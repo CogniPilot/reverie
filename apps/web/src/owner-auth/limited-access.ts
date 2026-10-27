@@ -1,5 +1,6 @@
 /** Matched-route allowlist. A limited human never enters an implicit owner/agent handler. */
 export const LIMITED_ROUTES = new Set([
+  'GET /api/chat-plugins', // shared rendering flags only; changes still require the verified owner
   'GET /api/owner-avatar/:key',
   'GET /api/office/presence',
   'GET /api/office/me',

@@ -34,11 +34,11 @@ it('phone permissions: verified owner any, coordinator agents, member self; stri
   expect((await write(b,a.slice(0,8))).statusCode).toBe(403);
   for(const extra of [{by:'owner'},{durationMs:1},{focus:true},{owner:'other'}]) expect((await write(b,'owner','ring',extra)).statusCode).toBe(400);
   expect((await write(b,'owner','bad')).statusCode).toBe(400);
-  const room=await app.inject({method:'POST',url:'/api/chatrooms',payload:{name:'Reverie',members:[{sessionId:b}],coordinatorSessionId:a}});
+  const room=await app.inject({method:'POST',url:'/api/chatrooms',headers:{cookie:'verified-owner'},payload:{name:'Reverie',members:[{sessionId:b}],coordinatorSessionId:a}});
   expect(room.statusCode).toBe(200);
   expect((await write(b,a,'ring')).statusCode).toBe(200);
   expect(service.alertMode(b)).toBeUndefined();
-  await app.inject({method:'PUT',url:`/api/chatrooms/${room.json().data.id}/archive`,payload:{archived:true}});
+  expect((await app.inject({method:'PUT',url:`/api/chatrooms/${room.json().data.id}/archive`,headers:{cookie:'verified-owner'},payload:{archived:true}})).statusCode).toBe(200);
   expect((await write(b,a)).statusCode).toBe(403);
   const audit=readFileSync(join(dir,'rooms.json.audit.jsonl'),'utf8');
   expect(audit).toContain('phone-status-request'); expect(audit).toContain(`"by":"${a}"`);

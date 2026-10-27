@@ -12,6 +12,8 @@
     epoch = 0,
     previewEpoch = 0,
     imageUrl = null,
+    pdfPreview = null,
+    previewController = null,
     uploading = false,
     loading = true,
     uploadAllowed = false,
@@ -89,8 +91,52 @@
       return `HTTP ${res.status}`;
     }
   }
+  async function previewBytes(response, limit, signal) {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Preview unavailable. Use Download.');
+    const chunks = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (signal.aborted) throw new Error('Preview cancelled.');
+        if (done) break;
+        if ((size += value.length) > limit) throw new Error('Preview is too large. Use Download.');
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return bytes;
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* preserve refusal */
+      }
+    }
+  }
+  function staticDocument(text) {
+    const template = document.createElement('template');
+    template.innerHTML = window.sanitizeMarkdownHtml(text);
+    for (const img of template.content.querySelectorAll('img'))
+      img.replaceWith(document.createTextNode(img.alt || '[image]'));
+    for (const a of template.content.querySelectorAll('a')) a.replaceWith(...a.childNodes);
+    for (const el of template.content.querySelectorAll('*'))
+      for (const attr of [...el.attributes]) {
+        if (/^(?:on|src|href|action|formaction|ping|style)/i.test(attr.name)) el.removeAttribute(attr.name);
+      }
+    return template;
+  }
   function clearPreview() {
     previewEpoch++;
+    previewController?.abort();
+    previewController = null;
+    pdfPreview?.destroy();
+    pdfPreview = null;
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     imageUrl = null;
     selectedPath = null;
@@ -170,7 +216,10 @@
         const download = node('a', undefined, 'row-download');
         download.setAttribute('aria-label', `Download ${entry.name}`);
         download.title = `Download ${entry.name}`;
-        download.href = url('api/workspace/file', { path: entry.path });
+        download.href = url('api/workspace/file', {
+          path: entry.path,
+          ...(entry.binding ? { binding: entry.binding } : {}),
+        });
         download.download = entry.name;
         download.append(icon('download'));
         li.append(download);
@@ -245,12 +294,27 @@
     }
   }
   async function preview(entry, button) {
+    // The owner console supplies the shared viewer. A standalone Workspace
+    // keeps its safe local preview; it does not invent a session or parent.
+    if (parent !== window && typeof entry.absolutePath === 'string') {
+      try {
+        if (parent.location.origin === location.origin && typeof parent.app?.openWorkspaceFilePreview === 'function') {
+          await parent.app.openWorkspaceFilePreview(entry.absolutePath, button);
+          return;
+        }
+      } catch {
+        /* unavailable/cross-origin parent: retain standalone behavior */
+      }
+    }
     clearPreview();
     selectedPath = entry.path;
     button.classList.add('selected');
     button.setAttribute('aria-pressed', 'true');
     const turn = previewEpoch,
       pane = $('preview');
+    const controller = new AbortController();
+    previewController = controller;
+    const timer = setTimeout(() => controller.abort(), 12000);
     const heading = node('div', undefined, 'preview-heading');
     const close = node('button', undefined, 'icon-button');
     close.type = 'button';
@@ -270,30 +334,73 @@
     );
     const download = node('a');
     download.append(icon('download'), node('span', 'Download file'));
-    download.href = url('api/workspace/file', { path: entry.path });
+    download.href = url('api/workspace/file', {
+      path: entry.path,
+      ...(entry.binding ? { binding: entry.binding } : {}),
+    });
     download.download = entry.name;
     const note = node('p', 'Loading preview…', 'preview-note');
     pane.replaceChildren(heading, info, download, note);
     pane.hidden = false;
     $('layout').classList.add('preview-open');
     try {
-      const res = await fetch(url('api/workspace/file', { path: entry.path, preview: '1' }), { cache: 'no-store' });
-      if (!res.ok) throw new Error(await responseError(res));
+      const res = await fetch(
+        url('api/workspace/file', {
+          path: entry.path,
+          preview: '1',
+          ...(entry.binding ? { binding: entry.binding } : {}),
+        }),
+        { cache: 'no-store', signal: controller.signal, redirect: 'error' }
+      );
+      if (!res.ok || res.redirected || res.status === 206) throw new Error(await responseError(res));
+      if (entry.binding && res.headers.get('X-Reverie-File-Binding') !== entry.binding)
+        throw new Error('Workspace file changed. Refresh and reopen.');
       const type = res.headers.get('content-type') || '';
       if (type.startsWith('image/')) {
-        const blob = await res.blob();
+        const blob = new Blob([await previewBytes(res, 5 * 1024 * 1024, controller.signal)], { type });
         if (turn !== previewEpoch) return;
         imageUrl = URL.createObjectURL(blob);
         const img = node('img');
         img.alt = entry.name;
         img.src = imageUrl;
         note.replaceWith(img);
+      } else if (type === 'application/pdf') {
+        const bytes = await previewBytes(res, 16 * 1024 * 1024, controller.signal);
+        if (turn !== previewEpoch) return;
+        const module =
+          await import('./file-preview-pdf.mjs?v=f7183e3bd5ad84a4a921b0c9932c982f884f2a5f3619ff44ceb5f030edf9fc53');
+        if (turn !== previewEpoch) return;
+        const container = node('div');
+        note.replaceWith(container);
+        pdfPreview = await module.mountReadOnlyPdf({ bytes, container, signal: controller.signal });
       } else {
-        const text = await res.text();
-        if (turn === previewEpoch) note.replaceWith(node('pre', text));
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(
+          await previewBytes(res, 256 * 1024, controller.signal)
+        );
+        if (turn !== previewEpoch) return;
+        if (/\.md(?:own)?$|\.markdown$/i.test(entry.name) && window.marked?.parse && window.sanitizeMarkdownHtml) {
+          const template = staticDocument(window.marked.parse(text, { async: false }));
+          const article = node('article', undefined, 'workspace-markdown');
+          article.append(template.content);
+          note.replaceWith(article);
+        } else if (/\.html?$/i.test(entry.name) && window.sanitizeMarkdownHtml) {
+          const frame = node('iframe');
+          frame.title = entry.name + ' (static preview)';
+          frame.setAttribute('sandbox', '');
+          frame.referrerPolicy = 'no-referrer';
+          frame.srcdoc =
+            '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;"><style>body{font:16px system-ui;margin:20px;overflow-wrap:anywhere}pre{white-space:pre-wrap}</style>' +
+            staticDocument(text).innerHTML;
+          note.replaceWith(frame);
+        } else note.replaceWith(node('pre', text));
       }
     } catch (error) {
-      if (turn === previewEpoch) note.textContent = error.message;
+      if (turn === previewEpoch) {
+        note.textContent = controller.signal.aborted ? 'Preview cancelled or timed out.' : error.message;
+        if (!note.isConnected) pane.append(note);
+      }
+    } finally {
+      clearTimeout(timer);
     }
     if (turn === previewEpoch && matchMedia('(max-width: 650px)').matches) {
       const top = pane.getBoundingClientRect().top;

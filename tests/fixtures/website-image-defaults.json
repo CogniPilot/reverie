@@ -1,0 +1,91 @@
+{
+  "scope": "Public image defaults only; no private instance mounts/env",
+  "oldLoadedImage": "sha256:e84306930b1509ba33151a9c35f5b00d742c2775dd88cdaa3c90ac4c59052d3f",
+  "targetArchiveConfigSha256": "aabd73c0cd1fcaf3c0959c1ead96a1d83f8d22ebb7431dc4e7d87d6d38d92887",
+  "oldConfig": {
+    "User": "2000:2000",
+    "ExposedPorts": {
+      "3000/tcp": {}
+    },
+    "Env": [
+      "PATH=/bin",
+      "HOME=/home/agent",
+      "REVERIE_CONTAINER=1",
+      "REVERIE_MANAGED_INSTALL=nix",
+      "REVERIE_VERSION=1.41.1",
+      "REVERIE_CASES_PATH=/scratch/cases",
+      "REVERIE_SHARED_WORKSPACE_PATH=/reverie_workspace",
+      "REVERIE_SHARED_ATTACHMENTS_PATH=/reverie_workspace/attachments",
+      "REVERIE_RESEARCH_ROOT=/scratch/research",
+      "TMPDIR=/scratch/tmp",
+      "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+      "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
+    ],
+    "Entrypoint": [
+      "/bin/tini",
+      "-g",
+      "-s",
+      "--",
+      "/usr/local/bin/reverie-start"
+    ],
+    "Cmd": [
+      "reverie",
+      "web",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "3000"
+    ],
+    "WorkingDir": "/reverie_workspace",
+    "Labels": {
+      "org.opencontainers.image.source": "https://github.com/jgoppert/reverie",
+      "org.reverie.worker.gid": "2000",
+      "org.reverie.worker.rootless-docker": "0",
+      "org.reverie.worker.uid": "2000",
+      "reverie.worker.nix-store": "0"
+    }
+  },
+  "targetConfig": {
+    "Cmd": [
+      "reverie",
+      "web",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "3000"
+    ],
+    "Entrypoint": [
+      "/bin/tini",
+      "-g",
+      "-s",
+      "--",
+      "/usr/local/bin/reverie-start"
+    ],
+    "Env": [
+      "PATH=/bin",
+      "HOME=/home/agent",
+      "REVERIE_CONTAINER=1",
+      "REVERIE_MANAGED_INSTALL=nix",
+      "REVERIE_VERSION=1.41.1",
+      "REVERIE_CASES_PATH=/scratch/cases",
+      "REVERIE_SHARED_WORKSPACE_PATH=/reverie_workspace",
+      "REVERIE_SHARED_ATTACHMENTS_PATH=/reverie_workspace/attachments",
+      "REVERIE_RESEARCH_ROOT=/scratch/research",
+      "TMPDIR=/scratch/tmp",
+      "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+      "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
+    ],
+    "ExposedPorts": {
+      "3000/tcp": {}
+    },
+    "Labels": {
+      "org.opencontainers.image.source": "https://github.com/jgoppert/reverie",
+      "org.reverie.worker.gid": "2000",
+      "org.reverie.worker.rootless-docker": "0",
+      "org.reverie.worker.uid": "2000",
+      "reverie.worker.nix-store": "0"
+    },
+    "User": "2000:2000",
+    "WorkingDir": "/reverie_workspace"
+  }
+}

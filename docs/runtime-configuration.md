@@ -15,6 +15,73 @@ Only owner-authorized policy grants orchestration or delegation authority.
 
 Environment variables are named `REVERIE_*`.
 
+Scoped agent message reads normally include current-owner coding evidence. During
+an older coding-consumer transition, the host can select `"ownerCodingEvidence": false`
+in `deployment.json`; omitted or `true` retains the normal default. This strict
+boolean selects `REVERIE_OWNER_CODING_EVIDENCE=disabled` at website startup.
+Disabled scoped exact/history reads return `authenticatedOwner: false`, including
+for real owner messages, and skip the current-owner authority lookup. Chat content,
+phone acceptance and plan-refresh authority are unchanged. This withholds evidence
+for compatibility staging; it does not change authentication, permissions or model
+settings, and is not a cancellation mechanism for tools already running.
+Keep it disabled until the updated consumer is active and reviewed, then use the
+reviewed website replacement workflow to enable evidence. Editing the deployment
+file does not change a running website. Native services use the same host-managed
+environment variable (`enabled` or unset is normal; other values withhold evidence).
+
+The Admin Harness defaults to a 15-second general room scan. On an isolated laptop,
+the website must explicitly opt in at startup with the per-instance environment variable
+`REVERIE_ADMIN_PHONE_WAKE=enabled`. The default is OFF: attention returns unavailable,
+no new private phone receipts are written, and automatic Admin Harness room effects
+fail closed. Normal native delivery, joined-channel history and manual reads remain
+available. The same new image can run OFF after activation: it preserves existing
+receipts privately while ignoring them for actions and stripping them from public data.
+For the host-managed Docker deployment, select `"adminPhoneWake": true` in the
+owner's `deployment.json` under the selected deployment root (normally `~/reverie`).
+The field is optional and defaults to `false`; strings and numbers are rejected.
+`reverie-start` passes the exact activation value only from this validated field;
+setting a similarly named variable in the calling host shell does not opt in.
+Changing this startup setting does not mutate a running container. For an existing
+isolated deployment, select it before the paired `reverie-isolate prepare` and
+`activate` workflow. The prepared plan records the choice and activation refuses a
+changed choice before stopping the console. The non-isolated `reverie-update`
+workflow also refreshes activation from the same durable setting and refuses a
+selection changed during its build. Both replace stale phone activation overrides
+while preserving the other instance settings. A missing deployment file or field
+selects OFF, including when the old container had an enabled override.
+The bootstrap retains its existing refusal to silently replace a changed deployment;
+use the applicable reviewed update workflow for a running installation. Existing
+update tools retain the original opaque deployment label; after changing this field,
+bootstrap may continue to refuse label reuse even after a successful reviewed update.
+Subsequent reviewed updates still read and preserve the selected setting.
+Native services need the same exact variable in owner-managed persistent service
+configuration; the Docker deployment file is not read by the native service installer.
+While the office explicitly reports the setting OFF, the harness status says that
+all automatic room replies are blocked. Manual reads and terminal prompts remain
+available. Repeated disabled responses produce one notice per status change rather
+than a log entry on every retry.
+
+After any receipt has been written, roll back only to a schema-aware image; an older
+website may expose unfamiliar stored fields. Enabling the instance setting allows
+one metadata-only long poll through its own office phone to wake the existing serial
+loop for whatever its current canonical phone policy accepts. Ring, Vibrate and Silent
+retain their existing owner/mention, room-notify, recipient and membership rules;
+DMs do not bypass the phone setting. There is no separate mention filter.
+It does not interrupt a running model turn or start a second one. The listener never
+calls a model, reads message bodies or changes the normal durable message claims.
+General scans cover reconnect gaps and use the same server acceptance; they cannot
+reply to muted traffic. Messages discarded while muted cannot become new actions after
+unmute. Ordinary joined-channel history, manual reads and memory access are unchanged;
+muted and legacy messages may remain quoted historical context after a valid request.
+`/status` shows whether phone wake is active,
+connecting or unavailable; unavailable connections use polling with bounded retry.
+Private `runtime-settings.json` accepts `phone_wake` (boolean) and `poll_s`
+(1–300 seconds). The launcher defaults are `true` and `15`. Applying updated launch
+code uses the owner's Restart session action, preserving saved identity and memory;
+direct `tmux respawn-pane` bypasses lifecycle and office-relay setup. The matching
+website API must provide verified phone acceptance; missing policy metadata prevents
+automatic room replies rather than falling back to a local guess.
+
 - `reverie.config`: `REVERIE_MODEL` defaults to `MODEL_ID`; select the served model alias.
   `REVERIE_API_BASE` defaults to the conventional loopback endpoint on port 8080.
   `REVERIE_INSTANCE_CONFIG` selects the identity and memory configuration explicitly.

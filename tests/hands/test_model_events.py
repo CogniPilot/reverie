@@ -85,6 +85,7 @@ class ModelEventTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 TraceWriter(fifo)
             shared = root / 'shared'; shared.mkdir(mode=0o755)
+            shared.chmod(0o755)  # Make the unsafe fixture explicit even under an owner-private umask.
             with self.assertRaises(ValueError):
                 TraceWriter(shared / 'events')
 

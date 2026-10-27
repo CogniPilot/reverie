@@ -49,6 +49,8 @@ export interface UsageSample {
 
 export interface PlanPace {
   fiveHour: number | null;
+  /** Actual reported five-hour reset, normalized to epoch ms; no inferred usage history. */
+  fiveHourReset?: number | null;
   weekly: number | null;
   weekStart: number | null;
   weekReset: number | null;
@@ -172,6 +174,7 @@ export function planPace(input: {
   }
   return {
     fiveHour,
+    fiveHourReset: toMs(input.fiveHour?.resetAt),
     weekly,
     weekStart,
     weekReset,

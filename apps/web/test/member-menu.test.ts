@@ -37,7 +37,7 @@ describe('compact member actions', () => {
     h.server.calls.length = 0;
     const menu = open(h);
     expect([...menu.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
-      'Profile', 'Message', 'Make lead', 'Remove from channel',
+      'Profile', 'Message', 'Make lead', 'Make voice', 'Remove from channel',
       'Debug terminal', 'Copy session id',
     ]);
     expect(menu.querySelectorAll('hr')).toHaveLength(3);
@@ -212,11 +212,9 @@ describe('compact member actions', () => {
     expect(item(h, 'Make lead').title).toBe('Only the owner or a server Admin can change the channel lead');
     item(h, 'Profile').click();
     const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-profile-actions button')];
-    expect(buttons.find((b) => b.textContent === 'Remove from channel')!.disabled).toBe(false);
+    expect(buttons.some((b) => b.textContent === 'Remove from channel')).toBe(false);
     expect(buttons.some((b) => b.textContent === 'Re-brief' || b.textContent === 'Edit status')).toBe(false);
-    const appoint = buttons.find((b) => b.textContent === 'Make lead')!;
-    expect(appoint.disabled).toBe(true);
-    expect(appoint.title).toBe('Only the owner or a server Admin can change the channel lead');
+    expect(buttons.some((b) => b.textContent === 'Make lead')).toBe(false);
     open(h, B);
     expect(item(h, 'Remove lead').disabled).toBe(true);
     expect(item(h, 'Remove lead').title).toBe('Only the owner or a server Admin can change the channel lead');

@@ -1,17 +1,14 @@
-/** Optional chat extensions. Preferences contain booleans only; snippets stay out of storage. */
+/** Shared, owner-controlled chat extensions. Snippet drafts never enter storage. */
 (function (root) {
   'use strict';
-  const key = 'reverie:chat-plugins:v1';
   const plugins = new Map();
   const mounted = new Map();
   let preferences = {};
-  try {
-    preferences = JSON.parse(root.localStorage.getItem(key) || '{}') || {};
-  } catch {
-    /* storage is optional */
-  }
-  const enabled = (id) => preferences[id] === true;
+  let canManage = false;
   let queued = false;
+  let saving = false;
+  const endpoint = `${root.__REVERIE_BASE__ || ''}/api/chat-plugins`;
+  const enabled = (id) => preferences[id] === true && (id === 'latex' || canManage);
   const schedule = () => {
     if (queued) return;
     queued = true;
@@ -36,16 +33,6 @@
   }
   function scan(scope = root.document) {
     clear();
-    const header = root.document.querySelector('.ca-head');
-    if (header && !header.querySelector('.ca-plugins-open')) {
-      const button = root.document.createElement('button');
-      button.type = 'button';
-      button.className = 'ca-icon-btn ca-plugins-open';
-      button.textContent = 'Plugins';
-      button.setAttribute('aria-label', 'Optional chat plugins');
-      button.addEventListener('click', openSettings);
-      header.append(button);
-    }
     if (![...plugins.values()].some((plugin) => enabled(plugin.id) && plugin.enhanceBlock)) return;
     for (const code of scope.querySelectorAll('pre > code')) {
       const language = [...code.classList]
@@ -56,58 +43,115 @@
         if (!enabled(plugin.id) || !plugin.enhanceBlock || !plugin.languages?.includes(language)) continue;
         const entries = mounted.get(code) || new Map();
         if (entries.has(plugin.id)) continue;
-        // Mark before the extension mutates the DOM; observer callbacks cannot mount twice.
         entries.set(plugin.id, null);
         mounted.set(code, entries);
         entries.set(plugin.id, plugin.enhanceBlock({ code, pre: code.parentElement, language, host }));
       }
     }
   }
-  function setEnabled(id, value) {
-    const plugin = plugins.get(id);
-    if (!plugin || enabled(id) === Boolean(value)) return;
-    preferences = { ...preferences, [id]: Boolean(value) };
-    try {
-      root.localStorage.setItem(
-        key,
-        JSON.stringify(Object.fromEntries([...plugins.keys()].map((name) => [name, enabled(name)])))
+  function apply(data) {
+    const before = new Map([...plugins.keys()].map((id) => [id, enabled(id)]));
+    preferences = data.enabled || {};
+    canManage = data.canManage === true;
+    for (const plugin of plugins.values()) {
+      if (before.get(plugin.id) === enabled(plugin.id)) continue;
+      if (enabled(plugin.id)) plugin.cleanup = plugin.enable?.(host) || plugin.onEnable?.(host);
+      else {
+        clear(plugin.id);
+        plugin.cleanup?.();
+        plugin.cleanup = undefined;
+        plugin.onDisable?.(host);
+      }
+      root.dispatchEvent(
+        new root.CustomEvent('reverie:chat-plugin-change', {
+          detail: { id: plugin.id, enabled: enabled(plugin.id) },
+        })
       );
-    } catch {
-      /* private mode */
     }
-    if (enabled(id)) plugin.cleanup = plugin.enable?.(host) || plugin.onEnable?.(host);
-    else {
-      clear(id);
-      plugin.cleanup?.();
-      plugin.cleanup = undefined;
-      plugin.onDisable?.(host);
-    }
-    root.dispatchEvent(new root.CustomEvent('reverie:chat-plugin-change', { detail: { id, enabled: enabled(id) } }));
     schedule();
+    return data;
   }
-  function openSettings() {
-    root.document.querySelector('.chat-plugins-settings')?.remove();
+  async function request(options) {
+    const response = await root.fetch(endpoint, { credentials: 'same-origin', cache: 'no-store', ...options });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.error || 'Plugin settings unavailable');
+    return apply(result.data);
+  }
+  async function refresh() {
+    try {
+      return await request();
+    } catch (error) {
+      apply({ enabled: {}, canManage: false });
+      throw error;
+    }
+  }
+  async function setEnabled(id, value) {
+    if (!canManage) throw new Error('Owner sign-in required');
+    if (!['latex', 'python', 'modelica'].includes(id) || !plugins.has(id)) throw new Error('Unknown plugin');
+    if (saving) throw new Error('Plugin settings are saving');
+    saving = true;
+    try {
+      return await request({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          latex: preferences.latex === true,
+          python: preferences.python === true,
+          modelica: preferences.modelica === true,
+          [id]: value === true,
+        }),
+      });
+    } finally {
+      saving = false;
+    }
+  }
+  async function openSettings() {
+    const data = await refresh();
+    if (!canManage) throw new Error('Owner sign-in required');
+    root.document.querySelector('.chat-plugins-settings')?.close();
     const dialog = root.document.createElement('dialog');
     dialog.className = 'chat-plugins-settings chat-plugin-dialog';
     const title = root.document.createElement('h2');
-    title.textContent = 'Optional chat plugins';
+    title.textContent = 'Chat plugins';
+    title.id = 'chat-plugins-title';
+    dialog.setAttribute('aria-labelledby', title.id);
     dialog.append(title);
     const note = root.document.createElement('p');
     note.textContent =
-      'Off by default. Choices apply to this browser. Language assistance sends only the snippet you explicitly check to a local server; it never runs your code.';
+      'Shared server settings, off by default. Each change saves immediately for everyone. Enabling a plugin does not install or download tools.';
     dialog.append(note);
+    const status = root.document.createElement('p');
+    status.className = 'chat-plugin-status';
+    status.setAttribute('role', 'status');
+    const inputs = [];
     for (const plugin of plugins.values()) {
       const label = root.document.createElement('label');
       label.className = 'chat-plugin-choice';
       const input = root.document.createElement('input');
+      inputs.push(input);
       input.type = 'checkbox';
-      input.checked = enabled(plugin.id);
-      input.addEventListener('change', () => setEnabled(plugin.id, input.checked));
+      input.checked = preferences[plugin.id] === true;
+      input.addEventListener('change', async () => {
+        inputs.forEach((item) => (item.disabled = true));
+        status.textContent = 'Saving…';
+        try {
+          await setEnabled(plugin.id, input.checked);
+          status.textContent = 'Saved for everyone.';
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          input.checked = preferences[plugin.id] === true;
+          inputs.forEach((item) => (item.disabled = false));
+        }
+      });
       const text = root.document.createElement('span');
-      text.textContent = `${plugin.label} — ${plugin.description}`;
+      const unavailable =
+        data.available?.[plugin.id] === false ? ' Local server is not included in this installation.' : '';
+      text.textContent = `${plugin.label} — ${plugin.description}${unavailable}`;
       label.append(input, text);
       dialog.append(label);
     }
+    dialog.append(status);
     const close = root.document.createElement('button');
     close.type = 'button';
     close.textContent = 'Done';
@@ -126,20 +170,18 @@
       schedule();
     },
     isEnabled: enabled,
+    canManage: () => canManage,
     setEnabled,
     scan,
     openSettings,
+    refresh,
   });
   new root.MutationObserver(schedule).observe(root.document.body, { childList: true, subtree: true });
-  root.addEventListener('storage', (event) => {
-    if (event.key !== key) return;
-    let next;
-    try {
-      next = JSON.parse(event.newValue || '{}') || {};
-    } catch {
-      return;
-    }
-    for (const id of plugins.keys()) setEnabled(id, next[id] === true);
+  root.addEventListener('focus', () => refresh().catch(() => {}));
+  root.document.addEventListener('visibilitychange', () => {
+    if (!root.document.hidden) refresh().catch(() => {});
   });
+  // Server state is authoritative. Old browser-local choices are deliberately ignored.
+  refresh().catch(() => {});
   schedule();
 })(window);

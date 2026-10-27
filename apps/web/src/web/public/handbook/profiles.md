@@ -1,30 +1,31 @@
 # Profiles and reporting lines
 
-Each expert is a generic AI agent with its own identity and memory. A role template supplies an editable starting point. CTO, COO and specialist titles do not grant tool permissions or make a model more capable.
+Experts are generic AI agents with their own identities and memories. Titles describe responsibilities; they grant no tools or model capabilities.
 
 ## Edit an expert
 
-1. In Company → People, choose Edit profile for the expert. You can also open it from the expert's profile menu.
-2. Set Role title, Skills and expertise (comma separated), Responsibilities (one per line), and Personality and working style. Describe observable duties and how work should be reported.
-3. Choose pronouns, voice and a profile picture if desired. Avatar background offers Automatic, Custom color and Transparent; use Background color for a custom shade. The preview updates immediately; Save profile keeps the choice across browsers and session restarts. Voice is independent of pronouns. Use Play sample to preview an available voice.
-4. Set Reports to to the owner or another expert. Save profile, then reopen it to verify the saved fields. If a picture upload fails, check the error and retry the picture separately.
+In **Company → People**, click a name or avatar to open the detailed profile. Edit role, skills, responsibilities, personality, pronouns, voice and picture. Voice is independent of pronouns; Play sample previews available voices. Avatar backgrounds support Automatic, Custom color and Transparent. **Save profile**, then reopen to verify. Retry a failed picture upload separately.
 
-Reporting relationships cannot refer to the expert itself or form a cycle. Company default means the existing implicit reporting relationship is preserved: normally the briefing coordinator, with the coordinator reporting to the owner. Changing a reporting parent does not appoint that person as briefing coordinator or grant recovery authority.
+Use **Reports to** or drag an expert onto their manager or the owner. Reporting changes save immediately; cycles and self-reporting are rejected. Company default preserves the implicit relationship, normally to the briefing coordinator. A reporting relationship grants no tools or coordinator appointment. Grey offline experts remain editable by the owner.
 
-## Identity and authority
+Permission and named PAT checkboxes save immediately. Other profile fields and Sleep / Dream require **Save profile**. See [Permissions and preferences](/handbook/permissions). Use [Runtime settings](/handbook/models) for account, harness, model or effort changes. Profile edits do not replace memory. Keep private identity and memory in instance storage, outside shared project handoffs.
 
-Profile changes update the role context; they do not replace the expert's memory. Use [Runtime settings](/handbook/models) for plan, harness, model or effort changes.
+## Core beliefs and startup context
 
-Company permission checkboxes save immediately with confirmation. Edit profile uses Save profile. Follow [Permissions and preferences](/handbook/permissions) to verify grants rather than relying on a title or checkbox that has not saved.
+Vanilla installations start with no core beliefs. **Company settings** holds company-wide blocks; **Additional personal core beliefs** in each profile adds personal blocks. Company blocks come first, followed by personal blocks, with exact duplicates removed. Each textarea preserves one block's paragraphs and order. Remove a block or empty its field to clear it. Company blocks use **Save company core beliefs**; personal blocks use **Save profile**. Unrelated profile saves preserve untouched blocks. Belief text grants no tool permissions.
 
-Keep personal profiles and memories in instance storage. Shared project handoffs should contain verified findings, source locations, checks, blockers and the next action, without private conversation history.
+Every profile, including offline experts, has **View startup context**. This owner-only inspector separates the current configured preview from captured startup reports. Missing sections are explicit. Older uncaptured startups remain unavailable; current settings do not prove what an earlier session loaded.
 
-## Human logins and presence
+Harness reports identify their own session, generation, stage and time. Another binding is labeled accordingly. Reports last only for the website process and disappear on restart. They do not independently prove provider consumption. Separate copy controls distinguish preview and reported input. Inspection never restarts or reconfigures an expert.
 
-Open **People** in the Office sidebar to add a human login. Choose **Owner** for full administration of this shared office, or **Limited** for text chat in selected ordinary channels. Limited logins cannot open private DMs, terminals, workspace files, credentials, global event streams or agent controls. Channel access is checked again on every request. Limited human messages are distinct from verified owner instructions. Additional accounts keep sign-in enforced. The existing separate-workspace multi-user mode is a different feature.
+## Office status
 
-Share the generated one-time password privately. It expires in 30 minutes and must be replaced at first sign-in. Each person can set up their own two-step sign-in under **Password and sign-in**. Never put passwords in chat.
+In the profile, switch **In office** off to stop an expert and keep them off. Confirm **Enter office** to resume on the current plan. Identity, conversation, files and packages persist. Starts queue; failures show a reason. **Restart session** retries. Automatic recovery never returns experts who left; its global controls are in **Company settings**.
 
-Use **Edit access** to change roles/channels or disable an account. Access changes and password resets end that person’s sessions immediately. The original owner account remains protected for recovery. Disabling a person retains their messages.
+## Human logins
 
-Signed-in humans appear under **People** in channel member lists, with their name, avatar and Owner/Limited label. Presence expires after about a minute without a visible connected browser; multiple browsers share one identity. Humans do not occupy agent laptop seats. Additional owners edit their own name/avatar on the People page; the original owner uses their chat profile. Human read cursors are independent.
+Use **Office → People** to add **Owner** administrators or **Limited** logins for selected ordinary channels. Limited users cannot access private DMs, terminals, files, credentials, global event streams or agent controls. Access is checked on every request; limited messages are distinct from verified owner instructions. Additional accounts keep sign-in enforced. Separate-workspace multi-user mode is a different feature.
+
+Share one-time passwords privately; they expire after 30 minutes and require replacement at first sign-in. Each person manages two-step sign-in under **Password and sign-in**. Never put passwords in chat.
+
+**Edit access**, disabling and password resets end affected sessions immediately. The original owner remains protected for recovery; disabling retains messages. Humans appear with Owner/Limited labels and do not consume agent laptop seats. Presence expires after about a minute without a visible connected browser; multiple browsers share one identity. Additional owners edit their own name/avatar on People; the original owner uses their chat profile. Human read cursors are independent.

@@ -26,7 +26,7 @@ describe('profile portrait preview', () => {
     const picture = card.querySelector<HTMLButtonElement>('.ca-profile-picture')!;
     expect(picture.tagName).toBe('BUTTON');
     expect(picture.getAttribute('aria-label')).toBe("View Alex's picture");
-    expect(card.querySelector('.ca-profile-top--portrait > .ca-profile-picture .ca-profile-avatar')).not.toBeNull();
+    expect(card.querySelector('.ca-profile--compact .ca-profile-top > .ca-profile-picture .ca-profile-avatar')).not.toBeNull();
     picture.focus();
     picture.click();
     const viewer = h.document.querySelector<HTMLDialogElement>('.ca-profile-image-view')!;
@@ -115,5 +115,73 @@ describe('profile portrait preview', () => {
     input.dispatchEvent(new h.window.Event('change'));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(editor.querySelector('.ca-owner-portrait img')!.getAttribute('src')).toBe(replacement);
+  });
+});
+
+
+describe('editable picture load failures', () => {
+  async function fixture(fallback = true) {
+    const h = await setup();
+    const changes: string[] = [];
+    const field = h.shell.pictureField('Picture', avatar, (value: string) => changes.push(value), fallback ? { fallback: () => 'A' } : {});
+    h.document.body.append(field.wrap);
+    const preview = field.wrap.querySelector('.ca-picture-preview')!;
+    const warning = () => [...field.wrap.querySelectorAll('[role=status]')].find((node: any) => !node.hidden && node.textContent.includes('unavailable'));
+    return { h, field, changes, preview, warning };
+  }
+  it('restores the glyph with a status hint without clearing or saving the failed selection', async () => {
+    const { h, field, changes, preview, warning } = await fixture();
+    const calls = h.server.calls.length;
+    preview.querySelector('img')!.dispatchEvent(new h.window.Event('error'));
+    expect(preview.querySelector('img')).toBeNull();
+    expect(preview.textContent).toBe('A');
+    expect(warning()?.textContent).toContain('selection is unchanged');
+    expect(field.value()).toBe(avatar); expect(changes).toEqual([]);
+    expect(h.server.calls.length).toBe(calls);
+  });
+  it('preserves a successful preview without displaying an error', async () => {
+    const { h, field, changes, preview, warning } = await fixture();
+    preview.querySelector('img')!.dispatchEvent(new h.window.Event('load'));
+    expect(preview.querySelector('img')!.getAttribute('src')).toBe(avatar);
+    expect(warning()).toBeUndefined(); expect(field.value()).toBe(avatar); expect(changes).toEqual([]);
+  });
+  it('ignores a late error from an image replaced by a newer selection', async () => {
+    const { h, field, preview, warning } = await fixture();
+    const old = preview.querySelector('img')!;
+    field.set(ownerAvatar); old.dispatchEvent(new h.window.Event('error'));
+    expect(preview.querySelector('img')!.getAttribute('src')).toBe(ownerAvatar);
+    expect(field.value()).toBe(ownerAvatar); expect(warning()).toBeUndefined();
+  });
+  it('clears the load warning when a new picture is selected', async () => {
+    const { h, field, changes, preview, warning } = await fixture();
+    preview.querySelector('img')!.dispatchEvent(new h.window.Event('error'));
+    field.set(ownerAvatar);
+    expect(preview.querySelector('img')!.getAttribute('src')).toBe(ownerAvatar);
+    expect(warning()).toBeUndefined(); expect(changes).toEqual([]);
+  });
+  it('retains explicit Remove semantics after a failed load', async () => {
+    const { h, field, changes, preview, warning } = await fixture();
+    preview.querySelector('img')!.dispatchEvent(new h.window.Event('error'));
+    [...field.wrap.querySelectorAll('button')].find((button: any) => button.textContent === 'Remove')!.click();
+    expect(field.value()).toBe(''); expect(changes).toEqual(['']);
+    expect(preview.textContent).toBe('A'); expect(warning()).toBeUndefined();
+  });
+  it('shows readable fallback text when no glyph callback was provided', async () => {
+    const { h, field, preview, warning } = await fixture(false);
+    preview.querySelector('img')!.dispatchEvent(new h.window.Event('error'));
+    expect(preview.textContent).toBe('none'); expect(warning()).toBeDefined(); expect(field.value()).toBe(avatar);
+  });
+  it('preserves the file conversion and selection callback after a preview error', async () => {
+    const { h, field, changes, preview, warning } = await fixture();
+    preview.querySelector('img')!.dispatchEvent(new h.window.Event('error'));
+    const replacement = 'data:image/png;base64,iVBORw0KGgo=';
+    h.shell.imageToIcon = async () => replacement;
+    const input = field.wrap.querySelector('input')!;
+    Object.defineProperty(input, 'files', { value: [new h.window.File(['image'], 'new.png', { type: 'image/png' })] });
+    input.dispatchEvent(new h.window.Event('change'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(field.pending()).toBe(false); expect(field.value()).toBe(replacement);
+    expect(preview.querySelector('img')!.getAttribute('src')).toBe(replacement);
+    expect(changes).toEqual([replacement]); expect(warning()).toBeUndefined();
   });
 });

@@ -58,7 +58,18 @@ cd reverie
 export NIX_CONFIG="experimental-features = nix-command flakes"
 ```
 
+When building from a Git checkout, Nix includes tracked changes and staged new
+files. Add new source files to Git before building; untracked files and Git
+metadata stay outside the build source. Unpacked source archives remain supported.
+
 ## Default local deployment
+
+Reverie does not require NixOS or changes to a personal host configuration.
+The flake provides the application, tools and launchers. The native service runs
+as your user; container mode uses an existing container engine. Privileged host
+cleanup and its service adapters are separate, opt-in features, never prerequisites
+for starting the website or agents. Unsupported optional host features stay
+unavailable rather than adding host configuration during ordinary startup.
 
 From a clone, start the default Docker deployment with:
 
@@ -77,6 +88,12 @@ only on first run. Company state and provider logins live under
 directory at an owner-selected mount or symlink before starting. You can edit the validated paths, port, container name,
 memory limit and process limit in deployment.json. Existing containers are retained;
 a changed deployment requires a new container name rather than silent replacement.
+
+The optional `adminPhoneWake` boolean in `deployment.json` defaults to `false`.
+Set it to `true` to enable automatic Admin Harness channel replies under the existing
+phone and membership policies. Existing deployments apply the selected startup setting
+through their normal reviewed update workflow; a Docker restart alone does not change
+container environment. See [runtime configuration](docs/runtime-configuration.md).
 
 Source code, host configuration and host update requests are not exposed by default.
 To explicitly expose a chosen project on the first launch:
@@ -115,10 +132,32 @@ container deployment requires a running Docker engine. Its image is built by Nix
 there is no separate Dockerfile build. For manual image loading or published
 images, see [image installation](docs/image.md).
 
+Choose one website deployment. For a native installation, `reverie service`
+supports `start`, `stop`, `status`, `logs --lines 100` and `uninstall`.
+Keep the container deployment and its service controls separate; do not install
+a second native website beside an existing container website.
+
+The isolated laptop broker has a separate owner-only service installer. Select
+the private configuration prepared by `nix run .#isolate -- prepare`, then run:
+
+```bash
+broker_config="$HOME/reverie/runtime/worker-isolation/broker.json"
+nix run .#worker-service -- --config "$broker_config" check
+nix run .#worker-service -- --config "$broker_config" install
+nix run .#worker-service -- --config "$broker_config" start
+```
+
+The installer requires a supported local Linux engine with bounded admission
+policies, pins its Nix closure, and installs without starting the broker or
+waking employees. The explicit `start` command starts the broker; employee stop
+and vacation choices still apply. See [service setup](docs/services.md) for boot
+and login behavior, container controls and platform limits. This setup does not
+require a personal NixOS repository or host rebuild.
+
 ## Agent workstations
 
 For a deployment running autonomous agents, use a separate worker container for
-each session. Think of these as the experts' office laptops: each has its own
+each employee. Think of these as the experts' office laptops: each has its own
 running tools, private home and restart boundary. Explicit project mounts are
 shared drives; the console is separate office infrastructure.
 
@@ -126,7 +165,14 @@ Worker images include Nix with an independent writable store and database for
 each laptop. For example, `nix profile install nixpkgs#openssh` installs an SSH
 client, and `nix develop` works in a mounted project. The `nixpkgs` registry follows
 the release's flake lock. Profiles are on the laptop's private home drive; its
-store is under its owned scratch directory and survives container replacement.
+store and database are under its private durable state directory
+(`stateRoot/employees/<employeeId>/nix`) and survive container replacement and
+plan changes. Session IDs identify terminal connections; permanent employee IDs
+identify laptop data. Build caches,
+temporary files and downloads stay on scratch. Existing scratch-backed stores
+require an explicit offline copy; the broker refuses an empty replacement.
+See [the staged Nix storage migration](docs/worker-nix-migration.md) for inventory,
+broker activation prerequisites, per-laptop checkpoints and rollback.
 An unprivileged, networkless helper seeds and updates the store from the immutable
 image before starting the laptop. It preserves installed packages and roots the
 image's runtime so ordinary garbage collection cannot remove it. The host's Nix
@@ -172,7 +218,7 @@ watchdog stops all laptop containers after **10 minutes without a reachable offi
 API**. Its outage timestamp survives broker restarts. Once the API returns, the
 normal desired-running and vacation rules apply again.
 
-Settings → System → Office power distinguishes three actions:
+The gear beside your name opens quick Office navigation. Its adjacent owner-only power button offers three actions, each requiring confirmation. The inherited console preferences are under **Terminal settings**:
 
 - **Stop Reverie** stops all agents and laptops before stopping the website.
 - **Stop all agents** stops laptops and keeps the website open.
@@ -198,7 +244,7 @@ promise that shared writable files are protected from another expert.
 
 ## Office handbook
 
-Open **Handbook** in the conversation sidebar, or `/handbook`, for searchable
+Open **Office → Handbook** from the nameplate gear, or `/handbook`, for searchable
 pages shared by humans and agents. Start with [Getting started](apps/web/src/web/public/handbook/getting-started.md),
 then use the short guides for [profiles](apps/web/src/web/public/handbook/profiles.md),
 [plans](apps/web/src/web/public/handbook/models.md),
@@ -210,6 +256,12 @@ The same packaged Markdown is available through
 Expert context includes these lookup pointers and the current recovery grant.
 The handbook explains procedures; it does not grant permissions. Source pages live
 in `apps/web/src/web/public/handbook/` and ship in the native flake package.
+
+For room attachments, `reverie agent chat read --room ROOM` prints authenticated
+API links. Download with `reverie agent chat fetch ROOM FILE_ID --output NAME`;
+the output must be a new filename in the current directory. See the
+[bounded attachment CLI guide](apps/web/docs/chat-attachment-cli.md) for size/deadline
+options and refusal behavior. This does not grant room or filesystem access.
 
 Company preference checkboxes save each field immediately with confirmation or an
 error. This includes Sleep, Dream and explicit recovery/plan grants; a failed or
@@ -299,8 +351,9 @@ Explicit permissions control orchestration independently of organizational title
 Drag an expert onto another plan to request a move, including between Codex and
 Claude. The destination selects its native harness; changing providers uses that
 provider's model and effort defaults. The expert prepares a handoff and approves
-the request before the replacement starts; its source stops only after the
-replacement is ready.
+the request before the replacement starts. Replacement metadata is reserved,
+the source's cleanup is verified, then the replacement starts and is checked
+before receiving the handoff. The two runtimes never share a writable home concurrently.
 
 Grant **Move own plan** or **Manage team plans** on an employee's Company card
 or during hiring. A CTO with Manage team plans can read team plan usage and request
@@ -311,6 +364,17 @@ The affected expert still supplies its own handoff and runs the approval command
 These permissions grant no account login, account deletion or general session creation.
 They default off and currently apply to single-company deployments; multi-user
 account delegation remains disabled.
+
+An authorized Codex or Claude expert can request a fresh runtime on its current
+account with `reverie agent plan-move request <current-account-id> --restart`.
+It still prepares a handoff and approves the one-time request. The explicit
+refresh preserves the selected account, harness, model, effort, permission policy
+and working directory, while starting a fresh provider conversation and session
+binding. Changed settings or grants invalidate the request. Ordinary same-account
+moves remain refused. This does not install packages, change the worker image
+target, wake vacationing experts, or support Hands/custom harnesses.
+Older laptop CLIs need the scoped API bootstrap in the Models handbook; a website
+update alone does not add their `--restart` parser.
 
 Kokoro speech runs locally with Nix-managed Python, ONNX Runtime and espeak-ng.
 The web launcher starts it in the background; its pinned, checksum-verified models
@@ -332,7 +396,7 @@ memory and personal reflection retain their separate storage and lifecycle.
 See [setup and operations](docs/setup.md) for recovery, source mounts, reproducible
 image updates and optional development-container workflows.
 
-[Optional chat plugins](docs/chat-plugins.md) add browser-selected LaTeX tools and
+[Optional chat plugins](docs/chat-plugins.md) add owner-enabled shared LaTeX tools and
 explicit local Python/Pyright and Modelica/Rumoca snippet assistance. They default
 off; language servers are separate optional packages and never run user code.
 
@@ -463,6 +527,11 @@ checkouts, unowned roots and symlink task roots are refused. A symlink inside sc
 is removed without following it. Failed/unfinished work, project repositories,
 memories and shared caches are not part of this cleanup. This is a task-level tool;
 it does not perform global Docker/Podman pruning or run a nightly scheduler.
+
+For separate root-controlled dry-run cleanup observations, see
+[disk cleanup](docs/disk-cleanup.md) and the opt-in, reboot-persistent
+[NixOS module](docs/disk-cleanup-nixos.md). Production live cleanup remains
+unqualified.
 
 ## Validation
 

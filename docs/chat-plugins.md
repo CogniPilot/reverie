@@ -1,7 +1,8 @@
 # Optional chat plugins
 
-Open **Plugins** in the conversation header. Python, Modelica and LaTeX are
-independent browser preferences and default to off. Turning a language plugin
+The owner opens **Company → Settings → Chat plugins**. Python, Modelica and
+LaTeX are shared server settings and default to off. Each change saves immediately
+for every device; only the verified owner may change it. Turning a language plugin
 on adds an assistance button beside explicitly labelled code fences (`python`,
 `py`, `modelica` or `mo`). Existing code and its Copy action keep their exact
 text. Unlabelled code is never guessed.
@@ -11,8 +12,9 @@ diagnostics, **Complete** for suggestions at the cursor, or **Hover** for type
 information. Suggestions are displayed as text and never applied automatically.
 The original message is unchanged. Closing the editor or disabling the plugin
 cancels outstanding requests and discards its draft. No draft is stored in
-browser storage or sent to an agent/provider. Only boolean plugin preferences
-are saved on this browser.
+browser storage or sent to an agent/provider. Boolean settings are saved in
+`chat-plugins.json` under the instance data directory and loaded on website restart.
+Old browser-local choices are ignored; they never grant server enablement.
 
 Language assistance requires an owner sign-in. Each assistance action sends
 only the scratch snippet and cursor to the same-origin Reverie API. The API
@@ -38,12 +40,13 @@ nix build .#dockerImageWithChatLanguages
 
 Deploy it through the normal owner-controlled rollout. It includes the two
 language servers and their configured paths inside the image; the default
-server image and laptop images stay unchanged. The browser plugins still
+server image and laptop images stay unchanged. The shared plugin settings still
 default to off. This image provides the tools without granting host access.
 
 For a native deployment, use the individual packages below.
 
-Enabling a plugin never installs, downloads or starts a language server. Optional
+Enabling a plugin never installs or downloads tools. A language server starts
+only for an explicit assistance action; disabled plugins are also refused by the API. Optional
 tools are separate from Reverie's default runtime and images. Build the pinned
 tools explicitly when needed:
 
@@ -64,8 +67,8 @@ Use actual installed binaries; do not point these settings at an installer,
 programs, running with the web service's operating-system permissions. Reverie
 does not expose arbitrary command, environment, file path or JSON-RPC inputs in
 the assistance API. Remove the variables to revoke availability on the next
-website start; browser toggles immediately remove their controls and cancel
-active requests.
+website start. Disabling a shared plugin cancels active server requests. Other
+open browsers refresh shared settings when focused or made visible.
 
 Python uses [Microsoft Pyright's stdio language server](https://github.com/microsoft/pyright/blob/main/packages/pyright/langserver.index.js),
 with its version and dependencies pinned by the existing nixpkgs flake lock.
@@ -89,6 +92,7 @@ a cleanup function, called on disable. `enhanceBlock({code, pre, language, host}
 may return a cleanup function, called on disable or when the block leaves the
 document. `onEnable(host)`/`onDisable(host)` are also supported for extensions
 that do not return a cleanup function. The host provides `isEnabled(id)`,
-`setEnabled(id, boolean)`, `scan(root)` and `openSettings()`. Registration itself
+`setEnabled(id, boolean)` (an asynchronous owner-only server save), `scan(root)`,
+`refresh()` and `openSettings()` (asynchronous and owner-only). Registration itself
 must not perform I/O. Extensions are bundled trusted source, not downloadable
 scripts or user-provided JavaScript.

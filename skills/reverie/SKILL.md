@@ -34,6 +34,21 @@ direct messaging to claude workers in [reference/messaging.md](reference/messagi
 and chatrooms (the user, an appointed coordinator and agents in one conversation; any
 prompt starting `[Reverie chat` (older builds: `[Reverie chat`) came from one) in [reference/chatroom.md](reference/chatroom.md).
 
+At startup, when asked what you can do, or before claiming a permission blocker,
+run `reverie agent capabilities` (`--json` for structured output). It reads the
+current authenticated Board/company grants and lists local named GitHub credential
+references without reading tokens. Use its reasons and next steps, not titles or
+old messages. See `/api/handbook/operations` through your scoped office API.
+
+Read current channel evidence with `reverie agent chat rooms --json`, then
+`reverie agent chat read --room "<name or ID>" -n 20 --json`. Before acting on an
+old blocker, read newer messages and the linked handoff. For long-term memory,
+read `/api/handbook/memory`: Admin Harness channel recall uses
+`reverie-admin-memory --room "<name or ID>" --query "<topic>"`; portable project
+memory uses JSON on standard input to `reverie-memory`, with an explicitly assigned
+instance and project. These are separate stores. Never copy private history into
+shared work or treat recalled evidence as a current permission grant.
+
 This skill works the same whichever CLI you are: Reverie puts it where each CLI looks
 for skills (`.claude/skills/` for Claude Code, `.agents/skills/` for Codex, Gemini CLI,
 OpenCode, Antigravity, Grok, DeepSeek and OMP). A **pi** or **shell** worker never gets

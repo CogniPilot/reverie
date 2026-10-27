@@ -92,8 +92,10 @@ function submit(h: any) {
     .querySelector('.ca-company-hire form')
     .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
 }
-it('opens Company directly from the sidebar without the legacy settings window', async () => {
+it('opens Company from Office without the legacy terminal settings window', async () => {
   const { h } = await setup();
+  h.shell.openPage('office');
+  await h.flush();
   const link = h.document.querySelector('.ca-company-nav');
   expect(link?.textContent).toBe('Company');
   link.click();
@@ -103,7 +105,11 @@ it('opens Company directly from the sidebar without the legacy settings window',
   expect(h.document.querySelector('.ca-company').textContent).toContain('Inspector');
   expect(h.document.querySelector('.ca-company form')).not.toBeNull();
   expect(h.document.querySelector('.reverie-company-dialog')).toBeNull();
-  expect(h.document.querySelector('.ca-company-chart').textContent).toContain('Reporting structure');
+  const chart = h.document.querySelector('.ca-company-chart');
+  expect(chart.getAttribute('aria-label')).toBe('Reporting structure');
+  expect(chart.querySelector('.ca-company-map-viewport')).not.toBeNull();
+  expect(chart.querySelector('[data-employee-id="lead"] .ca-company-person-title').textContent).toContain('Inspector');
+  expect(chart.querySelector('[data-employee-id="lead"] .ca-company-role').textContent).toBe('Security');
   expect(h.document.querySelector('.ca-company-hire').hidden).toBe(true);
   h.document.querySelector('[aria-label="Hire"]').click();
   expect(h.document.querySelector('.ca-company-hire').hidden).toBe(false);
@@ -129,7 +135,7 @@ it('chooses a plan and harness with backend runtime defaults for a fresh expert;
       expertise: ['Code review', 'Flight systems'],
       responsibilities: [],
       personality: '',
-      permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false },
+      permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false, editBoardIssues: true, manageBoard: false, manageDecisions: false },
       sleepEnabled: false,
       dreamEnabled: false,
       reportsTo: 'lead',

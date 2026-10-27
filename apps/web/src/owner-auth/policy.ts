@@ -33,9 +33,10 @@ import type { Socket } from 'node:net';
 import { ApiErrorCode, createErrorResponse } from '../types.js';
 import type { SessionPort } from '../web/ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../web/route-helpers.js';
-import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate } from './delegated-session-create.js';
+import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate, delegatedSessionStartCaller } from './delegated-session-create.js';
 import type { OwnerAuthService } from './service.js';
 import type { Relations } from './relations.js';
+import { goalRouteAction, type GoalAction } from '../goal-route-policy.js';
 
 export const OWNER_COOKIE = 'reverie_owner';
 export const DEVICE_COOKIE = 'reverie_owner_device';
@@ -49,8 +50,15 @@ export interface Caller {
   session?: string;
 }
 
-/** These handlers require an owner-made coordinator seat; services must never become headerless owners. */
-const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'POST /api/board/decisions/:id/clear']);
+/** Handlers enforce current employee grants; services never become headerless owners. */
+const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'PATCH /api/board/decisions/:id', 'POST /api/board/decisions/:id/clear', 'PUT /api/board/polls/:roomId/:messageId/note']);
+const BOARD_WRITE_ROUTES = new Set([
+  'POST /api/board/issues', 'PATCH /api/board/issues/:id', 'POST /api/board/wins',
+  'POST /api/board/milestones', 'PATCH /api/board/milestones/:id',
+  'POST /api/board/blockers', 'POST /api/board/blockers/:id/clear',
+  'PUT /api/board/agents/:memberId', 'PUT /api/board/marks', 'POST /api/board/import',
+  ...BOARD_DECISION_ROUTES,
+]);
 
 // Exact routine routes only. Handlers retain explicit grants, author/room checks and
 // post-only mutations; bot/grant management stays owner-only. Service tokens must
@@ -83,6 +91,7 @@ const AGENT_ROUTES = new Set([
   'GET /api/company',
   'GET /api/handbook',
   'GET /api/handbook/:slug',
+  'GET /api/chat-plugins', // shared enablement is readable; only the verified owner may change it
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
   // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.
@@ -103,9 +112,11 @@ const AGENT_ROUTES = new Set([
   'POST /api/experts/:id/retire',
   // The board: every agent's `reverie board` reads and moves cards.
   'GET /api/board',
-  'POST /api/board/issues',
-  'PATCH /api/board/issues/:id',
-  ...BOARD_DECISION_ROUTES,
+  'GET /api/publication/credentials',
+  'POST /api/publication/credentials/:id/material',
+  'GET /api/agent/context',
+  'POST /api/agent/context/receipt',
+  ...BOARD_WRITE_ROUTES,
 ]);
 /**
  * What an owner-set admin agent may call besides the agent routes. A whitelist: anything that sets
@@ -145,6 +156,8 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/owner/logout',
   'POST /api/hook-event',
   'POST /api/status-telemetry',
+  // Authenticated only by its service assertion header (service-decision.ts); a bare 403 without one.
+  'POST /api/service-decisions',
 ]);
 /** What a session signed in with a one-time password may still reach. */
 const RESTRICTED_ROUTES = new Set(['GET /api/owner/status', 'POST /api/owner/password', 'POST /api/owner/logout']);
@@ -165,6 +178,9 @@ const isPrivatePath = (path: string) => {
 };
 
 /** The class of a request: by its matched route pattern, or (unmatched) by its decoded path. */
+/** The stable status-page route (status-page-routes.ts registers it). */
+export const STATUS_PAGE_ROUTE = '/status/:name';
+
 export function classify(method: string, route: string | undefined, rawUrl: string): RouteClass {
   if (route !== undefined) {
     const key = `${method} ${route}`;
@@ -175,6 +191,8 @@ export function classify(method: string, route: string | undefined, rawUrl: stri
     if (AGENT_ROUTES.has(key)) return 'agent';
     if (SERVICE_ROUTES.has(key)) return 'service';
     if (isPrivatePath(route)) return 'owner';
+    // A status page mints an html-view capability (status-page-routes.ts): owner-only, like the APIs.
+    if (route === STATUS_PAGE_ROUTE) return 'owner';
     return 'public'; // the app shell, static assets, capability and QR paths
   }
   const path = decodedPath(rawUrl);
@@ -193,7 +211,8 @@ export function allowed(routeClass: RouteClass, caller: CallerKind): boolean {
 /** A browser loading the app: without an owner session in enforce mode it is sent to sign in. */
 export function isAppPage(req: FastifyRequest, route: string | undefined): boolean {
   if (req.method !== 'GET') return false;
-  if (route === '/' || route === '/index.html') return true;
+  // A status page is a bookmark (status-page-routes.ts): a signed-out browser goes to login and back, not a 401.
+  if (route === '/' || route === '/index.html' || route === STATUS_PAGE_ROUTE) return true;
   if (route !== undefined) return false;
   const path = decodedPath(req.url ?? '') ?? '';
   const accept = String(req.headers.accept ?? '');
@@ -215,6 +234,9 @@ export function sameOrigin(req: FastifyRequest): boolean {
 }
 
 export interface PolicyDeps {
+  /** Only exact registered Goal routes defer to this purpose-auth/custody/action gate after raw-body verification.
+   * Absence denies them even when ordinary owner policy is off/log. Never a generic agent allowlist. */
+  goalRequest?: (request: FastifyRequest, action: GoalAction) => Promise<void>;
   service: OwnerAuthService;
   ctx: SessionPort;
   /** Capability-authenticated paths the existing auth middleware lets through (webview, html-view, QR). */
@@ -231,7 +253,7 @@ export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' |
   const token = req.headers[SERVICE_HEADER];
   if (typeof token === 'string' && deps.service.service(token)) return { kind: 'service' };
   if (req.headers['x-reverie-parent-session'] !== undefined) {
-    const id = resolveParentSessionId(deps.ctx, req, undefined, ownerFor(req));
+    const id = resolveParentSessionId(deps.ctx, req, undefined, ownerFor(req)) ?? delegatedSessionStartCaller(req);
     return id ? { kind: 'agent', session: id } : { kind: 'invalid' };
   }
   return { kind: 'anonymous' };
@@ -271,6 +293,18 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
   // body is parsed only after onRequest, so this check runs as a preHandler; a refused value is
   // dropped (the caller's own header then names the parent), not an error.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
+    const goalAction = goalRouteAction(req);
+    if (goalAction) {
+      try {
+        if (!deps.goalRequest) throw new Error('Goal integration unavailable');
+        await deps.goalRequest(req, goalAction);
+      } catch {
+        return reply
+          .code(403)
+          .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Goal integration is unavailable or refused'));
+      }
+      return;
+    }
     if (consumeDelegatedSessionCreate(req) === false)
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated session authorization changed or the session request did not match'));
     const policy = deps.service.policy();
@@ -315,6 +349,9 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       if (LIMITED_ROUTES.has(key) || (path && limitedAsset(req.method, path))) return;
       return refuse(reply, 403, 'This login has limited channel access');
     }
+    // Keep the current Limited-account boundary ahead of Goal's purpose-specific gate.
+    // Exact Goal routes still require raw-body/provenance verification and the preHandler below.
+    if (goalRouteAction(req)) return;
     const policy = deps.service.policy();
     if (policy === 'off' && !hasDelegatedSessionCreate()) return;
     const route = req.routeOptions?.url;
@@ -364,8 +401,8 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       }
       return;
     }
-    if (caller.kind === 'service' && BOARD_DECISION_ROUTES.has(key)) {
-      return deny(403, 'Only the owner or a coordinator may update board decisions', 'decision_service');
+    if (caller.kind === 'service' && BOARD_WRITE_ROUTES.has(key)) {
+      return deny(403, 'Only the verified owner or a permitted employee may update the board', 'decision_service');
     }
     const admin = caller.kind === 'agent' && ADMIN_ROUTES.has(key) && deps.relations.admin(caller.session!);
     if (admin) {

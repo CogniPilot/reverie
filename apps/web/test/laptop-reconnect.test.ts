@@ -5,7 +5,7 @@ import type { SessionState } from '../src/types.js';
 
 function fixture() {
   const sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-  const employee = EmployeeSchema.parse({ id: 'assistant', sessionId: sid, name: 'Assistant', position: 'Expert', icon: 'J', expertise: ['coding'], createdAt: 1, desiredRunning: true });
+  const employee = EmployeeSchema.parse({ id: 'jinx', sessionId: sid, name: 'Jinx', position: 'Expert', icon: 'J', expertise: ['coding'], createdAt: 1, desiredRunning: true });
   const saved = { id: sid, workingDir: '/workspace', mode: 'hands', status: 'idle', pid: null, __customModel: { endpointId: 'local', model: 'qwen' } } as unknown as SessionState;
   const deps = { inventory: vi.fn(async () => ({ runningSessionIds: [sid] })), employees: () => [employee], saved: () => saved,
     live: () => false, restore: vi.fn(async (_entry, allowed) => allowed()) };

@@ -1,3 +1,4 @@
+import copy
 import os
 
 import agent_loop
@@ -37,6 +38,14 @@ class FakeChat:
 
     def read(self, room, count):
         return self.rooms.get(room, [])[-count:]
+
+    def exact_message(self, room, message_id):
+        selected = [m for m in self.rooms.get(room, []) if m['id'] == message_id]
+        if len(selected) != 1:
+            raise ValueError('no exact fixture message')
+        message = copy.deepcopy(selected[0])
+        message.setdefault('phoneWake', True)  # This fixture models a ringing phone.
+        return message
 
     def say(self, room, text, reply_to=None):
         if self.fail_say:

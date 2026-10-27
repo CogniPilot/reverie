@@ -67,7 +67,11 @@ describe('optional math in the actual chat shell, Chromium', () => {
       const user = { kind: 'user', name: 'Owner' };
       window.ReverieUrlSession = { sessionIdFromFragment: () => null };
       window.__server = createServer([room('r1', 'General', [member('${A}', 'Maple')], { messages: [message('m1', 'r1', {kind:'agent', sessionId:'${A}', name:'Maple'}, ${JSON.stringify(raw)}, 1000)] })]);
-      window.fetch = () => Promise.resolve({ ok: true });
+      let pluginFlags = {latex:false,python:false,modelica:false};
+      window.fetch = (url, init = {}) => {
+        if (init.method === 'PUT') pluginFlags = JSON.parse(init.body);
+        return Promise.resolve({ok:true,json:async()=>({success:true,data:{enabled:pluginFlags,available:{python:false,modelica:false},canManage:true}})});
+      };
       ${appStub}
     `,
     });
@@ -80,12 +84,13 @@ describe('optional math in the actual chat shell, Chromium', () => {
     await page.waitForSelector('.ca-msg');
   });
   async function setEnabled(enabled: boolean) {
-    await page.getByRole('button', { name: 'Optional chat plugins', exact: true }).click();
+    await page.evaluate(() => (window as any).ReverieChatPlugins.openSettings());
     await page.locator('.chat-plugin-choice').filter({ hasText: 'LaTeX math' }).locator('input').setChecked(enabled);
+    await page.getByText('Saved for everyone.', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Done', exact: true }).click();
   }
 
-  it('enables locally, toggles original source, edits a draft and sends the exact math source', async () => {
+  it('enables through shared settings, toggles original source, edits a draft and sends the exact math source', async () => {
     expect(assets).toEqual([]);
     expect(await page.locator('.chat-math-toolbar').count()).toBe(0);
     await setEnabled(true);

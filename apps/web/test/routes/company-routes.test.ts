@@ -13,14 +13,17 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
+import type { CompanyWakeReport } from '../../src/company-wake.js';
+import { isBoardCoordinator } from '../../src/board-permissions.js';
 
 describe('company HTTP ownership and expert invites', () => {
-  const wake = vi.fn(async () => ({ awakened: [], skipped: [] }));
+  const wake = vi.fn<(id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>>(async () => ({ awakened: [], skipped: [] }));
   let app: FastifyInstance;
   let directory: string;
   let service: CompanyService;
   let rooms: ChatroomStore;
   let sessions: Map<string, { id: string; name: string }>;
+  let publicationTokens: Set<string>;
   const hireBody = {
     name: 'Maya',
     icon: '🌱',
@@ -32,11 +35,13 @@ describe('company HTTP ownership and expert invites', () => {
 
   beforeEach(async () => {
     vi.mocked(appendAdminAudit).mockClear();
-    wake.mockClear();
+    wake.mockReset();
+    wake.mockResolvedValue({ awakened: [], skipped: [] });
     directory = await mkdtemp(join(tmpdir(), 'reverie-company-routes-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     rooms = new ChatroomStore();
+    publicationTokens = new Set();
     sessions = new Map([
       ['expert-session', { id: 'expert-session', name: 'Expert' }],
       ['parent-session', { id: 'parent-session', name: 'Parent' }],
@@ -52,13 +57,136 @@ describe('company HTTP ownership and expert invites', () => {
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
     app = Fastify();
-    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, wake, { verifiedOwner: trustedFixtureOwner });
+    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, wake, {
+      verifiedOwner: trustedFixtureOwner,
+      boardCoordinator: (sessionId) => isBoardCoordinator(rooms.list(), sessionId),
+      publicationTokens: { assertGrantIds: async (owner, ids) => {
+        if (owner !== undefined || ids.some(id => !publicationTokens.has(id))) throw new Error('Unknown PAT');
+      } },
+    });
     installRouteErrorHandler(app);
     await app.ready();
   });
   afterEach(async () => {
     await app.close();
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it('reports current inherited Board grants without saving them, and returns explicit revocation after an owner edit', async () => {
+    const employee = await service.hire(hireBody);
+    const room = rooms.create('planning', undefined);
+    rooms.addMember(room.id, employee.sessionId, { role: 'coordinator' });
+    const read = async () => (await app.inject({ url: '/api/company' })).json().data.employees[0];
+    expect(await read()).toMatchObject({
+      effectiveBoardPermissions: { editBoardIssues: true, manageBoard: true, manageDecisions: true },
+      boardPermissionSources: { editBoardIssues: 'included', manageBoard: 'legacy', manageDecisions: 'legacy' },
+    });
+    expect(service.store.snapshot().employees[0].permissions).not.toHaveProperty('manageBoard');
+    const url = `/api/company/employees/${employee.id}`;
+    const payload = { permissions: { manageBoard: false, manageDecisions: false, editBoardIssues: false } };
+    for (const headers of [{ 'x-reverie-parent-session': employee.sessionId }, { 'x-reverie-service-token': 'service' }])
+      expect((await app.inject({ method: 'PUT', url, headers, payload })).statusCode).toBe(403);
+    const updated = await app.inject({ method: 'PUT', url, payload });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().data.employee).toMatchObject({
+      permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false, ...payload.permissions },
+      effectiveBoardPermissions: { editBoardIssues: false, manageBoard: false, manageDecisions: false },
+      boardPermissionSources: { editBoardIssues: 'explicit', manageBoard: 'explicit', manageDecisions: 'explicit' },
+    });
+    expect(await read()).toMatchObject({ effectiveBoardPermissions: payload.permissions });
+    expect(rooms.get(room.id)?.members[0].role).toBe('coordinator');
+    const reloaded = new CompanyStore(service.store.file); await reloaded.init();
+    expect(reloaded.snapshot().employees[0].permissions).toMatchObject(payload.permissions);
+  });
+
+  it('does not grant a Board title authority and shows own-work access included in an explicit manager grant', async () => {
+    const employee = await service.hire({ ...hireBody, position: 'Board administrator' });
+    const read = async () => (await app.inject({ url: '/api/company' })).json().data.employees[0];
+    expect((await read()).effectiveBoardPermissions).toEqual({ editBoardIssues: true, manageBoard: false, manageDecisions: false });
+    const response = await app.inject({ method: 'PUT', url: `/api/company/employees/${employee.id}`,
+      payload: { permissions: { manageBoard: true, editBoardIssues: false } } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.employee).toMatchObject({
+      permissions: { manageBoard: true, editBoardIssues: false },
+      effectiveBoardPermissions: { editBoardIssues: true, manageBoard: true, manageDecisions: false },
+      boardPermissionSources: { editBoardIssues: 'included', manageBoard: 'explicit', manageDecisions: 'legacy' },
+    });
+  });
+
+  it('leaves a permission grant unchanged when its audit cannot be saved', async () => {
+    const employee = await service.hire(hireBody);
+    const previous = service.store.snapshot();
+    vi.mocked(appendAdminAudit).mockRejectedValueOnce(new Error('Synthetic unavailable audit'));
+    const response = await app.inject({ method: 'PUT', url: `/api/company/employees/${employee.id}`,
+      payload: { permissions: { manageBoard: true, manageDecisions: true } } });
+    expect(response.statusCode).toBe(500);
+    expect(service.store.snapshot()).toEqual(previous);
+    const reloaded = new CompanyStore(service.store.file); await reloaded.init();
+    expect(reloaded.snapshot()).toEqual(previous);
+  });
+
+  it('changes one named PAT grant atomically and keeps concurrent grants', async () => {
+    const employee = await service.hire(hireBody);
+    const first = '11111111-1111-4111-8111-111111111111';
+    const second = '22222222-2222-4222-8222-222222222222';
+    publicationTokens.add(first); publicationTokens.add(second);
+    const endpoint = (id: string) => `/api/company/employees/${employee.id}/publication-tokens/${id}`;
+    const granted = await Promise.all([first, second].map(id => app.inject({ method: 'PUT', url: endpoint(id), payload: { enabled: true } })));
+    expect(granted.map(response => response.statusCode)).toEqual([200, 200]);
+    expect(new Set(service.store.snapshot().employees[0].permissions.publicationTokenIds)).toEqual(new Set([first, second]));
+    publicationTokens.clear(); // Deleted/unavailable grants must remain removable.
+    const removed = await app.inject({ method: 'PUT', url: endpoint(first), payload: { enabled: false } });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json().data.employee.permissions.publicationTokenIds).toEqual([second]);
+    const edit = await app.inject({ method: 'PUT', url: `/api/company/employees/${employee.id}`,
+      payload: { permissions: { publicationTokenIds: [second] }, position: 'Updated role' } });
+    expect(edit.statusCode).toBe(200);
+    expect(service.store.snapshot().employees[0].permissions.publicationTokenIds).toEqual([second]);
+  });
+
+  it('allows only the owner to grant a currently available PAT and does not commit a failed validation or audit', async () => {
+    const employee = await service.hire(hireBody);
+    const id = '33333333-3333-4333-8333-333333333333';
+    const url = `/api/company/employees/${employee.id}/publication-tokens/${id}`;
+    const previous = service.store.snapshot();
+    for (const headers of [{ 'x-reverie-parent-session': employee.sessionId }, { 'x-reverie-service-token': 'service' }])
+      expect((await app.inject({ method: 'PUT', url, headers, payload: { enabled: true } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PUT', url, payload: { enabled: true } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PUT', url: `/api/company/employees/${employee.id}`,
+      payload: { permissions: { publicationTokenIds: [id] } } })).statusCode).toBe(400);
+    expect(service.store.snapshot()).toEqual(previous);
+    publicationTokens.add(id);
+    vi.mocked(appendAdminAudit).mockRejectedValueOnce(new Error('Synthetic unavailable audit'));
+    expect((await app.inject({ method: 'PUT', url, payload: { enabled: true } })).statusCode).toBe(500);
+    expect(service.store.snapshot()).toEqual(previous);
+    expect((await app.inject({ method: 'PUT', url, payload: { enabled: 'yes' } })).statusCode).toBe(400);
+  });
+
+  it('keeps vanilla core beliefs empty and preserves unrelated settings when the owner changes the company core', async () => {
+    expect(service.view().settings.coreBeliefs).toEqual([]);
+    await service.configure(undefined, { ownerName: 'Fixture owner', enabled: true, autoWakeEnabled: false,
+      timeZone: 'America/Indiana/Indianapolis', nightHour: 2, morningHour: 9 });
+    const before = service.view().settings;
+    const response = await app.inject({ method: 'PUT', url: '/api/company/settings',
+      payload: { coreBeliefs: ['Preserve exact\nowner-selected wording.'] } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.settings).toEqual({ ...before, coreBeliefs: ['Preserve exact\nowner-selected wording.'] });
+  });
+
+  it('lets the owner inspect effective core blocks while an agent sees only its own personal blocks', async () => {
+    await service.configure(undefined, { coreBeliefs: ['Shared company core'] });
+    const self = await service.hire({ ...hireBody, coreBeliefs: ['Self-only core'] });
+    const peer = await service.hire({ ...hireBody, name: 'Peer', sessionId: 'parent-session', coreBeliefs: ['Peer-only core'] });
+    const owner = (await app.inject({ url: '/api/company' })).json().data;
+    expect(owner.employees.find((e: any) => e.id === peer.id).effectiveCoreBeliefs).toEqual(['Shared company core', 'Peer-only core']);
+    const agent = (await app.inject({ url: '/api/company', headers: { 'x-reverie-parent-session': self.sessionId } })).json().data;
+    expect(agent.employees.find((e: any) => e.id === self.id).effectiveCoreBeliefs).toEqual(['Shared company core', 'Self-only core']);
+    expect(agent.employees.find((e: any) => e.id === peer.id)).not.toHaveProperty('coreBeliefs');
+    expect(agent.employees.find((e: any) => e.id === peer.id)).not.toHaveProperty('effectiveCoreBeliefs');
+    const updated = await app.inject({ method: 'PUT', url: `/api/company/employees/${self.id}`,
+      payload: { coreBeliefs: ['Updated\nexact self core'] } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().data.employee.effectiveCoreBeliefs).toEqual(['Shared company core', 'Updated\nexact self core']);
   });
 
   it('rejects runtime recipes in public hire and update payloads', async () => {
@@ -70,6 +198,51 @@ describe('company HTTP ownership and expert invites', () => {
     const update = await app.inject({ method: 'PUT', url: '/api/company/employees/' + employee.id, payload: { runtimeRecipe } });
     expect(update.statusCode).toBe(400);
     expect(service.view().employees[0].runtimeRecipe).toBeUndefined();
+  });
+
+  it('enter office persists running intent then starts that employee, even when automatic recovery is disabled', async () => {
+    const employee = await service.hire(hireBody);
+    await service.store.update(state => {
+      state.employees[0].onVacation = true;
+      state.employees[0].desiredRunning = false;
+    });
+    await service.configure(undefined, { autoWakeEnabled: false });
+    wake.mockImplementationOnce(async (id) => {
+      expect(service.view().employees[0]).toMatchObject({ id, onVacation: false, desiredRunning: true });
+      return { awakened: [id], skipped: [] };
+    });
+    const response = await app.inject({ method: 'POST', url: `/api/company/employees/${employee.id}/vacation`, payload: { enabled: false } });
+    expect(response.statusCode).toBe(200);
+    expect(wake).toHaveBeenCalledExactlyOnceWith(employee.id, { explicitStart: true });
+    expect(response.json().data.startup).toEqual({ state: 'started' });
+  });
+
+  it('reports refused startup instead of claiming a disconnected expert started', async () => {
+    const employee = await service.hire(hireBody);
+    wake.mockResolvedValueOnce({ awakened: [], skipped: [{ employeeId: employee.id, reason: 'wake-failed' }] });
+    const response = await app.inject({ method: 'POST', url: `/api/company/employees/${employee.id}/vacation`, payload: { enabled: false } });
+    expect(response.json().data.startup).toEqual({ state: 'blocked', reason: 'wake-failed' });
+  });
+
+  it('reports startup exceptions as blocked after the office state was saved', async () => {
+    const employee = await service.hire(hireBody);
+    wake.mockRejectedValueOnce(new Error('Synthetic private failure'));
+    const response = await app.inject({ method: 'POST', url: `/api/company/employees/${employee.id}/vacation`, payload: { enabled: false } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ employee: { onVacation: false, desiredRunning: true }, startup: { state: 'blocked', reason: 'wake-failed' } });
+    expect(response.body).not.toContain('Synthetic private failure');
+  });
+
+  it('leaving the office and unauthorized entry never invoke a start', async () => {
+    const employee = await service.hire(hireBody);
+    const url = `/api/company/employees/${employee.id}/vacation`;
+    for (const headers of [{ 'x-reverie-parent-session': 'parent-session' }, { 'x-reverie-service-token': 'service' }]) {
+      expect((await app.inject({ method: 'POST', url, payload: { enabled: false }, headers })).statusCode).toBe(403);
+    }
+    sessions.delete(employee.sessionId);
+    expect((await app.inject({ method: 'POST', url, payload: { enabled: true } })).statusCode).toBe(200);
+    expect(wake).not.toHaveBeenCalled();
+    expect(service.view().employees[0]).toMatchObject({ onVacation: true, desiredRunning: false });
   });
 
   it('defaults sleep and dream off and lets only the owner persist preferences, including on vacation', async () => {

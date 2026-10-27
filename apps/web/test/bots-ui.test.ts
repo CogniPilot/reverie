@@ -70,7 +70,7 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
   };
   const fetch = vi.fn(
     async (url: URL, options: { method?: string; body?: string; headers?: Record<string, string> }) => {
-      if (new URL(url).pathname === '/assets/avatars/pack-manifest.json') return { ok: true, json: async () => ({ avatars: [...Array.from({ length: 50 }, (_, i) => i + 1), ...Array.from({ length: 50 }, (_, i) => i + 102), 101].map((id) => ({ id: `pack-${String(id).padStart(2, '0')}`, name: id === 151 ? 'Merry Dragon' : id === 101 ? 'Sly Jester' : `Avatar ${id}`, src: `/assets/avatars/pack-${String(id).padStart(2, '0')}.png` })) }) };
+      if (new URL(url).pathname === '/assets/avatars/pack-manifest.json') return { ok: true, json: async () => ({ avatars: [...Array.from({ length: 50 }, (_, i) => i + 1), ...Array.from({ length: 50 }, (_, i) => i + 102), 101].map((id) => ({ id: `pack-${String(id).padStart(2, '0')}`, name: id === 151 ? 'Merry Dragon' : id === 101 ? 'Sly Jester' : `Avatar ${id}`, src: `/assets/avatars/pack-${String(id).padStart(2, '0')}.png` + (id === 1 ? '?v=' + 'a'.repeat(64) : '') })) }) };
       const path = new URL(url).pathname.slice('/api/'.length);
       if (options.method === 'DELETE') return { ok: true, json: async () => ({ success: true, data: {} }) };
       if (options.method === 'PUT' || options.method === 'POST') {
@@ -233,4 +233,18 @@ it('offers confirmed deletion for unused bots and explains why linked bots canno
   const request = p.fetch.mock.calls.find(([, options]) => options.method === 'DELETE')!;
   expect(new URL(request[0]).pathname).toBe('/api/chat-bots/build');
   expect(request[1].body).toBeUndefined();
+});
+
+it('keeps a replacement image revision when saving a bot without changing its grant', async () => {
+  const p = fixture(); await tick();
+  (p.get('bots').querySelector('button') as HTMLButtonElement).click();
+  p.get('choose-bot-avatar').click(); await tick();
+  const choice = p.get('bot-avatar-list').querySelector('[aria-label="Use Avatar 1"]') as HTMLButtonElement;
+  const revised = '/assets/avatars/pack-01.png?v=' + 'a'.repeat(64);
+  expect(choice.querySelector('img')!.getAttribute('src')).toContain(revised);
+  choice.click();
+  expect(p.get('bot-icon-preview').querySelector('img')!.getAttribute('src')).toContain(revised);
+  p.get('bot-form').dispatchEvent(new p.w.Event('submit', { cancelable: true, bubbles: true })); await tick();
+  const saved = p.fetch.mock.calls.find(([url, options]) => new URL(url).pathname === '/api/chat-bots/build' && options.method === 'PUT')!;
+  expect(JSON.parse(saved[1].body!)).toMatchObject({ icon: revised, rooms: ['r1'], maxPerHour: 30 });
 });

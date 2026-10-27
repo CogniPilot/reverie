@@ -129,33 +129,88 @@ Object.assign(ReverieApp.prototype, {
         );
         card.append(form);
         if (data.canManage) {
+          const ownerControls = el('details'); ownerControls.append(el('summary', 'Edit profile and permissions'));
           const recoveryLabel = el('label', ' May recover disconnected employee sessions ');
           const recovery = el('input');
           recovery.type = 'checkbox';
           recovery.checked = employee.permissions?.recoverEmployees === true;
           recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
           recoveryLabel.prepend(recovery);
-          card.append(
+          ownerControls.append(
             recoveryLabel,
             button('Save permissions', async () => {
-              await this._companyApi(`/employees/${employee.id}`, 'PUT', {
-                permissions: { ...employee.permissions, recoverEmployees: recovery.checked },
+              const result = await this._companyApi(`/employees/${employee.id}`, 'PUT', {
+                permissions: { recoverEmployees: recovery.checked },
               });
+              if (result.employee?.id !== employee.id || result.employee.permissions?.recoverEmployees !== recovery.checked)
+                throw new Error('Save not confirmed. Reopen Company to check the current value.');
+              employee.permissions = { ...employee.permissions, recoverEmployees: recovery.checked };
               status.textContent = 'Employee permissions saved.';
             })
           );
+          const permissions = el('fieldset'); permissions.append(el('legend', 'Board and plan permissions'));
+          const fields = [
+            ['editBoardIssues', 'Update own board work', 'File triage cards, update own cards, and record own wins and focus.', true],
+            ['manageBoard', 'Manage company board', 'Edit and reassign all cards, milestones, blockers and schedules. Includes updating own board work.', true],
+            ['manageDecisions', 'Prepare decision cards', 'Prepare, annotate and dismiss decisions and poll notes. Only the owner chooses answers; creating choices also requires the site’s decision-write setting.', true],
+            ['moveOwnPlan', 'Move own plan', 'Requires your handoff and approval; grants no provider account administration.', false],
+            ['managePlans', 'Manage team plans', 'Requests still require the affected expert’s handoff and approval.', false],
+          ];
+          const inputs = {}, pending = new Set();
+          const paintPermissions = () => {
+            for (const [key, , detail, board] of fields) {
+              const { input, note } = inputs[key];
+              const value = board ? employee.effectiveBoardPermissions?.[key] : employee.permissions?.[key] === true;
+              const included = key === 'editBoardIssues' && employee.effectiveBoardPermissions?.manageBoard === true;
+              input.checked = value === true;
+              input.disabled = pending.has(key) || (board && fields.some(([field, , , isBoard]) => isBoard && pending.has(field))) || included || typeof value !== 'boolean';
+              note.textContent = !board ? '' : typeof value !== 'boolean' ? 'Current access unavailable; reopen Company after updating the server.'
+                : included ? 'Included with Manage company board.' : employee.boardPermissionSources?.[key] === 'legacy'
+                  ? 'Inherited current policy. Toggle to set an explicit choice.' : 'Owner-selected permission.';
+              input.closest('label').title = detail;
+            }
+          };
+          for (const [key, text, , board] of fields) {
+            const wrap = el('label'), input = el('input'), note = el('small');
+            input.type = 'checkbox'; input.setAttribute('aria-label', `${text} for ${employee.name}`);
+            wrap.append(input, document.createTextNode(` ${text} `), note); permissions.append(wrap);
+            inputs[key] = { input, note };
+            input.addEventListener('change', async () => {
+              if (input.disabled) return;
+              const value = input.checked; pending.add(key); input.disabled = true; status.textContent = 'Saving permissions…';
+              if (board) for (const [field, , , isBoard] of fields) if (isBoard) inputs[field].input.disabled = true;
+              try {
+                const result = await this._companyApi(`/employees/${employee.id}`, 'PUT', { permissions: { [key]: value } });
+                const saved = result.employee;
+                if (saved?.id !== employee.id || saved.permissions?.[key] !== value)
+                  throw new Error('Save not confirmed. Reopen Company to check the current value.');
+                if (board && !fields.filter(([, , , isBoard]) => isBoard).every(([field]) =>
+                  typeof saved.effectiveBoardPermissions?.[field] === 'boolean' &&
+                  ['explicit', 'legacy', 'included'].includes(saved.boardPermissionSources?.[field])))
+                  throw new Error('Permission saved, but current access could not be read. Reopen Company to check it.');
+                employee.permissions = { ...employee.permissions, [key]: value };
+                if (board) {
+                  employee.effectiveBoardPermissions = saved.effectiveBoardPermissions;
+                  employee.boardPermissionSources = saved.boardPermissionSources;
+                }
+                status.textContent = 'Employee permissions saved.';
+              } catch (error) { status.textContent = `Could not save permissions: ${error.message}`; }
+              finally { pending.delete(key); paintPermissions(); }
+            });
+          }
+          paintPermissions(); ownerControls.append(permissions);
           const reconnect = el('input');
           reconnect.placeholder = 'Owned session ID for this permanent identity';
           reconnect.setAttribute('aria-label', `Registered session for ${employee.name}`);
           reconnect.value = employee.sessionId || '';
-          card.append(
+          ownerControls.append(
             reconnect,
             button('Reconnect registered session', async () => {
               await this._companyApi(`/employees/${employee.id}/session`, 'PUT', { sessionId: reconnect.value.trim() });
               await this._renderCompany();
             })
           );
-          card.append(
+          ownerControls.append(
             button('Assign briefing coordinator', async () => {
               await this._companyApi('/settings', 'PUT', { ...data.settings, coordinatorEmployeeId: employee.id });
               await this._renderCompany();
@@ -164,7 +219,7 @@ Object.assign(ReverieApp.prototype, {
           const memory = el('textarea');
           memory.placeholder = 'Company note for this employee (personal memory stays in their runtime)';
           memory.setAttribute('aria-label', `Company note for ${employee.name}`);
-          card.append(
+          ownerControls.append(
             memory,
             button('Save company note', async () => {
               await this._companyApi(`/employees/${employee.id}/memories`, 'POST', {
@@ -175,6 +230,7 @@ Object.assign(ReverieApp.prototype, {
               status.textContent = 'Company note saved.';
             })
           );
+          card.append(ownerControls);
         }
         roster.append(card);
       }
@@ -198,6 +254,23 @@ Object.assign(ReverieApp.prototype, {
           hire.append(labelNode, el('br'));
           fields[key] = input;
         }
+        const hireBoard = {}, boardChoices = el('fieldset'); boardChoices.append(el('legend', 'Board permissions'));
+        for (const [key, text, detail] of [
+          ['editBoardIssues', 'Update own board work', 'File triage cards and update own cards, wins and focus.'],
+          ['manageBoard', 'Manage company board', 'Manage everyone’s cards and schedules; includes own board work.'],
+          ['manageDecisions', 'Prepare decision cards', 'Prepare decision proposals; only the owner chooses answers.'],
+        ]) {
+          const wrap = el('label'), input = el('input'); input.type = 'checkbox'; input.checked = key === 'editBoardIssues';
+          input.setAttribute('aria-label', `${text} for new expert`); wrap.title = detail;
+          wrap.append(input, document.createTextNode(` ${text} `)); boardChoices.append(wrap); hireBoard[key] = input;
+        }
+        let basicBoardChoice = true;
+        hireBoard.editBoardIssues.addEventListener('change', () => { basicBoardChoice = hireBoard.editBoardIssues.checked; });
+        hireBoard.manageBoard.addEventListener('change', () => {
+          hireBoard.editBoardIssues.checked = hireBoard.manageBoard.checked || basicBoardChoice;
+          hireBoard.editBoardIssues.disabled = hireBoard.manageBoard.checked;
+        });
+        hire.append(boardChoices);
         hire.addEventListener('submit', (event) => event.preventDefault());
         hire.append(
           button('Hire registered session', async () => {
@@ -211,6 +284,7 @@ Object.assign(ReverieApp.prototype, {
                 .map((s) => s.trim())
                 .filter(Boolean),
               sessionId: fields.sessionId.value.trim(),
+              permissions: { editBoardIssues: basicBoardChoice, manageBoard: hireBoard.manageBoard.checked, manageDecisions: hireBoard.manageDecisions.checked },
               researchEnabled: true,
             });
             await this._renderCompany();

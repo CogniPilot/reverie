@@ -11,12 +11,25 @@
   let editingContent;
   let botAvatar = '';
   const avatarPath = (value) =>
-    typeof value === 'string' && /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(value) ? value : '';
+    typeof value === 'string' &&
+    /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png(?:\?v=[a-f0-9]{64})?$/.test(value)
+      ? value
+      : '';
   const assetUrl = (path) => new URL('.' + path, location.href).href;
   let snapshot,
     busy = false,
     closed = false,
     editingId = null;
+  let watchSnapshot = null,
+    watchError = '',
+    watchBusy = false,
+    watchEdit = null;
+  let credentials = [],
+    credentialsAvailable = false;
+  let credentialRepository = '',
+    credentialBusy = false;
+  let credentialEpoch = 0;
+  let watchCadenceEdited = false;
   const requests = new Set();
   const terminal = new Set(['posted', 'failed', 'skipped', 'prompt_sent']);
   const active = (run) => run.finishedAt === null && !terminal.has(run.status);
@@ -33,9 +46,12 @@
         headers: { ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...options.headers },
       });
       const result = await response.json();
-      if (!response.ok || result.success === false)
-        throw new Error(result.error?.message || result.error || `Request failed (${response.status})`);
-      return result.success === true ? result.data : result;
+      if (!response.ok || result?.success === false) {
+        const error = new Error(result?.error?.message || result?.error || `Request failed (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+      return result?.success === true ? result.data : result;
     } finally {
       clearTimeout(timer);
       requests.delete(controller);
@@ -46,13 +62,21 @@
     busy = true;
     byId('refresh').disabled = true;
     try {
-      const [bots, jobs, runs, rooms, company, executing] = await Promise.all([
+      const [bots, jobs, runs, rooms, company, executing, watchers, tokenMetadata] = await Promise.all([
         api('chat-bots'),
         api('cron/jobs'),
         api('cron/runs'),
         api('chatrooms'),
         api('company').catch(() => null),
         api('cron/active'),
+        api('bot-watches/github').then(
+          (data) => ({ data }),
+          (error) => ({ error })
+        ),
+        api('publication/tokens').then(
+          (data) => ({ data }),
+          () => ({ data: null })
+        ),
       ]);
       if (closed) return;
       if (
@@ -67,10 +91,26 @@
         bots: bots.bots,
         jobs,
         runs,
-        rooms: rooms.rooms.filter((room) => !room.dm),
+        rooms: rooms.rooms.filter((room) => !room.dm && room.kind !== 'dm' && !room.archivedAt),
         employees: company?.employees || [],
         executing: executing.jobs,
       };
+      credentialsAvailable = Array.isArray(tokenMetadata.data?.tokens);
+      credentials = credentialsAvailable ? tokenMetadata.data.tokens.slice(0, 64) : [];
+      if (watchers.error) {
+        watchSnapshot = null;
+        watchError =
+          watchers.error.status === 403
+            ? 'Sign in as the owner to manage repository watchers.'
+            : 'Repository watchers are unavailable. Refresh to try again.';
+      } else {
+        try {
+          acceptWatchSnapshot(watchers.data);
+        } catch {
+          watchSnapshot = null;
+          watchError = 'Repository watcher data is unavailable. Refresh to try again.';
+        }
+      }
       byId('status').className = '';
       byId('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
       render();
@@ -78,8 +118,15 @@
       if (closed) return;
       snapshot = undefined;
       byId('status').className = 'error';
-      byId('status').textContent = 'Bot status unavailable: ' + error.message;
-      for (const id of ['summary', 'routines', 'bots', 'history']) byId(id).replaceChildren();
+      byId('status').textContent =
+        error.status === 403 ? 'Sign in as the owner to manage bots.' : 'Bot status unavailable: ' + error.message;
+      watchSnapshot = null;
+      watchError =
+        error.status === 403
+          ? 'Sign in as the owner to manage repository watchers.'
+          : 'Repository watchers are unavailable. Refresh to try again.';
+      for (const id of ['summary', 'routines', 'bots', 'history', 'github-watches']) byId(id).replaceChildren();
+      renderWatchers();
     } finally {
       busy = false;
       byId('refresh').disabled = false;
@@ -87,6 +134,214 @@
     }
   }
   const roomName = (id) => snapshot.rooms.find((room) => room.id === id)?.name || id || 'No channel';
+  function acceptWatchSnapshot(data) {
+    if (
+      !data ||
+      data.version !== 1 ||
+      !Number.isInteger(data.revision) ||
+      data.revision < 0 ||
+      !Array.isArray(data.watches) ||
+      data.watches.length > 8 ||
+      data.watches.some((w) => !w?.config || !w?.status || typeof w.config.id !== 'string')
+    )
+      throw new Error('Unexpected repository watcher data.');
+    if (!watchSnapshot || data.revision >= watchSnapshot.revision) watchSnapshot = data;
+    watchError = '';
+  }
+  const eventLabels = {
+    issues: 'Issues',
+    pullRequests: 'Pull requests',
+    workflowFailures: 'Failed GitHub Actions runs',
+  };
+  const watchState = {
+    active: 'Enabled',
+    disabled: 'Disabled',
+    'auth-required': 'Credential required',
+    hold: 'Needs attention',
+    error: 'Check failed',
+    'not-run': 'Not checked yet',
+  };
+  function renderWatchers() {
+    const list = byId('github-watches');
+    list.replaceChildren();
+    const count = watchSnapshot?.watches.length ?? 0;
+    byId('new-watch').disabled = !snapshot || !watchSnapshot || watchBusy || count >= 8;
+    byId('watch-status').textContent =
+      watchError ||
+      (watchSnapshot
+        ? count
+          ? `${count} ${count === 1 ? 'repository watcher' : 'repository watchers'}`
+          : 'No repository watchers yet.'
+        : 'Repository watchers are unavailable.');
+    if (!watchSnapshot) return;
+    for (const { config, status } of watchSnapshot.watches) {
+      const title = `${config.owner}/${config.repo}`;
+      const element = card(
+        title,
+        watchState[status.state] || 'Status unavailable',
+        ['error', 'hold', 'auth-required'].includes(status.state) ? 'failed' : ''
+      );
+      element.append(
+        node(
+          'p',
+          `#${roomName(config.roomId)} · ${snapshot.bots.find((b) => b.id === config.botId)?.name || 'Bot unavailable'} · Every ${config.intervalMinutes} minutes`
+        )
+      );
+      element.append(
+        node(
+          'p',
+          Object.entries(eventLabels)
+            .filter(([key]) => config.events?.[key])
+            .map(([, label]) => label)
+            .join(' · ') || 'No events selected',
+          'github-watch-detail'
+        )
+      );
+      element.append(
+        node(
+          'p',
+          `Last successful check: ${time(status.lastSuccessAt)} · Next: ${config.enabled ? time(status.nextPollAt) : 'Disabled'}`,
+          'github-watch-detail'
+        )
+      );
+      if (status.state === 'auth-required')
+        element.append(node('p', 'Choose a named credential with access to this repository.', 'github-watch-error'));
+      if (status.lastError) element.append(node('p', status.lastError, 'github-watch-error'));
+      if (status.pendingCount > 0)
+        element.append(
+          node('p', `${status.pendingCount} update(s) awaiting delivery confirmation.`, 'github-watch-detail')
+        );
+      if (config.events?.workflowFailures && status.ciCoverage)
+        element.append(
+          node(
+            'p',
+            `GitHub Actions: new activity and recent reruns (31 days) · ${status.ciCoverage.complete ? 'Last check complete' : 'Needs attention: coverage incomplete'}.`,
+            'github-watch-detail'
+          )
+        );
+      const actions = node('div', undefined, 'card-actions');
+      const edit = node('button', 'Edit watcher');
+      edit.type = 'button';
+      edit.disabled = watchBusy;
+      edit.setAttribute('aria-label', `Edit watcher for ${title}`);
+      edit.addEventListener('click', () => openWatcher(config.id));
+      const toggle = node('button', config.enabled ? 'Disable watcher' : 'Enable watcher');
+      toggle.type = 'button';
+      toggle.disabled = watchBusy;
+      toggle.setAttribute('aria-label', `${config.enabled ? 'Disable' : 'Enable'} watcher for ${title}`);
+      toggle.addEventListener('click', () =>
+        changeWatchers(
+          watchSnapshot.revision,
+          watchSnapshot.watches.map((w) => ({
+            ...w.config,
+            ...(w.config.id === config.id ? { enabled: !config.enabled } : {}),
+          }))
+        )
+      );
+      const remove = node('button', 'Remove watcher');
+      remove.type = 'button';
+      remove.disabled = watchBusy;
+      remove.setAttribute('aria-label', `Remove watcher for ${title}`);
+      remove.addEventListener('click', () => {
+        if (confirm(`Remove the watcher for ${title}? Existing channel messages will remain.`))
+          void changeWatchers(
+            watchSnapshot.revision,
+            watchSnapshot.watches.filter((w) => w.config.id !== config.id).map((w) => w.config)
+          );
+      });
+      actions.append(edit, toggle, remove);
+      element.append(actions);
+      list.append(element);
+    }
+  }
+  async function putWatchers(revision, configs) {
+    await api('bot-watches/github', {
+      method: 'PUT',
+      body: JSON.stringify({ version: 1, expectedRevision: revision, watches: configs }),
+    });
+    acceptWatchSnapshot(await api('bot-watches/github'));
+  }
+  async function changeWatchers(revision, configs) {
+    if (watchBusy || !watchSnapshot || closed) return;
+    watchBusy = true;
+    renderWatchers();
+    try {
+      await putWatchers(revision, configs);
+    } catch (error) {
+      if (error.status === 403) watchSnapshot = null;
+      watchError =
+        error.status === 403
+          ? 'Sign in as the owner to manage repository watchers.'
+          : error.status === 409
+            ? 'Watchers changed elsewhere. Refresh before editing again.'
+            : 'Could not confirm the watcher change. Refresh before trying again.';
+    } finally {
+      watchBusy = false;
+      if (!closed && snapshot) render();
+    }
+  }
+  function fillWatchRooms(selected) {
+    const form = byId('watch-form'),
+      bot = snapshot?.bots.find((b) => b.id === form.elements.botId.value);
+    const rooms = snapshot?.rooms.filter((room) => !room.archivedAt && bot?.rooms.includes(room.id)) || [];
+    form.elements.roomId.replaceChildren(...rooms.map((room) => new Option('#' + room.name, room.id)));
+    if (selected && rooms.some((room) => room.id === selected)) form.elements.roomId.value = selected;
+  }
+  function repositoryParts(value) {
+    const match = value
+      .trim()
+      .match(/^(?:https:\/\/github\.com\/)?([A-Za-z0-9][A-Za-z0-9_.-]{0,99})\/([A-Za-z0-9][A-Za-z0-9_.-]{0,99})\/?$/i);
+    if (!match) throw new Error('Enter a repository as owner/repository or its GitHub URL.');
+    return [match[1], match[2]];
+  }
+  function fillWatchCredentials(selected = '') {
+    const field = byId('watch-form').elements.credentialId;
+    field.replaceChildren(
+      new Option('Public repository — no credential', ''),
+      ...credentials.map((token) => new Option(token.label ? `${token.name} · ${token.label}` : token.name, token.id))
+    );
+    if (selected && !credentials.some((token) => token.id === selected))
+      field.append(new Option('Current credential (metadata unavailable)', selected));
+    field.value = selected;
+    if (watchEdit && !watchEdit.id && !watchCadenceEdited)
+      byId('watch-form').elements.intervalMinutes.value = selected ? '15' : '30';
+    byId('watch-credential-field').hidden = !credentialsAvailable && !selected;
+    byId('watch-credential-hint').textContent = credentialsAvailable
+      ? 'Only credential names are shown. Repository access depends on their GitHub permissions.'
+      : 'Credential names are unavailable. Public repositories need no credential; private repositories require one before checks can run.';
+  }
+  function openWatcher(id = null) {
+    if (!snapshot || !watchSnapshot || watchBusy) return;
+    const config = watchSnapshot.watches.find((w) => w.config.id === id)?.config;
+    if (id && !config) return;
+    watchEdit = {
+      id,
+      revision: watchSnapshot.revision,
+      configs: JSON.parse(JSON.stringify(watchSnapshot.watches.map((w) => w.config))),
+    };
+    watchCadenceEdited = false;
+    const form = byId('watch-form');
+    form.reset();
+    byId('watch-title').textContent = config ? 'Edit repository watcher' : 'Watch a repository';
+    form.elements.repository.value = config ? `${config.owner}/${config.repo}` : '';
+    form.elements.repository.readOnly = !!config;
+    form.elements.botId.replaceChildren(...snapshot.bots.map((bot) => new Option(bot.name, bot.id)));
+    if (config) form.elements.botId.value = config.botId;
+    else if (snapshot.bots.some((b) => b.id === 'github-issues')) form.elements.botId.value = 'github-issues';
+    fillWatchRooms(config?.roomId);
+    form.elements.visibility.value = config?.visibility || 'public';
+    form.elements.intervalMinutes.value = String(config?.intervalMinutes || 30);
+    form.elements.intervalMinutes.min = String(
+      config?.id === 'github-issues' && config.intervalMinutes < 15 ? config.intervalMinutes : 15
+    );
+    form.elements.enabled.checked = config?.enabled ?? true;
+    for (const input of form.querySelectorAll('[name=events]'))
+      input.checked = config ? !!config.events[input.value] : true;
+    fillWatchCredentials(config?.credentialId || '');
+    byId('watch-error').textContent = '';
+    byId('watch-dialog').showModal();
+    form.elements.repository.focus();
+  }
   const schedule = (job) => {
     if (job.scheduleType === 'interval') return `Every ${job.intervalMinutes} minutes`;
     if (job.scheduleType === 'once') return 'Once: ' + time(job.runAt);
@@ -124,6 +379,7 @@
   }
   function render() {
     if (!snapshot) return;
+    renderWatchers();
     const { bots, jobs, runs } = snapshot;
     const running = new Set(snapshot.executing.map((job) => job.id));
     byId('summary').replaceChildren(
@@ -247,10 +503,13 @@
       if (query && !`${bot.name} ${bot.id} ${bot.rooms.map(roomName).join(' ')}`.toLowerCase().includes(query))
         continue;
       const linked = jobs.filter((job) => job.botId === bot.id && job.action === 'post');
+      const linkedWatches = watchSnapshot?.watches.filter((w) => w.config.botId === bot.id) || [];
       const image = avatarPath(bot.icon);
       const element = card(
         image ? bot.name : `${bot.icon || '⚙'} ${bot.name}`,
-        `${linked.filter((job) => job.enabled).length} enabled`
+        linkedWatches.length
+          ? `${linked.filter((job) => job.enabled).length} enabled routines · ${linkedWatches.filter((w) => w.config.enabled).length} enabled watchers`
+          : `${linked.filter((job) => job.enabled).length} enabled`
       );
       if (image) {
         const icon = node('img');
@@ -272,8 +531,10 @@
       actions.append(edit);
       const remove = node('button', 'Delete bot');
       remove.type = 'button';
-      remove.disabled = linked.length > 0;
+      remove.disabled = linked.length > 0 || linkedWatches.length > 0;
       if (linked.length) element.append(node('p', "Delete this bot's routines first to remove it.", 'hint'));
+      if (linkedWatches.length)
+        element.append(node('p', "Remove this bot's repository watchers first to remove it.", 'hint'));
       remove.addEventListener('click', async () => {
         if (!confirm(`Delete bot “${bot.name}”?`)) return;
         remove.disabled = true;
@@ -380,7 +641,12 @@
       const manifest = await response.json();
       if (!dialog.open) return;
       const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : [])
-        .filter((avatar) => /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar?.id) && avatarPath(avatar?.src) && avatar.src === `/assets/avatars/${avatar.id}.png`)
+        .filter(
+          (avatar) =>
+            /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar?.id) &&
+            avatarPath(avatar?.src) &&
+            avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png`
+        )
         .slice(0, 100);
       byId('bot-avatar-status').textContent = avatars.length ? '' : 'No avatars available.';
       for (const avatar of avatars) {
@@ -412,6 +678,191 @@
     form.elements.roomId.replaceChildren(...(bot?.rooms || []).map((id) => new Option('#' + roomName(id), id)));
   }
   byId('new-bot').addEventListener('click', () => openBot());
+  byId('new-watch').addEventListener('click', () => openWatcher());
+  byId('watch-form').elements.botId.addEventListener('change', () => fillWatchRooms());
+  byId('watch-form').elements.intervalMinutes.addEventListener('input', () => {
+    watchCadenceEdited = true;
+  });
+  byId('watch-form').elements.credentialId.addEventListener('change', (event) => {
+    if (watchEdit && !watchEdit.id && !watchCadenceEdited)
+      byId('watch-form').elements.intervalMinutes.value = event.target.value ? '15' : '30';
+  });
+  byId('watch-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget,
+      submit = form.querySelector('[type=submit]');
+    if (!watchEdit || watchBusy || !watchSnapshot || closed) return;
+    byId('watch-error').textContent = '';
+    let config;
+    try {
+      const [owner, repo] = repositoryParts(form.elements.repository.value);
+      const events = Object.fromEntries(
+        Object.keys(eventLabels).map((key) => [key, !!form.querySelector(`[name=events][value="${key}"]`)?.checked])
+      );
+      if (!Object.values(events).some(Boolean)) throw new Error('Choose at least one event.');
+      const bot = snapshot.bots.find((b) => b.id === form.elements.botId.value);
+      if (!bot || !bot.rooms.includes(form.elements.roomId.value))
+        throw new Error('Choose a bot and one of its allowed channels.');
+      const intervalMinutes = Number(form.elements.intervalMinutes.value);
+      const original = watchEdit.configs.find((w) => w.id === watchEdit.id);
+      const unchangedLegacy =
+        original?.id === 'github-issues' &&
+        original.intervalMinutes === intervalMinutes &&
+        original.owner === owner &&
+        original.repo === repo &&
+        original.botId === bot.id &&
+        original.roomId === form.elements.roomId.value &&
+        original.visibility === form.elements.visibility.value &&
+        original.credentialId === (form.elements.credentialId.value || null) &&
+        Object.keys(eventLabels).every((key) => original.events[key] === events[key]);
+      if (!Number.isInteger(intervalMinutes) || (!unchangedLegacy && intervalMinutes < 15) || intervalMinutes > 1440)
+        throw new Error('Choose a check interval from 15 to 1440 minutes.');
+      if (!watchEdit.id && watchEdit.configs.length >= 8)
+        throw new Error('Up to 8 repositories can be watched. Remove one before adding another.');
+      const suffix = Array.from(crypto.getRandomValues(new Uint8Array(4)), (value) =>
+        value.toString(16).padStart(2, '0')
+      ).join('');
+      const id =
+        watchEdit.id ||
+        `${owner}-${repo}`
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '-')
+          .slice(0, 30) +
+          '-' +
+          suffix;
+      config = {
+        id,
+        enabled: form.elements.enabled.checked,
+        botId: bot.id,
+        roomId: form.elements.roomId.value,
+        owner,
+        repo,
+        visibility: form.elements.visibility.value,
+        intervalMinutes,
+        events,
+        credentialId: form.elements.credentialId.value || null,
+      };
+    } catch (error) {
+      byId('watch-error').textContent = error.message;
+      return;
+    }
+    watchBusy = true;
+    submit.disabled = true;
+    renderWatchers();
+    try {
+      const configs = watchEdit.id
+        ? watchEdit.configs.map((w) => (w.id === watchEdit.id ? config : w))
+        : [...watchEdit.configs, config];
+      await putWatchers(watchEdit.revision, configs);
+      byId('watch-dialog').close();
+      watchEdit = null;
+    } catch (error) {
+      if (error.status === 403) watchSnapshot = null;
+      byId('watch-error').textContent =
+        error.status === 409
+          ? 'Watchers changed elsewhere. Close this dialog and refresh before saving again.'
+          : error.status === 403
+            ? 'Sign in as the owner to save repository watchers.'
+            : 'Could not confirm the save. Refresh before trying again.';
+    } finally {
+      watchBusy = false;
+      submit.disabled = false;
+      if (!closed && snapshot) render();
+    }
+  });
+  byId('add-watch-credential').addEventListener('click', () => {
+    if (credentialBusy || !watchEdit || closed) return;
+    try {
+      credentialRepository = repositoryParts(byId('watch-form').elements.repository.value).join('/');
+    } catch (error) {
+      byId('watch-error').textContent = error.message;
+      return;
+    }
+    const form = byId('watch-credential-form');
+    credentialEpoch++;
+    form.reset();
+    byId('watch-credential-repository').textContent = 'For ' + credentialRepository;
+    byId('watch-credential-error').textContent = '';
+    byId('watch-credential-dialog').showModal();
+    form.elements.name.focus();
+  });
+  byId('watch-credential-dialog').addEventListener('close', () => {
+    credentialEpoch++;
+    byId('watch-credential-form').elements.token.value = '';
+  });
+  byId('watch-dialog').addEventListener('close', () => {
+    watchEdit = null;
+    credentialEpoch++;
+    if (byId('watch-credential-dialog').open) byId('watch-credential-dialog').close();
+  });
+  byId('watch-credential-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget,
+      submit = form.querySelector('[type=submit]');
+    if (credentialBusy || !credentialRepository || closed) return;
+    const requestEpoch = credentialEpoch,
+      requestWatch = watchEdit,
+      requestRepository = credentialRepository;
+    const currentRequest = () => {
+      if (
+        closed ||
+        credentialEpoch !== requestEpoch ||
+        watchEdit !== requestWatch ||
+        !byId('watch-dialog').open ||
+        !byId('watch-credential-dialog').open
+      )
+        return false;
+      try {
+        return repositoryParts(byId('watch-form').elements.repository.value).join('/') === requestRepository;
+      } catch {
+        return false;
+      }
+    };
+    credentialBusy = true;
+    byId('add-watch-credential').disabled = true;
+    submit.disabled = true;
+    byId('watch-credential-error').textContent = '';
+    try {
+      const label = form.elements.label.value.trim();
+      const data = await api('publication/tokens', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: form.elements.name.value.trim(),
+          token: form.elements.token.value,
+          ...(label ? { label } : {}),
+          repositories: [requestRepository],
+        }),
+      });
+      if (!currentRequest()) return;
+      const token = data?.token;
+      if (!token || typeof token.id !== 'string' || typeof token.name !== 'string')
+        throw new Error('Missing saved credential metadata');
+      credentials = [
+        ...credentials.filter((item) => item.id !== token.id),
+        {
+          id: token.id,
+          name: token.name,
+          ...(typeof token.label === 'string' ? { label: token.label } : {}),
+          repositories: token.repositories,
+        },
+      ];
+      credentialsAvailable = true;
+      fillWatchCredentials(token.id);
+      byId('watch-credential-dialog').close();
+      byId('watch-form').elements.credentialId.focus();
+    } catch (error) {
+      if (!currentRequest()) return;
+      byId('watch-credential-error').textContent =
+        error.status === 403
+          ? 'Sign in as the owner to save a credential.'
+          : 'Could not confirm the credential save. Refresh credential names before trying again.';
+    } finally {
+      if (credentialEpoch === requestEpoch) form.elements.token.value = '';
+      credentialBusy = false;
+      submit.disabled = false;
+      byId('add-watch-credential').disabled = false;
+    }
+  });
   byId('new-routine').addEventListener('click', () => {
     if (!snapshot) return;
     if (!snapshot.bots.length) {
@@ -520,8 +971,10 @@
   }, 10000);
   addEventListener('pagehide', () => {
     closed = true;
+    credentialEpoch++;
     clearInterval(poll);
     for (const request of requests) request.abort();
+    byId('watch-credential-form').elements.token.value = '';
   });
   addEventListener('pageshow', (event) => {
     if (event.persisted) location.reload();

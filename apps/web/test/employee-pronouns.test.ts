@@ -80,7 +80,17 @@ describe('the pronouns field on the employee record', () => {
       await writeFile(file, JSON.stringify(old));
       const store = new CompanyStore(file);
       await store.init();
-      expect(store.snapshot().employees).toEqual([{ ...record, onVacation: false, sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false }, wakeAttempts: [] }]);
+      expect(store.snapshot().employees).toEqual([
+        {
+          ...record,
+          sessionGeneration: 1,
+          onVacation: false,
+          sleepEnabled: false,
+          dreamEnabled: false,
+          permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false },
+          wakeAttempts: [],
+        },
+      ]);
       expect(store.snapshot().retired[0]).not.toHaveProperty('pronouns');
       expect(
         CompanyStateSchema.parse({ ...old, retired: [{ ...old.retired[0], pronouns: 'he/him' }] }).retired[0].pronouns

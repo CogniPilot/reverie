@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 import type { Session } from '../src/session.js';
 import type { PlanAccount } from '../src/plan-accounts.js';
+import { composerReadyMark } from '../src/cli-agent.js';
 import type { PlanMoveInput } from '../src/plan-move.js';
 
 const input: PlanMoveInput = {
@@ -61,6 +62,40 @@ function harness(owner?: string) {
 }
 
 describe('runtime adapter uses normal creation and interactive paths, never changes live account env', () => {
+  async function refreshHarness() {
+    const h = harness();
+    const source = h.sessions.get('old')!, candidate = h.sessions.get('new')!;
+    const saved = source.toState();
+    candidate.toState = () => ({ ...saved, id: 'new', codexConfig: { ...saved.codexConfig, resumeSessionId: undefined } });
+    const snapshot = await h.executor.snapshot('casey', undefined, 'runtime-refresh');
+    const refresh: PlanMoveInput = { ...input, model: undefined, toAccount: 'first',
+      purpose: 'runtime-refresh', runtimeDigest: snapshot.runtimeDigest };
+    return { ...h, source, candidate, saved, refresh };
+  }
+
+  it('refreshes through normal metadata creation while preserving selected policy and clearing provider linkage', async () => {
+    const h = await refreshHarness();
+    expect(await h.executor.create(h.refresh, undefined)).toBe('new');
+    await h.executor.beforeStop(h.refresh);
+    expect(h.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({
+      subscriptionProfileId: 'first', codexConfig: { reasoningEffort: 'high', renderMode: 'hybrid' }, workingDir: '/scratch/casey' }));
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('rejects source setting changes while creating and candidate policy drift before stopping', async () => {
+    for (const drift of ['source', 'candidate', 'resume'] as const) {
+      const h = await refreshHarness();
+      await h.executor.create(h.refresh, undefined);
+      const target = drift === 'source' ? h.source : h.candidate;
+      target.toState = () => ({ ...h.saved, id: drift === 'source' ? 'old' : 'new', codexConfig: {
+        ...h.saved.codexConfig, resumeSessionId: drift === 'resume' ? 'old-thread' : undefined,
+        reasoningEffort: drift === 'resume' ? 'high' : 'low',
+      } });
+      await expect(h.executor.beforeStop(h.refresh)).rejects.toThrow();
+      expect(h.runtime.cleanup).not.toHaveBeenCalled();
+      expect(h.runtime.request).toHaveBeenCalledTimes(1);
+    }
+  });
   it('refuses a bound session belonging to another owner before any launch or cleanup', async () => {
     const test = harness();
     (test.sessions.get('old') as unknown as { owner?: string }).owner = 'another-owner';
@@ -109,12 +144,13 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
-  it('launches a cross-provider replacement through the normal wrapped session API before touching the source', async () => {
+  it('reserves cross-provider metadata through the normal API without starting its CLI', async () => {
     const test = harness();
     test.runtime.plans.account = vi.fn(async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);
     expect(await test.executor.create({ ...input, targetMode: 'claude' }, undefined)).toBe('new');
     expect(test.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({ mode: 'claude', subscriptionProfileId: 'second', employeeId: 'casey' }));
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    expect(test.runtime.request).toHaveBeenCalledTimes(1);
     const payload = (test.runtime.request as ReturnType<typeof vi.fn>).mock.calls[0][2];
     expect(payload.model).toBeUndefined();
     expect(payload.codexConfig).toBeUndefined();
@@ -165,12 +201,26 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
-  it('rechecks busy state after readiness, refusing late work unless explicitly forced', async () => {
+  it('rechecks busy state before stopping, refusing late work unless explicitly forced', async () => {
     const test = harness();
     (test.sessions.get('old') as unknown as { isWorking: boolean }).isWorking = true;
     await expect(test.executor.beforeStop(input)).rejects.toThrow('became busy');
     await expect(test.executor.beforeStop({ ...input, forceBusy: true })).resolves.toBeUndefined();
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('keeps phone delivery paused through the source stop until the replacement handoff is submitted', async () => {
+    const test = harness();
+    const release = vi.fn();
+    test.runtime.chat.delivery = { pauseForMigration: vi.fn(() => release) };
+    await test.executor.create(input, undefined);
+    await test.executor.beforeStop(input);
+    await test.executor.stop('old');
+    expect(release).not.toHaveBeenCalled();
+    await test.executor.start('new');
+    await test.executor.ready('new');
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(test.sessions.get('new')?.writeViaMux).toHaveBeenCalledTimes(1);
   });
 
   it('posts actor, employee, source, destination and phase to the owned audit channel', async () => {
@@ -218,4 +268,57 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     await expect(test.executor.audit(record)).resolves.toBeUndefined();
     expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(2); warning.mockRestore();
   });
+});
+
+
+describe('read-only owner inspection of an interrupted move destination', () => {
+  const record = {id: 'move', employeeId: 'casey', name: 'Casey', oldSession: 'old', newSession: 'new',
+    fromAccount: 'first', toAccount: 'second', phase: 'recovery-required' as const, at: 1,
+    sourceStopRequested: true, sourceCleanupVerified: true};
+  function recovery() {
+    const test = harness(); test.sessions.delete('old');
+    test.runtime.company.view = vi.fn(() => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: true, onVacation: false}]}) as never);
+    test.runtime.plans.allocations = vi.fn(async () => ({generatedAt: 1, accounts: [{id: 'second', sessionIds: ['new']}]}));
+    test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
+    return test;
+  }
+  it('verifies current binding, actual target allocation and composer without submitting a handoff or touching sessions', async () => {
+    const test = recovery(); const fence = await test.executor.verifyRecovery!(record); fence();
+    expect(test.runtime.request).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    expect(test.sessions.get('new')!.writeViaMux).not.toHaveBeenCalled();
+  });
+  it('does not infer source cleanup from a missing source session or journal stop request', async () => {
+    const test = recovery(); await expect(test.executor.verifyRecovery!({...record, sourceCleanupVerified: undefined})).rejects.toThrow('durably confirmed');
+    expect(test.runtime.plans.allocations).not.toHaveBeenCalled();
+  });
+  it('refuses an alive source, wrong account, absent composer and busy destination', async () => {
+    for (const failure of ['source', 'account', 'composer', 'busy']) {
+      const test = recovery();
+      if (failure === 'source') test.sessions.set('old', {...test.sessions.get('new')!, id: 'old'} as never);
+      if (failure === 'account') test.runtime.plans.allocations = vi.fn(async () => ({generatedAt: 1, accounts: [{id: 'first', sessionIds: ['new']}]}));
+      if (failure === 'composer') test.runtime.mux.capturePaneText = () => '';
+      if (failure === 'busy') (test.sessions.get('new') as unknown as {isWorking: boolean}).isWorking = true;
+      await expect(test.executor.verifyRecovery!(record)).rejects.toThrow();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled(); expect(test.runtime.request).not.toHaveBeenCalled();
+    }
+  });
+  it('the final fence notices revoked owner authority and changed employee intent', async () => {
+    for (const failure of ['authority', 'intent', 'generation', 'selection']) {
+      const test = recovery(); const fence = await test.executor.verifyRecovery!(record);
+      if (failure === 'authority') test.runtime.authorized = () => false;
+      if (failure === 'intent') test.runtime.company.view = () => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: false}]}) as never;
+      if (failure === 'generation') test.runtime.company.view = () => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 3, desiredRunning: true}]}) as never;
+      if (failure === 'selection') (test.sessions.get('new') as unknown as {subscriptionProfile: unknown}).subscriptionProfile = {id: 'changed'};
+      expect(fence).toThrow();
+    }
+  });
+  it('refuses already-unsupported remote, nested-container and custom-model candidates', async () => {
+    for (const change of [{remote: {host: 'remote'}}, {docker: {containerName: 'nested'}}, {customModel: {modelId: 'local'}}]) {
+      const test = recovery(), candidate = test.sessions.get('new')!, saved = candidate.toState();
+      candidate.toState = () => ({...saved, ...change}) as never;
+      await expect(test.executor.verifyRecovery!(record)).rejects.toThrow('cannot be adopted');
+      expect(test.runtime.cleanup).not.toHaveBeenCalled(); expect(test.runtime.request).not.toHaveBeenCalled();
+    }
+  });
+
 });

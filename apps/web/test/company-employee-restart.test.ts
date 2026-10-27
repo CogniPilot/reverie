@@ -105,6 +105,7 @@ describe('permanent employee across three runtime replacements', () => {
       const current = `worker-${i}`;
       await company.rebind(hired.id, undefined, current);
       expect(company.view().employees.map((e) => [e.id, e.sessionId])).toEqual([[hired.id, current]]);
+      expect(company.view().employees[0].sessionGeneration).toBe(i + 1);
       expect(company.view().memories).toContainEqual(memory);
       for (const original of [room, dm]) {
         const present = chat.room(original.id)!;
@@ -119,10 +120,12 @@ describe('permanent employee across three runtime replacements', () => {
         icon: '🦊',
       });
       expect(chat.openDm(current, undefined).id).toBe(dm.id);
-      expect(chat.room(room.id)!.messages).toContainEqual(message);
-      expect(chat.room(dm.id)!.messages).toContainEqual(direct);
+      // Public history stays exact while internal phone eligibility travels with the stored record.
+      expect(chat.view(chat.room(room.id)!).messages).toContainEqual(message);
+      expect(chat.view(chat.room(dm.id)!).messages).toContainEqual(direct);
       // The author of an old message stays the original runtime, not rewritten.
       expect(message.from).toMatchObject({ sessionId: 'worker-0' });
+      expect(chat.room(room.id)!.messages.find(item => item.id === message.id)!.from).toMatchObject({ sessionId: 'worker-0' });
       for (let old = 0; old < i; old++) expect(chat.roomsFor(`worker-${old}`)).toEqual([]);
     }
     await chat.stop();
@@ -133,7 +136,7 @@ describe('permanent employee across three runtime replacements', () => {
     expect(loaded.snapshot().employees).toHaveLength(1);
     expect(loaded.snapshot().employees[0]).toMatchObject({ id: hired.id, sessionId: 'worker-3' });
     expect(chat.openDm('worker-3', undefined).id).toBe(dm.id);
-    expect(chat.room(dm.id)!.messages).toContainEqual(direct);
+    expect(chat.view(chat.room(dm.id)!).messages).toContainEqual(direct);
   });
 
   it('drops old queued deliveries and resolves each new mention to only the current runtime', async () => {
@@ -186,6 +189,7 @@ describe('permanent employee across three runtime replacements', () => {
     vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(new Error('migration failed'));
     await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('migration failed');
     expect(company.view().employees[0].sessionId).toBe('worker-0');
+    expect(company.view().employees[0].sessionGeneration).toBe(3);
     expect(chat.room(room.id)).toEqual(before);
   });
 

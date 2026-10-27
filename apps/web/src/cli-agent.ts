@@ -29,7 +29,14 @@
  * @module cli-agent
  */
 import http from 'node:http';
+import { agentCapabilities } from './cli-agent-capabilities.js';
+import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
+import { agentContext, agentContextReceipt } from './cli-agent-context.js';
+import { AGENT_EXIT } from './agent-exit-codes.js';
 import https from 'node:https';
+import { StringDecoder } from 'node:string_decoder';
+import { MAX_MESSAGE_CHARS } from './chatroom-store.js';
+import { saveChatAttachment, chatAttachmentDestinationRefusal } from './cli-chat-attachment.js';
 import type { Command } from 'commander';
 import {
   basicAuthHeader,
@@ -45,6 +52,8 @@ import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
 import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves } from './cli-plan-request.js';
+import { registerGoalCommands } from './cli-goal.js';
+import { goalClientTarget } from './goal-client-target.js';
 
 /** A chat message id, as the server stores it. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -66,13 +75,7 @@ export interface AgentContext {
 export class AgentGuardError extends Error {}
 
 /** Exit codes shared by every verb; a shell agent can branch on them. */
-export const EXIT = {
-  ok: 0,
-  error: 1,
-  timeout: 2,
-  dead: 3,
-  refused: 4,
-} as const;
+export const EXIT = AGENT_EXIT;
 
 /**
  * Resolve the context from the environment, or throw `AgentGuardError`.
@@ -236,6 +239,10 @@ export interface ApiResponse<T = unknown> {
   /** Parsed envelope, or `undefined` when the body was not JSON (auth guards answer in plain text). */
   json?: ApiEnvelope<T>;
   text: string;
+  /** Only requested by bounded binary downloads; never decoded as text. */
+  bytes?: Buffer;
+  /** Selected response metadata; binary credential clients validate caller and material binding. */
+  headers?: Record<string, string | undefined>;
 }
 
 export interface WaitResult {
@@ -264,6 +271,10 @@ export interface RequestOptions {
   timeoutMs?: number;
   /** Aborts the request (an MCP client cancelling a long wait); the promise rejects. */
   signal?: AbortSignal;
+  /** Binary response with a hard byte ceiling and whole-request deadline (no redirects). */
+  binary?: { maxBytes: number; deadlineMs: number };
+  /** Optional bounded JSON response, used for attachment room resolution. */
+  bounds?: { maxBytes: number; deadlineMs: number };
 }
 
 export type ApiRequest = (ctx: AgentContext, options: RequestOptions) => Promise<ApiResponse>;
@@ -285,6 +296,18 @@ export function baseHeaders(ctx: AgentContext): Record<string, string> {
 /** The real transport. `rejectUnauthorized:false` because the HTTPS install uses a self-signed cert. */
 export const httpRequest: ApiRequest = (ctx, options) => {
   const url = new URL(options.path, ctx.apiUrl);
+  const bounds = options.binary ?? options.bounds;
+  if (
+    bounds &&
+    (url.origin !== new URL(ctx.apiUrl).origin ||
+      !['http:', 'https:'].includes(url.protocol) ||
+      !Number.isSafeInteger(bounds.maxBytes) ||
+      bounds.maxBytes <= 0 ||
+      !Number.isSafeInteger(bounds.deadlineMs) ||
+      bounds.deadlineMs <= 0)
+  ) {
+    return Promise.reject(new Error('invalid bounded download request'));
+  }
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
@@ -299,13 +322,18 @@ export const httpRequest: ApiRequest = (ctx, options) => {
   }
   const transport = url.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const failed = (error: Error) => {
+      clearTimeout(deadline);
+      reject(error);
+    };
     const req = transport.request(
       {
         protocol: url.protocol,
         hostname: url.hostname,
         port: url.port,
         method: options.method,
-        path: `${url.pathname}${url.search}`,
+        path: goalClientTarget(options) ?? `${url.pathname}${url.search}`,
         rejectUnauthorized: false,
         headers,
         timeout: options.timeoutMs ?? 30_000,
@@ -313,11 +341,48 @@ export const httpRequest: ApiRequest = (ctx, options) => {
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        let size = 0;
+        // The supported room-file route always declares its raw file length.
+        // Refuse uncertain/truncated proxy bodies, never silently accept a prefix.
+        const expected = options.binary && res.statusCode === 200 ? res.headers['content-length'] : undefined;
+        if (options.binary && res.statusCode === 200 &&
+            (expected === undefined || !/^\d+$/.test(expected) ||
+             (res.headers['content-encoding'] !== undefined && res.headers['content-encoding'] !== 'identity'))) {
+          req.destroy(new Error('download requires an unencoded declared length'));
+          res.destroy();
+          return;
+        }
+        if (
+          bounds &&
+          res.headers['content-length'] !== undefined &&
+          (!/^\d+$/.test(res.headers['content-length']) || Number(res.headers['content-length']) > bounds.maxBytes)
+        ) {
+          req.destroy(new Error('download exceeds byte limit'));
+          res.destroy();
+          return;
+        }
+        res.on('data', (chunk: Buffer) => {
+          size += chunk.length;
+          if (bounds && size > bounds.maxBytes) {
+            req.destroy(new Error('download exceeds byte limit'));
+            res.destroy();
+          } else chunks.push(chunk);
+        });
         // A connection dropped mid-body emits 'error' and never 'end'; without this the
         // promise never settles (and a long-lived `reverie mcp` never answers the call).
-        res.on('error', reject);
+        res.on('error', failed);
         res.on('end', () => {
+          clearTimeout(deadline);
+          if (options.binary) {
+            if (expected !== undefined && size !== Number(expected)) {
+              failed(new Error('download length mismatch'));
+              return;
+            }
+            resolve({ status: res.statusCode ?? 0, text: '', bytes: Buffer.concat(chunks),
+              headers: Object.fromEntries(Object.entries(res.headers).filter((entry): entry is [string, string] =>
+                ['content-type', 'cache-control', 'x-reverie-employee-id', 'x-reverie-session-id', 'x-reverie-credential-id'].includes(entry[0]) && typeof entry[1] === 'string')) });
+            return;
+          }
           const text = Buffer.concat(chunks).toString('utf-8');
           let json: ApiEnvelope | undefined;
           try {
@@ -330,7 +395,8 @@ export const httpRequest: ApiRequest = (ctx, options) => {
       }
     );
     req.on('timeout', () => req.destroy(new Error(`request timed out after ${options.timeoutMs ?? 30_000} ms`)));
-    req.on('error', reject);
+    req.on('error', failed);
+    if (bounds) deadline = setTimeout(() => req.destroy(new Error('download deadline exceeded')), bounds.deadlineMs);
     if (options.rawBody !== undefined) req.write(options.rawBody);
     else if (bodyText !== undefined) req.write(bodyText);
     req.end();
@@ -364,6 +430,21 @@ export interface AgentDeps {
   json: boolean;
   /** Clock for `seq`; injectable so tests are deterministic. */
   now?: () => number;
+}
+
+/** Shared thin client for model-context hooks; successful reads never consume delivery. */
+export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Promise<number> {
+  if (hookEvent && !['SessionStart', 'UserPromptSubmit', 'PostToolUse'].includes(hookEvent))
+    return fail(deps, 'Unsupported summary hook event');
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/turn-summary', timeoutMs: 2000 });
+  const data = result.json?.data as { text?: unknown } | undefined;
+  if (!result.json?.success || typeof data?.text !== 'string' || data.text.length > 3000)
+    return fail(deps, 'Pending message summary unavailable');
+  if (hookEvent) {
+    deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: data.text } }));
+  } else if (deps.json) emitJson(deps, data);
+  else if (data.text) deps.io.out(data.text);
+  return 0;
 }
 
 /** Print `data` as JSON (the `--json` path) — always the envelope's `data`, never a reshaped copy. */
@@ -951,7 +1032,7 @@ export async function resolveChatRoom(
  * One message as `agent chat read` prints it. Names and bodies are JSON strings (like the lines delivered to a pane), so a
  * body cannot start a new line or pass itself off as another speaker; a speaker's own label stays outside the quotes.
  */
-export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[]): string {
+export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], roomId?: string): string {
   const nameOf = (id: string) =>
     id === 'user' ? 'user' : quoteForPane(members.find((x) => x.sessionId === id)?.name ?? id.slice(0, 8), 80);
   // A post to the whole room names no recipient (as in the delivered line); only an addressed message shows `-> who`.
@@ -975,10 +1056,20 @@ export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[]): 
       ? `${quoteForPane(m.text)} [poll ${m.id.slice(0, 8)}: ${pollTotals(m.poll)}]`
       : !m.text && m.attachments?.length ? '(attachment only)' : quoteForPane(m.text);
   // An edited message reads as its new text, marked; a pinned one is a room rule or announcement.
-  const attached = m.deleted ? '' : (m.attachments ?? []).map(file => ` [attached: ${quoteForPane(file.path, 400)}]`).join('');
+  const attached = m.deleted
+    ? ''
+    : (m.attachments ?? [])
+        .map((file) => {
+          const link =
+            roomId && UUID_RE.test(roomId) && UUID_RE.test(file.id)
+              ? ` /api/v1/chatrooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(file.id)}`
+              : '';
+          return ` [attached: ${quoteForPane(file.name, 200)}${link}]`;
+        })
+        .join('');
   const marks = `${m.edited && !m.deleted ? ' (edited)' : ''}${m.pinned && !m.deleted ? ' [pinned]' : ''}`;
   return m.from.kind === 'system'
-    ? `${time} * ${iconOf(m.from.sessionId)}${body}`
+    ? `${time} * ${iconOf(m.from.sessionId)}${body}${attached}`
     : `${time} ${iconOf(m.from.sessionId)}${from}${to}: ${body || (attached ? '(attachment only)' : '')}${attached}${marks}`;
 }
 
@@ -1218,6 +1309,43 @@ export async function agentChatLeave(deps: AgentDeps, options: { room?: string }
 /** Said when an old `--to` is still given: it is accepted so nothing stalls, and ignored. */
 const TO_IGNORED_NOTE = '--to is ignored: everyone in a channel reads every message, so the post went to everyone; @name a member to address them';
 
+/** Explicit stdin is UTF-8 data, never shell syntax. Positional say keeps its existing trimming. */
+export async function agentChatSayInput(
+  deps: AgentDeps,
+  words: string[],
+  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string },
+  input: AsyncIterable<Buffer | string> = process.stdin
+): Promise<number> {
+  if (options.stdin && words.length)
+    return fail(deps, 'refusing: use either --stdin or positional text, not both', EXIT.refused);
+  let text = words.join(' ').trim();
+  if (options.stdin) {
+    const decoder = new StringDecoder('utf8');
+    text = '';
+    try {
+      for await (const chunk of input) {
+        text += decoder.write(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk);
+        if (text.length > MAX_MESSAGE_CHARS)
+          return fail(deps, `refusing: message exceeds ${MAX_MESSAGE_CHARS} characters`, EXIT.refused);
+      }
+      text += decoder.end();
+    } catch {
+      return fail(deps, 'refusing: could not read --stdin; no message sent', EXIT.refused);
+    }
+    if (text.length > MAX_MESSAGE_CHARS)
+      return fail(deps, `refusing: message exceeds ${MAX_MESSAGE_CHARS} characters`, EXIT.refused);
+  }
+  if (!text.trim() && (options.stdin || !options.file?.length))
+    return fail(deps, 'refusing: empty message', EXIT.refused);
+  return agentChatSay(deps, {
+    room: options.room,
+    to: options.to,
+    text,
+    files: options.file,
+    replyTo: options.replyTo,
+  });
+}
+
 /** `agent chat say` — post to the room, always to everyone (`--to` is accepted and ignored: nothing an agent posts is private in a channel). */
 export async function agentChatSay(
   deps: AgentDeps,
@@ -1318,7 +1446,7 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
     const data = exact.json.data as { message?: ChatMessageRow; readToken?: string } | undefined;
     if (data?.message?.id !== options.message || typeof data.readToken !== 'string') return fail(deps, 'Unrecognized exact-message response; nothing acknowledged');
     // Explicit acknowledgement follows receipt of this exact response, never a guessed timestamp or text match.
-    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? []));
+    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id));
     if (options.acknowledge) {
       const ack = await deps.request(deps.ctx, { method: 'POST', path: path + '/read-ack', body: { readToken: data.readToken } });
       const confirmed = ack.json?.success && (ack.json.data as { acknowledged?: string } | undefined)?.acknowledged === options.message;
@@ -1343,8 +1471,72 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
   }
   const messages = data.messages ?? [];
   if (messages.length === 0) deps.io.out(palette.muted('(no messages yet)'));
-  for (const m of messages) deps.io.out(formatChatMessage(m, data.members ?? []));
+  for (const m of messages) deps.io.out(formatChatMessage(m, data.members ?? [], target.room.id));
   return EXIT.ok;
+}
+
+/** Fetch one room-scoped attachment through the ordinary authenticated session transport. */
+export async function agentChatFetch(
+  deps: AgentDeps,
+  options: { room: string; fileId: string; output: string; maxBytes?: number; timeoutMs?: number }
+): Promise<number> {
+  const maxBytes = options.maxBytes ?? 8 * 1024 * 1024;
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!options.room.trim()) return fail(deps, 'an explicit room name or ID is required', EXIT.refused);
+  if (
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes < 1 ||
+    maxBytes > 64 * 1024 * 1024 ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > 120_000
+  )
+    return fail(deps, '--max-bytes must be 1..67108864 and --timeout 1..120000 ms (finite integers)', EXIT.refused);
+  const refusal = chatAttachmentDestinationRefusal(options.output);
+  if (refusal || !UUID_RE.test(options.fileId))
+    return fail(deps, refusal ?? 'file id must be a full UUID', EXIT.refused);
+  try {
+    const target = await resolveChatRoom(
+      {
+        ...deps,
+        request: (ctx, request) =>
+          deps.request(ctx, {
+            ...request,
+            bounds: { maxBytes: 1024 * 1024, deadlineMs: 5_000 },
+          }),
+      },
+      options.room
+    );
+    if ('error' in target) return fail(deps, target.error, target.code);
+    if (!UUID_RE.test(target.room.id)) return fail(deps, 'invalid room identity', EXIT.refused);
+    const res = await deps.request(deps.ctx, {
+      method: 'GET',
+      path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/files/${encodeURIComponent(options.fileId)}`,
+      binary: { maxBytes, deadlineMs: timeoutMs },
+      timeoutMs,
+      headers: { Accept: 'application/octet-stream', 'Accept-Encoding': 'identity' },
+    });
+    // No redirect following, server-name output, decoded-body fallback or error-body echo.
+    if (res.status !== 200) return fail(deps, `attachment fetch refused (HTTP ${res.status}); no file saved`);
+    if (!Buffer.isBuffer(res.bytes) || res.bytes.length > maxBytes)
+      return fail(deps, 'invalid or oversized attachment response; no file saved');
+    await saveChatAttachment(options.output, res.bytes);
+    if (deps.json)
+      emitJson(deps, {
+        roomId: target.room.id,
+        fileId: options.fileId,
+        output: options.output,
+        bytes: res.bytes.length,
+      });
+    else deps.io.out(`saved ${res.bytes.length} bytes to ${quoteForPane(options.output, 200)}`);
+    return EXIT.ok;
+  } catch {
+    // Errors may contain private transport URLs, credentials or local paths.
+    return fail(
+      deps,
+      'attachment fetch/save failed; no success confirmed (an exclusively-created partial output may remain)'
+    );
+  }
 }
 
 /**
@@ -2120,26 +2312,45 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk to other sessions from inside one (any CLI mode): list, spawn, send, wait, read, interrupt, rm');
 
   const run = runAgentVerb;
+  const context = agent.command('context').description('Read current self profile/core context; old startup is unknown without a harness receipt');
+  context.option('--json', 'Machine-readable current context and capture availability')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentContext));
+  context.command('receipt').description('Report an exact previously issued context snapshot as harness input').requiredOption('--digest <sha256>', 'Exact prior server-issued snapshot digest')
+    .requiredOption('--stage <stage>', 'startup or model-request; harness-reported inclusion only')
+    .option('--json', 'Machine-readable report metadata')
+    .action((options: { json?: boolean; digest: string; stage: string }) => run(Boolean(options.json), deps => agentContextReceipt(deps, options.digest, options.stage)));
+  agent.command('capabilities').description('Read current authenticated grants, supported commands and credential references; writes nothing')
+    .option('--json', 'Machine-readable current capability report')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentCapabilities));
+  const credentials = agent.command('credentials').description('List granted named PATs or explicitly install one private local copy; never prints material');
+  credentials.command('list').description('List current named publication credential grants without secret values').option('--json', 'Machine-readable granted credential metadata')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialsList));
+  credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
+    .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
+  registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
   planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
   planMove.command('request <account-id>')
+    .description('Prepare a permitted plan move or same-account runtime refresh for safe handoff')
+    .option('--restart', 'Refresh this expert on its current account through handoff and approval')
     .option('--employee <id>', 'Team expert ID (requires Manage team plans)')
     .option('--id <id>', 'Stable request ID for safe retries')
     .option('--json', 'Machine-readable result')
-    .action((toAccount: string, options: { employee?: string; id?: string; json?: boolean }) =>
-      run(Boolean(options.json), deps => agentRequestPlanMove(deps, { toAccount, employeeId: options.employee, id: options.id })));
+    .action((toAccount: string, options: { employee?: string; id?: string; json?: boolean; restart?: boolean }) =>
+      run(Boolean(options.json), deps => agentRequestPlanMove(deps, { toAccount, employeeId: options.employee, id: options.id, restart: options.restart })));
   planMove.command('approve <id>')
+    .description('Approve your pending request with its work-safe handoff file')
     .requiredOption('--handoff-file <path>', 'Work-safe handoff for the fresh destination session')
     .option('--json', 'Machine-readable result')
     .action((id: string, options: { handoffFile: string; json?: boolean }) =>
       run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'approve', handoffFile: options.handoffFile })));
-  planMove.command('reject <id>').option('--json', 'Machine-readable result')
+  planMove.command('reject <id>').description('Reject your pending plan request without moving the runtime').option('--json', 'Machine-readable result')
     .action((id: string, options: { json?: boolean }) =>
       run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'reject' })));
   for (const action of ['status', 'cancel', 'reauthorize'] as const)
-    planMove.command(`${action} <id>`).option('--json', 'Machine-readable result')
+    planMove.command(`${action} <id>`).description({ status: 'Inspect the current plan request and its outcome', cancel: 'Cancel a permitted pending plan request', reauthorize: 'Reauthorize a pending request using current permitted account choices' }[action]).option('--json', 'Machine-readable result')
       .action((id: string, options: { json?: boolean }) =>
         run(Boolean(options.json), deps => agentPlanMoveAction(deps, id, action)));
 
@@ -2364,6 +2575,15 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk in the Reverie chatroom(s) this session belongs to: say, read, who, status, add, new, rooms');
 
   chat
+    .command('summary')
+    .description('Bounded own pending-message context, filtered by membership and phone mode; no read acknowledgement')
+    .option('--json', 'Machine-readable snapshot')
+    .option('--hook-event <event>', 'Context output for SessionStart, UserPromptSubmit or PostToolUse')
+    .action((options: { json?: boolean; hookEvent?: string }) =>
+      run(Boolean(options.json), (deps) => agentChatSummary(deps, options.hookEvent))
+    );
+
+  chat
     .command('mode [mode]')
     .description('Read or set your employee phone mode: ring, vibrate, silent; quiet leases expire within 8h')
     .option('--for <duration>', 'Lease duration, e.g. 30m or 1h (maximum 8h)', '1h')
@@ -2410,6 +2630,7 @@ export function registerAgentCommands(program: Command): Command {
   chat
     .command('say [text...]')
     .description('Post a message to everyone in the room (everyone in a channel reads every message: @name a member to address them)')
+    .option('--stdin', 'Read literal UTF-8 text from stdin instead of positional text (until EOF)')
     .option('--to <names>', 'Ignored (kept so older scripts do not fail): a post always goes to everyone; @name a member instead')
     .option(
       '-f, --file <path>',
@@ -2419,12 +2640,8 @@ export function registerAgentCommands(program: Command): Command {
     .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
     .option('--reply-to <id>', 'Answer the message with this id (a spoken turn is read back only when its answer names it)')
     .option('--json', 'Machine-readable output')
-    .action((words: string[], options: { to?: string; room?: string; file?: string[]; replyTo?: string; json?: boolean }) =>
-      run(Boolean(options.json), (deps) => {
-        const text = words.join(' ').trim();
-        if (!text && !options.file?.length) return Promise.resolve(fail(deps, 'refusing: empty message', EXIT.refused));
-        return agentChatSay(deps, { room: options.room, to: options.to, text, files: options.file, replyTo: options.replyTo });
-      })
+    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; json?: boolean }) =>
+      run(Boolean(options.json), (deps) => agentChatSayInput(deps, words, options))
     );
 
   chat
@@ -2519,6 +2736,30 @@ export function registerAgentCommands(program: Command): Command {
       run(Boolean(options.json), (deps) =>
         agentChatRead(deps, { room: options.room, limit: parsePositiveInt(options.limit, 30, '--limit'), message: options.message, acknowledge: options.acknowledge })
       )
+    );
+
+  chat
+    .command('fetch <room> <file-id>')
+    .description('Download a room attachment (bounded bytes/deadline; no redirects or overwrite)')
+    .requiredOption('-o, --output <filename>', 'New filename in current directory, not a path')
+    .option('--max-bytes <bytes>', 'Download byte ceiling, 1..67108864 (64 MiB)', '8388608')
+    .option('--timeout <ms>', 'Whole download network deadline, 1..120000 ms', '30000')
+    .option('--json', 'Machine-readable output')
+    .action(
+      (
+        room: string,
+        fileId: string,
+        options: { output: string; json?: boolean; maxBytes?: string; timeout?: string }
+      ) =>
+        run(Boolean(options.json), (deps) =>
+          agentChatFetch(deps, {
+            room,
+            fileId,
+            output: options.output,
+            maxBytes: Number(options.maxBytes),
+            timeoutMs: Number(options.timeout),
+          })
+        )
     );
 
   chat

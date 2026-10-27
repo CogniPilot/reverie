@@ -82,3 +82,99 @@ A runtime unit under `/run/systemd/system` disappears at host reboot. Restore an
 verify it before admitting new pool workers, or retain admission defaults. This
 feature does not change the website watchdog, desired-running/vacation intent,
 provider runtime selection or operating-system repository configuration.
+
+
+Employee profiles and session overrides
+--------------------------------------
+
+`ProfileStore.stage_config` derives an optional `employeeResources` map from its
+locked canonical employee profile, alongside the existing target `sessionResources`
+projection. The broker config map is a projection, not another profile store.
+Both maps accept only the same six bounded resource fields. An explicit session
+entry wins over the employee projection; otherwise the trusted company/storage
+binding selects the employee entry, followed by global defaults. Human names,
+roles and caller-supplied employee IDs do not select policies. A later approved
+session move therefore inherits the employee profile without copying an old SID.
+Historical storage edges retain identity but do not grant permission to start.
+
+Both maps are removed before effective-policy hashing, preserving unrelated
+laptop labels. Configurations without an employee projection keep the legacy
+lookup behavior. A reload still refuses any running laptop whose effective
+policy would change: this source support neither resizes existing laptops nor
+activates a profile. Profile publication, approved recreation and native owner
+acceptance remain separate gates.
+
+## Optional native reservation barrier (source only)
+
+`resourceReservations` is an optional **host-only** broker control binding. It
+contains exactly `directory`, canonical `companyId`/`poolId`, `ownerScopeDigest`
+and a positive owner-selected `hostReserveMiB`. Its absence retains the legacy
+path unless a prior durable control binding or pending installation exists.
+This option is omitted from laptop create arguments/hashes; resource reload
+still cannot add, remove or change it. It grants no browser or employee rights.
+
+Explicit inactive `worker-service install` can provision a selected empty,
+private directory, its canonical ProfileStore and OperationStore directories,
+and a single cross-process admission lock. Runtime lookup never initializes a
+missing journal. A binding and one-attempt pending file under `stateRoot` fence
+incomplete installation, removed options, rebound directories and missing files.
+No service starts or employee wakes as a result of provisioning. A failed or
+uncertain installation requires inspection; do not delete its fence and retry.
+Durable completion and all fallible cleanup precede final pending-file removal.
+Power loss may resurrect that conservative fence; automatic reconciliation is
+not implemented. This is cooperating owner-controlled storage, not protection
+against a malicious host owner deleting or rolling back every custody record.
+
+Control state, including the binding and pending file, must lie outside all
+configured and actual engine mount exposures, including read-only, broad,
+stopped-container and nested mount aliases. The fixed observer checks complete
+engine metadata and kernel mount coordinates. No signing/approval callback is
+accepted from route JSON, and this slice implements no approval endpoint.
+
+The native observer binds current employee/session/generation/intent, canonical
+profile, actual CID/PID/start tick, finite no-swap RAM/PID limits, host ancestors,
+and physical home/Nix/scratch identities through the relevant process root. It
+rechecks employee/profile facts after native I/O. A genuine hierarchy root uses
+host accounting; missing non-root facts or a mounted/namespaced subroot refuse.
+Host headroom comes from explicit policy and current finite facts, not guessed
+quota or browser arithmetic. Each metadata scan checks a finite deadline between
+bounded engine calls; this is not a kernel hard-timeout guarantee.
+
+An OperationStore claim is itself the durable reserved-SID launch barrier.
+Canonical J creation, resource reload and cold recovery share the same admission
+lock. New creations account for retained positive deltas; if an old binding or
+committed ceiling cannot be proved current, new allocation refuses rather than
+crediting its apparent release. All brokers sharing that capacity domain must
+use the same protected lock/control root. External owner engine/config changes
+are conflicts to observe, not transactions made atomic by this file lock.
+
+No start permit exists in this version. All reserved targets remain fenced and
+claims stay charged. Cold views never revive an opaque journal handle, replay an
+effect, release capacity or interpret `VERIFY_RECORDED` as verified completion.
+An old source legitimately stopped, retired or moved remains recovery-required;
+with intact custody/journal this does not strand unrelated existing transports.
+Unknown custody or journal state still refuses. Native finalization errors are
+unconfirmed; a laptop might already be running, so no blind retry is allowed.
+
+The pure compatibility helper preserves the old SID's exact six fields before a
+changed EID projection. It neither publishes config nor rebinds ProfileStore.
+The private gate consumes the exact `target_sid` selected in the canonical
+profile before approval, requiring the next generation and unchanged profile.
+It passes that SID through OperationStore's optional keyword-only `reserved_sid`;
+this is not a wire request field or authority. The journal checks distinctness,
+retained uniqueness and explicit-target replay agreement under its existing lock.
+The fixed observer rechecks the approved profile/generation at commit fences and
+the caller rechecks after claim and original store finalization. A fixed terminal
+claim context survives to admission exit: the accepted journal reader closes
+before terminal native work. Complete engine/custody snapshots bracket the
+derived capacity, process and physical-storage facts; a final accepted-journal
+file signature then checks for observed replacement or change. Exact profile,
+source intent and target namespace facts are checked while the global lock
+is still held. No native I/O
+follows those terminal metadata checks. External mutations after the final
+observations are not made atomic by this cooperating lock. Changed/uncertain
+outcomes retain the claim and target barrier. No after-approval profile rewrite or new version is substituted.
+Omitted low-level callers retain the original allocation/read-only replay path;
+replay never returns a new effect handle. Native prepare/start/verify/settlement,
+protected owner approval and HTTP APIs, GUI activation and a selected native
+acceptance are **not implemented** by this reservation barrier.

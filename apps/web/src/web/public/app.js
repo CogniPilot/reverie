@@ -1660,6 +1660,28 @@ class ReverieApp {
     return id;
   }
 
+  /** A debug view belongs to one browser tab and one expert. Never restore a
+   * different terminal merely because the requested expert is temporarily absent. */
+  _restorePinnedDebugSession() {
+    let id;
+    try {
+      if (window.sessionStorage?.getItem('reverie:view') !== 'debug') return false;
+    } catch { return false; }
+    try { id = window.sessionStorage.getItem('reverie:debug-session'); } catch { id = null; }
+    const valid = typeof id === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(id);
+    this.activeSessionId = null;
+    if (valid && this.sessions.has(id)) {
+      this.selectSession(id, { auto: true, leaveTiles: true });
+    } else {
+      this._disconnectWs();
+      this.terminal?.clear();
+      this.terminal?.write?.(valid
+        ? '\r\nThis expert\'s terminal is unavailable. Return to chat to check or restart that expert.\r\n'
+        : '\r\nThis debug view has no saved expert. Return to chat and open the intended expert\'s Debug terminal.\r\n');
+    }
+    return true;
+  }
+
   /** Show the session a `#session=<id>` link asked for, once the session list
    *  has it. A page that has just created a session can link to it before
    *  session:created arrives here, so an unknown id stays pending (for at most
@@ -5080,6 +5102,7 @@ class ReverieApp {
     // Not listed yet: its wait starts now that the list has loaded, and the
     // last active tab is restored meanwhile.
     if (this._urlSessionId) this._armUrlSessionWait(this._urlSessionId);
+    if (!this._urlSessionId && this._restorePinnedDebugSession()) return;
     // The grid holds the focused session: nothing below may reconnect or reload
     // the parked main terminal (its keepTerminal branch would reopen the main
     // socket onto a session a tile already shows).
@@ -9487,6 +9510,12 @@ class ReverieApp {
   }
 
   async selectSession(sessionId, options = {}) {
+    if (options?.auto !== true && this.sessions.has(sessionId)) {
+      try {
+        if (window.sessionStorage?.getItem('reverie:view') === 'debug')
+          window.sessionStorage.setItem('reverie:debug-session', sessionId);
+      } catch {}
+    }
     // Picking another tab yourself retires a `#session=<id>` link still
     // waiting for its session, which would otherwise take the tab from you
     // whenever that session turned up (see _selectUrlSession).
@@ -9660,13 +9689,15 @@ class ReverieApp {
         const label = session.name || 'Session';
         if (window.confirm(`${label} was stopped after crashing repeatedly. Restart it?`)) {
           try {
-            await fetch(`/api/sessions/${sessionId}/interactive`, {
+            const res = await fetch(`/api/sessions/${sessionId}/interactive`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ clearBreaker: true }),
             });
-            session.respawnBlocked = false;
-            session.status = 'busy';
+            if (res.ok) {
+              session.respawnBlocked = false;
+              session.status = 'busy';
+            }
           } catch (err) {
             console.error('Failed to restart crash-looped session:', err);
           }
@@ -9680,9 +9711,9 @@ class ReverieApp {
           const endpoint = session.mode === 'shell'
             ? `/api/sessions/${sessionId}/shell`
             : `/api/sessions/${sessionId}/interactive`;
-          await fetch(endpoint, { method: 'POST' });
-          // Update local session state
-          session.status = 'busy';
+          const res = await fetch(endpoint, { method: 'POST' });
+          // Update local session state only when the start happened (bug 17: an owner-stopped expert answers 409)
+          if (res.ok) session.status = 'busy';
         } catch (err) {
           console.error('Failed to attach to restored session:', err);
         }

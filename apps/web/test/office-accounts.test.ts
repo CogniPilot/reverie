@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance, type InjectOptions } from 'fastify';
 import cookie from '@fastify/cookie';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Socket } from 'node:net';
@@ -132,6 +132,31 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
+it('requires a complete current account before granting message-owner authority', async () => {
+  const original = await readFile(store.file, 'utf8');
+  expect(auth.isMessageOwner('owner')).toBe(true);
+  for (const invalid of [{}, { mustChange: false }, { version: 1, mustChange: false },
+    { ...JSON.parse(original), password: {} }, { ...JSON.parse(original), mustChange: 'false' }]) {
+    await writeFile(store.file, JSON.stringify(invalid));
+    expect(auth.isMessageOwner('owner')).toBe(false);
+  }
+  await writeFile(store.file, original);
+  expect(auth.isMessageOwner('owner')).toBe(true);
+});
+
+it('rechecks invited-owner roles from disk instead of cached office people', async () => {
+  const person = await invite('owner');
+  const file = join(directory, 'office-people.json');
+  const original = JSON.parse(await readFile(file, 'utf8'));
+  expect(auth.isMessageOwner(person.person.id)).toBe(true);
+  original.people.find((p: { id: string }) => p.id === person.person.id).role = 'limited';
+  await writeFile(file, JSON.stringify(original));
+  expect(auth.isMessageOwner(person.person.id)).toBe(false);
+  await writeFile(file, '{}');
+  expect(auth.isMessageOwner(person.person.id)).toBe(false);
+  expect(auth.isMessageOwner('owner')).toBe(true);
+});
+
 it('invites a channel-limited human, forces an individual password, and never marks that human as owner', async () => {
   const person = await invite();
   expect((await call('GET', '/api/office/me', person.restricted)).statusCode).toBe(401);
@@ -164,6 +189,17 @@ it('invites a channel-limited human, forces an individual password, and never ma
   const view = (await call('GET', '/api/office/rooms/' + open, person.token)).json().data;
   expect(view).not.toHaveProperty('userReadAt');
   expect(view.messages[0]).not.toHaveProperty('attachments');
+});
+
+it('rechecks the current human role for marked coding requests without trusting an old owner label', async () => {
+  const person = await invite('owner', 'coding-owner');
+  expect(auth.isMessageOwner('owner')).toBe(true);
+  expect(auth.isMessageOwner(person.person.id)).toBe(true);
+  expect(auth.isMessageOwner(undefined)).toBe(false);
+  expect(auth.isMessageOwner('missing-human')).toBe(false);
+  expect((await call('PUT', '/api/office/accounts/' + person.person.id, primary, { role: 'limited' })).statusCode).toBe(200);
+  expect(auth.isMessageOwner(person.person.id)).toBe(false);
+  expect(auth.isMessageOwner('owner')).toBe(true);
 });
 
 it('refuses every administrative surface, global stream, forged principal and unknown route for a limited cookie', async () => {

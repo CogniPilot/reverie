@@ -7,7 +7,7 @@ in {
     enable = lib.mkEnableOption "Reverie agent resource isolation";
     user = lib.mkOption { type = lib.types.str; description = "Existing host owner with authorized access to the container engine."; };
     configFile = lib.mkOption { type = lib.types.str; description = "Owner-only broker configuration outside the Nix store."; };
-    stateRoot = lib.mkOption { type = lib.types.str; description = "Persistent private worker homes."; };
+    stateRoot = lib.mkOption { type = lib.types.str; description = "Persistent private worker homes and per-laptop Nix stores/databases; outside scratch and shared mounts."; };
     socketDirectory = lib.mkOption { type = lib.types.str; description = "Private directory mounted only into the console."; };
     scratchRoot = lib.mkOption { type = lib.types.str; description = "Owner-selected laptop scratch drive."; };
     apiSocketRoot = lib.mkOption { type = lib.types.str; description = "Private per-laptop office connections."; };

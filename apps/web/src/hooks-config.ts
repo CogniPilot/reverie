@@ -396,6 +396,116 @@ async function withSafeSettingsWrite(
   });
 }
 
+/** Bounded, fail-open summary hooks shared by Claude Code and Codex. */
+const TURN_SUMMARY_MARKER_PREFIX = 'REVERIE_TURN_SUMMARY_V';
+const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}2`;
+export type TurnSummaryHookEvent = 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse';
+
+export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
+  return [
+    `const ${TURN_SUMMARY_MARKER} = true;`,
+    "const { execFile } = require('node:child_process');",
+    "process.stdin.resume();",
+    // Drain but never parse or forward hook stdin. Only the managed session
+    // environment identifies the caller; tool arguments are never part of a summary.
+    "const sessionId = process.env.REVERIE_SESSION_ID || '';",
+    'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
+    `execFile('reverie', ['agent', 'chat', 'summary', '--hook-event', '${event}'],`,
+    "  { timeout: 2500, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout) => {",
+    '  if (error) return;',
+    '  try {',
+    '    const output = JSON.parse(stdout).hookSpecificOutput;',
+    `    if (output?.hookEventName !== '${event}' || typeof output.additionalContext !== 'string') return;`,
+    '    let text = output.additionalContext.trim();',
+    '    if (text.length > 3000) return;',
+    '    let previous = null;',
+    '    let unchanged = false;',
+    '    try {',
+    "      const fs = require('node:fs');",
+    "      const { join } = require('node:path');",
+    '      const uid = process.getuid();',
+    "      const root = join(require('node:os').tmpdir(), 'reverie-turn-summary-' + uid);",
+    "      try { fs.mkdirSync(root, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }",
+    '      const directory = fs.lstatSync(root);',
+    '      if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== uid || (directory.mode & 0o077)) throw new Error();',
+    "      const digest = require('node:crypto').createHash('sha256').update(text).digest('hex');",
+    "      const file = fs.openSync(join(root, sessionId.toLowerCase() + '.json'), fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);",
+    '      try {',
+    '        const stat = fs.fstatSync(file);',
+    '        if (!stat.isFile() || stat.uid !== uid || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 128) throw new Error();',
+    '        const buffer = Buffer.alloc(128);',
+    '        const size = fs.readSync(file, buffer, 0, buffer.length, 0);',
+    "        try { previous = JSON.parse(buffer.subarray(0, size).toString('utf8')); } catch {}",
+    "        if (!previous || !/^[a-f0-9]{64}$/.test(previous.digest) || typeof previous.nonempty !== 'boolean') previous = null;",
+    '        unchanged = previous?.digest === digest;',
+    '        const state = JSON.stringify({ digest, nonempty: Boolean(text) });',
+    "        fs.writeSync(file, state, 0, 'utf8');",
+    '        fs.ftruncateSync(file, Buffer.byteLength(state));',
+    '      } finally { fs.closeSync(file); }',
+    '    } catch { unchanged = false; }',
+    `    if ('${event}' === 'PostToolUse' && unchanged) return;`,
+    "    if (!text && previous?.nonempty) text = 'Reverie message summary cleared: no pending eligible messages.';",
+    '    if (!text) return;',
+    `    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: '${event}', additionalContext: text } }));`,
+    '  } catch {}',
+    '});',
+  ].join('\n');
+}
+
+function turnSummaryEntry(event: TurnSummaryHookEvent): { hooks: unknown[] } {
+  // A command string works in both harnesses; quote the inline script for POSIX
+  // shells rather than depending on harness-specific support for an args field.
+  const script = generateTurnSummaryScript(event).replaceAll("'", "'\\''");
+  return { hooks: [{ type: 'command', command: `node -e '${script}'`, timeout: 3 }] };
+}
+
+export function generateCodexTurnSummaryHooks(): { hooks: Record<string, unknown[]> } {
+  return {
+    hooks: Object.fromEntries(
+      (['SessionStart', 'UserPromptSubmit', 'PostToolUse'] as const).map((event) => [event, [turnSummaryEntry(event)]])
+    ),
+  };
+}
+
+/**
+ * Install only the managed summary handlers in Codex's supported project hooks
+ * file. This never changes Codex trust, approval policy, permissions or config.
+ * Project hooks still require the user's normal Codex trust decision.
+ */
+export async function applyCodexTurnSummaryHooks(workspace: string, install?: boolean): Promise<void> {
+  try {
+    if ((await probeBeforeTouching(workspace)) !== 'present') return;
+    const codexDir = join(workspace, '.codex');
+    const hooksPath = join(codexDir, 'hooks.json');
+    await withSettingsLock(hooksPath, async () => {
+      if (!(install ?? (await readWorkspaceHooksEnabled()))) return;
+      const dirStat = await lstat(codexDir).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'ENOENT') throw err;
+        return null;
+      });
+      if (dirStat && (!dirStat.isDirectory() || dirStat.isSymbolicLink())) return;
+      if (dirStat && (await realpath(codexDir)) !== join(await realpath(workspace), '.codex')) return;
+      const fileStat = await lstat(hooksPath).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'ENOENT') throw err;
+        return null;
+      });
+      if (fileStat && (!fileStat.isFile() || fileStat.isSymbolicLink())) return;
+      let existing: Record<string, unknown> = {};
+      if (fileStat) {
+        const parsed: unknown = JSON.parse(await readFile(hooksPath, 'utf8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+        existing = parsed as Record<string, unknown>;
+      }
+      const hooks = mergeReverieHooks(existing.hooks, generateCodexTurnSummaryHooks().hooks);
+      if (JSON.stringify(existing.hooks ?? {}) === JSON.stringify(hooks)) return;
+      await mkdir(codexDir, { recursive: true });
+      await writeFile(hooksPath, JSON.stringify({ ...existing, hooks }, null, 2) + '\n');
+    });
+  } catch {
+    // An inaccessible workspace or malformed hook file must not prevent launch.
+  }
+}
+
 /**
  * Generates the hooks section for .claude/settings.local.json
  *
@@ -442,6 +552,7 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
 
   return {
     hooks: {
+      SessionStart: [turnSummaryEntry('SessionStart')],
       Notification: [
         {
           matcher: 'idle_prompt',
@@ -478,7 +589,10 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
       // directly never gets one and stays pinned to the launch conversation.
       UserPromptSubmit: [
         {
-          hooks: [{ type: 'command', command: curlCmdSilent('prompt_submitted'), timeout: HOOK_TIMEOUT_SECONDS }],
+          hooks: [
+            { type: 'command', command: curlCmdSilent('prompt_submitted'), timeout: HOOK_TIMEOUT_SECONDS },
+            ...turnSummaryEntry('UserPromptSubmit').hooks,
+          ],
         },
       ],
       SubagentStop: [
@@ -504,6 +618,7 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
         },
       ],
       PostToolUse: [
+        turnSummaryEntry('PostToolUse'),
         {
           matcher: 'Bash',
           hooks: [
@@ -528,7 +643,8 @@ function isReverieHookHandler(value: unknown): boolean {
     return (
       serialized.includes('/api/hook-event') ||
       serialized.includes(BACKGROUND_WAKE_MARKER_PREFIX) ||
-      serialized.includes(SUBAGENT_STOP_GUARD_MARKER_PREFIX)
+      serialized.includes(SUBAGENT_STOP_GUARD_MARKER_PREFIX) ||
+      serialized.includes(TURN_SUMMARY_MARKER_PREFIX)
     );
   } catch {
     return false;
@@ -814,6 +930,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // workspace's settings file on every Claude spawn. The sibling markers are
     // quote-free for the same reason.
     const hasPromptSubmit = hooksJson.includes('prompt_submitted');
+    const hasTurnSummary = hooksJson.includes(TURN_SUMMARY_MARKER);
     if (
       !isOurs ||
       (hasSecret &&
@@ -821,6 +938,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
         hasSubagentStopGuard &&
         hasElicitationComplete &&
         hasPromptSubmit &&
+        hasTurnSummary &&
         !hasTlsFlaglessCurl)
     )
       return;

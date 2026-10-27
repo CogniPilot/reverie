@@ -7,7 +7,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
-import { boardIssueAdd, boardIssueMove, boardIssueTag, boardScheduleSet, memberRef, wallTime } from '../src/cli-board.js';
+import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueTag, boardScheduleSet, memberRef, wallTime } from '../src/cli-board.js';
 
 const board = {
   rev: 7,
@@ -39,6 +39,21 @@ function fake() {
 }
 
 describe('reverie board', () => {
+  it('decision choices and a named recommendation become structured fields, never question prose', async () => {
+    const f = fake();
+    expect(await boardDecisionWrite(f.deps, { id: 'snapshot', text: 'Publish?', option: ['Approve', 'Hold'], recommend: 'approve', reason: 'Checks passed' })).toBe(0);
+    expect(f.calls[0]).toMatchObject({ method: 'POST', path: '/api/board/decisions', body: { id: 'snapshot', text: 'Publish?', options: ['Approve', 'Hold'], recommendation: { option: 'Approve', reason: 'Checks passed' } } });
+    expect(await boardDecisionWrite(f.deps, { id: 'snapshot', option: ['Approve', 'Hold'] }, true)).toBe(0);
+    expect(f.calls[1]).toMatchObject({ method: 'PATCH', path: '/api/board/decisions/snapshot', body: { options: ['Approve', 'Hold'] } });
+  });
+
+  it('missing, repeated or invalid decision options fail with helpful guidance before a request', async () => {
+    const f = fake();
+    for (const input of [{}, { option: ['Approve'] }, { option: ['Approve', 'approve'] }, { option: ['Yes', 'No'], recommend: 'Maybe' }])
+      expect(await boardDecisionWrite(f.deps, { text: 'Question', ...input })).not.toBe(0);
+    expect(f.calls).toEqual([]);
+    expect(f.out.join('\n')).toContain('--option');
+  });
   it('issue add resolves owner, times and --from', async () => {
     const { deps, calls } = fake();
     const code = await boardIssueAdd(deps, { title: 'Suite', owner: 'builder', start: '2026-10-17T14:00', end: '2026-10-18', tag: ['x'], from: 'reverie:m42' });

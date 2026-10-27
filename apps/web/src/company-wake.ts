@@ -9,6 +9,7 @@ export interface CompanyWakeDeps {
   live(sessionId: string): boolean;
   closing(sessionId: string): boolean;
   noteRunning(sessionId: string): Promise<void>;
+  begin(employeeId: string, sessionId: string): { current(): boolean; finish(): void } | undefined;
   claim(employeeId: string, sessionId: string, now: number, automatic: boolean): Promise<boolean>;
   wake(entry: RebootRestoreEntry, allowed: () => boolean): Promise<boolean>;
   now?(): number;
@@ -73,9 +74,14 @@ export class CompanyWake {
     return roots.length === 1 && roots[0].id === id;
   }
 
-  async wakeOne(employeeId: string): Promise<CompanyWakeReport> {
+  async wakeOne(employeeId: string, options: { explicitStart?: boolean } = {}): Promise<CompanyWakeReport> {
+    // Owner starts queue behind an existing launch instead of dropping a click.
+    // Eligibility is read again after the wait, so leaving/stopping still wins.
+    if (options.explicitStart) {
+      while (this.flight) await this.flight.catch(() => {});
+    }
     if (this.flight) return { awakened: [], skipped: [{ employeeId, reason: 'recovery-in-progress' }] };
-    const flight = this.run(employeeId);
+    const flight = this.run(employeeId, options.explicitStart === true);
     this.flight = flight;
     try {
       return await flight;
@@ -84,7 +90,7 @@ export class CompanyWake {
     }
   }
 
-  private async run(manualId?: string): Promise<CompanyWakeReport> {
+  private async run(manualId?: string, explicitStart = false): Promise<CompanyWakeReport> {
     const report: CompanyWakeReport = { awakened: [], skipped: [] };
     const snapshot = this.deps.company();
     const order = companyWakeOrder(snapshot);
@@ -104,12 +110,13 @@ export class CompanyWake {
     const targets = snapshot.employees
       .filter((e) => (manualId ? e.id === manualId : selected.has(e.id)))
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    if (manualId && targets.length === 0) report.skipped.push({ employeeId: manualId, reason: 'changed-or-stopping' });
     for (const planned of targets) {
       const current = () =>
         this.deps
           .company()
           .employees.find((e) => e.id === planned.id && e.sessionId === planned.sessionId && e.owner === planned.owner);
-      const allowed = () => {
+      const baseAllowed = () => {
         const employee = current();
         return (
           !!employee &&
@@ -140,7 +147,7 @@ export class CompanyWake {
         await this.deps.noteRunning(employee.sessionId);
         continue;
       }
-      if (!allowed()) {
+      if (!baseAllowed()) {
         skip('not-desired');
         continue;
       }
@@ -153,7 +160,13 @@ export class CompanyWake {
         skip('not-previously-running');
         continue;
       }
-      const plan = planRebootRestore([employee.sessionId], { [employee.sessionId]: saved }, () => true, {
+      // Returning to the office is a fresh owner start, not crash recovery. The
+      // old leave-office stop marker must not veto it. Keep the stored recipe
+      // untouched and retain every ownership, capacity and in-flight stop check.
+      const startState = manualId && explicitStart
+        ? { ...saved, status: 'idle' as const, paneExit: undefined, respawnBlocked: false }
+        : saved;
+      const plan = planRebootRestore([employee.sessionId], { [employee.sessionId]: startState }, () => true, {
         allowMissingPid: employee.desiredRunning === true,
       });
       const entry = plan.restore[0];
@@ -161,6 +174,9 @@ export class CompanyWake {
         skip(plan.skipped[0]?.reason ?? 'ineligible');
         continue;
       }
+      const lease = this.deps.begin(employee.id, employee.sessionId);
+      if (!lease) { skip('lifecycle-in-progress'); continue; }
+      const allowed = () => lease.current() && baseAllowed();
       try {
         if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId))) {
           skip('disabled-or-retry-limited');
@@ -174,7 +190,12 @@ export class CompanyWake {
           await this.deps.noteRunning(employee.sessionId);
           continue;
         }
-        if (await this.deps.wake(entry, allowed)) {
+        const woke = await this.deps.wake(entry, allowed);
+        if (!allowed()) {
+          skip('changed-or-stopping');
+          continue;
+        }
+        if (woke) {
           report.awakened.push(employee.id);
           if (!manualId && allowed()) {
             try {
@@ -186,6 +207,8 @@ export class CompanyWake {
         } else skip('wake-failed');
       } catch {
         skip('wake-failed');
+      } finally {
+        lease.finish();
       }
     }
     return report;

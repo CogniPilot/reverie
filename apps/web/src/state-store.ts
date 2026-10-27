@@ -24,7 +24,7 @@
  * @module state-store
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync, copyFileSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { writeFile, rename, unlink, copyFile, access } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
@@ -142,6 +142,7 @@ export class StateStore {
           const result = this._mergeWithInitialState(parsed);
           if (path !== this.filePath) {
             console.warn(`[StateStore] Recovered state from backup: ${path}`);
+            this.fenceBackupCronJobs(result);
           }
           return result;
         }
@@ -150,6 +151,25 @@ export class StateStore {
       }
     }
     return createInitialState();
+  }
+
+  /** Every backup restoration is uncertain. Keep current jobs/run evidence even if the backup omits them. */
+  private fenceBackupCronJobs(recovered: AppState, retained?: AppState): void {
+    for (const job of Object.values(retained?.cronJobs ?? {})) {
+      recovered.cronJobs ??= {};
+      recovered.cronJobs[job.id] = { ...job };
+      for (const run of Object.values(retained?.cronJobRuns ?? {})) {
+        if (run.cronJobId !== job.id) continue;
+        recovered.cronJobRuns ??= {};
+        recovered.cronJobRuns[run.id] = run;
+      }
+    }
+    for (const job of Object.values(recovered.cronJobs ?? {})) {
+      job.enabled = false;
+      job.nextRunAt = null;
+      job.recoveryUncertain = true;
+      delete job.watchGeneration;
+    }
   }
 
   /**
@@ -176,17 +196,54 @@ export class StateStore {
    * waits for it to complete then re-checks dirty flag before starting another.
    */
   async saveNowAsync(): Promise<void> {
-    if (this._saveInFlight) {
-      await this._saveInFlight;
-      // After waiting, re-check if still dirty (the previous save may have handled it)
-      if (!this.dirty) return;
-    }
-    this._saveInFlight = this._doSaveAsync();
-    try {
-      await this._saveInFlight;
-    } finally {
-      this._saveInFlight = null;
-    }
+    return this.serializeWrite(() => this._doSaveAsync());
+  }
+
+  /** All main-state writers share this queue, including acknowledged watcher intents. */
+  private async serializeWrite(write: () => void | Promise<void>): Promise<void> {
+    const task = (this._saveInFlight ?? Promise.resolve()).catch(() => undefined).then(write);
+    this._saveInFlight = task;
+    try { await task; }
+    finally { if (this._saveInFlight === task) this._saveInFlight = null; }
+  }
+
+  /** Existing state file, not a second ledger. The callback fences current job generation at commit. */
+  async commitCronWatch(mutate: () => void): Promise<void> {
+    return this.serializeWrite(() => {
+      if (this.circuitBreakerOpen) throw new Error('Watcher state unavailable');
+      this.saveDeb.cancel();
+      const before = this.serializeState();
+      if (before === null) throw new Error('Watcher state unavailable');
+      const temp = `${this.filePath}.${process.pid}.${Date.now()}.watch.tmp`;
+      let fd: number | undefined;
+      try {
+        mutate();
+        this.dirty = true;
+        this.ensureDir();
+        const json = this.serializeState();
+        if (json === null) throw new Error('Watcher state unavailable');
+        fd = openSync(temp, 'wx', 0o600);
+        writeFileSync(fd, json, 'utf8');
+        fsyncSync(fd);
+        closeSync(fd); fd = undefined;
+        renameSync(temp, this.filePath);
+        fd = openSync(dirname(this.filePath), 'r');
+        fsyncSync(fd);
+        closeSync(fd); fd = undefined;
+        this.dirty = false;
+        this._resetCircuitBreaker();
+      } catch {
+        // In particular an acknowledgement write must not leave an uncommitted cursor in memory
+        // for a later ordinary debounce to publish. Restore the previous pending fence.
+        const previous = JSON.parse(before) as AppState;
+        this.state.cronJobs = previous.cronJobs;
+        this.state.cronJobRuns = previous.cronJobRuns;
+        this.dirty = true;
+        if (fd !== undefined) { try { closeSync(fd); } catch { /* refusal remains unconfirmed */ } }
+        try { unlinkSync(temp); } catch { /* renamed or never created */ }
+        throw new Error('Watcher state commit unconfirmed; delivery held');
+      }
+    });
   }
 
   /**
@@ -360,6 +417,8 @@ export class StateStore {
    * Prefer saveNowAsync() for normal operation.
    */
   saveNow(): void {
+    // A synchronous shutdown/save must not overtake an older asynchronous snapshot.
+    if (this._saveInFlight) { this.save(); return; }
     this.saveDeb.cancel();
     if (!this.dirty) {
       return;
@@ -413,16 +472,26 @@ export class StateStore {
    * Call this if main state file is corrupt.
    */
   recoverFromBackup(): boolean {
+    // This synchronous API cannot await the shared writer. Refuse rather than let an old snapshot
+    // or a queued intent race the restore. A later explicit retry uses the same fence below.
+    if (this._saveInFlight) return false;
     const backupPath = this.filePath + '.bak';
     try {
       if (existsSync(backupPath)) {
         const backupContent = readFileSync(backupPath, 'utf-8');
         const parsed = JSON.parse(backupContent) as Partial<AppState>;
-        this.state = this._mergeWithInitialState(parsed);
+        const recovered = this._mergeWithInitialState(parsed);
+        this.fenceBackupCronJobs(recovered, this.state);
+        recovered.config.stateFilePath = this.filePath;
+        this.saveDeb.cancel();
+        this.state = recovered;
+        this.cachedSessionJsons.clear();
+        this.dirtySessions.clear();
         console.log('[StateStore] Successfully recovered state from backup');
         // Reset circuit breaker after successful recovery
         this.circuitBreakerOpen = false;
         this.consecutiveSaveFailures = 0;
+        this.save();
         return true;
       }
     } catch (err) {

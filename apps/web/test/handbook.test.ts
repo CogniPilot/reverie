@@ -47,6 +47,8 @@ describe('shared office handbook', () => {
       'recovery',
       'power',
       'permissions',
+      'operations',
+      'memory',
       'plugins',
       'previews',
     ];
@@ -109,9 +111,17 @@ describe('shared office handbook', () => {
       'Recovery grant: enabled'
     );
   });
-  it('makes the handbook discoverable from the human sidebar', async () => {
+  it('makes the handbook discoverable from the Office page', async () => {
     const h = await createHarness();
     try {
+      const previous = h.app._chatApi.bind(h.app);
+      h.app._chatApi = (path: string, options: any) => path === '/api/company'
+        ? Promise.resolve({ ok: true, data: { canManage: true } })
+        : path === '/api/chatrooms/phone-status'
+          ? Promise.resolve({ ok: true, data: { self: 'owner', canSetOwn: true } })
+          : previous(path, options);
+      h.shell.openPage('office');
+      await h.flush();
       const button = h.document.querySelector('[aria-label="Handbook"]') as HTMLButtonElement;
       expect(button).not.toBeNull();
       button.click();

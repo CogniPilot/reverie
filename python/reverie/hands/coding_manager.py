@@ -12,6 +12,7 @@ from coding_process import BoundedProcess
 from coding_tasks import (Limits, begin_request, checked_result, control_request,
                           encoded, permitted_sender, reserve_chars)
 from coding_worker import CodingWorker
+import managed_context
 
 
 class TaskManager:
@@ -29,7 +30,7 @@ class TaskManager:
         if job:
             self.loop.save_json(self.cfg['state_file'], job['state'])
 
-    def control(self, state, room, history, message):
+    def control(self, state, room, history, message, *, canonical_source=None):
         settings = copy.deepcopy(self.cfg['coding'])
         validate_settings(settings)
         control = control_request(message)
@@ -48,6 +49,11 @@ class TaskManager:
             return 'No active coding task matches that id.'
         if self.active:
             return 'Coding task refused: another task is active.'
+        source = copy.deepcopy(message if canonical_source is None else canonical_source)
+        if (not isinstance(source, dict) or source.get('id') != message.get('id') or
+                source.get('roomId') != room or source.get('from') != message.get('from') or
+                source.get('at') != message.get('at')):
+            return 'Coding task refused: canonical source binding differs.'
         journal = state.setdefault('_coding', {})
         profile = task.get('profile', 'drill')
         limits = Limits(**settings.get('profiles', {'drill': {}})[profile])
@@ -60,16 +66,22 @@ class TaskManager:
         state['_coding_epoch'] = epoch
         journal[room + ':' + source_id]['epoch'] = epoch
         self.active = {'state': state, 'journal': journal, 'key': room + ':' + source_id,
-                       'room': room, 'source': message, 'task_id': task_id, 'profile': profile,
+                       'room': room, 'source': source, 'task_id': task_id, 'profile': profile,
                        'limits': limits, 'settings': settings, 'worker': None, 'arbiter': None,
                        'runner': None, 'pending': None, 'last_progress': self.clock(),
                        'deadline': self.clock() + limits.seconds, 'epoch': epoch}
         try:
             tools = read_tool_specs(settings['tool_schema_file'])
             prompt_cfg = dict(self.cfg, prompt_cap_chars=limits.prompt_chars)
+            reserved = reserve_chars(limits) + len(RULES) + len(encoded(tools)) + 1024
+            if reserved >= limits.prompt_chars:
+                self.finish({'status': 'stopped', 'reason': 'prompt_budget_too_small'}, post=False)
+                return (f'Task {task_id} stopped: prompt budget {limits.prompt_chars} cannot fit the '
+                        f'{reserved}-character tool reserve. Lower the profile frame_chars/argument_chars '
+                        'before retrying with a new request. No tool ran.')
             messages, _ = self.loop.build_prompt(prompt_cfg, history, message, room,
-                reserve=reserve_chars(limits) + len(RULES) + len(encoded(tools)) + 1024)
-            messages[0]['content'] += '\n' + RULES
+                reserve=reserved)
+            messages[0]['content'] += '\n' + RULES + f' Tool arguments must fit {limits.argument_chars} characters; split larger edits into smaller tool calls.'
             self.active.update(messages=messages, tools=tools)
             self.save()
         except Exception:
@@ -150,16 +162,30 @@ class TaskManager:
         meter = copy.deepcopy(job['settings'].get('token_meter'))
         if meter is not None and self.cfg.get('vision'):
             meter['image_tokens_per_image'] = self.cfg.get('image_tokens_per_image', 2048)
+        context_options = {'prepare_request': self.prepare_model_request} if self.cfg.get('managed_context') else {}
         job['arbiter'] = self.arbiter_factory(self.cfg['api_base'], key_env=self.cfg.get('model_key_env'),
                                              timeout_s=min(self.cfg['model_timeout_s'], 300),
                                              token_meter=meter,
-                                             events_file=self.cfg.get('model_events_file'))
+                                             events_file=self.cfg.get('model_events_file'), **context_options)
         options = {'model': self.cfg['model'], 'max_tokens': self.cfg['reply_max_tokens'], 'stream': False}
         if 'temperature' in self.cfg:
             options['temperature'] = self.cfg['temperature']
         job['worker'] = self.worker_factory(job['messages'], job['tools'], replace(job['limits'], seconds=remaining),
             options, epoch=job['epoch'])
         return True
+
+    def prepare_model_request(self, payload):
+        """Also runs on resume after preemption. Current authorization follows every context IO."""
+        cfg = dict(self.cfg, prompt_cap_chars=min(self.cfg['prompt_cap_chars'], self.active['limits'].prompt_chars))
+        request = dict(payload)
+        request['messages'] = managed_context.inject(cfg, payload['messages'],
+            len(json.dumps(payload.get('tools') or [])), self.loop.request_chars)
+        self.cfg['_managed_context_started'] = cfg['_managed_context_started']
+        managed_context.report(cfg)
+        if cfg.get('_managed_context_reported'): self.cfg['_managed_context_reported'] = True
+        denied = self.authorization()
+        if denied: raise ValueError('Current coding authorization refused')
+        return request
 
     def pump(self):
         try:
@@ -270,8 +296,13 @@ class TaskManager:
             argv = job['settings']['runner_argv'] + ['--task-dir',
                     os.path.join(job['settings']['root'], job['task_id']),
                     '--timeout-s', str(timeout), '--max-output-bytes', str(payload['cap'])]
+            if job['settings'].get('failure_telemetry') is True:
+                argv += ['--command-telemetry']
+            from coding_chat import office_environment
+            environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
+            environment.update(office_environment(self.cfg, job['task_id']))
             job['runner'] = self.process_factory(argv, encoded(tool_request).encode('utf-8'),
-                timeout, payload['cap'], environment={'PATH': os.defpath, 'LANG': 'C.UTF-8'})
+                timeout, payload['cap'], environment=environment)
             job['pending'] = event
         elif kind == 'progress':
             step = event['payload']

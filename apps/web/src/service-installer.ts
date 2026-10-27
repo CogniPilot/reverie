@@ -321,6 +321,15 @@ export async function installService(options: WebLaunchOptions): Promise<Service
   }
   const unitPath = unitPathFor(kind);
   const warnings: string[] = [];
+  // Do not install a second website beside a container or unmanaged process.
+  const alreadyUp = await probeServer(buildStatusUrl(options), 1000);
+  const current = kind === 'systemd'
+    ? run('systemctl', ['--user', 'is-active', SYSTEMD_UNIT]).output === 'active'
+    : run('launchctl', ['list', LAUNCHD_LABEL]).ok;
+  if (current) return { ok: false, unitPath, message: 'The native website service is active. Use its existing controls; explicitly stop it before reviewing a replacement installation.' };
+  if (alreadyUp.up && !current) {
+    return { ok: false, message: 'A website already answers at this address outside this native service. Manage its existing deployment instead of installing another website.' };
+  }
   mkdirSync(dirname(unitPath), { recursive: true });
 
   if (kind === 'launchd') {
@@ -354,12 +363,12 @@ export async function installService(options: WebLaunchOptions): Promise<Service
     if (!enable.ok) {
       return { ok: false, unitPath, message: `wrote ${unitPath} but enabling it failed: ${enable.output}` };
     }
-    // Without lingering the unit stops at logout, which is exactly what someone
-    // installing a service does not want. Best effort: it needs polkit rights.
-    const linger = run('loginctl', ['enable-linger', userInfo().username]);
-    if (!linger.ok) {
+    // Inspect login semantics; service installation does not silently change
+    // host account policy or acquire administrator authorization.
+    const linger = run('loginctl', ['show-user', userInfo().username, '--property=Linger', '--value']);
+    if (!linger.ok || linger.output !== 'yes') {
       warnings.push(
-        `could not enable lingering, so the service will stop when you log out. Run: sudo loginctl enable-linger ${userInfo().username}`
+        'This user service follows your login session. Starting before login or surviving logout requires an owner-enabled linger policy through normal host authentication.'
       );
     }
   }
@@ -385,6 +394,40 @@ export async function installService(options: WebLaunchOptions): Promise<Service
   };
 }
 
+export type ServiceRunner = (command: string, args: string[]) => { ok: boolean; output: string };
+
+/** Fixed native website actions; never an engine command or employee wake API. */
+export function controlService(action: 'start' | 'stop', runner: ServiceRunner = run): ServiceActionResult {
+  if (action !== 'start' && action !== 'stop') return { ok: false, message: 'Unknown fixed native service action' };
+  const kind = detectServiceKind();
+  if (!kind) return { ok: false, message: `no supported supervisor on ${process.platform}` };
+  const unitPath = unitPathFor(kind);
+  if (action === 'start' && !existsSync(unitPath)) return { ok: false, unitPath, message: 'Install the native service first' };
+  let result: { ok: boolean; output: string };
+  if (kind === 'systemd') result = runner('systemctl', ['--user', action, SYSTEMD_UNIT]);
+  else {
+    const uid = process.getuid?.() ?? 0;
+    if (action === 'stop') result = runner('launchctl', ['bootout', `gui/${uid}/${LAUNCHD_LABEL}`]);
+    else {
+      if (!runner('launchctl', ['list', LAUNCHD_LABEL]).ok) {
+        const loaded = runner('launchctl', ['bootstrap', `gui/${uid}`, unitPath]);
+        if (!loaded.ok) return { ok: false, unitPath, message: 'Native service manager refused startup' };
+      }
+      result = runner('launchctl', ['kickstart', `gui/${uid}/${LAUNCHD_LABEL}`]);
+    }
+  }
+  return { ok: result.ok, unitPath, message: result.ok ? `Native website service ${action} requested; employee intent is unchanged` : 'Native service manager refused the operation' };
+}
+
+export function serviceLogs(lines = 100, runner: ServiceRunner = run): ServiceActionResult {
+  const kind = detectServiceKind();
+  if (!kind || !Number.isInteger(lines) || lines < 1 || lines > 1000) return { ok: false, message: 'Select a supported native service and 1..1000 log lines' };
+  const result = kind === 'systemd'
+    ? runner('journalctl', ['--user', '--unit', SYSTEMD_UNIT, '--lines', String(lines), '--no-pager'])
+    : runner('tail', ['-n', String(lines), logFilePath()]);
+  return { ok: result.ok, message: result.ok ? result.output : 'Native service logs unavailable' };
+}
+
 export function uninstallService(): ServiceActionResult {
   const kind = detectServiceKind();
   if (!kind) return { ok: false, message: `no supported supervisor on ${process.platform}` };
@@ -397,9 +440,13 @@ export function uninstallService(): ServiceActionResult {
   if (kind === 'launchd') {
     const uid = process.getuid?.() ?? 0;
     const bootout = run('launchctl', ['bootout', `gui/${uid}/${LAUNCHD_LABEL}`]);
-    if (!bootout.ok) run('launchctl', ['unload', unitPath]);
+    if (!bootout.ok && !run('launchctl', ['unload', unitPath]).ok) {
+      return { ok: false, unitPath, message: 'Native service manager refused removal; service file retained' };
+    }
   } else {
-    run('systemctl', ['--user', 'disable', '--now', SYSTEMD_UNIT]);
+    if (!run('systemctl', ['--user', 'disable', '--now', SYSTEMD_UNIT]).ok) {
+      return { ok: false, unitPath, message: 'Native service manager refused removal; service file retained' };
+    }
   }
 
   try {

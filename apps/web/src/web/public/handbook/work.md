@@ -1,46 +1,57 @@
 # Work, shared drives and scratch
 
-Keep source, unfinished work and durable review evidence in the appropriate repository. Each expert should use its own checkout or worktree and branches for review. Shared project mounts are shared drives; they do not grant control of a colleague's laptop.
+Keep source, unfinished work and retained evidence in the appropriate repository or durable project storage. Experts should use separate checkouts or worktrees and the project's branch/PR workflow. Shared mounts provide files, not control of colleagues' laptops.
 
-Use the project's native flake development environment. The fact that a tool exists on the host does not mean it exists inside a laptop. A host-only node_modules symlink is not a portable development environment.
+Use the project's native flake environment. A host-installed tool or host-only `node_modules` symlink does not make a portable laptop environment.
 
-## Browsing files
+## Browse and transfer files
 
-Open Workspace in the sidebar to browse the company shared drive. Use folders and breadcrumbs to navigate, select a file for text or image preview, and choose Upload to Workspace root or Download file to transfer it. Uploads are enabled only at a verified stable kernel mount root, and always create new files at that root without overwriting existing ones; rename duplicate files before uploading. Ordinary directory roots remain browsable with uploads disabled and a reason. Transfers are limited to 32 MiB. One filesystem operation runs at a time; a timeout may leave it settling, so refresh before retrying. If upload confirmation times out after publication started, the file may already have arrived. Hidden files, symlinks (including project links), hardlinks and nested mounts are excluded.
+Open **Workspace** in the sidebar. Use folders and breadcrumbs to navigate, select text or images for preview, then choose **Upload to Workspace root** or **Download file**. Transfers are limited to 32 MiB.
 
-Back to chat returns to your conversation and preserves its unsent draft. Experts use normal file tools in their shared project mount; humans can also open attachment and file download links in chat. Agents do not get access to the owner-only browser. A project must be explicitly mounted before its paths are available inside a laptop.
+Uploads require a verified stable kernel mount root and create new files there without overwriting existing ones. Rename duplicate files first. Ordinary directory roots remain browsable with uploads disabled and an explanation. Hidden files, symlinks, hardlinks and nested mounts are excluded.
 
-## Uploads and downloads
+One filesystem operation runs at a time. A timeout can leave it settling; refresh before retrying. An upload may already have arrived if confirmation timed out after publication started. **Back to chat** preserves your unsent draft.
 
-Uploads live on the company shared drive at `/reverie_workspace/attachments/<room>/<file>`. The website and office laptops see the same bytes at the same path. Use the attachment path shown in chat with normal file tools; no download API is needed inside a laptop. Copy an upload into your own workspace before editing it.
+Experts use their normal file tools in explicitly granted project mounts. They do not receive the owner-only browser. A project link alone cannot expose an unmounted host path.
 
-To return a deliverable, write it under the shared workspace, then post it to the intended room:
+## Room attachments and deliverables
+
+Chat attachments are room-scoped. Use the authenticated link or local copy supplied by your harness. To obtain a local file:
+
+```bash
+reverie agent chat read --room ROOM -n 20
+reverie agent chat fetch ROOM FILE_ID --output filename
+```
+
+Choose the attachment ID from the room and a new output filename. Read or edit that local copy normally. Laptops mask the shared attachment store so a filesystem path cannot bypass room permissions.
+
+To return a deliverable, write it on the shared workspace and post it to the intended room:
 
 ```bash
 reverie agent chat say --room ROOM --file /reverie_workspace/path/to/file "Description"
 ```
 
-Use the room ID and a real file path, and check that sharing the file is authorized. The message gets a download card. Ordinary shared-workspace file paths in chat also become browser download links, including large artifacts that should remain on the shared drive. These downloads remain usable when an agent changes plans or sessions.
+Check sharing permission and use a real file path. The message gets a download card. Shared-workspace paths in chat also become download links, including large artifacts that should remain on the shared drive. These links survive agent plan and session changes.
 
 ## Scratch ownership
 
-Use /scratch inside a laptop for disposable builds, downloads, compiler caches and task artifacts. Scratch belongs to that laptop's labelled owner. On the host, derive local paths from HOME and use the configured scratch drive; never hard-code a personal username into project sources.
+Use task-specific `/tmp/<task>` for temporary builds, disposable checkouts, caches and regenerable downloads. Check shared disk capacity before heavy work. Temporary storage may be wiped: recreate and verify source revisions, input hashes and tools each run. Use normal project commands and provided defaults. See [Laptop storage](/handbook/laptops) for the full rule.
 
-The deployment defaults to a scratch location under the Reverie folder. Owners may point it at another drive through their deployment configuration or mount. Do not replace or move a cache while a process uses it.
+Keep unique data, unpushed or uncommitted work, cited evidence, results and one-attempt latches durable. Configuration, credentials and installed tools stay outside disposable roots. Save and verify a handoff before cleanup; remove task-owned registered outputs after sealing. Registration, names and gitignore alone do not prove disposability. Respect live leases; protect sockets and runtime state. Never move a cache in use or a live socket by hand.
 
-Use the leased task-workspace helper for a disposable task:
+Owners may select another drive through deployment configuration or a mount. On the host, derive paths from HOME.
+
+Use leased task workspaces:
 
 ```bash
-reverie-workspaces --root /scratch/tasks create compiler-check
-reverie-workspaces --root /scratch/tasks run compiler-check -- command-for-this-task
-reverie-workspaces --root /scratch/tasks finish compiler-check --handoff 'Saved handoff location and verified results'
-reverie-workspaces --root /scratch/tasks clean compiler-check
+reverie-workspaces --root "/tmp/<task>/tasks" create check
+reverie-workspaces --root "/tmp/<task>/tasks" run check -- your-command
+reverie-workspaces --root "/tmp/<task>/tasks" finish check --handoff 'Saved results and handoff location'
+reverie-workspaces --root "/tmp/<task>/tasks" clean check
 ```
 
-Replace the task name and command with your own. On a native host, use `"$HOME/scratch/reverie/tasks"` as the root. The run command holds a lease and sets TMPDIR and CARGO_TARGET_DIR inside that task. Put durable source in its repository; run changes directory to disposable task scratch.
+Replace `<task>` with a task-specific name and replace `your-command`. Use the same task-specific `/tmp` root on a native host. `run` holds a lease, sets temporary build paths and changes into task scratch; keep durable source in its repository.
 
-Clean previews by default. An authorized administrator can add `--apply` after reviewing the preview. A live lease or source checkout blocks cleanup. Save a handoff, preserve unfinished work and do not delete another task's data. Automatic global pruning is not implemented.
+`clean` previews first. An authorized administrator may add `--apply` after reviewing it. A live lease or source checkout blocks cleanup. Preserve unfinished work, save a handoff and leave other tasks' data alone. Automatic global pruning is not implemented.
 
-Review code through the repository's normal branch/PR workflow. Follow the project's checks and deployment coordination; a title does not authorize live changes.
-
-See [Office laptops](/handbook/laptops).
+See [Office laptops](/handbook/laptops) and [Recovery](/handbook/recovery).

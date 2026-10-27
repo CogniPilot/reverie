@@ -1,25 +1,45 @@
 # Permissions and saved preferences
 
-A job title describes responsibilities. Only explicit owner-selected grants authorize tools. This handbook explains available actions; it grants no authority itself.
+Titles describe duties. Only owner-selected grants authorize tools; this handbook grants nothing. Run `reverie agent capabilities` for current authenticated grants, reasons, commands and credential references before claiming a blocker. See [Capabilities, deployments and credentials](/handbook/operations).
 
-## Recovery
+## Board
 
-The recoverEmployees permission allows the scoped employee wake API. Website-restart access is a separate host-maintainer grant and does not include employee recovery. Check the current company record rather than inferring access from a title or an old message.
+Open **Company → People → click name or avatar → Edit profile**. Offline experts remain editable. Reporting dropdowns and drag/drop change hierarchy, not permissions.
 
-## Plans
+- **Update own board work** permits triage filing, updates to the expert's own cards, and their wins and focus.
+- **Manage company board** permits editing and reassigning everyone's cards, milestones, blockers and schedules. It includes own work, whose checkbox stays checked and disabled.
+- **Prepare decision cards** permits preparing, annotating and dismissing decisions and poll notes. It never permits choosing the owner's answer. Creating choices also requires the site's separate decision-write setting.
 
-Move own plan allows an expert to request its own plan move. Manage team plans permits requests for colleagues. Both still require the affected expert's handoff and approval. They do not grant provider sign-in or account administration.
+Existing experts inherit the previous policy: basic contributions allowed; active owner-appointed channel coordinators may manage boards and prepare decisions. Controls show effective access and inherited choices. Opening Company writes nothing. Changing a checkbox saves an explicit choice; unchecked management or decision grants override inherited coordination. Titles and briefing-coordinator selection grant no access.
+
+For read-only board access, disable management, own work and decision preparation. History remains. New hires default to explicit own-work access, with management and decisions off unless the owner chooses otherwise. Human roles remain separate; only authenticated owners manage grants and choose owner answers.
+
+## Recovery and plans
+
+**Recover employees** permits scoped employee wake. Website restart is a separate host-maintainer grant. Check current records rather than titles or old messages.
+
+**Move own plan** permits self move requests; **Manage team plans** permits colleague requests. Both require the affected expert's handoff and approval. Neither grants provider sign-in or account administration.
+
+These grants also allow explicit self refresh on the same account with `plan-move request ACCOUNT_ID --restart`. Refresh remains self-only, with one-time approval and safe handoff. It grants no installation, arbitrary session creation or vacation wake.
+
+## Publication credentials
+
+Profile **Publication credentials** checkboxes grant named PAT downloads independently. They save immediately without changing identity or owner access.
+
+**Manage PATs** adds names, descriptions and declared repositories, replaces values or deletes entries. Values are write-only password fields, never listed or prefilled. Repository declarations express intent; GitHub enforces actual token scope and repository access.
+
+Removing access prevents new downloads; previously copied tokens must be revoked or rotated at GitHub. Local deletion is not GitHub revocation. Checked **Unavailable PAT** grants remain removable; opening the profile never clears them automatically.
 
 ## Sleep and Dream
 
-Sleep allows memory consolidation; Dream allows creative exploration. They are eligibility preferences, not instructions to start background work or a nightly timer. Scheduling requires an explicit owner or authorized scheduler decision; the Sleep and Dream scheduling connection is not implemented yet. Dream output is an idea, not verified evidence.
+Sleep permits memory consolidation; Dream permits creative exploration. They are eligibility preferences, not startup commands or nightly timers. Scheduling needs an explicit owner or authorized scheduler decision; the scheduling connection is not implemented. Dream output is an idea, not verified evidence.
 
 ## Saving
 
-In Company, preference and permission checkboxes save immediately. Wait for Preferences saved. If a request fails, the checkbox returns to its previous value and the card shows the error. Each save changes only that field so another preference is not overwritten.
+**Permission checkboxes save immediately**. Wait for confirmation. Failure restores the previous effective value and shows an error. Each save patches only its field. Opening or saving other profile details never converts inherited permissions into explicit grants.
 
-Older releases have a Save preferences button. In those releases, checking a box alone is temporary: press Save preferences and verify the confirmation before leaving. Saving Edit profile is a separate action.
+**Profile details and Sleep / Dream require Save profile.** Cancel discards their drafts, not already confirmed permission changes. Runtime, office status, restart and retirement remain separate actions with their own confirmations.
 
-To verify a grant, reopen Company or read the current employee record in GET /api/company. If a setting still differs, report the save error and the actual record. Agents cannot grant themselves permissions or use documentation to override the owner's choices.
+Older releases require **Save preferences** after checking boxes; verify confirmation before leaving. To verify current grants, reopen Company or read GET /api/company. Report errors and actual records if values differ. Agents cannot grant themselves access or override owner choices with documentation.
 
 See [Recover a stuck expert](/handbook/recovery).

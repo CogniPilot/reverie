@@ -4093,8 +4093,477 @@ Object.assign(ReverieApp.prototype, {
    *   granted folder (folder grid): rendered from the folder's by-name routes, so
    *   paging through 300 renders never touches the attachment registry.
    */
+  /**
+   * Read bytes for a non-session preview. Source identity is closed and explicit:
+   * a room attachment is a saved snapshot, a listed Workspace path is live.
+   * This component does not resolve absolute paths or confer access; the existing
+   * room-membership/owner route makes a fresh authorization decision per read.
+   */
+  _filePreviewSourceDescriptor(source) {
+    const refuse = (message = 'Preview source unavailable.') => {
+      throw new Error(message);
+    };
+    if (!source || typeof source !== 'object' || Array.isArray(source)) refuse();
+    const room = source.kind === 'room-attachment';
+    const workspace = source.kind === 'workspace';
+    const keys = room ? ['kind', 'roomId', 'attachmentId', 'name'] : ['kind', 'path', 'name', 'binding'];
+    if ((!room && !workspace) || Object.keys(source).some((key) => !keys.includes(key))) refuse();
+    const name = source.name;
+    if (typeof name !== 'string' || !name || name.length > 255 || /[/\\\x00-\x1f\x7f]/.test(name)) refuse();
+    let raw,
+      download,
+      path = null,
+      expectedBinding = null;
+    if (room) {
+      if (
+        ![source.roomId, source.attachmentId].every((id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id))
+      )
+        refuse();
+      raw = `/api/chatrooms/${encodeURIComponent(source.roomId)}/files/${encodeURIComponent(source.attachmentId)}`;
+      download = raw;
+    } else {
+      path = source.path;
+      if (typeof path !== 'string' || !path || path.length > 2048 || /[\\\x00-\x1f\x7f]/.test(path)) refuse();
+      const parts = path.split('/');
+      if (parts.length > 32 || parts.some((part) => !part || part.startsWith('.')) || parts.at(-1) !== name) refuse();
+      expectedBinding = source.binding;
+      if (typeof expectedBinding !== 'string' || !/^[a-f0-9]{64}$/.test(expectedBinding)) refuse();
+      download = `/api/workspace/file?path=${encodeURIComponent(path)}&binding=${expectedBinding}`;
+      raw = `${download}&preview=1`;
+    }
+    return { room, workspace, name, path, raw, download, expectedBinding };
+  },
+
+  async _readFilePreviewSource(source, signal) {
+    const refuse = (message = 'Preview source unavailable.') => {
+      throw new Error(message);
+    };
+    const { room, workspace, name, path, raw, download, expectedBinding } = this._filePreviewSourceDescriptor(source);
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+    const raster = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+    const pdf = ext === 'pdf';
+    const text = [
+      '',
+      'txt',
+      'md',
+      'markdown',
+      'json',
+      'csv',
+      'ts',
+      'js',
+      'mjs',
+      'py',
+      'mo',
+      'xml',
+      'html',
+      'htm',
+      'css',
+      'yaml',
+      'yml',
+      'toml',
+      'log',
+      'sh',
+      'rs',
+      'c',
+      'h',
+      'cpp',
+      'svg',
+    ].includes(ext);
+    if (!raster && !pdf && !text) refuse('Preview unavailable for this format. Download to open it.');
+    const limit = raster ? 5 * 1024 * 1024 : pdf ? 16 * 1024 * 1024 : 256 * 1024;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) controller.abort();
+    const timer = setTimeout(abort, 12000);
+    let reader;
+    try {
+      if (controller.signal.aborted) refuse('Preview cancelled.');
+      const response = await fetch(ReverieBase.url(raw), {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      if (!response.ok || response.status === 206 || response.redirected)
+        refuse(`Preview unavailable (HTTP ${response.status}).`);
+      if (workspace && response.headers.get('X-Reverie-File-Binding') !== expectedBinding)
+        refuse('Workspace file binding changed. Refresh and try again.');
+      const declared = response.headers.get('Content-Length');
+      if (declared !== null && (declared.length > 8 || !/^\d+$/.test(declared) || BigInt(declared) > BigInt(limit)))
+        refuse('Preview is too large. Download to open it.');
+      reader = response.body?.getReader();
+      if (!reader) refuse();
+      const chunks = [];
+      let length = 0;
+      while (true) {
+        if (controller.signal.aborted) refuse('Preview cancelled.');
+        const { done, value } = await reader.read();
+        if (controller.signal.aborted) refuse('Preview cancelled.');
+        if (done) break;
+        if (!(value instanceof Uint8Array) || length + value.byteLength > limit)
+          refuse('Preview is too large. Download to open it.');
+        length += value.byteLength;
+        chunks.push(value);
+      }
+      if (declared !== null && BigInt(declared) !== BigInt(length))
+        refuse('File changed or transfer incomplete. Refresh and try again.');
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const ascii = (start, end) => String.fromCharCode(...bytes.subarray(start, end));
+      let mediaType = 'text/plain';
+      if (raster) {
+        if (bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((byte, i) => bytes[i] === byte))
+          mediaType = 'image/png';
+        else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) mediaType = 'image/jpeg';
+        else if (/^GIF8[79]a$/.test(ascii(0, 6))) mediaType = 'image/gif';
+        else if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') mediaType = 'image/webp';
+        else refuse('Preview does not contain a supported raster image.');
+      } else if (pdf) {
+        if (!/^%PDF-(?:1\.[0-7]|2\.0)[\r\n ]/.test(ascii(0, 9))) refuse('Preview does not contain a PDF.');
+        mediaType = 'application/pdf';
+      }
+      let content = null;
+      if (text) {
+        try {
+          if (bytes.includes(0)) throw new Error();
+          content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch {
+          refuse('Preview requires UTF-8 text. Download to open it.');
+        }
+      }
+      return {
+        kind: room ? 'room-attachment' : 'workspace',
+        name,
+        path,
+        ext,
+        bytes,
+        content,
+        mediaType,
+        sourceLabel: room ? 'Saved attachment' : 'Current workspace file',
+        downloadUrl: ReverieBase.url(download),
+      };
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      // Retain the original read/refusal error even if cancellation also fails.
+      try {
+        await reader?.cancel();
+      } catch {
+        /* closed or aborted stream */
+      }
+    }
+  },
+
+  /** Shared presentation for an explicit non-session reader; no session side effects. */
+  async openReadOnlyFilePreview(selected, trigger = document.activeElement) {
+    const overlay = this.$('filePreviewOverlay'),
+      previousBody = this.$('filePreviewBody');
+    const title = this.$('filePreviewTitle'),
+      footer = this.$('filePreviewFooter');
+    if (!overlay || !previousBody || !title || !footer) return;
+    if (this.filePreviewEdit?.dirty && !confirm('Discard unsaved changes?')) return;
+    this._disposeReadOnlyFilePreview();
+    this._filePreviewLoad = (this._filePreviewLoad || 0) + 1;
+    // The legacy body can already have session/loopback click delegates. Keep
+    // those on its detached node rather than sharing them with this reader.
+    const originalBody = this.$('filePreviewBody');
+    const body = originalBody.cloneNode(false);
+    body.removeAttribute('data-rv-bound');
+    this._stopFilePreviewMedia();
+    originalBody.replaceWith(body);
+    this._resetFilePreviewEdit();
+    this._stopFilePreviewMedia();
+    this._updateFolderPreviewNav(null);
+    this.filePreviewContent = '';
+    this.filePreviewText = null;
+    this.filePreviewPage = null;
+    this.filePreviewPageRefused = true;
+    this.filePreviewDetachUrl = '';
+    const detach = this.$('filePreviewDetachBtn');
+    if (detach) detach.hidden = true;
+    this._updateFilePreviewToolbar('none');
+    const state = {
+      controller: new AbortController(),
+      urls: [],
+      trigger,
+      inert: [],
+      timer: null,
+      extra: null,
+      keydown: null,
+      originalBody,
+      body,
+      overlay,
+      backdrop: null,
+    };
+    this._readOnlyFilePreview = state;
+    state.timer = setTimeout(() => state.controller.abort(), 12000);
+    const current = () => this._readOnlyFilePreview === state && !state.controller.signal.aborted;
+    const node = (tag, text, cls) => {
+      const el = document.createElement(tag);
+      if (text !== undefined) el.textContent = text;
+      if (cls) el.className = cls;
+      return el;
+    };
+    overlay.classList.add('visible', 'file-preview-readonly');
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'filePreviewTitle');
+    title.textContent = selected?.name || selected?.absolutePath || 'File preview';
+    body.replaceChildren(node('p', 'Loading preview…', 'binary-message'));
+    footer.replaceChildren();
+    const extra = node('div', undefined, 'file-preview-source-head');
+    state.extra = extra;
+    const back = node('button', 'Back', 'file-preview-source-back');
+    back.type = 'button';
+    back.onclick = () => this.closeFilePreview();
+    const location = node('nav', undefined, 'file-preview-source-path');
+    location.setAttribute('aria-label', 'File location');
+    extra.append(back, location);
+    title.closest('.file-preview-header')?.after(extra);
+    for (const element of document.body.children) {
+      if (element === overlay || element.contains(overlay) || element.tagName === 'SCRIPT') continue;
+      state.inert.push([element, element.inert]);
+      element.inert = true;
+    }
+    state.keydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.closeFilePreview();
+      } else if (event.key === 'Tab') {
+        const focusable = [...overlay.querySelectorAll('button,a[href],[tabindex="0"]')].filter(
+          (el) => !el.disabled && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none'
+        );
+        const index = focusable.indexOf(document.activeElement);
+        if (focusable.length && (index < 0 || (event.shiftKey ? index === 0 : index === focusable.length - 1))) {
+          event.preventDefault();
+          (event.shiftKey ? focusable.at(-1) : focusable[0]).focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', state.keydown, true);
+    state.backdrop = event => {
+      if (event.target === overlay && this._readOnlyFilePreview === state) this.closeFilePreview();
+    };
+    overlay.addEventListener('click', state.backdrop);
+    back.focus({ preventScroll: true });
+    let source;
+    try {
+      // Capture a copy before any request; a room filename never supplies a path.
+      source = { ...selected };
+      let metadata = null;
+      if (source.kind === 'workspace-reference') {
+        if (Object.keys(source).some((key) => !['kind', 'absolutePath'].includes(key)))
+          throw new Error('Workspace source unavailable.');
+        const absolute = source.absolutePath;
+        if (typeof absolute !== 'string' || !absolute.startsWith('/') || absolute.length > 4096)
+          throw new Error('Workspace path unavailable.');
+        const response = await fetch(ReverieBase.url(`/api/workspace/resolve?path=${encodeURIComponent(absolute)}`), {
+          credentials: 'same-origin',
+          cache: 'no-store',
+          redirect: 'error',
+          signal: state.controller.signal,
+        });
+        const raw = await this._readFilePreviewMetadata(response, state.controller.signal);
+        if (!current()) return;
+        metadata = raw.data;
+        if (
+          raw.success !== true ||
+          metadata?.kind !== 'workspace' ||
+          metadata.absolutePath !== absolute ||
+          !Array.isArray(metadata.crumbs) ||
+          metadata.crumbs.length > 32 ||
+          metadata.crumbs.some(
+            (c) =>
+              typeof c.name !== 'string' || typeof c.path !== 'string' || c.name.length > 4096 || c.path.length > 2048
+          )
+        )
+          throw new Error('Workspace file metadata unavailable.');
+        source = { kind: 'workspace', path: metadata.path, name: metadata.name, binding: metadata.binding };
+      }
+      const descriptor = this._filePreviewSourceDescriptor(source);
+      title.textContent = descriptor.name;
+      if (metadata) {
+        for (const crumb of metadata.crumbs) {
+          const a = node('a', crumb.name);
+          a.href = ReverieBase.url(`/workspace?path=${encodeURIComponent(crumb.path)}`);
+          a.onclick = (event) => {
+            if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            this.closeFilePreview();
+            const shell = this._chatApp;
+            if (shell?.openPage) {
+              shell.openPage('workspace');
+              const frame = shell.els?.page?.querySelector('iframe');
+              if (frame && shell.embed === 'workspace') frame.src = a.href;
+            } else window.location.assign(a.href);
+          };
+          if (location.childNodes.length) location.append(node('span', ' / '));
+          location.append(a);
+        }
+        location.append(node('span', ' / ' + descriptor.name));
+      } else
+        location.textContent = descriptor.room
+          ? 'Saved attachment · ' + descriptor.name
+          : 'Current workspace file · ' + descriptor.path;
+      const download = node('a', 'Download', 'file-preview-source-download');
+      download.href = ReverieBase.url(descriptor.download);
+      download.download = descriptor.name;
+      footer.append(download);
+      const result = await this._readFilePreviewSource(source, state.controller.signal);
+      if (!current()) return;
+      footer.prepend(node('span', result.sourceLabel + ' · ' + this.formatFileSize(result.bytes.length) + ' '));
+      if (result.mediaType.startsWith('image/')) {
+        const url = URL.createObjectURL(new Blob([result.bytes], { type: result.mediaType }));
+        state.urls.push(url);
+        const img = node('img');
+        img.alt = result.name;
+        img.src = url;
+        img.onerror = () => {
+          if (current())
+            body.replaceChildren(node('p', 'Image could not be displayed. Use Download.', 'binary-message'));
+        };
+        const zoom = node('button', 'Actual size');
+        zoom.type = 'button';
+        zoom.setAttribute('aria-pressed', 'false');
+        zoom.onclick = () => {
+          const actual = img.classList.toggle('file-preview-image-actual');
+          zoom.textContent = actual ? 'Fit image' : 'Actual size';
+          zoom.setAttribute('aria-pressed', String(actual));
+        };
+        footer.append(zoom);
+        body.replaceChildren(img);
+      } else if (result.mediaType === 'application/pdf') {
+        await this._mountReadOnlyPdf(result.bytes, body, state);
+      } else if (['html', 'htm'].includes(result.ext)) {
+        const template = document.createElement('template');
+        if (typeof sanitizeMarkdownHtml !== 'function') throw new Error('Safe HTML preview unavailable. Use Download.');
+        template.innerHTML = sanitizeMarkdownHtml(result.content);
+        // No navigation, remote assets or document-provided policy in a static page.
+        for (const img of template.content.querySelectorAll('img'))
+          img.replaceWith(document.createTextNode(img.alt || '[image]'));
+        for (const a of template.content.querySelectorAll('a')) a.replaceWith(...a.childNodes);
+        for (const el of template.content.querySelectorAll('*'))
+          for (const attr of [...el.attributes]) {
+            if (/^(?:on|src|href|action|formaction|ping|style)/i.test(attr.name)) el.removeAttribute(attr.name);
+          }
+        const frame = node('iframe');
+        frame.title = result.name + ' (static preview)';
+        frame.setAttribute('sandbox', '');
+        frame.referrerPolicy = 'no-referrer';
+        frame.srcdoc =
+          '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;margin:20px;overflow-wrap:anywhere}pre{white-space:pre-wrap}img{max-width:100%}</style>' +
+          template.innerHTML;
+        body.replaceChildren(frame);
+        const sourceButton = node('button', 'View source');
+        sourceButton.type = 'button';
+        sourceButton.onclick = () => body.replaceChildren(node('pre', result.content, 'file-preview-text wrap'));
+        footer.append(sourceButton);
+      } else {
+        this.filePreviewContent = result.content;
+        this.filePreviewText = { ext: result.ext, readOnlySource: true };
+        this._renderFilePreviewText();
+      }
+    } catch (error) {
+      if (this._readOnlyFilePreview === state)
+        body.replaceChildren(
+          node(
+            'p',
+            state.controller.signal.aborted ? 'Preview cancelled or timed out. Reopen to retry.' : error.message,
+            'binary-message'
+          )
+        );
+    } finally {
+      clearTimeout(state.timer);
+    }
+  },
+
+  async _mountReadOnlyPdf(bytes, body, state) {
+    const signal = state.controller.signal;
+    let abort;
+    const cancelled = new Promise((_, reject) => {
+      abort = () => reject(new Error('PDF preview cancelled or timed out.'));
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
+    try {
+      const module = await Promise.race([
+        import(
+          ReverieBase.url('/file-preview-pdf.mjs?v=f7183e3bd5ad84a4a921b0c9932c982f884f2a5f3619ff44ceb5f030edf9fc53')
+        ),
+        cancelled,
+      ]);
+      if (this._readOnlyFilePreview !== state || signal.aborted) return;
+      state.pdf = await module.mountReadOnlyPdf({ bytes, container: body, signal });
+    } finally {
+      signal.removeEventListener('abort', abort);
+    }
+  },
+
+  openWorkspaceFilePreview(absolutePath, trigger) {
+    return this.openReadOnlyFilePreview({ kind: 'workspace-reference', absolutePath }, trigger);
+  },
+
+  async _readFilePreviewMetadata(response, signal) {
+    if (!response.ok || response.redirected || response.status === 206)
+      throw new Error(`Workspace metadata unavailable (HTTP ${response.status}).`);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Workspace metadata unavailable.');
+    const chunks = [];
+    let length = 0;
+    try {
+      while (true) {
+        if (signal.aborted) throw new Error('Preview cancelled.');
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array) || (length += value.length) > 65536)
+          throw new Error('Workspace metadata is too large.');
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(length);
+      let at = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, at);
+        at += chunk.length;
+      }
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* retain original failure */
+      }
+    }
+  },
+
+  _disposeReadOnlyFilePreview() {
+    const state = this._readOnlyFilePreview;
+    if (!state) return;
+    this._readOnlyFilePreview = null;
+    state.controller.abort();
+    state.pdf?.destroy();
+    clearTimeout(state.timer);
+    this._filePreviewLoad = (this._filePreviewLoad || 0) + 1;
+    for (const url of state.urls) URL.revokeObjectURL(url);
+    for (const [element, inert] of state.inert) element.inert = inert;
+    document.removeEventListener('keydown', state.keydown, true);
+    state.overlay.removeEventListener('click', state.backdrop);
+    state.extra?.remove();
+    this.$('filePreviewOverlay')?.classList.remove('file-preview-readonly');
+    state.body.replaceChildren();
+    state.originalBody.replaceChildren();
+    if (state.body.isConnected) state.body.replaceWith(state.originalBody);
+    return state;
+  },
+
   async openFilePreview(filePath, sessionId = this.activeSessionId, attachmentId = null, options = {}) {
     if (!sessionId || !filePath) return;
+    this._disposeReadOnlyFilePreview();
     const folderFile = options.folderFile || null;
     // Prev/next only while browsing a folder grid; a preview opened from anywhere
     // else ends that browsing.
@@ -4147,6 +4616,7 @@ Object.assign(ReverieApp.prototype, {
     // to that source view on its own.
     if (!attachmentId && rendersAsPage(filePath) && this._filePreviewPref('htmlRendered')) {
       const pageUrl = await this._mintHtmlViewUrl(filePath, sessionId);
+      if (stale()) return;
       if (pageUrl) {
         footerEl.textContent = 'HTML';
         this.filePreviewPage = { filePath, sessionId };
@@ -4613,6 +5083,7 @@ Object.assign(ReverieApp.prototype, {
 
   closeFilePreview() {
     if (this.filePreviewEdit?.dirty && !confirm('Discard unsaved changes?')) return;
+    const sourceState = this._disposeReadOnlyFilePreview();
     this._resetFilePreviewEdit();
     // Back on the grid (if one is open underneath): its current tile stays marked.
     if (this.folderGrid) this.folderGrid.index = null;
@@ -4631,6 +5102,7 @@ Object.assign(ReverieApp.prototype, {
     this.filePreviewDetachUrl = '';
     const detachBtn = this.$('filePreviewDetachBtn');
     if (detachBtn) detachBtn.hidden = true;
+    if (sourceState?.trigger?.isConnected) sourceState.trigger.focus({ preventScroll: true });
   },
 
   /**
@@ -4771,16 +5243,40 @@ Object.assign(ReverieApp.prototype, {
       const tmpl = document.createElement('template');
       tmpl.innerHTML = `<div class="rv-text file-preview-md" data-i18n-skip>${this._renderMarkdown(this.filePreviewContent, { breaks: false })}</div>`;
       const doc = tmpl.content.firstElementChild;
+      if (info.readOnlySource) {
+        for (const img of doc.querySelectorAll('img')) img.replaceWith(document.createTextNode(img.alt || '[linked image]'));
+        for (const a of doc.querySelectorAll('a[href]')) {
+          const href = a.getAttribute('href') || '';
+          if (!/^https?:\/\//i.test(href) && !href.startsWith('#')) a.replaceWith(...a.childNodes);
+          else if (!href.startsWith('#')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+          else a.onclick = event => {
+            event.preventDefault();
+            let id; try { id = decodeURIComponent(href.slice(1)); } catch { return; }
+            const target = [...doc.querySelectorAll('[id]')].find(el => el.id === id);
+            target?.scrollIntoView({ block: 'start' });
+          };
+        }
+        for (const button of doc.querySelectorAll('.rv-copy-btn')) button.onclick = async () => {
+          const code = button.closest('.rv-code-wrap')?.querySelector('pre code');
+          const ok = code ? await this._copyText(code.textContent || '') : false;
+          button.classList.toggle('rv-copied', ok); button.classList.toggle('rv-copy-failed', !ok);
+        };
+        for (const button of doc.querySelectorAll('.rv-wrap-toggle')) button.onclick = () => {
+          const wrap = button.closest('.rv-diagram-wrap'), pre = wrap?.querySelector('pre.rv-diagram');
+          if (pre && wrap) wrap.classList.toggle('rv-wrap-nowrap', pre.classList.toggle('rv-nowrap'));
+        };
+      } else {
       this._rebaseFilePreviewMarkdownRefs(doc, info);
       this._linkifyFilePaths(doc);
       // The linkifier's absolute paths name no session; give them the
       // preview's, like the rebased links, or they open in the active tab's.
       for (const a of doc.querySelectorAll('a.rv-path:not([data-session-id])')) a.dataset.sessionId = info.sessionId;
-      bodyEl.replaceChildren(tmpl.content);
       // The Response Viewer's click delegate (path links, code-block copy
       // buttons, loopback links): container-bound and idempotent, so binding it
       // on the body once serves every preview.
       this._bindResponseViewerInteractions(bodyEl);
+      }
+      bodyEl.replaceChildren(tmpl.content);
     } else {
       const pre = document.createElement('pre');
       pre.className = 'file-preview-text';

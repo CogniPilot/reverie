@@ -31,7 +31,7 @@ class TerminalTests(unittest.TestCase):
         self.cfg['_terminal'] = self.view
 
     def test_shows_running_harness_and_distinguishes_configured_and_reported_model(self):
-        self.assertIn('Reverie Harness / Python PID', self.output.getvalue())
+        self.assertIn('Reverie Admin Harness / Python PID', self.output.getvalue())
         self.assertIn('configured model: configured-model', self.output.getvalue())
         self.assertIn('API-reported model: unverified', self.output.getvalue())
         self.assertIn('60000 characters', self.output.getvalue())
@@ -230,7 +230,11 @@ class TerminalPTYTests(unittest.TestCase):
                 'import json,sys\nfrom pathlib import Path\n'
                 f'history=Path({str(history_file)!r}); posts=Path({str(posts)!r})\n'
                 'if sys.argv[1]=="read":\n'
-                ' print(json.dumps({"messages":json.loads(history.read_text()),'
+                ' messages=[dict(m,roomId="room",phoneWake=True) for m in json.loads(history.read_text())]\n'
+                ' if "--message" in sys.argv:\n'
+                '  selected=sys.argv[sys.argv.index("--message")+1]\n'
+                '  print(json.dumps({"message":next(m for m in messages if m["id"]==selected)}))\n'
+                ' else: print(json.dumps({"messages":messages,'
                 '"members":[{"sessionId":"session-worker","name":"Worker"}]}))\n'
                 'elif sys.argv[1]=="say":\n'
                 ' with posts.open("a") as f:f.write(json.dumps(sys.argv[2:])+"\\n")\n'
@@ -282,9 +286,9 @@ class TerminalPTYTests(unittest.TestCase):
                 collect_until(lambda: process.poll() is not None)
                 self.assertEqual(process.returncode, 0)
                 output = data.decode(errors='replace')
-                self.assertIn('Reverie Harness', output)
+                self.assertIn('Reverie Admin Harness', output)
                 self.assertIn('Synthetic model reply.', output)
-                self.assertIn('Reverie Harness stopped.', output)
+                self.assertIn('Reverie Admin Harness stopped.', output)
                 self.assertNotIn('Traceback', output)
             finally:
                 release.set()

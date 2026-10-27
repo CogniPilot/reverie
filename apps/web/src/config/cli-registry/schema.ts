@@ -111,6 +111,7 @@ const launchSchema = z
   .object({
     params: z.record(z.string(), paramSpecSchema),
     chain: z.enum(['first', 'fallback']).optional(),
+    resumeSelection: z.literal('claude-transcript').optional(),
     variants: z.array(variantSchema).min(1).max(4),
     legacyConfigAliases: z.record(z.string(), z.string()).optional(),
     legacyConfigField: z.string().min(1).max(40).optional(),
@@ -143,6 +144,14 @@ const launchSchema = z
           path: ['variants', launch.variants.length - 1, 'when'],
         });
       }
+    }
+    if (launch.resumeSelection === 'claude-transcript' &&
+        (launch.chain !== 'fallback' || launch.variants.length !== 2 ||
+         launch.variants[0]?.id !== 'resume' || launch.variants[1]?.id !== 'new' ||
+         launch.params.resumeId?.type !== 'token' || launch.params.resumeId.pattern !== 'uuid' ||
+         launch.params.sessionId?.type !== 'engine' || launch.params.sessionId.source !== 'sessionId' ||
+         launch.variants.some((variant) => variant.args.length === 0))) {
+      ctx.addIssue({ code: 'custom', message: 'Claude transcript selection requires resume/new variants and typed resumeId/sessionId', path: ['resumeSelection'] });
     }
     if (launch.legacyConfigAliases) {
       for (const paramName of Object.keys(launch.legacyConfigAliases)) {

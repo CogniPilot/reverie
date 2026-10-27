@@ -1,3 +1,4 @@
+import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
@@ -540,6 +541,7 @@ export class Session extends EventEmitter {
   private _wireActivityAt: number;
   private _wireActivitySettleUntil: number;
   private _claudeSessionId: string | null = null;
+  private _claudeSessionIdPending = false;
   // Set only when the id came from the CLI's own UserPromptSubmit/Stop hook
   // payload, keyed on this pane's $REVERIE_SESSION_ID. That binding is a fact,
   // not a correlation: it never consults cwd, so a sibling pane on the same
@@ -898,6 +900,8 @@ export class Session extends EventEmitter {
       lastSubmitAt?: number;
       /** Restored conversation chain, oldest first (see `claudeSessionChain`). */
       claudeSessionChain?: string[];
+      /** Actual-runtime selector has not yet been identified by a provider hook. */
+      claudeSessionIdPending?: boolean;
       /** Restored agent-exit observation for this session's pane (see `paneExit`). */
       paneExit?: PaneExit;
       /** The previous run's `displayModel`; a CLI-reported one is restored (see `displayModel`). */
@@ -987,6 +991,9 @@ export class Session extends EventEmitter {
     this._claudeSessionChain = Array.isArray(config.claudeSessionChain) ? [...config.claudeSessionChain] : [];
     const restoredConversation = this._claudeSessionChain[this._claudeSessionChain.length - 1];
     if (restoredConversation) this._claudeSessionId = restoredConversation;
+    this._claudeSessionIdPending = !config.remote && config.claudeSessionIdPending === true &&
+      getCli(this.mode)?.launch.resumeSelection === 'claude-transcript';
+    if (this._claudeSessionIdPending) this._claudeSessionId = null;
     this._mux = config.mux || null;
     this._useMux = config.useMux ?? (this._mux !== null && this._mux.isAvailable());
     this._muxSession = config.muxSession || null;
@@ -1216,6 +1223,21 @@ export class Session extends EventEmitter {
     return this._claudeSessionId;
   }
 
+  /** Selection is intentionally unknown until the actual provider's hook. */
+  get claudeSessionIdPending(): boolean {
+    return this._claudeSessionIdPending;
+  }
+
+  private _beginClaudeConversationSelection(): void {
+    // An SSH pane can merely attach an existing remote CLI. Its local
+    // transport lifecycle cannot establish that the provider was relaunched.
+    if (this._remote || getCli(this.mode)?.launch.resumeSelection !== 'claude-transcript') return;
+    this._claudeSessionIdPending = true;
+    this._claudeSessionId = null;
+    this._claudeSessionIdIsFirstHand = false;
+    this._promptCache = null;
+  }
+
   /**
    * True when `claudeSessionId` came from the CLI's own hook payload rather than
    * from the launch config or a history correlation. The response viewer uses it
@@ -1293,8 +1315,9 @@ export class Session extends EventEmitter {
   // those extend the chain: a history-correlated guess must never be able to
   // write a foreign conversation into this pane's permanent record.
   adoptClaudeSessionId(newId: string, options: { firstHand?: boolean } = {}): void {
-    if (!newId) return;
+    if (!newId || (this._claudeSessionIdPending && !options.firstHand)) return;
     if (options.firstHand) {
+      this._claudeSessionIdPending = false;
       this._claudeSessionIdIsFirstHand = true;
       this._recordClaudeSessionInChain(newId);
     }
@@ -1888,6 +1911,7 @@ export class Session extends EventEmitter {
   setMode(mode: SessionMode): void {
     if (!getCli(mode)) throw new Error(`No CLI registry entry for mode ${mode}`);
     this._mode = mode;
+    if (getCli(mode)?.launch.resumeSelection !== 'claude-transcript') this._claudeSessionIdPending = false;
     this._acceptsPrompts = getCli(mode)?.capabilities.startMode !== 'shell';
     // The probed version belongs to the previous CLI.
     this._cliVersion = '';
@@ -1900,7 +1924,7 @@ export class Session extends EventEmitter {
   }): () => void {
     const record = this as unknown as Record<string, unknown>;
     const fields = ['_mode', '_acceptsPrompts', '_cliVersion', 'subscriptionProfile', '_envOverrides', '_customModel',
-      '_model', '_effort', '_resumeSessionId', '_claudeSessionId', '_claudeSessionChain', '_runtimeThreads',
+      '_model', '_effort', '_resumeSessionId', '_claudeSessionId', '_claudeSessionIdPending', '_claudeSessionIdIsFirstHand', '_claudeSessionChain', '_runtimeThreads',
       '_openCodeConfig', '_codexConfig', '_geminiConfig', '_antigravityConfig', '_piConfig', '_grokConfig', '_deepSeekConfig', '_ompConfig'];
     const before = new Map(fields.map((key) => [key, structuredClone(record[key])]));
     const pending = new Set(this._pendingEnvUnsets);
@@ -1909,7 +1933,7 @@ export class Session extends EventEmitter {
     const currentField = getCli(this.mode)?.launch.legacyConfigField;
     const currentConfig = currentField ? record['_' + currentField] as Record<string, unknown> | undefined : undefined;
     const thread = currentConfig?.continueSession || currentConfig?.resumeSessionId || this._resumeSessionId || (this._claudeSessionId !== this.id ? this._claudeSessionId : undefined);
-    if (typeof thread === 'string') this._runtimeThreads[currentKey] = thread;
+    if (!this._claudeSessionIdPending && typeof thread === 'string') this._runtimeThreads[currentKey] = thread;
     this.setCustomModel(undefined);
     this._envOverrides ??= {};
     for (const key of ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'XDG_DATA_HOME', 'OPENCODE_CONFIG_CONTENT']) {
@@ -1922,6 +1946,8 @@ export class Session extends EventEmitter {
     const targetThread = this._runtimeThreads[options.mode + ':' + options.sourceKey];
     this._resumeSessionId = undefined;
     this._claudeSessionId = targetThread ?? this.id;
+    this._claudeSessionIdPending = false;
+    this._claudeSessionIdIsFirstHand = false;
     this._claudeSessionChain = targetThread ? [targetThread] : [];
     this._model = options.model;
     this._effort = options.effort as EffortLevel | undefined;
@@ -2222,6 +2248,7 @@ export class Session extends EventEmitter {
       // resets that field to the launch id at three separate points, which is
       // why a recovered pane otherwise shows its pre-/clear transcript forever.
       claudeSessionChain: this._claudeSessionChain.length > 0 ? [...this._claudeSessionChain] : undefined,
+      claudeSessionIdPending: this._claudeSessionIdPending || undefined,
       // envOverrides intentionally NOT on the public SessionState type — they must not
       // leak into SSE / GET /api/sessions broadcasts (schema allows OPENCODE_*, which
       // can carry secrets). For disk persistence, session-manager calls
@@ -2376,6 +2403,7 @@ export class Session extends EventEmitter {
       // check ran, so it still carries the pre-pin ompConfig; rebuild it.
       this._pinOmpRespawnId();
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
+      this._beginClaudeConversationSelection();
       const newPid = await mux.respawnPane(respawnOptions);
       if (!newPid) {
         console.error('[Session] Failed to respawn pane, will create new session');
@@ -2419,12 +2447,15 @@ export class Session extends EventEmitter {
       // conversation. The vanished-tmux-session branch above relaunches for the
       // same reason and takes the same pin.
       if (needsNewSession || muxSessionVanished) {
-        const pinned = (await this._buildRespawnPaneOptionsWithResumePin()).resumeSessionId;
-        if (pinned) {
+        const launch = await this._buildRespawnPaneOptionsWithResumePin();
+        options.createSessionOptions.claudeResumeCandidates = launch.claudeResumeCandidates;
+        const pinned = launch.resumeSessionId;
+        if (pinned && !launch.claudeResumeCandidates) {
           options.createSessionOptions.resumeSessionId = pinned;
           this._resumeSessionId = pinned;
         }
       }
+      this._beginClaudeConversationSelection();
       this._muxSession = await mux.createSession(options.createSessionOptions);
       console.log('[Session] Created mux session:', this._muxSession.muxName);
       // No extra sleep — createSession() already waits for tmux readiness
@@ -2548,8 +2579,12 @@ export class Session extends EventEmitter {
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
+    if (this.mode === 'codex' && !this._remote && !this._docker) {
+      await applyCodexTurnSummaryHooks(this.workingDir);
+    }
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
+    this._beginClaudeConversationSelection();
     const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
     if (!newPid) {
       console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
@@ -2601,6 +2636,7 @@ export class Session extends EventEmitter {
       // once they've confirmed an actual respawn is about to happen.
       ompConfig: this._ompConfig,
       resumeSessionId: this._resumeSessionId,
+      claudeResumeCandidates: this._claudeLaunchCandidates(),
       envOverrides: this._envOverrides,
       unsetEnvKeys: this._pendingEnvUnsets.size > 0 ? [...this._pendingEnvUnsets] : undefined,
       effort: this._effort,
@@ -2613,79 +2649,23 @@ export class Session extends EventEmitter {
     return this._withCustomModelLaunchModel(options);
   }
 
-  /**
-   * Respawn options for a pane whose command is being REPLACED, with the
-   * conversation pinned so the relaunch resumes rather than collides.
-   *
-   * A CLI that launches with `--session-id <id>` refuses an id that is already
-   * in use (claude: `Error: Session ID ... is already in use.`), and every
-   * session whose agent has been prompted owns a transcript under that id. So
-   * relaunching such a pane with the bare launch line fails, the pane dies
-   * again immediately, and the user's conversation is stranded. A launch that
-   * declares a `fallback` chain renders `resume || new` once a resume id is
-   * set, which is the shape that survives both cases.
-   *
-   * Three candidates are tried in priority order — the conversation chain's
-   * tail, the launch seed, then the session's own id — and the first one a
-   * transcript backs is pinned. Four conditions gate that walk, each protecting
-   * against a way of resuming the WRONG conversation or of making a working
-   * relaunch fail.
-   *
-   * ⚠️ **A remote or docker session is never pinned.** Unlike `restartCli()`,
-   * whose route refuses both, the dead-pane respawn is reached by every session
-   * shape. Their pane commands (`buildRemoteLaunchCommand`,
-   * `claudeDockerPaneCommand`) already render a SELF-HEALING
-   * `--session-id <sid> || --resume <sid>`, and both flip to resume-first the
-   * moment the resume id differs from the session id. The conversation lives on
-   * the far side, so a local id pinned onto it resolves to nothing there, the
-   * resume fails, and the `--session-id` fallback then collides with the
-   * transcript the far side really does hold — both branches fail and the pane
-   * dies. `_pinOmpRespawnId()` refuses remote for the same reason.
-   *
-   * ⚠️ **The candidates come from the conversation CHAIN, never from
-   * `_claudeSessionId`.** That field holds either a first-hand id from the
-   * CLI's own hook payload or a history correlation, which is a guess keyed on
-   * the working directory. `_recordClaudeSessionInChain()` refuses a guess
-   * precisely so it cannot "write a foreign conversation into this pane's
-   * permanent record", and launching from one would do worse than the display
-   * bug that rule exists to prevent: the relaunched CLI would open and WRITE to
-   * a conversation that was never this pane's. The chain's tail is the live
-   * conversation and is hook-vouched, so it leads the walk, ahead of the launch
-   * seed, which is written once at construction and never moves off a `/clear`.
-   *
-   * ⚠️ **Every candidate must be backed by a transcript, the session's own id
-   * included, and a candidate that has none is passed over rather than ending
-   * the walk.** A pin that differs from the session id leaves
-   * `--session-id <this.id>` in the fallback branch, so a resume that finds
-   * nothing collides there and the pane dies exactly as it did before this
-   * pinning existed. Pinning `this.id` renders the self-healing
-   * `--resume <id> || --session-id <id>`, which is correct whether or not a
-   * transcript exists, but a pane that has none pays for the shape twice:
-   * claude prints "No conversation found" into the scrollback of a session that
-   * is brand new, and `wrapWithNice()` prefixes only the FIRST branch of the
-   * rendered `a || b`, so the branch that actually runs loses its priority for
-   * the life of the session. Falling off the end of the walk therefore adds
-   * no pin (the options keep any launch seed they already carried), which is
-   * the right answer: with no transcript anywhere there is nothing for the
-   * bare `--session-id <this.id>` to collide with.
-   *
-   * The create route pre-validates a resume id for the same reason, though it
-   * additionally requires the transcript be substantial — here mere existence
-   * is the question, because a one-line transcript still makes `--session-id`
-   * collide.
-   *
-   * The registry shape is the last gate, not the CLI's name: an entry whose
-   * resume id is minted by the CLI itself (codex/pi/omp/grok) declares no
-   * `fallback` chain and reads its resume field from its own `<Mode>Config`.
-   *
-   * `reattachRemote()` deliberately does NOT call this. It re-runs the remote
-   * session command, which attaches to the durable remote tmux with the agent
-   * still inside it and renders no local `--session-id` to collide.
+  /** Ordered owner-bound candidates; the actual launch runtime decides presence. */
+  private _claudeLaunchCandidates(): readonly string[] | undefined {
+    if (getCli(this.mode)?.launch.resumeSelection !== 'claude-transcript') return undefined;
+    return [...new Set([this._claudeSessionChain.at(-1), this._resumeSessionId, this.id]
+      .filter((id): id is string => !!id))];
+  }
+
+  /** The stock profile never probes website HOME. Explicit legacy custom
+   * fallback profiles retain their existing local-only pinning behavior.
    */
   private async _buildRespawnPaneOptionsWithResumePin(): Promise<import('./mux-interface.js').RespawnPaneOptions> {
     const options = this._buildRespawnPaneOptions();
-    if (this._remote || this._docker) return options;
     const entry = getCli(this.mode);
+    // The current profile selects inside the actual runtime. Host HOME must not
+    // decide worker/remote absence, and no provider failure may select a new ID.
+    if (entry?.launch.resumeSelection === 'claude-transcript') return options;
+    if (this._remote || this._docker) return options;
     if (entry?.launch.chain !== 'fallback') return options;
 
     const resumeIdPattern = entry.launch.params?.resumeId;
@@ -2996,6 +2976,9 @@ export class Session extends EventEmitter {
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
+    if (this.mode === 'codex' && !this._remote && !this._docker) {
+      await applyCodexTurnSummaryHooks(this.workingDir);
+    }
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
@@ -3090,6 +3073,8 @@ export class Session extends EventEmitter {
     // AFTER the mux branch and would otherwise stomp the restored conversation
     // straight back to the launch id.
     let restoredConversation: string | undefined;
+    let runtimeSelectedLaunch = false;
+    let preserveRemoteConversation = false;
 
     // If mux wrapping is enabled, create or attach to a mux session
     if (this._useMux && this._mux) {
@@ -3118,6 +3103,7 @@ export class Session extends EventEmitter {
             deepSeekConfig: this._deepSeekConfig,
             ompConfig: this._ompConfig,
             resumeSessionId: this._resumeSessionId,
+            claudeResumeCandidates: this._claudeLaunchCandidates(),
             envOverrides: this._envOverrides,
             effort: this._effort,
             advisorModel: this._advisorModel,
@@ -3151,19 +3137,28 @@ export class Session extends EventEmitter {
         // the walk may have passed over a chain tail with no transcript behind it,
         // so the conversation is whatever the respawn actually resumed. Undefined
         // there means the pane launched unpinned, which the fallbacks below name.
-        const pinGovernsRespawn = respawnedDeadPane && getCli(this.mode)?.launch.chain === 'fallback';
+        const launch = getCli(this.mode)?.launch;
+        runtimeSelectedLaunch = !this._remote && launch?.resumeSelection === 'claude-transcript' &&
+          (respawnedDeadPane || !isRestored);
+        preserveRemoteConversation = !!this._remote && launch?.resumeSelection === 'claude-transcript' &&
+          this._claudeSessionIdIsFirstHand;
+        const pinGovernsRespawn = respawnedDeadPane && launch?.chain === 'fallback' && !launch.resumeSelection;
         restoredConversation = pinGovernsRespawn
           ? respawnedResumeId
           : isRestored
             ? this._claudeSessionChain[this._claudeSessionChain.length - 1]
             : undefined;
-        this._claudeSessionId =
-          restoredConversation ||
-          this._resumeSessionId ||
-          this._ompConfig?.resumeSessionId ||
-          this._codexConfig?.resumeSessionId ||
-          this._resumeAliasFromConfigs() ||
-          this.id;
+        // A hook may have arrived during create/respawn: never replace its ID
+        // with an archived candidate, nor turn a pending selection into a guess.
+        if (!runtimeSelectedLaunch && !preserveRemoteConversation && !this._claudeSessionIdPending) {
+          this._claudeSessionId =
+            restoredConversation ||
+            this._resumeSessionId ||
+            this._ompConfig?.resumeSessionId ||
+            this._codexConfig?.resumeSessionId ||
+            this._resumeAliasFromConfigs() ||
+            this.id;
+        }
 
         // For NEW mux sessions: wait for readiness then clean buffer
         // For RESTORED mux sessions: leave the buffer alone - client will fetch it on tab switch
@@ -3278,13 +3273,15 @@ export class Session extends EventEmitter {
     // attach the CLI never stopped and may have `/clear`ed before the restart,
     // so the launch id is a lie and the chain's tail is the live conversation.
     // It is empty on every other path, so those paths keep the alias chain.
-    this._claudeSessionId =
-      restoredConversation ||
-      this._resumeSessionId ||
-      this._ompConfig?.resumeSessionId ||
-      this._codexConfig?.resumeSessionId ||
-      this._resumeAliasFromConfigs() ||
-      this.id;
+    if (!runtimeSelectedLaunch && !preserveRemoteConversation && !this._claudeSessionIdPending) {
+      this._claudeSessionId =
+        restoredConversation ||
+        this._resumeSessionId ||
+        this._ompConfig?.resumeSessionId ||
+        this._codexConfig?.resumeSessionId ||
+        this._resumeAliasFromConfigs() ||
+        this.id;
+    }
 
     this._pid = this.ptyProcess.pid;
     console.log('[Session] Interactive PTY spawned with PID:', this._pid);
@@ -4430,7 +4427,7 @@ export class Session extends EventEmitter {
       // (e.g. /api/sessions/:id/last-response) can find the transcript file.
       const msgSessionId =
         ((msg as unknown as Record<string, unknown>).sessionId as string | undefined) ?? msg.session_id;
-      if (msgSessionId && msgSessionId !== this._claudeSessionId) {
+      if (msgSessionId && !this._claudeSessionIdPending && msgSessionId !== this._claudeSessionId) {
         this._claudeSessionId = msgSessionId;
       }
 

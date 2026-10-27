@@ -12,24 +12,60 @@
  */
 
 Object.assign(ReverieApp.prototype, {
-  async officePower(action) {
+  /** Explicit in-page confirmation; native confirm can be suppressed by embedded clients. */
+  _confirmOfficePower(action, message) {
+    if (this._officePowerDialog?.isConnected) return Promise.resolve(false);
+    const labels = { 'restart-website': 'Restart website', 'stop-laptops': 'Stop all laptops', shutdown: 'Shut down Reverie' };
+    if (!Object.hasOwn(labels, action)) return Promise.resolve(false);
+    return new Promise(resolve => {
+      const dialog = document.createElement('dialog');
+      dialog.className = 'ca-dialog ca-office-power-confirm';
+      dialog.setAttribute('role', 'alertdialog');
+      dialog.setAttribute('aria-labelledby', 'office-power-confirm-title');
+      dialog.setAttribute('aria-describedby', 'office-power-confirm-message');
+      dialog.style.margin = 'auto'; dialog.style.maxHeight = 'calc(100dvh - 32px)'; dialog.style.overflow = 'auto';
+      const heading = document.createElement('h2'); heading.id = 'office-power-confirm-title'; heading.textContent = labels[action] + '?';
+      const detail = document.createElement('p'); detail.id = 'office-power-confirm-message'; detail.className = 'ca-dialog-note'; detail.textContent = message;
+      const actions = document.createElement('div'); actions.className = 'ca-dialog-actions';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ca-btn'; cancel.textContent = 'Cancel'; cancel.autofocus = true;
+      const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'ca-btn is-primary' + (action === 'restart-website' ? '' : ' is-danger'); confirm.textContent = labels[action];
+      const previousFocus = document.activeElement;
+      let settled = false;
+      const finish = accepted => {
+        if (settled) return; settled = true;
+        if (this._officePowerDialog === dialog) this._officePowerDialog = null;
+        if (dialog.open) dialog.close(); dialog.remove();
+        if (previousFocus?.isConnected) previousFocus.focus?.();
+        resolve(accepted);
+      };
+      cancel.addEventListener('click', () => finish(false)); confirm.addEventListener('click', () => finish(true));
+      dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
+      dialog.addEventListener('close', () => finish(false));
+      actions.append(cancel, confirm); dialog.append(heading, detail, actions);
+      this._officePowerDialog = dialog; document.body.append(dialog);
+      try { dialog.showModal(); cancel.focus(); } catch { finish(false); }
+    });
+  },
+
+  async officePower(action, output = document.getElementById('officePowerResult')) {
     if (this._officePowerPending) return;
+    if (!['restart-website', 'stop-laptops', 'shutdown'].includes(action)) return;
     this._officePowerPending = true;
-    const output = document.getElementById('officePowerResult');
     const say = text => { if (output) { output.textContent = text; output.style.display = 'block'; } };
     try {
       const statusResponse = await this._api('/api/system/laptops');
       const status = await statusResponse.json();
-      if (!statusResponse.ok || !status.data?.available) { say('Laptop power controls are unavailable.'); return; }
+      if (!statusResponse.ok || status.success !== true || !status.data?.available) { say('Laptop power controls are unavailable.'); return; }
       const count = status.data.runningLaptops;
+      if (!Number.isSafeInteger(count) || count < 0) { say('Laptop power status is unavailable.'); return; }
       const message = action === 'restart-website'
         ? `Restart the website? ${count} laptop(s) will keep working and may continue using their plans. Chat will briefly go offline. Laptops stop after 10 minutes if the office API does not return.`
         : action === 'shutdown'
-          ? `Stop Reverie? All ${count} laptop(s) and agent CLIs will stop before the website shuts down. Files will be preserved. Restart Reverie from the host when you are ready.`
-          : `Stop all ${count} laptop(s) and agent CLIs? The website will stay open. Files will be preserved.`;
-      if (!window.confirm(message)) return;
+          ? `Stop Reverie? All ${count} laptop(s) and agent CLIs will stop before the website shuts down. Active work is interrupted without a fresh handoff. Saved conversations, memory and files will be preserved. Restart Reverie from the host when you are ready.`
+          : `Stop all ${count} laptop(s) and agent CLIs? Active work is interrupted without a fresh handoff. The website will stay open. Saved conversations, memory and files will be preserved.`;
+      if (!await this._confirmOfficePower(action, message)) { say('Cancelled. No power action was requested.'); return; }
       say('Applying office power action…');
-      const response = await this._api('/api/system/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true }) });
+      const response = await this._api('/api/system/' + action, { method: 'POST', body: { confirmed: true } });
       const result = await response.json();
       if (!response.ok || !result.success) { say(result.error || 'The power action failed.'); return; }
       say(action === 'shutdown' ? 'All laptops stopped. Reverie is shutting down.' : action === 'stop-laptops' ? 'All laptops stopped. The website is still open.' : 'Website restarting. Your agents are continuing on their laptops.');
@@ -1251,8 +1287,6 @@ Object.assign(ReverieApp.prototype, {
     if (!group) return;
     const me = window.__reverieUser || {};
     group.style.display = me.multiUser && me.role !== 'admin' ? 'none' : '';
-    const power = document.getElementById('laptopPowerGroup');
-    if (power) power.style.display = group.style.display;
   },
 
   /**

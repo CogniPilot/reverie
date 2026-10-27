@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""reverie-autoenv (prototype r1, Ada): build or check the cached dev env the shim loads.
+  reverie-autoenv build REPO [--from-json FILE]   write <cache>/<key>.env from `nix print-dev-env --json --offline REPO#ATTR`
+                                                  (or from FILE, for tests) for the repo's approved attr
+  reverie-autoenv key REPO                        print the key the shim would use (attr + flake.nix + flake.lock)
+Only variables of type "exported" are kept, minus a fixed deny list (HOME, TMPDIR, PWD, SHELL, TERM, USER and the like), so the
+env never redirects a caller's home or temp dir. Generic: the attr and command list come from the approved config only."""
+import fnmatch, hashlib, json, os, subprocess, sys
+
+DENY = {"HOME", "TMPDIR", "TMP", "TEMP", "TEMPDIR", "PWD", "OLDPWD", "SHELL", "TERM", "USER", "LOGNAME", "SHLVL", "BASH_ENV",
+        "NIX_BUILD_TOP", "NIX_LOG_FD", "out", "outputs", "builder", "buildPhase", "shellHook", "IN_NIX_SHELL"}
+cfg = os.environ.get("REVERIE_AUTOENV_CONFIG") or os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "reverie/autoenv/approved")
+cache = os.environ.get("REVERIE_AUTOENV_CACHE") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "reverie/autoenv")
+
+
+def approved(repo):
+    repo = os.path.realpath(repo)
+    for line in open(cfg):
+        f = line.split()
+        if f and not f[0].startswith("#") and fnmatch.fnmatchcase(repo, f[0]):
+            return f[1], f[2].split(",")
+    raise SystemExit(f"{repo} is not in {cfg}")
+
+
+def key(repo, attr):
+    h = hashlib.sha256((attr + "\n").encode())
+    for f in ("flake.nix", "flake.lock"):
+        p = os.path.join(repo, f)
+        if os.path.exists(p):
+            h.update(open(p, "rb").read())
+    return h.hexdigest()[:32]
+
+
+def main():
+    a = sys.argv[1:]
+    repo = os.path.realpath(a[1]); attr, cmds = approved(repo); k = key(repo, attr)
+    if a[0] == "key":
+        print(k); return
+    if "--from-json" in a:
+        doc = json.load(open(a[a.index("--from-json") + 1]))
+    else:
+        doc = json.loads(subprocess.run(["nix", "print-dev-env", "--json", "--offline", f"{repo}#{attr}"], check=True,
+                                        capture_output=True, text=True).stdout)
+    kv = [(n, v["value"]) for n, v in sorted(doc["variables"].items())
+          if v.get("type") == "exported" and n not in DENY and isinstance(v.get("value"), str) and "\0" not in v["value"]]
+    os.makedirs(cache, exist_ok=True)
+    tmp = os.path.join(cache, f".{k}.tmp"); open(tmp, "wb").write(b"".join(f"{n}={v}".encode() + b"\0" for n, v in kv))
+    os.replace(tmp, os.path.join(cache, k + ".env"))
+    json.dump({"repo": repo, "attr": attr, "commands": cmds, "key": k, "vars": [n for n, _ in kv]}, open(os.path.join(cache, k + ".json"), "w"), indent=1)
+    print(f"cached {repo} {attr} -> {k} ({len(kv)} vars)")
+
+
+main()

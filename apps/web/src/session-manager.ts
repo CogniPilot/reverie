@@ -26,6 +26,7 @@ import { EventEmitter } from 'node:events';
 import { Session } from './session.js';
 import { getStore } from './state-store.js';
 import { SessionState } from './types.js';
+import { restSessionMetadataFromRegistry, type RestSessionMetadata } from './rest-canonical-metadata.js';
 
 /**
  * Events emitted by SessionManager
@@ -219,6 +220,11 @@ export class SessionManager extends EventEmitter {
    */
   getSession(id: string): Session | undefined {
     return this.sessions.get(id);
+  }
+
+  /** In-memory identity scalars only. Never toState/output/pane/process/health or a FROZEN assertion. */
+  restSessionMetadata(id: string): RestSessionMetadata | undefined {
+    return restSessionMetadataFromRegistry(this.sessions, id);
   }
 
   /** Gets all active sessions. */

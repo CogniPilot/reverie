@@ -1,0 +1,2 @@
+# Preserve unified-diff context prefixes in the pinned upstream patch.
+nix/codex-observer/observer-r5.patch -whitespace

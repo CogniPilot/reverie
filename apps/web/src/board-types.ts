@@ -93,12 +93,18 @@ export const CardNoteFields = {
 export const PollNoteSchema = z.object({ ...CardNoteFields, updatedAt: ms, updatedBy: z.string().max(100) }).strict();
 export type PollNote = z.infer<typeof PollNoteSchema>;
 
+export const DecisionOptionsSchema = z.array(text(200)).min(2, 'Give at least two decision options (CLI: repeat --option)').max(10)
+  .refine(options => new Set(options.map(option => option.toLowerCase())).size === options.length, 'Decision options must be distinct');
+
 export const DecisionSchema = z
   .object({
     id,
     text: text(500),
     where: z.string().trim().max(200).default(''),
     ...CardNoteFields,
+    // Optional only for legacy stored/imported cards. New requests require choices.
+    options: DecisionOptionsSchema.optional(),
+    chosen: text(200).optional(),
     at: ms,
     clearedAt: ms.optional(),
     clearedBy: z.string().max(100).optional(),
@@ -183,6 +189,8 @@ export interface RosterRow {
 }
 
 export interface PlanBurn {
+  /** Latest actual five-hour reading. Percent of that provider window, not weekly points or token counts. */
+  fiveHour?: { used: number | null; reset: number | null; asOf: number | null; stale: boolean };
   /** Plan account id (for sign-in) and its subscription profile id; profileId is null for an account that exists only as an acct directory. */
   id: string;
   profileId: string | null;
@@ -243,6 +251,10 @@ export interface BoardPin {
 
 /** GET /api/board. */
 export interface BoardView extends BoardState {
+  /** Startup-only write availability; not persisted Board data or an authority grant. */
+  structuredDecisionWrites?: boolean;
+  /** Current authenticated caller; derived by the Board's actual write gates. */
+  capabilities?: import('./agent-capabilities.js').AgentCapabilities;
   built: number;
   timeZone: string;
   ownerName: string;

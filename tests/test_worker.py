@@ -70,6 +70,93 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.load(changed)
 
+    def test_noncanonical_absolute_mount_destinations_are_rejected_before_policy_checks(self):
+        for destination in [
+            '//reverie_workspace',
+            '//reverie_workspace/attachments/private-room',
+        ]:
+            changed = deepcopy(self.config)
+            changed['mounts'][0]['destination'] = destination
+            with self.subTest(destination=destination), self.assertRaisesRegex(ValueError, 'destination must be canonical'):
+                self.load(changed)
+
+    def test_shared_attachment_store_is_overlaid_after_the_workspace_bind(self):
+        workspace = self.root / 'shared-workspace'
+        marker = workspace / 'attachments' / 'synthetic-room' / 'synthetic-nonmember.txt'
+        marker.parent.mkdir(parents=True)
+        marker.write_text('synthetic only')
+        config = deepcopy(self.config)
+        config['mounts'] = [dict(source=str(workspace), destination='/reverie_workspace', readOnly=False)]
+
+        loaded = self.load(config)
+        _, _, args = create_args(loaded, SID, self.root/'home')
+        mounts = [args[i + 1] for i, value in enumerate(args[:-1]) if value == '--mount']
+        workspace_bind = 'type=bind,src=' + str(workspace) + ',dst=/reverie_workspace'
+        attachment_mask = 'type=tmpfs,dst=/reverie_workspace/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly'
+        self.assertTrue(marker.is_file())
+        self.assertIn(workspace_bind, mounts)
+        self.assertIn(attachment_mask, mounts)
+        self.assertLess(mounts.index(workspace_bind), mounts.index(attachment_mask))
+        self.assertFalse(any('src=' + str(workspace / 'attachments') in value for value in mounts))
+        worker_path = Path('/reverie_workspace/attachments/synthetic-room/synthetic-nonmember.txt')
+        visible = [
+            spec for spec in mounts
+            if worker_path.is_relative_to(Path(spec.split('dst=', 1)[1].split(',', 1)[0]))
+        ]
+        self.assertEqual(max(visible, key=lambda spec: len(Path(spec.split('dst=', 1)[1].split(',', 1)[0]).parts)), attachment_mask)
+
+    def test_worker_mounts_cannot_reexpose_shared_attachments_by_path_alias(self):
+        workspace = self.root / 'shared-workspace'
+        attachments = workspace / 'attachments'
+        (attachments / 'room').mkdir(parents=True)
+        base = deepcopy(self.config)
+        base['mounts'] = [dict(source=str(workspace), destination='/reverie_workspace', readOnly=False)]
+
+        for source, destination in [
+            (str(attachments), '/attachments-copy'),
+            (str(attachments / 'room'), '/room-copy'),
+            (str(workspace), '/workspace-alias'),
+            (str(self.root), '/broad-parent'),
+        ]:
+            changed = deepcopy(base)
+            changed['mounts'].append(dict(source=source, destination=destination, readOnly=True))
+            with self.subTest(source=source, destination=destination), self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+                self.load(changed)
+
+        alias = self.root / 'attachments-alias'
+        alias.symlink_to(attachments / 'room', target_is_directory=True)
+        changed = deepcopy(base)
+        changed['mounts'].append(dict(source=str(alias), destination='/room-symlink-alias', readOnly=True))
+        with self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+            self.load(changed)
+
+        outside = self.root / 'outside-room-data'
+        outside.mkdir()
+        (attachments / 'room-link').symlink_to(outside, target_is_directory=True)
+        changed = deepcopy(base)
+        changed['mounts'].append(dict(source=str(attachments / 'room-link'), destination='/room-link-alias', readOnly=True))
+        with self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+            self.load(changed)
+
+        changed = deepcopy(base)
+        changed['mounts'].append(dict(source=str(self.root / 'work'), destination='/reverie_workspace/attachments/room', readOnly=True))
+        with self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+            self.load(changed)
+
+    def test_workspace_attachment_root_must_exist_as_a_real_directory(self):
+        workspace = self.root / 'workspace-without-attachments'
+        workspace.mkdir()
+        config = deepcopy(self.config)
+        config['mounts'] = [dict(source=str(workspace), destination='/reverie_workspace', readOnly=False)]
+        with self.assertRaisesRegex(ValueError, 'existing directory'):
+            self.load(config)
+
+        outside = self.root / 'outside-attachments'
+        outside.mkdir()
+        (workspace / 'attachments').symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'real directory'):
+            self.load(config)
+
     def test_default_workers_borrow_cpu_and_memory_under_enforced_pool(self):
         name, digest, args = create_args(self.config, SID, self.root/'home')
         self.assertEqual(name, 'test-agent-' + SID)
@@ -123,12 +210,44 @@ class WorkerTests(unittest.TestCase):
                 journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other, 'phase': phase}]))
                 self.assertEqual(broker.allowed(SID), allowed)
                 self.assertTrue(broker.allowed(other))
+        # A supervisor can miss the transient stopping phase. The durable stop
+        # request survives startup, readiness and recovery failures, but is not
+        # authority to stop the currently bound employee or an unrelated laptop.
+        for phase in ('starting', 'checking', 'recovery-required'):
+            journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other,
+                                           'phase': phase, 'sourceStopRequested': True}]))
+            self.assertFalse(broker.allowed(SID))
+            self.assertTrue(broker.allowed(other))
+            self.assertTrue(broker.allowed('ffffffff-1111-2222-3333-444444444444'))
+        journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other,
+                                       'phase': 'creating', 'sourceStopRequested': 'true'}]))
+        self.assertTrue(broker.allowed(SID))
         journal.write_text(json.dumps([{'oldSession': other, 'newSession': SID, 'phase': 'failed'}]))
         self.assertFalse(broker.allowed(SID))
         # An explicit owner rebind is newer authority than an old failed record.
         company.write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': True}]}))
         self.assertTrue(broker.allowed(SID))
         self.assertTrue(broker.allowed('ffffffff-1111-2222-3333-444444444444'))
+
+    def test_plan_move_stop_request_requires_unaliased_owner_metadata(self):
+        broker = Broker(self.config)
+        (self.root/'company.json').write_text(json.dumps({'employees': []}))
+        journal = self.root/'plan-moves.json'
+        journal.write_text(json.dumps([{'oldSession': SID, 'phase': 'starting', 'sourceStopRequested': True}]))
+        journal.chmod(0o666)
+        with self.assertRaisesRegex(RuntimeError, 'Plan move state'):
+            broker.allowed(SID)
+        journal.chmod(0o600)
+        self.assertFalse(broker.allowed(SID))
+        alias = self.root/'journal-alias'
+        os.link(journal, alias)
+        with self.assertRaisesRegex(RuntimeError, 'Plan move state'):
+            broker.allowed(SID)
+        alias.unlink()
+        journal.rename(alias)
+        journal.symlink_to(alias)
+        with self.assertRaisesRegex(RuntimeError, 'Plan move state'):
+            broker.allowed(SID)
 
     def test_protocol_preserves_terminal_bytes_and_bounds_allocations(self):
         left, right = socket.socketpair()
@@ -162,7 +281,7 @@ class WorkerTests(unittest.TestCase):
                 if getattr(self, 'done', False): return b''
                 self.done = True; return b'{}'
         class Upstream:
-            def __init__(self, *args, **kwargs): pass
+            def __init__(self, *args, **kwargs): self.sock = None
             def request(self, method, path, body, headers): calls.append((method, path, body, headers))
             def getresponse(self): return Response()
             def close(self): pass
@@ -218,12 +337,15 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(broker.active)
 
     def test_reconnect_inventory_requires_live_owned_laptop_and_current_running_intent(self):
+        employee='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        (self.root/'company.json').write_text(json.dumps({'employees':[{'id':employee,'sessionId':SID,'desiredRunning':True}]}))
         broker = Broker(self.config)
         broker.laptops[SID] = 'test-agent-' + SID
-        home = Path(self.config['stateRoot']) / SID / 'home'
+        home = Path(self.config['stateRoot']) / 'employees' / employee / 'home'
         home.mkdir(parents=True)
         (home / '.reverie-launch').mkdir()
-        (home.parent / 'runtime.json').write_text(json.dumps({'exit': 'current.exit'}))
+        runtime=Path(self.config['stateRoot'])/SID;runtime.mkdir(mode=0o700)
+        (runtime / 'runtime.json').write_text(json.dumps({'exit': 'current.exit'}))
         item = {'Config': {'Labels': {'reverie.worker': 'test', 'reverie.session': SID}}, 'State': {'Running': True}}
         dead = False
         def engine(args, optional=False):
@@ -236,9 +358,9 @@ class WorkerTests(unittest.TestCase):
         item['Config']['Labels']['reverie.session'] = 'foreign'
         self.assertEqual(broker.control('status')['runningSessionIds'], [])
         item['Config']['Labels']['reverie.session'] = SID
-        (self.root / 'company.json').write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': False}]}))
+        (self.root / 'company.json').write_text(json.dumps({'employees': [{'id':employee,'sessionId': SID, 'desiredRunning': False}]}))
         self.assertEqual(broker.control('status')['runningSessionIds'], [])
-        (self.root / 'company.json').write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': True}]}))
+        (self.root / 'company.json').write_text(json.dumps({'employees': [{'id':employee,'sessionId': SID, 'desiredRunning': True}]}))
         (home / '.reverie-launch/current.exit').write_text('0')
         self.assertEqual(broker.control('status')['runningSessionIds'], [])
 

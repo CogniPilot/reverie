@@ -15,7 +15,7 @@ export function registerPlanRequestRoutes(
   ctx: Pick<AuthPort, 'authSessions'> & Pick<SessionPort, 'sessions'>,
   ownerAuth: Pick<OwnerAuthService, 'session'> | undefined,
   capture: (request: FastifyRequest) => PlanRequestExecution,
-  agentCapture?: (request: FastifyRequest, input: { employeeId: string; sessionId: string }) => PlanRequestExecution | undefined,
+  agentCapture?: (request: FastifyRequest, input: { employeeId: string; sessionId: string; purpose?: 'runtime-refresh' }) => PlanRequestExecution | undefined,
   selfCaller?: (request: FastifyRequest) => { sessionId: string; owner?: string } | undefined
 ): void {
   const failure = (reply: FastifyReply, error: unknown) => {
@@ -33,8 +33,9 @@ export function registerPlanRequestRoutes(
         )
       );
   };
-  const agentInput = z.object({ id: PlanRequestId, employeeId: PlanRequestId, sessionId: PlanRequestId, toAccount: PlanRequestId }).strict();
-  const agentExecution = (request: FastifyRequest, input: { employeeId: string; sessionId: string }) => {
+  const agentInput = z.object({ id: PlanRequestId, employeeId: PlanRequestId, sessionId: PlanRequestId, toAccount: PlanRequestId,
+    purpose: z.literal('runtime-refresh').optional() }).strict();
+  const agentExecution = (request: FastifyRequest, input: { employeeId: string; sessionId: string; purpose?: 'runtime-refresh' }) => {
     const execution = agentCapture?.(request, input);
     if (!execution?.authorized()) throw new PlanMoveError('This expert needs Move own plan or Manage team plans permission from the owner', 403);
     return execution;
@@ -60,7 +61,8 @@ export function registerPlanRequestRoutes(
       try {
         const id = PlanRequestId.parse(request.params.id), owner = ownerFor(request);
         const record = await requests.get(id, owner);
-        const execution = agentExecution(request, { employeeId: record.employeeId, sessionId: record.newSession ?? record.sessionId });
+        const execution = agentExecution(request, { employeeId: record.employeeId, sessionId: record.newSession ?? record.sessionId,
+          ...(record.purpose ? { purpose: record.purpose } : {}) });
         const data = action === 'cancel' ? await requests.cancel(id, owner)
           : action === 'reauthorize' ? await requests.reauthorize(id, owner, execution) : record;
         return { success: true, data };

@@ -3,6 +3,7 @@ let
   lib = pkgs.lib;
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
+  goalPythonFixture = lib.cleanSource (src + "/python/reverie");
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -19,13 +20,24 @@ let
     postPatch = ''
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
+      mkdir -p test/fixtures/recovery-ledger/reverie
+      cp ${src}/python/reverie/{__init__,resume_ledger,resume_ledger_rpc}.py test/fixtures/recovery-ledger/reverie/
+      # The web derivation is flattened to apps/web. Supply explicit trusted
+      # offline test sources; tests must not escape /build/source to find them.
+      mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
+      cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
+      cp ${src}/tests/__init__.py ${src}/tests/goal_private_fixture.py ${src}/tests/goal_broker_fixture.py test/fixtures/goal-source/tests/
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
     nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
-      npm test -- test/company-recover.test.ts test/routes/company-routes.test.ts \
+      npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
+        test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
+        test/rest-canonical-metadata.test.ts \
+        test/company-recover.test.ts test/routes/company-routes.test.ts \
+        test/cli-agent-chat-fetch.test.ts test/cli-agent-chat-stdin.test.ts test/cli-agent-chat-file.test.ts \
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-hierarchy.test.ts \
@@ -34,9 +46,22 @@ let
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
         test/service-installer.test.ts test/company-wake.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
+        test/goal-lifecycle.test.ts test/goal-lifecycle-transactions.test.ts test/goal-api-auth.test.ts \
+        test/goal-response-privacy.test.ts test/goal-successor-independent.test.ts \
+        test/goal-server-integration.test.ts test/goal-server-unavailable.test.ts test/goal-server-policy.test.ts \
+        test/goal-canonical-authority.test.ts \
+        test/goal-broker-auth.test.ts test/goal-nonce-store.test.ts test/goal-nonce-independent.test.ts test/goal-nonce-successor.test.ts \
+        test/cli-goal.test.ts test/goal-canonical-transport.test.ts test/goal-combined-server.test.ts test/goal-server-assembly.test.ts \
+        test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts test/goal-source-fixture.test.ts \
         test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
+        test/routes/status-page-auth.test.ts test/routes/status-page-routes.test.ts test/routes/html-view-routes.test.ts \
         test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
-        test/owner-auth-board-decisions.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
+        test/owner-auth-board-decisions.test.ts test/board-decision-options.test.ts test/board-decision-fallback-current.test.ts test/cli-board.test.ts test/routes/board-routes.test.ts \
+        test/board-decision-config.test.ts test/routes/system-routes-settings-partial-put.test.ts \
+        test/office-power-ui.test.ts test/company-lifecycle-fence.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
+        test/fixed-github-watch.test.ts test/fixed-watch-delivery.test.ts test/fixed-watch-server.test.ts \
+        test/routine-backup-recovery.test.ts test/routine-recovery-controls.test.ts \
+        test/cron-recovery-inflight.test.ts \
         test/owner-auth.test.ts test/owner-route-principals.test.ts test/routines-grants-owner.test.ts test/owner-setup-ui.test.ts \
         test/owner-name-onboarding.test.ts \
         test/account-login.test.ts test/chat-workspace-delete.test.ts \
@@ -44,7 +69,7 @@ let
         test/local-model-profile.test.ts test/routes/quick-start-custom-model.test.ts \
         test/plan-auth-status.test.ts test/plan-account-management.test.ts \
         test/subscription-profile-remove.test.ts test/subscription-profiles.test.ts \
-        test/cli-registry-spawn-golden.test.ts test/company-lifecycle-ui.test.ts test/company-voice-ui.test.ts \
+        test/cli-registry-spawn-golden.test.ts test/claude-launch-selection.test.ts test/claude-launch-attribution.test.ts test/company-lifecycle-ui.test.ts test/company-voice-ui.test.ts \
         test/employee-pronouns.test.ts test/routes/voice-speak-routes.test.ts \
         test/hands-free.test.ts test/car-hands-free.test.ts test/voice-chat.test.ts test/car-mode.test.ts \
         test/car-mode-team-voice.test.ts test/car-mode-member-voice.test.ts test/car-reply-voice.test.ts test/car-turn-link.test.ts \
@@ -54,20 +79,48 @@ let
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
         test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
-        test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
+        test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
+        test/session-health-provider.test.ts test/session-health-provider-routes.test.ts test/health-canonical-reader.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
-        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \
+        test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
-        test/member-menu.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
-        test/company-plans-navigation.test.ts test/company-plans-width.test.ts \
+        test/member-menu.test.ts test/menu-viewport.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
+        test/company-plans-navigation.test.ts test/company-plans-width.test.ts test/plan-five-hour-ui.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
+        test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
         test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
-        test/office-accounts.test.ts test/human-presence-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
+        test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
+      npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts
+      npm test -- test/file-preview-source-reader.test.ts test/file-preview-sources-ui.test.ts \
+        test/file-preview-worker-policy.test.ts test/workspace-preview-source.test.ts \
+        test/pdf-preview-terminal-state.test.ts test/pdf-preview-worker-cancellation.test.ts
+      npm test -- test/cli-help.test.ts test/cli-commands.test.ts test/chat-ui-controls.test.ts \
+        test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts \
+        test/github-watches-ui.test.ts test/office-footer-panel.test.ts
+      npm test -- test/board-permissions.test.ts test/owner-auth-board-decisions.test.ts \
+        test/publication-credentials.test.ts test/publication-routes.test.ts \
+        test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
+        test/company-board-permissions-ui.test.ts test/company-publication-ui.test.ts \
+        test/company-reporting-ui.test.ts test/company-core-context-ui.test.ts
+      NIX_REVERIE_TEST_ROOT_CUSTODY=1 npm test -- test/cli-agent-credentials.test.ts
+      npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts test/company-lifecycle-fence.test.ts
+      npm test -- test/assignment-status-watch.test.ts test/assignment-refused-reservation.test.ts test/public-issue-watch.test.ts \
+        test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts \
+        test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
+        test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
+      # The console owns this Python/Node composition check after its TS build.
+      # memoryPackage's Python discovery never depends on the console output.
+      PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
+        OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
+        OWNER_TERMINAL_TEST_DIST="$PWD/dist" \
+        OWNER_TERMINAL_TEST_CONNECTOR="$PWD/scripts/connect-owner-terminal.mjs" \
+        NIX_REVERIE_TEST_NODE_CUSTODY=1 \
+        python3 -B test/fixtures/owner-terminal/test_bridge.py
       runHook postCheck
     '';
     installPhase = ''
@@ -79,6 +132,7 @@ let
       # to load the compiled PTY module at runtime.
       find "$out/lib/reverie/node_modules" -path '*/node-pty/build/config.gypi' -delete
       makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
+        --prefix PATH : ${lib.getBin pkgs.util-linux}/bin \
         --add-flags "$out/lib/reverie/dist/index.js"
       runHook postInstall
     '';
@@ -95,15 +149,20 @@ let
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ])}/bin/python3 -m unittest discover -s tests -t .)
-      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
+      (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
-  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
+  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ps.pytest ]);
   kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
   hands = pkgs.writeShellApplication {
     name = "reverie-hands";
     runtimeInputs = [ memory ];
     text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
+  };
+  adminMemory = pkgs.writeShellApplication {
+    name = "reverie-admin-memory";
+    runtimeInputs = [ memory ];
+    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/memory_access.py "$@"'';
   };
   handsToolchain = pkgs.buildEnv {
     name = "reverie-hands-toolchain";
@@ -115,6 +174,9 @@ let
     mkdir -p "$out"
     cp ${src}/python/reverie/hands/laptop_tools.py "$out/laptop_tools.py"
     cp ${src}/python/reverie/hands/workspace_dispatch.py "$out/workspace_dispatch.py"
+    cp ${src}/python/reverie/hands/coding_telemetry.py "$out/coding_telemetry.py"
+    cp ${src}/python/reverie/hands/command_telemetry.py "$out/command_telemetry.py"
+    cp ${src}/python/reverie/hands/command_catalog.py "$out/command_catalog.py"
   '';
   handsTools = pkgs.writeShellApplication {
     name = "reverie-hands-tools";
@@ -146,9 +208,10 @@ let
   '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
+      pkgs.rustc pkgs.cargo pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
       pkgs.cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
   };
@@ -213,6 +276,7 @@ let
     ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
+    ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \

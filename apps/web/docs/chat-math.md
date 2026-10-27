@@ -21,9 +21,10 @@ mathematical LaTeX; this is not a full document or PDF editor. Math uses dollar
 delimiters, with at most 32 formulas and 4,096 characters per formula in a text run.
 Disabling the plugin restores ordinary chat and keeps unsent text unchanged.
 
-The parser, renderer safety settings and generated HTML sanitizer provide bounded,
-display-only math rendering. The plugin adds an opt-in lifecycle and
-source/edit/preview controls independently of other chat formatting. Renderer settings follow the primary
+The parser, renderer safety settings and generated HTML sanitizer reuse Mira's
+reviewed `chat-rendering-final-operator-composition-r1` packet. This plugin adds
+an opt-in lifecycle and source/edit/preview controls without enabling that packet's
+unrelated formatting changes. Renderer settings follow the primary
 [KaTeX options](https://katex.org/docs/options.html) and
 [security guidance](https://katex.org/docs/security.html): untrusted commands,
 bounded expansion and sizes, fresh macro state and a dedicated DOMPurify policy.

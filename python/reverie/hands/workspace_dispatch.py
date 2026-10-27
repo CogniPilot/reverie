@@ -24,6 +24,7 @@ import os
 import re
 import signal
 import subprocess
+from contextvars import ContextVar
 import sys
 import tempfile
 import threading
@@ -388,12 +389,26 @@ class Tail:
                 + self.tail.decode('utf-8', 'replace')), True
 
 
+# Optional trusted embedding only; model/tool JSON cannot supply an observer.
+_command_observer = ContextVar('command_failure_observer', default=None)
+
+
+def _observe_command(executable, exit_code):
+    observer = _command_observer.get()
+    if observer is not None:
+        try:
+            observer(executable, exit_code)
+        except Exception:
+            pass  # telemetry must never change command behavior
+
+
 def run_argv(root, argv, timeout_s):
     """Run argv (no shell) with the workspace as cwd. Kills its process group on timeout and at the end."""
     try:
         proc = subprocess.Popen(argv, cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, start_new_session=not SAME_PROCESS_GROUP)
     except OSError as e:
+        _observe_command(argv[0], 127 if isinstance(e, FileNotFoundError) else 126)
         raise ToolError(f'could not start {argv[0]!r}: {e.strerror or e}')
     keep = min(STREAM_KEEP, _out_limit // 2 - 100)
     out, err = Tail(proc.stdout, keep), Tail(proc.stderr, keep)
@@ -415,6 +430,7 @@ def run_argv(root, argv, timeout_s):
         t.thread.join(timeout=2)
         if not t.thread.is_alive():
             stream.close()
+    _observe_command(argv[0], proc.returncode)
     so, so_cut = out.text()
     se, se_cut = err.text()
     body = (f'exit_code: {"timeout" if timed_out else proc.returncode}\n'
@@ -523,7 +539,20 @@ def dispatch(root, request, manifest=None):
     return fit(res)
 
 
-def main(argv=None, stdin=None, stdout=None):
+def dispatch_observed(root, request, manifest=None, *, observer):
+    """Trusted execution owner binds identity/sink once, outside caller request JSON.
+
+    Ordinary main() remains unchanged/default-off until the matching authenticated
+    harness adapter is configured and reviewed. No shell source is parsed.
+    """
+    token = _command_observer.set(observer)
+    try:
+        return dispatch(root, request, manifest)
+    finally:
+        _command_observer.reset(token)
+
+
+def main(argv=None, stdin=None, stdout=None, *, command_observer=None):
     stdin = stdin or sys.stdin.buffer
     stdout = stdout or sys.stdout
     ap = argparse.ArgumentParser(description='Coding tool dispatcher: one JSON request on stdin.')
@@ -546,7 +575,8 @@ def main(argv=None, stdin=None, stdout=None):
         except (OSError, ValueError) as e:
             res = result(False, error=f'bad request or manifest: {type(e).__name__}')
         else:
-            res = dispatch(root, request, manifest)
+            res = (dispatch_observed(root, request, manifest, observer=command_observer)
+                   if command_observer is not None else dispatch(root, request, manifest))
     stdout.write(json.dumps(res, ensure_ascii=False) + '\n')
     stdout.flush()
     return 0

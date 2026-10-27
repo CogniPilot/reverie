@@ -6,9 +6,10 @@ import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import { ChatroomService, type ChatSessionLike } from '../src/chatroom-service.js';
 import { PlanMoves, type PlanMoveInput, type PlanMovePort } from '../src/plan-move.js';
+import { PlanMoveStore } from '../src/plan-move-store.js';
 import type { RuntimeRecipe } from '../src/expert-runtime-recipe.js';
 
-describe('plan move rollback using real company and chatroom persistence', () => {
+describe('plan move recovery using real company and chatroom persistence', () => {
   let directory: string;
   let chat: ChatroomService;
   let company: CompanyService;
@@ -55,8 +56,8 @@ describe('plan move rollback using real company and chatroom persistence', () =>
     await rm(directory, { recursive: true, force: true });
   });
 
-  it.each(['start', 'ready', 'audit'] as const)(
-    'restores identity, seats, coordinator role, DM and history after failed %s',
+  it.each(['start', 'ready', 'audit', 'beforeStop'] as const)(
+    'preserves identity, seats, coordinator role, DM and history at the correct recovery boundary after failed %s',
     async (failure) => {
       const employee = await company.hire({
         name: 'Casey',
@@ -67,6 +68,7 @@ describe('plan move rollback using real company and chatroom persistence', () =>
         researchEnabled: false,
       });
       await company.saveRuntimeRecipe('old', recipes.get('old')!);
+      await company.setDesiredRunning('old', true);
       const room = chat.createRoom('Workshop', undefined);
       chat.addMember(room.id, 'old', { role: 'coordinator', goal: 'Finish the task' });
       const dm = chat.openDm('old', undefined);
@@ -74,9 +76,11 @@ describe('plan move rollback using real company and chatroom persistence', () =>
         deliver: false,
       });
       const stopped: string[] = [];
+      const postStop = failure === 'start' || failure === 'ready';
+      const journal = new PlanMoveStore(join(directory, 'moves.json'));
       const port: PlanMovePort = {
-        load: async () => [],
-        save: async () => {},
+        load: () => journal.load(),
+        save: (records) => journal.save(records),
         snapshot: async () => ({ sessionId: 'old', name: employee.name, account: 'first', working: false }),
         idle: async () => {},
         create: async () => {
@@ -87,20 +91,25 @@ describe('plan move rollback using real company and chatroom persistence', () =>
           expect(panes.has('old')).toBe(true);
           return 'candidate';
         },
-        start: async () => {
+        start: vi.fn(async () => {
+          expect(panes.has('old')).toBe(false);
+          expect(stopped).toEqual(['old']);
+          expect((await journal.load())[0]).toMatchObject({ phase: 'starting', sourceStopRequested: true });
           if (failure === 'start') throw new Error('dead pane');
-        },
-        ready: async () => {
+        }),
+        ready: vi.fn(async () => {
+          expect(panes.has('old')).toBe(false);
           if (failure === 'ready') throw new Error('dead pane');
-        },
-        beforeStop: async () => {},
+        }),
+        beforeStop: async () => { if (failure === 'beforeStop') throw new Error('Owner authority expired before stop'); },
         binding: () => company.view().employees.find((person) => person.id === employee.id)?.sessionId,
         exists: (id) => panes.has(id),
-        rebind: async (id, sessionId, owner) => {
+        rebind: vi.fn(async (id, sessionId, owner) => {
           await company.rebind(id, owner, sessionId);
-        },
+        }),
         stop: async (id) => {
           stopped.push(id);
+          await company.setDesiredRunning(id, false);
           panes.delete(id);
           return [];
         },
@@ -117,22 +126,46 @@ describe('plan move rollback using real company and chatroom persistence', () =>
         handoff: 'Resume the task.',
       };
       await moves.begin(input);
-      await vi.waitFor(async () => expect((await moves.get('move'))?.phase).toBe('failed'));
-      expect(company.view().employees.map((person) => [person.id, person.sessionId])).toEqual([[employee.id, 'old']]);
+      const phase = postStop ? 'recovery-required' : 'failed';
+      await vi.waitFor(async () => expect((await moves.get('move'))?.phase).toBe(phase));
+      const current = postStop ? 'candidate' : 'old';
+      const retired = postStop ? 'old' : 'candidate';
+      expect(company.view().employees.map((person) => [person.id, person.sessionId])).toEqual([[employee.id, current]]);
       expect(chat.room(room.id)?.members).toMatchObject([
-        { sessionId: 'old', role: 'coordinator', goal: 'Finish the task' },
+        { sessionId: current, role: 'coordinator', goal: 'Finish the task' },
       ]);
-      expect(chat.room(dm.id)?.dm?.slice().sort()).toEqual(['old', 'user']);
-      expect(chat.room(dm.id)?.members.map((member) => member.sessionId)).toEqual(['old']);
-      expect(chat.isRetired('old')).toBe(false);
-      expect(chat.isRetired('candidate')).toBe(true);
-      expect(stopped).toEqual(['candidate']);
-      expect(panes.has('old')).toBe(true);
+      expect(chat.room(dm.id)?.dm?.slice().sort()).toEqual([current, 'user']);
+      expect(chat.room(dm.id)?.members.map((member) => member.sessionId)).toEqual([current]);
+      expect(chat.isRetired(current)).toBe(false);
+      expect(chat.isRetired(retired)).toBe(true);
+      expect(stopped).toEqual(postStop ? ['old', 'candidate'] : ['candidate']);
+      expect(panes.has('old')).toBe(!postStop);
+      expect(panes.has('candidate')).toBe(false);
       expect(chat.room(dm.id)?.messages.some((message) => message.id === original.id)).toBe(true);
       const persisted = new CompanyStore(join(directory, 'company.json'));
       await persisted.init();
-      expect(persisted.snapshot().employees[0].sessionId).toBe('old');
-      expect(persisted.snapshot().employees[0].runtimeRecipe).toEqual(recipes.get('old'));
+      expect(persisted.snapshot().employees[0].sessionId).toBe(current);
+      expect(persisted.snapshot().employees[0].runtimeRecipe).toEqual(recipes.get(current));
+      expect(persisted.snapshot().employees[0].desiredRunning).toBe(!postStop);
+      expect((await new PlanMoveStore(journal.file).load())[0]).toMatchObject({
+        phase, ...(postStop ? { sourceStopRequested: true } : {}),
+      });
+      if (postStop) {
+        expect(port.rebind).not.toHaveBeenCalled();
+        await expect(moves.begin({ ...input, id: 'unsafe-retry' })).rejects.toThrow('requiring recovery');
+      } else {
+        expect(port.start).not.toHaveBeenCalled();
+        expect(port.ready).not.toHaveBeenCalled();
+        expect(port.rebind).toHaveBeenCalledExactlyOnceWith(employee.id, 'old', undefined);
+        expect((await journal.load())[0].sourceStopRequested).toBeUndefined();
+      }
+      await chat.stop(); // Flush the real service's debounced private persistence before reopening it.
+      chat = new ChatroomService({ file: join(directory, 'rooms.json'), getSession: (id) => panes.get(id), broadcast: vi.fn() });
+      await chat.init();
+      chat.delivery.stop();
+      expect(chat.room(room.id)?.members).toMatchObject([{ sessionId: current, role: 'coordinator', goal: 'Finish the task' }]);
+      expect(chat.room(dm.id)?.dm?.slice().sort()).toEqual([current, 'user']);
+      expect(chat.room(dm.id)?.messages.some((message) => message.id === original.id)).toBe(true);
     }
   );
 

@@ -27,6 +27,17 @@ export const HANDBOOK_PAGES = [
   },
   { slug: 'laptops', title: 'Office laptops', summary: 'Where tools run, resource protection and host boundaries.' },
   {
+    slug: 'operations',
+    title: 'Capabilities, deployments and credentials',
+    summary:
+      'Check current grants, file Board requests, restart or deploy the website, and locate named GitHub credentials.',
+  },
+  {
+    slug: 'memory',
+    title: 'Channels and long-term memory',
+    summary: 'Read current channels, recall source-backed history and keep private and project memory separate.',
+  },
+  {
     slug: 'previews',
     title: 'Laptop previews',
     summary: 'Open agent web pages over HTTPS on separate secure addresses.',

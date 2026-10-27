@@ -4,15 +4,18 @@ import { randomUUID } from 'node:crypto';
 import { PlanRequestCapabilities, PlanRequestId } from './plan-request-capability.js';
 
 /** Request a move through the scoped company API; session creation remains private to the executor. */
-export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: string; employeeId?: string; id?: string }): Promise<number> {
+export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: string; employeeId?: string; id?: string; restart?: boolean }): Promise<number> {
   try {
     const response = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
     const company = response.json as { success?: boolean; data?: { employees?: { id: string; sessionId: string }[] } };
     const employee = company?.data?.employees?.find(item => input.employeeId ? item.id === input.employeeId : item.sessionId === deps.ctx.selfId);
     if (response.status >= 400 || !company.success || !employee) throw new Error('Unknown company expert');
+    if (input.restart && employee.sessionId !== deps.ctx.selfId)
+      throw new Error('A runtime refresh is only available for this exact expert');
     const id = PlanRequestId.parse(input.id ?? randomUUID());
     const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests', body: {
       id, employeeId: employee.id, sessionId: employee.sessionId, toAccount: PlanRequestId.parse(input.toAccount),
+      ...(input.restart ? { purpose: 'runtime-refresh' } : {}),
     } });
     const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
     if (result.status >= 400 || !body?.success) { deps.io.err('Plan move request refused. Check the destination ID and owner-granted plan permissions.'); return 1; }

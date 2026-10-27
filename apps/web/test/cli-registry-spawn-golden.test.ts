@@ -32,7 +32,10 @@ const SID = '00000008-0008-4000-8000-000000000008';
 function render(options: SpawnBridgeOptions): string | undefined {
   const entry = getCli(options.mode);
   if (!entry) throw new Error(`no registry entry for mode ${options.mode}`);
-  return buildSpawnCommandFromRegistry(entry, options);
+  // Keep literal provider-argv pins independent of the launch-time selector.
+  // Its actual single-provider execution is covered by claude-launch-selection.
+  const raw = { ...entry, launch: { ...entry.launch, resumeSelection: undefined } };
+  return buildSpawnCommandFromRegistry(raw, options);
 }
 
 /** Every claude case pins an explicit `claudeCliVersion` so the --name gate is deterministic. */
@@ -69,7 +72,7 @@ describe('claude', () => {
     );
   });
 
-  it('resumes through a shell fallback to a fresh session', () => {
+  it('retains the legacy custom fallback renderer when transcript selection is disabled', () => {
     // The ` || ` is emitted by the ENGINE, not by config — no registry field can hold shell
     // text. This pin is what proves the fallback chain still renders as one command line.
     expect(claude({ resumeSessionId: 'abc-123-def' })).toBe(

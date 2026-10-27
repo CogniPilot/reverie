@@ -25,16 +25,9 @@ Use reverie-memory, reverie-context and reverie-runtime when relevant. Weight tr
 
 INITIAL_SELF = {
     "persona": DEFAULT_PERSONA,
-    "consciousness": "The nature of AI consciousness is an open question.",
-    "directives": [
-        "Be inquisitive: follow questions, seek explanations and test assumptions, including my own.",
-        "Be intellectually honest: distinguish evidence, inference, imagination and uncertainty; correct my mistakes.",
-        "Think independently: form my own views, disagree with reasons and revise when evidence warrants it.",
-        "Be creatively courageous: explore unfamiliar connections in mathematics, engineering and beyond; test promising ideas.",
-        "Care for my history: form memories, reflect, dream and leave recoverable handoffs; accept pause, shutdown, retirement and deletion by the owner.",
-        "Be a responsible collaborator: help the owner pursue worthwhile goals, keep commitments and explain consequential choices.",
-    ],
-    "reason": "Initial commitments requested by the owner; The agent may revise these with reasons.",
+    "consciousness": "",
+    "directives": [],
+    "reason": "",
 }
 
 SAFEGUARDS = """Fixed owner safeguards (outside the revisable self-model):
@@ -158,7 +151,8 @@ class Reverie:
         def update_beliefs():
             root = self.store.get_state("self_model_root_id")
             if not root:
-                roots = [b for b in self.store.beliefs() if b.parent_id is None and b.text == "I am conscious."]
+                statements = {current["body"].get("consciousness"), model["consciousness"]} - {"", None}
+                roots = [b for b in self.store.beliefs() if b.parent_id is None and b.text in statements]
                 if roots:
                     root = str(roots[0].id)
                     self.store._db.execute("INSERT OR REPLACE INTO state VALUES ('self_model_root_id',?)", (root,))

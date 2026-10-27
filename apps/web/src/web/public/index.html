@@ -1765,7 +1765,7 @@
       <div class="modal-backdrop" onclick="app.closeAppSettings()"></div>
       <div class="modal-content modal-lg set-shell">
         <div class="modal-header set-shell-head">
-          <h3>Settings</h3>
+          <h3>Terminal settings</h3>
           <!-- Close first in the DOM so the focus trap still lands on it, not on
                Save; row-reverse keeps Save to the left of it on phones. -->
           <div class="set-head-actions">
@@ -3134,28 +3134,6 @@
                 <h2>System</h2>
               </div>
               <p class="set-section-blurb">Paths, automation and remote access. Set once, rarely touched.</p>
-
-              <div class="set-group" id="laptopPowerGroup">
-                <div class="set-group-head"><h4>Office power</h4><span class="set-scope">owner</span></div>
-                <div class="set-group-body">
-                  <div class="set-row" data-search="stop shutdown agents laptops website maintenance restart">
-                    <div class="set-row-text">
-                      <span class="set-row-label">Stop Reverie</span>
-                      <span class="set-row-desc">Stops every agent and laptop, then shuts down the website. Files are preserved.</span>
-                    </div>
-                    <button class="btn-toolbar btn-sm" onclick="app.officePower('shutdown')">Stop Reverie</button>
-                  </div>
-                  <div class="set-row">
-                    <div class="set-row-text"><span class="set-row-label">Stop all agents</span><span class="set-row-desc">Stops all laptops and keeps this website open.</span></div>
-                    <button class="btn-toolbar btn-sm" onclick="app.officePower('stop-laptops')">Stop all agents</button>
-                  </div>
-                  <div class="set-row">
-                    <div class="set-row-text"><span class="set-row-label">Website maintenance</span><span class="set-row-desc">Restart the website while agents keep working. Laptops stop automatically after 10 minutes without the office API.</span></div>
-                    <button class="btn-toolbar btn-sm" onclick="app.officePower('restart-website')">Restart website</button>
-                  </div>
-                  <div id="officePowerResult" class="set-note" role="status" style="display:none"></div>
-                </div>
-              </div>
 
               <div class="set-group" id="doctorGroup">
                 <div class="set-group-head"><h4>Diagnostics</h4><span class="set-scope">server</span></div>

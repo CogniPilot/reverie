@@ -108,25 +108,21 @@ describe('buildDockerLaunchCommand', () => {
     expect(cmd).toContain("sh -lc '");
   });
 
-  it('pins a deterministic conversation id with a reboot-surviving fallback (fresh launch)', () => {
+  it('selects the deterministic existing transcript before execution in the container', () => {
     const cmd = buildDockerLaunchCommand(launchOpts());
-    // --session-id first (fresh start), || --resume so a container stop/reboot
-    // relaunch of the SAME session resumes instead of dead-paning on
-    // "Session ID already in use".
-    expect(cmd).toContain(
-      'claude --dangerously-skip-permissions --session-id 1a2b3c4d5e6f || ' +
-        'claude --dangerously-skip-permissions --resume 1a2b3c4d5e6f'
-    );
-    // exec is stripped from the claude pane command — an exec'd first branch could never fall back.
+    expect(cmd).toContain('claude --dangerously-skip-permissions --session-id 1a2b3c4d5e6f');
+    expect(cmd).toContain('claude --dangerously-skip-permissions --resume 1a2b3c4d5e6f');
+    expect(cmd).toContain('exec python3 -I -c');
+    expect(cmd).not.toContain('--session-id 1a2b3c4d5e6f || claude');
     expect(cmd).not.toContain('exec claude');
   });
 
-  it('resumes an explicit id with a --session-id fallback (stale id never dead-panes)', () => {
+  it('keeps an explicit resume candidate ahead of the fresh SID metadata check', () => {
     const withResume = buildDockerLaunchCommand(launchOpts({ resumeSessionId: 'abc-123-def' }));
-    expect(withResume).toContain(
-      'claude --dangerously-skip-permissions --resume abc-123-def || ' +
-        'claude --dangerously-skip-permissions --session-id 1a2b3c4d5e6f'
-    );
+    expect(withResume).toContain('claude --dangerously-skip-permissions --resume abc-123-def');
+    expect(withResume).toContain('claude --dangerously-skip-permissions --session-id 1a2b3c4d5e6f');
+    expect(withResume).not.toContain('--resume abc-123-def || claude');
+    expect(withResume.indexOf('--resume abc-123-def')).toBeLessThan(withResume.indexOf('--resume 1a2b3c4d5e6f'));
   });
 
   it('uses codex resume syntax and drops an unsafe resume id', () => {

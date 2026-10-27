@@ -36,3 +36,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+The optional `codexObserver` Nix candidate fetches OpenAI Codex 0.163.0 at
+commit `83086188ae0614bd882818ff1aa23f3194962012` from
+https://github.com/openai/codex under Apache-2.0. The exact observer patch,
+source checksum and locked dependency provenance are retained under
+`nix/codex-observer/`; its package retains the upstream LICENSE and any NOTICE.
+This optional candidate is separate from the default provider CLI installer.

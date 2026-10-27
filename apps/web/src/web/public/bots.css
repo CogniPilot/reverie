@@ -134,6 +134,29 @@ a:focus-visible {
   display: grid;
   gap: 10px;
 }
+#github-watch-section {
+  margin-bottom: 28px;
+}
+#watch-status {
+  min-height: 24px;
+  color: #b2bbca;
+}
+#watch-form .github-watch-events {
+  display: grid;
+  gap: 8px;
+}
+#watch-form .github-watch-events .check {
+  margin: 0;
+}
+#github-watches .github-watch-detail {
+  font-size: 13px;
+}
+#github-watches .github-watch-error {
+  color: #ffb1a9;
+}
+#watch-dialog [hidden] {
+  display: none;
+}
 .bot-icon-row {
   display: flex;
   align-items: center;
@@ -314,6 +337,9 @@ fieldset {
   .toolbar select,
   .toolbar button {
     width: 100%;
+  }
+  .toolbar #new-watch {
+    white-space: normal;
   }
   .check {
     min-height: 44px;

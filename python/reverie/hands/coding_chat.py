@@ -3,7 +3,9 @@ import math
 import os
 import re
 import time
+import urllib.parse
 from types import SimpleNamespace
+from pathlib import Path
 
 from coding_tasks import ARGUMENT_CHARS, TOOL_NAMES, Limits, control_request, interrupt_requests, permitted_sender
 from coding_tokens import TokenMeter
@@ -55,6 +57,8 @@ def validate_settings(settings):
     for key in ('root', 'tool_schema_file'):
         if not isinstance(settings.get(key), str) or not os.path.isabs(settings[key]):
             raise ValueError('coding needs an explicit ' + key)
+    if type(settings.get('failure_telemetry', False)) is not bool:
+        raise ValueError('invalid failure telemetry flag')
     argv = settings.get('runner_argv')
     if (not isinstance(argv, list) or not argv or not isinstance(argv[0], str) or not os.path.isabs(argv[0]) or
             any(not isinstance(part, str) or not part for part in argv)):
@@ -79,12 +83,48 @@ def validate_settings(settings):
                 raise ValueError('invalid coding task scope')
         if type(task.get('enabled', True)) is not bool:
             raise ValueError('invalid task enabled flag')
+        if type(task.get('office_access', False)) is not bool:
+            raise ValueError('invalid task office access flag')
     if settings.get('web_search', False) is not False:
         raise ValueError('proxied coding web search adapter is not connected yet')
     if settings.get('token_meter') is not None:
         if not isinstance(settings['token_meter'], dict):
             raise ValueError('invalid token meter configuration')
         TokenMeter(**settings['token_meter'])
+
+def office_environment(cfg, task_id):
+    """Only an explicitly enabled task gets its own loopback phone identity, never API/model passwords."""
+    task = cfg['coding']['tasks'][task_id]
+    if not task.get('office_access', False):return {}
+    url = os.environ.get('REVERIE_API_URL', '')
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.username or parsed.password or
+                parsed.path not in ('', '/') or parsed.query or parsed.fragment or not parsed.port or not 1 <= parsed.port <= 65535):
+            raise ValueError()
+    except ValueError:
+        raise ValueError('The configured local office relay is unavailable') from None
+    session = cfg['self_session_id']
+    if not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', session):
+        raise ValueError('Invalid scoped office identity')
+    from config_location import configuration_path
+    selected = configuration_path(os.environ, session)
+    if cfg.get('_config_path') and Path(cfg['_config_path']).resolve() != selected:
+        raise ValueError('The task configuration differs from the launcher selection')
+    return {'REVERIE_SCOPED_OFFICE': '1', 'REVERIE_MUX': '1', 'REVERIE_SESSION_ID': session,
+            'REVERIE_API_URL': url.rstrip('/'), 'REVERIE_AGENT_HOME': os.environ.get('REVERIE_AGENT_HOME') or os.path.expanduser('~'),
+            'REVERIE_DATA_DIR': str(selected.parents[2])}
+
+
+def source_identity(message):
+    """Immutable request fields; derived read-time authority is checked separately."""
+    sender = message.get('from')
+    if (not isinstance(sender, dict) or not isinstance(message.get('id'), str) or
+            not message['id'] or not isinstance(message.get('roomId'), str) or
+            not isinstance(message.get('text'), str)):
+        raise ValueError('invalid canonical coding source')
+    return {**{key: message.get(key) for key in ('id', 'roomId', 'text', 'at')},
+            'from': {key: value for key, value in sender.items() if key != 'authenticatedOwner'}}
 
 
 def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
@@ -113,17 +153,32 @@ def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
                 lease.get('mode') not in ('silent', 'ring', 'vibrate') or
                 type(lease.get('until')) not in (int, float) or not math.isfinite(lease['until'])):
             return 'authorization_unavailable'
-        cached = SimpleNamespace(member_alert=lambda *args: view)
-        if not loop.alert_allows(cfg, cached, room, message):
-            return 'silent'
         if check_cancel:
             for candidate in chat.read(room, cfg['history_n']):
+                if candidate.get('phoneWake') is False:
+                    continue
                 if candidate.get('at', 0) <= message.get('at', 0):
                     continue
                 control = control_request(candidate)
                 if (control and control['action'] == 'cancel' and control['task_id'] == task_id and
                         permitted_sender(current, room, task_id, candidate)):
                     return 'cancelled'
+        # Finish remote metadata preflight before reading current request authority.
+        # No cached owner grant may survive revocation during those slower calls.
+        fresh = chat.exact_message(room, message['id'])
+        if source_identity(fresh) != source_identity(message) or fresh['roomId'] != room:
+            return 'revoked'
+        current = read_json(cfg['_config_path']).get('coding') if cfg.get('_config_path') else settings
+        validate_settings(current)
+        if current != settings or not permitted_sender(current, room, task_id, fresh):
+            return 'revoked'
+        if type(fresh.get('phoneWake')) is not bool:
+            return 'authorization_unavailable'
+        if not fresh['phoneWake']:
+            return 'silent'
+        cached = SimpleNamespace(member_alert=lambda *args: view)
+        if not loop.alert_allows(cfg, cached, room, fresh):
+            return 'silent'
         return None
     except Exception:
         return 'authorization_unavailable'

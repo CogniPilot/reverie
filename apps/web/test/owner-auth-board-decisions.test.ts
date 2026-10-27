@@ -18,6 +18,8 @@ import { registerBoardRoutes } from '../src/web/routes/board-routes.js';
 import { BoardStore } from '../src/board-store.js';
 import type { ChatRoom } from '../src/chatroom-store.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
+import type { BoardPermissionFlags } from '../src/board-permissions.js';
+import type { BoardState } from '../src/board-types.js';
 
 const COORD = '0000002d-0035-4000-8000-000000000047';
 const ORDINARY = '00000038-0043-4000-8000-000000000060';
@@ -31,9 +33,39 @@ describe('owner middleware: exact board decision add and clear', () => {
   let rooms: ChatRoom[];
   let serviceToken: string;
   let ownerToken: string;
+  let ownPlanPermissions: { moveOwnPlan: boolean; managePlans: boolean };
   let audit: Record<string, unknown>[];
+  let boardPermissions: Record<string, BoardPermissionFlags>;
+  let afterAudit: (() => void | Promise<void>) | undefined;
+  let ordinaryBinding: string;
+
+  it('reports current effective decision access through the same caller and coordinator gate, without a write', async () => {
+    const read = async (session: string) => (await app.inject({ url: '/api/board', headers: { 'x-reverie-parent-session': session } })).json().data.capabilities;
+    expect(await read(COORD)).toMatchObject({ identity: { sessionId: COORD, employeeId: 'e-coord' }, board: { createDecision: true } });
+    expect(await read(ORDINARY)).toMatchObject({ board: { createDecision: false } });
+    expect(await read(FORGED)).toMatchObject({ board: { createDecision: false } });
+    rooms[0]!.members.find(member => member.sessionId === COORD)!.role = 'agent';
+    expect(await read(COORD)).toMatchObject({ board: { createDecision: false } });
+    expect(audit).toEqual([]);expect(board.snapshot().decisions).toEqual([]);
+  });
+
+  it('reports manager-only own-plan admission and narrow Board operations through real gates', async () => {
+    ownPlanPermissions.managePlans=true;
+    const response=await app.inject({url:'/api/board',headers:{'x-reverie-parent-session':COORD}});
+    expect(response.json().data.capabilities).toMatchObject({board:{read:true,fileIssue:true,createDecision:true,clearDecision:true,manageBoard:true},
+      company:{moveOwnPlan:true,managePlans:true,planPreconditions:expect.stringContaining('Grant admission only')}});
+    ownPlanPermissions.managePlans=false;
+    expect((await app.inject({url:'/api/board',headers:{'x-reverie-parent-session':COORD}})).json().data.capabilities.company.moveOwnPlan).toBe(false);
+    boardPermissions[COORD] = { manageBoard: false };
+    for(const url of ['/api/board/import','/api/board/milestones','/api/board/blockers'])
+      expect((await app.inject({method:'POST',url,headers:{'x-reverie-parent-session':COORD},payload:{}})).statusCode).toBe(403);
+  });
 
   beforeEach(async () => {
+    boardPermissions = {};
+    ordinaryBinding = ORDINARY;
+    afterAudit = undefined;
+    ownPlanPermissions = { moveOwnPlan: false, managePlans: false };
     dir = await mkdtemp(join(tmpdir(), 'board-decision-access-'));
     const store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
     const { oneTimePassword } = await bootstrap(store, 'synthetic-owner');
@@ -73,19 +105,21 @@ describe('owner middleware: exact board decision add and clear', () => {
     });
     registerOwnerRoutes(app, service, false);
     registerBoardRoutes(app, { sessions } as unknown as SessionPort, {
+      structuredDecisionWrites: true,
       verifiedOwner: ownerVerifier({ service, ctx: { sessions } as unknown as SessionPort }),
       store: board,
       rooms: () => rooms,
       company: () => ({
         settings: { ownerName: 'Synthetic Owner', timeZone: 'UTC' },
         employees: [
-          { id: 'e-coord', name: 'Coordinator', sessionId: COORD },
-          { id: 'e-ordinary', name: 'Ordinary CTO', position: 'CTO', sessionId: ORDINARY },
-          { id: 'e-forged', name: 'Forged coordinator', sessionId: FORGED },
+          { id: 'e-coord', name: 'Coordinator', sessionId: COORD, permissions: { ...ownPlanPermissions, ...boardPermissions[COORD] } },
+          { id: 'e-ordinary', name: 'Ordinary CTO', position: 'CTO', sessionId: ordinaryBinding, permissions: boardPermissions[ORDINARY] },
+          { id: 'e-forged', name: 'Forged coordinator', sessionId: FORGED, permissions: boardPermissions[FORGED] },
         ],
       }),
       audit: async (entry) => {
         audit.push(entry);
+        await afterAudit?.();
       },
     });
     await app.ready();
@@ -114,18 +148,114 @@ describe('owner middleware: exact board decision add and clear', () => {
   const post = (url: string, headers: Record<string, string>, payload: object = {}) =>
     app.inject({ method: 'POST', url, headers, payload });
 
-  it('opens precisely add and clear, leaving annotation, blockers, import and execution owner-only', () => {
+  it('opens decision creation, annotation and dismissal while keeping choice and execution owner-only', () => {
     for (const route of ['/api/board/decisions', '/api/board/decisions/:id/clear'])
       expect(classify('POST', route, route)).toBe('agent');
+    expect(classify('PATCH', '/api/board/decisions/:id', '/api/board/decisions/:id')).toBe('agent');
     for (const [method, route] of [
-      ['PATCH', '/api/board/decisions/:id'],
+      ['POST', '/api/board/decisions/:id/choose'],
       ['DELETE', '/api/board/decisions/:id'],
       ['POST', '/api/board/decisions/:id/execute'],
       ['POST', '/api/board/decisions/:id/delegate'],
-      ['POST', '/api/board/blockers'],
-      ['POST', '/api/board/import'],
     ])
       expect(classify(method, route, route)).toBe('owner');
+    for (const route of ['/api/board/blockers', '/api/board/import', '/api/board/milestones'])
+      expect(classify('POST', route, route)).toBe('agent');
+  });
+
+  it('explicit false revokes all coordinator Board writes while reads and owner choices remain separate', async () => {
+    boardPermissions[COORD] = { editBoardIssues: false, manageBoard: false, manageDecisions: false };
+    const headers = asAgent(COORD);
+    const cap = (await app.inject({ url: '/api/board', headers })).json().data.capabilities.board;
+    expect(cap).toMatchObject({ fileIssue: false, editBoardIssues: false, manageBoard: false, createDecision: false, clearDecision: false });
+    for (const [url, payload] of [
+      ['/api/board/issues', { title: 'Denied' }], ['/api/board/wins', { text: 'Denied' }],
+      ['/api/board/milestones', { title: 'Denied', due: '2026-10-30' }],
+      ['/api/board/decisions', { text: 'Denied', options: ['Yes', 'No'] }],
+    ] as const) expect((await post(url, headers, payload)).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PUT', url: '/api/board/agents/e-coord', headers, payload: { focus: 'Denied' } })).statusCode).toBe(403);
+    expect(board.snapshot().rev).toBe(0);
+    expect(audit).toEqual([]);
+  });
+
+  it('grants planning and basic work independently of decisions, titles and owner-only choices', async () => {
+    boardPermissions[ORDINARY] = { editBoardIssues: false, manageBoard: true, manageDecisions: false };
+    const headers = asAgent(ORDINARY);
+    expect((await post('/api/board/issues', headers, { title: 'Planned', owner: 'e-coord', status: 'todo' })).statusCode).toBe(200);
+    expect((await post('/api/board/milestones', headers, { title: 'Milestone', due: '2026-10-30' })).statusCode).toBe(200);
+    expect((await post('/api/board/decisions', headers, { text: 'Denied decision', options: ['Yes', 'No'] })).statusCode).toBe(403);
+    expect((await post('/api/board/decisions/no/choose', headers, { option: 'Yes' })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PUT', url: '/api/company/employees/e-ordinary', headers, payload: { permissions: { manageDecisions: true } } })).statusCode).toBe(403);
+    boardPermissions[ORDINARY] = { editBoardIssues: false, manageBoard: false, manageDecisions: true };
+    expect((await post('/api/board/decisions', headers, { id: 'explicit', text: 'Granted', options: ['Yes', 'No'] })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'PATCH', url: '/api/board/decisions/explicit', headers, payload: { summary: 'Reviewed', options: ['Approve', 'Hold'] } })).statusCode).toBe(200);
+    expect((await post('/api/board/decisions/explicit/choose', headers, { option: 'Approve' })).statusCode).toBe(403);
+    expect((await post('/api/board/decisions/explicit/clear', headers)).statusCode).toBe(200);
+    expect((await post('/api/board/issues', headers, { title: 'No basic grant' })).statusCode).toBe(403);
+    expect((await post('/api/board/milestones', headers, { title: 'Denied', due: '2026-10-30' })).statusCode).toBe(403);
+  });
+
+  it('keeps legacy basic writes but refuses unknown employees and service-token Board mutations', async () => {
+    const headers = asAgent(ORDINARY);
+    const created = await post('/api/board/issues', headers, { title: 'Triage', owner: 'e-ordinary', status: 'todo' });
+    expect(created.statusCode).toBe(200);
+    expect(created.json().data.item.status).toBe('triage');
+    expect((await app.inject({ method: 'PATCH', url: '/api/board/issues/' + created.json().data.item.id, headers, payload: { title: 'Own edit' } })).statusCode).toBe(200);
+    boardPermissions[ORDINARY] = { editBoardIssues: false };
+    expect((await app.inject({ method: 'PATCH', url: '/api/board/issues/' + created.json().data.item.id, headers, payload: { title: 'Revoked edit' } })).statusCode).toBe(403);
+    ordinaryBinding = 'different-current-session';
+    expect((await post('/api/board/issues', headers, { title: 'Stale session' })).statusCode).toBe(403);
+    for (const url of ['/api/board/issues', '/api/board/milestones', '/api/board/decisions'])
+      expect((await post(url, { [SERVICE_HEADER]: serviceToken, ...asAgent(COORD) }, {})).statusCode).toBe(403);
+  });
+
+  it('rechecks a revoked grant after waiting in the real Board mutation queue', async () => {
+    boardPermissions[ORDINARY] = { manageBoard: true };
+    let release!: () => void;
+    let holding!: () => void;
+    const ready = new Promise<void>(resolve => { holding = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const first = board.update({ beforeSave: async () => { holding(); await gate; } }, () => undefined);
+    await ready;
+    let enqueued!: () => void;
+    const queued = new Promise<void>(resolve => { enqueued = resolve; });
+    const original = board.update.bind(board);
+    board.update = <T>(options: Parameters<BoardStore['update']>[0], mutate: (state: BoardState) => T) => {
+      enqueued(); return original(options, mutate);
+    };
+    const request = post('/api/board/milestones', asAgent(ORDINARY), { title: 'Revoked while queued', due: '2026-10-30' });
+    void request.then(() => undefined);
+    await queued;
+    boardPermissions[ORDINARY] = { manageBoard: false };
+    release(); await first;
+    expect((await request).statusCode).toBe(403);
+    expect(board.snapshot().milestones).toEqual([]);
+    expect(audit).toEqual([]);
+  });
+
+  it('rechecks grant and canonical session after async audit before committing', async () => {
+    boardPermissions[ORDINARY] = { manageBoard: true };
+    afterAudit = () => { boardPermissions[ORDINARY] = { manageBoard: false }; };
+    expect((await post('/api/board/milestones', asAgent(ORDINARY), { title: 'Revoked during audit', due: '2026-10-30' })).statusCode).toBe(403);
+    expect(board.snapshot().milestones).toEqual([]);
+    expect(board.snapshot().rev).toBe(0);
+    boardPermissions[ORDINARY] = { manageDecisions: true };
+    afterAudit = () => { ordinaryBinding = 'different-current-session'; };
+    expect((await post('/api/board/decisions', asAgent(ORDINARY), { text: 'Stale during audit', options: ['Yes', 'No'] })).statusCode).toBe(403);
+    expect(board.snapshot().decisions).toEqual([]);
+  });
+
+  it('decision preparation keeps current poll-room membership even for explicitly granted employees', async () => {
+    boardPermissions[ORDINARY] = { manageDecisions: true };
+    rooms[0]!.messages.push({ id: 'poll', at: 1, text: 'Question', from: { kind: 'agent', sessionId: COORD },
+      poll: { question: 'Question', options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }], votes: {} } } as never);
+    const request = () => app.inject({ method: 'PUT', url: '/api/board/polls/synthetic-room/poll/note', headers: asAgent(ORDINARY), payload: { summary: 'A permitted note' } });
+    expect((await request()).statusCode).toBe(200);
+    const before = board.snapshot();
+    afterAudit = () => { rooms[0]!.members = rooms[0]!.members.filter(member => member.sessionId !== ORDINARY); };
+    expect((await request()).statusCode).toBe(403);
+    expect(board.snapshot()).toEqual(before);
+    expect((await request()).statusCode).toBe(403);
   });
 
   it('an exact owner-appointed coordinator reads, adds and clears a decision with attributed audit', async () => {
@@ -133,6 +263,7 @@ describe('owner middleware: exact board decision add and clear', () => {
     const added = await post('/api/board/decisions', asAgent(COORD), {
       id: 'd-coord',
       text: 'Synthetic owner question',
+      options: ['Approve', 'Hold'],
     });
     expect(added.statusCode).toBe(200);
     expect((await post('/api/board/decisions/d-coord/clear', asAgent(COORD))).statusCode).toBe(200);
@@ -145,7 +276,7 @@ describe('owner middleware: exact board decision add and clear', () => {
 
   it('ordinary agents, agent-made coordinator seats and session prefixes cannot add or clear', async () => {
     expect(
-      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question' })).statusCode
+      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question', options: ['Approve', 'Hold'] })).statusCode
     ).toBe(200);
     for (const id of [ORDINARY, FORGED, COORD.slice(0, 8)]) {
       expect((await post('/api/board/decisions', asAgent(id), { text: 'Refused synthetic question' })).statusCode).toBe(
@@ -156,6 +287,20 @@ describe('owner middleware: exact board decision add and clear', () => {
     expect(board.snapshot().decisions).toHaveLength(1);
     expect(board.snapshot().decisions[0].clearedAt).toBeUndefined();
     expect(audit).toHaveLength(1);
+  });
+
+  it('a coordinator can repair choices but cannot choose for the owner through middleware', async () => {
+    expect((await post('/api/board/decisions', asAgent(COORD), { id: 'options', text: 'Question?', options: ['Proceed', 'Hold'] })).statusCode).toBe(200);
+    const repaired = await app.inject({ method: 'PATCH', url: '/api/board/decisions/options', headers: asAgent(COORD), payload: { options: ['Approve', 'Hold', 'Reject'], recommendation: { option: 'Hold' } } });
+    expect(repaired.statusCode).toBe(200);
+    expect((await post('/api/board/decisions/options/choose', asAgent(COORD), { option: 'Approve' })).statusCode).toBe(403);
+    expect(board.snapshot().decisions[0].chosen).toBeUndefined();
+    expect(board.snapshot().decisions[0].recommendation).toMatchObject({ option: 'Hold', by: 'Coordinator' });
+    const chosen = await app.inject({ method: 'POST', url: '/api/board/decisions/options/choose', cookies: { [OWNER_COOKIE]: ownerToken }, headers: { origin: 'http://localhost' }, payload: { option: 'Hold' } });
+    expect(chosen.statusCode).toBe(200);
+    expect(board.snapshot().decisions[0]).toMatchObject({ chosen: 'Hold', clearedBy: 'owner' });
+    expect((await app.inject({ method: 'PATCH', url: '/api/board/decisions/options', headers: asAgent(COORD), payload: { chosen: 'Approve' } })).statusCode).toBe(400);
+    expect(board.snapshot().decisions[0].chosen).toBe('Hold');
   });
 
   it('a coordinator seat in an archived room grants no write authority', async () => {
@@ -169,7 +314,7 @@ describe('owner middleware: exact board decision add and clear', () => {
 
   it('an authenticated service cannot become a headerless owner or borrow a coordinator header', async () => {
     expect(
-      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question' })).statusCode
+      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question', options: ['Approve', 'Hold'] })).statusCode
     ).toBe(200);
     for (const headers of [{ [SERVICE_HEADER]: serviceToken }, { [SERVICE_HEADER]: serviceToken, ...asAgent(COORD) }]) {
       expect((await post('/api/board/decisions', headers, { text: 'Refused service question' })).statusCode).toBe(403);
@@ -191,7 +336,7 @@ describe('owner middleware: exact board decision add and clear', () => {
           ...request,
           method: 'POST',
           url: '/api/board/decisions',
-          payload: { id: 'd-owner', text: 'Synthetic owner decision' },
+          payload: { id: 'd-owner', text: 'Synthetic owner decision', options: ['Approve', 'Hold'] },
         })
       ).statusCode
     ).toBe(200);

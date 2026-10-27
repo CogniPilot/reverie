@@ -14,7 +14,8 @@ import https from 'node:https';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
-import { dataPath } from './config/instance.js';
+import { dataPath, configuredDataDir } from './config/instance.js';
+import { registerHelpCommands } from './cli-help.js';
 import { readReverieCredentials } from './reverie-credentials.js';
 import { casePath } from './config/cases-dir.js';
 import { assertValidBasePath } from './config/base-path.js';
@@ -38,7 +39,7 @@ import { getStore } from './state-store.js';
 import { getErrorMessage } from './types.js';
 import { DOCUMENT_ATTACHMENT_EXTENSIONS, isSupportedAttachmentExtension } from './attachment-registry.js';
 import { daemonStatus, startDaemon, stopDaemon, type WebLaunchOptions } from './daemon-control.js';
-import { installService, serviceStatus, uninstallService } from './service-installer.js';
+import { installService, serviceStatus, uninstallService, controlService, serviceLogs } from './service-installer.js';
 import { isLoopbackBindHost, isUnauthenticatedNetworkAcknowledged } from './web/network-auth-policy.js';
 import { confirm, heading, isInteractive, kv, palette, rule, tint, withSpinner, type Tone } from './cli-style.js';
 import type { ToolResult } from './utils/dependency-checker.js';
@@ -121,7 +122,7 @@ program
 // ============ Skill Commands ============
 
 /** Same registry the server resolves case names through (mirrors `case-routes.ts`). */
-const LINKED_CASES_FILE = dataPath('linked-cases.json');
+const LINKED_CASES_FILE = join(configuredDataDir(), 'linked-cases.json');
 /** Graceful shutdown budget before the process force-exits (see the SIGTERM handler). */
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
 
@@ -345,7 +346,12 @@ program
   )
   .action(async (options: { url?: string; allowAnySession?: boolean; chat?: boolean }) => {
     await runMcpStdio(
-      resolveMcpConfig({ url: options.url, allowAnySession: options.allowAnySession, chat: options.chat, version: pkg.version })
+      resolveMcpConfig({
+        url: options.url,
+        allowAnySession: options.allowAnySession,
+        chat: options.chat,
+        version: pkg.version,
+      })
     );
     process.exit(0);
   });
@@ -952,6 +958,8 @@ function addWebLaunchOptions(cmd: Command): Command {
       process.env.REVERIE_BASE_URL || '/'
     )
     .option('--title-hostname <hostname>', 'Override the hostname shown in the browser title')
+    .option('--goal-private-config <path>', 'Explicit operator-private Goal bootstrap (absent means unavailable)')
+    .option('--service-auth-config <path>', 'Explicit tracked service authentication config (absent means unavailable)')
     .option(
       '--allow-unauthenticated-network',
       'Allow non-loopback web access without REVERIE_PASSWORD (dangerous; terminal control is exposed)'
@@ -971,6 +979,8 @@ function toWebLaunchOptions(options: {
   titleHostname?: string;
   allowUnauthenticatedNetwork?: boolean;
   multiuser?: boolean;
+  goalPrivateConfig?: string;
+  serviceAuthConfig?: string;
 }): WebLaunchOptions {
   const port = parseInt(options.port, 10);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -992,6 +1002,8 @@ function toWebLaunchOptions(options: {
     titleHostname: options.titleHostname,
     allowUnauthenticatedNetwork: !!options.allowUnauthenticatedNetwork,
     multiuser: !!options.multiuser,
+    ...(options.goalPrivateConfig === undefined ? {} : { goalPrivateConfig: options.goalPrivateConfig }),
+    ...(options.serviceAuthConfig === undefined ? {} : { serviceAuthConfig: options.serviceAuthConfig }),
   };
 }
 
@@ -1072,12 +1084,10 @@ webCmd.action(async (options) => {
     process.exit(1);
   }
 
-  const { startWebServer } = await import('./web/server.js');
+  const { startConfiguredWebServer } = await import('./goal-web-launch.js');
   const host = launch.host;
   const port = launch.port;
   const https = launch.https;
-  const titleHostname = options.titleHostname;
-  const allowUnauthenticatedNetwork = launch.allowUnauthenticatedNetwork ?? false;
   const basePath = launch.basePath ?? '';
   // Single source of truth for subsystems that read it directly (e.g. renderers).
   if (basePath) process.env.REVERIE_BASE_URL = basePath;
@@ -1092,7 +1102,7 @@ webCmd.action(async (options) => {
   {
     // The server prints its own "running at" line (it also covers the daemon and
     // service launch paths), so this one used to be a duplicate of it.
-    const server = await startWebOrExit(() => startWebServer(port, https, false, host, titleHostname, allowUnauthenticatedNetwork, basePath));
+    const server = await startWebOrExit(() => startConfiguredWebServer(launch));
     if (https) {
       console.log(palette.warn('  Note: Accept the self-signed certificate in your browser on first visit'));
     }
@@ -1130,7 +1140,10 @@ webCmd.action(async (options) => {
  * check, a port in use) must end the process non-zero, so the supervisor counts it as a failed start.
  * The exit is injectable so this is tested without ending the test runner.
  */
-export async function startWebOrExit<T>(start: () => Promise<T>, exit: (code: number) => never = process.exit): Promise<T> {
+export async function startWebOrExit<T>(
+  start: () => Promise<T>,
+  exit: (code: number) => never = process.exit
+): Promise<T> {
   try {
     return await start();
   } catch (err) {
@@ -1144,6 +1157,20 @@ export async function startWebOrExit<T>(start: () => Promise<T>, exit: (code: nu
 const serviceCmd = program
   .command('service')
   .description('Manage the background service (systemd user unit on Linux, LaunchAgent on macOS)');
+
+for (const action of ['start', 'stop'] as const) {
+  serviceCmd.command(action).description(`${action} the installed native website service; preserve employee intent`).action(() => {
+    const result = controlService(action);
+    console.log(result.message);
+    if (!result.ok) process.exitCode = 1;
+  });
+}
+serviceCmd.command('logs').description('Read bounded native website service logs')
+  .option('--lines <count>', 'Log lines, 1..1000', '100').action((options) => {
+    const result = serviceLogs(Number(options.lines));
+    console.log(result.message);
+    if (!result.ok) process.exitCode = 1;
+  });
 
 addWebLaunchOptions(
   serviceCmd.command('install').description('Install and start the service, then verify it answers')
@@ -1292,7 +1319,10 @@ ownerCmd
   .action((options: { username: string; force?: boolean; enforce?: boolean }) =>
     ownerAction(async () => {
       const { bootstrap } = await import('./owner-auth/admin.js');
-      const result = await bootstrap(await ownerStore(), options.username, { force: !!options.force, enforce: !!options.enforce });
+      const result = await bootstrap(await ownerStore(), options.username, {
+        force: !!options.force,
+        enforce: !!options.enforce,
+      });
       printOneTime(result.username, result.oneTimePassword);
       if (options.enforce) console.log('Owner policy: enforce');
     })
@@ -1340,14 +1370,19 @@ ownerCmd
   );
 ownerCmd
   .command('policy <mode>')
-  .description('off (no checks), log (allow, record what enforce would refuse), enforce (refused while it would lock you out)')
+  .description(
+    'off (no checks), log (allow, record what enforce would refuse), enforce (refused while it would lock you out)'
+  )
   .option('--force-lockout-risk', 'turn enforce on although the checks fail (audited)')
   .action((mode: string, opts: { forceLockoutRisk?: boolean }) =>
     ownerAction(async () => {
       const { setPolicy } = await import('./owner-auth/admin.js');
-      const { audited } = await setPolicy(await ownerStore(), mode as 'off' | 'log' | 'enforce', { forceLockoutRisk: !!opts.forceLockoutRisk });
+      const { audited } = await setPolicy(await ownerStore(), mode as 'off' | 'log' | 'enforce', {
+        forceLockoutRisk: !!opts.forceLockoutRisk,
+      });
       console.log(`Owner policy: ${mode}`);
-      if (!audited) console.error('Warning: the audit line for this change could not be written (owner-auth-audit.jsonl).');
+      if (!audited)
+        console.error('Warning: the audit line for this change could not be written (owner-auth-audit.jsonl).');
     })
   );
 ownerCmd
@@ -1368,7 +1403,8 @@ ownerCmd
       const { issueServiceToken, revokeServiceToken, OwnerAdminError } = await import('./owner-auth/admin.js');
       const store = await ownerStore();
       if (action === 'issue') console.log(await issueServiceToken(store, name));
-      else if (action === 'revoke') console.log((await revokeServiceToken(store, name)) ? 'Revoked.' : 'No such service.');
+      else if (action === 'revoke')
+        console.log((await revokeServiceToken(store, name)) ? 'Revoked.' : 'No such service.');
       else throw new OwnerAdminError('Use issue or revoke');
     })
   );
@@ -1576,5 +1612,7 @@ program
     }
     process.exit(computeExitCode(results));
   });
+
+registerHelpCommands(program);
 
 export { program };

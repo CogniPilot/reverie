@@ -23,12 +23,21 @@ describe('planPace', () => {
       ],
       now,
     });
+    expect(p.fiveHourReset).toBe(now + 2 * H);
     expect(p.weekStart).toBe(START);
     expect(p.elapsed).toBe(50);
     expect(p.pace).toBe(-20);
     expect(p.burnPerHour).toBe(1);
     expect(p.projected).toBe(30 + 84); // 84 h left at 1 %/h
     expect(p.recommendation).toBe('push');
+  });
+
+  it('retains only actual five-hour reset metadata and does not derive five-hour history from weekly samples', () => {
+    const now = START + H;
+    for (const resetAt of [RESET, RESET / 1000, new Date(RESET).toISOString()]) {
+      expect(planPace({ signedIn: true, fiveHour: { usedPercentage: 0, resetAt }, now })).toMatchObject({ fiveHour: 0, fiveHourReset: RESET });
+    }
+    expect(planPace({ signedIn: true, sevenDay: { usedPercentage: 60, resetAt: RESET }, now }).fiveHourReset).toBeNull();
   });
 
   it('accepts reset times in epoch seconds or ISO text', () => {

@@ -5,10 +5,10 @@
  * cannot supply one, and the mark survives save/load and room history. Synthetic fixtures only.
  * Port: N/A (app.inject(); a loopback fake for the voice service).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -26,6 +26,8 @@ import { OWNER_COOKIE, registerOwnerPolicy } from '../../src/owner-auth/policy.j
 import { ownerVerifier } from '../../src/owner-auth/marks.js';
 import * as admin from '../../src/owner-auth/admin.js';
 import type { SessionPort } from '../../src/web/ports/session-port.js';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const USER = 'owner-test';
 const NEW_PASSWORD = 'synthetic-correct-horse-42';
@@ -73,7 +75,8 @@ describe('chatroom owner marks', () => {
       registerOwnerRoutes(fastify, auth, false);
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {} });
       const verifiedOwner = ownerVerifier(deps);
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(join(dir, 'files')), verifiedOwner);
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(join(dir, 'files')), verifiedOwner,
+        undefined, undefined, { messageOwner: id => auth.isMessageOwner(id) });
       registerVoiceTurnRoutes(fastify, service, { serviceUrl: () => base, diagDir: () => join(dir, 'diag'), verifiedOwner, replyWaitMs: 2000 });
     });
     app = harness.app;
@@ -115,6 +118,8 @@ describe('chatroom owner marks', () => {
   }
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     await service.stop();
     await app.close();
     await new Promise((r) => upstream.close(r));
@@ -134,6 +139,80 @@ describe('chatroom owner marks', () => {
     return res.json().data.message;
   };
   const markOf = (m: ChatMessage) => (m.from as { mark?: string }).mark;
+
+  it('carries server-verified owner authority through exact/history reads to the real coding gate', async () => {
+    const posted = sent(await post({ cookie: owner }));
+    const headers = { 'x-reverie-parent-session': ALPHA };
+    const exact = await app.inject({ url: `/api/chatrooms/${roomId}/messages/${posted.id}`, headers });
+    expect(exact.statusCode).toBe(200);
+    const message = exact.json().data.message;
+    expect(message.from.authenticatedOwner).toBe(true);
+    const history = await app.inject({ url: `/api/chatrooms/${roomId}/messages`, headers });
+    expect(history.json().data.messages.find((m: ChatMessage) => m.id === posted.id).from.authenticatedOwner).toBe(true);
+    expect(service.room(roomId)!.messages.find(m => m.id === posted.id)!.from).not.toHaveProperty('authenticatedOwner');
+    const python = spawnSync('python3', ['-I', '-c',
+      'import json,sys; sys.path.insert(0,sys.argv[1]); from coding_tasks import permitted_sender; m=json.load(sys.stdin); print(json.dumps(permitted_sender({"tasks":{"workspace":{"rooms":[m["roomId"]]}}},m["roomId"],"workspace",m)))',
+      fileURLToPath(new URL('../../../../python/reverie/hands', import.meta.url))],
+      { input: JSON.stringify(message), encoding: 'utf8', timeout: 5000 });
+    expect(python.status, python.stderr).toBe(0);
+    expect(JSON.parse(python.stdout)).toBe(true);
+  });
+
+  it('never turns an unmarked, limited-human or agent message into owner authority', async () => {
+    expect((await post({ payload: { authenticatedOwner: true, mark: 'owner_typed' } })).statusCode).toBe(403);
+    const unsigned = service.post(roomId, { kind: 'user', name: 'Owner' }, 'legacy unmarked request', 'all', { deliver: false });
+    const limited = service.post(roomId, { kind: 'human', name: 'Owner', humanId: 'limited', access: 'limited' }, 'request', 'all', { deliver: false });
+    expect((await post({ cookie: owner, agent: ALPHA, payload: { authenticatedOwner: true, mark: 'owner_typed' } })).statusCode).toBe(400);
+    const agent = sent(await post({ cookie: owner, agent: ALPHA }));
+    for (const item of [unsigned, limited, agent]) {
+      const response = await app.inject({ url: `/api/chatrooms/${roomId}/messages/${item.id}`,
+        headers: { 'x-reverie-parent-session': ALPHA } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data.message.from.authenticatedOwner).toBe(false);
+    }
+  });
+
+  it.each(['disabled', 'invalid'])('withholds owner coding evidence for host value %s on both scoped reads without consulting owner authority or changing chat', async (selection) => {
+    const posted = sent(await post({ cookie: owner }));
+    const headers = { 'x-reverie-parent-session': ALPHA };
+    const url = `/api/chatrooms/${roomId}/messages/${posted.id}`;
+    const before = (await app.inject({ url, headers })).json().data.message;
+    expect(before.from.authenticatedOwner).toBe(true);
+    const lookup = vi.spyOn(auth, 'isMessageOwner');
+    vi.stubEnv('REVERIE_OWNER_CODING_EVIDENCE', selection);
+    const exact = await app.inject({ url, headers });
+    expect(exact.statusCode).toBe(200);
+    const message = exact.json().data.message;
+    expect(message.from.authenticatedOwner).toBe(false);
+    expect(message.phoneWake).toBe(before.phoneWake);
+    expect(message.text).toBe(before.text);
+    expect(message.from.mark).toBe('owner_typed');
+    const history = await app.inject({ url: `/api/chatrooms/${roomId}/messages`, headers });
+    expect(history.statusCode).toBe(200);
+    expect(history.json().data.messages.find((m: ChatMessage) => m.id === posted.id).from.authenticatedOwner).toBe(false);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(service.room(roomId)!.messages.find(m => m.id === posted.id)!.from).not.toHaveProperty('authenticatedOwner');
+    vi.stubEnv('REVERIE_OWNER_CODING_EVIDENCE', 'enabled');
+    expect((await app.inject({ url, headers })).json().data.message.from.authenticatedOwner).toBe(true);
+  });
+
+  it('does not grant coding authority from a cached account when its current file is corrupt', async () => {
+    const posted = sent(await post({ cookie: owner }));
+    const headers = { 'x-reverie-parent-session': ALPHA };
+    expect((await app.inject({ url: `/api/chatrooms/${roomId}/messages/${posted.id}`, headers })).json().data.message.from.authenticatedOwner).toBe(true);
+    await writeFile(join(dir, 'owner-auth.json'), '{');
+    expect((await app.inject({ url: `/api/chatrooms/${roomId}/messages/${posted.id}`, headers })).json().data.message.from.authenticatedOwner).toBe(false);
+  });
+
+  it('rechecks owner authority when reading a request after a password reset', async () => {
+    const posted = sent(await post({ cookie: owner }));
+    const headers = { 'x-reverie-parent-session': ALPHA };
+    expect((await app.inject({ url: `/api/chatrooms/${roomId}/messages/${posted.id}`, headers })).json().data.message.from.authenticatedOwner).toBe(true);
+    await restrictedSession();
+    expect((await app.inject({ url: `/api/chatrooms/${roomId}/messages/${posted.id}`, headers })).json().data.message.from.authenticatedOwner).toBe(false);
+    const history = await app.inject({ url: `/api/chatrooms/${roomId}/messages`, headers });
+    expect(history.json().data.messages.find((m: ChatMessage) => m.id === posted.id).from.authenticatedOwner).toBe(false);
+  });
 
   it('marks a verified owner post owner_typed, in history and after save/load', async () => {
     const message = sent(await post({ cookie: owner }));

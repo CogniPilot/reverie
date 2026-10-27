@@ -63,7 +63,11 @@ describe('managed Codex workspace trust', () => {
     expect(options.codexTrustWorkspace).toBe(cwd);
     expect(buildSpawnCommand(options)).toContain('--config ' + codexTrustArgument(cwd));
     expect(buildSpawnCommand(options)).toContain('--dangerously-bypass-approvals-and-sandbox');
-    expect(await fs.readdir(dir)).toEqual([]);
+    expect(await fs.readdir(dir)).toEqual(['.codex']);
+    expect(await fs.readdir(join(dir, '.codex'))).toEqual(['hooks.json']);
+    const hooks = JSON.parse(await fs.readFile(join(dir, '.codex', 'hooks.json'), 'utf8'));
+    expect(hooks.hooks.UserPromptSubmit).toBeInstanceOf(Array);
+    expect(JSON.stringify(hooks)).not.toContain('trust_level');
   });
   it('preserves an explicit restricted Codex runtime without adding trust or bypass', async () => {
     const mux = new TmuxManager(); const create = vi.spyOn(mux, 'createSession');

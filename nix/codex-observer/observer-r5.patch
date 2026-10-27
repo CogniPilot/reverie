@@ -1,0 +1,2876 @@
+--- a/codex-rs/Cargo.lock
++++ b/codex-rs/Cargo.lock
+@@ -276,7 +276,7 @@
+ 
+ [[package]]
+ name = "app_test_support"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1895,7 +1895,7 @@
+ 
+ [[package]]
+ name = "codex-agent-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -1907,7 +1907,7 @@
+ 
+ [[package]]
+ name = "codex-agent-graph-store"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-state",
+@@ -1922,7 +1922,7 @@
+ 
+ [[package]]
+ name = "codex-agent-identity"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1942,7 +1942,7 @@
+ 
+ [[package]]
+ name = "codex-agent-message-board-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -1965,7 +1965,7 @@
+ 
+ [[package]]
+ name = "codex-agent-message-board-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "caseless",
+@@ -1988,7 +1988,7 @@
+ 
+ [[package]]
+ name = "codex-agent-roles"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-config",
+  "codex-file-system",
+@@ -2001,7 +2001,7 @@
+ 
+ [[package]]
+ name = "codex-analytics"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-app-server-protocol",
+  "codex-git-utils",
+@@ -2024,7 +2024,7 @@
+ 
+ [[package]]
+ name = "codex-ansi-escape"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "ansi-to-tui",
+  "pretty_assertions",
+@@ -2035,7 +2035,7 @@
+ 
+ [[package]]
+ name = "codex-api"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "assert_matches",
+@@ -2073,7 +2073,7 @@
+ 
+ [[package]]
+ name = "codex-app-server"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2187,7 +2187,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-app-server",
+  "codex-app-server-protocol",
+@@ -2214,7 +2214,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-daemon"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "blake3",
+@@ -2240,7 +2240,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-protocol"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-app-server-protocol-noop-macros",
+@@ -2274,11 +2274,11 @@
+ 
+ [[package]]
+ name = "codex-app-server-protocol-noop-macros"
+-version = "0.0.0"
++version = "0.163.0"
+ 
+ [[package]]
+ name = "codex-app-server-test-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2300,7 +2300,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-transport"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "axum",
+  "base64 0.22.1",
+@@ -2342,7 +2342,7 @@
+ 
+ [[package]]
+ name = "codex-apply-patch"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -2362,7 +2362,7 @@
+ 
+ [[package]]
+ name = "codex-arg0"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-apply-patch",
+@@ -2385,7 +2385,7 @@
+ 
+ [[package]]
+ name = "codex-async-utils"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "rand 0.9.3",
+@@ -2395,7 +2395,7 @@
+ 
+ [[package]]
+ name = "codex-attachment-store"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "serde",
+@@ -2405,7 +2405,7 @@
+ 
+ [[package]]
+ name = "codex-aws-auth"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "aws-config",
+  "aws-credential-types",
+@@ -2431,7 +2431,7 @@
+ 
+ [[package]]
+ name = "codex-backend-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-api",
+@@ -2451,7 +2451,7 @@
+ 
+ [[package]]
+ name = "codex-backend-openapi-models"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "serde",
+  "serde_json",
+@@ -2460,7 +2460,7 @@
+ 
+ [[package]]
+ name = "codex-build-info"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-install-context",
+  "pretty_assertions",
+@@ -2473,7 +2473,7 @@
+ 
+ [[package]]
+ name = "codex-bwrap"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "cc",
+  "libc",
+@@ -2482,7 +2482,7 @@
+ 
+ [[package]]
+ name = "codex-chatgpt"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2504,7 +2504,7 @@
+ 
+ [[package]]
+ name = "codex-cli"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2606,7 +2606,7 @@
+ 
+ [[package]]
+ name = "codex-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-http-client",
+  "eventsource-stream",
+@@ -2620,7 +2620,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "async-stream",
+@@ -2644,7 +2644,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-config"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -2670,7 +2670,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2703,7 +2703,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2718,7 +2718,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks-mock-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "chrono",
+  "codex-cloud-tasks-client",
+@@ -2727,7 +2727,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-code-mode-protocol",
+  "codex-http-client",
+@@ -2751,7 +2751,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-host"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -2780,7 +2780,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-protocol"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "glob",
+@@ -2798,7 +2798,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-runtime"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-code-mode-protocol",
+@@ -2816,11 +2816,11 @@
+ 
+ [[package]]
+ name = "codex-collaboration-mode-templates"
+-version = "0.0.0"
++version = "0.163.0"
+ 
+ [[package]]
+ name = "codex-config"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -2870,7 +2870,7 @@
+ 
+ [[package]]
+ name = "codex-config-schema"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2879,7 +2879,7 @@
+ 
+ [[package]]
+ name = "codex-connectors"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -2901,7 +2901,7 @@
+ 
+ [[package]]
+ name = "codex-connectors-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-connectors",
+  "codex-core-plugins",
+@@ -2915,7 +2915,7 @@
+ 
+ [[package]]
+ name = "codex-context-fragments"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -2925,7 +2925,7 @@
+ 
+ [[package]]
+ name = "codex-core"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3038,6 +3038,7 @@
+  "rmcp",
+  "serde",
+  "serde_json",
++ "sha2 0.10.9",
+  "serial_test",
+  "sha1 0.10.6",
+  "shlex",
+@@ -3069,7 +3070,7 @@
+ 
+ [[package]]
+ name = "codex-core-api"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-analytics",
+  "codex-app-server-protocol",
+@@ -3092,7 +3093,7 @@
+ 
+ [[package]]
+ name = "codex-core-plugin-common"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "semver",
+@@ -3103,7 +3104,7 @@
+ 
+ [[package]]
+ name = "codex-core-plugins"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3160,7 +3161,7 @@
+ 
+ [[package]]
+ name = "codex-diagnostics"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -3168,7 +3169,7 @@
+ 
+ [[package]]
+ name = "codex-exec"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -3221,7 +3222,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3293,7 +3294,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-protocol"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-file-system",
+@@ -3310,7 +3311,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-test-support"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-exec-server",
+@@ -3325,7 +3326,7 @@
+ 
+ [[package]]
+ name = "codex-execpolicy"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3343,7 +3344,7 @@
+ 
+ [[package]]
+ name = "codex-experimental-api-macros"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -3352,7 +3353,7 @@
+ 
+ [[package]]
+ name = "codex-extension-api"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-api",
+  "codex-config",
+@@ -3374,7 +3375,7 @@
+ 
+ [[package]]
+ name = "codex-extension-items"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "pretty_assertions",
+@@ -3386,7 +3387,7 @@
+ 
+ [[package]]
+ name = "codex-external-agent-migration"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "chrono",
+  "codex-analytics",
+@@ -3417,7 +3418,7 @@
+ 
+ [[package]]
+ name = "codex-features"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-network-proxy",
+  "codex-protocol",
+@@ -3431,7 +3432,7 @@
+ 
+ [[package]]
+ name = "codex-feedback"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -3458,7 +3459,7 @@
+ 
+ [[package]]
+ name = "codex-file-search"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3474,7 +3475,7 @@
+ 
+ [[package]]
+ name = "codex-file-system"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "bytes",
+  "codex-protocol",
+@@ -3486,7 +3487,7 @@
+ 
+ [[package]]
+ name = "codex-file-watcher"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "notify",
+  "pretty_assertions",
+@@ -3497,7 +3498,7 @@
+ 
+ [[package]]
+ name = "codex-git-attribution"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-backend-client",
+  "codex-extension-api",
+@@ -3510,7 +3511,7 @@
+ 
+ [[package]]
+ name = "codex-git-utils"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3538,7 +3539,7 @@
+ 
+ [[package]]
+ name = "codex-goal-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3563,7 +3564,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-context"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-context-fragments",
+  "codex-history",
+@@ -3575,7 +3576,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-reviewer"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3600,7 +3601,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-v2"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3638,7 +3639,7 @@
+ 
+ [[package]]
+ name = "codex-history"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-protocol",
+@@ -3650,7 +3651,7 @@
+ 
+ [[package]]
+ name = "codex-history-notes-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-analytics",
+  "codex-client",
+@@ -3675,7 +3676,7 @@
+ 
+ [[package]]
+ name = "codex-home"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-extension-api",
+  "codex-utils-absolute-path",
+@@ -3687,7 +3688,7 @@
+ 
+ [[package]]
+ name = "codex-hooks"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "async-channel",
+@@ -3707,6 +3708,7 @@
+  "schemars 0.8.22",
+  "serde",
+  "serde_json",
++ "sha2 0.10.9",
+  "tempfile",
+  "tokio",
+  "tracing",
+@@ -3715,7 +3717,7 @@
+ 
+ [[package]]
+ name = "codex-http-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "bytes",
+  "codex-utils-cargo-bin",
+@@ -3751,7 +3753,7 @@
+ 
+ [[package]]
+ name = "codex-image-generation-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -3779,7 +3781,7 @@
+ 
+ [[package]]
+ name = "codex-install-context"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "codex-utils-home-dir",
+@@ -3792,7 +3794,7 @@
+ 
+ [[package]]
+ name = "codex-keyring-store"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "keyring",
+  "pretty_assertions",
+@@ -3803,7 +3805,7 @@
+ 
+ [[package]]
+ name = "codex-linux-sandbox"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "clap",
+  "codex-core",
+@@ -3832,7 +3834,7 @@
+ 
+ [[package]]
+ name = "codex-lmstudio"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-core",
+  "codex-http-client",
+@@ -3846,7 +3848,7 @@
+ 
+ [[package]]
+ name = "codex-login"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -3892,7 +3894,7 @@
+ 
+ [[package]]
+ name = "codex-mcp"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3935,7 +3937,7 @@
+ 
+ [[package]]
+ name = "codex-mcp-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -3968,7 +3970,7 @@
+ 
+ [[package]]
+ name = "codex-memories-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-core",
+  "codex-extension-api",
+@@ -3990,7 +3992,7 @@
+ 
+ [[package]]
+ name = "codex-memories-read"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -4000,7 +4002,7 @@
+ 
+ [[package]]
+ name = "codex-memories-write"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4037,7 +4039,7 @@
+ 
+ [[package]]
+ name = "codex-mermaid"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "insta",
+  "pretty_assertions",
+@@ -4046,7 +4048,7 @@
+ 
+ [[package]]
+ name = "codex-message-history"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-config",
+  "memchr",
+@@ -4060,7 +4062,7 @@
+ 
+ [[package]]
+ name = "codex-model-provider"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -4094,7 +4096,7 @@
+ 
+ [[package]]
+ name = "codex-model-provider-info"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-client",
+  "codex-protocol",
+@@ -4112,7 +4114,7 @@
+ 
+ [[package]]
+ name = "codex-models-manager"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "chrono",
+  "codex-http-client",
+@@ -4131,7 +4133,7 @@
+ 
+ [[package]]
+ name = "codex-mxc-sandbox"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "appcontainer_common",
+@@ -4153,7 +4155,7 @@
+ 
+ [[package]]
+ name = "codex-network-proxy"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4202,7 +4204,7 @@
+ 
+ [[package]]
+ name = "codex-ollama"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "assert_matches",
+  "async-stream",
+@@ -4222,7 +4224,7 @@
+ 
+ [[package]]
+ name = "codex-otel"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "bytes",
+  "chrono",
+@@ -4259,7 +4261,7 @@
+ 
+ [[package]]
+ name = "codex-otel-trace-websocket"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4270,7 +4272,7 @@
+ 
+ [[package]]
+ name = "codex-plugin"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-config",
+  "codex-core-plugin-common",
+@@ -4285,7 +4287,7 @@
+ 
+ [[package]]
+ name = "codex-process-hardening"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -4293,7 +4295,7 @@
+ 
+ [[package]]
+ name = "codex-prompts"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-collaboration-mode-templates",
+@@ -4310,7 +4312,7 @@
+ 
+ [[package]]
+ name = "codex-protocol"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chardetng",
+@@ -4355,7 +4357,7 @@
+ 
+ [[package]]
+ name = "codex-queue-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -4376,7 +4378,7 @@
+ 
+ [[package]]
+ name = "codex-realtime-webrtc"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-build-info",
+@@ -4395,7 +4397,7 @@
+ 
+ [[package]]
+ name = "codex-response-debug-context"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -4406,7 +4408,7 @@
+ 
+ [[package]]
+ name = "codex-responses-api-proxy"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4423,7 +4425,7 @@
+ 
+ [[package]]
+ name = "codex-rmcp-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4474,7 +4476,7 @@
+ 
+ [[package]]
+ name = "codex-rollout"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4505,7 +4507,7 @@
+ 
+ [[package]]
+ name = "codex-rollout-trace"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-code-mode",
+@@ -4521,7 +4523,7 @@
+ 
+ [[package]]
+ name = "codex-sandboxing"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-mxc-sandbox",
+@@ -4549,7 +4551,7 @@
+ 
+ [[package]]
+ name = "codex-secrets"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "age",
+  "anyhow",
+@@ -4570,7 +4572,7 @@
+ 
+ [[package]]
+ name = "codex-shell-command"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4593,7 +4595,7 @@
+ 
+ [[package]]
+ name = "codex-skills"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -4610,7 +4612,7 @@
+ 
+ [[package]]
+ name = "codex-skills-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "assert_matches",
+  "blake3",
+@@ -4648,7 +4650,7 @@
+ 
+ [[package]]
+ name = "codex-state"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4675,7 +4677,7 @@
+ 
+ [[package]]
+ name = "codex-stdio-to-uds"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-uds",
+@@ -4687,7 +4689,7 @@
+ 
+ [[package]]
+ name = "codex-tcp-tunnel"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -4708,7 +4710,7 @@
+ 
+ [[package]]
+ name = "codex-terminal-detection"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "tracing",
+@@ -4716,7 +4718,7 @@
+ 
+ [[package]]
+ name = "codex-test-binary-support"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-arg0",
+  "tempfile",
+@@ -4724,7 +4726,7 @@
+ 
+ [[package]]
+ name = "codex-thread-manager-sample"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4735,7 +4737,7 @@
+ 
+ [[package]]
+ name = "codex-thread-store"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "chrono",
+  "codex-app-server-protocol",
+@@ -4766,7 +4768,7 @@
+ 
+ [[package]]
+ name = "codex-tools"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "bitflags 2.13.1",
+  "codex-code-mode",
+@@ -4790,7 +4792,7 @@
+ 
+ [[package]]
+ name = "codex-tui"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -4917,7 +4919,7 @@
+ 
+ [[package]]
+ name = "codex-uds"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "async-io",
+  "libc",
+@@ -4931,7 +4933,7 @@
+ 
+ [[package]]
+ name = "codex-user-verification"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "core-foundation 0.10.1",
+@@ -4951,7 +4953,7 @@
+ 
+ [[package]]
+ name = "codex-utils-absolute-path"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "dirs",
+  "dunce",
+@@ -4965,14 +4967,14 @@
+ 
+ [[package]]
+ name = "codex-utils-approval-presets"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-audio"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-protocol",
+@@ -4986,7 +4988,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cache"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "lru",
+  "sha1 0.10.6",
+@@ -4995,7 +4997,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cargo-bin"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "assert_cmd",
+  "runfiles",
+@@ -5004,7 +5006,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cli"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "clap",
+  "codex-protocol",
+@@ -5016,15 +5018,15 @@
+ 
+ [[package]]
+ name = "codex-utils-elapsed"
+-version = "0.0.0"
++version = "0.163.0"
+ 
+ [[package]]
+ name = "codex-utils-fuzzy-match"
+-version = "0.0.0"
++version = "0.163.0"
+ 
+ [[package]]
+ name = "codex-utils-git-discovery"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-git-utils",
+  "codex-utils-absolute-path",
+@@ -5037,7 +5039,7 @@
+ 
+ [[package]]
+ name = "codex-utils-home-dir"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dirs",
+@@ -5047,7 +5049,7 @@
+ 
+ [[package]]
+ name = "codex-utils-image"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-cache",
+@@ -5061,7 +5063,7 @@
+ 
+ [[package]]
+ name = "codex-utils-json-to-toml"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "serde_json",
+@@ -5070,7 +5072,7 @@
+ 
+ [[package]]
+ name = "codex-utils-oss"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-core",
+  "codex-lmstudio",
+@@ -5080,7 +5082,7 @@
+ 
+ [[package]]
+ name = "codex-utils-output-truncation"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -5090,7 +5092,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dunce",
+@@ -5101,7 +5103,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path-uri"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-absolute-path",
+@@ -5117,7 +5119,7 @@
+ 
+ [[package]]
+ name = "codex-utils-plugins"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-exec-server",
+  "codex-exec-server-protocol",
+@@ -5131,7 +5133,7 @@
+ 
+ [[package]]
+ name = "codex-utils-process"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "tokio",
+@@ -5139,7 +5141,7 @@
+ 
+ [[package]]
+ name = "codex-utils-pty"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-utils-cargo-bin",
+@@ -5158,7 +5160,7 @@
+ 
+ [[package]]
+ name = "codex-utils-readiness"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "assert_matches",
+  "thiserror 2.0.18",
+@@ -5168,7 +5170,7 @@
+ 
+ [[package]]
+ name = "codex-utils-redacted-string"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "schemars 0.8.22",
+  "serde",
+@@ -5176,14 +5178,14 @@
+ 
+ [[package]]
+ name = "codex-utils-rustls-provider"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "rustls",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-sandbox-summary"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-absolute-path",
+@@ -5193,7 +5195,7 @@
+ 
+ [[package]]
+ name = "codex-utils-sleep-inhibitor"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "core-foundation 0.9.4",
+  "libc",
+@@ -5203,14 +5205,14 @@
+ 
+ [[package]]
+ name = "codex-utils-stream-parser"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-string"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "regex-lite",
+@@ -5220,14 +5222,14 @@
+ 
+ [[package]]
+ name = "codex-utils-template"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-v8-poc"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "pretty_assertions",
+  "v8",
+@@ -5235,7 +5237,7 @@
+ 
+ [[package]]
+ name = "codex-voice-host"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-install-context",
+@@ -5262,7 +5264,7 @@
+ 
+ [[package]]
+ name = "codex-web-search-extension"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-api",
+  "codex-core",
+@@ -5284,7 +5286,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-auth"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5303,7 +5305,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-client"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-http-client",
+  "codex-utils-rustls-provider",
+@@ -5319,7 +5321,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5349,7 +5351,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-service"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-cloud-config",
+@@ -5366,14 +5368,14 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-test-support"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "dirs",
+ ]
+ 
+ [[package]]
+ name = "codex-workload-identity"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "codex-http-client",
+  "pretty_assertions",
+@@ -5388,7 +5390,7 @@
+ 
+ [[package]]
+ name = "codex-worktree"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "codex-git-utils",
+@@ -5629,7 +5631,7 @@
+ 
+ [[package]]
+ name = "core_test_support"
+-version = "0.0.0"
++version = "0.163.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+--- a/codex-rs/core/Cargo.toml
++++ b/codex-rs/core/Cargo.toml
+@@ -108,6 +108,7 @@
+ ] }
+ serde = { workspace = true, features = ["derive"] }
+ serde_json = { workspace = true }
++sha2 = { workspace = true }
+ sha1 = { workspace = true }
+ shlex = { workspace = true }
+ similar = { workspace = true }
+--- a/codex-rs/core/src/context_manager/history.rs
++++ b/codex-rs/core/src/context_manager/history.rs
+@@ -594,6 +594,9 @@
+             processed.metadata.get_or_insert_default().retained_source = Some(source.clone());
+         }
+         Arc::make_mut(&mut self.items).push(processed);
++        if let Some(recorded) = self.items.last() {
++            crate::hook_context_observer::recorded_item(&recorded.item);
++        }
+         source
+     }
+ 
+--- /dev/null
++++ b/codex-rs/core/src/hook_context_observer.rs
+@@ -0,0 +1,188 @@
++//! Optional diagnostic scope for actual managed context-hook history admission.
++//! No model input, history item, protocol, trust or execution result is changed.
++use codex_protocol::models::ContentItem;
++use codex_protocol::models::ResponseItem;
++use codex_protocol::protocol::HookCompletedEvent;
++use codex_protocol::protocol::HookEventName;
++use serde_json::Value;
++use serde_json::json;
++use sha2::Digest;
++use sha2::Sha256;
++use std::future::Future;
++use std::sync::Arc;
++use std::sync::LazyLock;
++use std::sync::atomic::AtomicUsize;
++use std::sync::atomic::Ordering;
++
++static ENABLED: LazyLock<bool> = LazyLock::new(||
++    std::env::var_os("CODEX_REDACTED_HOOK_OBSERVER").as_deref() == Some(std::ffi::OsStr::new("1")));
++static START_TICK: LazyLock<Option<u64>> = LazyLock::new(|| {
++    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
++    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
++});
++struct Binding {
++    batch_id: String,
++    thread_id: String,
++    turn_id: String,
++    dispatch_turn_id: Option<String>,
++    event_name: HookEventName,
++    phase: &'static str,
++    run_ids: Vec<String>,
++    input: Value,
++    admitted: AtomicUsize,
++}
++tokio::task_local! { static ACTIVE: Arc<Binding>; }
++
++/// Opaque metadata-only token, moved with the original hook outcome until its
++/// own additional-context record future runs. It never holds context text.
++pub(crate) struct ContextObservation(Arc<Binding>);
++
++fn event_label(event: HookEventName) -> Option<&'static str> {
++    match event {
++        HookEventName::SessionStart => Some("SessionStart"),
++        HookEventName::UserPromptSubmit => Some("UserPromptSubmit"),
++        HookEventName::PostToolUse => Some("PostToolUse"),
++        _ => None,
++    }
++}
++
++
++fn digest(bytes: &[u8]) -> String { format!("sha256:{:x}", Sha256::digest(bytes)) }
++
++fn texts_summary(texts: &[&str]) -> Option<Value> {
++    if texts.len() > 128 { return None; }
++    let bytes = texts.iter().try_fold(0_usize, |n,t| n.checked_add(t.len()))?;
++    if bytes > 1024 * 1024 { return None; }
++    let mut hash=Sha256::new();hash.update(b"codex-hook-context-list-v1\0");
++    let mut entries=Vec::new();
++    for (i,text) in texts.iter().enumerate() {
++        hash.update((i as u64).to_be_bytes());hash.update((text.len() as u64).to_be_bytes());hash.update(text.as_bytes());
++        entries.push(json!({"bytes":text.len(),"sha256":digest(text.as_bytes())}));
++    }
++    hash.update((texts.len() as u64).to_be_bytes());
++    Some(json!({"count":texts.len(),"bytes":bytes,"entries":entries,"framedListSha256":format!("sha256:{:x}",hash.finalize())}))
++}
++
++fn emit(binding: &Binding, stage: &'static str, details: Value) {
++    let row=json!({"schemaVersion":1,"stage":stage,"threadId":binding.thread_id,
++        "turnId":binding.turn_id,"admissionTurnId":binding.turn_id,
++        "dispatchTurnId":binding.dispatch_turn_id,"eventName":event_label(binding.event_name),
++        "phase":binding.phase,"batchId":binding.batch_id,"runIdSha256s":binding.run_ids,
++        "runAssociation":"native_context_hook_outcome_run_set_not_per_entry_assignment",
++        "namespacePid":std::process::id(),"namespaceStartTick":*START_TICK,
++        "details":details,"qualification":"context_history_recorded_not_provider_or_model_consumption",
++        "coverage":"best_effort_log_queue_no_absence_inference"});
++    tracing::info!(target:"codex_hook_context_observer",parent:None,
++        thread_id=binding.thread_id.as_str(),hook_context_observation=%row,"redacted hook context admission");
++}
++
++/// Captures only the actual returned native outcome metadata. A later native
++/// record call must consume this token; merely preparing it claims no admission.
++pub(crate) fn prepare_context_observation(
++    thread_id: String,
++    admission_turn_id: &str,
++    dispatch_turn_id: Option<&str>,
++    event_name: HookEventName,
++    phase: &'static str,
++    runs: &[HookCompletedEvent],
++    contexts: &[String],
++) -> Option<ContextObservation> {
++    if !*ENABLED { return None; }
++    let valid_id=|id:&str| !id.is_empty() && id.len()<=128 && id.bytes().all(|b|b.is_ascii_graphic());
++    if !valid_id(&thread_id) || !valid_id(admission_turn_id)
++        || dispatch_turn_id.is_some_and(|id| !valid_id(id)) || event_label(event_name).is_none()
++        || runs.len()>128 || contexts.len()>128 || runs.iter().any(|r|
++            r.run.id.len()>8192 || r.turn_id.as_deref()!=dispatch_turn_id || r.run.event_name!=event_name)
++    {
++        tracing::info!(target:"codex_hook_context_observer",parent:None,reason_code="binding_bounds","redacted hook context scope refused");
++        return None;
++    }
++    let input=texts_summary(&contexts.iter().map(String::as_str).collect::<Vec<_>>());
++    let Some(input)=input else {
++        tracing::info!(target:"codex_hook_context_observer",parent:None,reason_code="binding_bounds","redacted hook context scope refused");
++        return None;
++    };
++    Some(ContextObservation(Arc::new(Binding {
++        batch_id:uuid::Uuid::new_v4().to_string(),thread_id,turn_id:admission_turn_id.to_owned(),
++        dispatch_turn_id:dispatch_turn_id.map(str::to_owned),event_name,phase,
++        run_ids:runs.iter().map(|r|digest(r.run.id.as_bytes())).collect(),input,admitted:AtomicUsize::new(0),
++    })))
++}
++
++struct AdmissionGuard { binding: Arc<Binding>, returned: bool }
++impl Drop for AdmissionGuard {
++    fn drop(&mut self) {
++        if !self.returned {
++            emit(&self.binding,"context_batch_future_dropped",json!({
++                "outcome":"unknown","admittedItems":self.binding.admitted.load(Ordering::Relaxed),
++            }));
++        }
++    }
++}
++
++/// Activates correlation ONLY around this outcome's own context-record future,
++/// after any user-input recording. The original future/output are unchanged.
++pub(crate) async fn record_observed<F: Future>(
++    observation: Option<ContextObservation>, record: F,
++) -> F::Output {
++    let Some(ContextObservation(binding))=observation else { return record.await; };
++    let mut guard=AdmissionGuard{binding:binding.clone(),returned:false};
++    emit(&binding,"context_batch_started",json!({"input":binding.input}));
++    let output=ACTIVE.scope(binding.clone(),record).await;
++    guard.returned=true;
++    emit(&binding,"context_batch_returned",json!({
++        "recordFutureReturned":true,"admittedItems":binding.admitted.load(Ordering::Relaxed),
++    }));
++    output
++}
++
++/// Existing PostToolUse result/cancellation semantics remain unchanged.
++pub(crate) async fn with_post_tool_contexts<F,T,E>(
++    thread_id: String, turn_id: &str, runs: &[HookCompletedEvent], contexts: &[String], record: F,
++) -> Result<T,E>
++where F:Future<Output=Result<T,E>> {
++    let observation=prepare_context_observation(thread_id,turn_id,Some(turn_id),HookEventName::PostToolUse,
++        "post_tool_result",runs,contexts);
++    let Some(ContextObservation(binding))=observation else { return record.await; };
++    let mut guard=AdmissionGuard{binding:binding.clone(),returned:false};
++    emit(&binding,"post_tool_context_batch_started",json!({"input":binding.input}));
++    let result=ACTIVE.scope(binding.clone(),record).await;
++    guard.returned=true;
++    emit(&binding,"post_tool_context_batch_returned",json!({
++        "recordFutureSucceeded":result.is_ok(),"admittedItems":binding.admitted.load(Ordering::Relaxed),
++    }));
++    result
++}
++
++/// Called only AFTER the processed item was pushed into ContextManager.items.
++/// No full history scan, context-body mutation or transcript read occurs.
++pub(crate) fn recorded_item(item: &ResponseItem) {
++    if !*ENABLED { return; }
++    let _=ACTIVE.try_with(|binding| {
++        let ordinal=binding.admitted.fetch_add(1,Ordering::Relaxed);
++        let ResponseItem::Message{role,content,..}=item else {
++            emit(binding,"context_manager_item_recorded_projection_refused",json!({"ordinal":ordinal,"reasonCode":"non_message"}));return;
++        };
++        if role!="developer" {
++            emit(binding,"context_manager_item_recorded_projection_refused",json!({"ordinal":ordinal,"reasonCode":"non_developer"}));return;
++        }
++        if content.len()>128 {
++            emit(binding,"context_manager_item_recorded_projection_refused",json!({"ordinal":ordinal,"reasonCode":"part_count_bounds"}));return;
++        }
++        let mut texts=Vec::new();
++        for part in content {
++            let ContentItem::InputText{text,..}=part else {
++                emit(binding,"context_manager_item_recorded_projection_refused",json!({"ordinal":ordinal,"reasonCode":"non_text"}));return;
++            };
++            texts.push(text.as_str());
++        }
++        match texts_summary(&texts) {
++            Some(summary)=>emit(binding,"context_manager_developer_item_recorded",json!({"ordinal":ordinal,"content":summary})),
++            None=>emit(binding,"context_manager_item_recorded_projection_refused",json!({"ordinal":ordinal,"reasonCode":"content_bounds"})),
++        }
++    });
++}
++
++#[cfg(test)]
++#[path = "hook_context_observer_tests.rs"]
++mod tests;
+--- /dev/null
++++ b/codex-rs/core/src/hook_context_observer_tests.rs
+@@ -0,0 +1,147 @@
++//! Actual ContextManager/HookAdditionalContext tests, using owned literal data.
++use super::*;
++use crate::context::{ContextualUserFragment, HookAdditionalContext};
++use crate::context_manager::ContextManager;
++use codex_protocol::protocol::{HookExecutionMode, HookHandlerType, HookRunStatus, HookRunSummary, HookScope, HookSource};
++use codex_utils_absolute_path::AbsolutePathBuf;
++use codex_utils_output_truncation::TruncationPolicy;
++use std::path::PathBuf;
++use std::sync::Mutex;
++use std::task::{Context, Poll, Wake, Waker};
++use tracing::{Event, Metadata, Subscriber};
++use tracing::span::{Attributes, Id, Record};
++
++const THREAD: &str = "11111111-1111-4111-8111-111111111111";
++fn run(event: HookEventName, turn: Option<&str>) -> HookCompletedEvent {
++    HookCompletedEvent { turn_id: turn.map(str::to_owned), run: HookRunSummary {
++        builtin: false, id: format!("{}:0:owned-fixture", event_label(event).expect("supported event")),
++        event_name: event, handler_type: HookHandlerType::Command, execution_mode: HookExecutionMode::Sync,
++        scope: if event == HookEventName::SessionStart { HookScope::Thread } else { HookScope::Turn },
++        source_path: AbsolutePathBuf::try_from(PathBuf::from("/OWNED-CONTEXT-FIXTURE/hooks.json")).expect("literal metadata path"),
++        source: HookSource::User, display_order: 0, status: HookRunStatus::Completed,
++        status_message: None, started_at: 1, completed_at: Some(2), duration_ms: Some(1), entries: Vec::new(),
++    }}
++}
++fn item(text: &str) -> ResponseItem { ContextualUserFragment::into(HookAdditionalContext::new(text)) }
++fn record(history: &mut ContextManager, contexts: &[String]) {
++    let items = contexts.iter().map(|text| item(text)).collect::<Vec<_>>();
++    history.record_items(items.iter(), TruncationPolicy::Bytes(1024 * 1024));
++}
++#[derive(Clone, Default)] struct Capture(Arc<Mutex<Vec<Value>>>);
++struct Visit(Option<Value>);
++impl tracing::field::Visit for Visit {
++    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
++        if field.name() == "hook_context_observation" {
++            self.0 = Some(serde_json::from_str(&format!("{value:?}")).expect("diagnostic JSON"));
++        }
++    }
++}
++impl Subscriber for Capture {
++    fn enabled(&self, _: &Metadata<'_>) -> bool { true }
++    fn new_span(&self, _: &Attributes<'_>) -> Id { Id::from_u64(1) }
++    fn record(&self, _: &Id, _: &Record<'_>) {}
++    fn record_follows_from(&self, _: &Id, _: &Id) {}
++    fn event(&self, event: &Event<'_>) {
++        let mut visitor = Visit(None); event.record(&mut visitor);
++        if let Some(row) = visitor.0 { self.0.lock().expect("capture lock").push(row); }
++    }
++    fn enter(&self, _: &Id) {}
++    fn exit(&self, _: &Id) {}
++}
++fn token(event: HookEventName, dispatch_turn: Option<&str>, admission_turn: &str, contexts: &[String]) -> Option<ContextObservation> {
++    prepare_context_observation(THREAD.into(), admission_turn, dispatch_turn, event,
++        if event == HookEventName::SessionStart { "pending_session_start_queue" } else { "pending_user_prompt_input" },
++        &[run(event, dispatch_turn)], contexts)
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_pending_start_token_waits_for_own_actual_history_record() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let contexts = vec!["OWNED_START_CONTEXT_é".to_owned()];
++    let observation = token(HookEventName::SessionStart, Some("first-turn"), "first-turn", &contexts);
++    let mut history = ContextManager::new();
++    record(&mut history, &["PRIVATE_UNRELATED_DEVELOPER".to_owned()]);
++    assert!(capture.0.lock().expect("capture lock").is_empty());
++    let result = record_observed(observation, async { record(&mut history, &contexts); 41 }).await;
++    assert_eq!(result, 41); assert_eq!(history.raw_items().len(), 2);
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows.len(), 3);
++    assert_eq!(rows[1]["stage"], "context_manager_developer_item_recorded");
++    assert_eq!(rows[1]["eventName"], "SessionStart"); assert_eq!(rows[1]["phase"], "pending_session_start_queue");
++    assert_eq!(rows[1]["dispatchTurnId"], "first-turn"); assert_eq!(rows[1]["admissionTurnId"], "first-turn");
++    assert_eq!(rows[1]["details"]["content"]["entries"][0]["sha256"], digest(contexts[0].as_bytes()));
++    assert_eq!(rows[2]["details"]["admittedItems"], 1);
++    let encoded = serde_json::to_string(&*rows).expect("diagnostic JSON");
++    assert!(!encoded.contains("PRIVATE_UNRELATED")); assert!(!encoded.contains("OWNED_START_CONTEXT"));
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_absent_dispatch_turn_is_not_replaced_by_admission_turn() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let contexts = vec!["OWNED_START_CONTEXT".to_owned()]; let mut history = ContextManager::new();
++    record_observed(token(HookEventName::SessionStart, None, "later-admission", &contexts), async {
++        record(&mut history, &contexts);
++    }).await;
++    let rows = capture.0.lock().expect("capture lock"); assert!(rows[1]["dispatchTurnId"].is_null());
++    assert_eq!(rows[1]["admissionTurnId"], "later-admission"); assert_eq!(rows[2]["details"]["admittedItems"], 1);
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_controlled_nonempty_unchanged_changed_clear_sequence_records_exactly_supplied_outputs() {
++    // This drives the consumer, not the summary handler's dedup implementation.
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let mut history = ContextManager::new();
++    for (index, payload) in [Some("OWNED_INITIAL"), None, None, Some("OWNED_CHANGED"), Some("OWNED_CLEAR"), None].into_iter().enumerate() {
++        let turn = format!("turn-{index}"); let contexts = payload.map(|s| vec![s.to_owned()]).unwrap_or_default();
++        let observation = token(HookEventName::UserPromptSubmit, Some(&turn), &turn, &contexts);
++        record_observed(observation, async { record(&mut history, &contexts); }).await;
++    }
++    assert_eq!(history.raw_items().len(), 3);
++    let rows = capture.0.lock().expect("capture lock");
++    let returned = rows.iter().filter(|row| row["stage"] == "context_batch_returned").collect::<Vec<_>>();
++    assert_eq!(returned.len(), 6);
++    for (index, count) in [1, 0, 0, 1, 1, 0].into_iter().enumerate() {
++        assert_eq!(returned[index]["details"]["admittedItems"], count);
++        assert_eq!(returned[index]["eventName"], "UserPromptSubmit");
++        assert_eq!(returned[index]["dispatchTurnId"], format!("turn-{index}"));
++    }
++    assert_eq!(rows.iter().filter(|row| row["stage"] == "context_manager_developer_item_recorded").count(), 3);
++    assert!(!serde_json::to_string(&*rows).expect("diagnostic JSON").contains("OWNED_"));
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_wrong_event_or_turn_refuses_projection_but_keeps_record_future() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let contexts = vec!["OWNED_CONTEXT".to_owned()];
++    let mut history = ContextManager::new();
++    for wrong_run in [run(HookEventName::SessionStart, Some("turn2")), run(HookEventName::UserPromptSubmit, Some("turn1"))] {
++        let wrong = prepare_context_observation(THREAD.into(), "turn2", Some("turn2"), HookEventName::UserPromptSubmit,
++            "pending_user_prompt_input", &[wrong_run], &contexts);
++        assert!(wrong.is_none());
++        let output = record_observed(wrong, async { record(&mut history, &contexts); 73 }).await;
++        assert_eq!(output, 73);
++    }
++    assert_eq!(history.raw_items().len(), 2);
++    assert!(capture.0.lock().expect("capture lock").is_empty());
++}
++
++struct Noop;
++impl Wake for Noop { fn wake(self: Arc<Self>) {} }
++#[test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++fn native_cancelled_record_after_actual_push_reports_unknown_not_rollback() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let contexts = vec!["OWNED_CONTEXT".to_owned()]; let mut history = ContextManager::new();
++    let observation = token(HookEventName::UserPromptSubmit, Some("turn1"), "turn1", &contexts);
++    let mut future = Box::pin(record_observed(observation, async {
++        record(&mut history, &contexts); std::future::pending::<()>().await;
++    }));
++    let waker = Waker::from(Arc::new(Noop)); let mut cx = Context::from_waker(&waker);
++    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending)); drop(future);
++    assert_eq!(history.raw_items().len(), 1); let rows = capture.0.lock().expect("capture lock");
++    assert_eq!(rows.len(), 3); assert_eq!(rows[2]["stage"], "context_batch_future_dropped");
++    assert_eq!(rows[2]["details"]["outcome"], "unknown"); assert_eq!(rows[2]["details"]["admittedItems"], 1);
++}
+--- a/codex-rs/core/src/hook_runtime.rs
++++ b/codex-rs/core/src/hook_runtime.rs
+@@ -76,6 +76,8 @@
+ pub(crate) struct HookRuntimeOutcome {
+     pub should_stop: bool,
+     pub additional_contexts: Vec<String>,
++    // Diagnostic-only correlation survives deferred input recording; no text.
++    observation: Option<crate::hook_context_observer::ContextObservation>,
+ }
+ 
+ pub(crate) enum PreToolUseHookResult {
+@@ -101,6 +103,7 @@
+             outcome: HookRuntimeOutcome {
+                 should_stop,
+                 additional_contexts,
++                observation: None,
+             },
+         }
+     }
+@@ -119,6 +122,7 @@
+             outcome: HookRuntimeOutcome {
+                 should_stop,
+                 additional_contexts,
++                observation: None,
+             },
+         }
+     }
+@@ -161,11 +165,17 @@
+             permission_mode: hook_permission_mode(turn_context.approval_policy()),
+             target,
+         };
++        let observer_event = match &request.target {
++            StartHookTarget::SessionStart { .. } => HookEventName::SessionStart,
++            StartHookTarget::SubagentStart { .. } => HookEventName::SubagentStart,
++        };
+         let hooks = sess.hooks();
+         let preview_runs = hooks.preview_session_start(&request);
+         if run_context_injecting_hook(
+             sess,
+             turn_context,
++            observer_event,
++            "pending_session_start_queue",
+             preview_runs,
+             hooks.run_session_start(request, Some(turn_context.sub_id.clone())),
+         )
+@@ -697,6 +707,8 @@
+             run_context_injecting_hook(
+                 sess,
+                 turn_context,
++                HookEventName::UserPromptSubmit,
++                "pending_user_prompt_input",
+                 preview_runs,
+                 hooks.run_user_prompt_submit(request),
+             )
+@@ -705,10 +717,12 @@
+         TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => HookRuntimeOutcome {
+             should_stop: false,
+             additional_contexts: Vec::new(),
++            observation: None,
+         },
+         TurnInput::InterAgentCommunication(_) => HookRuntimeOutcome {
+             should_stop: false,
+             additional_contexts: Vec::new(),
++            observation: None,
+         },
+     }
+ }
+@@ -718,7 +732,7 @@
+     turn_context: &Arc<TurnContext>,
+     model_info: &ModelInfo,
+     pending_input: TurnInput,
+-    additional_contexts: Vec<String>,
++    hook_outcome: HookRuntimeOutcome,
+     persist_context: PersistContext,
+ ) {
+     match pending_input {
+@@ -769,7 +783,7 @@
+             sess.ensure_rollout_materialized(persist_context).await;
+         }
+     }
+-    record_additional_contexts(sess, turn_context, additional_contexts).await;
++    hook_outcome.record_additional_contexts(sess, turn_context).await;
+ }
+ 
+ /// Processes finished async hook results at a safe turn boundary.
+@@ -820,6 +834,8 @@
+ async fn run_context_injecting_hook<Fut, Outcome>(
+     sess: &Arc<Session>,
+     turn_context: &Arc<TurnContext>,
++    observer_event: HookEventName,
++    observer_phase: &'static str,
+     preview_runs: Vec<HookRunSummary>,
+     outcome_future: Fut,
+ ) -> HookRuntimeOutcome
+@@ -829,20 +845,26 @@
+ {
+     emit_hook_started_events(sess, turn_context, preview_runs).await;
+ 
+-    let outcome = outcome_future.await.into();
++    let mut outcome = outcome_future.await.into();
++    outcome.outcome.observation = crate::hook_context_observer::prepare_context_observation(
++        sess.session_id().to_string(), &turn_context.sub_id, Some(&turn_context.sub_id),
++        observer_event, observer_phase, &outcome.hook_events, &outcome.outcome.additional_contexts,
++    );
+     emit_hook_completed_events(sess, turn_context, outcome.hook_events).await;
+     outcome.outcome
+ }
+ 
+ impl HookRuntimeOutcome {
+-    async fn record_additional_contexts(
++    pub(crate) async fn record_additional_contexts(
+         self,
+         sess: &Arc<Session>,
+         turn_context: &Arc<TurnContext>,
+     ) -> bool {
+-        record_additional_contexts(sess, turn_context, self.additional_contexts).await;
+-
+-        self.should_stop
++        let should_stop = self.should_stop;
++        crate::hook_context_observer::record_observed(
++            self.observation, record_additional_contexts(sess, turn_context, self.additional_contexts),
++        ).await;
++        should_stop
+     }
+ }
+ 
+--- a/codex-rs/core/src/lib.rs
++++ b/codex-rs/core/src/lib.rs
+@@ -99,6 +99,7 @@
+ mod guardian;
+ pub mod guardian_review;
+ mod hook_mcp_executor;
++mod hook_context_observer;
+ mod hook_runtime;
+ mod image_preparation;
+ mod installation_id;
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -18,7 +18,6 @@
+ use crate::feedback_tags;
+ use crate::hook_runtime::drain_async_hook_results;
+ use crate::hook_runtime::inspect_pending_input;
+-use crate::hook_runtime::record_additional_contexts;
+ use crate::hook_runtime::record_pending_input;
+ use crate::hook_runtime::run_legacy_after_agent_hook;
+ use crate::hook_runtime::run_pending_session_start_hooks;
+@@ -953,7 +952,7 @@
+         let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
+         if hook_outcome.should_stop {
+             blocked_input = true;
+-            record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
++            hook_outcome.record_additional_contexts(sess, turn_context).await;
+         } else {
+             if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty()) {
+                 accepted_user_input = true;
+@@ -971,7 +970,7 @@
+                 turn_context,
+                 model_info,
+                 input_item.clone(),
+-                hook_outcome.additional_contexts,
++                hook_outcome,
+                 input_persist_context,
+             )
+             .await;
+--- a/codex-rs/core/src/tools/registry.rs
++++ b/codex-rs/core/src/tools/registry.rs
+@@ -834,12 +834,18 @@
+             None
+         };
+         if let Some(outcome) = &post_tool_use_outcome {
+-            record_additional_contexts(
+-                &invocation.session,
+-                &invocation.turn,
+-                outcome.additional_contexts.clone(),
++            crate::hook_context_observer::with_post_tool_contexts(
++                invocation.session.session_id().to_string(),
++                &invocation.turn.sub_id,
++                &outcome.hook_events,
++                &outcome.additional_contexts,
++                record_additional_contexts(
++                    &invocation.session,
++                    &invocation.turn,
++                    outcome.additional_contexts.clone(),
++                )
++                .or_cancel_tool(&cancellation_token),
+             )
+-            .or_cancel_tool(&cancellation_token)
+             .await?;
+         }
+ 
+--- a/codex-rs/hooks/Cargo.toml
++++ b/codex-rs/hooks/Cargo.toml
+@@ -28,6 +28,7 @@
+ schemars = { workspace = true }
+ serde = { workspace = true, features = ["derive"] }
+ serde_json = { workspace = true }
++sha2 = { workspace = true }
+ tokio = { workspace = true, features = ["fs", "io-util", "process", "sync", "time"] }
+ tracing = { workspace = true }
+ uuid = { workspace = true, features = ["v4"] }
+--- a/codex-rs/hooks/src/engine/command_runner_tests.rs
++++ b/codex-rs/hooks/src/engine/command_runner_tests.rs
+@@ -513,6 +513,7 @@
+ async fn schedule(runtime: &CommandHookRuntime, handler: ConfiguredHandler, cwd: &Path) {
+     let engine = ClaudeHooksEngine {
+         handlers: Arc::new(vec![handler]),
++        observer_selection: Arc::default(),
+         warnings: Arc::default(),
+         required_load_errors: Arc::default(),
+         command_runtime: runtime.clone(),
+--- a/codex-rs/hooks/src/engine/dispatcher.rs
++++ b/codex-rs/hooks/src/engine/dispatcher.rs
+@@ -194,7 +194,8 @@
+     cwd: &Path,
+     metadata: Option<&Map<String, Value>>,
+ ) -> HandlerRunResult {
+-    match &handler.kind {
++    let mut observation = super::hook_dispatch_observer::dispatched(engine, handler);
++    let result = match &handler.kind {
+         ConfiguredHandlerKind::Command { command, env, .. } => {
+             run_command(
+                 &engine.command_runtime,
+@@ -222,7 +223,11 @@
+             )
+             .await
+         }
+-    }
++    };
++    if let Some(observation) = observation.as_mut() {
++        observation.returned(&result);
++    }
++    result
+ }
+ 
+ pub(crate) fn completed_summary(
+--- /dev/null
++++ b/codex-rs/hooks/src/engine/hook_dispatch_observer.rs
+@@ -0,0 +1,239 @@
++//! Optional redacted diagnostics, never a trust/eligibility input.
++//!
++//! This cache records the discovery that populated this exact engine. It does not
++//! rediscover hooks, fingerprint executable bytes, or prove process spawn. Only
++//! synchronous PostToolUse execution in the scoped caller is observed.
++use super::{ClaudeHooksEngine, ConfiguredHandler, HandlerRunResult, HandlerSourcePath, HookListEntry};
++use codex_protocol::protocol::{HookEventName, HookTrustStatus};
++use serde_json::{Value, json};
++use sha2::{Digest, Sha256};
++use std::collections::HashMap;
++use std::future::Future;
++use std::sync::Arc;
++use uuid::Uuid;
++
++#[derive(Debug, Clone)]
++struct Descriptor {
++    configuration_sha256: String,
++    trust_status: HookTrustStatus,
++    engine_bypass_hook_trust: bool,
++}
++
++#[derive(Debug, Default)]
++pub(crate) struct CachedSelection {
++    snapshot_id: String,
++    descriptors: HashMap<String, Descriptor>,
++}
++
++/// Called once with the same admitted handlers and entries returned by discovery.
++/// An ambiguous/nonlocal/invalid descriptor stays unavailable, never trusted.
++pub(crate) fn snapshot(
++    handlers: &[ConfiguredHandler],
++    entries: &[HookListEntry],
++    bypass_hook_trust: bool,
++) -> CachedSelection {
++    if !enabled() { return CachedSelection::default(); }
++    let mut cache = CachedSelection {
++        snapshot_id: Uuid::new_v4().to_string(),
++        descriptors: HashMap::new(),
++    };
++    for handler in handlers {
++        let HandlerSourcePath::Local(path) = &handler.source_path else { continue };
++        let mut matching = entries.iter().filter(|entry| {
++            entry.event_name == handler.event_name
++                && entry.display_order == handler.display_order
++                && entry.source == handler.source
++                && entry.source_path.as_path() == path.as_path()
++                && entry.builtin == handler.builtin
++                && entry.enabled
++        });
++        let Some(entry) = matching.next() else { continue };
++        if matching.next().is_some() || !valid_sha(&entry.current_hash) {
++            continue;
++        }
++        // Do not manufacture eligibility: only discovery-admitted handlers enter
++        // this snapshot; untrusted selected with explicit bypass remains untrusted.
++        cache.descriptors.insert(handler.run_id(), Descriptor {
++            configuration_sha256: entry.current_hash.clone(),
++            trust_status: entry.trust_status,
++            engine_bypass_hook_trust: bypass_hook_trust,
++        });
++    }
++    cache
++}
++
++fn valid_sha(value: &str) -> bool {
++    value.strip_prefix("sha256:").is_some_and(|hex| {
++        hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
++    })
++}
++
++fn digest(value: &str) -> String {
++    format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
++}
++
++fn valid_identity(value: &str) -> bool {
++    !value.is_empty() && value.len() <= 128 && value.bytes().all(|b| b.is_ascii_graphic())
++}
++
++fn enabled() -> bool {
++    std::env::var_os("CODEX_REDACTED_HOOK_OBSERVER").is_some_and(|value| value == "1")
++}
++
++#[derive(Clone)]
++struct Invocation {
++    thread_id: String,
++    turn_id: Option<String>,
++    tool_use_id: Option<String>,
++    event_name: HookEventName,
++}
++
++tokio::task_local! { static ACTIVE: Arc<Invocation>; }
++
++/// Scope the unchanged dispatcher future. Tokio-spawned async handlers do not
++/// inherit task locals and are outside this diagnostic coverage.
++pub(crate) async fn with_post_tool_dispatch<F: Future>(
++    thread_id: String,
++    turn_id: &str,
++    tool_use_id: &str,
++    future: F,
++) -> F::Output {
++    with_context_dispatch(thread_id, Some(turn_id), HookEventName::PostToolUse, Some(tool_use_id), future).await
++}
++
++/// Actual native event identities; SessionStart may have no turn, and events
++/// without a native tool-use suffix never receive an invented one.
++pub(crate) async fn with_context_dispatch<F: Future>(
++    thread_id: String,
++    turn_id: Option<&str>,
++    event_name: HookEventName,
++    tool_use_id: Option<&str>,
++    future: F,
++) -> F::Output {
++    let valid_event = match event_name {
++        HookEventName::SessionStart => tool_use_id.is_none(),
++        HookEventName::UserPromptSubmit => turn_id.is_some() && tool_use_id.is_none(),
++        HookEventName::PostToolUse => turn_id.is_some() && tool_use_id.is_some(),
++        _ => false,
++    };
++    if !enabled() || !valid_event || !valid_identity(&thread_id)
++        || turn_id.is_some_and(|id| !valid_identity(id))
++        || tool_use_id.is_some_and(|id| !valid_identity(id))
++    {
++        return future.await;
++    }
++    ACTIVE.scope(Arc::new(Invocation {
++        thread_id, turn_id: turn_id.map(str::to_owned),
++        tool_use_id: tool_use_id.map(str::to_owned), event_name,
++    }), future).await
++}
++
++pub(crate) struct DispatchObservation {
++    binding: Arc<Invocation>,
++    row: Value,
++    returned: bool,
++}
++
++/// Called inside execute_handler immediately before the original handler branch.
++/// This attests dispatch entry for this selected handler, not OS spawn success.
++pub(crate) fn dispatched(
++    engine: &ClaudeHooksEngine,
++    handler: &ConfiguredHandler,
++) -> Option<DispatchObservation> {
++    if !enabled() || !matches!(&handler.source_path, HandlerSourcePath::Local(_)) {
++        return None;
++    }
++    let binding = ACTIVE.try_with(Arc::clone).ok()?;
++    if handler.event_name != binding.event_name { return None; }
++    let run_id = handler.run_id();
++    if run_id.len() > 8192 { return None; }
++    let descriptor = engine.observer_selection.descriptors.get(&run_id);
++    let mut observation = DispatchObservation {
++        binding,
++        returned: false,
++        row: json!({
++            "version": 1,
++            "dispatchId": Uuid::new_v4().to_string(),
++            "snapshotId": engine.observer_selection.snapshot_id,
++            "configurationFingerprintKind": "native_discovery_normalized_handler_config",
++            "configurationSha256": descriptor.map(|d| d.configuration_sha256.as_str()),
++            "nativeTrustStatus": descriptor.map(|d| match d.trust_status {
++                HookTrustStatus::Managed => "managed",
++                HookTrustStatus::Trusted => "trusted",
++                HookTrustStatus::Untrusted => "untrusted",
++                HookTrustStatus::Modified => "modified",
++            }),
++            "engineBypassHookTrust": descriptor.map(|d| d.engine_bypass_hook_trust),
++            "selectionRequiredBypass": descriptor.map(|d| matches!(
++                d.trust_status, HookTrustStatus::Untrusted | HookTrustStatus::Modified,
++            )),
++            "cachedSelection": if descriptor.is_some() { "available" } else { "unavailable" },
++            "handlerBaseRunIdSha256": digest(&run_id),
++            "executedScriptSha256": Value::Null,
++            "qualification": if descriptor.is_some() {
++                "cached_selection_dispatch_entry_not_spawn_or_script_byte_attestation"
++            } else {
++                "dispatch_entry_cached_selection_unavailable"
++            },
++            "coverage": "sync_session_start_user_prompt_submit_post_tool_use_best_effort_queues_may_drop",
++        }),
++    };
++    let native_run_id = match &observation.binding.tool_use_id {
++        Some(tool_use_id) => format!("{run_id}:{tool_use_id}"),
++        None => run_id,
++    };
++    observation.row["eventName"] = json!(match observation.binding.event_name {
++        HookEventName::SessionStart => "SessionStart",
++        HookEventName::UserPromptSubmit => "UserPromptSubmit",
++        HookEventName::PostToolUse => "PostToolUse",
++        _ => "unsupported",
++    });
++    observation.row["toolUseCorrelation"] = json!(if observation.binding.tool_use_id.is_some() {
++        "native_post_tool_use_suffix"
++    } else { "not_applicable" });
++    observation.row["runIdSha256"] = json!(digest(&native_run_id));
++    observation.emit("dispatch_entered", json!({}));
++    Some(observation)
++}
++
++impl DispatchObservation {
++    pub(crate) fn returned(&mut self, result: &HandlerRunResult) {
++        self.returned = true;
++        self.emit("handler_future_returned", json!({
++            "exitCode": result.exit_code,
++            "hasError": result.error.is_some(),
++            "commandOutcomeClass": "native_result_unclassified",
++        }));
++    }
++
++    fn emit(&self, stage: &str, details: Value) {
++        let mut row = self.row.clone();
++        row["stage"] = json!(stage);
++        row["threadId"] = json!(&self.binding.thread_id);
++        row["turnId"] = json!(&self.binding.turn_id);
++        row["details"] = details;
++        row["namespacePid"] = json!(std::process::id());
++        row["namespaceStartTick"] = json!(namespace_start_tick());
++        let thread_id = &self.binding.thread_id;
++        tracing::info!(target: "codex_hook_dispatch_observer", parent: None,
++            thread_id = %thread_id, hook_dispatch_observation = %row,
++            "redacted cached hook dispatch observation");
++    }
++}
++
++impl Drop for DispatchObservation {
++    fn drop(&mut self) {
++        if !self.returned {
++            self.emit("handler_future_dropped", json!({"outcome": "unknown"}));
++        }
++    }
++}
++
++fn namespace_start_tick() -> Option<u64> {
++    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
++    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
++}
++
++#[cfg(test)]
++#[path = "hook_dispatch_observer_tests.rs"]
++mod tests;
+--- /dev/null
++++ b/codex-rs/hooks/src/engine/hook_dispatch_observer_tests.rs
+@@ -0,0 +1,294 @@
++//! Native-private-type tests; no handler process, hook config, or live thread.
++use super::*;
++use crate::engine::{CommandShell, ConfiguredHandlerKind, HookListEntryHandler};
++use crate::engine::command_runner::CommandHookRuntime;
++use codex_protocol::ThreadId;
++use codex_protocol::protocol::HookSource;
++use codex_utils_absolute_path::AbsolutePathBuf;
++use std::path::PathBuf;
++use std::sync::Mutex;
++use std::task::{Context, Poll, Wake, Waker};
++use tracing::{Event, Metadata, Subscriber};
++use tracing::span::{Attributes, Id, Record};
++
++const THREAD: &str = "11111111-1111-4111-8111-111111111111";
++
++fn path() -> AbsolutePathBuf {
++    AbsolutePathBuf::try_from(PathBuf::from("/NATIVE-OBSERVER-FIXTURE/hooks.json"))
++        .expect("fixed absolute metadata path, never opened")
++}
++
++fn handler() -> ConfiguredHandler {
++    ConfiguredHandler {
++        builtin: false, event_name: HookEventName::PostToolUse, matcher: None,
++        timeout_sec: 1, status_message: None, additional_context_limit: Default::default(),
++        source_path: path().into(), source: HookSource::User, display_order: 3,
++        kind: ConfiguredHandlerKind::Command {
++            command: "NOT_EXECUTED_PRIVATE_COMMAND".into(), env: HashMap::new(), r#async: false,
++        },
++    }
++}
++
++fn entry(byte: char, trust_status: HookTrustStatus) -> HookListEntry {
++    HookListEntry {
++        builtin: false, key: "observer-fixture".into(), event_name: HookEventName::PostToolUse,
++        handler: HookListEntryHandler::Command { command: "NOT_EXECUTED_PRIVATE_COMMAND".into(), r#async: false },
++        matcher: None, timeout_sec: 1, status_message: None, additional_context_limit: None,
++        source_path: path(), source: HookSource::User, plugin_id: None, display_order: 3,
++        enabled: true, is_managed: false,
++        current_hash: format!("sha256:{}", byte.to_string().repeat(64)), trust_status,
++    }
++}
++
++fn build_engine(handlers: Vec<ConfiguredHandler>, entries: &[HookListEntry], bypass: bool) -> ClaudeHooksEngine {
++    let (sender, _receiver) = async_channel::unbounded();
++    let cache = snapshot(&handlers, entries, bypass);
++    ClaudeHooksEngine {
++        handlers: Arc::new(handlers), observer_selection: Arc::new(cache),
++        warnings: Arc::default(), required_load_errors: Arc::default(),
++        command_runtime: CommandHookRuntime::new(
++            CommandShell { program: String::new(), args: Vec::new() },
++            Arc::new(Vec::new()), ThreadId::new(), sender,
++        ),
++        mcp_executor: crate::engine::tests::mcp_executor(),
++    }
++}
++
++fn result(error: Option<&str>) -> HandlerRunResult {
++    HandlerRunResult {
++        started_at: 1, completed_at: 2, duration_ms: 1,
++        exit_code: error.is_none().then_some(0),
++        stdout: "PRIVATE_STDOUT".into(), stderr: "PRIVATE_STDERR".into(),
++        error: error.map(str::to_owned),
++    }
++}
++
++#[derive(Clone, Default)]
++struct Capture(Arc<Mutex<Vec<Value>>>);
++struct Visit(Option<Value>);
++impl tracing::field::Visit for Visit {
++    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
++        if field.name() == "hook_dispatch_observation" {
++            self.0 = Some(serde_json::from_str(&format!("{value:?}")).expect("diagnostic JSON"));
++        }
++    }
++}
++impl Subscriber for Capture {
++    fn enabled(&self, _: &Metadata<'_>) -> bool { true }
++    fn new_span(&self, _: &Attributes<'_>) -> Id { Id::from_u64(1) }
++    fn record(&self, _: &Id, _: &Record<'_>) {}
++    fn record_follows_from(&self, _: &Id, _: &Id) {}
++    fn event(&self, event: &Event<'_>) {
++        let mut visitor = Visit(None); event.record(&mut visitor);
++        if let Some(value) = visitor.0 { self.0.lock().expect("capture lock").push(value); }
++    }
++    fn enter(&self, _: &Id) {}
++    fn exit(&self, _: &Id) {}
++}
++
++async fn invoke(engine: &ClaudeHooksEngine, handler: &ConfiguredHandler, tool: &str) {
++    with_post_tool_dispatch(THREAD.into(), "turn1", tool, async {
++        let mut observation = dispatched(engine, handler).expect("actual scoped observer");
++        observation.returned(&result(None));
++    }).await;
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_cached_snapshot_clone_and_reload_preserve_exact_discovery() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let h = handler(); let mut e = entry('a', HookTrustStatus::Trusted);
++    let original = build_engine(vec![h.clone()], std::slice::from_ref(&e), false); let cloned = original.clone();
++    e.current_hash = format!("sha256:{}", "b".repeat(64)); e.trust_status = HookTrustStatus::Modified;
++    let reloaded = build_engine(vec![h.clone()], std::slice::from_ref(&e), true);
++    invoke(&original, &h, "call1").await; invoke(&cloned, &h, "call2").await; invoke(&reloaded, &h, "call3").await;
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows.len(), 6);
++    assert_eq!(rows[0]["configurationSha256"], format!("sha256:{}", "a".repeat(64)));
++    assert_eq!(rows[0]["snapshotId"], rows[2]["snapshotId"]); assert_ne!(rows[0]["snapshotId"], rows[4]["snapshotId"]);
++    assert_eq!(rows[4]["nativeTrustStatus"], "modified"); assert_eq!(rows[4]["selectionRequiredBypass"], true);
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_untrusted_selected_by_bypass_remains_untrusted_and_unadmitted_absent() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let h = handler(); let e = entry('c', HookTrustStatus::Untrusted);
++    invoke(&build_engine(vec![h.clone()], std::slice::from_ref(&e), true), &h, "call1").await;
++    invoke(&build_engine(Vec::new(), std::slice::from_ref(&e), false), &h, "call2").await;
++    let rows = capture.0.lock().expect("capture lock");
++    assert_eq!(rows[0]["nativeTrustStatus"], "untrusted"); assert_eq!(rows[0]["engineBypassHookTrust"], true);
++    assert_eq!(rows[2]["cachedSelection"], "unavailable"); assert!(rows[2]["nativeTrustStatus"].is_null());
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_full_run_matches_existing_tool_run_constructor() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let h = handler(); let engine = build_engine(vec![h.clone()], &[entry('a', HookTrustStatus::Managed)], false);
++    invoke(&engine, &h, "call1").await; invoke(&engine, &h, "call1").await; invoke(&engine, &h, "call2").await;
++    let actual = crate::events::common::hook_run_for_tool_use(crate::engine::dispatcher::running_summary(&h), "call1");
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows[0]["runIdSha256"], digest(&actual.id));
++    assert_eq!(rows[0]["dispatchId"], rows[1]["dispatchId"]); assert_ne!(rows[0]["dispatchId"], rows[2]["dispatchId"]);
++    assert_eq!(rows[0]["runIdSha256"], rows[2]["runIdSha256"]); assert_ne!(rows[0]["runIdSha256"], rows[4]["runIdSha256"]);
++}
++
++struct Noop;
++impl Wake for Noop { fn wake(self: Arc<Self>) {} }
++#[test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++fn native_cancelled_dispatch_records_unknown_with_same_id() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let h = handler(); let engine = build_engine(vec![h.clone()], &[entry('a', HookTrustStatus::Trusted)], false);
++    let mut future = Box::pin(with_post_tool_dispatch(THREAD.into(), "turn1", "call", async {
++        let _observation = dispatched(&engine, &h).expect("scoped observer"); std::future::pending::<()>().await;
++    }));
++    let waker = Waker::from(Arc::new(Noop)); let mut cx = Context::from_waker(&waker);
++    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending)); drop(future);
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows.len(), 2);
++    assert_eq!(rows[1]["stage"], "handler_future_dropped"); assert_eq!(rows[1]["details"]["outcome"], "unknown");
++    assert_eq!(rows[0]["dispatchId"], rows[1]["dispatchId"]);
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_noninherited_scope_and_ambiguous_descriptor_are_unqualified() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let h = handler(); let engine = build_engine(vec![h.clone()], &[entry('a', HookTrustStatus::Trusted)], false);
++    assert!(dispatched(&engine, &h).is_none());
++    with_post_tool_dispatch(THREAD.into(), "turn1", "call", async {
++        let cloned = engine.clone(); let h = h.clone();
++        assert!(tokio::spawn(async move { dispatched(&cloned, &h).is_none() }).await.expect("owned no-work task"));
++    }).await;
++    assert!(capture.0.lock().expect("capture lock").is_empty());
++    let ambiguous = build_engine(vec![h.clone()], &[entry('a', HookTrustStatus::Trusted), entry('b', HookTrustStatus::Trusted)], false);
++    invoke(&ambiguous, &h, "call").await;
++    assert_eq!(capture.0.lock().expect("capture lock")[0]["cachedSelection"], "unavailable");
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_result_keeps_error_but_redacts_error_and_script_text() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let h = handler(); let engine = build_engine(vec![h.clone()], &[entry('a', HookTrustStatus::Trusted)], false);
++    with_post_tool_dispatch(THREAD.into(), "turn1", "call", async {
++        let mut observation = dispatched(&engine, &h).expect("scoped observer");
++        let result = result(Some("PRIVATE_ERROR_PAYLOAD")); observation.returned(&result);
++        assert_eq!(result.error.as_deref(), Some("PRIVATE_ERROR_PAYLOAD"));
++    }).await;
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows[1]["details"]["hasError"], true);
++    let text = serde_json::to_string(&*rows).expect("diagnostic JSON");
++    for forbidden in ["PRIVATE_ERROR", "PRIVATE_STDOUT", "PRIVATE_STDERR", "PRIVATE_COMMAND", "NATIVE-OBSERVER-FIXTURE"] {
++        assert!(!text.contains(forbidden));
++    }
++    assert!(rows[0]["executedScriptSha256"].is_null());
++}
++
++struct OwnedReadyMcp;
++impl crate::mcp::HookMcpExecutor for OwnedReadyMcp {
++    fn execute(&self, _: crate::mcp::HookMcpCall) -> futures::future::BoxFuture<'_, anyhow::Result<String>> {
++        Box::pin(async { Ok(r#"{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"OWNED_FIXTURE_CONTEXT"}}"#.into()) })
++    }
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_actual_post_tool_use_dispatch_joins_returned_run_without_external_command() {
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let mut h = handler(); h.kind = ConfiguredHandlerKind::McpTool {
++        server: "owned-fixture".into(), tool: "ready".into(), input: serde_json::Map::new(),
++    };
++    let mut e = entry('a', HookTrustStatus::Trusted); e.handler = HookListEntryHandler::McpTool {
++        server: "owned-fixture".into(), tool: "ready".into(),
++    };
++    let mut engine = build_engine(vec![h], &[e], false); engine.mcp_executor = Arc::new(OwnedReadyMcp);
++    let thread = ThreadId::new(); let thread_text = thread.to_string();
++    let outcome = crate::events::post_tool_use::run(&engine, crate::events::post_tool_use::PostToolUseRequest {
++        session_id: thread, turn_id: "owned-turn".into(), subagent: None,
++        cwd: AbsolutePathBuf::try_from(PathBuf::from("/")).expect("literal metadata cwd"), transcript_path: None,
++        model: "owned-fixture".into(), permission_mode: "owned-fixture".into(),
++        tool_name: "owned-fixture".into(), matcher_aliases: Vec::new(), tool_use_id: "owned-tool-call".into(),
++        tool_input: json!({}), tool_response: json!({}),
++    }).await;
++    assert_eq!(outcome.hook_events.len(), 1); assert_eq!(outcome.additional_contexts.len(), 1);
++    assert!(outcome.additional_contexts[0].contains("OWNED_FIXTURE_CONTEXT"));
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows.len(), 2);
++    assert_eq!(rows[0]["threadId"], thread_text); assert_eq!(rows[0]["turnId"], "owned-turn");
++    assert_eq!(rows[0]["runIdSha256"], digest(&outcome.hook_events[0].run.id));
++    assert_eq!(rows[0]["dispatchId"], rows[1]["dispatchId"]); assert_eq!(rows[1]["stage"], "handler_future_returned");
++    assert!(!serde_json::to_string(&*rows).expect("diagnostic JSON").contains("OWNED_FIXTURE_CONTEXT"));
++}
++
++struct OwnedEventMcp {
++    event: &'static str,
++    outputs: Mutex<std::collections::VecDeque<Option<&'static str>>>,
++}
++impl crate::mcp::HookMcpExecutor for OwnedEventMcp {
++    fn execute(&self, _: crate::mcp::HookMcpCall) -> futures::future::BoxFuture<'_, anyhow::Result<String>> {
++        let payload = self.outputs.lock().expect("owned queue").pop_front().expect("one output per owned call");
++        let output = payload.map(|text| json!({"hookSpecificOutput":{"hookEventName":self.event,"additionalContext":text}})).unwrap_or_else(|| json!({})).to_string();
++        Box::pin(async move { Ok(output) })
++    }
++}
++fn event_engine(event: HookEventName, outputs: Vec<Option<&'static str>>, label: &'static str) -> ClaudeHooksEngine {
++    let mut h = handler(); h.event_name = event;
++    h.kind = ConfiguredHandlerKind::McpTool { server: "owned-fixture".into(), tool: "ready".into(), input: serde_json::Map::new() };
++    let mut e = entry('a', HookTrustStatus::Trusted); e.event_name = event;
++    e.handler = HookListEntryHandler::McpTool { server: "owned-fixture".into(), tool: "ready".into() };
++    let mut engine = build_engine(vec![h], &[e], false);
++    engine.mcp_executor = Arc::new(OwnedEventMcp { event: label, outputs: Mutex::new(outputs.into()) });
++    engine
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_actual_session_start_preserves_optional_turn_and_base_run_without_tool_suffix() {
++    use crate::events::session_start::{SessionStartRequest, SessionStartSource, StartHookTarget};
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    let engine = event_engine(HookEventName::SessionStart, vec![Some("OWNED_START_CONTEXT"), Some("OWNED_START_CONTEXT")], "SessionStart");
++    for (index, turn) in [None, Some("first-turn")].into_iter().enumerate() {
++        let thread = ThreadId::new(); let thread_text = thread.to_string();
++        let outcome = crate::events::session_start::run(&engine, SessionStartRequest {
++            session_id: thread, cwd: AbsolutePathBuf::try_from(PathBuf::from("/")).expect("literal metadata cwd"),
++            transcript_path: None, model: "owned-fixture".into(), permission_mode: "owned-fixture".into(),
++            target: StartHookTarget::SessionStart { source: SessionStartSource::Startup },
++        }, turn.map(str::to_owned)).await;
++        assert_eq!(outcome.hook_events.len(), 1); assert_eq!(outcome.additional_contexts.len(), 1);
++        assert_eq!(outcome.hook_events[0].turn_id.as_deref(), turn);
++        let rows = capture.0.lock().expect("capture lock"); let entered = &rows[index * 2];
++        assert_eq!(entered["eventName"], "SessionStart"); assert_eq!(entered["threadId"], thread_text);
++        assert_eq!(entered["turnId"], json!(turn)); assert_eq!(entered["toolUseCorrelation"], "not_applicable");
++        assert_eq!(entered["runIdSha256"], digest(&outcome.hook_events[0].run.id));
++        assert_eq!(entered["runIdSha256"], entered["handlerBaseRunIdSha256"]);
++    }
++    assert_eq!(capture.0.lock().expect("capture lock").len(), 4);
++}
++
++#[tokio::test]
++#[ignore = "opt-in observer diagnostic: CODEX_REDACTED_HOOK_OBSERVER=1"]
++async fn native_actual_user_prompt_sequence_keeps_each_turn_and_empty_outcomes_without_fake_tool_id() {
++    use crate::events::user_prompt_submit::UserPromptSubmitRequest;
++    let capture = Capture::default(); let _subscriber = tracing::subscriber::set_default(capture.clone());
++    // Controlled native outputs test consumer coverage; this does not implement
++    // or claim the managed summary handler's own dedup behavior.
++    let payloads = vec![Some("OWNED_INITIAL"), None, None, Some("OWNED_CHANGED"), Some("OWNED_CLEAR"), None];
++    let engine = event_engine(HookEventName::UserPromptSubmit, payloads.clone(), "UserPromptSubmit");
++    let thread = ThreadId::new();
++    for (index, payload) in payloads.into_iter().enumerate() {
++        let turn = format!("continuation-{index}");
++        let outcome = crate::events::user_prompt_submit::run(&engine, UserPromptSubmitRequest {
++            session_id: thread, turn_id: turn.clone(), subagent: None,
++            cwd: AbsolutePathBuf::try_from(PathBuf::from("/")).expect("literal metadata cwd"), transcript_path: None,
++            model: "owned-fixture".into(), permission_mode: "owned-fixture".into(), prompt: "PRIVATE_OWNED_PROMPT".into(),
++        }).await;
++        assert_eq!(outcome.hook_events.len(), 1); assert_eq!(outcome.additional_contexts.len(), usize::from(payload.is_some()));
++        let rows = capture.0.lock().expect("capture lock"); let entered = &rows[index * 2];
++        assert_eq!(entered["eventName"], "UserPromptSubmit"); assert_eq!(entered["turnId"], turn);
++        assert_eq!(entered["toolUseCorrelation"], "not_applicable");
++        assert_eq!(entered["runIdSha256"], digest(&outcome.hook_events[0].run.id));
++    }
++    let rows = capture.0.lock().expect("capture lock"); assert_eq!(rows.len(), 12);
++    assert_ne!(rows[0]["dispatchId"], rows[2]["dispatchId"]);
++    assert_eq!(rows[0]["runIdSha256"], rows[2]["runIdSha256"]);
++    let text = serde_json::to_string(&*rows).expect("diagnostic JSON");
++    assert!(!text.contains("OWNED_INITIAL")); assert!(!text.contains("PRIVATE_OWNED_PROMPT"));
++}
+--- a/codex-rs/hooks/src/engine/mod.rs
++++ b/codex-rs/hooks/src/engine/mod.rs
+@@ -1,6 +1,7 @@
+ pub(crate) mod command_runner;
+ pub(crate) mod discovery;
+ pub(crate) mod dispatcher;
++pub(crate) mod hook_dispatch_observer;
+ mod matcher;
+ pub(crate) mod mcp_runner;
+ pub(crate) mod output_parser;
+@@ -223,6 +224,8 @@
+ pub(crate) struct ClaudeHooksEngine {
+     // Per-turn views share configuration; executor overlays copy handlers on mutation.
+     pub(crate) handlers: Arc<Vec<ConfiguredHandler>>,
++    // Diagnostic-only immutable discovery snapshot; never used for eligibility.
++    observer_selection: Arc<hook_dispatch_observer::CachedSelection>,
+     warnings: Arc<[String]>,
+     required_load_errors: Arc<[String]>,
+     pub(crate) command_runtime: CommandHookRuntime,
+@@ -242,6 +245,7 @@
+         if !enabled && plugin_hook_sources.is_empty() {
+             return Self {
+                 handlers: Arc::default(),
++                observer_selection: Arc::default(),
+                 warnings: Arc::default(),
+                 required_load_errors: Arc::default(),
+                 command_runtime,
+@@ -262,8 +266,12 @@
+             discovered.warnings.clear();
+             discovered.required_load_errors.clear();
+         }
++        let observer_selection = hook_dispatch_observer::snapshot(
++            &discovered.handlers, &discovered.hook_entries, bypass_hook_trust,
++        );
+         Self {
+             handlers: Arc::new(discovered.handlers),
++            observer_selection: Arc::new(observer_selection),
+             warnings: discovered.warnings.into(),
+             required_load_errors: discovered.required_load_errors.into(),
+             command_runtime,
+--- a/codex-rs/hooks/src/events/post_tool_use.rs
++++ b/codex-rs/hooks/src/events/post_tool_use.rs
+@@ -100,13 +100,18 @@
+         }
+     };
+ 
+-    let results = dispatcher::execute_handlers(
+-        engine,
+-        matched,
+-        input_json,
+-        request.cwd.as_path(),
+-        Some(request.turn_id.clone()),
+-        parse_completed,
++    let results = crate::engine::hook_dispatch_observer::with_post_tool_dispatch(
++        request.session_id.to_string(),
++        &request.turn_id,
++        &request.tool_use_id,
++        dispatcher::execute_handlers(
++            engine,
++            matched,
++            input_json,
++            request.cwd.as_path(),
++            Some(request.turn_id.clone()),
++            parse_completed,
++        ),
+     )
+     .await;
+ 
+--- a/codex-rs/hooks/src/events/session_start.rs
++++ b/codex-rs/hooks/src/events/session_start.rs
+@@ -127,6 +127,7 @@
+         };
+     }
+ 
++    let observer_event = request.target.event_name();
+     let (input_json, turn_id) = match request.target {
+         StartHookTarget::SessionStart { source } => {
+             let input_json = match serde_json::to_string(&SessionStartCommandInput::new(
+@@ -182,15 +183,12 @@
+         }
+     };
+ 
+-    let results = dispatcher::execute_handlers(
+-        engine,
+-        matched,
+-        input_json,
+-        request.cwd.as_path(),
+-        turn_id,
+-        parse_completed,
+-    )
+-    .await;
++    let results = crate::engine::hook_dispatch_observer::with_context_dispatch(
++        request.session_id.to_string(), turn_id.as_deref(), observer_event, None,
++        dispatcher::execute_handlers(
++            engine, matched, input_json, request.cwd.as_path(), turn_id.clone(), parse_completed,
++        ),
++    ).await;
+ 
+     let should_stop = results.iter().any(|result| result.data.should_stop);
+     let stop_reason = results
+--- a/codex-rs/hooks/src/events/user_prompt_submit.rs
++++ b/codex-rs/hooks/src/events/user_prompt_submit.rs
+@@ -102,15 +102,12 @@
+         }
+     };
+ 
+-    let results = dispatcher::execute_handlers(
+-        engine,
+-        matched,
+-        input_json,
+-        request.cwd.as_path(),
+-        Some(request.turn_id),
+-        parse_completed,
+-    )
+-    .await;
++    let results = crate::engine::hook_dispatch_observer::with_context_dispatch(
++        request.session_id.to_string(), Some(&request.turn_id), HookEventName::UserPromptSubmit, None,
++        dispatcher::execute_handlers(
++            engine, matched, input_json, request.cwd.as_path(), Some(request.turn_id.clone()), parse_completed,
++        ),
++    ).await;
+ 
+     let should_stop = results.iter().any(|result| result.data.should_stop);
+     let stop_reason = results
+--- a/codex-rs/tui/src/chatwidget/protocol.rs
++++ b/codex-rs/tui/src/chatwidget/protocol.rs
+@@ -192,9 +192,17 @@
+                 })
+             }
+             ServerNotification::HookStarted(notification) => {
++                crate::hook_observer::observe_received(
++                    "hook/started", &notification.thread_id, notification.turn_id.as_deref(),
++                    &notification.run, from_replay,
++                );
+                 self.on_hook_started(notification.run);
+             }
+             ServerNotification::HookCompleted(notification) => {
++                crate::hook_observer::observe_received(
++                    "hook/completed", &notification.thread_id, notification.turn_id.as_deref(),
++                    &notification.run, from_replay,
++                );
+                 self.on_hook_completed(notification.run);
+             }
+             ServerNotification::Error(notification) => {
+--- /dev/null
++++ b/codex-rs/tui/src/hook_observer.rs
+@@ -0,0 +1,145 @@
++//! Source-only proposal: redacted observations at the native TUI consumer.
++//! Nothing here records hook text, paths, status messages, commands or errors.
++//! This is diagnostic metadata, not proof that a model consumed the context.
++
++use codex_app_server_protocol::HookOutputEntryKind;
++use codex_app_server_protocol::HookRunStatus;
++use codex_app_server_protocol::HookRunSummary;
++use serde_json::Value;
++use serde_json::json;
++use sha2::Digest;
++use sha2::Sha256;
++use std::sync::LazyLock;
++use std::sync::atomic::AtomicU64;
++use std::sync::atomic::Ordering;
++
++const MAX_ENTRIES: usize = 128;
++const MAX_ENTRY_BYTES: usize = 1024 * 1024;
++static SEQUENCE: AtomicU64 = AtomicU64::new(0);
++// Proposed opt-in for an explicitly reviewed future native diagnostic build;
++// this key does not exist in the currently installed binary.
++static ENABLED: LazyLock<bool> = LazyLock::new(|| {
++    std::env::var_os("CODEX_REDACTED_HOOK_OBSERVER").as_deref() == Some(std::ffi::OsStr::new("1"))
++});
++static OBSERVER_ID: LazyLock<String> = LazyLock::new(|| uuid::Uuid::new_v4().to_string());
++static START_TICK: LazyLock<Option<u64>> = LazyLock::new(|| {
++    // This reads only the observer's own process identity, never an agent's
++    // transcript, environment, configuration, error or memory content.
++    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
++    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
++});
++
++fn digest(bytes: &[u8]) -> String {
++    format!("sha256:{:x}", Sha256::digest(bytes))
++}
++
++/// Pure projection over the real app-server HookRunSummary fields. A host-side
++/// current-process join is deliberately not invented by this native consumer.
++pub(crate) fn project_received(
++    thread_id: &str,
++    turn_id: Option<&str>,
++    run: &HookRunSummary,
++    replay: bool,
++) -> Result<Value, &'static str> {
++    let bounded_id = |id: &str| !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_graphic());
++    if !bounded_id(thread_id) || turn_id.is_some_and(|id| !bounded_id(id)) {
++        return Err("identity_bounds");
++    }
++    let path = run.source_path.as_path().as_os_str().as_encoded_bytes();
++    if run.id.len() > 8192 || path.len() > 8192 || run.entries.len() > MAX_ENTRIES {
++        return Err("run_bounds");
++    }
++    let total = run.entries.iter().try_fold(0_usize, |n, e| n.checked_add(e.text.len()));
++    if total.is_none_or(|n| n > MAX_ENTRY_BYTES) {
++        return Err("entry_byte_bounds");
++    }
++    let mut counts = [0_u64; 5];
++    let mut context_bytes = 0_usize;
++    let mut contexts = Vec::new();
++    let mut hash = Sha256::new();
++    hash.update(b"codex-hook-context-list-v1\0");
++    for entry in &run.entries {
++        let index = match &entry.kind {
++            HookOutputEntryKind::Warning => 0,
++            HookOutputEntryKind::Stop => 1,
++            HookOutputEntryKind::Feedback => 2,
++            HookOutputEntryKind::Context => 3,
++            HookOutputEntryKind::Error => 4,
++        };
++        counts[index] += 1;
++        if index == 3 {
++            let bytes = entry.text.as_bytes();
++            hash.update((contexts.len() as u64).to_be_bytes());
++            hash.update((bytes.len() as u64).to_be_bytes());
++            hash.update(bytes);
++            context_bytes += bytes.len();
++            contexts.push(json!({"bytes": bytes.len(), "sha256": digest(bytes)}));
++        }
++    }
++    hash.update((contexts.len() as u64).to_be_bytes());
++    let failure = match &run.status {
++        HookRunStatus::Failed => Some("native_run_failed_unclassified"),
++        HookRunStatus::Blocked => Some("native_run_blocked"),
++        HookRunStatus::Stopped => Some("native_run_stopped"),
++        HookRunStatus::Running | HookRunStatus::Completed => None,
++    };
++    Ok(json!({
++        "schemaVersion": 1,
++        "stage": "native_tui_hook_notification_received",
++        "threadId": thread_id,
++        "turnId": turn_id,
++        "replay": replay,
++        "runIdSha256": digest(run.id.as_bytes()),
++        "sourcePathSha256": digest(path),
++        "eventName": &run.event_name,
++        "handlerType": &run.handler_type,
++        "executionMode": &run.execution_mode,
++        "scope": &run.scope,
++        "source": &run.source,
++        "displayOrder": run.display_order,
++        "status": &run.status,
++        "startedAt": run.started_at,
++        "completedAt": run.completed_at,
++        "durationMs": run.duration_ms,
++        "entryKinds": {"warning": counts[0], "stop": counts[1], "feedback": counts[2], "context": counts[3], "error": counts[4]},
++        "contextBytes": context_bytes,
++        "contexts": contexts,
++        "contextListSha256": format!("sha256:{:x}", hash.finalize()),
++        "contextHashScheme": "ordered_length_framed_utf8_v1",
++        "failureClass": failure,
++        "commandOutcome": null,
++        "nativeTrustFingerprint": null,
++        "qualification": "consumer_received_only_not_model_consumption",
++        "coverage": "best_effort_upstream_and_log_queues_may_drop"
++    }))
++}
++
++/// Called at the actual TUI hook notification boundary before its normal
++/// consumer runs. Parentless tracing avoids inheriting arbitrary span fields.
++pub(crate) fn observe_received(
++    method: &'static str,
++    thread_id: &str,
++    turn_id: Option<&str>,
++    run: &HookRunSummary,
++    replay: bool,
++) {
++    if !*ENABLED {
++        return;
++    }
++    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
++    let mut row = match project_received(thread_id, turn_id, run, replay) {
++        Ok(row) => row,
++        Err(code) => json!({"schemaVersion":1,"stage":"native_tui_hook_notification_refused","reasonCode":code}),
++    };
++    row["method"] = json!(method);
++    row["observerId"] = json!(OBSERVER_ID.as_str());
++    row["sequence"] = json!(sequence);
++    row["namespacePid"] = json!(std::process::id());
++    row["namespaceStartTick"] = json!(*START_TICK);
++    // The existing SQLite layer indexes this exact field. On redaction refusal
++    // never fall back to the unvalidated original identity.
++    let indexed_thread = row.get("threadId").and_then(Value::as_str).unwrap_or("");
++    // No Debug/Display of the native notification or run is permitted here.
++    tracing::info!(target: "codex_hook_observer", parent: None,
++        thread_id = indexed_thread, hook_observation = %row, "redacted hook consumer observation");
++}
+--- a/codex-rs/tui/src/lib.rs
++++ b/codex-rs/tui/src/lib.rs
+@@ -160,6 +160,7 @@
+ mod goal_display;
+ mod goal_files;
+ mod history_cell;
++mod hook_observer;
+ mod hooks_rpc;
+ mod ide_context;
+ mod inline_visualization;

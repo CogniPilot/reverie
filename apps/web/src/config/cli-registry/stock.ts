@@ -129,6 +129,7 @@ const CLAUDE: CliEntry = {
   },
   launch: {
     chain: 'fallback',
+    resumeSelection: 'claude-transcript',
     params: {
       claudeMode: {
         type: 'enum',
@@ -1617,9 +1618,9 @@ const OMP: CliEntry = {
 };
 
 const HANDS_ENV = ['REVERIE_HANDS_BASE_URL', 'REVERIE_HANDS_API_KEY', 'REVERIE_HANDS_MODEL'];
-/** Recovered generic loop. Coding remains disabled until its separate runner integration is validated. */
+/** Reverie Admin Harness; legacy hands identifier retained for saved runtimes. Tools require explicit configured task scopes. */
 const HANDS: CliEntry = {
-  id: 'hands' as CliEntry['id'], label: 'Hands (experimental chat)', shortBadge: 'H',
+  id: 'hands' as CliEntry['id'], label: 'Reverie Admin Harness', shortBadge: 'RA',
   accent: '#6b7280', enabled: true, stock: true, order: 110, kind: 'agent',
   discovery: { binaries: ['reverie-hands'], searchDirs: [], install: { command: {} } },
   launch: { params: {}, variants: [{ id: 'default', args: [{ lit: 'reverie-hands' }] }] },

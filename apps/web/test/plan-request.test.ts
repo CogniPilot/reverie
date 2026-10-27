@@ -82,6 +82,33 @@ export function requestHarness(seed: PlanRequestRecord[] = []) {
 }
 
 describe('expert-approved plan requests', () => {
+  it('issues and approves a same-account refresh only with its explicit purpose and unchanged runtime digest', async () => {
+    const h = requestHarness(), runtimeDigest = 'a'.repeat(64);
+    h.executor.snapshot = vi.fn(async () => ({ sessionId: 'source', name: 'Alex', account: 'first', working: false,
+      mode: 'codex', runtimeDigest }));
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' }));
+    const input = { ...h.input, toAccount: 'first', purpose: 'runtime-refresh' as const };
+    const record = await h.service.create(input, undefined, h.execution);
+    expect(record).toMatchObject({ purpose: 'runtime-refresh', fromAccount: 'first', toAccount: 'first', runtimeDigest });
+    await expect(h.service.create({ ...input, purpose: undefined }, undefined, h.execution)).rejects.toThrow('identifier');
+    await h.service.decide(record.id, 'source', h.nonce(), 'approve', 'Preserve the bounded work handoff.');
+    expect(h.port.moves.begin).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'runtime-refresh',
+      runtimeDigest, fromAccount: 'first', toAccount: 'first', forceBusy: false }), undefined, h.executor);
+    expect(h.port.capability.remove).toHaveBeenCalled();
+  });
+
+  it('refuses different-account refreshes and changed runtime policy before consuming an approval', async () => {
+    const h = requestHarness(); let runtimeDigest = 'a'.repeat(64);
+    h.executor.snapshot = vi.fn(async () => ({ sessionId: 'source', name: 'Alex', account: 'first', working: false,
+      mode: 'codex', runtimeDigest }));
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' }));
+    await expect(h.service.create({ ...h.input, purpose: 'runtime-refresh' }, undefined, h.execution)).rejects.toThrow('plan changed');
+    const record = await h.service.create({ ...h.input, toAccount: 'first', purpose: 'runtime-refresh' }, undefined, h.execution);
+    runtimeDigest = 'b'.repeat(64);
+    await expect(h.service.decide(record.id, 'source', h.nonce(), 'approve', 'Handoff.')).rejects.toThrow('runtime changed');
+    expect(h.port.moves.begin).not.toHaveBeenCalled();
+    await expect(h.service.reauthorize(record.id, undefined, h.execution)).rejects.toThrow('runtime changed');
+  });
   it('exposes no capability reader and cancellation still revokes privately', async () => {
     const h = requestHarness();
     const record = await h.service.create(h.input, 'owner', h.execution);

@@ -1,7 +1,9 @@
-import type { CompanyService } from '../../company-service.js';
+import { CompanyError, type CompanyService, type RuntimeRestartIntent } from '../../company-service.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { SessionPort } from '../ports/session-port.js';
+import type { EventPort } from '../ports/event-port.js';
+import { SseEvent } from '../sse-events.js';
 import type { Session } from '../../session.js';
 import { getCli } from '../../config/cli-registry/registry.js';
 import { selectedSubscription } from '../../subscription-profiles.js';
@@ -46,7 +48,7 @@ export function runtimeView(session: Session) {
 
 export const runtimeSwitches = new Set<string>();
 
-export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session) => Promise<void>) {
+export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session) => Promise<void>) {
   const switching = runtimeSwitches;
   const authorize = (req: FastifyRequest) => req.headers['x-reverie-parent-session'] === undefined && verifiedOwner(req);
   app.post('/api/company/employees/:id/restart', async (req, reply) => {
@@ -82,6 +84,12 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     const fail = (status: number, error: string) => reply.code(status).send({ success: false, error });
     const body = parseBody(Input, req.body);
+    // A worker transport respawn replaces the server's terminal viewer. The
+    // broker may reuse its still-running laptop and ignore the new launch line,
+    // so a new viewer PID cannot confirm a runtime switch. Keep the selected
+    // recipe intact until a supported whole-session replacement is performed.
+    if (!detached && process.env.REVERIE_WORKER_SOCKET)
+      return fail(409, 'An isolated laptop cannot change runtime in place. Use a supported whole-session replacement; reconnecting its terminal does not restart the running agent.');
     const workBlocked = () => {
       const state = restartEligibility(session);
       if (body.forceRestart) return body.confirmSessionId !== id || !state.recoverable;
@@ -96,8 +104,14 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     switching.add(id);
     let rollback: (() => void) | undefined;
     let configDir: string | undefined;
+    let intent: RuntimeRestartIntent | undefined;
+    let launchAttempted = false;
     const wasPinned = session.pinned;
     try {
+      intent = company?.prepareRuntimeRestart?.(id, ownerFor(req));
+      const requireIntent = () => {
+        if (intent && !intent.current()) throw new CompanyError('This expert changed or stopped during restart', 409);
+      };
       let selection: typeof session.subscriptionProfile;
       let env: Record<string, string> = {};
       let custom: { endpointId: string; modelId: string; label: string; envKeys: string[]; configDir?: string; launchModel?: string } | undefined;
@@ -121,30 +135,48 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       }
       if (workBlocked() || (!detached && ctx.sessions.get(id) !== session) || (detached && loadSession && !loadSession(id, req)))
         return fail(409, 'This expert changed or stopped while runtime settings were being validated');
+      // The laptop broker reads this durable flag before accepting any launch.
+      await intent?.claim();
+      requireIntent();
       const sourceKey = body.source.kind === 'subscription' ? 'subscription:' + body.source.profileId : 'local:' + body.source.endpointId;
       rollback = session.configureRuntime({ mode: body.mode as SessionMode, selection, env, sourceKey, model, effort: body.effort, effortField: effort.field });
       ctx.mux?.updateSessionMode(id, session.mode);
       if (custom) session.setCustomModel(custom, env);
       session.setPinned(true);
+      launchAttempted = true;
       if (detached) {
         await session.startInteractive();
+        requireIntent();
         await ctx.addSession(session);
+        requireIntent();
         await ctx.setupSessionListeners(session);
       } else if (!await session.restartCli()) throw new Error('The selected runtime did not start');
+      requireIntent();
       ctx.persistSessionStateNow(session);
       await onRuntimeSaved?.(session);
+      requireIntent();
+      const state = ctx.getSessionStateWithRespawn?.(session);
+      if (state !== undefined) ctx.broadcast?.(detached ? SseEvent.SessionCreated : SseEvent.SessionUpdated,
+        detached ? state : { session: state });
       return { success: true, data: runtimeView(session) };
-    } catch {
+    } catch (error) {
       if (rollback) {
         rollback(); session.setPinned(wasPinned);
         ctx.mux?.updateSessionMode(id, session.mode);
         // Restore the previous account environment in the pane as well as in memory.
-        if (detached) await ctx.discardPartiallyBuiltSession(id).catch(() => undefined);
-        else if (ctx.sessions.get(id) === session) await session.restartCli().catch(() => false);
+        if (launchAttempted && detached) {
+          // A failed start may have created a pane before registration; discard cannot see it yet.
+          if (ctx.sessions.get(id) === session) await ctx.discardPartiallyBuiltSession(id).catch(() => undefined);
+          else await session.stop().catch(() => undefined);
+        } else if (launchAttempted && (intent?.originallyStopped || (intent && !intent.current()))) {
+          await session.stop().catch(() => undefined);
+        } else if (launchAttempted && ctx.sessions.get(id) === session) await session.restartCli().catch(() => false);
         ctx.persistSessionStateNow(session);
       }
+      await intent?.rollback();
       if (configDir) removeConfigDir(configDir);
+      if (error instanceof CompanyError) return fail(error.status, error.message);
       return fail(400, 'Runtime change failed; previous settings were restored. Check the account and harness compatibility.');
-    } finally { switching.delete(id); }
+    } finally { intent?.finish(); switching.delete(id); }
   });
 }

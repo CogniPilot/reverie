@@ -50,6 +50,10 @@ export interface WebLaunchOptions {
   titleHostname?: string;
   allowUnauthenticatedNetwork?: boolean;
   multiuser?: boolean;
+  /** Explicit operator private Goal bootstrap; never inferred from agent environment. */
+  goalPrivateConfig?: string;
+  /** Explicit tracked service authentication config (purpose registry, principals, nonce store). */
+  serviceAuthConfig?: string;
 }
 
 export interface StartResult {
@@ -93,6 +97,8 @@ export function buildWebArgs(options: WebLaunchOptions): string[] {
   if (options.titleHostname) args.push('--title-hostname', options.titleHostname);
   if (options.allowUnauthenticatedNetwork) args.push('--allow-unauthenticated-network');
   if (options.multiuser) args.push('--multiuser');
+  if (options.goalPrivateConfig !== undefined) args.push('--goal-private-config', options.goalPrivateConfig);
+  if (options.serviceAuthConfig !== undefined) args.push('--service-auth-config', options.serviceAuthConfig);
   return args;
 }
 

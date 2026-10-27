@@ -367,7 +367,7 @@ describe('the recovery construction path can create a resumed pane', () => {
     expect(created[0].workingDir).toBe(workingDir);
   });
 
-  it('comes back pointed at the conversation the pane was holding', async () => {
+  it('preserves archived intent but waits for a new pane to identify its conversation', async () => {
     const mux = new TmuxManager();
     const state = persistedSession({
       id: '0000002a-0032-4000-8000-000000000042',
@@ -376,10 +376,19 @@ describe('the recovery construction path can create a resumed pane', () => {
     });
     const session = rebuildFromPersistedState(state, mux);
 
+    // Before a new launch, the old chain still records the prior conversation.
+    expect(session.claudeSessionId).toBe('after-clear');
+    expect(session.toState().resumeSessionId).toBe('after-clear');
     await session.startInteractive();
 
-    // The chain tail wins: a `/clear` before the reboot moved the CLI off the launch id.
+    // This test creates a NEW pane, not an attachment to a surviving provider.
+    // Runtime metadata may select a different candidate: do not guess before its hook.
+    expect(session.claudeSessionId).toBeNull();
+    expect(session.claudeSessionIdPending).toBe(true);
+    expect(session.toState().claudeSessionChain).toEqual(['launch-id', 'after-clear']);
+    session.adoptClaudeSessionId('after-clear', { firstHand: true });
     expect(session.claudeSessionId).toBe('after-clear');
+    expect(session.claudeSessionIdPending).toBe(false);
   });
 
   it('comes back idle, with no prompt sent and no autonomous loop armed', async () => {

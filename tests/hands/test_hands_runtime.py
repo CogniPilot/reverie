@@ -77,6 +77,8 @@ class HandsRuntimeTests(unittest.TestCase):
             cfg=json.loads(path.read_text())
             self.assertEqual(cfg['self_name'],employee['name'])
             self.assertEqual(cfg['reply_max_tokens'],16384)
+            self.assertEqual(cfg['poll_s'], 15)
+            self.assertTrue(cfg['phone_wake'])
             self.assertTrue(Path(cfg['memory_instance']).is_file())
             self.assertIsNone(cfg['coding'])
             self.assertEqual(cfg['attachments_root'], '/reverie_workspace/attachments')
@@ -94,7 +96,8 @@ class HandsRuntimeTests(unittest.TestCase):
     def test_runtime_settings_cannot_replace_identity_or_accept_invalid_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'settings.json'
-            for value in ({'self_session_id':'other'},{'reply_max_tokens':True},{'model_timeout_s':901}):
+            for value in ({'self_session_id':'other'},{'reply_max_tokens':True},{'model_timeout_s':901},
+                          {'phone_wake': 1}, {'poll_s': 0}, {'poll_s': float('inf')}, {'poll_s': True}):
                 path.write_text(json.dumps(value));path.chmod(0o600)
                 with self.assertRaises(ValueError):launcher.runtime_settings(path)
             path.write_text('{}');path.chmod(0o644)

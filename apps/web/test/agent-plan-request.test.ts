@@ -30,9 +30,11 @@ function fixture(manager = false) {
       allocations: async () => ({ accounts: [{ id: 'old-plan', sessionIds: ['source'] }] }),
       account: async () => ({ provider: 'anthropic', id: 'target', profileId: 'target' }),
     },
-    mux: { isPaneDead: () => false },
+    mux: { isPaneDead: () => false, getSession: () => ({ pid: 12 }) },
+    capture: async () => [{ pid: 12, start: 'fixture' }],
+    survivors: async () => [],
     chat: {},
-    cleanup: vi.fn(),
+    cleanup: vi.fn(async (id: string) => { sessions.delete(id); }),
   };
   const invoke = vi.fn(async (_method: string, url: string, payload?: any) => {
     expect(hasDelegatedSessionCreate()).toBe(true);
@@ -66,6 +68,18 @@ const move = {
   forceBusy: false,
 };
 describe('explicit agent plan delegation', () => {
+  it('keeps runtime refresh self-only even for a manager and still requires current granted permission', () => {
+    const own = fixture();
+    expect(agentPlanRequestExecution(own.request, { ...own.input, purpose: 'runtime-refresh' },
+      own.runtime as PlanMoveRuntime, own.invoke)).toBeDefined();
+    own.employees[0].permissions.moveOwnPlan = false;
+    expect(agentPlanRequestExecution(own.request, { ...own.input, purpose: 'runtime-refresh' },
+      own.runtime as PlanMoveRuntime, own.invoke)).toBeUndefined();
+    const manager = fixture(true);
+    expect(agentPlanRequestExecution(manager.request, { ...manager.input, purpose: 'runtime-refresh' },
+      manager.runtime as PlanMoveRuntime, manager.invoke)).toBeUndefined();
+    expect(manager.invoke).not.toHaveBeenCalled();
+  });
   it('defaults both capabilities off; rejects titles, temporary agents, stale sessions and another owner', () => {
     expect(EmployeePermissionsSchema.parse({})).toEqual({
       recoverEmployees: false,
@@ -123,5 +137,84 @@ describe('explicit agent plan delegation', () => {
       await expect(execution.executor.create(move, undefined)).rejects.toThrow();
       expect(h.invoke).not.toHaveBeenCalled();
     }
+  });
+
+  it.each([false, true])('retains exact approval after its intentional source stop (manager=%s)', async (manager) => {
+    const h = fixture(manager), execution = h.capture()!;
+    await execution.executor.create(move, undefined);
+    await execution.executor.stop('source');
+    expect(h.sessions.has('source')).toBe(false);
+    expect(execution.authorized()).toBe(true);
+    expect(execution.requestedBy).toBe(manager ? 'manager-session' : 'source');
+    await execution.executor.start('candidate');
+    expect(h.invoke).toHaveBeenLastCalledWith('POST', '/api/sessions/candidate/interactive', undefined);
+  });
+
+  it('never treats an unexpected missing source or failed cleanup as successful source-stop proof', async () => {
+    for (const manager of [false, true]) {
+      const h = fixture(manager), execution = h.capture()!;
+      await execution.executor.create(move, undefined);
+      h.sessions.delete('source');
+      expect(execution.authorized()).toBe(false);
+      await expect(execution.executor.start('candidate')).rejects.toThrow();
+      expect(h.invoke).toHaveBeenCalledTimes(1);
+      const failed = fixture(manager), pending = failed.capture()!;
+      await pending.executor.create(move, undefined);
+      failed.runtime.cleanup.mockImplementation(async () => { failed.sessions.delete('source'); throw new Error('cleanup failed'); });
+      await expect(pending.executor.stop('source')).rejects.toThrow('cleanup failed');
+      expect(pending.authorized()).toBe(false);
+      await expect(pending.executor.start('candidate')).rejects.toThrow();
+    }
+  });
+
+  it('rechecks fresh grants, intent and both captured identities after the approved source stop', async () => {
+    const changes = [
+      (h: ReturnType<typeof fixture>) => { h.employees[1].permissions.managePlans = false; },
+      (h: ReturnType<typeof fixture>) => { (h.employees[0] as any).onVacation = true; },
+      (h: ReturnType<typeof fixture>) => { (h.employees[1] as any).desiredRunning = false; },
+      (h: ReturnType<typeof fixture>) => { (h.employees[0] as any).desiredRunning = false; },
+      (h: ReturnType<typeof fixture>) => { h.sessions.set('source', { ...h.sessions.get('candidate'), id: 'source' }); },
+      (h: ReturnType<typeof fixture>) => { h.sessions.set('candidate', { ...h.sessions.get('candidate') }); },
+      (h: ReturnType<typeof fixture>) => { h.employees[0].sessionId = 'foreign'; },
+      (h: ReturnType<typeof fixture>) => { h.sessions.set('manager-session', { ...h.sessions.get('manager-session') }); },
+      (h: ReturnType<typeof fixture>) => { h.sessions.get('manager-session').owner = 'foreign-owner'; },
+      (h: ReturnType<typeof fixture>) => { (h.employees[0] as any).owner = 'foreign-owner'; },
+    ];
+    for (const mutate of changes) {
+      const h = fixture(true), execution = h.capture()!;
+      await execution.executor.create(move, undefined);
+      await execution.executor.stop('source');
+      expect(execution.authorized()).toBe(true);
+      mutate(h);
+      expect(execution.authorized()).toBe(false);
+      await expect(execution.executor.start('candidate')).rejects.toThrow();
+      expect(h.invoke).toHaveBeenCalledTimes(1);
+    }
+  });
+  it('does not clean a different object that reused the candidate identifier', async () => {
+    const h = fixture(true), execution = h.capture()!;
+    await execution.executor.create(move, undefined);
+    await execution.executor.stop('source');
+    const foreign = { ...h.sessions.get('candidate') };
+    h.sessions.set('candidate', foreign);
+    await expect(execution.executor.stop('candidate')).rejects.toThrow('candidate identity changed');
+    expect(h.sessions.get('candidate')).toBe(foreign);
+    expect(h.runtime.cleanup).toHaveBeenCalledTimes(1);
+  });
+  it('never admits a missing candidate, unrelated cleanup or expired post-stop authority', async () => {
+    const absent = fixture(true), failed = absent.capture()!;
+    absent.invoke.mockResolvedValue({ success: true, data: { session: { id: 'missing' } } });
+    await expect(failed.executor.create(move, undefined)).rejects.toThrow('owned candidate');
+    const h = fixture(true), execution = h.capture()!;
+    await execution.executor.create(move, undefined);
+    await expect(execution.executor.stop('manager-session')).rejects.toThrow('outside the approved');
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+    await execution.executor.stop('source');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 30 * 60_000);
+    try {
+      expect(execution.authorized()).toBe(false);
+      await expect(execution.executor.start('candidate')).rejects.toThrow();
+      expect(h.invoke).toHaveBeenCalledTimes(1);
+    } finally { clock.mockRestore(); }
   });
 });

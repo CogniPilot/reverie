@@ -73,7 +73,7 @@ beforeAll(async () => {
     app,
     ctx,
     {
-      view: () => ({ employees: [{ id: 'employee', name: 'Synthetic', onVacation: false }], settings: {} }),
+      view: () => ({ employees: [{ id: 'employee', name: 'Synthetic', onVacation: false, permissions: {} }], settings: {} }),
       rebind: async () => {
         rebindCalls++;
         return { id: 'employee' };

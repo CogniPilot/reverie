@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { ChatLanguageService } from '../src/chat-language-service.js';
 
-const service = new ChatLanguageService();
+// This explicit operator diagnostic intentionally enables its synthetic snippets.
+const service = new ChatLanguageService({ enabled: () => true });
 try {
   assert.deepEqual(
     await service.available(),

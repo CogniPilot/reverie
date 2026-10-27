@@ -10,14 +10,17 @@ const A = '00000026-002d-4000-8000-00000000003c';
 const open: any[] = [];
 afterEach(async () => {
   for (const h of open.splice(0)) {
-    h.window.ReverieChatPlugins?.setEnabled('latex', false);
+    await h.window.ReverieChatPlugins?.setEnabled('latex', false);
     for (const observer of h.observers) observer.disconnect();
     await h.flush();
     h.dom.window.close();
   }
 });
 
-async function setup(raw = 'Explain **this**: $x^2 + y^2$\n$$\\frac{1}{2}$$\n```tex\n$x$\n```') {
+async function setup(
+  raw = 'Explain **this**: $x^2 + y^2$\n$$\\frac{1}{2}$$\n```tex\n$x$\n```',
+  options: { deferAssets?: boolean } = {}
+) {
   const h = await createHarness({
     sessions: [{ id: A, name: 'alpha', mode: 'claude' }],
     rooms: [
@@ -33,7 +36,26 @@ async function setup(raw = 'Explain **this**: $x^2 + y^2$\n$$\\frac{1}{2}$$\n```
     }
   };
   open.push({ ...h, observers });
+  let enabled = { latex: false, python: false, modelica: false };
+  const originalFetch = h.window.fetch;
+  h.window.fetch = async (url: string, init: any = {}) => {
+    if (new URL(url, h.window.location.href).pathname !== '/api/chat-plugins') return originalFetch(url, init);
+    if (init.method === 'PUT') enabled = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          enabled,
+          available: { python: false, modelica: false },
+          canManage: true,
+        },
+      }),
+    };
+  };
   const requests: string[] = [];
+  let deferAssets = options.deferAssets === true;
+  const pendingAssets: (() => void)[] = [];
   const append = h.document.head.append.bind(h.document.head);
   h.document.head.append = (...nodes: any[]) => {
     append(...nodes);
@@ -41,18 +63,26 @@ async function setup(raw = 'Explain **this**: $x^2 + y^2$\n$$\\frac{1}{2}$$\n```
       if (node.src || node.href) {
         const path = new URL(node.src || node.href).pathname.slice(1);
         requests.push(path);
-        if (node.tagName === 'SCRIPT')
-          h.window.queueMicrotask(() => {
+        if (node.tagName === 'SCRIPT') {
+          const load = () => {
             h.window.eval(read(path));
             node.dispatchEvent(new h.window.Event('load'));
-          });
+          };
+          if (deferAssets) pendingAssets.push(load);
+          else h.window.queueMicrotask(load);
+        }
       }
   };
   h.window.eval(read('vendor/dompurify.min.js'));
   h.window.eval(read('chat-plugins.js'));
   h.window.eval(read('chat-math-plugin.js'));
+  await h.window.ReverieChatPlugins.refresh();
   await h.flush();
-  return { ...h, requests, host: h.window.ReverieChatPlugins };
+  const releaseAssets = () => {
+    deferAssets = false;
+    for (const load of pendingAssets.splice(0)) h.window.queueMicrotask(load);
+  };
+  return { ...h, requests, releaseAssets, host: h.window.ReverieChatPlugins };
 }
 const click = (scope: any, text: string) => {
   const node = [...scope.querySelectorAll('button')].find(
@@ -72,13 +102,16 @@ describe('optional math source and preview', () => {
   });
 
   it('can disable while local assets are loading without mounting late controls', async () => {
-    const h = await setup('$x$');
-    h.host.setEnabled('latex', true);
-    h.host.setEnabled('latex', false);
+    const h = await setup('$x$', { deferAssets: true });
+    await h.host.setEnabled('latex', true);
+    expect(h.requests.length).toBeGreaterThan(0);
+    expect(h.document.querySelector('.chat-math-toolbar')).toBeNull();
+    await h.host.setEnabled('latex', false);
+    h.releaseAssets();
     await h.flush();
     expect(h.document.querySelector('.chat-math-toolbar')).toBeNull();
     expect(h.document.querySelector('.chatroom-msg-text')!.textContent).toBe('$x$');
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     expect(h.document.querySelectorAll('.chat-math-message-preview .katex')).toHaveLength(1);
   });
@@ -88,7 +121,7 @@ describe('optional math source and preview', () => {
     const h = await setup(raw);
     const msg = h.document.querySelector('.chatroom-msg-text')!;
     const initial = msg.innerHTML;
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     expect(msg.querySelectorAll('.katex')).toHaveLength(2);
     expect(msg.querySelector('pre code')!.textContent).toBe('$x$');
@@ -99,14 +132,14 @@ describe('optional math source and preview', () => {
       expect(msg.querySelector('.chat-math-message-source')!.textContent).toBe(raw);
       click(msg, 'Show rendered');
     }
-    h.host.setEnabled('latex', false);
+    await h.host.setEnabled('latex', false);
     expect(msg.innerHTML).toBe(initial);
     expect(h.requests.every((path) => !path.includes('://'))).toBe(true);
   });
 
   it('keeps textarea source exact across preview/edit and appends message source to a draft', async () => {
     const h = await setup('Please solve $x^2=2$.');
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     const input = h.document.querySelector('textarea.chatroom-input') as HTMLTextAreaElement;
     const raw = '  $\\alpha_1$\n$$a  + b$$\n<&>  ';
@@ -123,14 +156,14 @@ describe('optional math source and preview', () => {
     expect(input.value).toBe(raw + '\nPlease solve $x^2=2$.');
     expect(input.hidden).toBe(false);
     expect(h.server.posts).toHaveLength(0);
-    h.host.setEnabled('latex', false);
+    await h.host.setEnabled('latex', false);
     expect(input.value).toBe(raw + '\nPlease solve $x^2=2$.');
     expect(input.hidden).toBe(false);
   });
 
   it('edits and sends the source, while the preview stays derived and fenced text stays literal', async () => {
     const h = await setup();
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     const input = h.document.querySelector('textarea.chatroom-input') as HTMLTextAreaElement;
     const form = input.parentElement!;
@@ -151,7 +184,7 @@ describe('optional math source and preview', () => {
 
   it('enhances dynamic message editors and removes controls on disable', async () => {
     const h = await setup();
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     const input = h.document.createElement('textarea');
     input.className = 'ca-edit-input';
@@ -165,11 +198,11 @@ describe('optional math source and preview', () => {
     click(box, 'Edit source');
     input.value = '$b$';
     click(box, 'Preview math');
-    h.host.setEnabled('latex', false);
+    await h.host.setEnabled('latex', false);
     expect(input.hidden).toBe(false);
     expect(input.value).toBe('$b$');
     expect(h.document.querySelector('.chat-math-toolbar')).toBeNull();
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     expect(box.querySelectorAll('.chat-math-toolbar')).toHaveLength(1);
   });
@@ -178,7 +211,7 @@ describe('optional math source and preview', () => {
 describe('bounded renderer and escaping', () => {
   it('uses untrusted settings, fresh macro state and safe failure text', async () => {
     const h = await setup('$x$');
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     const katex = h.window.katex;
     const spy = vi.spyOn(katex, 'renderToString');
@@ -209,7 +242,7 @@ describe('bounded renderer and escaping', () => {
     String.raw`\invalid{<img src=x onerror=alert(1)>}`,
   ])('keeps hostile/unsupported content visible without resource markup: %s', async (math) => {
     const h = await setup('$' + math + '$');
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     const node = h.window.ReverieChatMath.mathNode({ math, raw: '$' + math + '$' });
     expect(node.textContent).toBe('$' + math + '$');
@@ -222,7 +255,7 @@ describe('bounded renderer and escaping', () => {
 
   it('sanitizes generated HTML without allowing URLs, executable attributes or arbitrary CSS', async () => {
     const h = await setup();
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     const fragment = h.window.sanitizeChatMathHtml(
       '<span id="app" onclick="alert(1)" style="height:2em;position:fixed;background:url(x)">x</span><svg><foreignObject><img src=x></foreignObject><path d="M0 0L1 1" onload="alert(1)"/></svg>'
@@ -238,7 +271,7 @@ describe('bounded renderer and escaping', () => {
 
   it('bounds math work and preserves all malformed and oversized source', async () => {
     const h = await setup();
-    h.host.setEnabled('latex', true);
+    await h.host.setEnabled('latex', true);
     await h.flush();
     for (const raw of ['$' + 'x'.repeat(4097) + '$', 'unclosed $$x', '$x + 1', Array(40).fill('$x$').join(' ')]) {
       const parts = h.window.ReverieChatMath.mathSegments(raw);

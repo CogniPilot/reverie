@@ -163,6 +163,7 @@
   },
   "files": [
     "dist",
+    "scripts/reverie-postinstall.mjs",
     "scripts/postinstall.js",
     "scripts/fix-node-pty.mjs",
     "skills",

@@ -155,7 +155,10 @@ export async function spendRebootRestore(
       [...ctx.sessions.values()]
         .flatMap((session) => {
           const record = ctx.store.getSession(session.id);
-          return [session.claudeSessionId, record ? nativeOpenCodeThread(record) ?? nativeCodexThread(record) : undefined];
+          return [
+            session.claudeSessionId,
+            record ? (nativeOpenCodeThread(record) ?? nativeCodexThread(record)) : undefined,
+          ];
         })
         .filter((id): id is string => !!id)
     );
@@ -208,6 +211,7 @@ export async function spendRebootRestore(
       failures.push({ sessionId: entry.sessionId, reason: 'workspace-forbidden' });
       continue;
     }
+    let builtSession: Session | undefined;
     try {
       const saved = entry.state;
       const claudeModeConfig = await ctx.getClaudeModeConfig();
@@ -238,9 +242,10 @@ export async function spendRebootRestore(
         resumeSessionId: nativeOpenCodeThread(saved) || saved.mode === 'codex' ? undefined : entry.resumeConversationId,
         // Kept whatever the mode, as on recovery: a session switched off OpenCode still owns its thread.
         openCodeConfig: saved.openCodeConfig,
-        codexConfig: saved.mode === 'codex'
-          ? { ...saved.codexConfig, resumeSessionId: nativeCodexThread(saved) }
-          : saved.codexConfig,
+        codexConfig:
+          saved.mode === 'codex'
+            ? { ...saved.codexConfig, resumeSessionId: nativeCodexThread(saved) }
+            : saved.codexConfig,
         // Re-resolved against the owner's CURRENT grant, never replayed from the
         // record: a grant held when the record was written may be gone now.
         subscriptionProfile: saved.subscriptionProfile,
@@ -257,19 +262,30 @@ export async function spendRebootRestore(
           saved.attachmentHistory,
         lastSubmitAt: saved.lastSubmitAt,
         claudeSessionChain: saved.claudeSessionChain,
+        claudeSessionIdPending: saved.claudeSessionIdPending,
         lastActivityAt: saved.lastActivityAt,
         owner: saved.owner,
         parentSessionId: saved.parentSessionId,
       });
 
+      builtSession = session;
+      if (!shouldRestore() || ctx.sessions.has(entry.sessionId))
+        throw new Error('Recovery canceled or session replaced before registration');
+      const assertCurrent = () => {
+        if (!shouldRestore() || ctx.sessions.get(entry.sessionId) !== session)
+          throw new Error('Recovery canceled by current owner intent or session replacement');
+      };
       await ctx.addSession(session);
+      assertCurrent();
       // Before the listeners, because setupSessionListeners() reads the
       // image-watcher flag this phase restores; before the spawn, because the
       // custom-model environment and the nice priority shape the process.
       await ctx.reapplyPersistedSessionState(session, saved, 'before-spawn');
+      assertCurrent();
       await ctx.setupSessionListeners(session);
-      if (!shouldRestore()) throw new Error('Recovery canceled by current owner intent');
+      assertCurrent();
       await session.startInteractive();
+      assertCurrent();
       // The session's own history, applied only once the pane exists: on a
       // failed start these totals would belong to a session that never ran.
       // Both halves precede the route's OWN persist, which matters because a
@@ -286,6 +302,7 @@ export async function spendRebootRestore(
       await ctx.reapplyPersistedSessionState(session, saved, 'after-spawn', {
         rearmAutoResumeSchedule: false,
       });
+      assertCurrent();
       ctx.persistSessionState(session);
 
       // A session without its workspace hooks goes silently blind: no stop or
@@ -303,12 +320,17 @@ export async function spendRebootRestore(
       // skill falls back to writing out the whole ~150-line §0 preamble. Remote and
       // docker sessions never reach here (the plan rejects them as
       // `remote-or-docker`), so the local-only condition is structural.
-      if (agentSkillDir(getCli(session.mode)?.capabilities) && (await ctx.getAgentSkillEnabled())) {
+      assertCurrent();
+      const skillDir = agentSkillDir(getCli(session.mode)?.capabilities);
+      const skillEnabled = skillDir && (await ctx.getAgentSkillEnabled());
+      assertCurrent();
+      if (skillEnabled) {
         await seedAgentSessionPreamble(session.id).catch((err: unknown) =>
           console.warn(`[agent-skill] preamble seed failed for ${session.id}: ${getErrorMessage(err)}`)
         );
       }
 
+      assertCurrent();
       getLifecycleLog().log({ event: 'recovered', sessionId: session.id, name: session.name });
       // Every other open tab and phone needs this; the clicking tab already has
       // the response, and the client's handler is an idempotent upsert.
@@ -332,11 +354,13 @@ export async function spendRebootRestore(
       // a pinned record to `stopped` (which this pass reads as an intentional
       // kill, making the session permanently unrestorable) and delete the
       // workspace's `.reverie-uploads`. This undoes only the construction.
-      await ctx
-        .discardPartiallyBuiltSession(entry.sessionId)
-        .catch((discardErr: unknown) =>
-          console.error(`[reboot-restore] discarding a failed rebuild failed: ${getErrorMessage(discardErr)}`)
-        );
+      // Only discard the object this attempt registered, never a replacement with the same id.
+      if (builtSession && ctx.sessions.get(entry.sessionId) === builtSession)
+        await ctx
+          .discardPartiallyBuiltSession(entry.sessionId)
+          .catch((discardErr: unknown) =>
+            console.error(`[reboot-restore] discarding a failed rebuild failed: ${getErrorMessage(discardErr)}`)
+          );
       failures.push({ sessionId: entry.sessionId, reason: 'rebuild-failed' });
       // Left on offer: the user can put the binary back and click again.
       continue;

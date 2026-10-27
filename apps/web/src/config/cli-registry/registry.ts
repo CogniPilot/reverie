@@ -164,6 +164,10 @@ export function resolveRegistry(stock: CliEntry[], file: CliRegistryFile | null,
     const id = stockEntry.id as string;
     const override = overrides[id];
     const merged = override ? deepMerge(stockEntry, override) : stockEntry;
+    const launchOverride = override && typeof override === 'object' ? (override as { launch?: Record<string, unknown> }).launch : undefined;
+    if (merged.launch.resumeSelection && launchOverride && Array.isArray(launchOverride.variants) && !('resumeSelection' in launchOverride)) {
+      merged.launch = { ...merged.launch, resumeSelection: undefined };
+    }
     // `stock: true` is forced here rather than read from the merged object, so an override
     // can never flip a custom entry's provenance or vice versa.
     const parsed = CliEntrySchema.safeParse({ ...merged, id, stock: true });

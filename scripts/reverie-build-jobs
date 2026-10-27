@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+"""Print the conservative laptop Cargo parallelism default."""
+from reverie.worker_tmp import memory_aware_build_jobs
+print(memory_aware_build_jobs({})['CARGO_BUILD_JOBS'])

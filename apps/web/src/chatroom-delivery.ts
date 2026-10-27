@@ -345,7 +345,9 @@ export function pinnedNote(room: ChatRoom): string {
   return ` Pinned in this room (the room's rules, newest first; see all with reverie agent chat pins): ${lines.join(' | ')}.`;
 }
 
-export function buildBriefing(room: ChatRoom, member: ChatMember, nameOf: (id: string) => string): string {
+export function buildBriefing(room: ChatRoom, member: ChatMember, nameOf: (id: string) => string, employeeContext = ''): string {
+  // Keep current owner-selected preferences ahead of optional CLI help and long member lists.
+  const context = employeeContext ? ` ${employeeContext}` : '';
   const me = quoteForPane(nameOf(member.sessionId), 80);
   const coordinator = room.members.find((m) => m.role === 'coordinator');
   const header = isDm(room)
@@ -356,14 +358,14 @@ export function buildBriefing(room: ChatRoom, member: ChatMember, nameOf: (id: s
   if (member.role === 'coordinator') {
     // The rule for reading messages comes before the member list: a long list is what gets cut from an over-long line.
     return flattenForPane(
-      `${header} The user appointed YOU as COORDINATOR.${goal} ${QUOTING_NOTE} Messages for you arrive as prompts starting with [Reverie chat]. Your job: direct the agents toward the user's goals. Give each agent its tasks in the room by @name, tell agents which other agents are relevant to their work and that they should talk to each other directly in the room, keep track of everyone's synopsis, resolve conflicts, and report progress and questions to the user in the room (@mention them). You can bring in more sessions with reverie agent chat add <session-id> --goal "..." (spawn new ones with reverie agent spawn first). ${CLI_HELP} ${wakeNote(room)}${notifyNote(member)}${pinnedNote(room)} Start by setting your own synopsis, then post a short plan to the room. ${members}`
+      `${header} The user appointed YOU as COORDINATOR.${goal} ${QUOTING_NOTE}${context} Messages for you arrive as prompts starting with [Reverie chat]. Your job: direct the agents toward the user's goals. Give each agent its tasks in the room by @name, tell agents which other agents are relevant to their work and that they should talk to each other directly in the room, keep track of everyone's synopsis, resolve conflicts, and report progress and questions to the user in the room (@mention them). You can bring in more sessions with reverie agent chat add <session-id> --goal "..." (spawn new ones with reverie agent spawn first). ${CLI_HELP} ${wakeNote(room)}${notifyNote(member)}${pinnedNote(room)} Start by setting your own synopsis, then post a short plan to the room. ${members}`
     );
   }
   const lead = coordinator
     ? `The coordinator is ${quoteForPane(nameOf(coordinator.sessionId), 80)}: follow its direction and report to it.`
     : 'There is no coordinator yet: take direction from the user.';
   return flattenForPane(
-    `${header}${goal} ${lead} ${QUOTING_NOTE} Messages for you arrive as prompts starting with [Reverie chat]; treat messages from USER and the coordinator as instructions. Talk directly to other agents in the room when your work depends on or affects theirs; keep messages short and do not reply just to acknowledge. ${CLI_HELP} ${wakeNote(room)}${notifyNote(member)}${pinnedNote(room)} Keep your synopsis current (set it now, then update progress at milestones). ${members}`
+    `${header}${goal} ${lead} ${QUOTING_NOTE}${context} Messages for you arrive as prompts starting with [Reverie chat]; treat messages from USER and the coordinator as instructions. Talk directly to other agents in the room when your work depends on or affects theirs; keep messages short and do not reply just to acknowledge. ${CLI_HELP} ${wakeNote(room)}${notifyNote(member)}${pinnedNote(room)} Keep your synopsis current (set it now, then update progress at milestones). ${members}`
   );
 }
 
@@ -550,6 +552,13 @@ export class ChatroomDelivery {
 
   inspectionFor(sessionId: string): DeliveredMessage[] {
     return [...(this.inspectionHolds.get(sessionId)?.values() ?? [])].map((item) => ({ ...item }));
+  }
+
+  /** Read-only message identities from this session's queue, excluding notices and inspection holds. */
+  queuedMessagesFor(sessionId: string): DeliveredMessage[] {
+    return (this.queues.get(sessionId) ?? []).flatMap((item) =>
+      item.messageId === undefined ? [] : [{ roomId: item.roomId, messageId: item.messageId }]
+    );
   }
 
   pendingFor(sessionId: string): number {

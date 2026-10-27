@@ -64,7 +64,7 @@ it('uses the real Chromium wizard through editable role, identity, work, review,
     await page.locator('.ca-company-chart').getByText('Rowan', { exact: true }).waitFor();
     const bodies = await page.evaluate(() => (window as any).__hires);
     expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toMatchObject({ name: 'Rowan', position: 'Flight software engineer', responsibilities: ['Review recorded flight data'], personality: 'Patient and precise', mode: 'codex', source: { kind: 'subscription', profileId: 'fixture' }, permissions: { recoverEmployees: false, moveOwnPlan: true, managePlans: true } });
+    expect(bodies[0]).toMatchObject({ name: 'Rowan', position: 'Flight software engineer', responsibilities: ['Review recorded flight data'], personality: 'Patient and precise', mode: 'codex', source: { kind: 'subscription', profileId: 'fixture' }, permissions: { recoverEmployees: false, moveOwnPlan: true, managePlans: true, editBoardIssues: true, manageBoard: false, manageDecisions: false } });
     expect(bodies[0]).not.toHaveProperty('model'); expect(bodies[0]).not.toHaveProperty('effort');
   } finally { await browser.close(); }
 });

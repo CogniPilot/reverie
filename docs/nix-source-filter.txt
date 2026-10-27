@@ -1,0 +1,27 @@
+Nix source capture and build inputs
+
+flake.nix supplies one fixed-name cleanSourceWith tree to package sources and
+repository-source wrapper paths. The filter removes VCS metadata, Python caches,
+explicit root/Python/web generated outputs and root result symlinks. It is NOT a
+cleanup permission, a secret filter, or an interpretation of .gitignore. Source,
+tests, .github CI, skill symlinks, tracked models/WASM and vendor assets remain.
+Other directories named build/dist, for example test fixtures, are preserved.
+
+There are TWO capture stages. An outputs-level source filter cannot stop Nix from
+first importing the flake itself. start/update/isolate therefore use ordinary
+absolute local flake references, not forced path: references. Nix detects a local
+Git repository and captures its tracked working-tree files; intended new source
+must be git-added before building. Non-Git exported trees retain normal local-path
+fallback. Dirty tracked changes are still inputs, not silently replaced with HEAD.
+Untracked source is not made durable by staging it: preserve unique work separately.
+
+Do not invoke broad builds/checks merely to test this change. The predicate tests
+and tiny source-materialization tests need only the evaluator; no image, service,
+engine, GC or root action. Existing historical store snapshots are NOT removed.
+Actual host allocation savings require before/after capture receipts, not a logical
+source-size subtraction. Direct external path: callers still need correction or
+a separately prepared clean export; this flake cannot intercept them before fetch.
+
+Primary references:
+https://nixos.org/manual/nixpkgs/stable/#function-library-lib.sources.cleanSourceWith
+https://nix.dev/manual/nix/2.35/command-ref/new-cli/nix3-flake.html

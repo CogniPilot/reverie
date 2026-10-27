@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import signal
@@ -93,6 +94,39 @@ class ManagerTests(unittest.TestCase):
         self.assertIsNotNone(self.manager.active)
         self.assertEqual(self.manager.active['tools'], TOOLS)
         self.assertEqual(FakeArbiter.instances, [])
+
+    def test_revoked_owner_stops_queued_task_before_any_tool(self):
+        FakeArbiter.replies = [call(name='run_tests')]
+        source = self.start()
+        self.assertIsNot(self.manager.active['source'], source)
+        source['from'] = dict(OWNER, authenticatedOwner=False)
+        self.pump_until(lambda: self.manager.active is None)
+        self.assertEqual(FakeRunner.requests, [])
+        self.assertEqual(self.state['_coding']['room:' + source['id']]['reason'], 'revoked')
+
+    def test_owner_revocation_after_first_tool_prevents_the_next_tool(self):
+        FakeArbiter.replies = [call(name='read_file'), call('next', name='run_tests'), {'content': 'Finished.'}]
+        source = self.start()
+        self.pump_until(lambda: len(FakeRunner.requests) == 1)
+        source['from'] = dict(OWNER, authenticatedOwner=False)
+        self.pump_until(lambda: self.manager.active is None)
+        self.assertEqual([r['name'] for r in FakeRunner.requests], ['read_file'])
+        self.assertEqual(self.state['_coding']['room:' + source['id']]['reason'], 'revoked')
+
+    def test_natural_task_keeps_original_source_and_dispatches_bounded_runner(self):
+        import admin_task
+        self.cfg['admin_task'] = 'fixture'
+        source = self.chat.add('room', copy.deepcopy(OWNER), 'Implement and test the requested function.')
+        start = admin_task.callback(self.cfg, self.manager, self.state, 'room', [], source)
+        self.assertIn('queued', start('Implement the function and run its tests.'))
+        self.assertEqual(self.manager.active['source']['text'], source['text'])
+        self.assertIsNot(self.manager.active['source'], source)
+        # The normal chat loop marks the source seen after its queue reply is posted.
+        self.state['room']['seen'].append(source['id'])
+        FakeArbiter.replies = [call(name='run_tests'), {'content': 'Finished.'}]
+        self.pump_until(lambda: self.manager.active is None)
+        self.assertEqual([r['name'] for r in FakeRunner.requests], ['run_tests'])
+        self.assertEqual(self.state['_coding']['room:' + source['id']]['status'], 'completed')
 
     def test_incompatible_export_stops_before_model_or_tool(self):
         schema = Path(self.cfg['coding']['tool_schema_file'])

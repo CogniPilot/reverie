@@ -24,16 +24,19 @@ reverie-context = "reverie.context_cli:main"
 reverie-runtime = "reverie.runtime:main"
 reverie-workspaces = "reverie.workspaces:main"
 reverie-memory = "reverie.memory_cli:main"
+reverie-credentials = "reverie.github_credentials:main"
 reverie-opencode = "reverie.opencode:main"
 reverie-chat = "reverie.chat:main"
 reverie-gpu-publisher = "reverie.gpu_publisher:main"
 reverie-sleep = "reverie.sleep:main"
+reverie-ops = "reverie.ops_cli:main"
+reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.package-data]
-reverie = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md"]
+reverie = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md", "ops-core*.schema.json", "ops-classifier-pin.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

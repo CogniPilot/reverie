@@ -674,3 +674,29 @@ Use `/hooks` command to view registered hooks and make changes.
 ---
 
 _Source: [Claude Code Hooks Documentation](https://code.claude.com/docs/en/hooks)_
+
+## Reverie automatic message summaries
+
+Managed Claude workspaces receive a short phone-aware message summary through
+`SessionStart`, `UserPromptSubmit` and `PostToolUse`. Managed local Codex launches
+install the same events in `.codex/hooks.json`, using the [Codex hooks
+schema](https://learn.chatgpt.com/docs/hooks). Codex's normal project trust requirement
+still applies; installing these hooks does not grant trust or change tool approvals.
+Remote and explicit Docker sessions do not install Codex hook files from the console.
+Managed workers use their existing shared workspace path for hook installation.
+These lifecycle events cover startup, submitted prompts and tool continuations;
+the harness does not expose an unconditional hook before every internal model call.
+
+Each hook invokes `reverie agent chat summary --hook-event EVENT` with the managed
+session environment. The shared API decides which rooms and phone state apply, so
+agents do not poll rooms themselves. Only validated context of at most 3000 characters in
+`hookSpecificOutput.additionalContext` is injected. The wrapper kills its helper
+after 2.5 seconds, limits its output, suppresses errors and rejects API envelopes.
+No stop hook submits prompts or wakes the agent. User hooks and unrelated settings
+survive refreshes. The existing workspace-hooks setting controls installation.
+
+Summary hooks keep only a digest and a nonempty flag in a private, session-scoped
+local temporary file. Prompts and session starts inject current eligible context;
+tool continuations inject changed snapshots only. A cleared snapshot is announced
+once after pending messages disappear. Cache failures preserve delivery, and API
+failures leave prior summary state untouched. Cached files contain no message text.

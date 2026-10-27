@@ -54,9 +54,17 @@ async function setup({ verified = true, canManage = true, onVacation = false, ac
   const confirm = vi.spyOn(h.shell, 'confirmCompanyAction');
   if (!actualDialog) confirm.mockResolvedValue(true);
   await h.shell.openCompany('people');
+  const profile = h.document.querySelector<HTMLButtonElement>('[aria-label="Edit profile for River"]');
+  if (profile) { profile.click(); await h.flush(); }
   const button = (label: string) =>
-    h.document.querySelector(`.ca-company-person [aria-label="${label}"]`) as HTMLButtonElement;
-  const error = () => h.document.querySelector('.ca-company-person [role="alert"]')!.textContent;
+    h.document.querySelector(`.ca-expert-profile [aria-label="${label}"]`) as HTMLButtonElement;
+  const error = () => h.document.querySelector('.ca-expert-profile .ca-company-actions + .ca-company-error')!.textContent;
+  const recoveryChoices = async () => {
+    h.document.querySelector<HTMLDialogElement>('.ca-expert-profile')?.close();
+    h.document.querySelector<HTMLButtonElement>('[aria-label="Company settings"]')!.click();
+    await h.flush();
+    return h.document.querySelector<HTMLSelectElement>('.ca-company-settings [aria-label="Wake after a crash"]')!;
+  };
   return {
     h,
     data,
@@ -66,6 +74,7 @@ async function setup({ verified = true, canManage = true, onVacation = false, ac
     nativeConfirm,
     button,
     error,
+    recoveryChoices,
     resolve: (value: any) => finish(value),
     reject: () => fail(new Error('Network lost')),
   };
@@ -75,13 +84,14 @@ it.each([{ verified: false }, { canManage: false }])(
   'only a verified company owner sees lifecycle controls (%j)',
   async (access) => {
     const { h } = await setup(access);
+    expect(h.document.querySelector('.ca-expert-profile .ca-company-actions')).toBeNull();
     expect(h.document.querySelector('.ca-company-person .ca-company-actions')).toBeNull();
   }
 );
 
 it.each([
   { onVacation: false, label: 'Leave office: River', meaning: 'stops their session' },
-  { onVacation: true, label: 'Enter office: River', meaning: 'eligible for recovery again' },
+  { onVacation: true, label: 'Enter office: River', meaning: 'starts their laptop and resumes their agent' },
   { onVacation: false, label: 'Retire River', meaning: 'keeping their identity in chat history' },
 ])('names the expert and explains $label before any change', async ({ onVacation, label, meaning }) => {
   const { h, button, confirm, calls } = await setup({ onVacation });
@@ -94,7 +104,7 @@ it.each([
 });
 
 it('pauses once, blocks competing actions, and refreshes vacation state and recovery controls', async () => {
-  const { h, employee, button, calls, resolve } = await setup();
+  const { h, employee, button, calls, resolve, recoveryChoices } = await setup();
   const pause = button('Leave office: River');
   const retire = button('Retire River');
   pause.click();
@@ -114,27 +124,36 @@ it('pauses once, blocks competing actions, and refreshes vacation state and reco
   expect(button('Enter office: River')).not.toBeNull();
   expect((button('Enter office: River') as unknown as HTMLInputElement).checked).toBe(false);
   expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(false);
-  const choices = h.document.querySelector('[aria-label="Wake after a crash"]')!;
+  const choices = await recoveryChoices();
   expect([...choices.options].map((option: any) => option.value)).not.toContain(employee.id);
   expect(choices.textContent).not.toContain('Automatic: River');
   expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is out of office.');
 });
 
-it('returns the same expert to active status and recovery eligibility', async () => {
-  const { h, employee, button, calls, resolve } = await setup({ onVacation: true });
+it('returns the same expert and confirms the agent started', async () => {
+  const { h, employee, button, calls, resolve, recoveryChoices } = await setup({ onVacation: true });
   button('Enter office: River').click();
   await h.flush();
   expect(calls[0]).toMatchObject({ path: '/api/company/employees/expert%2Fone/vacation', body: { enabled: false } });
   employee.onVacation = false;
-  resolve({ ok: true, data: { employee } });
+  resolve({ ok: true, data: { employee, startup: { state: 'started' } } });
   await h.flush();
   expect(button('Leave office: River')).not.toBeNull();
   expect((button('Leave office: River') as unknown as HTMLInputElement).checked).toBe(true);
   expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(false);
-  expect(
-    [...h.document.querySelector('[aria-label="Wake after a crash"]')!.options].map((option: any) => option.value)
-  ).toContain(employee.id);
-  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office.');
+  expect([...(await recoveryChoices()).options].map((option: any) => option.value)).toContain(employee.id);
+  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office. Agent started.');
+});
+
+it('shows a startup failure with a retry action after the office state is saved', async () => {
+  const { h, employee, button, resolve } = await setup({ onVacation: true });
+  button('Enter office: River').click();
+  await h.flush();
+  employee.onVacation = false;
+  resolve({ ok: true, data: { employee, startup: { state: 'blocked', reason: 'wake-failed' } } });
+  await h.flush();
+  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office. Could not start: wake-failed. Use Restart session to retry.');
+  expect(button('Restart session for River').disabled).toBe(false);
 });
 
 it('retirement reuses the endpoint and removes the expert only after server success', async () => {
@@ -186,7 +205,7 @@ it('does not offer to repeat a saved change when the subsequent refresh fails', 
   await h.flush();
   resolve({ ok: true, data: {} });
   await h.flush();
-  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe(
+  expect(h.document.querySelector('.ca-expert-profile .ca-profile-lifecycle-status')!.textContent).toBe(
     'River is out of office. The view could not refresh. Reopen Company to see the updated roster.'
   );
   expect(pause.disabled).toBe(true);

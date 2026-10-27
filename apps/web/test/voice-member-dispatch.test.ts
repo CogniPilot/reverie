@@ -341,13 +341,15 @@ it('does not retain an extra CLI turn when the stock Hands runtime reads its API
   expect(pane.writes).toHaveLength(0);
 });
 
-it('does not infer an addressed turn from a reply to a deleted voice message', () => {
+it('does not infer an addressed turn from a reply to a deleted voice message', async () => {
   pane.isWorking = true;
   const prior = service.post(roomId, { kind: 'agent', sessionId: VOICE, name: 'Voice' }, 'Withdrawn.', 'all');
   const asked = service.post(roomId, { kind: 'user', name: 'Owner' }, 'A reply to removed context.', 'all', {
     replyTo: prior.id,
   });
-  prior.deleted = { at: clock, by: 'user' };
+  // Public message projections are detached from the private persisted record.
+  await service.deleteMessage(roomId, prior.id, 'user');
+  expect(service.room(roomId)!.messages.find(message => message.id === prior.id)?.deleted).toEqual({ at: clock, by: 'user' });
   expect(isAddressedVoiceTurn(service.room(roomId)!, asked, VOICE, (id) => (id === VOICE ? 'Voice' : 'Lead'))).toBe(
     false
   );

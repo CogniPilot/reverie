@@ -21,6 +21,21 @@ afterEach(async () => {
 });
 
 describe('private plan approval files and CLI', () => {
+  it('requests an explicit refresh for this exact session without acquiring any session-creation route', async () => {
+    const deps: AgentDeps = { ctx: { selfId: 'source', apiUrl: 'http://fixture' }, json: true,
+      io: { out: vi.fn(), err: vi.fn() },
+      request: vi.fn(async (_ctx, request) => request.method === 'GET'
+        ? { status: 200, text: '', json: { success: true, data: { employees: [{ id: 'expert', sessionId: 'source' }, { id: 'other', sessionId: 'other-session' }] } } }
+        : { status: 202, text: '', json: { success: true, data: { phase: 'pending' } } }),
+    };
+    expect(await agentRequestPlanMove(deps, { id: 'refresh', toAccount: 'current', restart: true })).toBe(0);
+    expect(deps.request).toHaveBeenLastCalledWith(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests', body: {
+      id: 'refresh', employeeId: 'expert', sessionId: 'source', toAccount: 'current', purpose: 'runtime-refresh',
+    } });
+    const before = vi.mocked(deps.request).mock.calls.filter(([, r]) => r.method === 'POST').length;
+    expect(await agentRequestPlanMove(deps, { id: 'wrong', employeeId: 'other', toAccount: 'current', restart: true })).toBe(1);
+    expect(vi.mocked(deps.request).mock.calls.filter(([, r]) => r.method === 'POST')).toHaveLength(before);
+  });
   it('requests a selected company employee through the scoped API without creating a session or approving it', async () => {
     const deps: AgentDeps = { ctx: { selfId: 'manager', apiUrl: 'http://fixture' }, json: true,
       io: { out: vi.fn(), err: vi.fn() },

@@ -69,7 +69,7 @@ it('a late preview after owner loss cannot restore a secret or confirmation',asy
 });
 it('Embassies lives only in the sidebar and opens the same feed, composer and message renderer',async()=>{
  const h=await setup();const feed=h.app._chatEls.feed,form=h.app._chatEls.composer;
- expect([...h.document.querySelectorAll('.ca-pages .ca-name')].map(n=>n.textContent)).toEqual(['Board']);h.shell=h.window.reverieChat;
+ expect([...h.document.querySelectorAll('.ca-pages .ca-name')].map(n=>n.textContent)).toEqual([]);h.shell=h.window.reverieChat;
  h.shell.openPage('embassies');expect(h.document.querySelector('.ca-page iframe')).toBeNull();h.document.querySelector('.eg-directory-room').click();await h.flush(15);
  expect(h.ui.feed).toBe(feed);expect(h.ui.form).toBe(form);expect(h.ui.feed.querySelector('.ca-msg .ca-msg-body')).not.toBeNull();expect(h.ui.feed.textContent).toContain('UNTRUSTED EXTERNAL');expect(h.ui.feed.querySelector('img')).toBeNull();
  expect(h.ui.feed.querySelector('.ca-msg-actions')).toBeNull();expect(h.window.location.hash).toBe('');

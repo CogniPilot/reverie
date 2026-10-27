@@ -3,11 +3,26 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const names = new Map();
-  const suggested = new URLSearchParams(location.search);
-  if (/^[0-9]+$/.test(suggested.get('port') || '')) $('expose').elements.port.value = suggested.get('port');
-  const suggestedPath = suggested.get('path');
-  if (suggestedPath && suggestedPath.startsWith('/') && !suggestedPath.startsWith('//'))
-    $('expose').elements.path.value = suggestedPath;
+  const query = new URLSearchParams(location.search);
+  const fragment = /^#previews\?(.*)$/.exec(location.hash);
+  const hash = new URLSearchParams(fragment ? fragment[1] : '');
+  let invalidLink = false;
+  const suggestion = (name, valid) => {
+    const value = query.has(name) ? query.get(name) : hash.get(name);
+    if (value === null) return null;
+    if (!valid(value)) { invalidLink = true; return null; }
+    return value;
+  };
+  const suggestedSession = suggestion('sessionId', value => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value));
+  const suggestedPort = suggestion('port', value => /^[0-9]{4,5}$/.test(value) && Number(value) >= 1024 &&
+    Number(value) <= 65535 && ![8092, 8093].includes(Number(value)));
+  const suggestedPath = suggestion('path', value => value.length <= 4096 && value.startsWith('/') &&
+    !value.startsWith('//') && !/[\\#\x00-\x1f\x7f]/.test(value));
+  if (suggestedPort) $('expose').elements.port.value = suggestedPort;
+  if (suggestedPath) $('expose').elements.path.value = suggestedPath;
+  const status = text => {
+    $('status').textContent = (invalidLink ? 'Some preview link fields were invalid; check the laptop, port and path. ' : '') + text;
+  };
   const element = (tag, text) => {
     const node = document.createElement(tag);
     node.textContent = text;
@@ -31,21 +46,42 @@
     tab.opener = null;
     tab.location.replace(url);
   }
+  async function loadRoster() {
+    const company = await api('company');
+    const employees = company.data?.employees || [];
+    const selected = $('expose').elements.sessionId.value || suggestedSession;
+    const options = [];
+    names.clear();
+    for (const employee of employees) {
+      if (!employee.sessionId) continue;
+      names.set(employee.sessionId, employee.name || employee.sessionId);
+      const option = element('option', names.get(employee.sessionId));
+      option.value = employee.sessionId;
+      options.push(option);
+    }
+    $('expose').elements.sessionId.replaceChildren(...options);
+    if (options.some(option => option.value === selected)) $('expose').elements.sessionId.value = selected;
+    else if (selected || query.has('sessionId') || hash.has('sessionId')) {
+      $('expose').elements.sessionId.value = '';
+      invalidLink = true;
+    }
+  }
   async function refresh() {
+    // A missing optional preview service must not hide the available laptops.
+    const [roster, listing] = await Promise.allSettled([loadRoster(), api('previews')]);
+    const errors = [];
+    if (roster.status === 'rejected') {
+      names.clear();
+      $('expose').elements.sessionId.replaceChildren();
+      errors.push('Could not load laptops. ' + roster.reason.message);
+    }
+    if (listing.status === 'rejected') {
+      $('previews').replaceChildren();
+      status(errors.concat(listing.reason.message).join(' '));
+      return;
+    }
     try {
-      const [company, data] = await Promise.all([api('company'), api('previews')]);
-      const employees = company.data?.employees || [];
-      const selected = $('expose').elements.sessionId.value || suggested.get('sessionId');
-      const options = [];
-      for (const employee of employees) {
-        if (!employee.sessionId) continue;
-        names.set(employee.sessionId, employee.name || employee.sessionId);
-        const option = element('option', names.get(employee.sessionId));
-        option.value = employee.sessionId;
-        options.push(option);
-      }
-      $('expose').elements.sessionId.replaceChildren(...options);
-      if (options.some((option) => option.value === selected)) $('expose').elements.sessionId.value = selected;
+      const data = listing.value;
       $('previews').replaceChildren();
       for (const preview of data.previews) {
         const card = element('article', '');
@@ -63,7 +99,7 @@
             navigate((await api('previews/' + preview.id + '/open', 'POST', { path: path.value })).url, tab);
           } catch (error) {
             if (tab) tab.close();
-            $('status').textContent = error.message;
+            status(error.message);
           }
         };
         const remove = element('button', 'Stop sharing');
@@ -73,18 +109,18 @@
             await api('previews/' + preview.id, 'DELETE');
             await refresh();
           } catch (error) {
-            $('status').textContent = error.message;
+            status(error.message);
             remove.disabled = false;
           }
         };
         card.append(path, open, remove);
         $('previews').append(card);
       }
-      $('status').textContent = data.previews.length
+      status(errors.concat(data.previews.length
         ? 'Exposed ports are listed below.'
-        : 'No laptop ports are exposed.';
+        : 'No laptop ports are exposed.').join(' '));
     } catch (error) {
-      $('status').textContent = error.message;
+      status(error.message);
     }
   }
   $('refresh').onclick = refresh;
@@ -105,7 +141,7 @@
       await refresh();
     } catch (error) {
       if (tab) tab.close();
-      $('status').textContent = error.message;
+      status(error.message);
     } finally {
       button.disabled = false;
     }

@@ -17,6 +17,17 @@ interface Grant {
 const grants = new AsyncLocalStorage<Grant>();
 export const hasDelegatedSessionCreate = (): boolean => !!grants.getStore();
 
+/** Preserve the original actor only for the exact privately approved start.
+ * General parent resolution still requires a live registry entry. */
+export function delegatedSessionStartCaller(req: FastifyRequest): string | undefined {
+  const grant = grants.getStore();
+  if (!grant?.targetSessionId || grant.closed || grant.consumed || grant.claimed ||
+      req.method !== 'POST' || req.url !== `/api/sessions/${encodeURIComponent(grant.targetSessionId)}/interactive` ||
+      req.routeOptions.url !== '/api/sessions/:id/interactive' || ownerFor(req) !== grant.owner ||
+      req.headers['x-reverie-parent-session'] !== grant.sessionId || !grant.authorized()) return undefined;
+  return grant.sessionId;
+}
+
 /** Only the migration executor may start its exact freshly-created candidate. */
 export function withDelegatedSessionStart<T>(
   input: Pick<Grant, 'sessionId' | 'owner' | 'authorized'> & { targetSessionId: string },
@@ -52,7 +63,9 @@ export function claimDelegatedSessionCreate(req: FastifyRequest, caller: string 
 export function consumeDelegatedSessionCreate(req: FastifyRequest): boolean | undefined {
   const grant = grants.getStore();
   if (!grant) return undefined;
-  if (grant.claimed !== req) return req.method === 'POST' && req.url === '/api/sessions' ? false : undefined;
+  if (grant.claimed !== req) return req.method === 'POST' &&
+    (req.url === '/api/sessions' || (!!grant.targetSessionId && req.url === `/api/sessions/${encodeURIComponent(grant.targetSessionId)}/interactive`))
+    ? false : undefined;
   if (grant.closed || grant.consumed) return false;
   grant.consumed = true;
   return ownerFor(req) === grant.owner && req.headers['x-reverie-parent-session'] === grant.sessionId &&

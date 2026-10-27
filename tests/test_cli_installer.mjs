@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { runInNewContext } from 'node:vm';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'reverie-clis-'));
@@ -254,4 +255,77 @@ test('Nix Claude native hardlink layout gets a nonmutating loader launcher', () 
     assert.ok(readFileSync(join(f.root,'data/tools/bin/.reverie-claude.mjs'), 'utf8').includes('--library-path'));
     assert.deepEqual(readFileSync(join(f.root,'data/tools/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe')), Buffer.from([127,69,76,70,0]));
   } finally { f.clean(); }
+});
+
+function claudeDispatchFixture(callback) {
+  const f = fixture();
+  try {
+    const loader = join(f.root, 'loader');
+    writeFileSync(loader, `#!${process.execPath}\nconsole.log('2.1.308');\n`, { mode: 0o700 });
+    const result = f.run({ REVERIE_INSTALL_CLIS: 'claude', CREATE_CLAUDE_NATIVE: '1', REVERIE_ELF_INTERPRETER: loader, REVERIE_ELF_LIBRARY_PATH: '/nix/test/lib' });
+    assert.equal(result.status, 0, result.stderr);
+    const native = join(f.root, 'data/tools/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
+    const before = readFileSync(native);
+    const source = readFileSync(join(f.root, 'data/tools/bin/.reverie-claude.mjs'), 'utf8')
+      .replace(/^#![^\n]*\n/, '').replace(/^import [^\n]*\n/gm, '');
+    const dispatch = (kind, status = 0, libraryPath = '/caller/lib') => {
+      let call, exit;
+      const env = { CLAUDE_CODE_EXECPATH: '/old/loader', SYNTHETIC_ACCOUNT: 'unchanged' };
+      if (libraryPath !== null) env.LD_LIBRARY_PATH = libraryPath;
+      runInNewContext(source, {
+        realpathSync(path) {
+          if (path === loader) return '/nix/pinned/ld.so';
+          assert.ok(['/lib64/ld-linux-x86-64.so.2', '/lib/ld-linux-aarch64.so.1'].includes(path));
+          if (kind === 'missing') throw new Error('missing image interpreter');
+          return kind === 'match' ? '/nix/pinned/ld.so' : '/other/ld.so';
+        },
+        spawnSync(command, args, options) { call = { command, args: Array.from(args), options }; return { status }; },
+        process: { argv: ['node', 'launcher', '--model', 'fixture model', 'resume', 'saved-thread', ';literal'], env, exit(code) { exit = code; } },
+      });
+      return { call, exit, env };
+    };
+    callback({ dispatch, native, loader });
+    assert.deepEqual(readFileSync(native), before, 'vendor ELF must remain byte-identical');
+  } finally { f.clean(); }
+}
+
+test('matching image interpreter kernel-starts Claude and points bundled tools at the real binary', () => {
+  claudeDispatchFixture(({ dispatch, native }) => {
+    const { call, exit } = dispatch('match');
+    assert.equal(call.command, native);
+    assert.deepEqual(call.args, ['--model', 'fixture model', 'resume', 'saved-thread', ';literal']);
+    assert.equal(call.options.env.CLAUDE_CODE_EXECPATH, native);
+    assert.equal(call.options.env.LD_LIBRARY_PATH, '/caller/lib');
+    assert.equal(call.options.env.SYNTHETIC_ACCOUNT, 'unchanged');
+    assert.equal(call.options.stdio, 'inherit');
+    assert.equal(exit, 0);
+  });
+});
+
+test('direct Claude launch does not introduce library-path environment variables', () => {
+  claudeDispatchFixture(({ dispatch }) => {
+    const { call } = dispatch('match', 0, null);
+    assert.equal('LD_LIBRARY_PATH' in call.options.env, false);
+    assert.equal('NIX_LD_LIBRARY_PATH' in call.options.env, false);
+    assert.equal('LD_PRELOAD' in call.options.env, false);
+  });
+});
+
+for (const kind of ['missing', 'mismatch']) {
+  test(`Claude keeps compatibility loader when image interpreter is ${kind}`, () => {
+    claudeDispatchFixture(({ dispatch, native, loader }) => {
+      const { call, exit, env } = dispatch(kind);
+      assert.equal(call.command, loader);
+      assert.deepEqual(call.args, ['--library-path', '/nix/test/lib', native, '--model', 'fixture model', 'resume', 'saved-thread', ';literal']);
+      assert.equal(call.options.env, env);
+      assert.equal(exit, 0);
+    });
+  });
+}
+
+test('direct Claude launcher preserves failure status and refuses a spawn error as success', () => {
+  claudeDispatchFixture(({ dispatch }) => {
+    assert.equal(dispatch('match', 37).exit, 37);
+    assert.equal(dispatch('match', null).exit, 1);
+  });
 });

@@ -181,9 +181,16 @@ def main():
                 if time.monotonic() > deadline: raise AssertionError('Offline watchdog did not stop the laptop')
                 time.sleep(.2)
             broker.stopping.set(); supervisor.join(5)
+            assert not supervisor.is_alive(), 'Offline watchdog supervisor did not stop'
             engine('start', server_name)
             print('PASS host watchdog stopped detached laptops after the offline grace period', flush=True)
-            broker.stopping.clear()
+            # Shutdown budgets are irreversible. The next scenario gets a fresh
+            # broker after the previous instance has released its owned work.
+            for office in list(broker.offices.values()):
+                assert office.close(), 'Previous broker office did not close'
+            assert not (broker.active or broker.handlers or broker.owned_clients or
+                        broker.viewers or broker.storage_leases), 'Previous broker still owns work'
+            broker = worker.Broker(config)
             connection, thread = launch(sid1, 'printf STOP_ALL_READY; sleep 60')
             until(connection, b'STOP_ALL_READY')
             connection.close(); thread.join(12)

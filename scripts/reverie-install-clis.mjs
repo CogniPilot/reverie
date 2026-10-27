@@ -92,7 +92,23 @@ const prepareClaude = () => {
     if (!magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return false;
   } catch { return false; }
   const launcher = join(prefix, 'bin/.reverie-claude.mjs');
-  writeFileSync(launcher, `#!${process.execPath}\nimport { spawnSync } from 'node:child_process';\nconst r=spawnSync(${JSON.stringify(process.env.REVERIE_ELF_INTERPRETER)},['--library-path',${JSON.stringify(process.env.REVERIE_ELF_LIBRARY_PATH || '')},${JSON.stringify(binary)},...process.argv.slice(2)],{stdio:'inherit',env:process.env});process.exit(r.status ?? 1);\n`, { mode: 0o700 });
+  const systemInterpreter = process.arch === 'x64' ? '/lib64/ld-linux-x86-64.so.2'
+    : process.arch === 'arm64' ? '/lib/ld-linux-aarch64.so.1' : null;
+  // Only the matching image-owned interpreter enables direct execution. Merely
+  // exporting CLAUDE_CODE_EXECPATH cannot fix Claude's process.execPath override.
+  // Keep loader fallback for older images/native hosts; never rewrite Bun's ELF.
+  const code = `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+const binary=${JSON.stringify(binary)}, loader=${JSON.stringify(process.env.REVERIE_ELF_INTERPRETER)}, libraries=${JSON.stringify(process.env.REVERIE_ELF_LIBRARY_PATH || '')};
+let direct=false;
+try { direct=${JSON.stringify(systemInterpreter)} !== null && realpathSync(${JSON.stringify(systemInterpreter)}) === realpathSync(loader); } catch {}
+const args=process.argv.slice(2);
+const env=direct ? {...process.env,CLAUDE_CODE_EXECPATH:binary} : process.env;
+const r=spawnSync(direct ? binary : loader,direct ? args : ['--library-path',libraries,binary,...args],{stdio:'inherit',env});
+process.exit(r.status ?? 1);
+`;
+  writeFileSync(launcher, code, { mode: 0o700 });
   try { unlinkSync(join(prefix, 'bin/claude')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   symlinkSync('.reverie-claude.mjs', join(prefix, 'bin/claude'));
   return true;

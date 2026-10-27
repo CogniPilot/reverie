@@ -8,7 +8,7 @@ import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime
 
 describe('owner browser plan move API', () => {
   let app: FastifyInstance;
-  const moves = { begin: vi.fn(), get: vi.fn(), cancel: vi.fn(), list: vi.fn() };
+  const moves = { begin: vi.fn(), get: vi.fn(), cancel: vi.fn(), list: vi.fn(), resolve: vi.fn() };
   const headers = { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' };
   const input = {
     id: 'move',
@@ -41,6 +41,7 @@ describe('owner browser plan move API', () => {
     '/api/plans/moves/recent',
     '/api/plans/moves/move/status',
     '/api/plans/moves/move/cancel',
+    '/api/plans/moves/move/resolve',
   ])('requires credentials on %s, even with no agent header', async (url) => {
     const response = await app.inject({
       method: 'POST',
@@ -141,5 +142,26 @@ describe('owner browser plan move API', () => {
     const response = await app.inject({ method: 'POST', url: '/api/plans/moves/preview', headers, payload: { employeeId: 'casey', sessionId: 'old' } });
     expect(response.statusCode).toBe(200); expect(response.json().data).toMatchObject({ sessionId: 'old', account: 'first' });
     expect(runtime.chat.auditEntry).not.toHaveBeenCalled(); expect(runtime.chat.post).not.toHaveBeenCalled(); expect(runtime.request).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('explicit owner recovery endpoint', () => {
+  it('uses the authenticated scoped executor and exact target without permitting agent callers', async () => {
+    const app = Fastify(); await app.register(cookie);
+    const resolve = vi.fn(async () => ({id: 'move', phase: 'completed'}));
+    const executor = {} as never;
+    registerPlanMoveRoutes(app, {resolve} as unknown as PlanMoves, {
+      authSessions: new Map([['owner', {ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic'}]]) as never,
+    }, undefined, () => executor);
+    const headers = {host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner'};
+    const payload = {action: 'adopt-existing', oldSession: 'old', newSession: 'new', toAccount: 'second'};
+    const accepted = await app.inject({method: 'POST', url: '/api/plans/moves/move/resolve', headers, payload});
+    expect(accepted.statusCode).toBe(200); expect(resolve).toHaveBeenCalledWith('move', payload, undefined, executor);
+    resolve.mockClear();
+    for (const extra of [{'x-reverie-parent-session': 'agent'}, {origin: 'https://evil.test'}, {cookie: ''}]) {
+      expect((await app.inject({method: 'POST', url: '/api/plans/moves/move/resolve', headers: {...headers, ...extra}, payload})).statusCode).toBe(403);
+    }
+    expect(resolve).not.toHaveBeenCalled(); await app.close();
   });
 });

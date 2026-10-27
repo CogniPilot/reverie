@@ -967,6 +967,8 @@ export interface SessionState {
    * entry is what re-pins `claudeSessionId` past `start()`'s three resets.
    */
   claudeSessionChain?: string[];
+  /** Actual-runtime selection is unknown until a first-hand provider hook. */
+  claudeSessionIdPending?: boolean;
   /**
    * PTY-exit circuit breaker tripped — respawn blocked until an explicit restart
    * (COD-118). Runtime-only: never restored on boot (fresh server = fresh breaker).

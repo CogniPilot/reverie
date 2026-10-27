@@ -56,6 +56,7 @@ export interface SpawnBridgeOptions {
   deepSeekConfig?: DeepSeekConfig;
   ompConfig?: OmpConfig;
   resumeSessionId?: string;
+  claudeResumeCandidates?: readonly string[];
   effort?: EffortLevel;
   /** Claude advisor model; rides the same `--settings` JSON as ultracode (see buildAdvisorSettings). */
   advisorModel?: string;
@@ -181,6 +182,7 @@ export function buildSpawnCommandFromRegistry(entry: CliEntry, options: SpawnBri
 
   const engineValues: EngineValues = {
     sessionId: options.sessionId,
+    claudeResumeCandidates: options.claudeResumeCandidates,
     // Allowlist-sanitized (Unicode letters/digits + ` . _ : -`, 64 chars), matching
     // buildNameCliArgs exactly — sanitizeCliSessionName is the injection guard for this
     // value, NOT the `quote: 'double'` escaping on the --name arg (which only makes an

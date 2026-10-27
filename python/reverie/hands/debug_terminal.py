@@ -76,8 +76,10 @@ class DebugTerminal:
     def summary(self):
         with self.lock:
             return self.clean(
-                f"Reverie Harness / Python PID {os.getpid()} | configured model: {self.cfg['model']}\n"
+                f"Reverie Admin Harness / Python PID {os.getpid()} | configured model: {self.cfg['model']}\n"
                 f"Endpoint: {self.endpoint()} | API-reported model: {self.api_model}\n"
+                f"General scan: {self.cfg.get('poll_s', 15)}s | phone wake: "
+                f"{getattr(self.cfg.get('_attention'), 'status', 'not started')}\n"
                 f"State: {self.phase} | polls: {self.polls}, rooms: {self.room_count}, "
                 f"posted replies: {self.replies}, errors: {self.errors}\n"
                 f"Prompt cap: {self.cfg['prompt_cap_chars']} characters; "
@@ -108,7 +110,7 @@ class DebugTerminal:
         if self.trace_thread:
             self.trace_thread.join(2)
         self.poll_trace(drain=True)
-        self._print('Reverie Harness stopped.')
+        self._print('Reverie Admin Harness stopped.')
 
     def _print(self, text):
         print(self.clean(text), file=self.output, flush=True)
@@ -273,7 +275,7 @@ class DebugTerminal:
                 phase = self.phase
                 elapsed = time.monotonic() - self.phase_since
                 status = f'{phase} ({elapsed:.1f}s) | last poll {self.last_poll} UTC | rooms {self.room_count} | errors {self.errors}'
-                title = self.clean(f"Reverie Harness | {self.cfg['self_name']} | configured: {self.cfg['model']} | PID {os.getpid()}")
+                title = self.clean(f"Reverie Admin Harness | {self.cfg['self_name']} | configured: {self.cfg['model']} | PID {os.getpid()}")
                 endpoint = f'{self.endpoint()} | API model: {self.api_model}'
             screen.erase()
 

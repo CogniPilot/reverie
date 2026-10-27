@@ -1,0 +1,86 @@
+{
+  "buildQualification": "new Nix candidate requires separate native build/runtime acceptance; scratch binary hash is not reused as Nix artifact proof",
+  "gitSources": {
+    "git+https://github.com/dzbarsky/rules_rust?rev=b56cbaa8465e74127f1ea216f813cd377295ad81#b56cbaa8465e74127f1ea216f813cd377295ad81": {
+      "fetchSubmodules": true,
+      "hash": "sha256-uJpVLcQh8wWZA3GPv9D8Nt43EOirajfDJ7eq/FB+tek=",
+      "outputHashKey": "runfiles-0.1.0",
+      "rev": "b56cbaa8465e74127f1ea216f813cd377295ad81"
+    },
+    "git+https://github.com/helix-editor/nucleo.git?rev=4253de9faabb4e5c6d81d946a5e35a90f87347ee#4253de9faabb4e5c6d81d946a5e35a90f87347ee": {
+      "fetchSubmodules": true,
+      "hash": "sha256-Hm4SxtTSBrcWpXrtSqeO0TACbUxq3gizg1zD/6Yw/sI=",
+      "outputHashKey": "nucleo-0.5.0",
+      "rev": "4253de9faabb4e5c6d81d946a5e35a90f87347ee"
+    },
+    "git+https://github.com/hyperium/h3?rev=e07e69412876f7e26f026bd75a48b2704d8c8283#e07e69412876f7e26f026bd75a48b2704d8c8283": {
+      "fetchSubmodules": true,
+      "hash": "sha256-fgE0AMj5d4iattTC/yQwnACV8uEu+KR7wD29xfEm8M0=",
+      "outputHashKey": "h3-0.0.8",
+      "rev": "e07e69412876f7e26f026bd75a48b2704d8c8283"
+    },
+    "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4": {
+      "fetchSubmodules": true,
+      "hash": "sha256-XUkT2R+RYk9WIqgKnmIAagNW4xOTyp4bWHmQL1iznHw=",
+      "outputHashKey": "appcontainer_common-0.8.0",
+      "rev": "6cd3d58f05d3447e67109cfb75e042803b843ca4"
+    },
+    "git+https://github.com/modelcontextprotocol/rust-sdk?rev=4048ac40e958fb1a7d614617a2ae8d26666ee2fa#4048ac40e958fb1a7d614617a2ae8d26666ee2fa": {
+      "fetchSubmodules": true,
+      "hash": "sha256-RbGuEuNyBUF2WeqKwkBAwCYnjb7DZJP8ZI8sIuR4D88=",
+      "outputHashKey": "rmcp-3.5.1",
+      "rev": "4048ac40e958fb1a7d614617a2ae8d26666ee2fa"
+    },
+    "git+https://github.com/openai-oss-forks/crossterm?rev=ed1cdab335221515706178d68495bba2aed1924f#ed1cdab335221515706178d68495bba2aed1924f": {
+      "fetchSubmodules": true,
+      "hash": "sha256-7ZzFZ6c6uU27ZxCGOPK82Aia4CzTnJwksAfbpTMPikY=",
+      "outputHashKey": "crossterm-0.29.0",
+      "rev": "ed1cdab335221515706178d68495bba2aed1924f"
+    },
+    "git+https://github.com/openai-oss-forks/tokio-tungstenite?rev=0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186#0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186": {
+      "fetchSubmodules": true,
+      "hash": "sha256-V1xmnrfRWOcZZogelZEA4vvyMj2awCfHVA5/glQ6KAI=",
+      "outputHashKey": "tokio-tungstenite-0.28.0",
+      "rev": "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186"
+    },
+    "git+https://github.com/openai-oss-forks/tungstenite-rs?rev=4fffad30fe373adbdcffab9545e9e9bf4f2fc19f#4fffad30fe373adbdcffab9545e9e9bf4f2fc19f": {
+      "fetchSubmodules": true,
+      "hash": "sha256-VVHhk7l9J/sEmG3q/UuV/sQ3f+fGsmq5vumSy8vbMvw=",
+      "outputHashKey": "tungstenite-0.27.0",
+      "rev": "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f"
+    }
+  },
+  "license": "Apache-2.0",
+  "lockSha256": "754695b4516854a670ee07909bf3b209a7a0a18adcbb8e1a406a68c539a3b7a3",
+  "patchSha256": "9b8ee785d64277315cc22244ddd80328cec8af1497e6dd34a32c64580dff22e4",
+  "patchedFiles": {
+    "codex-rs/Cargo.lock": "754695b4516854a670ee07909bf3b209a7a0a18adcbb8e1a406a68c539a3b7a3",
+    "codex-rs/core/Cargo.toml": "e248445f85bca506d5ea653db6726d5a58bb9b5c4daa17c0dafdc4cb66d95fe8",
+    "codex-rs/core/src/context_manager/history.rs": "52ebc141119b79c55a62e8d67a9c3e75a19f1486d8c29e2efe42b0634381806a",
+    "codex-rs/core/src/hook_context_observer.rs": "a03d0646fa430e7a175855796d3965ba2497a7133ed5ca4803937fee3346ef35",
+    "codex-rs/core/src/hook_context_observer_tests.rs": "df1e2b5c055ec0b818996ed1bb7ffc91a4705eff7c7dca5f39a30200c51f1a36",
+    "codex-rs/core/src/hook_runtime.rs": "64285eda71942aa88c09e4adda97e961aa7a2006c347f9232f3c3acdc91a3e9a",
+    "codex-rs/core/src/lib.rs": "87388edb39823873cb53ec9051f8ddd5822ac6b97e249d5910b42022c2692b16",
+    "codex-rs/core/src/session/turn.rs": "2435b1b651464f186712368075ab79076fe7502116017eb5c93e54450a689e54",
+    "codex-rs/core/src/tools/registry.rs": "12a3f88030ae367405c9c8e71f6459fcf4434ed2dc25c3fa21129916b37499ea",
+    "codex-rs/hooks/Cargo.toml": "388ef103750a2e78d280a35b6598c82b31bec7c38962896ef328064a2b325edb",
+    "codex-rs/hooks/src/engine/command_runner_tests.rs": "f4ea3336196b3c9646a9ab39648e1ee39ddad45d2e42a4c81969298b132aef1c",
+    "codex-rs/hooks/src/engine/dispatcher.rs": "0a83ee7a1ffd7b8b83f4e691777c5acc26d2afc13dc8d921e4d6c457d54ef304",
+    "codex-rs/hooks/src/engine/hook_dispatch_observer.rs": "d4f1881ac1b8a8d5d7a27f6d893d548b09c6d8904aeeb815742a719effde2c99",
+    "codex-rs/hooks/src/engine/hook_dispatch_observer_tests.rs": "491ba00fc2446c0055462db1d274207ab1c425b02a9ff50ae200a388e3537344",
+    "codex-rs/hooks/src/engine/mod.rs": "cd4c9ecdb5c463cc8a81195808e69df6e22906944f71bebaca20b4fe1943996f",
+    "codex-rs/hooks/src/events/post_tool_use.rs": "020f7cc708a48e577d92de3402fd5e5d67d7ab645f627561d08a9415aa377d0f",
+    "codex-rs/hooks/src/events/session_start.rs": "7bcaca5eced7e632494d5aed1b411ee22e76155dc778c86797eb2129121d9b4f",
+    "codex-rs/hooks/src/events/user_prompt_submit.rs": "e575881d19e7afdd4c3ad8799497af3615638e1e9c5ef5e0a7f15563b640c5af",
+    "codex-rs/tui/src/chatwidget/protocol.rs": "4b384cd6b759436e5d8b409f1ce849829e02d3965ef86c5f5b7ca4e18fea7846",
+    "codex-rs/tui/src/hook_observer.rs": "45fecc04796cdc6ae94694035ab3d773a19ed25e5643c41e8370380d863ed3a7",
+    "codex-rs/tui/src/lib.rs": "86229828bbbebad052297e531ee8c891c9d069598636f28b0f0d44dfe4dcf971"
+  },
+  "registryPackages": 1296,
+  "schemaVersion": 1,
+  "sourceReviewScope": "three synchronous native events, actual cached selected configuration/trust, redacted ContextManager history insertion; default off",
+  "upstreamArchiveHash": "sha256-5X8dT5FMccNTKhLVwU90CQn8pOfgQfobPbcWGMiOVWc=",
+  "upstreamArchiveUrl": "https://codeload.github.com/openai/codex/tar.gz/83086188ae0614bd882818ff1aa23f3194962012",
+  "upstreamRevision": "83086188ae0614bd882818ff1aa23f3194962012",
+  "version": "0.163.0"
+}
