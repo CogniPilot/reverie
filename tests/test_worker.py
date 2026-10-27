@@ -281,7 +281,7 @@ class WorkerTests(unittest.TestCase):
                 if getattr(self, 'done', False): return b''
                 self.done = True; return b'{}'
         class Upstream:
-            def __init__(self, *args, **kwargs): pass
+            def __init__(self, *args, **kwargs): self.sock = None
             def request(self, method, path, body, headers): calls.append((method, path, body, headers))
             def getresponse(self): return Response()
             def close(self): pass
