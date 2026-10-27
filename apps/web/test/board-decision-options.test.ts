@@ -9,11 +9,11 @@ afterEach(() => { for (const dom of windows.splice(0)) dom.window.close(); });
 function fixture(decision: object, writesEnabled: boolean | undefined = true) {
   const html = readFileSync(new URL('../src/web/public/board.html', import.meta.url), 'utf8');
   const script = /<script>([\s\S]*)<\/script>/.exec(html)![1];
-  const dom = new JSDOM('<section id="sec-decisions"><div id="cards"></div><div id="waitingHint"></div><details id="decidedBox"><summary id="decidedSum"></summary><ul id="decided"></ul></details></section>');
+  const dom = new JSDOM('<section id="sec-decisions"><div id="cards"></div><div id="waitingHint"></div><details id="decidedBox"><summary id="decidedSum"></summary><ul id="decided"></ul></details></section>', { pretendToBeVisual: true });
   windows.push(dom);
   const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ success: true }) }));
   const load = vi.fn(async () => {});
-  const context = vm.createContext({ document: dom.window.document, CSS: { escape: (value: string) => value }, fetch, load,
+  const context = vm.createContext({ document: dom.window.document, CSS: { escape: (value: string) => value }, fetch, load, boardActive: true, readyForActions: true,
     B: { rev: 7, decisions: [decision], polls: [], structuredDecisionWrites: writesEnabled }, when: () => 'Today' });
   new vm.Script(`${/const esc = .*/.exec(script)![0]}\n${script.slice(script.indexOf('const cardErr = {}'))}\ncards();`).runInContext(context);
   return { document: dom.window.document, fetch, load, context };
@@ -80,4 +80,14 @@ it('treats an absent availability projection as OFF in the UI', () => {
   new vm.Script('delete B.structuredDecisionWrites; cards();').runInContext(f.context);
   expect((f.document.querySelector('[data-opt="Hold"]') as HTMLButtonElement).disabled).toBe(true);
   expect(f.fetch).not.toHaveBeenCalled();
+});
+
+it.each(['boardActive', 'readyForActions'])('refuses decision writes when %s becomes false', async (guard) => {
+  const f = fixture({ id: 'snapshot', text: 'Publish?', at: 1, options: ['Approve', 'Hold'] });
+  new vm.Script(`${guard} = false;`).runInContext(f.context);
+  (f.document.querySelector('[data-opt="Hold"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(f.load).toHaveBeenCalledOnce());
+  new vm.Script('cards();').runInContext(f.context);
+  expect(f.fetch).not.toHaveBeenCalled();
+  expect(f.document.querySelector('.err')!.textContent).toContain('Refresh the visible board');
 });

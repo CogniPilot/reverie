@@ -2649,7 +2649,7 @@ describe('picture icons', () => {
     });
     file.dispatchEvent(new h.window.Event('change', { bubbles: true }));
     await settle(30);
-    expect(dlg.querySelector('.ca-picture [role=status]')?.textContent).toMatch(/png, jpeg, webp or gif/);
+    expect(dlg.querySelector('.ca-picture [role=status]:not([hidden])')?.textContent).toMatch(/png, jpeg, webp or gif/);
     expect(dlg.querySelector('.ca-picture-preview img')).toBeNull();
   });
 });
