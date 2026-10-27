@@ -33,7 +33,7 @@ export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistr
   app.delete('/api/chat-bots/:id', async (req, reply) => {
     if (!verifiedOwner(req)) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner removes a bot');
     const { id } = req.params as { id: string };
-    if (hasRoutines(id)) return reply.code(409).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, "Delete this bot's routines first"));
+    if (hasRoutines(id)) return reply.code(409).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, "Remove this bot's routines and repository watches first"));
     if (!(await bots.remove(id))) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'No such bot');
     return { success: true, data: {} };
   });

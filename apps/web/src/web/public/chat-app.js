@@ -3319,11 +3319,31 @@ class ReverieChatApp {
   renderOfficePane(owner = this.canManageOffice()) {
     const pane = this.els.officePane;
     if (!pane) return;
+    const focusedLink = [...pane.querySelectorAll('button')].indexOf(this.doc.activeElement);
     const expanded = caRead('local', 'reverie:office-expanded', 'false') !== 'false';
     pane.hidden = !expanded;
-    const gearRect = this.els.rail.querySelector('.ca-office-gear')?.getBoundingClientRect();
-    const rootRect = this.els.root.getBoundingClientRect();
-    if (gearRect) pane.style.bottom = `${Math.max(8, rootRect.bottom - gearRect.top + 6)}px`;
+    const rail = this.els.rail, anchor = this.els.machineBar, launcher = this.els.officeLauncher;
+    const position = () => {
+      if (!anchor?.isConnected || !pane.isConnected || !launcher?.isConnected) return;
+      const meter = anchor.getBoundingClientRect(), root = this.els.root.getBoundingClientRect(), gutter = rail.getBoundingClientRect();
+      if (!meter.width) return;
+      pane.style.left = `${meter.left - root.left}px`;
+      pane.style.width = `${meter.width}px`;
+      pane.style.bottom = `${root.bottom - meter.top}px`;
+      pane.style.maxHeight = `${Math.max(0, meter.top - root.top)}px`;
+      launcher.style.top = `${meter.top + meter.height / 2 - gutter.top + rail.scrollTop - launcher.offsetHeight / 2}px`;
+    };
+    position();
+    if (this._officeFooterPane !== pane || this._officeFooterAnchor !== anchor) {
+      this._officeFooterObserver?.disconnect();
+      this._officeFooterRail?.removeEventListener('scroll', this._officeFooterPosition);
+      this._officeFooterRail?.removeEventListener('transitionend', this._officeFooterPosition);
+      this._officeFooterPane = pane; this._officeFooterAnchor = anchor; this._officeFooterRail = rail; this._officeFooterPosition = position;
+      rail.addEventListener('scroll', position, { passive: true });
+      rail.addEventListener('transitionend', position);
+      const Observer = this.doc.defaultView?.ResizeObserver;
+      if (Observer && anchor) { this._officeFooterObserver = new Observer(position); this._officeFooterObserver.observe(anchor); this._officeFooterObserver.observe(rail); }
+    }
     this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
@@ -3336,6 +3356,7 @@ class ReverieChatApp {
       }
       entry.run();
     }, { text: entry.label }));
+    if (expanded && focusedLink >= 0) pane.querySelectorAll('button')[Math.min(focusedLink, pane.children.length - 1)]?.focus({ preventScroll: true });
   }
 
   async openOfficeMenu(anchor) {

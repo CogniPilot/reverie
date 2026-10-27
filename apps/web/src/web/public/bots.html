@@ -27,11 +27,18 @@
             <option value="disabled">Disabled</option>
           </select></label
         ><button id="refresh" type="button">Refresh</button
+        ><button id="new-watch" class="primary" type="button" disabled>Watch a repository</button
         ><button id="new-routine" class="primary" type="button">New routine</button
         ><button id="new-bot" type="button">Set up a bot</button>
       </div>
       <p id="status" role="status">Loading bots…</p>
       <div id="summary" class="summary" aria-label="Bot activity summary"></div>
+      <section id="github-watch-section" aria-labelledby="github-watch-title">
+        <h2 id="github-watch-title">GitHub watchers</h2>
+        <p class="hint">Send repository updates to a channel. Choose the events you want to hear about.</p>
+        <p id="watch-status" role="status">Loading repository watchers…</p>
+        <div id="github-watches" class="cards"></div>
+      </section>
       <section aria-labelledby="routines-title">
         <h2 id="routines-title">Routines</h2>
         <p class="hint">Enabled routines run on their schedule. Execution status updates every 10 seconds.</p>
@@ -47,6 +54,95 @@
         <div id="history" class="cards"></div>
       </section>
     </main>
+    <dialog id="watch-dialog" aria-labelledby="watch-title">
+      <form id="watch-form">
+        <h2 id="watch-title">Watch a repository</h2>
+        <label
+          >Repository<input
+            name="repository"
+            required
+            maxlength="201"
+            placeholder="owner/repository"
+            autocapitalize="none"
+            spellcheck="false"
+        /></label>
+        <label>Post as<select name="botId" aria-label="Watcher bot" required></select></label>
+        <label>Channel<select name="roomId" aria-label="Watcher channel" required></select></label>
+        <fieldset class="github-watch-events">
+          <legend>Events</legend>
+          <label class="check"><input type="checkbox" name="events" value="issues" checked />Issues</label>
+          <label class="check"><input type="checkbox" name="events" value="pullRequests" checked />Pull requests</label>
+          <label class="check"
+            ><input type="checkbox" name="events" value="workflowFailures" checked />Failed GitHub Actions runs</label
+          >
+        </fieldset>
+        <p class="hint">
+          New activity and recent GitHub Actions reruns (31 days). The first check sets a quiet baseline; incomplete
+          checks are marked Needs attention.
+        </p>
+        <label
+          >Check every (minutes)<input name="intervalMinutes" type="number" min="15" max="1440" value="30" required
+        /></label>
+        <p class="hint">
+          GitHub rate limits can delay checks. Public polling starts at 30 minutes; you can choose another interval.
+        </p>
+        <label
+          >Repository visibility<select name="visibility" aria-label="Repository visibility">
+            <option value="public">Public</option>
+            <option value="private">Private</option>
+          </select></label
+        >
+        <label id="watch-credential-field" hidden
+          >GitHub credential<select name="credentialId" aria-label="GitHub credential">
+            <option value="">Public repository — no credential</option>
+          </select></label
+        >
+        <button id="add-watch-credential" type="button">Add a GitHub credential</button>
+        <p id="watch-credential-hint" class="hint"></p>
+        <label class="check"><input type="checkbox" name="enabled" checked />Enable watcher</label>
+        <p id="watch-save-hint" class="hint">Saving changes future checks. It does not run a check immediately.</p>
+        <p id="watch-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="watch-dialog">Cancel</button
+          ><button class="primary" type="submit">Save watcher</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="watch-credential-dialog" aria-labelledby="watch-credential-title">
+      <form id="watch-credential-form">
+        <h2 id="watch-credential-title">Add a GitHub credential</h2>
+        <p id="watch-credential-repository" class="hint"></p>
+        <label
+          >Name<input
+            name="name"
+            required
+            maxlength="48"
+            pattern="[a-z][a-z0-9-]{0,47}"
+            placeholder="github-watch"
+            autocapitalize="none"
+            spellcheck="false"
+        /></label>
+        <label>Label (optional)<input name="label" maxlength="120" /></label>
+        <label
+          >GitHub personal access token<input
+            name="token"
+            type="password"
+            required
+            maxlength="4096"
+            autocomplete="off"
+            spellcheck="false"
+        /></label>
+        <p class="hint">
+          Stored privately on the server and never shown again. GitHub controls which repositories and events this
+          credential can read.
+        </p>
+        <p id="watch-credential-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="watch-credential-dialog">Cancel</button
+          ><button class="primary" type="submit">Save credential</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="bot-dialog" aria-labelledby="bot-title">
       <form id="bot-form">
         <h2 id="bot-title">Set up a bot</h2>

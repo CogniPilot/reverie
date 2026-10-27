@@ -108,7 +108,7 @@ export class PublicIssueWatch {
   status() {
     return this.store.snapshot();
   }
-  async configure(raw: unknown) {
+  async configure(raw: unknown, beforeCommit: () => void = () => {}) {
     const cfg = PublicIssueWatchConfig.parse(raw),
       bot = this.deps.bot(cfg.botId),
       room = this.deps.room(cfg.roomId);
@@ -124,7 +124,7 @@ export class PublicIssueWatch {
       )
         throw Error('Existing target change requires separate reviewed watch; cursor retained');
       s.config = cfg;
-    });
+    }, beforeCommit);
   }
   tick(): Promise<void> {
     const run = this.chain.then(() => this.poll());

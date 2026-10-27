@@ -4,6 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Company · Plans and burn rate</title>
+<script id="company-plans-bootstrap">
+// Resolve embedding and the initial palette before the first body content can paint.
+(function () {
+  const root = document.documentElement;
+  let theme;
+  try {
+    const frame = window.frameElement;
+    if (frame?.classList?.contains('ca-company-plans-frame')) {
+      root.dataset.companyPlansEmbedded = 'true';
+      const skin = frame.ownerDocument.documentElement.dataset.skin;
+      if (['paper-gray', 'solarized-light', 'catppuccin-latte', 'rose-pine-dawn'].includes(skin)) theme = 'light';
+      else if (['og', 'daylight-blue', 'daylight-green'].includes(skin)) theme = 'dark';
+    }
+  } catch (e) { /* A foreign embedding cannot supply the Company skin. */ }
+  try {
+    const saved = localStorage.getItem('board-theme');
+    if (saved === 'dark' || saved === 'light') theme = saved;
+  } catch (e) { /* Storage may be disabled; no preference is written. */ }
+  if (!theme) {
+    try { theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+    catch (e) { theme = 'light'; }
+  }
+  root.dataset.theme = theme;
+})();
+</script>
+<style>
+html[data-theme="dark"]{color-scheme:dark;background:#0f1115}
+html[data-theme="light"]{color-scheme:light;background:#f4f3ef}
+</style>
 <link rel="stylesheet" href="/company-board.css">
 </head>
 <body>
@@ -87,7 +116,7 @@ const startOfDay = t => { const p = parts(t); return t - ((+p.hour * 60 + +p.min
 const zoneShort = () => { try { return (new Intl.DateTimeFormat('en-US', {timeZone: TZ, timeZoneName: 'short'}).formatToParts(new Date()).find(p => p.type === 'timeZoneName') || {}).value || 'ET'; } catch (e) { return 'ET'; } };
 (function theme() {
   let saved = null; try { saved = localStorage.getItem('board-theme'); } catch (e) {}
-  if (saved) document.documentElement.dataset.theme = saved;
+  if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
   document.getElementById('theme').onclick = () => {
     const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     const nx = cur === 'dark' ? 'light' : 'dark';

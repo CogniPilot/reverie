@@ -152,16 +152,18 @@ export class BotWatchState<T> {
       throw Error('Bot archive outcome unconfirmed; preserve live ledger and history');
     }
   }
-  update(change: (next: T) => void): Promise<void> {
+  update(change: (next: T) => void, beforeCommit: () => void = () => {}): Promise<void> {
     const run = this.chain.then(async () => {
       const next = this.snapshot();
+      const guard = () => { if (beforeCommit() !== undefined) throw Error('Synchronous bot authority guard required'); };
+      guard();
       change(next);
       const published = structuredClone(this.schema.parse(next));
       const raw = JSON.stringify(published);
       if (Buffer.byteLength(raw, 'utf8') > BOT_WATCH_MAX_STATE_BYTES)
         throw Error('Bot state byte bound; prior state preserved');
       try {
-        await writeCompanyStateFile(this.file, raw);
+        await writeCompanyStateFile(this.file, raw, guard);
         this.value = published;
       } catch {
         this.unavailable = true;

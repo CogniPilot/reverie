@@ -96,7 +96,8 @@ let
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
       npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts
       npm test -- test/cli-help.test.ts test/cli-commands.test.ts test/chat-ui-controls.test.ts \
-        test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts
+        test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts \
+        test/github-watches-ui.test.ts test/office-footer-panel.test.ts
       npm test -- test/board-permissions.test.ts test/owner-auth-board-decisions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
@@ -105,7 +106,9 @@ let
       NIX_REVERIE_TEST_ROOT_CUSTODY=1 npm test -- test/cli-agent-credentials.test.ts
       npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts test/company-lifecycle-fence.test.ts
       npm test -- test/assignment-status-watch.test.ts test/public-issue-watch.test.ts \
-        test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts
+        test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts \
+        test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
+        test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
       runHook postCheck
     '';
     installPhase = ''

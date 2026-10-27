@@ -94,27 +94,37 @@ export class ChatBotRegistry {
     return this.bots.get(id);
   }
 
-  async set(id: string, raw: unknown): Promise<ChatBot> {
+  async set(id: string, raw: unknown, beforeCommit: () => void = () => {}): Promise<ChatBot> {
     const bot = parseBot(raw, id);
-    if (!this.bots.has(id) && this.bots.size >= MAX_BOTS) throw new ChatBotError(`At most ${MAX_BOTS} bots`, 'CONFLICT');
-    this.bots.set(id, bot);
-    await this.save();
+    await this.save((next) => {
+      if (!next.has(id) && next.size >= MAX_BOTS) throw new ChatBotError(`At most ${MAX_BOTS} bots`, 'CONFLICT');
+      next.set(id, bot);
+      return true;
+    }, beforeCommit);
     return bot;
   }
 
   async remove(id: string): Promise<boolean> {
-    if (!this.bots.delete(id)) return false;
-    await this.save();
-    return true;
+    let removed = false;
+    await this.save((next) => { removed = next.delete(id); return removed; });
+    return removed;
   }
 
-  private save(): Promise<void> {
-    const body = JSON.stringify(Object.fromEntries(this.bots), null, 2);
+  private save(change: (next: Map<string, ChatBot>) => boolean, beforeCommit: () => void = () => {}): Promise<void> {
     this.saveChain = this.saveChain.catch(() => {}).then(async () => {
+      const guard = () => {
+        if (beforeCommit() !== undefined) throw new ChatBotError('Synchronous bot authority required', 'INVALID_INPUT');
+      };
+      guard();
+      const next = new Map(this.bots);
+      if (!change(next)) return;
+      const body = JSON.stringify(Object.fromEntries(next), null, 2);
       await fs.mkdir(dirname(this.file), { recursive: true });
       const tmp = `${this.file}.${process.pid}.tmp`;
       await fs.writeFile(tmp, body, { mode: 0o600 });
+      guard();
       await fs.rename(tmp, this.file);
+      this.bots = next;
     });
     return this.saveChain;
   }

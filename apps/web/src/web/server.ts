@@ -1853,14 +1853,14 @@ export class WebServer extends EventEmitter {
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
     registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>
-      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id)
+      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id)
     );
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
       employees: () => companyStore.snapshot().employees,
       coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
-      verifiedOwner, multiUser: isMultiUserMode(),
+      verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
     });
     this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment and public issue watchers' });
     this.inputWatch = createInputWatch({
