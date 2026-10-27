@@ -1059,9 +1059,9 @@ class ReverieApp {
     this.init();
   }
 
-  // Cached element getter - avoids repeated DOM queries
+  // Reuse connected elements, and refresh entries when a panel replaces a node.
   $(id) {
-    if (!this._elemCache[id]) {
+    if (!this._elemCache[id]?.isConnected) {
       this._elemCache[id] = document.getElementById(id);
     }
     return this._elemCache[id];

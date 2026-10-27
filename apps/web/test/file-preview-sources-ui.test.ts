@@ -81,7 +81,7 @@ function fixture(
     context
   );
   const app: any = Object.create((context as any).App.prototype);
-  app.$ = (id: string) => document.getElementById(id);
+  app._elemCache = {};
   app.sessions = new Map();
   app.activeSessionId = 'SHOULD-NEVER-BE-USED';
   app._copyText = vi.fn(async () => true);

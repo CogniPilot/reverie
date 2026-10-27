@@ -18,7 +18,7 @@ function pdf() { let b = '%PDF-1.4\n', offset = [0]; const objects = ['<< /Type 
 } const x = Buffer.byteLength(b); b += 'xref\n0 5\n0000000000 65535 f \n' + offset.slice(1).map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF'; return Buffer.from(b); }
 const bodies = { md: Buffer.from('# Synthetic preview\n\nHarmless local fixture.'), png: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6pAAAAABJRU5ErkJggg==', 'base64'), pdf: pdf() };
 it('keeps the real shell viewer visible, interactive and scoped across file types and view modes', async () => {
-    const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
+    const browser = await chromium.launch({ headless: true, chromiumSandbox: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
     const results = [];
     const artifacts = process.env.VIEWER_SHELL_ARTIFACTS;
     if (artifacts)
@@ -57,7 +57,7 @@ it('keeps the real shell viewer visible, interactive and scoped across file type
             await page.waitForSelector('.ca-root', { state: 'attached' });
             await page.waitForTimeout(150);
             assert.equal(await page.locator('.app > .main').evaluate(el => getComputedStyle(el).display), 'none');
-            await page.evaluate(() => { window.reader = Object.create(window.ReaderApp.prototype); window.reader.$ = id => document.getElementById(id); window.reader.sessions = new Map(); window.reader._copyText = async () => true; window.app.closeFilePreview = () => window.reader.closeFilePreview(); const b = document.createElement('button'); b.id = 'fixture-trigger'; b.textContent = 'Open synthetic file'; window.reverieChat.els.root.append(b); b.style.cssText = 'position:fixed;left:10px;top:10px;z-index:10'; window.__open = type => { b.focus(); return window.__opened = window.reader.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: 'fixture-room', attachmentId: 'fixture-' + type, name: 'sample.' + type }, b); }; });
+            await page.evaluate(() => { window.reader = Object.create(window.ReaderApp.prototype); window.reader._elemCache = {}; window.reader.sessions = new Map(); window.reader._copyText = async () => true; window.app.closeFilePreview = () => window.reader.closeFilePreview(); const b = document.createElement('button'); b.id = 'fixture-trigger'; b.textContent = 'Open synthetic file'; window.reverieChat.els.root.append(b); b.style.cssText = 'position:fixed;left:10px;top:10px;z-index:10'; window.__open = type => { b.focus(); return window.__opened = window.reader.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: 'fixture-room', attachmentId: 'fixture-' + type, name: 'sample.' + type }, b); }; });
             for (const type of ['md', 'png', 'pdf']) {
                 await page.evaluate(t => window.__open(t), type);
                 await page.evaluate(() => window.__opened);
