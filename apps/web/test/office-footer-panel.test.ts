@@ -90,3 +90,28 @@ it('preserves the focused category during rerender and cleans up the old geometr
   expect(previous.disconnected).toBe(true);
   expect(observers.at(-1)).not.toBe(previous);
 });
+
+it('only marks a gear opening for animation; persistent panel repaints and resize remain still', async () => {
+  const { h } = await fixture();
+  let pane = h.shell.els.officePane;
+  expect(pane.classList.contains('ca-office-pane-opening')).toBe(true);
+  const finished = new h.window.Event('animationend');
+  Object.defineProperty(finished, 'animationName', { value: 'ca-office-slide-up' });
+  pane.dispatchEvent(finished);
+  expect(pane.classList.contains('ca-office-pane-opening')).toBe(false);
+  h.shell.renderOfficePane();
+  h.shell.renderUser();
+  h.window.dispatchEvent(new h.window.Event('resize'));
+  pane = h.shell.els.officePane;
+  expect(pane.hidden).toBe(false);
+  expect(pane.classList.contains('ca-office-pane-opening')).toBe(false);
+  const gear = h.document.querySelector('.ca-office-gear');
+  gear.click();
+  await h.flush();
+  expect(pane.hidden).toBe(true);
+  expect(pane.classList.contains('ca-office-pane-opening')).toBe(false);
+  gear.click();
+  await h.flush();
+  expect(pane.hidden).toBe(false);
+  expect(pane.classList.contains('ca-office-pane-opening')).toBe(true);
+});

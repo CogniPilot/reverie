@@ -178,3 +178,72 @@ it('requires every page in a CI range to retain the same declared total', async 
         : reply({ total_count: 2, workflow_runs: [run(1)] }, true);
   await expect(scanGithub(config, initial(), get, NOW)).rejects.toThrow('SCAN_INCOMPLETE');
 });
+
+it('starts an empty quiet issue baseline now despite over 300 historical rows, then reports old-issue updates and new PRs', async () => {
+  const c = { ...config, events: { issues: true, pullRequests: true, workflowFailures: false } };
+  const historical = Array.from({ length: 450 }, (_, i) => ({
+    number: i + 1,
+    title: 'Historical ' + i,
+    state: 'open',
+    created_at: at(NOW - 10 * DAY),
+    updated_at: at(NOW - DAY),
+    ...(i % 2 ? { pull_request: {} } : {}),
+  }));
+  let rows = historical,
+    paths: string[] = [];
+  const get = async (path: string) => {
+    if (!path) return reply({ private: false, full_name: 'owner/repo' });
+    paths.push(path);
+    const url = new URL('https://fixture.invalid' + path),
+      since = url.searchParams.get('since'),
+      page = Number(url.searchParams.get('page') || 1);
+    const filtered = rows.filter((r) => !since || r.updated_at > since),
+      start = (page - 1) * 30;
+    return reply(filtered.slice(start, start + 30), filtered.length > start + 30);
+  };
+  const original = initial();
+  const baseline = await scanGithub(c, original, get, NOW);
+  expect(paths).toHaveLength(1);
+  expect(new URL('https://fixture.invalid' + paths[0]).searchParams.get('since')).toBe(at(NOW - 1000));
+  expect(baseline.events).toHaveLength(0);
+  expect(baseline.next.issueCursor).toBe(at(NOW));
+  expect(baseline.next.issuePrimed).toBe(true);
+  expect(original).toEqual(initial());
+  rows = [
+    { ...historical[0]!, title: 'Old issue updated', updated_at: at(NOW + 2000) },
+    {
+      number: 451,
+      title: 'New PR',
+      state: 'open',
+      created_at: at(NOW + 1000),
+      updated_at: at(NOW + 2000),
+      pull_request: {},
+    },
+  ];
+  const changed = await scanGithub(c, baseline.next, get, NOW + 2000);
+  expect(changed.events.map((e) => e.text)).toEqual([
+    expect.stringContaining('Issue #1 updated:'),
+    expect.stringContaining('PR #451 new:'),
+  ]);
+  expect((await scanGithub(c, changed.next, get, NOW + 2000)).events).toHaveLength(0);
+});
+it('keeps an existing primed legacy cursor instead of resetting it to the new scan time', async () => {
+  const c = { ...config, events: { issues: true, pullRequests: false, workflowFailures: false } },
+    state = initial();
+  state.issuePrimed = true;
+  state.issueCursor = at(NOW - 5 * DAY);
+  let since: string | null = null;
+  const result = await scanGithub(
+    c,
+    state,
+    async (path) => {
+      if (!path) return reply({ private: false, full_name: 'owner/repo' });
+      since = new URL('https://fixture.invalid' + path).searchParams.get('since');
+      return reply([]);
+    },
+    NOW
+  );
+  expect(since).toBe(at(NOW - 5 * DAY - 1000));
+  expect(result.next.issueCursor).toBe(state.issueCursor);
+  expect(result.next.issuePrimed).toBe(true);
+});

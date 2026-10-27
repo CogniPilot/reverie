@@ -176,11 +176,15 @@ async function scan(config: WatchConfig, state: ScanState, get: Get, now: number
     events: WatchEvent[] = [];
   const budget = { left: 60 };
   if (config.events.issues || config.events.pullRequests) {
+    // A new quiet baseline watches from this scan, rather than importing all repository history.
+    // Retain the seed even for an empty reply, and publish it only with a complete scan.
+    if (!next.issuePrimed && next.issueCursor === undefined)
+      next.issueCursor = new Date(now).toISOString().replace(/\.\d{3}Z$/, 'Z');
     const path =
       '/issues?state=all&sort=updated&direction=desc&per_page=30' +
-      (state.issueCursor
+      (next.issueCursor
         ? '&since=' +
-          encodeURIComponent(new Date(Date.parse(state.issueCursor) - 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'))
+          encodeURIComponent(new Date(Date.parse(next.issueCursor) - 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'))
         : '');
     const rows = await pages(get, path, 'issues', budget);
     const observed = new Map<string, string>();

@@ -307,7 +307,7 @@ it('conditionally reuses only the matching complete issue page, without inventin
   await f.service.tick();
   f.advance();
   await f.service.tick();
-  expect(conditionals).toBe(1);
+  expect(conditionals).toBe(2);
   expect(f.service.status().watches[0]!.status.state).toBe('active');
   expect(f.messages).toHaveLength(0);
 });

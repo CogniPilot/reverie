@@ -39,7 +39,7 @@ for (const config of [
       for (const n of ['styles.css', 'chat-app.css']) await page.addStyleTag({ content: read(n) });
       await page.addScriptTag({
         content: `${member.toString()} ${room.toString()} ${message.toString()} ${createServer.toString()}
- const user={kind:'user',name:'Owner'};window.ReverieUrlSession={sessionIdFromFragment:()=>null};window.__server=createServer([room('general','General',[])]);window.__server.company={canManage:true,settings:{ownerName:'Owner'},employees:[]};const prior=window.__server.handle;window.__server.handle=async(path,options={})=>{const ok=data=>({ok:true,status:200,json:async()=>({success:true,data})});if(path.startsWith('/api/embassy'))return ok({connections:[]});if(path==='/api/chatrooms/phone-status')return ok({self:'owner',canSetOwn:true});if(path==='/api/system/stats')return ok({cpu:4,memory:{percent:26},disks:{available:true,filesystems:[{labels:['fixture'],totalBytes:100,availableBytes:10}]}});if(path==='/api/system/gpu')return ok({available:true,utilization:22});return prior(path,options);};window.fetch=async()=>({ok:true,json:async()=>({avatars:[]})});${stub}`,
+ const user={kind:'user',name:'Owner'};window.ReverieUrlSession={sessionIdFromFragment:()=>null};window.__server=createServer([room('general','General',[]),room('other','Other',[])]);window.__server.company={canManage:true,settings:{ownerName:'Owner'},employees:[]};const prior=window.__server.handle;window.__server.handle=async(path,options={})=>{const ok=data=>({ok:true,status:200,json:async()=>({success:true,data})});if(path.startsWith('/api/embassy'))return ok({connections:[]});if(path==='/api/chatrooms/phone-status')return ok({self:'owner',canSetOwn:true});if(path==='/api/system/stats')return ok({cpu:4,memory:{percent:26},disks:{available:true,filesystems:[{labels:['fixture'],totalBytes:100,availableBytes:10}]}});if(path==='/api/system/gpu')return ok({available:true,utilization:22});return prior(path,options);};window.fetch=async()=>({ok:true,json:async()=>({avatars:[]})});${stub}`,
       });
       for (const n of ['chatroom-ui.js', 'chat-media.js']) await page.addScriptTag({ content: read(n) });
       await page.addScriptTag({ content: 'window.app=new ReverieApp();' });
@@ -68,6 +68,12 @@ for (const config of [
           };
         });
       const before = await geometry();
+      await page.evaluate(() => {
+        (window as any).__officeOpenAnimations = 0;
+        document.addEventListener('animationstart', (event) => {
+          if ((event as AnimationEvent).animationName === 'ca-office-slide-up') (window as any).__officeOpenAnimations++;
+        });
+      });
       if (config.touch) await page.locator('.ca-office-gear').tap();
       else await page.locator('.ca-office-gear').click();
       for (let i = 0; i < 3; i++) {
@@ -94,6 +100,21 @@ for (const config of [
       expect(opened.meter).toEqual(before.meter);
       expect(opened.profile).toEqual(before.profile);
       if (config.reduced) expect(opened.animation).toBe('none');
+      const openingCount = config.reduced ? 0 : 1;
+      expect(await page.evaluate(() => (window as any).__officeOpenAnimations)).toBe(openingCount);
+      await page.evaluate(async () => {
+        const shell = (window as any).reverieChat;
+        await shell.selectRoom('other');
+        if (innerWidth < 768) shell.toggleDrawer('channels'); // Room selection intentionally closes the phone drawer.
+        shell.renderUser(); // The background refresh path replaces the panel DOM.
+        shell.renderOfficePane();
+        dispatchEvent(new Event('resize'));
+      });
+      await page.waitForTimeout(220);
+      expect(await page.locator('.ca-office-pane').isVisible()).toBe(true);
+      expect((await geometry()).animation).toBe('none');
+      expect(await page.evaluate(() => (window as any).__officeOpenAnimations)).toBe(openingCount);
+      assertJoined(await geometry());
       await page.locator('.ca-office-pane button').nth(1).focus();
       await page.setViewportSize({
         width: config.touch ? 360 : config.width - 80,
@@ -134,6 +155,7 @@ for (const config of [
       else await page.keyboard.press('Enter');
       await page.waitForTimeout(200);
       assertJoined(await geometry());
+      expect(await page.evaluate(() => (window as any).__officeOpenAnimations)).toBe(config.reduced ? 0 : 2);
       expect(errors).toEqual([]);
       if (process.env.FOOTER_PANEL_SCREENSHOTS) {
         mkdirSync(process.env.FOOTER_PANEL_SCREENSHOTS, { recursive: true });

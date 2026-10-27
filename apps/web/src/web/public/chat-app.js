@@ -3362,6 +3362,8 @@ class ReverieChatApp {
   async openOfficeMenu(anchor) {
     const expanded = anchor.getAttribute('aria-expanded') !== 'true';
     caWrite('local', 'reverie:office-expanded', String(expanded));
+    // Repaints restore the saved panel without motion; only the gear starts an opening transition.
+    this.els.officePane?.classList.toggle('ca-office-pane-opening', expanded);
     this.renderOfficePane();
     if (!expanded) return;
     try { this.renderOfficePane(await this.verifyOfficeOwner()); }
@@ -5531,6 +5533,9 @@ class ReverieChatApp {
     gear.setAttribute('aria-controls', 'ca-office-pane');
     const launcher = this.el('div', 'ca-office-launcher');
     const pane = this.el('nav', 'ca-office-pane'); pane.id = 'ca-office-pane'; pane.setAttribute('aria-label', 'Company and board');
+    pane.addEventListener('animationend', event => {
+      if (event.target === pane && event.animationName === 'ca-office-slide-up') pane.classList.remove('ca-office-pane-opening');
+    });
     pane.addEventListener('keydown', event => {
       if (event.key !== 'Escape') return;
       event.preventDefault(); event.stopPropagation();
