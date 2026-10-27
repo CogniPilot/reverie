@@ -62,7 +62,7 @@
 </div>
 <div class="tip" id="tip" hidden></div>
 <script>
-if (window.frameElement?.classList?.contains('ca-page-frame')) document.documentElement.dataset.boardEmbedded = 'true';
+if (window.frameElement?.classList?.contains('ca-page-frame') || window.frameElement?.dataset.boardManaged === 'true') document.documentElement.dataset.boardEmbedded = 'true';
 if (location.hash === '#sec-burn') location.replace('/#company-plans');
 if (location.hash === '#sec-agents') location.replace('/#company-people');
 const H = 3600e3, D = 24 * H;
@@ -162,14 +162,38 @@ function tick() {
 const zoneShort = () => { try { return (new Intl.DateTimeFormat('en-US', {timeZone: TZ, timeZoneName: 'short'}).formatToParts(new Date()).find(p => p.type === 'timeZoneName') || {}).value || 'ET'; } catch (e) { return 'ET'; } };
 
 /* ---------- loading ---------- */
-let failures = 0, loading = false, renderKey = null;
-async function load() {
-  if (loading) return;
-  loading = true;
+const managedBoard = window.frameElement?.dataset.boardManaged === 'true';
+let boardActive = !managedBoard || window.frameElement.dataset.boardActive === 'true';
+let failures = 0, loading = false, renderKey = null, loadVersion = 0, boardRequest = null, pollTimer = null, clockTimer = null, readyForActions = false;
+function boardActionState(ready) {
+  readyForActions = ready;
+  document.getElementById('sec-decisions').inert = !ready;
+}
+function pauseBoard() {
+  clearInterval(pollTimer); clearInterval(clockTimer); pollTimer = clockTimer = null;
+  cancelAnimationFrame(timelineAnimation); timelineAnimation = 0;
+  ++loadVersion; boardRequest?.abort(); boardRequest = null; loading = false; boardActionState(false);
+}
+function startBoardTimers() {
+  if (pollTimer === null) pollTimer = setInterval(() => { if (boardActive && !document.hidden) load(); }, 10e3);
+  if (clockTimer === null) clockTimer = setInterval(() => { if (boardActive && !document.hidden) tick(); }, 30e3);
+}
+function boardVisibility(active) {
+  const next = active && !document.hidden;
+  if (next === boardActive && (!next || pollTimer !== null)) return;
+  boardActive = next; pauseBoard();
+  if (next) { startBoardTimers(); void load(); }
+}
+async function load(warm = false) {
+  if (loading || (!boardActive && !warm)) return;
+  const version = ++loadVersion, controller = boardRequest = new AbortController();
+  loading = true; boardActionState(false);
   const banner = document.getElementById('banner');
   try {
-    const r = await fetch('/api/board', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}});
+    const r = await fetch('/api/board', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}, signal: controller.signal});
+    if (version !== loadVersion) return;
     if (r.status === 401 || r.status === 403) {
+      if (managedBoard) { B = null; renderKey = null; pauseBoard(); parent.postMessage({ type: 'board-auth-lost' }, location.origin); return; }
       // The login expired: reload once so the console can ask again; never loop.
       let tried = null; try { tried = sessionStorage.getItem('board-reloaded'); } catch (e) {}
       if (!tried || Date.now() - +tried > 60e3) { try { sessionStorage.setItem('board-reloaded', String(Date.now())); } catch (e) {} location.reload(); return; }
@@ -178,30 +202,39 @@ async function load() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     // The API wraps replies as {success, data}; a bare view is accepted too.
     const j = await r.json();
+    if (version !== loadVersion) return;
     if (j && j.success === false) throw new Error(j.error || 'refused');
     const next = j && j.data ? j.data : j;
     if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
     const first = !B, previousPlan = latestPlanTag();
     // built changes on each read; unchanged board data must not rebuild the SVG.
     const nextKey = JSON.stringify([next.rev, next.timeZone, next.company, next.roster, next.ownerIds, next.polls, next.pins, next.planBurn, next.pace, next.pollNotes, next.structuredDecisionWrites]);
-    B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true;
+    B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true; boardActionState(boardActive && !document.hidden);
     if ((first || previousPlan !== latestPlanTag()) && latestPlanTag() && workChoice !== 'all') preset = 'fit';
     if (first || preset === 'fit') view = presetView(preset);
     if (renderKey === nextKey) { kpis(); return; }
     renderKey = nextKey;
     render();
   } catch (e) {
+    if (version !== loadVersion || e.name === 'AbortError') return;
     failures++;
     banner.hidden = false;
     banner.textContent = (B ? 'Could not refresh the board (' : 'Could not load the board (') + e.message + '). ' + (B ? 'Showing the last data; ' : '') + 'trying again when visible within 10 seconds.';
-  } finally { loading = false; }
+  } finally { if (version === loadVersion) { loading = false; boardRequest = null; } }
 }
 document.getElementById('refresh').onclick = () => load();
-setInterval(() => { if (!document.hidden) load(); }, 10e3);
-addEventListener('focus', () => { if (!document.hidden) load(); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
-setInterval(tick, 30e3);
-load().then(tick);
+addEventListener('message', event => {
+  if (managedBoard && event.source === parent && event.origin === location.origin && event.data?.type === 'board-visibility' && typeof event.data.active === 'boolean') boardVisibility(event.data.active);
+});
+addEventListener('focus', () => { if (boardActive && !document.hidden) load(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) boardVisibility(false);
+  else if (!managedBoard) boardVisibility(true); // Managed frames wait for the parent's fresh owner/identity check.
+});
+boardActionState(false);
+if (boardActive && !document.hidden) { startBoardTimers(); load().then(tick); }
+else if (managedBoard) load(true); // One authorized idle preload read, with no hidden timers or actions.
+
 
 const undecidedPolls = () => (B.polls || []).filter(p => !(p.ownerVote || []).length);
 function render() {
@@ -449,7 +482,7 @@ function hideTip() { tipEl.hidden = true; }
     const k = pinch.d / (Math.abs(a.clientX - b.clientX) || 1), t = pinch.c;
     view = clampView({s: t - (t - pinch.v.s) * k, e: t + (pinch.v.e - t) * k}); drawTimeline(); unpreset(); } }, {passive: false});
   host.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
-  addEventListener('resize', () => { if (B) drawTimeline(); });
+  addEventListener('resize', () => { if (B && boardActive && !document.hidden) drawTimeline(); });
   document.addEventListener('click', e => { if (!e.target.closest('.bar')) hideTip(); });
 })();
 
@@ -556,6 +589,7 @@ function decisionCard(d) {
   </article>`;
 }
 async function post(url, body) {
+  if (!boardActive || document.hidden || !readyForActions) throw new Error('Refresh the visible board before recording an action');
   const r = await fetch(url, {method: 'POST', credentials: 'same-origin', headers: {'content-type': 'application/json', accept: 'application/json'}, body: JSON.stringify(body || {})});
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.success === false) throw new Error(j.error || j.message || 'HTTP ' + r.status);

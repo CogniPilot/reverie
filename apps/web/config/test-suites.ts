@@ -37,6 +37,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/company-ui.browser.test.ts',
   'test/office-power.browser.test.ts',
   'test/workspace-gutter-navigation.browser.test.ts',
+  'test/board-preload.browser.test.ts',
   'test/plan-five-hour.browser.test.ts',
   'test/company-hire-wizard.browser.test.ts',
   'test/company-reporting-tree.browser.test.ts',

@@ -1176,9 +1176,9 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .ca-office-gear.is-active { color:var(--accent); background:var(--ca-active); }
 .ca-body { position: relative; }
 /* z-index 2 keeps the page and org panels under the phone drawers (3); the scrim (2) comes later in the DOM so it still covers them. */
-.ca-page { position: absolute; inset: 0; z-index: 2; display: flex; background: var(--ca-main-bg); }
-.ca-page[hidden] { display: none; }
-.ca-page-frame { flex: 1; width: 100%; min-width: 0; border: 0; background: var(--ca-main-bg); }
+.ca-page, .ca-board-page { position: absolute; inset: 0; z-index: 2; display: flex; background: var(--ca-main-bg); }
+.ca-page[hidden], .ca-board-page[hidden] { display: none; }
+.ca-page-frame, .ca-board-frame { flex: 1; width: 100%; min-width: 0; border: 0; background: var(--ca-main-bg); }
 .ca-root.is-page :is(.ca-head-members, .ca-head-bell, .ca-head-pins, .ca-head-invite, .ca-head-topic) { display: none; }
 
 /* Guest embassy views keep external data out of local conversation controls. */
@@ -1607,7 +1607,7 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-root > .ca-office-pane .ca-office-pane-link:hover, .ca-root > .ca-office-pane .ca-office-pane-link:focus-visible { background: var(--ca-hover); }
 .ca-tool-page-head { flex: 0 0 auto; display: flex; padding: 8px 12px; border-bottom: 1px solid var(--ca-line); }
 .ca-page:has(> .ca-tool-page-head) { display: flex; flex-direction: column; }
-.ca-page > .ca-tool-page-head + .ca-page-frame { flex: 1; min-height: 0; }
+.ca-page > .ca-tool-page-head + .ca-page-frame, .ca-board-frame { flex: 1; min-height: 0; }
 @keyframes ca-office-slide-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 767px) { .ca-root .ca-rail { bottom: 56px; } .ca-root:not([data-drawer='channels']) > .ca-office-pane { display: none; } }
 @media (prefers-reduced-motion: reduce) { .ca-root > .ca-office-pane { animation: none; } }

@@ -48,7 +48,7 @@ describe('GET /board (page)', () => {
 describe('shipped Board page', () => {
   it('refreshes the visible Board every ten seconds', () => {
     const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
-    expect(html).toContain('setInterval(() => { if (!document.hidden) load(); }, 10e3)');
+    expect(html).toContain('setInterval(() => { if (boardActive && !document.hidden) load(); }, 10e3)');
     expect(html).toContain("addEventListener('focus'");
   });
   it('keeps its script parse check after plans move into Company', () => {
@@ -307,4 +307,35 @@ describe('shipped Company plans page', () => {
     expect(acct).toContain("'The name cannot be empty'");
     expect(acct).toContain("credentials: 'same-origin'");
   });
+});
+
+it('pauses managed Board timers, rejects stale responses/actions and resumes with a fresh guarded read', async () => {
+  const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
+  const lifecycle = html.slice(html.indexOf('const managedBoard ='), html.indexOf('const undecidedPolls ='));
+  const post = html.slice(html.indexOf('async function post(url, body)'), html.indexOf('function cards()'));
+  const dom = new JSDOM('<button id="refresh"></button><div id="banner"></div><section id="sec-decisions"></section>', { pretendToBeVisual: true });
+  const pending: ((value: any) => void)[] = [], timers = new Map<number, number>(), listeners = new Map<string, (event: any) => void>(), messages: any[] = [];
+  let nextTimer = 0, reads = 0; const parent = { postMessage: (value: any) => messages.push(value) };
+  const result = new vm.Script(`let B=null,TZ='UTC',preset='now',workChoice='all',view=null,timelineAnimation=42;${lifecycle};${post};({boardVisibility,post,state:()=>({B,readyForActions,boardActive,timelineAnimation})})`).runInNewContext({
+    window: { frameElement: { dataset: { boardManaged: 'true', boardActive: 'false' } } }, document: dom.window.document, parent,
+    location: { origin: 'https://fixture.test' }, AbortController,
+    setInterval: (_fn: () => void, ms: number) => { timers.set(++nextTimer, ms); return nextTimer; }, clearInterval: (id: number) => timers.delete(id), cancelAnimationFrame: () => {},
+    addEventListener: (type: string, fn: (event: any) => void) => listeners.set(type, fn), fetch: () => { reads++; return new Promise(resolve => pending.push(resolve)); },
+    latestPlanTag: () => null, presetView: () => null, render: () => {}, kpis: () => {}, tick: () => {},
+  });
+  const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+  const response = (rev: number) => ({ ok: true, status: 200, json: async () => ({ data: { rev, issues: [] } }) });
+  try {
+    expect(reads).toBe(1); expect(timers.size).toBe(0); pending.shift()!(response(1)); await flush(); expect(result.state().readyForActions).toBe(false);
+    listeners.get('message')!({ source: parent, origin: 'https://foreign.test', data: { type: 'board-visibility', active: true } }); expect(reads).toBe(1);
+    listeners.get('message')!({ source: {}, origin: 'https://fixture.test', data: { type: 'board-visibility', active: true } }); expect(reads).toBe(1);
+    listeners.get('message')!({ source: parent, origin: 'https://fixture.test', data: { type: 'board-visibility', active: true } });
+    expect([...timers.values()].sort((a,b)=>a-b)).toEqual([10000,30000]); expect(reads).toBe(2); result.boardVisibility(true); expect(reads).toBe(2); expect(timers.size).toBe(2);
+    result.boardVisibility(false); expect(timers.size).toBe(0); expect(result.state().timelineAnimation).toBe(0);
+    pending.shift()!(response(2)); await flush(); expect(result.state().B.rev).toBe(1); expect(result.state().readyForActions).toBe(false);
+    await expect(result.post('/api/board/decisions/fixture/clear', {})).rejects.toThrow('visible board'); expect(reads).toBe(2);
+    result.boardVisibility(true); expect(reads).toBe(3); pending.shift()!(response(3)); await flush(); expect(result.state().B.rev).toBe(3); expect(result.state().readyForActions).toBe(true);
+    result.boardVisibility(false); result.boardVisibility(true); pending.shift()!({ ok: false, status: 403 }); await flush();
+    expect(result.state().B).toBeNull(); expect(result.state().readyForActions).toBe(false); expect(timers.size).toBe(0); expect(messages).toEqual([{type:'board-auth-lost'}]);
+  } finally { dom.window.close(); }
 });

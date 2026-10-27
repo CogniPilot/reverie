@@ -1333,9 +1333,10 @@ class ReverieChatApp {
   /** The instance's configured owner name (company settings), the default for how you are called. */
   async loadOwner() {
     const res = await this.app._chatApi('/api/company');
-    if (!res.ok) return;
+    if (!res.ok) { this.discardBoardFrame(); return; }
     this.company = res.data;
     await this.loadPhoneStatus();
+    if (this.canManageOffice()) this.scheduleBoardWarm(); else this.discardBoardFrame();
     this.ownerName = String(res.data?.settings?.ownerName || '').trim();
     // An agent's own profile icon (the company record: an employee, else a temporary agent) is the one icon it wears everywhere.
     const before = this.profileSig;
@@ -1360,15 +1361,17 @@ class ReverieChatApp {
 
   async startHumanPresence() {
     const me = await this.app._chatApi('/api/office/me').catch(() => null);
-    if (!me?.ok || !me.data?.person) return;
+    if (!me?.ok || !me.data?.person) { this.discardBoardFrame(); return; }
     this.humanSelf = me.data.person;
+    this.checkBoardIdentity(this.humanSelf);
     const pulse = async () => {
       if (this.doc.hidden || this._humanPending) return;
       this._humanPending = true;
       try {
         const fresh = await this.app._chatApi('/api/office/me');
-        if (!fresh.ok || !fresh.data?.person) return;
+        if (!fresh.ok || !fresh.data?.person) { this.discardBoardFrame(); return; }
         this.humanSelf = fresh.data.person;
+        this.checkBoardIdentity(this.humanSelf);
         await this.app._chatApi('/api/office/presence', { method: 'POST', body: {} });
         const id = this.roomId;
         if (id && !caIsDm(this.room)) {
@@ -1463,6 +1466,8 @@ class ReverieChatApp {
     if (!initial) caWrite('session', 'reverie:view', this.view === 'debug' ? 'debug' : null);
     if (!initial && this.view === 'chat') caWrite('session', 'reverie:debug-session', null);
     this.els.root.hidden = this.view === 'debug';
+    if (this.view === 'debug') this.suspendBoardFrame();
+    else if (this._boardCache && this.embed === 'board') void this.openWarmBoard({ push: false });
     if (this.view === 'chat' && this.built) this.touchHint();
     if (this.view === 'debug') {
       this.ensureBackButton();
@@ -1637,6 +1642,14 @@ class ReverieChatApp {
       }
     });
     this.doc.defaultView?.addEventListener('resize', () => this.renderOfficePane());
+    this.doc.defaultView?.addEventListener('message', event => {
+      const cache = this._boardCache;
+      if (cache && event.origin === this.doc.defaultView.location.origin && event.source === cache.frame.contentWindow && event.data?.type === 'board-auth-lost') this.discardBoardFrame();
+    });
+    this.doc.addEventListener('visibilitychange', () => {
+      if (this.doc.hidden) this.suspendBoardFrame();
+      else if (this._boardCache && this.embed === 'board' && this.view === 'chat') void this.openWarmBoard({ push: false });
+    });
     this.doc.defaultView?.addEventListener('pageshow', event => {
       if (event.persisted && this.active) { this.renderAll(); this.refreshAfterReturn(); }
     });
@@ -2448,6 +2461,7 @@ class ReverieChatApp {
 
   /** Company is a first-class chat surface; management requires a verified owner. */
   async openCompany(section = 'plans', { push = true } = {}) {
+    this.suspendBoardFrame();
     this.toggleDrawer(null);
     if (this.companyPage?.isConnected) {
       this._companySection?.(section, push);
@@ -3216,6 +3230,83 @@ class ReverieChatApp {
     return company.ok && auth.ok && this.canManageOffice(company.data, auth.data);
   }
 
+  boardIdentity(person) {
+    return person?.role === 'owner' && typeof person.id === 'string' ? person.id + ':' + Boolean(person.primary) : null;
+  }
+
+  async readBoardOwnerKey() {
+    if (this.app._chatSelf) return null;
+    try {
+      const [company, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
+      const me = await this.app._chatApi('/api/office/me');
+      const owner = company.ok && auth.ok && me.ok && this.canManageOffice(company.data, auth.data) ? this.boardIdentity(me.data?.person) : null;
+      return owner && (!this._boardKnownIdentity || owner === this._boardKnownIdentity) ? owner : null;
+    } catch { return null; }
+  }
+
+  checkBoardIdentity(person) {
+    const owner = this.boardIdentity(person);
+    if (owner !== this._boardKnownIdentity || (this._boardCache && owner !== this._boardCache.owner)) {
+      this._boardKnownIdentity = owner; this.discardBoardFrame();
+      if (owner && this.canManageOffice()) this.scheduleBoardWarm();
+    }
+  }
+
+  discardBoardFrame() {
+    this._boardEpoch = (this._boardEpoch || 0) + 1;
+    this._boardWarmAttempted = false;
+    const cache = this._boardCache; this._boardCache = null;
+    if (cache) { cache.frame.src = 'about:blank'; cache.panel.remove(); if (this.embed === 'board') this.closePage(); }
+  }
+
+  notifyBoard(active) {
+    const cache = this._boardCache;
+    if (!cache) return;
+    active = active && this.view === 'chat' && !this.doc.hidden && !cache.panel.hidden;
+    cache.frame.dataset.boardActive = String(active);
+    cache.frame.contentWindow?.postMessage({ type: 'board-visibility', active }, this.doc.defaultView.location.origin);
+  }
+
+  suspendBoardFrame() {
+    this._boardOpen = (this._boardOpen || 0) + 1;
+    if (this._boardCache) { this._boardCache.panel.hidden = true; this.notifyBoard(false); }
+  }
+
+  scheduleBoardWarm() {
+    if (this._boardCache || this._boardWarmAttempted || !this.canManageOffice() || this.doc.hidden) return;
+    this._boardWarmAttempted = true;
+    const epoch = this._boardEpoch || 0;
+    const warm = async () => {
+      if (this.doc.hidden || this.embed === 'board') return;
+      const owner = await this.readBoardOwnerKey();
+      if (!owner || epoch !== (this._boardEpoch || 0) || this._boardCache || this.embed === 'board') return;
+      const panel = this.el('section', 'ca-board-page'); panel.hidden = true;
+      const frame = this.el('iframe', 'ca-board-frame'); frame.title = 'Board';
+      frame.dataset.boardManaged = 'true'; frame.dataset.boardActive = 'false'; frame.loading = 'eager';
+      this._boardCache = { owner, panel, frame };
+      frame.onload = () => { if (this._boardCache?.frame === frame && this.embed === 'board' && this.view === 'chat' && !panel.hidden) this.notifyBoard(true); };
+      panel.append(frame); this.els.body.append(panel); frame.src = CA_PAGES.board.path;
+    };
+    if (this.doc.defaultView.requestIdleCallback) this.doc.defaultView.requestIdleCallback(() => { void warm(); }, { timeout: 1500 });
+    else this.doc.defaultView.setTimeout(() => { void warm(); }, 200);
+  }
+
+  async openWarmBoard({ push = true } = {}) {
+    const cache = this._boardCache, attempt = this._boardOpen = (this._boardOpen || 0) + 1;
+    if (!cache) return;
+    const owner = await this.readBoardOwnerKey();
+    if (attempt !== this._boardOpen || cache !== this._boardCache || this.view !== 'chat' || this.doc.hidden) return;
+    if (!owner || owner !== cache.owner) { this.discardBoardFrame(); this.openPage('board', { push }); return; }
+    this.disposeCompanyPage(); this.embassy?.close(); if (this.orgOpen) this.closeOrg(); this.toggleDrawer(null);
+    if (this.els.page) this.els.page.hidden = true;
+    this.embed = 'board'; this._embedRoom = this.roomId; cache.panel.hidden = false;
+    this.els.root.classList.add('is-page'); this.els.chat.inert = true; this.els.members.inert = true;
+    this.notifyBoard(true);
+    const win = this.doc.defaultView;
+    if (push && caPageFromHash(win.location.hash) !== 'board') win.history.pushState({ reveriePage: 'board' }, '', '#board');
+    this.renderSidebar(); this.renderHeader();
+  }
+
   officeToolEntries() {
     return [
       { label: 'Org chart', run: () => this.openOrg() },
@@ -3366,6 +3457,8 @@ class ReverieChatApp {
   openPage(kind, { push = true } = {}) {
     const page = CA_PAGES[kind];
     if (!page) return;
+    if (kind === 'board' && this._boardCache) { void this.openWarmBoard({ push }); return; }
+    this.suspendBoardFrame();
     if (kind === 'company' || kind === 'company-plans' || kind === 'company-people') {
       void this.openCompany(kind === 'company-people' ? 'people' : 'plans', { push });
       return;
@@ -3433,6 +3526,7 @@ class ReverieChatApp {
   /** Back to the conversation. `history: 'replace'` also takes #board out of the address bar. */
   closePage({ history = 'replace' } = {}) {
     if (!this.embed) return;
+    const wasBoard = this.embed === 'board'; this.suspendBoardFrame();
     this.disposeCompanyPage();
     this.embed = null;
     this._embedRoom = null;
@@ -3455,6 +3549,7 @@ class ReverieChatApp {
     }
     this.renderSidebar();
     this.renderHeader();
+    if (wasBoard && !this._boardCache) { this._boardWarmAttempted = false; this.scheduleBoardWarm(); }
   }
 
   orgTreeEl(tree) {
@@ -5345,6 +5440,7 @@ class ReverieChatApp {
   async loadPhoneStatus() {
     const res = await this.app._chatApi('/api/chatrooms/phone-status');
     if (!this._phonePending?.size) this.phoneStatus = res.ok ? res.data : undefined;
+    if (this._boardCache && (!res.ok || !this.canManageOffice(this.company, res.data))) this.discardBoardFrame();
     this.renderUser();
     if (this.view === 'chat') this.renderMembers();
   }
@@ -7181,15 +7277,27 @@ class ReverieChatApp {
     remove.type = 'button';
     const note = this.el('span', 'ca-hint');
     note.setAttribute('role', 'status');
+    const imageNote = this.el('span', 'ca-hint');
+    imageNote.setAttribute('role', 'status');
+    imageNote.hidden = true;
     const paint = () => {
+      imageNote.textContent = '';
+      imageNote.hidden = true;
       preview.replaceChildren();
+      const showFallback = () => preview.replaceChildren(this.el('span', fallback ? 'chatroom-avatar-glyph' : 'ca-hint', fallback ? fallback() : 'none'));
       const src = this.iconImage(image);
       if (src) {
         const img = this.el('img', 'chatroom-avatar-img');
         img.alt = '';
+        img.addEventListener('error', () => {
+          if (!preview.contains(img)) return;
+          showFallback();
+          imageNote.textContent = 'Picture unavailable. Your picture selection is unchanged.';
+          imageNote.hidden = false;
+        });
         img.src = src;
         preview.append(img);
-      } else preview.append(this.el('span', fallback ? 'chatroom-avatar-glyph' : 'ca-hint', fallback ? fallback() : 'none'));
+      } else showFallback();
       remove.hidden = !alwaysRemove && !src;
     };
     choose.addEventListener('click', () => input.click());
@@ -7219,7 +7327,7 @@ class ReverieChatApp {
     });
     paint();
     row.append(preview, choose, remove, input);
-    wrap.append(row, note);
+    wrap.append(row, imageNote, note);
     return { wrap, value: () => image, pending: () => loading, refresh: paint, cancelPending: () => { revision++; loading = false; }, set: (v) => { revision++; loading = false; image = v || ''; paint(); } };
   }
 

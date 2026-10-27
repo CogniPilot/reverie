@@ -142,3 +142,82 @@ it.each(['office', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews
   expect(h.document.querySelector('.ca-office-gear')!.getAttribute('aria-current')).toBe('page');
   expect(h.document.querySelector('.ca-page')!.hidden).toBe(false);
 });
+
+async function warmBoardFixture() {
+  const h = await fixture({ owner: true });
+  let owner = true, identity = 'owner'; const idle: (() => void)[] = [], writes: string[] = [];
+  const previous = h.app._chatApi.bind(h.app);
+  h.app._chatApi = async (path: string, options: any = {}) => {
+    if (options.method && options.method !== 'GET') writes.push(path);
+    if (path === '/api/company') return { ok: true, data: { canManage: owner, employees: [], settings: {} } };
+    if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: owner ? 'owner' : 'agent', canSetOwn: owner } };
+    if (path === '/api/office/me') return { ok: true, data: { person: { id: identity, role: owner ? 'owner' : 'limited', primary: identity === 'owner' } } };
+    return previous(path, options);
+  };
+  (h.window as any).requestIdleCallback = (callback: () => void) => idle.push(callback);
+  h.shell._boardWarmAttempted = false;
+  const warm = async () => { h.shell.scheduleBoardWarm(); idle.shift()?.(); await h.flush(); await h.flush(); };
+  return { h, idle, writes, warm, revoke: () => { owner = false; }, changeOwner: () => { identity = 'other-owner'; } };
+}
+it('warms only one owner-bound Board without navigating or changing an existing draft', async () => {
+  const { h, warm, writes } = await warmBoardFixture(); const prior = h.shell.roomId;
+  const input = h.shell.els.composerInput(); input.value = 'Unsent draft';
+  await warm(); const cache = h.shell._boardCache; expect(cache.owner).toBe('owner:true'); expect(cache.panel.hidden).toBe(true);
+  expect(cache.frame.getAttribute('src')).toBe('/board'); expect(cache.frame.dataset.boardActive).toBe('false');
+  await warm(); expect(h.document.querySelectorAll('.ca-board-frame')).toHaveLength(1); expect(h.shell.embed).toBeNull();
+  expect(h.shell.roomId).toBe(prior); expect(input.value).toBe('Unsent draft'); expect(writes).toEqual([]);
+});
+it('retains the same Board iframe across close and other pages while suspending its visibility', async () => {
+  const { h, warm, writes } = await warmBoardFixture(); await warm(); const frame = h.shell._boardCache.frame;
+  await h.shell.openWarmBoard(); expect(h.shell.embed).toBe('board'); expect(frame.dataset.boardActive).toBe('true');
+  h.shell.closePage(); expect(frame.getAttribute('src')).toBe('/board'); expect(frame.dataset.boardActive).toBe('false');
+  h.shell.openPage('workspace'); expect(h.shell._boardCache.frame).toBe(frame); expect(h.shell._boardCache.panel.hidden).toBe(true);
+  await h.shell.openWarmBoard(); expect(h.shell._boardCache.frame).toBe(frame); expect(h.shell.embed).toBe('board'); expect(writes).toEqual([]);
+});
+it('discards a retained document on current owner revocation or a different owner identity', async () => {
+  const { h, warm, revoke, writes } = await warmBoardFixture(); await warm(); const old = h.shell._boardCache.frame;
+  revoke(); await h.shell.openWarmBoard(); expect(h.shell._boardCache).toBeNull(); expect(old.isConnected).toBe(false); expect(writes).toEqual([]);
+  const next = await warmBoardFixture(); await next.warm(); const prior = next.h.shell._boardCache.frame; next.changeOwner();
+  await next.h.shell.openWarmBoard(); expect(prior.isConnected).toBe(false); expect(next.h.shell._boardCache).toBeNull();
+});
+it('does not let a stale owner check or idle callback restore a document after revocation/navigation', async () => {
+  const { h, warm } = await warmBoardFixture(); await warm();
+  let finish!: (value: string) => void; h.shell.readBoardOwnerKey = () => new Promise(resolve => { finish = resolve; });
+  const opening = h.shell.openWarmBoard(); await h.shell.openCompany('people'); finish('owner:true'); await opening;
+  expect(h.shell.embed).toBe('company'); expect(h.shell._boardCache.panel.hidden).toBe(true);
+  const pending = await warmBoardFixture(); let finishWarm!: (value: string) => void;
+  pending.h.shell.readBoardOwnerKey = () => new Promise(resolve => { finishWarm = resolve; });
+  pending.h.shell.scheduleBoardWarm(); pending.idle.shift()?.();
+  // A current identity notification invalidates even an older successful in-flight warm check.
+  pending.h.shell.checkBoardIdentity({ id: 'owner', role: 'limited', primary: true });
+  finishWarm('owner:true'); await pending.h.flush(); await pending.h.flush();
+  expect(pending.h.shell._boardCache).toBeNull();
+});
+it('rejects wrong-window/origin Board authority messages and accepts only its exact retained frame', async () => {
+  const { h, warm } = await warmBoardFixture(); await warm(); const frame = h.shell._boardCache.frame;
+  const send = (origin: string, source: Window) => h.window.dispatchEvent(new h.window.MessageEvent('message', { origin, source, data: { type: 'board-auth-lost' } }));
+  send('https://foreign.test', frame.contentWindow); send(h.window.location.origin, h.window); expect(h.shell._boardCache).not.toBeNull();
+  send(h.window.location.origin, frame.contentWindow); expect(h.shell._boardCache).toBeNull(); expect(frame.isConnected).toBe(false);
+});
+
+it('drops cached private content when a current phone-authority read reports logout', async () => {
+  const {h,warm}=await warmBoardFixture();await warm();const frame=h.shell._boardCache.frame;const previous=h.app._chatApi.bind(h.app);
+  h.app._chatApi=async(path:string,options:any)=>path==='/api/chatrooms/phone-status'?{ok:false,status:401}:previous(path,options);
+  await h.shell.loadPhoneStatus();expect(h.shell._boardCache).toBeNull();expect(frame.isConnected).toBe(false);
+});
+it('leaves an unsaved detailed profile open while an authorized idle Board is prepared', async () => {
+  const {h,warm,writes}=await warmBoardFixture();
+  h.shell.openEmployeeProfile({id:'river',sessionId:'runtime',sessionGeneration:1,name:'River',position:'Engineer',expertise:[],responsibilities:[],permissions:{}},()=>{});
+  const dialog=h.document.querySelector('.ca-expert-profile')!,field=dialog.querySelector<HTMLInputElement>('[name=position]')!;field.value='Unsaved role';
+  await warm();expect(dialog.isConnected).toBe(true);expect(field.value).toBe('Unsaved role');expect(h.shell._boardCache.panel.hidden).toBe(true);expect(writes).toEqual([]);
+});
+
+it.each(['debug','transient-debug','hidden','hidden-before-event'])('cannot activate a delayed cached Board open after %s', async mode => {
+  const {h,warm}=await warmBoardFixture();await warm();const cache=h.shell._boardCache;
+  let finish!: (value:string)=>void;h.shell.readBoardOwnerKey=()=>new Promise(resolve=>{finish=resolve;});const opening=h.shell.openWarmBoard();
+  if(mode==='debug'||mode==='transient-debug'){h.shell.setView('debug');if(mode==='transient-debug')h.shell.setView('chat');}
+  else {Object.defineProperty(h.document,'hidden',{configurable:true,value:true});if(mode==='hidden')h.document.dispatchEvent(new h.window.Event('visibilitychange'));}
+  finish('owner:true');await opening;
+  expect(cache.panel.hidden).toBe(true);expect(cache.frame.dataset.boardActive).toBe('false');
+  if(mode!=='transient-debug') {h.shell.notifyBoard(true);expect(cache.frame.dataset.boardActive).toBe('false');}
+});
