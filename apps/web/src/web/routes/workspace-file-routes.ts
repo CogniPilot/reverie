@@ -12,6 +12,17 @@ export function registerWorkspaceFileRoutes(
   verifiedOwner: OwnerVerifier,
   files = new WorkspaceFiles(sharedWorkspaceRoot)
 ): void {
+  // Public package code keeps the existing global/static authentication boundary.
+  // A worker response policy applies inside the worker without changing the console.
+  app.get('/vendor/pdfjs-6.4.299/pdf.worker.mjs', async (_request, reply) =>
+    reply
+      .type('application/javascript; charset=utf-8')
+      .header('Content-Security-Policy', "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'")
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cross-Origin-Resource-Policy', 'same-origin')
+      .header('Cache-Control', 'public, max-age=31536000, immutable')
+      .send(await readFile(new URL('../public/vendor/pdfjs-6.4.299/pdf.worker.mjs', import.meta.url)))
+  );
   void app.register(async (scoped) => {
     scoped.addHook('onRequest', async (request, reply) => {
       reply
@@ -77,9 +88,17 @@ export function registerWorkspaceFileRoutes(
       success: true,
       data: await files.list(query(request).path ?? ''),
     }));
+    scoped.get('/api/workspace/resolve', async (request) => ({
+      success: true,
+      data: await files.resolve(query(request).path),
+    }));
     scoped.get('/api/workspace/file', async (request, reply) => {
-      const result = await files.file(query(request).path, query(request).preview === '1');
-      reply.header('Content-Length', result.size).type(result.mime);
+      const result = await files.file(query(request).path, query(request).preview === '1', query(request).binding);
+      // The final custody/identity check precedes stream EOF. An advertised
+      // Content-Length lets HTTP clients finish before that check executes.
+      // Keep stream completion authoritative (chunked on HTTP/1.1).
+      reply.type(result.mime);
+      reply.header('X-Reverie-File-Binding', result.binding);
       reply.header('Content-Security-Policy', "default-src 'none'; sandbox");
       reply.header(
         'Content-Disposition',

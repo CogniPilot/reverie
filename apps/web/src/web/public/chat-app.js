@@ -4571,31 +4571,50 @@ class ReverieChatApp {
     }
   }
 
-  /** Files on the company drive stay ordinary paths for agents and become downloads for humans. */
+  /** Files on the company drive stay ordinary paths for agents and open authorized previews for humans. */
   decorateWorkspaceFiles(root) {
+    const makePreviewLink = (path) => {
+      const link = this.el('a', 'chatroom-link ca-workspace-download', path);
+      link.href = '/api/filesystem/download?path=' + encodeURIComponent(path);
+      link.title = 'Preview ' + path.split('/').pop();
+      link.onclick = (event) => {
+        if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        void this.app.openWorkspaceFilePreview(path, link);
+      };
+      return link;
+    };
     const walker = this.doc.createTreeWalker(root, 4);
     const nodes = [];
-    while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest('a,pre,button,script,style')) nodes.push(walker.currentNode);
+    while (walker.nextNode())
+      if (!walker.currentNode.parentElement?.closest('a,pre,button,script,style')) nodes.push(walker.currentNode);
     for (const node of nodes) {
       const text = node.nodeValue;
-      if (node.parentElement?.tagName === 'CODE' && text.startsWith('/reverie_workspace/') && !/[\r\n]/.test(text) && /\.[a-zA-Z0-9]{1,12}$/.test(text)) {
-        const link = this.el('a', 'chatroom-link ca-workspace-download', text);
-        link.href = '/api/filesystem/download?path=' + encodeURIComponent(text);
-        link.download = text.split('/').pop(); link.title = 'Download ' + link.download;
-        node.replaceWith(link); continue;
+      if (
+        node.parentElement?.tagName === 'CODE' &&
+        text.startsWith('/reverie_workspace/') &&
+        !/[\r\n]/.test(text) &&
+        /\.[a-zA-Z0-9]{1,12}$/.test(text)
+      ) {
+        const link = makePreviewLink(text);
+        node.replaceWith(link);
+        continue;
       }
       const pattern = /\/reverie_workspace\/[^\s<>"'`]+/g;
-      const parts = []; let cursor = 0;
+      const parts = [];
+      let cursor = 0;
       for (const match of text.matchAll(pattern)) {
         const path = match[0].replace(/[.,;:)\]]+$/, '');
         if (!path || path.endsWith('/') || !/\.[a-zA-Z0-9]{1,12}$/.test(path)) continue;
         parts.push(this.doc.createTextNode(text.slice(cursor, match.index)));
-        const link = this.el('a', 'chatroom-link ca-workspace-download', path);
-        link.href = '/api/filesystem/download?path=' + encodeURIComponent(path);
-        link.download = path.split('/').pop(); link.title = 'Download ' + link.download;
-        parts.push(link); cursor = match.index + path.length;
+        const link = makePreviewLink(path);
+        parts.push(link);
+        cursor = match.index + path.length;
       }
-      if (parts.length) { parts.push(this.doc.createTextNode(text.slice(cursor))); node.replaceWith(...parts); }
+      if (parts.length) {
+        parts.push(this.doc.createTextNode(text.slice(cursor)));
+        node.replaceWith(...parts);
+      }
     }
   }
 

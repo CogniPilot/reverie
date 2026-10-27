@@ -508,12 +508,19 @@ Object.assign(ReverieApp.prototype, {
         img.src = url;
         img.alt = a.name;
         img.loading = 'lazy';
-        img.onclick = () => this._openChatLightbox(url, a.name);
+        img.tabIndex = 0; img.setAttribute('role', 'button');
+        img.onclick = () => this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, img);
+        img.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); img.click(); } };
         wrap.append(img);
       } else {
         const card = this._chatEl('a', 'chatroom-file');
         card.href = url;
-        card.download = a.name;
+        card.setAttribute('aria-label', `Preview ${a.name}`);
+        card.onclick = event => {
+          if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          void this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, card);
+        };
         card.append(
           this._chatEl('span', 'chatroom-file-icon', '\u{1F4C4}'),
           this._chatEl('span', 'chatroom-file-name', a.name),

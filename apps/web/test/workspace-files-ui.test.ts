@@ -22,11 +22,13 @@ const listing = (entries = [item('report.txt')], enabled = true, limited = false
       data: { entries, limited, upload: { enabled, reason: enabled ? '' : 'Uploads go to the root only.' } },
     })
   );
-function setup(fetcher: (input: string, options?: RequestInit) => Promise<Response>) {
+function setup(fetcher: (input: string, options?: RequestInit) => Promise<Response>, configure?: (win: any) => void) {
   dom = new JSDOM(html, { url: 'http://localhost/prefix/workspace', runScripts: 'outside-only' });
   const win = dom.window;
   win.fetch = fetcher as never;
+  win.TextDecoder = TextDecoder as never;
   win.matchMedia = (() => ({ matches: false })) as never;
+  configure?.(win);
   win.eval(script);
   return { win, doc: win.document, button: (id: string) => win.document.getElementById(id) as HTMLButtonElement };
 }
@@ -164,4 +166,27 @@ it('sorts by date and size in either direction and offers a direct download for 
   expect(download.href).toBe('http://localhost/prefix/api/workspace/file?path=older.txt');
   expect(download.download).toBe('older.txt');
   expect(doc.getElementById('preview')!.hidden).toBe(true);
+});
+
+it('renders standalone Markdown and static HTML through the same sanitizer without remote/navigation authority', async () => {
+  for(const name of ['notes.md','static.html']) {
+    const content=name.endsWith('.md')?'# Heading\n\n![remote](https://outside.invalid/x)\n\n[link](https://outside.invalid)':'<h1>Heading</h1><script>sentinel()</script><form><input></form><img src="https://outside.invalid/x">';
+    const {doc}=setup(async input=>input.includes('/file?')?new Response(content,{headers:{'content-type':'text/plain'}}):listing([item(name)]),win=>{
+      win.eval(readFileSync(resolve(publicDir,'vendor/marked.min.js'),'utf8'));
+      win.eval(readFileSync(resolve(publicDir,'vendor/dompurify.min.js'),'utf8'));
+      win.eval(readFileSync(resolve(publicDir,'sanitize-html.js'),'utf8'));
+    });
+    await vi.waitFor(()=>expect(doc.querySelector('#files button')).not.toBeNull());(doc.querySelector('#files button') as HTMLButtonElement).click();
+    if(name.endsWith('.md')) {await vi.waitFor(()=>expect(doc.querySelector('#preview h1')?.textContent).toBe('Heading'));expect(doc.querySelector('#preview img,#preview article a')).toBeNull();}
+    else {await vi.waitFor(()=>expect(doc.querySelector('#preview iframe')).not.toBeNull());const frame=doc.querySelector('iframe')!;expect(frame.getAttribute('sandbox')).toBe('');expect(frame.srcdoc).not.toContain('<script');expect(frame.srcdoc).not.toContain('<form');}
+    dom?.window.close();
+  }
+});
+it('refuses standalone stale binding and over-budget streams while retaining Download', async () => {
+  for(const failure of ['binding','size']) {
+    const {doc}=setup(async input=>input.includes('/file?')?new Response(failure==='size'?'x'.repeat(256*1024+1):'stale',{headers:{'content-type':'text/plain','X-Reverie-File-Binding':failure==='binding'?'b'.repeat(64):'a'.repeat(64)}}):listing([{...item('notes.txt'),binding:'a'.repeat(64)}] as never));
+    await vi.waitFor(()=>expect(doc.querySelector('#files button')).not.toBeNull());(doc.querySelector('#files button') as HTMLButtonElement).click();
+    await vi.waitFor(()=>expect(doc.querySelector('#preview .preview-note')?.textContent).toContain(failure==='binding'?'changed':'too large'));
+    expect(doc.querySelector('#preview a')?.textContent).toContain('Download');dom?.window.close();
+  }
 });

@@ -618,3 +618,72 @@ footer a:hover {
     right: -20px;
   }
 }
+
+#preview iframe {
+  width: 100%;
+  min-height: 60vh;
+  border: 0;
+}
+
+.file-preview-pdf {
+  min-width: 0;
+  text-align: center;
+}
+.file-preview-pdf-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  background: var(--floating-bg);
+}
+.file-preview-pdf-controls button {
+  min-height: 44px;
+  padding: 8px 12px;
+  color: inherit;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+}
+.file-preview-pdf-canvas {
+  display: block;
+  margin: 8px auto;
+  max-width: 100%;
+  background: white;
+}
+.file-preview-pdf details {
+  text-align: left;
+  margin: 12px;
+  overflow-wrap: anywhere;
+}
+.file-preview-pdf summary {
+  cursor: pointer;
+  min-height: 44px;
+}
+.file-preview-pdf-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 14px/1.5 system-ui;
+}
+
+.workspace-markdown {
+  overflow-wrap: anywhere;
+  padding: 12px;
+  line-height: 1.6;
+}
+.workspace-markdown pre {
+  white-space: pre-wrap;
+}
+.workspace-markdown table {
+  border-collapse: collapse;
+  max-width: 100%;
+}
+.workspace-markdown th,
+.workspace-markdown td {
+  border: 1px solid var(--border);
+  padding: 6px;
+}

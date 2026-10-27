@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { readFile, realpath, link, opendir, type FileHandle } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PassThrough, type Readable } from 'node:stream';
 import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
@@ -17,6 +17,7 @@ export { WorkspaceError } from './workspace-operation.js';
 export const WORKSPACE_MAX_FILE = 32 * 1024 * 1024;
 export const WORKSPACE_MAX_TEXT = 256 * 1024;
 export const WORKSPACE_MAX_IMAGE = 5 * 1024 * 1024;
+export const WORKSPACE_MAX_PDF = 16 * 1024 * 1024;
 const MAX_ENTRIES = 1000;
 const TEXT_EXT = new Set([
   '.txt',
@@ -84,6 +85,7 @@ interface Located {
   path: string;
   mount: string;
   dataRoots: string[];
+  rootIdentity: string;
 }
 export class WorkspaceFiles {
   constructor(
@@ -122,7 +124,9 @@ export class WorkspaceFiles {
       return id;
     };
     try {
-      const device = (await op.io(() => handle.stat())).dev,
+      const rootStat = await op.io(() => handle.stat({ bigint: true })),
+        rootIdentity = `${rootStat.dev}:${rootStat.ino}:${rootStat.birthtimeNs}`,
+        device = Number(rootStat.dev),
         mount = await mountId(handle);
       for (let i = 0; i < parts.length; i++) {
         const actualParent = await op.io(() => realpath(fdPath(handle))),
@@ -148,11 +152,58 @@ export class WorkspaceFiles {
       }
       const actual = await op.io(() => realpath(fdPath(handle)));
       visible(root, actual, dataRoots);
-      return { configured: resolve(configured), handle, root, path: actual, mount, dataRoots };
+      return { configured: resolve(configured), handle, root, path: actual, mount, dataRoots, rootIdentity };
     } catch (error) {
       await op.close(handle);
       throw error;
     }
+  }
+  private async snapshot(op: WorkspaceOperation, located: Located) {
+    const stat = await op.io(() => located.handle.stat({ bigint: true }));
+    const binding = createHash('sha256')
+      .update(JSON.stringify([located.configured, located.root, located.rootIdentity, located.mount,
+        located.path, stat.dev.toString(), stat.ino.toString(), stat.size.toString(),
+        stat.mtimeNs.toString(), stat.ctimeNs.toString()]))
+      .digest('hex');
+    return { stat, binding };
+  }
+  private async current(op: WorkspaceOperation, path: unknown, binding: string) {
+    // Rewalk the configured root, not the old FD alone: a replacement root or
+    // directory entry must not supply another file under the old preview title.
+    const located = await this.location(op, path, false);
+    try {
+      if ((await this.snapshot(op, located)).binding !== binding)
+        fail(409, 'The workspace file changed. Refresh and try again.');
+    } finally {
+      await op.close(located.handle);
+    }
+  }
+  async resolve(path: unknown) {
+    return workspaceOperation(this.timeoutMs, async (op) => {
+      if (typeof path !== 'string' || path.length > 4096 || !isAbsolute(path) ||
+        /[\\\x00-\x1f\x7f]/.test(path) || resolve(path) !== path)
+        fail(400, 'Use an absolute shared workspace file path.');
+      const configured = this.root();
+      if (!configured) fail(503, 'The shared workspace is not configured.');
+      const selectedRoot = resolve(configured);
+      if (!contained(selectedRoot, path)) fail(403, 'This workspace path is unavailable.');
+      const relativePath = relative(selectedRoot, path).split(sep).join('/');
+      const parts = segments(relativePath);
+      const located = await this.location(op, relativePath, false);
+      try {
+        if (located.configured !== selectedRoot) fail(409, 'Workspace configuration changed. Refresh and try again.');
+        const { stat, binding } = await this.snapshot(op, located);
+        if (!stat.isFile()) fail(400, 'Select a file.');
+        if (stat.size > BigInt(WORKSPACE_MAX_FILE)) fail(413, 'Files are limited to 32 MiB.');
+        await this.current(op, relativePath, binding);
+        return { kind: 'workspace', path: relativePath, name: basename(relativePath), size: Number(stat.size),
+          absolutePath: resolve(selectedRoot, relativePath), binding,
+          crumbs: [{ name: selectedRoot, path: '' }, ...parts.slice(0, -1).map((name, i) =>
+            ({ name, path: parts.slice(0, i + 1).join('/') }))] };
+      } finally {
+        await op.close(located.handle);
+      }
+    });
   }
   async list(path: unknown) {
     return workspaceOperation(this.timeoutMs, async (op) => {
@@ -161,7 +212,8 @@ export class WorkspaceFiles {
         () => opendir(fdPath(located.handle)),
         (dir) => dir.close()
       );
-      const entries: Array<{ name: string; path: string; kind: string; size: number; modified: string }> = [];
+      const entries: Array<{ name: string; path: string; kind: string; size: number; modified: string;
+        binding?: string; absolutePath?: string }> = [];
       let scanned = 0,
         limited = false;
       while (true) {
@@ -183,6 +235,8 @@ export class WorkspaceFiles {
               kind: stat.isDirectory() ? 'directory' : 'file',
               size: stat.size,
               modified: stat.mtime.toISOString(),
+              ...(stat.isFile() ? { binding: (await this.snapshot(op, item)).binding,
+                absolutePath: resolve(item.configured, child) } : {}),
             });
           } finally {
             await op.close(item.handle);
@@ -214,28 +268,36 @@ export class WorkspaceFiles {
       return { path, entries, limited, maxFileBytes: WORKSPACE_MAX_FILE, upload };
     });
   }
-  async file(path: unknown, preview: boolean) {
-    return workspaceOperation<{ stream: PassThrough; size: number; mime: string; name: string }>(
+  async file(path: unknown, preview: boolean, expectedBinding?: unknown) {
+    if (expectedBinding !== undefined && (typeof expectedBinding !== 'string' || !/^[a-f0-9]{64}$/.test(expectedBinding)))
+      fail(400, 'Invalid workspace file binding.');
+    return workspaceOperation<{ stream: PassThrough; size: number; mime: string; name: string; binding: string }>(
       this.timeoutMs,
       async (op, ready) => {
         const located = await this.location(op, path, false),
-          stat = await op.io(() => located.handle.stat());
+          { stat, binding } = await this.snapshot(op, located),
+          size = Number(stat.size);
         if (!stat.isFile()) fail(400, 'Select a file.');
-        if (stat.size > WORKSPACE_MAX_FILE) fail(413, 'Files are limited to 32 MiB.');
+        if (stat.size > BigInt(WORKSPACE_MAX_FILE)) fail(413, 'Files are limited to 32 MiB.');
+        if (expectedBinding !== undefined && binding !== expectedBinding)
+          fail(409, 'The workspace file changed. Refresh and try again.');
         let mime = 'application/octet-stream';
         if (preview) {
           const head = Buffer.alloc(16);
           await op.io(() => located.handle.read(head, 0, 16, 0));
           const image = imageType(head);
           if (image) {
-            if (stat.size > WORKSPACE_MAX_IMAGE) fail(413, 'Image previews are limited to 5 MiB.');
+            if (size > WORKSPACE_MAX_IMAGE) fail(413, 'Image previews are limited to 5 MiB.');
             mime = image;
+          } else if (/^%PDF-(?:1\.[0-7]|2\.0)[\r\n ]/.test(head.toString('ascii'))) {
+            if (size > WORKSPACE_MAX_PDF) fail(413, 'PDF previews are limited to 16 MiB.');
+            mime = 'application/pdf';
           } else {
-            if (stat.size > WORKSPACE_MAX_TEXT)
+            if (size > WORKSPACE_MAX_TEXT)
               fail(413, 'Text previews are limited to 256 KiB. Download to view the full file.');
             if (!TEXT_EXT.has(extname(located.path).toLowerCase()) && extname(located.path) !== '')
               fail(415, 'Preview unavailable. Download this file to open it.');
-            const bytes = Buffer.alloc(stat.size);
+            const bytes = Buffer.alloc(size);
             await op.io(() => located.handle.read(bytes, 0, bytes.length, 0));
             try {
               if (bytes.includes(0)) throw new Error();
@@ -262,11 +324,12 @@ export class WorkspaceFiles {
           cancelStreamCleanup();
           op.completeStream(); // End is emitted only after all bytes are consumed; the file FD was already closed.
         });
-        ready({ stream, size: stat.size, mime, name: basename(located.path) });
+        await this.current(op, path, binding);
+        ready({ stream, size, mime, name: basename(located.path), binding });
         try {
           let position = 0;
-          while (position < stat.size) {
-            const bytes = Buffer.alloc(Math.min(65536, stat.size - position));
+          while (position < size) {
+            const bytes = Buffer.alloc(Math.min(65536, size - position));
             const { bytesRead } = await op.io(() => located.handle.read(bytes, 0, bytes.length, position));
             if (!bytesRead) fail(409, 'The file changed during download. Refresh and try again.');
             position += bytesRead;
@@ -274,6 +337,10 @@ export class WorkspaceFiles {
             if (!stream.write(bytes.subarray(0, bytesRead))) await once(stream, 'drain', { signal: op.signal });
             op.check();
           }
+          // Check the original FD and the current root/path before signaling EOF.
+          if ((await this.snapshot(op, located)).binding !== binding)
+            fail(409, 'The workspace file changed. Refresh and try again.');
+          await this.current(op, path, binding);
           await op.close(located.handle);
           op.check();
           stream.end();
