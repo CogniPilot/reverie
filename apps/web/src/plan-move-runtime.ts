@@ -4,12 +4,31 @@ import type { PlanService } from './plan-accounts.js';
 import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
 import type { TerminalMultiplexer } from './mux-interface.js';
-import { PlanMoveError, type PlanMoveExecutor } from './plan-move.js';
+import { PlanMoveError, type PlanMoveExecutor, type PlanMoveInput, type PlanMoveRecord } from './plan-move.js';
 import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
 import { submitRecoveryPrompt } from './company-recovery-prompt.js';
+
+/** Fixed server-private resource actor. Request references and launchKey are not
+ * authorization: each method must check the durable owner/capacity/profile claim.
+ * reserve must durably preselect the SID and install a launch fence BEFORE making
+ * metadata visible. It must not change host config, stop or launch a laptop.
+ * start must enforce that same fence through actual broker admission/creation;
+ * public session creation/interactive endpoints are not a resource fallback.
+ * An unavailable/uncertain provider must refuse and preserve its operation claim.
+ */
+export interface PlanMoveResourceRuntime {
+  reserve(
+    input: Readonly<PlanMoveInput>,
+    owner: string,
+    launch: Readonly<ReturnType<typeof planMoveLaunch>>
+  ): Promise<{ sessionId: string; launchKey: object }>;
+  prepare(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<void>;
+  start(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<void>;
+  verify(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<() => unknown>;
+}
 
 export interface PlanMoveRuntime {
   company: Pick<CompanyService, 'view' | 'rebind'>;
@@ -21,11 +40,40 @@ export interface PlanMoveRuntime {
   authorized(): boolean;
   actor?: string;
   request(method: 'GET' | 'POST', url: string, payload?: unknown): Promise<unknown>;
+  /** Installer-owned dependency, never populated from route JSON/parent headers. */
+  resourceReplacement?: PlanMoveResourceRuntime;
   capture?: typeof capturePlanProcesses;
   survivors?: typeof survivingPlanProcesses;
 }
 
 export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): PlanMoveExecutor {
+  // Capture the fixed implementation once; later object mutation cannot replace
+  // one method halfway through a resource operation.
+  const supplied = runtime.resourceReplacement;
+  const resources =
+    supplied &&
+    ['reserve', 'prepare', 'start', 'verify'].every(
+      (key) => typeof supplied[key as keyof PlanMoveResourceRuntime] === 'function'
+    )
+      ? Object.freeze({
+          reserve: supplied.reserve.bind(supplied),
+          prepare: supplied.prepare.bind(supplied),
+          start: supplied.start.bind(supplied),
+          verify: supplied.verify.bind(supplied),
+        })
+      : undefined;
+  const resourceCandidates = new Map<
+    string,
+    {
+      launchKey: object;
+      input: Readonly<PlanMoveInput>;
+      candidate: ReturnType<PlanMoveRuntime['sessions']['get']>;
+      prepared?: Readonly<PlanMoveRecord>;
+      prepareRequested?: boolean;
+      startRequested?: boolean;
+      started?: boolean;
+    }
+  >();
   const candidates = new Map<string, string>();
   const createdCandidates = new Set<string>();
   const releases: Array<() => void> = [];
@@ -62,7 +110,59 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       throw new PlanMoveError('The replacement would change the approved runtime settings');
   };
 
+  const resourceTarget = (record: Readonly<PlanMoveRecord>) => {
+    assertAuthorized();
+    const state = record.newSession ? resourceCandidates.get(record.newSession) : undefined;
+    const expected = state?.input,
+      actual = record.resourceIntent,
+      intent = expected?.resourceIntent;
+    if (
+      !resources ||
+      !state ||
+      !expected ||
+      !actual ||
+      !intent ||
+      record.owner !== owner ||
+      record.id !== expected.id ||
+      record.employeeId !== expected.employeeId ||
+      record.oldSession !== expected.sessionId ||
+      record.fromAccount !== expected.fromAccount ||
+      record.toAccount !== expected.toAccount ||
+      record.purpose !== 'runtime-refresh' ||
+      Object.keys(intent).some((key) => actual[key as keyof typeof actual] !== intent[key as keyof typeof intent]) ||
+      runtime.sessions.get(record.newSession!) !== state.candidate ||
+      binding(record.employeeId) !== record.newSession
+    )
+      throw new PlanMoveError('The private resource replacement binding is unavailable or changed');
+    session(record.newSession!);
+    return state;
+  };
+
   return {
+    ...(resources
+      ? {
+          prepareResources: async (record: Readonly<PlanMoveRecord>) => {
+            const state = resourceTarget(record);
+            if (state.prepareRequested)
+              throw new PlanMoveError('Resource preparation already attempted; inspect the operation');
+            state.prepareRequested = true; // Retain uncertain attempts; never retry a possibly committed reload.
+            await resources.prepare(state.launchKey, record);
+            resourceTarget(record); // Recheck owner/session after the host adapter ACK.
+            state.prepared = Object.freeze({ ...record, resourceIntent: Object.freeze({ ...record.resourceIntent! }) });
+          },
+          verifyResources: async (record: Readonly<PlanMoveRecord>) => {
+            const state = resourceTarget(record);
+            if (!state.prepared || !state.started) throw new PlanMoveError('Resource start was not acknowledged');
+            const fence = await resources.verify(state.launchKey, record);
+            resourceTarget(record);
+            if (typeof fence !== 'function') throw new PlanMoveError('Resource native verification has no final fence');
+            return () => {
+              resourceTarget(record);
+              return fence();
+            };
+          },
+        }
+      : {}),
     verifyRecovery: async (record) => {
       assertAuthorized();
       if (!record.newSession || record.sourceCleanupVerified !== true || record.sourceStopRequested !== true)
@@ -153,8 +253,20 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       }
       signal.throwIfAborted();
     },
-    create: async (input) => {
+    create: async (input, requestedOwner) => {
       assertAuthorized();
+      if (input.resourceIntent) {
+        if (!resources) throw new PlanMoveError('The private resource reservation/launch actor is unavailable', 503);
+        if (
+          !owner ||
+          requestedOwner !== owner ||
+          input.purpose !== 'runtime-refresh' ||
+          input.fromAccount !== input.toAccount ||
+          input.forceBusy
+        )
+          throw new PlanMoveError('Resource replacement requires its verified owner and same-account handoff', 403);
+        input = Object.freeze({ ...input, resourceIntent: Object.freeze({ ...input.resourceIntent }) });
+      }
       const account = await runtime.plans.account(input.toAccount);
       if (!account) throw new PlanMoveError('The destination plan no longer exists', 404);
       const source = session(input.sessionId);
@@ -162,11 +274,47 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const pauseSource = runtime.chat.delivery?.pauseForMigration(input.sessionId);
       if (pauseSource) releases.push(pauseSource);
       try {
-      const response = (await runtime.request('POST', '/api/sessions', payload)) as {
-        session?: { id?: unknown }; data?: { session?: { id?: unknown } };
-      };
-      const id = response?.data?.session?.id ?? response?.session?.id;
-      if (typeof id !== 'string') throw new PlanMoveError('The replacement response has no session identifier');
+      let id: string;
+      if (input.resourceIntent) {
+        assertAuthorized();
+        if (
+          binding(input.employeeId) !== input.sessionId ||
+          runtime.sessions.get(input.sessionId) !== source ||
+          source.isWorking
+        )
+          throw new PlanMoveError('The checkpointed resource source changed before reservation');
+        const reserved = await resources!.reserve(input, owner!, Object.freeze(payload));
+        assertAuthorized();
+        if (
+          !reserved ||
+          typeof reserved.sessionId !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(reserved.sessionId) ||
+          reserved.sessionId === input.sessionId ||
+          !reserved.launchKey ||
+          typeof reserved.launchKey !== 'object' ||
+          Array.isArray(reserved.launchKey)
+        )
+          throw new PlanMoveError('The private resource reservation has no exact replacement identity');
+        id = reserved.sessionId;
+        const candidate = session(id);
+        if (
+          candidate.pid ||
+          (candidate.muxName && !runtime.mux.isPaneDead(candidate.muxName)) ||
+          binding(input.employeeId) !== id ||
+          resourceCandidates.has(id)
+        )
+          throw new PlanMoveError('Resource reservation must expose only fenced owned replacement metadata');
+        resourceCandidates.set(id, { launchKey: reserved.launchKey, input, candidate });
+      } else {
+        const response = (await runtime.request('POST', '/api/sessions', payload)) as {
+          session?: { id?: unknown };
+          data?: { session?: { id?: unknown } };
+        };
+        const selected = response?.data?.session?.id ?? response?.session?.id;
+        if (typeof selected !== 'string')
+          throw new PlanMoveError('The replacement response has no session identifier');
+        id = selected;
+      }
       candidates.set(id, input.handoff);
       createdCandidates.add(id);
       if (input.purpose === 'runtime-refresh')
@@ -178,7 +326,21 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
     },
     start: async (id) => {
       assertAuthorized();
-      await runtime.request('POST', `/api/sessions/${encodeURIComponent(id)}/interactive`);
+      const resource = resourceCandidates.get(id);
+      if (resource) {
+        if (!resources || !resource.prepared) throw new PlanMoveError('The resource launch fence is not prepared');
+        resourceTarget(resource.prepared);
+        if (resource.startRequested) throw new PlanMoveError('Resource start already attempted; inspect the operation');
+        const old = runtime.sessions.get(resource.prepared.oldSession);
+        if (old?.pid && old.muxName && !runtime.mux.isPaneDead(old.muxName))
+          throw new PlanMoveError('The source still appears live; the resource actor must verify actual release');
+        resource.startRequested = true;
+        // This record is the captured binding, not proof of source cleanup. The
+        // private provider must read its durable operation and actual host state.
+        await resources.start(resource.launchKey, resource.prepared);
+        resourceTarget(resource.prepared);
+        resource.started = true;
+      } else await runtime.request('POST', `/api/sessions/${encodeURIComponent(id)}/interactive`);
     },
     ready: async (id) => {
       assertAuthorized();

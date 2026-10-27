@@ -251,6 +251,127 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     expect(watch.status().entries[0]!.response?.reason).toBe('waiting for dependency');
     expect(board.snapshot().issues.filter((i) => i.tags.includes('assignment-attention'))).toHaveLength(1);
   });
+  it.each([480, 500, 574])('regression: retains a %i-character Blocked explanation through its exact reply reference', async (length) => {
+    await watch.tick();
+    const qualifier = ' Do not infer completion or remove the required approval.';
+    const reason = 'Waiting for separately authorized evidence. '.repeat(20).slice(0, length - qualifier.length) + qualifier;
+    expect(reason).toHaveLength(length);
+    reply('Blocked: ' + reason);
+    const original = structuredClone(room.messages.at(-1)!);
+    await watch.tick();
+    const response = watch.status().entries[0]!.response!;
+    expect(response.status).toBe('blocked');
+    expect(response.sourceDigest).toMatch(/^[a-f0-9]{64}$/);
+    if (length > 500) expect(response.reason).toContain(original.id);
+    else expect(response.reason).toBe(reason);
+    expect(board.snapshot().issues[0]!.status).toBe('blocked');
+    const attention = board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))!;
+    expect(attention.reason).toContain('Assignee reported blocked.');
+    expect(attention.reason).not.toContain('No correlated assignee response');
+    expect(attention.reason!.length).toBeLessThanOrEqual(500);
+    expect(attention.reason).toContain(original.id); // Prefix must also respect Board's 500-character bound.
+    expect(room.messages.find((m) => m.id === original.id)).toEqual(original);
+    expect(room.messages.find((m) => m.id === original.id)!.text.endsWith(qualifier)).toBe(true);
+  });
+  it('regression: accepts a long multiline direct Blocked reply without copying or trimming its qualifiers', async () => {
+    await watch.tick();
+    const text = 'Blocked: ' + 'Awaiting current evidence.\n'.repeat(24) + 'No completion or additional permission is claimed.';
+    reply(text);
+    const original = structuredClone(room.messages.at(-1)!);
+    await watch.tick();
+    expect(watch.status().entries[0]!.response?.status).toBe('blocked');
+    expect(watch.status().entries[0]!.response?.reason).toContain(original.id);
+    expect(room.messages.find((m) => m.id === original.id)?.text).toBe(text);
+  });
+  it('regression: applies a long-reason ETA only through the existing granted plan-edit path', async () => {
+    await watch.tick();
+    reply('New ETA: 2026-10-26T16:00:00Z | ' + 'Waiting for dependency evidence. '.repeat(20));
+    const original = structuredClone(room.messages.at(-1)!);
+    await watch.tick();
+    expect(watch.status().entries[0]!.response?.status).toBe('new-eta');
+    expect(watch.status().entries[0]!.response?.planApplied).toBe(true);
+    expect(board.snapshot().issues[0]!.end).toBe(Date.parse('2026-10-26T16:00:00Z'));
+    expect(board.snapshot().issues[0]!.reason).toContain(original.id);
+    expect(room.messages.find((m) => m.id === original.id)).toEqual(original);
+  });
+  it('regression: a foreign long reply and a reply beyond the canonical chat bound do not gain status authority', async () => {
+    await watch.tick();
+    reply('Blocked: ' + 'x'.repeat(574), { from: { kind: 'agent', sessionId: 'other', employeeId: 'other', name: 'Other' } });
+    await watch.tick();
+    expect(watch.status().entries[0]!.response).toBeUndefined();
+    reply('Blocked: ' + 'x'.repeat(8000));
+    await watch.tick();
+    expect(watch.status().entries[0]!.response).toBeUndefined();
+    expect(board.snapshot().issues).toHaveLength(1);
+    expect(board.snapshot().issues[0]!.status).toBe('doing');
+  });
+  it('regression: a manager-completed same-checkin attention stays ended after ticks and reopen', async () => {
+    await watch.tick();
+    at += 300001;
+    await watch.tick();
+    const id = board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))!.id;
+    await board.update({}, (s) => { const row = s.issues.find((i) => i.id === id)!; row.status = 'done'; row.doneAt = at; });
+    const completed = structuredClone(board.snapshot().issues.find((i) => i.id === id)!);
+    await watch.tick();
+    watch = create(); await watch.init(); await watch.tick();
+    expect(board.snapshot().issues.find((i) => i.id === id)).toEqual(completed);
+    expect(watch.status().entries[0]!.attentionPending).toBe(false);
+    expect(board.snapshot().issues[0]!.status).toBe('doing');
+    expect(posts).toHaveLength(2);
+    // Closing an attention acknowledges this check-in, never the underlying work;
+    // normal monitoring can ask a fresh question at its existing interval.
+    at += 3600001;
+    await watch.tick();
+    expect(watch.status().entries).toHaveLength(2);
+    expect(watch.status().entries[1]!.promptId).not.toBe(watch.status().entries[0]!.promptId);
+    at += 300001;
+    await watch.tick();
+    const fresh = board.snapshot().issues.find((i) => i.id === id)!;
+    expect(fresh.status).toBe('todo');
+    expect(fresh.source?.messageId).toBe(watch.status().entries[1]!.promptId);
+    expect(board.snapshot().issues.filter((i) => i.id === id)).toHaveLength(1);
+  });
+  it('regression: an older Blocked check-in cannot reopen a closed attention for a newer check-in', async () => {
+    await watch.tick(); reply('Blocked: current dependency'); await watch.tick();
+    const id = board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))!.id;
+    const complete = () => board.update({}, (s) => { const row=s.issues.find((i)=>i.id===id)!; row.status='done'; row.doneAt=at; });
+    await complete(); await watch.tick();
+    at += 3600001; await watch.tick();
+    expect(watch.status().entries).toHaveLength(2);
+    at += 300001; await watch.tick();
+    expect(board.snapshot().issues.find((i)=>i.id===id)!.source?.messageId).toBe(watch.status().entries[1]!.promptId);
+    await complete();
+    const completed = structuredClone(board.snapshot().issues.find((i)=>i.id===id)!);
+    await watch.tick(); await watch.tick();
+    expect(board.snapshot().issues.find((i)=>i.id===id)).toEqual(completed);
+  });
+  it('regression: a completed attention committed during ledger save is not overwritten by queued creation', async () => {
+    await watch.tick();
+    at += 300001;
+    const update = watch.store.update.bind(watch.store);
+    let inserted = false;
+    watch.store.update = async (change, guard) => {
+      await update(change, guard);
+      const entry = watch.status().entries[0]!;
+      if (!inserted && entry.attentionPending) {
+        inserted = true;
+        await board.update({}, (s) => s.issues.push({
+          id: entry.attentionId!, title: 'Manager handled this check-in', status: 'done',
+          tags: ['assignment-attention'], links: [], reason: 'Handled without completing the work',
+          source: { roomId: entry.roomId, messageId: entry.promptId! },
+          createdAt: at, updatedAt: at, doneAt: at,
+        }));
+      }
+    };
+    await expect(watch.tick()).rejects.toThrow('board changed');
+    const completed = structuredClone(board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))!);
+    expect(completed.status).toBe('done');
+    await watch.tick();
+    expect(board.snapshot().issues.find((i) => i.id === completed.id)).toEqual(completed);
+    expect(watch.status().entries[0]!.attentionPending).toBe(false);
+    expect(posts).toHaveLength(1);
+    expect(audits.some((e) => (e as { action?: string }).action === 'assignment-attention-opened')).toBe(false);
+  });
   it('later unblock response is recorded with prior reason preserved', async () => {
     await watch.tick();
     reply('Blocked: dependency');

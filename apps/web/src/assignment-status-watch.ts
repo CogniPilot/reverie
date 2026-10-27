@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { ChatBot } from './chat-bots.js';
 import type { BoardStore } from './board-store.js';
 import type { Issue } from './board-types.js';
-import type { ChatMessage, ChatRoom } from './chatroom-store.js';
+import { MAX_MESSAGE_CHARS, type ChatMessage, type ChatRoom } from './chatroom-store.js';
 import { BotWatchState, BotWatchPostRefused } from './bot-watch-state.js';
 
 export const AssignmentWatchConfig = z
@@ -102,6 +102,14 @@ const ended = (issue: Issue) => issue.status === 'done' || issue.status === 'won
 const attentionId = (id: string) => 'attention-' + createHash('sha256').update(id).digest('hex').slice(0, 24);
 const marker = (entry: Entry) => `[assignment-checkin:${entry.id}]`;
 const safeName = (s: string) => s.replace(/[@\r\n`<>]/g, '').slice(0, 80);
+// Board reasons stay bounded; the exact explanation remains in its correlated
+// source message, whose current identity/content digest is checked before use.
+const boardReason = (messageId: string, reason: string, prefix = '') => {
+  const text = prefix + reason;
+  return text.length <= 500
+    ? text
+    : `${prefix}Read the full explanation in correlated assignee reply ${messageId} (${reason.length} characters).`;
+};
 
 export class AssignmentStatusWatch {
   readonly store: BotWatchState<z.infer<typeof AssignmentWatchStateSchema>>;
@@ -558,23 +566,24 @@ export class AssignmentStatusWatch {
       m.from.kind !== 'agent' ||
       m.from.sessionId !== current.employee.sessionId ||
       m.from.employeeId !== current.employee.id ||
-      m.at > this.now() + 1000
+      m.at > this.now() + 1000 ||
+      m.text.length > MAX_MESSAGE_CHARS
     )
       return;
     const text = m.text.trim();
     if (/^on track[.!]?$/i.test(text))
       return { messageId: m.id, at: m.at, status: 'on-track', reason: '', applied: false, planApplied: false };
-    const blocked = /^blocked:\s*(.{1,500})$/i.exec(text);
+    const blocked = /^blocked:\s*([\s\S]+)$/i.exec(text);
     if (blocked && blocked[1]!.trim())
       return {
         messageId: m.id,
         at: m.at,
         status: 'blocked',
-        reason: blocked[1]!.trim(),
+        reason: boardReason(m.id, blocked[1]!.trim()),
         applied: false,
         planApplied: false,
       };
-    const eta = /^new eta:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\s*\|\s*(.{1,500})$/i.exec(text);
+    const eta = /^new eta:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\s*\|\s*([\s\S]+)$/i.exec(text);
     if (
       eta &&
       eta[2]!.trim() &&
@@ -587,7 +596,7 @@ export class AssignmentStatusWatch {
         messageId: m.id,
         at: m.at,
         status: 'new-eta',
-        reason: eta[2]!.trim(),
+        reason: boardReason(m.id, eta[2]!.trim()),
         extendUntil: Date.parse(eta[1]!),
         priorEnd: current.task.end,
         applied: false,
@@ -749,6 +758,9 @@ export class AssignmentStatusWatch {
     );
   }
   private async escalate(entry: Entry, bot: ChatBot, task: Issue, employee: AssignmentEmployee) {
+    // A historical Blocked report must not reopen attention for a newer check-in.
+    if (this.store.snapshot().entries.some((other) =>
+      other.taskId === entry.taskId && other.id !== entry.id && other.createdAt >= entry.createdAt)) return;
     const coordinator = this.deps.coordinatorId?.(employee.owner);
     const managerId = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : (coordinator ?? 'owner'));
     const manager = this.deps.employees().find((e) => e.id === managerId && e.owner === employee.owner);
@@ -763,14 +775,26 @@ export class AssignmentStatusWatch {
     )
       return;
     const id = attentionId(task.id);
-    const existing = this.deps.board.snapshot().issues.find((i) => i.id === id);
+    const observedBoard = this.deps.board.snapshot();
+    const existing = observedBoard.issues.find((i) => i.id === id);
     if (existing && !existing.tags.includes('assignment-attention')) throw Error('Attention identity conflict');
+    if (existing && ended(existing) && existing.source?.roomId === entry.roomId && existing.source.messageId === entry.promptId) {
+      // Closing this check-in's attention does not complete the work. It remains
+      // closed, while the normal interval can issue an independent fresh check-in.
+      const changed = entry.attentionId !== id || entry.attentionPending || entry.phase === 'asked';
+      entry.attentionId = id;
+      entry.attentionPending = false;
+      if (entry.phase === 'asked') entry.phase = 'cancelled';
+      if (changed) await this.save(entry);
+      return;
+    }
     entry.attentionId = id;
     entry.attentionPending = true;
     await this.save(entry);
     if (!existing || ended(existing)) {
       await this.deps.board.update(
         {
+          ifRev: observedBoard.rev,
           beforeSave: () =>
             this.audit({
               action: 'assignment-attention-opened',
@@ -789,9 +813,9 @@ export class AssignmentStatusWatch {
             owner: manager?.id,
             status: 'todo',
             reason: entry.response
-              ? (entry.response.status === 'new-eta'
+              ? boardReason(entry.response.messageId, entry.response.reason, entry.response.status === 'new-eta'
                   ? 'Assignee reported a new ETA; canonical commitment unchanged without plan-edit permission. '
-                  : 'Assignee reported blocked. ') + entry.response.reason
+                  : 'Assignee reported blocked. ')
               : 'No correlated assignee response by check-in deadline',
             tags: ['assignment-attention'],
             source: { roomId: entry.roomId, messageId: entry.promptId! },
