@@ -471,24 +471,28 @@ class OperationStore:
              'OBSERVATION_BINDING')
         return value
 
-    def claim(self, selected, idempotency_key, proposed, *, reserved_sid=None):
+    def claim(self, selected, idempotency_key, proposed, *, reserved_sid=None, operation_id=None, reservation_id=None):
         """Claim an optional fixed-provider SID selected before approval.
 
-        This keyword is not a request field or authority. Omitted callers keep
+        The fixed service may also preselect operation_id/reservation_id in a
+        private draft before approval, without creating a positive claim. These
+        keywords are not request fields or authority. Omitted callers keep
         the original allocator/replay behavior. The fixed capacity observer must
         bind any preselection to its approved canonical profile/generation.
         """
         scope(selected)
         canonical_uuid(idempotency_key)
         request(proposed)
-        if reserved_sid is not None:
-            canonical_uuid(reserved_sid)
         selected, proposed = copy.deepcopy(selected), copy.deepcopy(proposed)
         def create(current, context, lock):
+            for identifier in (reserved_sid, operation_id, reservation_id):
+                if identifier is not None:canonical_uuid(identifier)
             for op in current['operations'].values():
                 if op['scope'] == selected and op['idempotency_key'] == idempotency_key:
                     need(op['request'] == proposed, 'IDEMPOTENCY_CONFLICT')
-                    need(reserved_sid is None or op['reserved_sid'] == reserved_sid,
+                    need((reserved_sid is None or op['reserved_sid'] == reserved_sid) and
+                         (operation_id is None or op['id'] == operation_id) and
+                         (reservation_id is None or op['reservation_id'] == reservation_id),
                          'IDEMPOTENCY_CONFLICT')
                     return self._view(op), None  # No replayed effect handle.
             need(len(current['operations']) < MAX_OPERATIONS, 'OPERATION_LIMIT')
@@ -501,11 +505,17 @@ class OperationStore:
                 occupied = {identifier for op in current['operations'].values() for identifier in
                             (op['id'], op['reservation_id'], op['reserved_sid'], op['observation']['current_sid'])}
                 need(reserved_sid not in occupied, 'RESERVATION_TARGET_IN_USE')
-            opid = str(uuid.uuid4())
+            opid = str(uuid.uuid4()) if operation_id is None else operation_id
+            reservation = str(uuid.uuid4()) if reservation_id is None else reservation_id
+            target = str(uuid.uuid4()) if reserved_sid is None else reserved_sid
+            need(len({opid,reservation,target,observed['current_sid']}) == 4, 'RESERVATION_ROLES')
+            occupied = {identifier for op in current['operations'].values() for identifier in
+                        (op['id'],op['reservation_id'],op['reserved_sid'],op['observation']['current_sid'])}
+            need(not {opid,reservation,target} & occupied, 'RESERVATION_ALLOCATION_IN_USE')
             op = {'id': opid, 'scope': selected, 'idempotency_key': idempotency_key,
                   'request': proposed, 'request_digest': fingerprint(proposed),
-                  'reservation_id': str(uuid.uuid4()),
-                  'reserved_sid': str(uuid.uuid4()) if reserved_sid is None else reserved_sid,
+                  'reservation_id': reservation,
+                  'reserved_sid': target,
                   'observation': observed,
                   'delta_bytes': str(max(0, memory(proposed['requested_memory_bytes'])
                                         - memory(observed['current_memory_bytes']))),

@@ -372,6 +372,24 @@ class NativeObserver:
         return result
 
 
+class _RetainedClaim:
+    """Process-local journal ownership; not approval or a native launch permit."""
+    def __init__(self, gate, store, handle, view, context):
+        self.gate, self.store, self.handle = gate, store, handle
+        self.view, self.context = copy.deepcopy(view), copy.deepcopy(context)
+        self.before_config = copy.deepcopy(gate.broker.config)
+        binding=self.context['profile']['binding']
+        self.source_paths=storage_paths(gate.broker.config,binding['current_sid'])
+        need(self.source_paths.kind=='employee' and self.source_paths.identity==binding['employee_id'],
+             'RESOURCE_PREPARATION_STORAGE_CHANGED')
+        self.closed = False
+
+    def close(self):
+        if not self.closed:
+            self.closed = True
+            self.store.close()  # The durable claim and target fence are retained.
+
+
 class ReservationGate:
     """No start permit exists in this version: every reserved SID stays fenced."""
     def __init__(self, broker):
@@ -457,17 +475,27 @@ class ReservationGate:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 self._local.fd, self._local.depth = fd, 1
                 self._local.terminal_claim = None
+                self._local.preparation_boundary = None
                 self._guard()
                 if sid is not None:
                     self.check_launch(sid)
                 yield
                 claim = self._local.terminal_claim
-                if claim is None:
+                boundary = self._local.preparation_boundary
+                if boundary is not None:
+                    need(claim is None, 'RESOURCE_PREPARATION_BOUNDARY_CONFLICT')
+                    from .worker_resource_preparation import _finish_phase
+                    _finish_phase(self,boundary)
+                elif claim is None:
                     self._guard()
                 else:
                     self._finish_claim(claim)
             finally:
                 self._local.terminal_claim = None
+                self._local.preparation_boundary = None
+                self._local.preparation_ack = None
+                self._local.approved_profile = None
+                self._local.claim_native = None
                 self._local.depth = 0
                 os.close(fd)
 
@@ -477,6 +505,10 @@ class ReservationGate:
 
     def _scope_guard(self, selected):
         self._guard(selected)
+        fence=getattr(self._local,'preparation_ack',None)
+        if fence is not None:
+            from .worker_resource_preparation import _ack_policy_current
+            _ack_policy_current(self,fence)
 
     def _profile(self, eid):
         profiles = ProfileStore(self.root / 'profiles')
@@ -646,8 +678,12 @@ class ReservationGate:
         return {'budgetBytes': budget, 'committedBytes': total, 'retainedBytes': retained}
 
     def check_reload(self, updated):
-        need(not self._document()['operations'] or updated == self.broker.config,
-             'RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION')
+        document=self._document()
+        if document['operations'] and updated != self.broker.config:
+            boundary=getattr(self._local,'preparation_reload',None)
+            need(boundary is not None,'RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION')
+            from .worker_resource_preparation import _allow_reload
+            _allow_reload(self,boundary,updated,document)
 
     def cold_inspect(self):
         with self.admission():
@@ -750,8 +786,16 @@ class ReservationGate:
                 'profile_version': str(profile['version']), 'current_memory_bytes': str(target[0]['memory'])}
 
     def reserve(self, key, request):
-        """Private host claim only; not an approval endpoint and never a permit."""
+        """Private host metadata claim; discard its effect handle as before."""
+        return self._reserve(key, request, retain=False)
+
+    def _retain_claim(self, key, request, *, operation_id=None, reservation_id=None):
+        """Fixed private preparation owner only; no wire/approval/launch port."""
+        return self._reserve(key, request, retain=True, operation_id=operation_id, reservation_id=reservation_id)
+
+    def _reserve(self, key, request, *, retain, operation_id=None, reservation_id=None):
         claimed = False
+        retained = None
         try:
             with self.admission():
                 observed = self.observe(self.scope, request['pool_id'], request['employee_id'])
@@ -767,7 +811,7 @@ class ReservationGate:
                 try:
                     store = self._store()
                     view, _local_handle = store.claim(self.scope, key, request,
-                        reserved_sid=profile['binding']['target_sid'])
+                        reserved_sid=profile['binding']['target_sid'],operation_id=operation_id,reservation_id=reservation_id)
                     claimed = True
                     def final_check(document, _context, _lock):
                         op = document['operations'].get(view['operation']['id'])
@@ -782,13 +826,20 @@ class ReservationGate:
                     self._local.terminal_claim = {'profile': copy.deepcopy(profile),
                         'employee': copy.deepcopy(employee[0]), 'document': document,
                         'native': copy.deepcopy(self._local.claim_native), 'observation': observed}
-                    # No effect API exists. Closing discards the local handle;
-                    # this exact preselected SID remains a refusal-only fence.
+                    if retain:
+                        need(_local_handle is not None, 'RESERVATION_REPLAY_HAS_NO_ACTIVE_HANDLE')
+                        retained = _RetainedClaim(self, store, _local_handle, view, self._local.terminal_claim)
+                        return retained
                     return view
                 finally:
-                    if store is not None:
+                    if store is not None and retained is None:
                         store.close()
         except BaseException as error:
+            if retained is not None:
+                try:
+                    retained.close()
+                except BaseException:
+                    error.add_note('RETAINED_CLAIM_CLOSE_UNCONFIRMED')
             if claimed and not isinstance(error, journal.OperationCommitUncertain):
                 raise journal.OperationCommitUncertain('CLAIM_OR_RESPONSE_UNCERTAIN_KEEP_ALL_CLAIMS') from error
             raise
