@@ -87,7 +87,7 @@ class WorkerService:
         config = load_config(path)
         if config['uid'] != os.getuid() or config['gid'] != os.getgid():
             raise ValueError('Broker identity must be the ordinary installing owner')
-        policies = [config, *config.get('sessionResources', {}).values()]
+        policies = [config, *config.get('sessionResources', {}).values(), *config.get('employeeResources', {}).values()]
         if any(p['budgetMode'] != 'admission' or p['memoryMiB'] < 512 for p in policies):
             raise ValueError('Portable broker installation requires bounded admission policies; pool setup is separate')
         state, scratch = Path(config['stateRoot']), Path(config['scratchRoot'])

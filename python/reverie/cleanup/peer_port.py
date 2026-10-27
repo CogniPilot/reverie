@@ -67,16 +67,15 @@ def worker_config(config,session):
 
 def expected_labels(config,session):
     """Match worker_resources.effective_config and create_args hashing exactly."""
-    policies=config.get('sessionResources',{})
-    I.require(isinstance(policies,dict) and len(policies)<=32,'invalid current resource map')
-    fields={'budgetMode','memoryMiB','pidsLimit','cpus','poolMemoryMiB','poolTasksMax'}
-    for sid,policy in policies.items():
-        I.canonical_id(sid);I.require(isinstance(policy,dict) and set(policy)==fields,'invalid current resource policy')
-    effective={k:v for k,v in config.items() if k!='sessionResources'}
-    effective.update(policies.get(session,{}))
-    effective=worker_config(effective,session)
+    if __package__:
+        from ..worker_resources import resource_config
+    else:
+        spec=importlib.util.spec_from_file_location('_peer_worker_resources',Path(__file__).parent.parent/'worker_resources.py')
+        resources=importlib.util.module_from_spec(spec);spec.loader.exec_module(resources)
+        resource_config=resources.resource_config
+    effective=worker_config(resource_config(config,session),session)
     config_hash=hashlib.sha256(json.dumps(effective,sort_keys=True).encode()).hexdigest()
-    policy_hash=hashlib.sha256(json.dumps({k:v for k,v in effective.items() if k not in ('image','maintenanceSessions')},sort_keys=True).encode()).hexdigest()
+    policy_hash=hashlib.sha256(json.dumps({k:v for k,v in effective.items() if k not in ('image','maintenanceSessions','opsConfig')},sort_keys=True).encode()).hexdigest()
     return {'workerConfigHash':config_hash,'workerPolicyHash':policy_hash}
 
 

@@ -28,11 +28,49 @@ def validate_session_resources(config):
             raise ValueError('Invalid resource-policy session')
         validate_resources(policy)
 
+    employees=config.get('employeeResources',{})
+    if not isinstance(employees,dict) or len(employees)>256:
+        raise ValueError('Invalid owner employee resource projection')
+    for eid,policy in employees.items():
+        if not isinstance(eid,str) or not SESSION.fullmatch(eid):
+            raise ValueError('Invalid resource-policy employee')
+        validate_resources(policy)
+
+
+def employee_policy(config,sid):
+    """Resolve a derived EID policy through the trusted storage binding only."""
+    if __package__:
+        from .worker_storage import storage_paths
+    else:
+        # The flat immutable broker/acceptance bundle has the same fixed sibling.
+        import importlib.util
+        import sys
+        from pathlib import Path
+        name=__name__+'_storage'
+        if name not in sys.modules:
+            spec=importlib.util.spec_from_file_location(name,Path(__file__).with_name('worker_storage.py'))
+            module=importlib.util.module_from_spec(spec);sys.modules[name]=module
+            try:spec.loader.exec_module(module)
+            except BaseException:sys.modules.pop(name,None);raise
+        storage_paths=sys.modules[name].storage_paths
+    paths=storage_paths(config,sid)
+    return config['employeeResources'].get(paths.identity,{}) if paths.kind=='employee' else {}
+
+
+def resource_config(config,sid):
+    """Project resources only; lease-grant transformation remains separate."""
+    validate_session_resources(config)
+    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources')}
+    policies=config.get('sessionResources',{})
+    if sid in policies:
+        result.update(policies[sid])
+    elif config.get('employeeResources'):
+        result.update(employee_policy(config,sid))
+    return result
+
 
 def effective_config(config,sid):
-    validate_session_resources(config)
-    result={k:v for k,v in config.items() if k!='sessionResources'}
-    result.update(config.get('sessionResources',{}).get(sid,{}))
+    result=resource_config(config,sid)
     if result.get('leaseAcceptance') is not None:
         if __package__:
             from .cleanup import peer_port
@@ -52,6 +90,6 @@ def policy_digest(config,sid):
 
 def validate_resource_reload(before,after):
     validate_session_resources(after)
-    ignored=RESOURCE_FIELDS|{'sessionResources'}
+    ignored=RESOURCE_FIELDS|{'sessionResources','employeeResources'}
     if {k:v for k,v in before.items() if k not in ignored}!={k:v for k,v in after.items() if k not in ignored}:
         raise ValueError('Resource reload cannot change laptop grants, images or control paths')

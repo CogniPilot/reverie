@@ -82,3 +82,24 @@ A runtime unit under `/run/systemd/system` disappears at host reboot. Restore an
 verify it before admitting new pool workers, or retain admission defaults. This
 feature does not change the website watchdog, desired-running/vacation intent,
 provider runtime selection or operating-system repository configuration.
+
+
+Employee profiles and session overrides
+--------------------------------------
+
+`ProfileStore.stage_config` derives an optional `employeeResources` map from its
+locked canonical employee profile, alongside the existing target `sessionResources`
+projection. The broker config map is a projection, not another profile store.
+Both maps accept only the same six bounded resource fields. An explicit session
+entry wins over the employee projection; otherwise the trusted company/storage
+binding selects the employee entry, followed by global defaults. Human names,
+roles and caller-supplied employee IDs do not select policies. A later approved
+session move therefore inherits the employee profile without copying an old SID.
+Historical storage edges retain identity but do not grant permission to start.
+
+Both maps are removed before effective-policy hashing, preserving unrelated
+laptop labels. Configurations without an employee projection keep the legacy
+lookup behavior. A reload still refuses any running laptop whose effective
+policy would change: this source support neither resizes existing laptops nor
+activates a profile. Profile publication, approved recreation and native owner
+acceptance remain separate gates.

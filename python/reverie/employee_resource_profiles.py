@@ -114,9 +114,15 @@ class ProfileStore:
    need(type(sid_owners) is dict,'CANONICAL_SID_OWNERS_REQUIRED')
    for key in ('current_sid','target_sid'):need(sid_owners.get(canonical_binding[key])==eid,'SID_OWNER_MISMATCH')
    before=copy.deepcopy(config);validate_session_resources(before);after=copy.deepcopy(before)
-   sid=canonical_binding['target_sid'];after.setdefault('sessionResources',{})[sid]=copy.deepcopy(p['resources']);validate_resource_reload(before,after)
+   sid=canonical_binding['target_sid']
+   # Both are projections of this locked canonical profile. Retain the target
+   # SID projection for compatibility; later SIDs inherit the stable EID entry.
+   after.setdefault('employeeResources',{})[eid]=copy.deepcopy(p['resources'])
+   after.setdefault('sessionResources',{})[sid]=copy.deepcopy(p['resources']);validate_resource_reload(before,after)
    for other,policy in before.get('sessionResources',{}).items():
     if other!=sid:need(encode(after['sessionResources'][other])==encode(policy),'UNRELATED_POLICY_CHANGED')
+   for other,policy in before.get('employeeResources',{}).items():
+    if other!=eid:need(encode(after['employeeResources'][other])==encode(policy),'UNRELATED_EMPLOYEE_POLICY_CHANGED')
    self._root()
    return {'config':after,'target_sid':sid,'profile_version':p['version'],'store_revision':v['revision'],'effective_policy_sha256':policy_digest(after,sid),'profile_sha256':hashlib.sha256(encode(p)).hexdigest()}
   return self._locked(stage)

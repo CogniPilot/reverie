@@ -167,7 +167,7 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     if 'opsConfig' in config:
         if not isinstance(config['opsConfig'], str) or not Path(config['opsConfig']).is_absolute() or Path(config['opsConfig']).anchor != '/' or str(Path(config['opsConfig'])) != config['opsConfig'] or any(ord(c)<32 or ord(c)==127 for c in config['opsConfig']):
@@ -1464,7 +1464,7 @@ class Broker:
                     if not storage_start_allowed(self.config,paths):
                         raise ValueError('Only the current employee session may start its laptop')
                     resources=effective_config(self.config,session_id)
-                    if 'sessionResources' in self.config:
+                    if 'sessionResources' in self.config or 'employeeResources' in self.config:
                         self.check_pool(config=resources)
                     else:
                         self.check_pool()

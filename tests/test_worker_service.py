@@ -105,6 +105,16 @@ class WorkerServiceTests(unittest.TestCase):
         self.info['MemoryLimit'] = True
         self.service.action('start'); self.assertTrue(self.active)
 
+    def test_employee_projection_pool_refuses_portable_installation(self):
+        fields=('budgetMode','memoryMiB','pidsLimit','cpus','poolMemoryMiB','poolTasksMax')
+        policy={k:self.config[k] for k in fields}
+        policy.update(budgetMode='pool',memoryMiB=0)
+        self.config['employeeResources']={'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa':policy}
+        self.write_config()
+        with self.assertRaisesRegex(ValueError,'bounded admission'):
+            self.service.install()
+        self.assertEqual(self.calls,[])
+
     def test_unknown_private_storage_alias_and_failed_manager_never_report_success(self):
         self.path.chmod(0o644)
         with self.assertRaises(ValueError): self.service.install()

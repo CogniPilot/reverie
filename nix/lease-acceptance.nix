@@ -13,6 +13,10 @@ pkgs.runCommand "reverie-lease-acceptance" {
   for name in acceptance acceptance_io peer_port peer_helper peer_artifact host_install; do
     install -m444 "${src}/python/reverie/cleanup/$name.py" "$out/libexec/reverie/$name.py"
   done
+  # Flat acceptance imports use the same fixed resource/storage implementation.
+  for name in worker_resources worker_storage; do
+    install -m444 "${src}/python/reverie/$name.py" "$out/libexec/$name.py"
+  done
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-prune-acceptance" \
     --add-flags "-I -B $out/libexec/reverie/acceptance.py" \
     --add-flags "--initializer ${initializer}/bin/reverie-prune-declared --docker ${pkgs.docker-client}/bin/docker --peer-binary ${peerArtifact}/bin/reverie-acceptance-peer"
