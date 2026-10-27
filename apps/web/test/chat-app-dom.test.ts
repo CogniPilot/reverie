@@ -4,7 +4,7 @@
  * sending and receiving, grouping, members and presence, the quick switcher, the Debug terminal and
  * the way back, reload, and the server-dependent controls that must stay hidden on an older server.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import postcss from 'postcss';
@@ -4362,13 +4362,19 @@ it('browser Back returns from a debug session to the full conversation shell', a
   h.dom.window.close();
 });
 
-it('turns shared workspace artifact paths into browser downloads, including inline code but excluding fenced code', async () => {
-  const path = '/reverie_workspace/cases/expert-quill/EP010.mp4';
+it('previews shared workspace artifacts on ordinary click with a download fallback, including inline code but excluding fenced code', async () => {
+  const path = '/reverie_workspace/projects/example/clip.mp4';
   const h = await createHarness({ sessions, rooms: [room('r1', 'Office', [member(A, 'alpha')], { messages: [message('video', 'r1', agent(A, 'alpha'), 'Video: `' + path + '`\n```\n' + path + '\n```', 1000)] })] });
   const links = [...h.document.querySelectorAll('.ca-workspace-download')];
   expect(links).toHaveLength(1);
   expect(links[0].getAttribute('href')).toBe('/api/filesystem/download?path=' + encodeURIComponent(path));
-  expect(links[0].getAttribute('download')).toBe('EP010.mp4');
+  const preview = vi.fn(async () => {});
+  h.app.openWorkspaceFilePreview = preview;
+  h.app.activeSessionId = B;
+  const click = new h.window.MouseEvent('click', { button: 0, bubbles: true, cancelable: true });
+  links[0].dispatchEvent(click);
+  expect(click.defaultPrevented).toBe(true);
+  expect(preview).toHaveBeenCalledExactlyOnceWith(path, links[0]);
   expect(h.document.querySelector('pre .ca-workspace-download')).toBeNull();
   h.dom.window.close();
 });

@@ -3,7 +3,7 @@
 
   python3 -I reverie_collect.py --config /etc/reverie/collect.toml once
 
-r2 (Kit's H1-1..3): committed output is the source of truth, so a failed checkpoint never duplicates anything; dry-run
+r2 (H1-1..3): committed output is the source of truth, so a failed checkpoint never duplicates anything; dry-run
 estimates and live deletions are separate counters; every joined input is size-bounded and schema-checked, and each
 reading fails on its own into an explicit error instead of aborting the sample or inventing a value.
 
@@ -112,7 +112,7 @@ def read_small(path, limit):
 
 
 def run_capped(argv, limit, timeout=10):
-    """stdout of ARGV, at most LIMIT bytes, within ONE monotonic deadline covering both reading and exit (Kit R2-1).
+    """stdout of ARGV, at most LIMIT bytes, within ONE monotonic deadline covering both reading and exit (R2-1).
     On timeout, oversize or error the child's whole session is killed and reaped; stderr is discarded."""
     deadline = time.monotonic() + timeout
     p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -372,7 +372,7 @@ def read_lines_counted(path, cfg=None):
 
 def ledger(path, cfg):
     """(state, records) for prune-runs.jsonl: "missing" (a genuinely new ledger), "ok", or "unavailable" when the file
-    exists but can't be read within bounds (symlink, non-regular, oversize, I/O error). Kit R3-1: an unavailable ledger
+    exists but can't be read within bounds (symlink, non-regular, oversize, I/O error). R3-1: an unavailable ledger
     is NEVER treated as an empty committed set; the caller then skips the prune join and its accounting."""
     if not os.path.lexists(path):
         return "missing", [], 0
@@ -442,7 +442,7 @@ def rollup(samples, start, length, kind, runs=None, prune_ok=True):
     if runs is None:                                       # derive from the samples' committed records
         runs = [{**r, "committed_t": s["t"]} for s in win for r in (s.get("prune") or []) if isinstance(r, dict)]
     pr = [r for r in runs if finite(r.get("committed_t")) and start <= r["committed_t"] < start + length]
-    if not prune_ok:                                       # Kit R3-1: unknown, never a fabricated zero
+    if not prune_ok:                                       # R3-1: unknown, never a fabricated zero
         return {"v": 2, "kind": kind, "start": start, "end": start + length, "samples": len(win),
                 "cpu_pct": agg([s.get("cpu_pct") for s in win]), "mem_pct": agg([s.get("mem_pct") for s in win]),
                 "gpu_pct": agg([s.get("gpu_pct") for s in win]), "drives": drives, "prune_unavailable": True,
@@ -455,7 +455,7 @@ def rollup(samples, start, length, kind, runs=None, prune_ok=True):
             "prune_runs_live": sum(1 for r in pr if r.get("mode") == "live"),
             "prune_runs_partial": sum(1 for r in pr if r.get("status") == "partial"),
             "prune_runs_failed": sum(1 for r in pr if r.get("status") == "failed"),
-            # Never one undifferentiated total: a dry-run estimate is not reclaimed space (Kit H1-2).
+            # Never one undifferentiated total: a dry-run estimate is not reclaimed space (H1-2).
             "prune_bytes_by_mode": {"dry_would_delete": sum(run_bytes(r)[0] for r in pr),
                                     "live_deleted": sum(run_bytes(r)[1] for r in pr)},
             "prune_bytes": sum(run_bytes(r)[1] for r in pr)}       # r1 name, now LIVE deletions only (never estimates)
@@ -464,7 +464,7 @@ def rollup(samples, start, length, kind, runs=None, prune_ok=True):
 def last_rolled(out, cfg, name, cur, length):
     """Where to resume rolling when there is no usable cursor: after the newest committed period in this or the
     previous rollup file; or, if none was ever committed, at the period holding the EARLIEST retained valid sample
-    (Kit R2-2: never silently start history at now while earlier committed samples exist); else CUR."""
+    (R2-2: never silently start history at now while earlier committed samples exist); else CUR."""
     ends = []
     for t in (cur, cur - 32 * 86400 if length == 3600 else cur - 366 * 86400):
         ends += [r.get("end") for r in read_lines(os.path.join(out, time.strftime(name, time.gmtime(t))), cfg)]

@@ -2768,7 +2768,7 @@ class ReverieChatApp {
       plan.addEventListener('change', () => updatePlan(false)); updatePlan();
       const name = field('name', 'Name', 'input', pages[1]); name.required = true; name.maxLength = 100;
       const suggestName = () => {
-        const names = ['Alex', 'Mira', 'Ellis', 'Rowan', 'Morgan', 'Sage', 'Quinn', 'Casey', 'Avery', 'Jordan', 'Robin', 'Remy'];
+        const names = ['Alex', 'Riley', 'Ellis', 'Rowan', 'Morgan', 'Sage', 'Quinn', 'Casey', 'Avery', 'Jordan', 'Robin', 'Remy'];
         const base = names[Math.floor(Math.random() * names.length)];
         const taken = new Set(employees.map(e => e.name.normalize('NFKC').toLowerCase()));
         let candidate = base, suffix = 2; while (taken.has(candidate.toLowerCase())) candidate = `${base} ${suffix++}`;
