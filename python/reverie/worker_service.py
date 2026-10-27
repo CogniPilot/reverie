@@ -74,7 +74,7 @@ class WorkerService:
             if result.returncode or not self.gcroot.is_symlink() or self.gcroot.resolve() != root:
                 raise RuntimeError('Durable service GC root publication is unconfirmed')
 
-    def positive_preflight(self, *, check_manager=True):
+    def positive_preflight(self, *, check_manager=True, installing=False):
         if sys.platform != 'linux' or os.geteuid() == 0:
             raise ValueError('Isolated broker setup requires the ordinary owner on local Linux')
         path = self.config_path
@@ -124,10 +124,32 @@ class WorkerService:
         if (type(value.get('MemTotal')) is not int or value['MemTotal'] <= 0 or
                 config['poolMemoryMiB'] * 1024 * 1024 + 8 * 1024**3 > value['MemTotal'] * .9):
             raise ValueError('Worker admission budget must retain website and host memory headroom')
+        from .worker_resource_reservations import option, configured, marker, pending, NativeObserver, ReservationGate
+        if configured(config):
+            probe = self.resource_probe(config)
+            if installing and option(config) is not None and not os.path.lexists(marker(config)) and not os.path.lexists(pending(config)):
+                NativeObserver(probe).custody(Path(option(config)['directory']), marker(config))
+            else:
+                with ReservationGate(probe).admission():
+                    pass
         return config
 
+    def resource_probe(self, config):
+        service = self
+        class InstallProbe:
+            """Fixed metadata-only adapter; no browser/worker resource authority."""
+            def __init__(self): self.config = config
+            def run_engine(self, args, optional=False):
+                if not args or args[0] not in ('ps', 'inspect'):
+                    raise ValueError('Installation probe is metadata-only')
+                result = service.run(['docker', *args])
+                if result.returncode:
+                    raise ValueError('Resource custody inventory unavailable')
+                return result
+        return InstallProbe()
+
     def install(self):
-        self.positive_preflight()
+        config = self.positive_preflight(installing=True)
         if self.manager('is-active', UNIT, required=False).returncode == 0:
             raise ValueError('Broker is active; coordinate its transport maintenance before replacing the installed unit')
         target = self.target_unit()
@@ -147,6 +169,14 @@ class WorkerService:
                 raise ValueError('Private owned broker environment file required')
             if self.environment.read_text() != environment_selection(self.config_path):
                 raise ValueError('Existing broker configuration selection differs; owner review required')
+        from .worker_resource_reservations import option, marker, pending, provision, ReservationGate
+        if option(config) is not None:
+            probe = self.resource_probe(config)
+            if os.path.lexists(marker(config)) or os.path.lexists(pending(config)):
+                with ReservationGate(probe).admission():
+                    pass
+            else:
+                provision(probe)  # Explicit install only; never a runtime fallback.
         self.pin_unit(target)  # Keep unit, broker and checker closures after nix run/GC/reboot.
         if not self.environment.exists():
             fd = os.open(self.environment, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

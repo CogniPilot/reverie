@@ -60,7 +60,9 @@ def employee_policy(config,sid):
 def resource_config(config,sid):
     """Project resources only; lease-grant transformation remains separate."""
     validate_session_resources(config)
-    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources')}
+    # Native control custody is not a laptop grant and must not change any
+    # existing laptop's create arguments or reattachment policy label.
+    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations')}
     policies=config.get('sessionResources',{})
     if sid in policies:
         result.update(policies[sid])

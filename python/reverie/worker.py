@@ -15,6 +15,7 @@ if (__name__ == '__main__' and __package__ and sys.argv[1:] in
     raise SystemExit(_goal_custody_main(stream=sys.argv[-1] == '--goal-custody-stream'))
 
 import argparse
+from contextlib import nullcontext
 import fcntl
 import hashlib
 import http.client
@@ -167,8 +168,10 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
+    from reverie.worker_resource_reservations import option as reservation_option
+    reservation_option(config)
     if 'opsConfig' in config:
         if not isinstance(config['opsConfig'], str) or not Path(config['opsConfig']).is_absolute() or Path(config['opsConfig']).anchor != '/' or str(Path(config['opsConfig'])) != config['opsConfig'] or any(ord(c)<32 or ord(c)==127 for c in config['opsConfig']):
             raise ValueError('Invalid private OPS binding')
@@ -698,6 +701,26 @@ class Broker:
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
         from reverie.worker_command_telemetry import CommandTelemetry
         self.command_telemetry = CommandTelemetry(config, self.run_engine)
+        from reverie.worker_resource_reservations import ReservationGate, configured
+        self.resource_reservations = ReservationGate(self) if configured(config) else None
+
+    def resource_admission(self, sid=None):
+        if self.resource_reservations is None:
+            # A removed configuration option must not hide a durable prior fence.
+            from reverie.worker_resource_reservations import configured
+            if configured(self.config):
+                raise ValueError('Resource reservation control requires reconciliation')
+            return nullcontext()
+        return self.resource_reservations.admission(sid)
+
+    def _release_resource_admission(self, guard):
+        try:
+            guard.__exit__(None, None, None)
+        except Exception as error:
+            # A program may already be running. Never classify this as a
+            # known pre-effect refusal, retry, or successful reservation release.
+            self.cleanup_uncertain.add('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED')
+            raise RuntimeError('Resource admission release unconfirmed') from error
 
     def run_engine(self, args, optional=False):
         if self.stopping.is_set() and (args[0] in ('create', 'start', 'exec') or args[:2] == ['network', 'create']):
@@ -1089,11 +1112,20 @@ class Broker:
             guard.release()
 
     def recover(self):
+        with self.resource_admission():
+            if self.resource_reservations is not None:
+                self.resource_reservations.check_recovery()
+            return self._recover_laptops()
+
+    def _recover_laptops(self):
         result = self.run_engine(['ps', '--filter', 'label=reverie.worker=' + self.config['deployment'], '--format', '{{.Names}}'])
         names=result.stdout.splitlines()
         if len(names)!=len(set(names)):raise RuntimeError('Duplicate laptop recovery inventory')
         selected={name.removeprefix(self.config['deployment']+'-agent-'):name for name in names
                   if SESSION.fullmatch(name.removeprefix(self.config['deployment']+'-agent-'))}
+        if self.resource_reservations is not None:
+            for sid in selected:
+                self.resource_reservations.check_launch(sid)
         # Goal: recovery extends the known set and commits nothing on failure.
         recovered=dict(self.laptops);recovered.update(selected)
         if len(recovered)>self.config['maxWorkers'] or (self.config['budgetMode']=='admission' and
@@ -1216,11 +1248,17 @@ class Broker:
             raise RuntimeError('Pool plus actual peer ceilings exceed host headroom')
 
     def reload_resources(self):
+        with self.resource_admission():
+            return self._reload_resources()
+
+    def _reload_resources(self):
         if not self.config_file:
             raise ValueError('Resource reload requires an owner configuration file')
         with self.lock:
             updated = load_config(self.config_file)
             validate_resource_reload(self.config,updated)
+            if self.resource_reservations is not None:
+                self.resource_reservations.check_reload(updated)
             # Serialize with launch, and refuse a new policy for any live program.
             for sid,name in self.laptops.items():
                 previous=self.run_engine(['inspect',name],optional=True)
@@ -1365,6 +1403,8 @@ class Broker:
         retention_ready = None
         retention_container_id = None
         viewer_token = None
+        resource_guard = None
+        resource_cleanup_failure = None
         try:
             if self.stopping.is_set():
                 raise RuntimeError('Worker broker is stopping')
@@ -1402,6 +1442,9 @@ class Broker:
                         raise RuntimeError('Restart the host broker after changing worker policy')
                     self.config = updated
             session_id = request['sessionId']
+            pending_guard = self.resource_admission(session_id)
+            pending_guard.__enter__()
+            resource_guard = pending_guard
             generation = self.generation
             # Wait outside the broker mutex: a source plan-move laptop must
             # finish stopping before its successor can acquire the same home.
@@ -1469,6 +1512,8 @@ class Broker:
                     else:
                         self.check_pool()
                     self.check_creation_budget(session_id,resources)
+                    if self.resource_reservations is not None:
+                        self.resource_reservations.check_creation(session_id, resources)
                 admitted = True
                 if previous.returncode==0 and not reuse:
                     if paths.kind=='employee':self.stop(name,retain_storage=True)
@@ -1500,6 +1545,8 @@ class Broker:
                         raise RuntimeError('Current employee running intent changed during preparation')
                     if paths.kind=='employee':self.check_storage_writers(paths,session_id)
                     self.check_creation_budget(session_id, prepared_config)
+                    if self.resource_reservations is not None:
+                        self.resource_reservations.check_creation(session_id, prepared_config)
                     if nix_store is not None:
                         # Private durable store and database; build caches retain
                         # the existing scratch grant.
@@ -1565,6 +1612,9 @@ class Broker:
                     nix_guard.__exit__(None, None, None)
                     nix_guard = None
                 started = True
+            pending_guard = resource_guard
+            resource_guard = None
+            self._release_resource_admission(pending_guard)
             master, slave = pty.openpty()
             tty.setraw(slave)
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', request['rows'], request['cols'], 0, 0))
@@ -1637,6 +1687,12 @@ class Broker:
             except OSError:
                 pass
         finally:
+            if resource_guard is not None:
+                try:
+                    self._release_resource_admission(resource_guard)
+                except Exception as error:
+                    resource_cleanup_failure = error
+                    self.cleanup_uncertain.add('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED')
             if nix_guard is not None:
                 nix_guard.__exit__(None, None, None)
             try:
@@ -1691,6 +1747,8 @@ class Broker:
                     finally:
                         self.connections.release()
                         self.handlers.pop(connection, None)
+            if resource_cleanup_failure is not None:
+                raise RuntimeError('Resource admission release unconfirmed') from resource_cleanup_failure
 
     def serve(self):
         self.check_pool()
