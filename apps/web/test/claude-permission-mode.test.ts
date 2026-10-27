@@ -49,34 +49,32 @@ describe('buildInteractiveArgs permission modes (direct PTY path)', () => {
 describe('buildSpawnCommand permission modes (tmux path)', () => {
   it('unset claudeMode defaults to --dangerously-skip-permissions', () => {
     const cmd = buildSpawnCommand({ mode: 'claude', sessionId: 'sid-1' });
-    expect(cmd).toContain('claude --dangerously-skip-permissions --session-id "sid-1"');
+    expect(cmd).toContain(JSON.stringify('claude --dangerously-skip-permissions --session-id "sid-1"').slice(1, -1));
     expect(cmd).not.toContain('--permission-mode');
   });
 
   it('auto mode emits --permission-mode auto and never the skip flag', () => {
     const cmd = buildSpawnCommand({ mode: 'claude', sessionId: 'sid-1', claudeMode: 'auto' });
-    expect(cmd).toContain('claude --permission-mode auto --session-id "sid-1"');
+    expect(cmd).toContain(JSON.stringify('claude --permission-mode auto --session-id "sid-1"').slice(1, -1));
     expect(cmd).not.toContain('--dangerously-skip-permissions');
   });
 
-  it('auto mode carries into BOTH legs of the resume fallback command', () => {
+  it('auto mode carries into every preselected resume/new provider command', () => {
     const cmd = buildSpawnCommand({
       mode: 'claude',
       sessionId: 'sid-1',
       claudeMode: 'auto',
       resumeSessionId: 'abc-123',
     });
-    const [resumeLeg, fallbackLeg] = cmd.split('||');
-    expect(resumeLeg).toContain('--permission-mode auto');
-    expect(resumeLeg).toContain('--resume "abc-123"');
-    expect(fallbackLeg).toContain('--permission-mode auto');
-    expect(fallbackLeg).toContain('--session-id "sid-1"');
+    expect(cmd).toContain(JSON.stringify('claude --permission-mode auto --resume "abc-123"').slice(1, -1));
+    expect(cmd).toContain(JSON.stringify('claude --permission-mode auto --session-id "sid-1"').slice(1, -1));
+    expect(cmd).not.toMatch(/claude[^\n]* \|\| claude/);
     expect(cmd).not.toContain('--dangerously-skip-permissions');
   });
 
   it('normal mode emits no permission flag', () => {
     const cmd = buildSpawnCommand({ mode: 'claude', sessionId: 'sid-1', claudeMode: 'normal' });
-    expect(cmd).toContain('claude --session-id "sid-1"');
+    expect(cmd).toContain(JSON.stringify('claude --session-id "sid-1"').slice(1, -1));
     expect(cmd).not.toContain('--permission-mode');
     expect(cmd).not.toContain('--dangerously-skip-permissions');
   });

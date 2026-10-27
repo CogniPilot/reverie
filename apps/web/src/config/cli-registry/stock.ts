@@ -129,6 +129,7 @@ const CLAUDE: CliEntry = {
   },
   launch: {
     chain: 'fallback',
+    resumeSelection: 'claude-transcript',
     params: {
       claudeMode: {
         type: 'enum',

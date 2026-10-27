@@ -68,6 +68,7 @@ import {
   type StatusLineExporter,
 } from './types.js';
 import { getCli } from './config/cli-registry/registry.js';
+import { renderClaudeLaunch } from './utils/claude-launch.js';
 import { missingCliMessage, resolveCliBinDir } from './utils/cli-resolver.js';
 import {
   buildSpawnCommandFromRegistry,
@@ -1023,6 +1024,7 @@ export function buildSpawnCommand(options: {
   deepSeekConfig?: DeepSeekConfig;
   ompConfig?: OmpConfig;
   resumeSessionId?: string;
+  claudeResumeCandidates?: readonly string[];
   effort?: EffortLevel;
   /** Claude advisor model, merged into the launch's one `--settings` JSON (see buildAdvisorSettings). */
   advisorModel?: string;
@@ -1143,8 +1145,9 @@ export function buildRemoteLaunchCommand(options: {
   /** OMP only — resume/continue overrides for the remote omp relaunch (dead-pane respawn). */
   ompConfig?: OmpConfig;
   resumeSessionId?: string;
+  claudeResumeCandidates?: readonly string[];
 }): string {
-  const { mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId } = options;
+  const { mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates } = options;
   // §6.3: honor the session's EFFECTIVE claude permission mode on remote instead of
   // hardcoding --dangerously-skip-permissions, so a non-granted multi-user user's
   // downgraded 'auto' actually reaches the remote agent (the default command otherwise
@@ -1157,19 +1160,8 @@ export function buildRemoteLaunchCommand(options: {
   if (override) {
     modeCommand = override;
   } else if (mode === 'claude') {
-    // Deterministic conversation pinning for SSH-remote claude (mirrors the
-    // docker-claude shape in claudeDockerPaneCommand, INCLUDING the distinct
-    // resumeId branch it declares — this used to only mirror the same-id
-    // fallback shape, silently dropping an explicit resumeSessionId that
-    // differs from sessionId, e.g. a resume-from-history launch): the FIRST
-    // run creates the conversation under --session-id <sessionId>; a respawn
-    // / reattach re-runs the same idempotent command, --session-id exits
-    // non-zero ("already in use"), and the `||` fallback RESUMES that same
-    // conversation. Without a pinned id, every reattach relaunched a bare
-    // `claude` and started a NEW conversation (found live 2026-08-29: remote
-    // claude ctrl-d / ctrl-c relaunched a fresh session). A per-host
-    // `commands.claude` override stays authoritative (admin's explicit
-    // choice) and skips this entirely.
+    // Select from metadata on the remote host, after its existing login shell
+    // resolves the selected account. A provider exit is never a create fallback.
     const permFlags = buildClaudePermissionFlags(claudeMode, allowedTools);
     const cmd = `claude${permFlags}`;
     // Defense in depth, mirroring claudeDockerPaneCommand's own belt-and-braces check:
@@ -1180,11 +1172,11 @@ export function buildRemoteLaunchCommand(options: {
       modeCommand = remoteLoginShellCommand(cmd);
     } else {
       const rid = resumeSessionId && RESUME_ID_SAFE.test(resumeSessionId) ? resumeSessionId : undefined;
-      modeCommand = remoteLoginShellCommand(
-        rid && rid !== sessionId
-          ? `${cmd} --resume ${rid} || ${cmd} --session-id ${sessionId}`
-          : `${cmd} --session-id ${sessionId} || ${cmd} --resume ${sessionId}`
-      );
+      const ids = [...(claudeResumeCandidates ?? []), rid, sessionId].filter((id): id is string => !!id && RESUME_ID_SAFE.test(id));
+      modeCommand = remoteLoginShellCommand(renderClaudeLaunch(
+        ids.map((id) => ({ id, command: `${cmd} --resume ${id}` })),
+        `${cmd} --session-id ${sessionId}`
+      ));
     }
   } else if (mode === 'omp') {
     // Remote OMP respawn must RESUME the same conversation instead of
@@ -1334,28 +1326,18 @@ function appendResumeFlag(modeCommand: string, mode: SessionMode, resumeId: stri
     : `${modeCommand} ${append.token} ${resumeId}`;
 }
 
-/**
- * Claude-mode pane command with a DETERMINISTIC conversation id (the docker analog
- * of buildSpawnCommand's --resume/--session-id logic). A fresh launch passes
- * `--session-id <sessionId>`, so the in-container conversation id is knowable
- * host-side (resume-id capture + subagent/workflow correlation) WITHOUT relying on
- * hook reachability. When the in-container tmux was re-created after a container
- * stop/reboot, the same command re-runs against the surviving transcript:
- * `--session-id` exits 1 ("already in use") and the `||` fallback RESUMES that
- * conversation (verified CLI behavior). An explicit resumeId gets the local
- * builder's shape — resume first, session-id fallback — so a stale id never
- * dead-panes. The leading `exec ` is stripped: an exec'd first branch could never
- * fall back.
+/** Same metadata selector as local/worker/remote, executed inside the container.
+ * The argv includes the original configured command/flags; no transcript is read
+ * from the website and no nonzero provider exit retries under a new identity.
  */
-function claudeDockerPaneCommand(modeCommand: string, sessionId: string, resumeId?: string): string {
-  if (!RESUME_ID_SAFE.test(sessionId)) return modeCommand; // defensive — ids are server-minted uuids
+export function claudeDockerPaneCommand(modeCommand: string, sessionId: string, resumeId?: string, candidates?: readonly string[], customShell = false): string {
+  if (!RESUME_ID_SAFE.test(sessionId)) return modeCommand;
   const cmd = modeCommand.replace(/^exec\s+/, '');
-  const rid = resumeId && RESUME_ID_SAFE.test(resumeId) ? resumeId : undefined;
-  if (rid && rid !== sessionId) {
-    return `${cmd} --resume ${rid} || ${cmd} --session-id ${sessionId}`;
-  }
-  const cid = rid ?? sessionId;
-  return `${cmd} --session-id ${cid} || ${cmd} --resume ${cid}`;
+  const ids = [...(candidates ?? []), resumeId, sessionId].filter((id): id is string => !!id && RESUME_ID_SAFE.test(id));
+  // Owner-selected Docker commands already permit shell syntax. Preserve each
+  // selected leg's existing shell semantics, without adding an exit fallback.
+  const leg = (args: string): string => customShell ? `/bin/sh -c ${shellescape(`${cmd} ${args}`)}` : `${cmd} ${args}`;
+  return renderClaudeLaunch(ids.map((id) => ({ id, command: leg(`--resume ${id}`) })), leg(`--session-id ${sessionId}`));
 }
 
 /** Fully-resolved inputs for buildDockerLaunchCommand (pure). */
@@ -1364,6 +1346,7 @@ export interface DockerLaunchOptions {
   docker: SessionDocker;
   sessionId: string;
   resumeSessionId?: string;
+  claudeResumeCandidates?: readonly string[];
   createContext: DockerCreateContext;
   /** exec-time inline env (non-secret): TERM, COLORTERM, REVERIE_SESSION_ID, REVERIE_MUX */
   execEnv: Record<string, string>;
@@ -1407,7 +1390,7 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   let modeCommand =
     docker.commands?.[mode as DockerCommandMode] || defaultDockerCommandForMode(mode, !!docker.runsAsRoot);
   if (mode === 'claude') {
-    modeCommand = claudeDockerPaneCommand(modeCommand, sessionId, resumeSessionId);
+    modeCommand = claudeDockerPaneCommand(modeCommand, sessionId, resumeSessionId, opts.claudeResumeCandidates, !!docker.commands?.claude);
   } else if (resumeSessionId) {
     modeCommand = appendResumeFlag(modeCommand, mode, resumeSessionId);
   }
@@ -1544,7 +1527,8 @@ export function resolveDockerLaunchOptions(
   mode: SessionMode,
   docker: SessionDocker,
   sessionId: string,
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  claudeResumeCandidates?: readonly string[]
 ): DockerLaunchOptions {
   const home = homedir();
   const isDesktop = process.platform === 'darwin'; // Docker Desktop translates uids + native host.docker.internal
@@ -1633,7 +1617,7 @@ export function resolveDockerLaunchOptions(
   // inherits it), so API-key CLIs get their key without it appearing in argv.
   const execEnvNames = getCli(mode)?.env.dockerExecEnvNames ?? [];
 
-  return { mode, docker, sessionId, resumeSessionId, createContext, execEnv, execEnvNames, seedCopies };
+  return { mode, docker, sessionId, resumeSessionId, claudeResumeCandidates, createContext, execEnv, execEnvNames, seedCopies };
 }
 
 /**
@@ -1680,6 +1664,7 @@ function buildRemoteSessionCommand(options: {
   /** OMP only — resume/continue overrides for a remote omp relaunch. */
   ompConfig?: OmpConfig;
   resumeSessionId?: string;
+  claudeResumeCandidates?: readonly string[];
 }): string {
   const { remote, sessionId } = options;
   if (remote.owned === false) {
@@ -2354,6 +2339,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       deepSeekConfig,
       ompConfig,
       resumeSessionId,
+      claudeResumeCandidates: options.claudeResumeCandidates,
       effort,
       advisorModel,
       statusLineCommand,
@@ -2367,9 +2353,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // Build the full command to run inside tmux
       const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
       const fullCmd = docker
-        ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId))
+        ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
         : remote
-          ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId })
+          ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
           : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
 
       // Create tmux session in three steps to handle cold-start (no server running)
@@ -2656,6 +2642,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       deepSeekConfig,
       ompConfig,
       resumeSessionId,
+      claudeResumeCandidates: options.claudeResumeCandidates,
       effort,
       advisorModel,
       statusLineCommand,
@@ -2665,9 +2652,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const cmd = wrapWithNice(baseCmd, config);
     const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
     const fullCmd = docker
-      ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId))
+      ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
       : remote
-        ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId })
+        ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
         : workerLaunchCommand(localFullCmd, workingDir, sessionId);
 
     try {

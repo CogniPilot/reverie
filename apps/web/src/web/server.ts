@@ -4791,6 +4791,7 @@ export class WebServer extends EventEmitter {
               // the conversation the CLI was on when the server stopped, which is
               // what a re-attach must point the viewer at instead of the launch id.
               claudeSessionChain: savedState?.claudeSessionChain,
+              claudeSessionIdPending: savedState?.claudeSessionIdPending,
               // What the previous run last observed of this pane's agent. Carried
               // over so the first persist after boot does not blank a record that
               // says the agent exited; the attach below drops it, and the

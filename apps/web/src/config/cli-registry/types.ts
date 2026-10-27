@@ -126,10 +126,12 @@ export interface CliLaunch {
   /**
    * 'first'    — emit the first variant whose `when` passes (the usual case).
    * 'fallback' — emit EVERY passing variant joined by the engine's own ` || `, which is how
-   *              claude's `--resume X || --session-id Y` shell fallback is expressed without
-   *              config ever containing shell text. The engine owns the operator.
+   *              an explicit legacy custom fallback is expressed without config shell text.
+   *              The fixed resumeSelection profile instead chooses before provider exec.
    */
   chain?: 'first' | 'fallback';
+  /** Fixed launch-time transcript metadata selection; never fallback on provider exit. */
+  resumeSelection?: 'claude-transcript';
   variants: CliVariant[];
   /**
    * Maps a declared param name to the field name it arrives under on the legacy

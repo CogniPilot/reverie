@@ -938,6 +938,13 @@ function wakeableHost(host: RemoteHost): WakeableRemote {
   };
 }
 
+/** Persist a launch seed only once that runtime's conversation is known. */
+export async function persistDockerLaunchConversation(session: Session, configDir: string): Promise<void> {
+  if (!session.docker || session.mode !== 'claude' || session.claudeSessionIdPending) return;
+  await persistDockerCaseClaudeSessionId(configDir, session.docker.containerName,
+    session.claudeSessionId || session.id);
+}
+
 export function registerSessionRoutes(
   app: FastifyInstance,
   ctx: SessionPort & EventPort & ConfigPort & InfraPort & AuthPort & TabLayoutPort,
@@ -2865,7 +2872,7 @@ export function registerSessionRoutes(
    * effort: the tab rename has already happened and must not fail on this.
    */
   async function syncClaudeTitle(session: Session): Promise<void> {
-    if (getCli(session.mode)?.capabilities.transcript !== 'claude-jsonl' || session.remote || session.docker) return;
+    if (getCli(session.mode)?.capabilities.transcript !== 'claude-jsonl' || session.remote || session.docker || session.claudeSessionIdPending) return;
     try {
       const projectsDir = join(process.env.HOME || '/tmp', '.claude', 'projects');
       const hookPath = ctx.getTranscriptPath(session.id);
@@ -2995,6 +3002,14 @@ export function registerSessionRoutes(
         hasContext: blocks.length > 0,
         messages: externalQuery.context === 'full' ? blocks : undefined,
       };
+    }
+
+    // No website-side guess can identify the runtime selector's choice. Even
+    // an existing SID transcript may be a different candidate from its seed.
+    if (session.claudeSessionIdPending) {
+      const query = req.query as { context?: string };
+      return { text: '', timestamp: '', hasContext: false, claudeSessionIdPending: true,
+        ...(query.context === 'full' || query.context === 'turn' ? { messages: [] } : {}) };
     }
 
     // Scan ~/.claude/projects/*/ for the transcript file
@@ -4834,13 +4849,7 @@ export function registerSessionRoutes(
       // NOW — a later container stop/reboot relaunch resumes this conversation even
       // if no in-container hook ever reaches the host (loopback bind, no bridge
       // listener). Hook/last-response adoption updates it again after /clear.
-      if (docker && mode === 'claude') {
-        void persistDockerCaseClaudeSessionId(
-          REVERIE_CONFIG_DIR,
-          docker.containerName,
-          session.claudeSessionId || session.id
-        ).catch(() => {});
-      }
+      void persistDockerLaunchConversation(session, REVERIE_CONFIG_DIR).catch(() => {});
 
       // Save lastUsedCase to settings for TUI/web sync
       try {
@@ -5560,6 +5569,7 @@ export function registerSessionRoutes(
         createdAt: st.createdAt,
         lastActivityAt: st.lastActivityAt,
         claudeSessionId: s.claudeSessionId ?? undefined,
+        claudeSessionIdPending: s.claudeSessionIdPending || undefined,
         pinned: st.pinned,
         pinnedAt: st.pinnedAt,
       };
@@ -5584,6 +5594,7 @@ export function registerSessionRoutes(
       createdAt: p.createdAt,
       lastActivityAt: p.lastActivityAt,
       claudeSessionId: p.resumeSessionId || p.codexConfig?.resumeSessionId,
+      claudeSessionIdPending: p.claudeSessionIdPending,
       pinned: p.pinned,
       pinnedAt: p.pinnedAt,
     }));

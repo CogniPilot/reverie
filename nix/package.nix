@@ -69,7 +69,7 @@ let
         test/local-model-profile.test.ts test/routes/quick-start-custom-model.test.ts \
         test/plan-auth-status.test.ts test/plan-account-management.test.ts \
         test/subscription-profile-remove.test.ts test/subscription-profiles.test.ts \
-        test/cli-registry-spawn-golden.test.ts test/company-lifecycle-ui.test.ts test/company-voice-ui.test.ts \
+        test/cli-registry-spawn-golden.test.ts test/claude-launch-selection.test.ts test/claude-launch-attribution.test.ts test/company-lifecycle-ui.test.ts test/company-voice-ui.test.ts \
         test/employee-pronouns.test.ts test/routes/voice-speak-routes.test.ts \
         test/hands-free.test.ts test/car-hands-free.test.ts test/voice-chat.test.ts test/car-mode.test.ts \
         test/car-mode-team-voice.test.ts test/car-mode-member-voice.test.ts test/car-reply-voice.test.ts test/car-turn-link.test.ts \

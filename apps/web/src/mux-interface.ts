@@ -118,6 +118,8 @@ export interface CreateSessionOptions {
   ompConfig?: OmpConfig;
   /** When restoring after reboot, resume a previous Claude conversation by its session ID */
   resumeSessionId?: string;
+  /** Internal ordered candidates, checked only inside the actual launch namespace. */
+  claudeResumeCandidates?: readonly string[];
   /** Extra env vars exported before launching the CLI (e.g., CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS). Ephemeral — not written to disk. */
   envOverrides?: Record<string, string>;
   /** Claude CLI effort level, injected as a `--settings` soft default (overridable via /effort in-session) */
@@ -166,6 +168,7 @@ export interface RespawnPaneOptions {
   ompConfig?: OmpConfig;
   /** Resume a previous Claude conversation when respawning */
   resumeSessionId?: string;
+  claudeResumeCandidates?: readonly string[];
   /** Extra env vars exported before launching the CLI (preserved across respawns). */
   envOverrides?: Record<string, string>;
   /**

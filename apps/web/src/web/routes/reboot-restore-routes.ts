@@ -262,6 +262,7 @@ export async function spendRebootRestore(
           saved.attachmentHistory,
         lastSubmitAt: saved.lastSubmitAt,
         claudeSessionChain: saved.claudeSessionChain,
+        claudeSessionIdPending: saved.claudeSessionIdPending,
         lastActivityAt: saved.lastActivityAt,
         owner: saved.owner,
         parentSessionId: saved.parentSessionId,

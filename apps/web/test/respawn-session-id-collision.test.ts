@@ -27,9 +27,11 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { getCli } from '../src/config/cli-registry/registry.js';
+import * as registry from '../src/config/cli-registry/registry.js';
+const originalGetCli = getCli;
 import { buildSpawnCommandFromRegistry } from '../src/session-cli-registry-bridge.js';
 import { claudeTranscriptExists } from '../src/utils/claude-transcript.js';
 import type {
@@ -115,9 +117,17 @@ let configDir: string;
 /** A relocated Claude config dir, so the transcript gate reads a real fixture. */
 beforeEach(() => {
   configDir = mkdtempSync(join(tmpdir(), 'reverie-transcript-'));
+  // Explicit legacy custom profiles retain host pinning compatibility. Current
+  // stock selection is checked separately below, in the actual runtime namespace.
+  vi.spyOn(registry, 'getCli').mockImplementation((id) => {
+    const entry = originalGetCli(id);
+    return entry?.launch.resumeSelection
+      ? { ...entry, launch: { ...entry.launch, resumeSelection: undefined } } : entry;
+  });
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(configDir, { recursive: true, force: true });
 });
 
@@ -140,7 +150,7 @@ function localSession(extra: Record<string, unknown> = {}, mux?: TerminalMultipl
   });
 }
 
-describe('pinning a conversation onto a relaunch', () => {
+describe('legacy custom profile: pinning a conversation onto a relaunch', () => {
   it('pins the chain tail on the DEAD-PANE respawn, which is the bug', async () => {
     // The path a recovered `/exit`ed session takes, and the one that was
     // missing the pin. Driven through `startInteractive()` rather than asserted
@@ -417,7 +427,8 @@ describe('what the pin renders', () => {
   // reason shows. Asserting here rather than counting call sites in the source
   // is what would have caught the divergent-pin and synthetic-id cases.
   const SID = '00000008-0008-4000-8000-000000000008';
-  const entry = getCli('claude');
+  const stock = getCli('claude');
+  const entry = stock && { ...stock, launch: { ...stock.launch, resumeSelection: undefined } };
   const render = (resumeSessionId?: string) => {
     if (!entry) throw new Error('no registry entry for claude');
     return buildSpawnCommandFromRegistry(entry, {
@@ -483,5 +494,27 @@ describe('where the transcript lookup reads', () => {
       if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR;
       else process.env.CLAUDE_CONFIG_DIR = before;
     }
+  });
+});
+
+
+describe('current stock profile delegates transcript selection to its actual runtime', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  it('carries ordered chain/seed/SID candidates without a website transcript', async () => {
+    const seed = '00000011-0011-4000-8000-000000000011';
+    const session = localSession({ claudeSessionChain: [CONVERSATION], resumeSessionId: seed });
+    const options = await (session as unknown as {
+      _buildRespawnPaneOptionsWithResumePin(): Promise<RespawnPaneOptions>;
+    })._buildRespawnPaneOptionsWithResumePin();
+    expect(options.claudeResumeCandidates).toEqual([CONVERSATION, seed, session.id]);
+    expect(options.resumeSessionId).toBe(seed); // intent only; no host-backed selection claim
+  });
+  it('does not use a website transcript to remove a remote candidate', async () => {
+    const session = localSession({ claudeSessionChain: [CONVERSATION],
+      remote: { hostId: 'h1', label: 'box', host: 'box', username: 'dev', remotePath: '/tmp' } });
+    const options = await (session as unknown as {
+      _buildRespawnPaneOptionsWithResumePin(): Promise<RespawnPaneOptions>;
+    })._buildRespawnPaneOptionsWithResumePin();
+    expect(options.claudeResumeCandidates).toEqual([CONVERSATION, session.id]);
   });
 });

@@ -7,7 +7,7 @@
  * 1. Config contains no shell text. There is no `command: "..."` field anywhere in the
  *    schema. An entry declares a sequence of typed tokens (`ArgSpec`); this module is the
  *    ONLY place that turns them into a string, and it owns every separator itself: a single
- *    space between tokens, and ` || ` between fallback variants. Neither can originate from
+ *    space between tokens, and ` || ` between explicit legacy fallback variants. Neither can originate from
  *    config, because config has no field that could hold either.
  * 2. Every literal (`lit`, `flag`, `value`) is validated against `SAFE_BARE_TOKEN` — no
  *    space, quote, backtick, `$`, `;`, `&`, `|`, `<`, `>`, parens, braces, newline or
@@ -29,12 +29,16 @@
 import type { ArgSpec, CliEntry, CliLaunch, Cond, EngineValue, ParamSpec, QuoteStyle } from './types.js';
 import { matchesPattern } from './patterns.js';
 import { SAFE_BARE_TOKEN } from './patterns.js';
+import { renderClaudeLaunch } from '../../utils/claude-launch.js';
 
 /** Resolved parameter values, keyed by the name declared in `CliLaunch.params`. */
 export type ParamValues = Record<string, string | boolean | undefined>;
 
 /** Values the caller supplies for the reserved engine params. */
-export type EngineValues = Partial<Record<EngineValue, string>>;
+export type EngineValues = Partial<Record<EngineValue, string>> & {
+  /** Internal ordered conversation candidates; not a registry template or API field. */
+  claudeResumeCandidates?: readonly string[];
+};
 
 /**
  * POSIX single-quote escaping: end-quote, escaped-literal-quote, restart-quote. Identical in
@@ -158,6 +162,21 @@ export function renderLaunch(
   engineValues: EngineValues,
   gatesPassed: ReadonlySet<string> = new Set()
 ): string {
+  if (launch.resumeSelection === 'claude-transcript') {
+    if (!engineValues.sessionId) throw new Error('Claude transcript launch requires its session identity');
+    const resume = launch.variants.find((variant) => variant.id === 'resume');
+    const fresh = launch.variants.find((variant) => variant.id === 'new');
+    if (!resume || !fresh) throw new Error('Claude transcript launch variants unavailable');
+    const plain = { ...launch, resumeSelection: undefined };
+    const ids = [...(engineValues.claudeResumeCandidates ?? []), params.resumeId, engineValues.sessionId];
+    const pattern = launch.params.resumeId;
+    const candidates = ids.filter((id): id is string => typeof id === 'string' &&
+      pattern?.type === 'token' && matchesPattern(pattern.pattern, id));
+    return renderClaudeLaunch(candidates.map((id) => ({
+      id,
+      command: renderLaunch({ ...plain, variants: [resume] }, { ...params, resumeId: id }, engineValues, gatesPassed),
+    })), renderLaunch({ ...plain, variants: [fresh] }, params, engineValues, gatesPassed));
+  }
   const cache = new Map<string, string | undefined>();
   const resolved = (name: string): string | undefined => {
     if (cache.has(name)) return cache.get(name);

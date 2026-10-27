@@ -31,6 +31,7 @@ export type UnifiedSessionItem = {
   createdAt?: number;
   lastActivityAt?: number;
   claudeSessionId?: string;
+  claudeSessionIdPending?: boolean;
   firstPrompt?: string;
   /** Most recent user prompt from the transcript (COD-145), parallel to firstPrompt. */
   lastPrompt?: string;
@@ -67,6 +68,7 @@ export type LiveSessionInput = {
   createdAt?: number;
   lastActivityAt?: number;
   claudeSessionId?: string;
+  claudeSessionIdPending?: boolean;
   pinned?: boolean;
   pinnedAt?: number;
 };
@@ -82,6 +84,7 @@ export type PersistedSessionInput = {
   lastActivityAt?: number;
   /** Claude conversation ID this session resumes (`SessionState.resumeSessionId`). */
   claudeSessionId?: string;
+  claudeSessionIdPending?: boolean;
   pinned?: boolean;
   pinnedAt?: number;
 };
@@ -179,12 +182,18 @@ export function mergeUnifiedSessions(sources: UnifiedSources): UnifiedSessionIte
   // would otherwise surface twice — once as a live/persisted row and once as a
   // separate history-only row keyed by the conversation UUID. Live wins over
   // persisted on conflicting entries (registered last).
+  // A live unknown selection overrides its archived resume intent. Conversely,
+  // an actual live hook resolution overrides a stale persisted pending bit.
+  const pendingById = new Map<string, boolean>();
+  for (const p of sources.persisted ?? []) pendingById.set(p.id, !!p.claudeSessionIdPending);
+  for (const v of sources.live ?? []) pendingById.set(v.id, !!v.claudeSessionIdPending);
+  const pendingIds = new Set([...pendingById].filter(([, pending]) => pending).map(([id]) => id));
   const aliasToOwner = new Map<string, string>();
   for (const p of sources.persisted ?? []) {
-    if (p.claudeSessionId !== undefined && p.claudeSessionId !== p.id) aliasToOwner.set(p.claudeSessionId, p.id);
+    if (!pendingIds.has(p.id) && p.claudeSessionId !== undefined && p.claudeSessionId !== p.id) aliasToOwner.set(p.claudeSessionId, p.id);
   }
   for (const v of sources.live ?? []) {
-    if (v.claudeSessionId !== undefined && v.claudeSessionId !== v.id) aliasToOwner.set(v.claudeSessionId, v.id);
+    if (!pendingIds.has(v.id) && v.claudeSessionId !== undefined && v.claudeSessionId !== v.id) aliasToOwner.set(v.claudeSessionId, v.id);
   }
   const resolveId = (sessionId: string): string => aliasToOwner.get(sessionId) ?? sessionId;
 
@@ -306,6 +315,13 @@ export function mergeUnifiedSessions(sources: UnifiedSources): UnifiedSessionIte
     }
   }
   for (const item of map.values()) {
+    if (pendingIds.has(item.sessionId)) {
+      item.claudeSessionIdPending = true;
+      delete item.claudeSessionId;
+      delete item.firstPrompt;
+      delete item.lastPrompt;
+      continue; // neither archived alias nor same-cwd prompt is a current binding
+    }
     const hasOwnHistoryEntry = item.sources.includes('history');
     if (!item.firstPrompt) {
       // never overwrite an existing non-empty prompt
