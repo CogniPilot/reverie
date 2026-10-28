@@ -251,7 +251,9 @@ configuration filename, image, all resource limits and unrelated laptop policies
 It does not stop laptops, change employee intent, issue a wake or run a workload.
 
 Coordinate a provider checkpoint and normal exit for the selected employee first;
-preparation requires its existing laptop already stopped. Keep its current SID,
+preparation requires its existing laptop already stopped. A normal provider exit
+may set desired-running OFF: configuration maintenance preserves that exact OFF
+state and does not require turning it ON. Vacation mode still refuses. Keep its current SID,
 generation, account, conversation, home and private Nix data. Broker maintenance
 briefly disconnects phone/terminal transports even while peer containers and
 provider processes remain running. Arrange that window before applying.
@@ -306,8 +308,11 @@ intended GPU grant already included, reloads the user manager and starts the new
 broker. It never resets a journal or installs the optional H/RAM actor.
 
 The helper verifies actual new broker/phone listeners with `SO_PEERCRED`, current
-capacity and unchanged peers. Normal website reconnection may start the same
-owner-requested selected session. Such activation is accepted only when its new
+capacity and unchanged peers. When current owner intent is ON, normal website reconnection may start the same
+owner-requested selected session. An OFF employee remains unavailable through
+the existing broker/storage start guards; GPU configuration is no start grant.
+A subsequent normal owner GUI start is separate from this maintenance operation.
+Observed activation is accepted only for an unchanged valid ON binding and when its new
 full CID, unchanged image/resources/security, selected CDI device, actual
 character-device identities and canonical home/Nix/scratch bindings match. A
 normal runtime-thread update is allowed; identity, account/recipe or owner-intent

@@ -15,7 +15,8 @@ from unittest.mock import patch
 from reverie import worker_service_upgrade as U
 from reverie import worker_resource_reservations as R
 from reverie.worker_service import UNIT, environment_selection
-from reverie.worker_storage import prepare_storage, storage_paths
+from reverie.worker_storage import prepare_storage, storage_paths, storage_start_allowed
+from reverie.worker import Broker
 from tests import test_worker_service as service_fixture
 from tests.test_worker_resource_reservations import NativeFixture, EID, SID, COMPANY, POOL
 
@@ -211,9 +212,9 @@ class GPUServiceUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'template'): self.prepare()
         self.assert_not_attempted()
 
-    def test_owner_off_or_ambiguous_current_binding_refuses_before_attempt(self):
-        self.employee['desiredRunning'] = False; self.company()
-        with self.assertRaisesRegex(ValueError, 'running intent'): self.prepare()
+    def test_owner_vacation_refuses_before_attempt_even_when_stopped_off(self):
+        self.employee['desiredRunning'] = False; self.employee['onVacation'] = True; self.company()
+        with self.assertRaisesRegex(ValueError, 'vacation intent'): self.prepare()
         self.assert_not_attempted()
 
     def test_timeout_after_stop_retains_all_backups_and_never_rolls_back_or_replays(self):
@@ -355,6 +356,28 @@ class GPUServiceUpgradeTests(unittest.TestCase):
             finally:
                 thread.join(2)
                 self.assertFalse(thread.is_alive())
+
+    def test_stopped_off_employee_can_upgrade_without_changing_intent_or_granting_start(self):
+        self.employee['desiredRunning'] = False; self.company()
+        before = Path(self.config['companyFile']).read_bytes()
+        result = self.upgrade.apply(self.prepare())
+        self.assertIsNone(result['selectedNormalActivation'])
+        self.assertTrue(result['noWakeCommand'])
+        self.assertEqual(Path(self.config['companyFile']).read_bytes(), before)
+        after = json.loads(self.service.config_path.read_bytes())
+        self.assertEqual(after['employeeGpuGrants'], {EID: DEVICE})
+        self.assertFalse(storage_start_allowed(after, storage_paths(after, SID)))
+        broker = Broker.__new__(Broker); broker.config = after
+        self.assertFalse(broker.allowed(SID))
+        self.assertFalse(any('create' in cmd or 'stop-laptops' in cmd or 'wake' in cmd for cmd in self.commands))
+
+    def test_off_employee_unexpected_native_start_is_never_claimed_as_activation(self):
+        self.employee['desiredRunning'] = False; self.company(); sha = self.prepare()
+        with self.activate_on_normal_start(), self.assertRaisesRegex(ValueError, 'OFF or vacation'):
+            self.upgrade.apply(sha)
+        self.assertFalse((self.operation / 'DONE.json').exists())
+        self.assertTrue((self.operation / 'ATTEMPT.json').exists())
+        self.assertFalse(self.employee['desiredRunning'])
 
     def test_private_input_cpu_and_command_fields_are_not_an_execution_api(self):
         for values in ([True], [1, 1], [{}]):

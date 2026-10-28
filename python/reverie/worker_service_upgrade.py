@@ -262,7 +262,7 @@ class GPUUpgrade:
         rows = company.get('employees')
         need(type(rows) is list and len(rows) <= 256, 'Bounded employee registry required')
         binding = self.stable_binding(before, selection['employeeId'])
-        need(binding['desiredRunning'] and not binding['onVacation'], 'Current owner running intent required')
+        need(not binding['onVacation'], 'Current owner vacation intent refuses GPU maintenance')
         sid = binding['sessionId']
         for row in rows:
             if type(row) is dict and row.get('sessionId') and row['sessionId'] != sid:
@@ -274,7 +274,7 @@ class GPUUpgrade:
 
     def native(self, before, after, selection):
         report = P.check(before, selection['employeeId'], selection['device'], spec_sha256=selection['cdiSHA256'])
-        need(report['ownerIntentAllowsStart'] and not report['currentLaptop']['running'],
+        need(not report['currentLaptop']['running'],
              'Selected provider must already have handed off and laptop must be stopped')
         paths = storage_paths(before, report['employee']['sessionId'])
         need(paths.kind == 'employee' and paths.identity == selection['employeeId'], 'Selected canonical storage owner changed')
@@ -496,6 +496,8 @@ class GPUUpgrade:
                 need(len(active) <= 1, 'Selected native laptop is ambiguous')
                 activation = None
                 if active:
+                    need(binding['desiredRunning'] and not binding['onVacation'],
+                         'OFF or vacation employee cannot qualify normal activation')
                     # Observe normal owner-intended reconnection only. This
                     # helper issues no J/create/provider/wake request.
                     report = P.check(after, plan['selection']['employeeId'], plan['selection']['device'],
