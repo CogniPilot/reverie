@@ -99,7 +99,7 @@ Object.assign(ReverieApp.prototype, {
       return;
     }
     this._notePlanAccounts(res.data.accounts);
-    updated.textContent = `updated ${new Date(res.data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    updated.textContent = `updated ${(globalThis.ReverieTime?.format(res.data.generatedAt) ?? new Date(res.data.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
     const cards = res.data.accounts.map((a) => this._planCard(a));
     cards.push(this._gpuCard(res.data.gpu));
     grid.replaceChildren(...cards);
@@ -123,6 +123,8 @@ Object.assign(ReverieApp.prototype, {
 
   _planCard(a) {
     const { el } = this._plansEls;
+    const time = value => globalThis.ReverieTime?.format(value)
+      ?? new Date(value).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
     const p = a.pace;
     const rec = PLAN_RECOMMENDATION[p.recommendation] || PLAN_RECOMMENDATION.unknown;
     const card = el('article', `plans-card plans-card--${p.recommendation}`);
@@ -160,7 +162,7 @@ Object.assign(ReverieApp.prototype, {
     }
     const reset = p.weekReset ? new Date(p.weekReset) : null;
     card.append(
-      this._planBar('week', p.elapsed, 'plans-bar--time', reset ? `Week resets ${reset.toLocaleString()}` : ''),
+      this._planBar('week', p.elapsed, 'plans-bar--time', reset ? `Week resets ${time(reset)}` : ''),
       this._planBar('used', p.weekly, `plans-bar--${p.recommendation}`, 'Weekly usage'),
       this._planBar('5 h', p.fiveHour, 'plans-bar--five', '5-hour window')
     );
@@ -173,17 +175,17 @@ Object.assign(ReverieApp.prototype, {
     fact('pace', p.pace === null ? '-' : `${p.pace > 0 ? '+' : ''}${p.pace}`);
     fact('burn', p.burnPerHour === null ? '-' : `${p.burnPerHour}%/h`);
     if (p.runsOutAt) {
-      fact('runs out', new Date(p.runsOutAt).toLocaleString([], { weekday: 'short', hour: 'numeric' }));
+      fact('runs out', time(p.runsOutAt));
     } else {
       fact('at reset', p.projected === null ? '-' : `${Math.round(p.projected)}%`);
     }
     if (a.usageSource === 'statusline' || a.usageSource === 'history') {
-      const asOf = new Date(a.usageAsOf).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const asOf = time(a.usageAsOf);
       fact(a.usageStale ? 'stale, as of' : 'as of', asOf);
     } else if (a.provider === 'anthropic' && p.weekly === null && p.fiveHour === null) {
       fact('usage', 'no report yet');
     }
-    if (reset) fact('resets', reset.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
+    if (reset) fact('resets', time(reset));
     card.append(facts);
     if (a.usageError) card.append(el('p', 'plans-note', a.usageError));
     card.append(this._planResets(a));
@@ -208,18 +210,13 @@ Object.assign(ReverieApp.prototype, {
     return card;
   },
 
-  /** "Usage resets": used %, reset and run-out in ET, projected %, and (Codex) banked resets. Read-only: no redeem control. */
+  /** Usage resets and run-out in the configured company timezone. Read-only. */
   _planResets(a) {
     const { el } = this._plansEls;
     const p = a.pace;
     const et = (ms) =>
       ms
-        ? new Date(ms).toLocaleString('en-US', {
-            timeZone: 'America/New_York',
-            weekday: 'short',
-            hour: 'numeric',
-            minute: '2-digit',
-          }) + ' ET'
+        ? (globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))
         : '-';
     const pct = (n) => (n === null || n === undefined ? '-' : `${Math.round(n)}%`);
     const box = el('div', 'plans-resets');

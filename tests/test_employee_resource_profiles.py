@@ -13,6 +13,15 @@ class Controls(unittest.TestCase):
   config=dict(R,sessionResources={C:dict(R,memoryMiB=4096)})
   before=copy.deepcopy(config);r=self.store.stage_config(config,E,bind(),expected_revision=1,expected_profile_version=1,sid_owners={A:E,B:E})
   self.assertEqual(config,before);self.assertEqual(r['config']['sessionResources'][B],R);self.assertEqual(r['config']['sessionResources'][C],before['sessionResources'][C]);self.assertEqual(r['effective_policy_sha256'],m.policy_digest(r['config'],B));self.assertEqual(self.store.snapshot()['profiles'][E]['resources'],R)
+ def test_central_pool_stages_global_copies_without_rewriting_canonical_profile(self):
+  self.save();raw=(self.root/'profiles.json').read_bytes()
+  config=dict(R,poolMemoryMiB=51200,poolTasksMax=4096,resourceReservations={'configured':True})
+  result=self.store.stage_config(config,E,bind(),expected_revision=1,expected_profile_version=1,sid_owners={A:E,B:E})
+  expected=dict(R,poolMemoryMiB=51200,poolTasksMax=4096)
+  self.assertEqual(result['config']['employeeResources'][E],expected)
+  self.assertEqual(result['config']['sessionResources'][B],expected)
+  self.assertEqual((self.root/'profiles.json').read_bytes(),raw)
+  self.assertEqual(self.store.snapshot()['profiles'][E]['resources'],R)
  def test_missing_profile_no_default(self):
   with self.assertRaisesRegex(m.Refusal,'NO_DEFAULT'):self.store.stage_config(R,E,bind(),expected_revision=0,expected_profile_version=0,sid_owners={A:E,B:E})
  def test_stale_cas_version_and_identity_refuse_no_write(self):

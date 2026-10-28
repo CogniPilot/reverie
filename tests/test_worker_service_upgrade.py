@@ -121,6 +121,20 @@ class GPUServiceUpgradeTests(unittest.TestCase):
                         patch.object(R, 'NativeObserver', FakeNative)]
         for p in self.patches: p.start(); self.addCleanup(p.stop)
         self.baseline_config = self.service.config_path.read_bytes()
+        if os.environ.get('NIX_BUILD_TOP'):
+            # These real-store/fault controls model host metadata, not native
+            # root custody. Nix user namespaces can map / and /tmp to uid 65534.
+            # Only those fixed roots are modeled; all private ancestor modes,
+            # inodes, symlinks and replacement observations remain actual.
+            original = Path.lstat
+            mapped_root = Path('/').stat().st_uid
+            def lstat(path, *args, **kwargs):
+                info = original(path, *args, **kwargs)
+                if path in (Path('/'), Path('/tmp')) and info.st_uid == mapped_root:
+                    values = list(info); values[4] = 0
+                    return os.stat_result(values)
+                return info
+            self.enterContext(patch.object(Path, 'lstat', lstat))
 
     def company(self):
         Path(self.config['companyFile']).write_text(json.dumps({'employees': [self.employee, self.peer]}))
@@ -211,6 +225,15 @@ class GPUServiceUpgradeTests(unittest.TestCase):
         self.old.chmod(0o644); self.old.write_text(self.old.read_text() + 'ExecStartPost=/unsafe\n')
         with self.assertRaisesRegex(ValueError, 'template'): self.prepare()
         self.assert_not_attempted()
+
+    def test_unsafe_private_unit_ancestor_still_refuses_before_attempt(self):
+        self.service.unit.parent.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(ValueError, 'Unsafe unit directory ancestor'):
+                self.prepare()
+            self.assert_not_attempted()
+        finally:
+            self.service.unit.parent.chmod(0o755)
 
     def test_owner_vacation_refuses_before_attempt_even_when_stopped_off(self):
         self.employee['desiredRunning'] = False; self.employee['onVacation'] = True; self.company()

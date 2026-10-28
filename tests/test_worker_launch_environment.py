@@ -62,6 +62,15 @@ class ChildEnvironmentTests(unittest.TestCase):
         self.assertNotIn('REVERIE_WORKER_SOCKET',env)
         self.assertEqual({env[k] for k in ('TMPDIR','TMP','TEMP')},{'/tmp'})
 
+    def test_gpu_container_library_default_preserves_explicit_launch_override(self):
+        default = '/usr/local/nvidia/lib64:/usr/local/nvidia/lib'
+        inherited = {'LD_LIBRARY_PATH': default, 'CODEX_HOME': '/selected/codex'}
+        env = self.run_child(inherited=inherited)
+        self.assertEqual(env['LD_LIBRARY_PATH'], default)
+        env = self.run_child(inherited=inherited, requested={'LD_LIBRARY_PATH': '/owner/lib'})
+        self.assertEqual(env['LD_LIBRARY_PATH'], '/owner/lib')
+        self.assertEqual(env['CODEX_HOME'], '/selected/codex')
+
     def test_no_packaged_shims_does_not_rewrite_existing_path(self):
         env = self.run_child(packaged=False)
         self.assertEqual(env['PATH'],BROKER_PATH)

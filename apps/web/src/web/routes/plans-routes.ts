@@ -1,3 +1,4 @@
+import { displayTimeZone } from '../../display-time.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview Plans: subscription accounts paced against their weekly windows.
@@ -28,6 +29,7 @@ import { isAdmin, ownerFor, parseBody } from '../route-helpers.js';
 export interface PlansScope {
   /** The live session this request speaks as (X-Reverie-Parent-Session), undefined when it does not resolve. */
   callerSession(req: FastifyRequest): string | undefined;
+  timeZone?(owner: string | undefined): string | undefined;
   /** Does this session hold plans.view_all (Admin, or Lead of a live room)? It sees every account. */
   canViewAll(sessionId: string): boolean;
   employees?(owner: string | undefined): Array<{
@@ -70,7 +72,7 @@ export function registerPlansRoutes(
   app.get('/api/plans', async (req, reply) => {
     if (verifiedOwner(req)) {
       if (!isAdmin(req)) return forbid(reply);
-      return { success: true, data: await plans.plans() };
+      return { success: true, data: { ...(await plans.plans()), timeZone: displayTimeZone(scope?.timeZone?.(ownerFor(req))) } };
     }
     if (req.headers['x-reverie-service-token'] !== undefined) return forbid(reply);
     const self = scope?.callerSession(req);
@@ -79,7 +81,7 @@ export function registerPlansRoutes(
         .code(403)
         .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'X-Reverie-Parent-Session does not name a live session you may speak as'));
     }
-    const all = await plans.plans();
+    const all = { ...(await plans.plans()), timeZone: displayTimeZone(scope?.timeZone?.(ownerFor(req))) };
     if (scope?.canViewAll(self)) return { success: true, data: all };
     const { gpu: _gpu, ...rest } = all;
     return { success: true, data: { ...rest, accounts: all.accounts.filter((a) => a.sessions.some((s) => s.id === self)) } };

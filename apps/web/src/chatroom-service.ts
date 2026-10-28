@@ -11,6 +11,7 @@
  */
 
 import { randomUUID, createHash } from 'node:crypto';
+import { displayTime, displayTimeZone } from './display-time.js';
 import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
 import { ChatroomNoticeState, noticeDigest, type NoticeAttention, type NoticeRecipient, type NoticeSource } from './chatroom-notice-state.js';
 import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
@@ -215,10 +216,6 @@ const OWED_IDLE_RECHECK_MS = 30_000;
 /** While it keeps working, after this long an unconfirmed delivery is said so once. */
 const OWED_DELIVERY_DEADLINE_MS = 10 * 60_000;
 
-function etTime(at: number): string {
-  return new Date(at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
-}
-
 export class ChatroomService {
   /** Per-instance startup opt-in; configuration-OFF remains safe for stored receipts. */
   readonly adminPhoneWakeEnabled = process.env.REVERIE_ADMIN_PHONE_WAKE === 'enabled';
@@ -319,6 +316,8 @@ export class ChatroomService {
   lastSeen(sessionId: string, roomId: string): SeenMark | undefined {
     return this.seen.get(sessionId, roomId);
   }
+
+  displayTimeZone(owner?: string): string { return displayTimeZone(this.deps.timeZone?.(owner)); }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
   turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } }): TurnSummary {
@@ -430,7 +429,7 @@ export class ChatroomService {
         });
       }
     }
-    const summary = renderTurnSummary(mode, candidates, coverage);
+    const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now());
     if (historyPage) summary.sourceReferences = candidates.map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
     return summary;
   }
@@ -544,6 +543,25 @@ export class ChatroomService {
       pending: this.delivery.pendingFor(sessionId),
       held: holds.filter((item) => this.store.get(item.roomId)?.members.some((m) => m.sessionId === sessionId)),
     };
+  }
+
+  searchTimeZone(owner: string | undefined): string {
+    try { return new Intl.DateTimeFormat('en-US', { timeZone: this.deps.timeZone?.(owner) || 'UTC' }).resolvedOptions().timeZone; }
+    catch { return 'UTC'; }
+  }
+
+  /** Read-only human search. Route authorization is repeated for every request/page/context. */
+  searchMessages(roomIds: string[], query: string, before?: { at: number; id: string; roomId: string }) {
+    if (!this.db) throw new ChatroomError('History search requires the chat database', 'UNAVAILABLE');
+    return this.db.searchMessages(roomIds, query, before);
+  }
+
+  searchContext(roomId: string, messageId: string) {
+    if (!this.db) throw new ChatroomError('History search requires the chat database', 'UNAVAILABLE');
+    const room = this.store.require(roomId);
+    const messages = this.db.searchContext(roomId, messageId);
+    if (!messages) throw new ChatroomError('Message is no longer available', 'NOT_FOUND');
+    return messages.map(message => this.messageIdentity(room, message));
   }
 
   private exactVisibleMessage(sessionId: string, roomId: string, messageId: string): ChatMessage {
@@ -1577,7 +1595,7 @@ export class ChatroomService {
       // Still working: not a missed reply. Past the fixed delivery deadline, say once that delivery itself is unconfirmed.
       if (!owed.deliveryNoted && owed.delivery !== 'submitted' && now - owed.at >= OWED_DELIVERY_DEADLINE_MS) {
         owed.deliveryNoted = true;
-        this.system(room, `Delivery to ${this.nameOf(owed.sessionId)} still unconfirmed ${Math.round((now - owed.at) / 60_000)} min after the ${etTime(owed.at)} ET message to it (it is still working)`, owed.sessionId);
+        this.system(room, `Delivery to ${this.nameOf(owed.sessionId)} still unconfirmed ${Math.round((now - owed.at) / 60_000)} min after the ${displayTime(owed.at, this.displayTimeZone(room.owner))} message to it (it is still working)`, owed.sessionId);
       }
       this.armOwedReply(key, owed, this.owedRecheckMs());
       return;
@@ -1590,7 +1608,7 @@ export class ChatroomService {
     this.owedReplies.delete(key);
     const mins = Math.round((now - owed.at) / 60_000);
     const delivery = owed.delivery === 'pending' ? 'not yet confirmed' : owed.delivery;
-    this.system(room, `Reply from ${this.nameOf(owed.sessionId)} unconfirmed: no reply linked to the ${etTime(owed.at)} ET message to it after ${mins} min (delivery: ${delivery})`, owed.sessionId);
+    this.system(room, `Reply from ${this.nameOf(owed.sessionId)} unconfirmed: no reply linked to the ${displayTime(owed.at, this.displayTimeZone(room.owner))} message to it after ${mins} min (delivery: ${delivery})`, owed.sessionId);
   }
 
   private noteOwedDelivery(sessionId: string, messages: { roomId: string; messageId: string }[], delivery: 'submitted' | 'unconfirmed'): void {
@@ -1806,7 +1824,7 @@ export class ChatroomService {
     const name = senderLabel({ ...original.from, name: this.nameOf(original.from.sessionId) });
     const snippet = original.text.replace(/\s+/g, ' ').trim().slice(0, 200) || '(attachment)';
     const text =
-      `REPORT from ${from.kind === 'agent' ? quoteForPane(reporter, 80) : reporter} about a message in ${quoteForPane(room.name, 80)} by ${name} (${new Date(original.at).toISOString()}): ` +
+      `REPORT from ${from.kind === 'agent' ? quoteForPane(reporter, 80) : reporter} about a message in ${quoteForPane(room.name, 80)} by ${name} (${displayTime(original.at, this.displayTimeZone(room.owner))}): ` +
       `${quoteForPane(snippet, 200)}${reason.trim() ? ` Reason: ${quoteForPane(reason.trim(), 1000)}` : ''} Please look into it and tell ${from.kind === 'agent' ? quoteForPane(reporter, 80) : 'the user'} what you find.`;
     const dm = this.openDm(coordinator.sessionId, room.owner);
     // An agent is not a participant of the coordinator's direct message, so its report goes in as a system notice naming it.

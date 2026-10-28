@@ -89,6 +89,7 @@ input,select{font:inherit;font-size:16px;padding:8px 10px;min-height:40px;border
 <dialog id="addDlg" aria-label="Add subscription account"></dialog>
 <dialog id="signDlg" aria-label="Sign in"></dialog>
 <dialog id="removeDlg" aria-label="Remove account"></dialog>
+<script src="display-time.js"></script>
 <script>
 (function () {
   'use strict';
@@ -133,7 +134,7 @@ input,select{font:inherit;font-size:16px;padding:8px 10px;min-height:40px;border
     }
   }
   var et = function (ms) {
-    return ms ? new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' }) + ' ET' : '-';
+    return ms ? (window.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })) : '-';
   };
   var pct = function (n) { return n === null || n === undefined ? '-' : Math.round(n) + '%'; };
   var providerName = function (p) { return p === 'anthropic' ? 'Claude' : 'Codex'; };
@@ -184,7 +185,7 @@ input,select{font:inherit;font-size:16px;padding:8px 10px;min-height:40px;border
     }
     var reset = p.weekReset ? new Date(p.weekReset) : null;
     c.append(
-      bar('week', p.elapsed, 'time', reset ? 'Week resets ' + reset.toLocaleString() : ''),
+      bar('week', p.elapsed, 'time', reset ? 'Week resets ' + (window.ReverieTime?.format(reset) ?? reset.toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })) : ''),
       bar('used', p.weekly, p.recommendation || '', 'Weekly usage'),
       bar('5 h', p.fiveHour, '', '5-hour window')
     );
@@ -419,6 +420,7 @@ input,select{font:inherit;font-size:16px;padding:8px 10px;min-height:40px;border
 
   $('addBtn').onclick = openAdd;
   $('refreshBtn').onclick = load;
+  window.addEventListener('reverie-timezone-changed', load);
   load();
   timer = setInterval(function () { if (!document.hidden && !sign) load(); }, 60000);
 })();

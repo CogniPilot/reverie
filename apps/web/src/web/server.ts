@@ -1,3 +1,4 @@
+import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
 import { OWNER_COOKIE } from '../owner-auth/policy.js';
@@ -1435,7 +1436,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs)
+          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1862,6 +1863,7 @@ export class WebServer extends EventEmitter {
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
       employees: () => companyStore.snapshot().employees,
+      timeZone: owner => this.companyService?.view(owner).settings.timeZone,
       coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
       verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
@@ -1869,6 +1871,7 @@ export class WebServer extends EventEmitter {
     this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment and public issue watchers' });
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
+      timeZone: owner => this.companyService.view(owner).settings.timeZone,
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
       employee: (sessionId) => {
         const session = this.sessions.get(sessionId);
@@ -2102,6 +2105,7 @@ export class WebServer extends EventEmitter {
       this.accountLogins,
       {
         callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
+        timeZone: owner => this.companyService.view(owner).settings.timeZone,
         employees: (owner) =>
           this.companyService.view(owner).employees.map(({ id, name, sessionId, icon, avatar }) => ({
             id,

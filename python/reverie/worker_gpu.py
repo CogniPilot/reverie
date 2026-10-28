@@ -98,4 +98,8 @@ def projected_gpu_grants(config, session):
 
 def gpu_create_args(config, session):
     grants = projected_gpu_grants(config, session) or {}
-    return ["--device", grants[session]] if session in grants else []
+    # CDI provides these fixed guest aliases; the private Nix mount can hide its
+    # original host store path. Explicit per-launch environment still overrides
+    # this container default in worker.child(). No other laptop receives it.
+    return ["--device", grants[session], "--env",
+            "LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib"] if session in grants else []

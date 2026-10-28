@@ -23,3 +23,16 @@ charges the actual candidate under the same held reservation policy.
 These checks qualify capacity only. They do not enable a resource actor, grant
 browser authority, resize a laptop, change employee intent, or prove a completed
 resource transaction. Installation and runtime acceptance remain separate.
+
+Within an explicit reservation domain, top-level `poolMemoryMiB` and
+`poolTasksMax` are the single shared pool settings. Employee/session policies
+select their own memory, CPU and process limits. Their six-field wire schema is
+retained for compatibility, but copied pool values do not override the global
+pool. Canonical profiles remain unchanged on disk; staging derives both EID and
+SID pool copies from the global settings. Without `resourceReservations`, legacy
+per-session pool behavior and labels remain unchanged.
+
+This projection does not resize running laptops or accept old policy labels.
+Changing the global pool still requires the existing checked policy transition;
+a live label mismatch refuses reload. Already normalized copies produce the same
+labels and create arguments.

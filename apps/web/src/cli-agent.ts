@@ -29,6 +29,7 @@
  * @module cli-agent
  */
 import http from 'node:http';
+import { displayTime, displayTimeZone } from './display-time.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
 import { agentCredentialStatus } from './cli-agent-credential-status.js';
@@ -1033,12 +1034,12 @@ export async function resolveChatRoom(
  * One message as `agent chat read` prints it. Names and bodies are JSON strings (like the lines delivered to a pane), so a
  * body cannot start a new line or pass itself off as another speaker; a speaker's own label stays outside the quotes.
  */
-export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], roomId?: string): string {
+export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], roomId?: string, timeZone?: string): string {
   const nameOf = (id: string) =>
     id === 'user' ? 'user' : quoteForPane(members.find((x) => x.sessionId === id)?.name ?? id.slice(0, 8), 80);
   // A post to the whole room names no recipient (as in the delivered line); only an addressed message shows `-> who`.
   const to = m.to === 'all' ? '' : ` -> ${m.to.map(nameOf).join(', ')}`;
-  const time = new Date(m.at).toLocaleTimeString();
+  const time = displayTime(m.at, timeZone);
   const from =
     m.from.kind === 'user'
       ? 'USER'
@@ -1146,7 +1147,7 @@ async function findPollMessage(
     query: { limit: 1000 },
   });
   if (!res.json?.success) return { error: describeFailure(res) };
-  const data = (res.json.data ?? {}) as { messages?: ChatMessageRow[]; members?: ChatMemberRow[] };
+  const data = (res.json.data ?? {}) as { messages?: ChatMessageRow[]; members?: ChatMemberRow[]; timeZone?: string };
   const hits = (data.messages ?? []).filter((m) => m.poll && !m.deleted && m.id.startsWith(prefix.trim().toLowerCase()));
   if (hits.length === 0) return { error: `no poll with id ${quoteForPane(prefix, 40)} in this room's history (the last 1000 messages are kept)` };
   if (hits.length > 1) return { error: `${quoteForPane(prefix, 40)} matches ${hits.length} polls; give more characters` };
@@ -1444,10 +1445,10 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
     const path = `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/messages/${encodeURIComponent(options.message)}`;
     const exact = await deps.request(deps.ctx, { method: 'GET', path });
     if (!exact.json?.success) return fail(deps, describeFailure(exact));
-    const data = exact.json.data as { message?: ChatMessageRow; readToken?: string } | undefined;
+    const data = exact.json.data as { message?: ChatMessageRow; readToken?: string; timeZone?: string } | undefined;
     if (data?.message?.id !== options.message || typeof data.readToken !== 'string') return fail(deps, 'Unrecognized exact-message response; nothing acknowledged');
     // Explicit acknowledgement follows receipt of this exact response, never a guessed timestamp or text match.
-    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id));
+    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id, data.timeZone));
     if (options.acknowledge) {
       const ack = await deps.request(deps.ctx, { method: 'POST', path: path + '/read-ack', body: { readToken: data.readToken } });
       const confirmed = ack.json?.success && (ack.json.data as { acknowledged?: string } | undefined)?.acknowledged === options.message;
@@ -1465,14 +1466,14 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
     query: { limit: options.limit },
   });
   if (!res.json?.success) return fail(deps, describeFailure(res));
-  const data = (res.json.data ?? {}) as { messages?: ChatMessageRow[]; members?: ChatMemberRow[] };
+  const data = (res.json.data ?? {}) as { messages?: ChatMessageRow[]; members?: ChatMemberRow[]; timeZone?: string };
   if (deps.json) {
     emitJson(deps, data);
     return EXIT.ok;
   }
   const messages = data.messages ?? [];
   if (messages.length === 0) deps.io.out(palette.muted('(no messages yet)'));
-  for (const m of messages) deps.io.out(formatChatMessage(m, data.members ?? [], target.room.id));
+  for (const m of messages) deps.io.out(formatChatMessage(m, data.members ?? [], target.room.id, data.timeZone));
   return EXIT.ok;
 }
 
@@ -1506,7 +1507,7 @@ export async function agentChatHandle(deps: AgentDeps, options: { room?: string;
   const exact = async (messageId: string) => {
     const response = await deps.request(deps.ctx, { method: 'GET',
       path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/messages/${encodeURIComponent(messageId)}` });
-    const data = response.json?.data as { message?: ChatMessageRow; readToken?: string } | undefined;
+    const data = response.json?.data as { message?: ChatMessageRow; readToken?: string; timeZone?: string } | undefined;
     return response.json?.success && data?.message?.id === messageId && typeof data.readToken === 'string'
       ? { roomId: target.room.id, messageId, readToken: data.readToken } : undefined;
   };
@@ -1930,28 +1931,29 @@ interface PlanRowView {
 
 const PLAN_ZONE = 'America/New_York';
 
-/** An instant as "Sat 17 Oct 20:54 ET". */
-export function planEt(ms: number | null | undefined): string {
+/** Legacy export name; human plan clocks use the configured company zone. */
+export function planEt(ms: number | null | undefined, timeZone = 'UTC'): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return '-';
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: PLAN_ZONE,
+    timeZone: displayTimeZone(timeZone),
     weekday: 'short',
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
+    timeZoneName: 'short',
   }).formatToParts(new Date(ms));
   const get = (t: string) => parts.find((x) => x.type === t)?.value ?? '';
-  return `${get('weekday')} ${get('day')} ${get('month')} ${get('hour')}:${get('minute')} ET`;
+  return `${get('weekday')} ${get('day')} ${get('month')} ${get('hour')}:${get('minute')} ${get('timeZoneName')}`;
 }
 
 const planPct = (n: number | null): string => (n === null || !Number.isFinite(n) ? '-' : `${Math.round(n)}%`);
 
-function planState(a: PlanRowView): string {
+function planState(a: PlanRowView, timeZone?: string): string {
   if (!a.signedIn) return 'signed out';
   // A run-out time is only as good as the rate behind it: with no recent rate it says so instead of guessing.
-  if (a.pace.runsOutAt) return `runs out ${planEt(a.pace.runsOutAt)}${a.pace.burnBasis === 'average' ? ' (at the weekly average)' : ''}`;
+  if (a.pace.runsOutAt) return `runs out ${planEt(a.pace.runsOutAt, timeZone)}${a.pace.burnBasis === 'average' ? ' (at the weekly average)' : ''}`;
   return a.pace.burnBasis ? 'on pace' : 'pace: not enough data';
 }
 
@@ -1969,24 +1971,25 @@ function planBurnLine(a: PlanRowView): string {
   return `  ${burn}${left}`;
 }
 
-function planLines(a: PlanRowView): string[] {
+function planLines(a: PlanRowView, timeZone?: string): string[] {
   const lines = [
-    `${quoteForPane(a.label, 80)}  (${a.provider})  ${planState(a)}`,
-    `  week ${planPct(a.pace.weekly)}  5-hour ${planPct(a.pace.fiveHour)}  resets ${planEt(a.pace.weekReset)}`,
+    `${quoteForPane(a.label, 80)}  (${a.provider})  ${planState(a, timeZone)}`,
+    `  week ${planPct(a.pace.weekly)}  5-hour ${planPct(a.pace.fiveHour)}  resets ${planEt(a.pace.weekReset, timeZone)}`,
     ...(a.signedIn ? [planBurnLine(a)] : []),
   ];
   if (a.provider === 'openai') {
     const b = a.bankedResets;
-    lines.push(`  banked resets: ${b ? b.availableCount + (b.earliestExpiresAt ? ` (earliest ${planEt(b.earliestExpiresAt)})` : '') : 'unknown'}`);
+    lines.push(`  banked resets: ${b ? b.availableCount + (b.earliestExpiresAt ? ` (earliest ${planEt(b.earliestExpiresAt, timeZone)})` : '') : 'unknown'}`);
   }
   lines.push(`  agents on it: ${a.sessions.length ? a.sessions.map((s) => quoteForPane(s.name, 40)).join(', ') : '(none)'}`);
   return lines;
 }
 
-async function loadPlans(deps: AgentDeps): Promise<{ rows: PlanRowView[] } | { error: string }> {
+async function loadPlans(deps: AgentDeps): Promise<{ rows: PlanRowView[]; timeZone: string } | { error: string }> {
   const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/plans' });
   if (!res.json?.success) return { error: describeFailure(res) };
-  return { rows: ((res.json.data as { accounts?: PlanRowView[] } | undefined)?.accounts ?? []) as PlanRowView[] };
+  const data = res.json.data as { accounts?: PlanRowView[]; timeZone?: string } | undefined;
+  return { rows: data?.accounts ?? [], timeZone: displayTimeZone(data?.timeZone) };
 }
 
 /** `plans`: every account this session may see (a coordinator sees all, any other agent its own account). Read-only. */
@@ -1998,7 +2001,7 @@ export async function agentPlans(deps: AgentDeps): Promise<number> {
     return EXIT.ok;
   }
   if (loaded.rows.length === 0) deps.io.out(palette.muted('(no account visible to this session)'));
-  for (const a of loaded.rows) for (const line of planLines(a)) deps.io.out(line);
+  for (const a of loaded.rows) for (const line of planLines(a, loaded.timeZone)) deps.io.out(line);
   return EXIT.ok;
 }
 
@@ -2013,7 +2016,7 @@ export async function agentPlansShow(deps: AgentDeps, options: { name: string })
     emitJson(deps, hit);
     return EXIT.ok;
   }
-  for (const line of planLines(hit)) deps.io.out(line);
+  for (const line of planLines(hit, loaded.timeZone)) deps.io.out(line);
   return EXIT.ok;
 }
 

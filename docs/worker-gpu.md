@@ -69,8 +69,13 @@ legacy policy labels and creation arguments stay byte-equivalent. OFF/vacation
 continues to block startup independently; a permission is not a wake request.
 
 Numeric indices, `all`, raw device paths, flags and wildcards remain invalid.
-The existing engine producer still adds only `--device` plus one exact NVIDIA
-CDI UUID. GPU grants require reviewed configuration and selected-laptop recreation;
+The engine producer adds `--device` with one exact NVIDIA CDI UUID. Selected
+GPU containers also receive the fixed default
+`LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib`, using the reviewed
+CDI guest library aliases rather than host store paths. Explicit per-launch
+library-path overrides remain unchanged. Existing containers gain this default
+only on their next normal recreation; this source change does not restart them.
+GPU grants require reviewed configuration and selected-laptop recreation;
 the resource-only hot reload cannot change them. An older broker does not accept
 the new map: update its reviewed package/configuration through the normal inactive
 service workflow. No running container is resized or granted a device in place.
@@ -326,3 +331,12 @@ not permission to rerun, clear markers or restore old files over a newer broker.
 There is no automatic rollback. Reconcile exact native/configuration state and
 preserve evidence before authorizing a separate recovery. Success is the CLI's
 successful terminal result and durable `DONE.json`, not mere file existence.
+
+For the **first** owner-local service/upgrade call, add `--diagnostic` to request
+a bounded JSON failure category and vetted static guard reason on stderr. Unknown
+messages, private paths, command arguments, captured subprocess bodies and
+credentials are withheld. Diagnostics keep the original nonzero exit and do not
+change an attempt, roll back configuration, publish `DONE.json` or authorize a
+retry. A past generic refusal's exact cause remains unknown; do not repeat a
+consumed operation to obtain diagnostics. `worker-service --help` describes the
+flag; retain its stderr with the private operation evidence.

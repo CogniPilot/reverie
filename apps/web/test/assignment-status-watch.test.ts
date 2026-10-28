@@ -9,6 +9,7 @@ import type { ChatMessage, ChatRoom } from '../src/chatroom-store.js';
 
 describe('typed assignment check-ins, real durable Board/ledger', () => {
   let postDelay = 0;
+  let timeZone: string | undefined;
   let auditHook: () => Promise<void>;
   let root: string,
     board: BoardStore,
@@ -34,6 +35,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     new AssignmentStatusWatch(path.join(root, 'watch.json'), {
       board,
       employees: () => employees,
+      timeZone: () => timeZone,
       running: () => true,
       bot: () => ({ id: 'status', name: 'Status', rooms: ['room', 'other'], maxPerHour: 30 }),
       room: (id) => (id === 'room' ? room : id === 'other' ? { ...room, id: 'other', messages: [] } : undefined),
@@ -69,6 +71,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     posts = [];
     audits = [];
     postDelay = 0;
+    timeZone = undefined;
     auditHook = async () => {};
     employees = [
       {
@@ -318,6 +321,22 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
             ? { replyTo: undefined }
             : { edited: { at } }
     );
+    await watch.tick();
+    expect(watch.status().entries[0]!.response).toBeUndefined();
+  });
+  it('renders the configured zone and accepts a correlated offset ETA without changing its instant', async () => {
+    timeZone = 'America/New_York';
+    await watch.tick();
+    expect(posts[0]!.text).toContain('8:05:00 AM EDT');
+    expect(posts[0]!.text).toContain('2026-10-26T08:05:00-04:00');
+    reply('New ETA: 2026-10-26T12:00:00-04:00 | same actual instant');
+    await watch.tick();
+    expect(watch.status().entries[0]!.response?.extendUntil).toBe(Date.parse('2026-10-26T16:00:00Z'));
+  });
+  it('does not accept an ambiguous local ETA even when its date looks valid', async () => {
+    timeZone = 'America/New_York';
+    await watch.tick();
+    reply('New ETA: 2026-10-26T16:00:00 | missing offset');
     await watch.tick();
     expect(watch.status().entries[0]!.response).toBeUndefined();
   });

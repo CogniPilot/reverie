@@ -175,6 +175,42 @@ export class ChatDb {
     this.db.close();
   }
 
+  /** Literal word search over the existing FTS index; authorization supplies the room set. */
+  searchMessages(roomIds: string[], query: string, before?: { at: number; id: string; roomId: string }) {
+    const terms = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+    if (!terms.length || terms.length > 12 || query.length > 160) throw new ChatDbError('Use 1–12 words, at most 160 characters');
+    if (roomIds.length > 500) throw new ChatDbError('Select a channel to narrow the search');
+    if (!roomIds.length) return { hits: [], next: null };
+    // Quote each token, never accept FTS operators, column selectors or wildcards from callers.
+    const match = terms.map(term => '"' + term.replaceAll('"', '""') + '"*').join(' AND ');
+    const rows = this.db.prepare(`SELECT m.room_id, m.id, m.at,
+      substr(json_extract(m.data, '$.from.name'), 1, 160) AS sender,
+      substr(snippet(messages_fts, 0, '', '', ' … ', 48), 1, 2000) AS text
+      FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid
+      WHERE messages_fts MATCH ? AND m.room_id IN (${roomIds.map(() => '?').join(',')})
+      AND json_extract(m.data, '$.deleted') IS NULL
+      ${before ? 'AND (m.at, m.id, m.room_id) < (?, ?, ?)' : ''}
+      ORDER BY m.at DESC, m.id DESC, m.room_id DESC LIMIT 31`)
+      .all(match, ...roomIds, ...(before ? [before.at, before.id, before.roomId] : []));
+    const hits = rows.slice(0, 30).map(row => ({ roomId: String(row.room_id), id: String(row.id),
+      at: Number(row.at), sender: String(row.sender ?? ''), text: String(row.text ?? '') }));
+    const last = hits.at(-1);
+    return { hits, next: rows.length > 30 && last ? { at: last.at, id: last.id, roomId: last.roomId } : null };
+  }
+
+  /** Exact source plus bounded chronological neighbors, including messages outside memory. */
+  searchContext(roomId: string, messageId: string): ChatMessage[] | undefined {
+    const source = this.db.prepare("SELECT at, id FROM messages WHERE room_id = ? AND id = ? AND json_extract(data, '$.deleted') IS NULL").get(roomId, messageId);
+    if (!source) return undefined;
+    const older = this.db.prepare('SELECT id, length(CAST(data AS BLOB)) AS bytes FROM messages WHERE room_id = ? AND (at, id) <= (?, ?) ORDER BY at DESC, id DESC LIMIT 6').all(roomId, source.at, source.id).reverse();
+    const newer = this.db.prepare('SELECT id, length(CAST(data AS BLOB)) AS bytes FROM messages WHERE room_id = ? AND (at, id) > (?, ?) ORDER BY at, id LIMIT 5').all(roomId, source.at, source.id);
+    const rows = [...older, ...newer];
+    if (rows.reduce((bytes, row) => bytes + Number(row.bytes), 0) > 1024 * 1024) throw new ChatDbError('Context exceeds the bounded response size');
+    // Read bounded bodies only after the metadata budget passes.
+    return this.db.prepare(`SELECT data FROM messages WHERE room_id = ? AND id IN (${rows.map(() => '?').join(',')}) ORDER BY at, id`)
+      .all(roomId, ...rows.map(row => row.id)).map(row => JSON.parse(String(row.data)) as ChatMessage).filter(message => !message.deleted);
+  }
+
   /** Those of `ids` whose sync committed. */
   committedTxns(ids: Iterable<string>): Set<string> {
     const has = this.db.prepare('SELECT 1 AS hit FROM txns WHERE id = ?');

@@ -1,8 +1,9 @@
+import { displayTime } from './display-time.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ChatroomService } from './chatroom-service.js';
 import type { PlanRequestView } from './plan-request.js';
 
-export type PlanRequestMessages = Pick<ChatroomService, 'openDm' | 'post' | 'lastSeen' | 'deleteMessage'>;
+export type PlanRequestMessages = Pick<ChatroomService, 'openDm' | 'post' | 'lastSeen' | 'deleteMessage'> & { displayTimeZone?(owner?: string): string };
 
 /** A nonce-free DM is readable immediately; the existing chat queue handles busy panes. */
 export async function deliverPlanRequest(
@@ -20,7 +21,7 @@ export async function deliverPlanRequest(
 
   const room = messages.openDm(record.sessionId, record.owner);
   const message = messages.post(room.id, { kind: 'system', name: 'Plans' },
-    text + ` This request expires at ${new Date(record.expiresAt).toISOString()}. Use reverie agent plan-move list to inspect your pending requests.`,
+    text + ` This request expires at ${displayTime(record.expiresAt, messages.displayTimeZone?.(record.owner))}. Use reverie agent plan-move list to inspect your pending requests.`,
     [record.sessionId]);
   const received = () => {
     const seen = messages.lastSeen(record.sessionId, room.id);

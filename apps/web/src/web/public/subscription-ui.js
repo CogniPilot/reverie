@@ -272,9 +272,9 @@ Object.assign(ReverieApp.prototype, {
     chip.title = accounts
       .map((account) => {
         const lines = this._accountWindows(account).map(
-          (w) => `${w.name}: ${w.pct}% used; resets ${new Date(w.window.resetAt).toLocaleString()}`
+          (w) => `${w.name}: ${w.pct}% used; resets ${(globalThis.ReverieTime?.format(w.window.resetAt) ?? new Date(w.window.resetAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`
         );
-        return `${account.label}\n${lines.join('\n') || account.status}\nUpdated ${new Date(account.updatedAt).toLocaleString()}`;
+        return `${account.label}\n${lines.join('\n') || account.status}\nUpdated ${(globalThis.ReverieTime?.format(account.updatedAt) ?? new Date(account.updatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
       })
       .join('\n\n');
     if (!multi) this.closeAccountMenu();
@@ -323,7 +323,7 @@ Object.assign(ReverieApp.prototype, {
         const reset = document.createElement('span');
         reset.className = 'pu-menu-reset';
         reset.textContent = Number.isFinite(Date.parse(w.window.resetAt))
-          ? `resets ${new Date(w.window.resetAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+          ? `resets ${(globalThis.ReverieTime?.format(w.window.resetAt) ?? new Date(w.window.resetAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`
           : '';
         cell.append(reset);
         usage.append(cell);

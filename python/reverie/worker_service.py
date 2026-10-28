@@ -4,6 +4,7 @@ No website process, employee wake, host OS rebuild or engine socket grant is
 created here. Positive operations require an existing private admission policy.
 """
 import argparse
+import errno
 import json
 import math
 import os
@@ -263,9 +264,108 @@ class WorkerService:
         return {'action': action, 'success': True, 'unit': UNIT}
 
 
+# Exact fixed guard text only. Never print arbitrary exception strings,
+# filenames, commands, environment, private JSON or subprocess output.
+_DIAGNOSTIC_REASONS = frozenset({
+    'Use the pinned Reverie worker-service flake launcher',
+    'Immutable packaged worker unit required',
+    'Select an existing canonical private broker configuration',
+    'Private owned broker configuration required',
+    'Existing canonical private storage roots required',
+    'Broker identity must be the ordinary installing owner',
+    'Existing service differs; preserve it and explicitly review replacement',
+    'Existing broker configuration selection differs; owner review required',
+    'Existing service generation root differs; owner review required',
+    'Select the private one-attempt operation directory',
+    'Select the closed private GPU upgrade input',
+    'Canonical private operation directory required',
+    'Private singly linked owner file required',
+    'Private file changed during read',
+    'Installed generation links required',
+    'Installed unit, environment and GC root disagree',
+    'Foreign or changed unit template',
+    'Actual manager unit differs from selected immutable generation',
+    'Broker stop not confirmed inactive',
+    'Closed GPU upgrade selection required',
+    'Reviewed CDI digest required',
+    'Bounded existing provider PID set required',
+    'Existing or uncertain reservation domain requires its own reconciliation',
+    'Current owner vacation intent refuses GPU maintenance',
+    'Legacy SID authority conflicts with selected employee GPU',
+    'Selected provider must already have handed off and laptop must be stopped',
+    'Fresh empty reservation control root required',
+    'Selected laptop would exceed current pool',
+    'Selected replacement exceeds worker population bound',
+    'Provider PID is not in an observed running container',
+    'Native inventory changed after capacity/provider reads',
+    'Fresh operation directory required',
+    'One-attempt upgrade already consumed',
+    'Exact prepared plan digest required',
+    'Upgrade plan expired',
+    'Prepared generation changed',
+    'Candidate or employee binding changed',
+    'Native readiness changed; prepare a fresh plan',
+    'Upgrade command refused or outcome unknown',
+    'Generation GC root publication unknown',
+    'Previous broker process is still alive',
+    'Peer/provider continuity changed during broker stop',
+    'Config CAS precondition changed',
+    'Configuration identity changed',
+    'Employee intent changed before CAS',
+    'Configuration or current employee changed after commit intent',
+    'Configuration/employee metadata changed at CAS boundary',
+    'Generation link changed before CAS',
+    'New generation readback changed',
+    'New broker/office listener readiness deadline exhausted',
+    'Recovered listener is not the selected new broker process',
+    'OFF or vacation employee cannot qualify normal activation',
+    'Normal activation has the wrong native identity or image',
+    'Native GPU/device authority differs from exact selected CDI profile',
+    'Original selected home/Nix/scratch identity changed',
+    'Selected stopped laptop identity changed without observed activation',
+    'Peer native continuity changed',
+    'Provider continuity changed',
+    'Original selected storage identities changed',
+    'Employee intent or recipe changed',
+    'Final metadata changed after finalizers',
+    'RESERVATION_HOST_BUDGET',
+    'RESERVATION_CAPACITY_EXHAUSTED',
+    'RESERVATION_NATIVE_INVENTORY_CHANGED',
+    'RESERVATION_CONTROL_EXPOSED',
+    'RESERVATION_CONTROL_ALIAS',
+    'RESERVATION_DOMAIN_CHANGED',
+    'RESERVATION_INSTALL_REQUIRES_RECONCILIATION',
+    'RESERVATION_CONTROL_NOT_READY',
+    'RESERVATION_OBSERVATION_DEADLINE',
+    'RESERVATION_NATIVE_PID_CHANGED',
+    'RESERVATION_EFFECTIVE_LIMIT_CONFLICT',
+})
+
+
+def _diagnostic(error):
+    """A bounded category/allowlisted reason, never exception serialization."""
+    reason = 'Unlisted exception details withheld.'
+    if len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in _DIAGNOSTIC_REASONS:
+        reason = error.args[0]
+    if isinstance(error, (subprocess.TimeoutExpired, TimeoutError)):
+        category = 'OBSERVATION_TIMEOUT'
+        reason = 'A fixed observation/client deadline expired; existing attempt state is unchanged by diagnostics.'
+    elif isinstance(error, OSError):
+        category = {errno.ENOENT: 'PATH_UNAVAILABLE', errno.EACCES: 'PATH_PERMISSION',
+                    errno.EPERM: 'PATH_PERMISSION', errno.EEXIST: 'EXCLUSIVE_PATH_EXISTS',
+                    errno.ELOOP: 'PATH_ALIAS', errno.EXDEV: 'ATOMIC_FILESYSTEM_MISMATCH'}.get(error.errno, 'IO_UNCONFIRMED')
+    elif isinstance(error, ValueError):
+        category = 'GUARD_CHECK_FAILED'
+    else:
+        category = 'OPERATION_UNCONFIRMED'
+    return {'category': category, 'reason': reason}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path)
+    parser.add_argument('--diagnostic', action='store_true',
+                        help='On failure print a bounded redacted category and vetted guard reason; never authorizes replay')
     parser.add_argument('action', choices=('check', 'check-backend', 'install', 'start', 'stop', 'status', 'logs', 'uninstall',
                                                  'prepare-gpu-upgrade', 'apply-gpu-upgrade'))
     parser.add_argument('--lines', type=int, default=100)
@@ -298,8 +398,12 @@ def main(argv=None):
             print(result.stdout, end=''); return 0
         else: result = service.action(args.action)
         print(json.dumps(result)); return 0
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print('Worker service operation refused; verify private policy, local engine capabilities and reviewed installation.', file=sys.stderr)
+        if args.diagnostic:
+            print(json.dumps(_diagnostic(error), sort_keys=True, separators=(',', ':')), file=sys.stderr)
+        else:
+            print('For future calls, --diagnostic adds a bounded guard reason.', file=sys.stderr)
         return 1
 
 

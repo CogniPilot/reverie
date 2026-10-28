@@ -19,7 +19,7 @@ import time
 
 from . import laptop_resource_operations as journal
 from .employee_resource_profiles import ProfileStore
-from .worker_resources import RESOURCE_FIELDS, effective_config, policy_digest, validate_resource_reload
+from .worker_resources import RESOURCE_FIELDS, effective_config, policy_digest, project_resource_policy, validate_resource_reload
 from .worker_storage import read_metadata, storage_paths, storage_start_allowed
 from .worker_cold_tmp import read_mount_table, _mount_location
 from .worker_capacity_policy import explicit_host_headroom_fits, pool_headroom_fits
@@ -771,7 +771,8 @@ class ReservationGate:
              profile['binding']['current_generation'] == generation and
              profile['resources']['budgetMode'] == 'admission', 'RESERVATION_PROFILE_BINDING')
         current = effective_config(config, paths.session)
-        need(all(profile['resources'][k] == current[k] for k in RESOURCE_FIELDS if k != 'memoryMiB'),
+        projected = project_resource_policy(config, profile['resources'])
+        need(all(projected[k] == current[k] for k in RESOURCE_FIELDS if k != 'memoryMiB'),
              'RESERVATION_RAM_ONLY_PROFILE')
         total, budget, site, commitments = self.native.capacity(rows, self.option)
         target = []; target_row = None

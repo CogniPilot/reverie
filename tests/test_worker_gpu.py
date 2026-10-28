@@ -8,6 +8,8 @@ import unittest
 from reverie.worker import create_args, load_config
 from reverie.worker_gpu import gpu_create_args, validate_gpu_grants
 
+GPU_LIBRARY_ENV = "LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib"
+
 
 class WorkerGPUTests(unittest.TestCase):
     session = '11111111-1111-1111-1111-111111111111'
@@ -23,7 +25,7 @@ class WorkerGPUTests(unittest.TestCase):
     def test_absent_and_unselected_grants_expose_no_devices(self):
         self.assertEqual(gpu_create_args({}, self.session), [])
         self.assertEqual(gpu_create_args({'gpuGrants': {self.other: self.device}}, self.session), [])
-        self.assertEqual(gpu_create_args({'gpuGrants': {self.session: self.device}}, self.session), ['--device', self.device])
+        self.assertEqual(gpu_create_args({'gpuGrants': {self.session: self.device}}, self.session), ['--device', self.device, '--env', GPU_LIBRARY_ENV])
 
     def test_rejects_broad_devices_paths_flags_and_non_session_grants(self):
         for value in ['nvidia.com/gpu=all', 'nvidia.com/gpu=0', '/dev/nvidia0', '--privileged',
@@ -66,6 +68,13 @@ class WorkerGPUTests(unittest.TestCase):
             self.assertNotIn('--privileged', args)
             _, _, ordinary = create_args(granted, self.other, root / 'other-home')
             self.assertNotIn('--device', ordinary)
+            def environments(argv):
+                return [argv[i + 1] for i, value in enumerate(argv[:-1]) if value == '--env']
+            # Preserve every existing container default. Only the selected CDI
+            # laptop gains these two fixed guest aliases, with no host paths.
+            self.assertEqual(environments(args), environments(ordinary) + [GPU_LIBRARY_ENV])
+            self.assertEqual([value for value in environments(ordinary)
+                              if value.startswith('LD_LIBRARY_PATH=')], [])
             config['gpuGrants'][self.session] = 'nvidia.com/gpu=all'
             path.write_text(json.dumps(config))
             with self.assertRaises(ValueError):
@@ -115,15 +124,15 @@ class EmployeeGPUTests(unittest.TestCase):
 
     def test_current_completed_move_and_restart_inherit_without_granting_historical_sid(self):
         selected={**self.config,'employeeGpuGrants':{self.employee:self.device}}
-        self.assertEqual(gpu_create_args(selected,self.session),['--device',self.device])
+        self.assertEqual(gpu_create_args(selected,self.session),['--device',self.device,'--env',GPU_LIBRARY_ENV])
         row=self.company['employees'][0];row.update(sessionId=self.next_session,sessionGeneration=2);self.save()
         journal=Path(self.config['companyFile']).with_name('plan-moves.json')
         journal.write_text(json.dumps([{'employeeId':self.employee,'owner':'fixture-owner',
             'oldSession':self.session,'newSession':self.next_session,'phase':'completed'}]));journal.chmod(0o600)
-        self.assertEqual(gpu_create_args(selected,self.next_session),['--device',self.device])
+        self.assertEqual(gpu_create_args(selected,self.next_session),['--device',self.device,'--env',GPU_LIBRARY_ENV])
         self.assertEqual(gpu_create_args(selected,self.session),[])
         row['sessionGeneration']=3;self.save()
-        self.assertEqual(gpu_create_args(selected,self.next_session),['--device',self.device])
+        self.assertEqual(gpu_create_args(selected,self.next_session),['--device',self.device,'--env',GPU_LIBRARY_ENV])
 
     def test_explicit_legacy_sid_grant_wins_and_legacy_policy_is_unchanged(self):
         from reverie.worker_resources import effective_config
@@ -131,8 +140,8 @@ class EmployeeGPUTests(unittest.TestCase):
         legacy={**self.config,'gpuGrants':{self.session:override}}
         selected={**legacy,'employeeGpuGrants':{self.employee:self.device}}
         self.assertEqual(effective_config(selected,self.session),legacy)
-        self.assertEqual(gpu_create_args(selected,self.session),['--device',override])
-        self.assertEqual(gpu_create_args(legacy,self.session),['--device',override])
+        self.assertEqual(gpu_create_args(selected,self.session),['--device',override,'--env',GPU_LIBRARY_ENV])
+        self.assertEqual(gpu_create_args(legacy,self.session),['--device',override,'--env',GPU_LIBRARY_ENV])
 
     def test_retired_ambiguous_missing_generation_and_binding_drift_never_mint_a_grant(self):
         from unittest.mock import patch
@@ -159,7 +168,7 @@ class EmployeeGPUTests(unittest.TestCase):
         for field in ('desiredRunning','onVacation'):
             self.company['employees'][0].update(desiredRunning=True,onVacation=False)
             self.company['employees'][0][field]=field=='onVacation';self.save()
-            self.assertEqual(gpu_create_args(selected,self.session),['--device',self.device])
+            self.assertEqual(gpu_create_args(selected,self.session),['--device',self.device,'--env',GPU_LIBRARY_ENV])
             self.assertFalse(storage_start_allowed(selected,storage_paths(selected,self.session)))
 
     def test_flat_resource_bundle_uses_same_projection_and_requires_fixed_gpu_dependency(self):

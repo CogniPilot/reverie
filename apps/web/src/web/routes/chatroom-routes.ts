@@ -4,6 +4,7 @@ import { modePollsChat } from '../../chatroom-delivery.js';
 import { registerChatAttention } from './chat-attention.js';
 import { agentMessage } from '../../chatroom-agent-message.js';
 import { z } from 'zod';
+import { ChatDbError } from '../../chat-db.js';
 /**
  * @fileoverview Chatroom routes: a shared room where the user, an appointed
  * coordinator session and worker sessions talk.
@@ -112,6 +113,7 @@ import { OWNER_RANK, RolesStore, type Actor, type Permission } from '../../roles
 class PhoneStatusForbidden extends Error {}
 
 function sendError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof ChatDbError) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, err.message));
   if (err instanceof PhoneStatusForbidden) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, err.message));
   if (err instanceof ChatroomError) {
     if (err.code === 'UNAVAILABLE') return reply.code(503).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, err.message));
@@ -344,7 +346,7 @@ export function registerChatroomRoutes(
         // For an agent asking about its own rooms: where its last prompt came from, so a verb with no --room can reply there.
         ...(self && member === 'self' ? { lastDelivery: service.lastDeliveryRooms(self) ?? null } : {}),
         // What this server can do, so a page built for more never shows a control that does nothing.
-        features: { pollingModes: listClis().filter(entry => modePollsChat(entry.id)).map(entry => entry.id), unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true },
+        features: { search: !!verifiedOwner(req) && !self && host.human?.(req)?.primary !== false, pollingModes: listClis().filter(entry => modePollsChat(entry.id)).map(entry => entry.id), unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true },
         // What the owner is called in a room, so the page counts an `@name` of them as a mention.
         ownerNames: service.ownerNames(isMultiUserMode() ? user.username : undefined),
         // Sessions retired by a plan switch: the page keeps them out of its pickers (the owner sees them in a list).
@@ -609,6 +611,41 @@ export function registerChatroomRoutes(
     } catch (err) {
       return sendError(reply, err);
     }
+  });
+
+  const searchQuery = z.object({ q: z.string().trim().min(1).max(160), roomId: z.string().min(1).max(100).optional(),
+    before: z.string().max(400).optional() }).strict();
+  const searchCursor = z.object({ at: z.number().int().nonnegative(), id: z.string().min(1).max(100), roomId: z.string().min(1).max(100) }).strict();
+  const humanSearch = (req: FastifyRequest) => verifiedOwner(req) && !caller(req) &&
+    req.headers['x-reverie-parent-session'] === undefined && req.headers['x-reverie-service-token'] === undefined && host.human?.(req)?.primary !== false;
+  app.get('/api/chatrooms/search', async (req, reply) => {
+    if (!humanSearch(req)) return forbid(reply, 'Verified owner browser required for channel search');
+    const parsed = searchQuery.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected search words and optional channel/cursor'));
+    try {
+      const { q, roomId, before } = parsed.data;
+      const cursor = before ? searchCursor.parse(JSON.parse(before)) : undefined;
+      const user = getAuthUser(req);
+      let rooms = service.rooms().filter(room => !isDm(room) && canAccessOwned(user, room.owner));
+      if (roomId) { const room = roomOrFail(req, roomId); if (isDm(room)) throw new ChatroomError('Channel not found', 'NOT_FOUND'); rooms = rooms.filter(item => item.id === room.id); }
+      const page = service.searchMessages(rooms.map(room => room.id), q, cursor);
+      const names = new Map(rooms.map(room => [room.id, room.name]));
+      return { success: true, data: { ...page, hits: page.hits.map(hit => ({ ...hit, roomName: names.get(hit.roomId) })), order: 'newest', timeZone: service.searchTimeZone(ownerFor(req)) } };
+    } catch (error) {
+      if (error instanceof SyntaxError || error instanceof z.ZodError) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid search cursor'));
+      return sendError(reply, error);
+    }
+  });
+  app.get('/api/chatrooms/:id/search-context/:messageId', async (req, reply) => {
+    if (!humanSearch(req)) return forbid(reply, 'Verified owner browser required for channel search');
+    const { id, messageId } = req.params as { id: string; messageId: string };
+    try {
+      const room = roomOrFail(req, id);
+      if (isDm(room)) throw new ChatroomError('Channel not found', 'NOT_FOUND');
+      return { success: true, data: { roomId: id, roomName: room.name, messageId, timeZone: service.searchTimeZone(room.owner),
+        messages: service.searchContext(id, messageId).map(message => ({ id: message.id, at: message.at,
+          sender: message.from.name ?? '', text: message.text ?? '' })) } };
+    } catch (error) { return sendError(reply, error); }
   });
 
   app.get('/api/chatrooms/:id', async (req, reply) => {
@@ -1203,11 +1240,11 @@ export function registerChatroomRoutes(
   app.get('/api/chatrooms/:id/messages/:messageId', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {
-      roomOrFail(req, id);
+      const room = roomOrFail(req, id);
       const self = caller(req);
       if (!self) return forbid(reply, 'An agent session is required');
       const data = service.exactAgentRead(self, id, messageId);
-      return { success: true, data: { ...data, message: agentMessage(data.message, service.phoneAccepts(self, id, messageId), host.messageOwner ?? (() => false)) } };
+      return { success: true, data: { ...data, timeZone: service.displayTimeZone(room.owner), message: agentMessage(data.message, service.phoneAccepts(self, id, messageId), host.messageOwner ?? (() => false)) } };
     } catch (error) { return sendError(reply, error); }
   });
 
@@ -1234,7 +1271,7 @@ export function registerChatroomRoutes(
       const self = caller(req);
       if (self && room.members.some((m) => m.sessionId === self)) service.acknowledgeAgentRead(self, room.id, view.messages);
       const messages = self ? view.messages.map(message => agentMessage(message, service.phoneAccepts(self, id, message.id), host.messageOwner ?? (() => false))) : view.messages;
-      return { success: true, data: { messages, members: view.members } };
+      return { success: true, data: { messages, members: view.members, timeZone: service.displayTimeZone(room.owner) } };
     } catch (err) {
       return sendError(reply, err);
     }

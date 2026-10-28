@@ -170,6 +170,27 @@ class Reservations(unittest.TestCase):
     def claim(self):
         return self.gate.reserve(KEY, self.request())
 
+    def test_global_pool_change_still_requires_running_policy_transition(self):
+        after=copy.deepcopy(self.config);after['poolMemoryMiB']=9216
+        broker=Broker(self.config,config_file='unused');broker.laptops={SID:'test-agent-'+SID}
+        broker.resource_reservations=self.gate  # Existing controlled native ports, actual admission.
+        labels={'reverie.worker':'test','reverie.session':SID,'reverie.worker-policy':policy_digest(self.config,SID)}
+        broker.run_engine=lambda argv,optional=False:subprocess.CompletedProcess(argv,0,json.dumps([{'Config':{'Labels':labels},'State':{'Running':True}}]))
+        with patch('reverie.worker.load_config',return_value=after),self.assertRaisesRegex(ValueError,'Stop only'):
+            broker.control('reload-resources')
+        self.assertIs(broker.config,self.config)
+
+    def test_stale_profile_pool_metadata_uses_global_but_other_limits_still_refuse(self):
+        profile=self.profiles.snapshot()['profiles'][EID]
+        resources=dict(profile['resources'],poolMemoryMiB=6144,poolTasksMax=4096)
+        self.profiles.put(EID,resources,profile['binding'],expected_revision=1,
+                          expected_profile_version=1,expected_binding=profile['binding'])
+        self.assertEqual(self.observed()['current_memory_bytes'],str(2048*MIB))
+        resources['pidsLimit']+=1
+        self.profiles.put(EID,resources,profile['binding'],expected_revision=2,
+                          expected_profile_version=2,expected_binding=profile['binding'])
+        with self.assertRaisesRegex(ValueError,'RESERVATION_RAM_ONLY_PROFILE'):self.observed()
+
     def test_fixed_native_observation_matches_existing_closed_journal_schema(self):
         value = self.observed(); J.observation(value)
         self.assertEqual(value['committed_bytes'], str(2048 * MIB))

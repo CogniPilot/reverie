@@ -1,8 +1,9 @@
 import type { ChatBot } from './chat-bots.js';
+import { displayTime } from './display-time.js';
 import { readFileSync, statSync, writeFileSync, renameSync } from 'node:fs';
 
 type Room = {
-  id: string; kind?: string; archivedAt?: number;
+  id: string; owner?: string; kind?: string; archivedAt?: number;
   members: readonly { sessionId: string }[];
   messages: readonly { id: string; at: number; from: { kind: string; botId?: string } }[];
 };
@@ -14,6 +15,7 @@ export interface InputWatchDeps {
   post: (bot: ChatBot, roomId: string, text: string, recent: number) => { id: string; at: number };
   failed: (text: string) => void;
   now?: () => number;
+  timeZone?: (owner?: string) => string | undefined;
   /** Server-owned path. Omit only for explicitly volatile unit fixtures. */
   ledgerFile?: string;
 }
@@ -97,9 +99,8 @@ export function createInputWatch(deps: InputWatchDeps): { pending: (item: Pendin
             const reservation = `attempt:${key}`;
             ledger.set(reservation, at);
             persist(); // Write quota reservation before chat IO; uncertain failures retain it.
-            const time = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
-              hour: 'numeric', minute: '2-digit', hour12: true }).format(at);
-            const message = deps.post(bot, room.id, `Input needed: ${item.kind} prompt reported for employee ${employee.id.slice(0, 8)} — ${time} ET. Open Approvals to inspect.`, recent);
+            const time = displayTime(at, deps.timeZone?.(room.owner));
+            const message = deps.post(bot, room.id, `Input needed: ${item.kind} prompt reported for employee ${employee.id.slice(0, 8)} — ${time}. Open Approvals to inspect.`, recent);
             ledger.delete(reservation);
             ledger.set(`message:${message.id}`, message.at);
             trim(at);
