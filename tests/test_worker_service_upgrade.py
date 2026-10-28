@@ -268,8 +268,13 @@ class GPUServiceUpgradeTests(unittest.TestCase):
                                      (actual.st_mtime_ns, actual.st_ctime_ns))
                     if path == self.operation:
                         self.assertEqual(by_fd, actual)
-                    elif os.environ.get('NIX_BUILD_TOP'):
+                    elif (os.environ.get('NIX_BUILD_TOP') and
+                          actual.st_uid == Path('/').stat().st_uid):
                         self.assertEqual(by_fd.st_uid, 0)
+                    else:
+                        # A private user-owned TMP is not one of the captured
+                        # mapped root-UID inodes and must remain unmodified.
+                        self.assertEqual(by_fd.st_uid, actual.st_uid)
                 finally:
                     os.close(fd)
 
