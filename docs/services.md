@@ -111,3 +111,56 @@ temporary tools and `nix profile install` for persistent tools. Keep the base le
 Private home/settings and `/nix`, durable projects and retained results survive
 recreation; `/tmp/<project>` build/cache/download data are disposable. See
 [laptop storage](portable-laptop-storage.md) and the handbook for storage boundaries.
+
+### Same-config broker transport upgrade
+
+A different immutable broker generation requires an explicit owner maintenance
+window. `install` continues to refuse an active/different generation. The fixed
+transport upgrade changes only the recognized user-service unit and its service
+GC-root link. It does not rewrite configuration, environment, reservation marker,
+profiles, operation history, grants or limits, and never sends a laptop stop,
+create, wake or provider launch command. It is separate from GPU first installation.
+
+Use the reviewed **new generation's** `worker-service` flake launcher. Select a
+fresh canonical owner-only operation directory on the same filesystem as the
+installed unit/configuration, outside every laptop/container mount. A private
+0600 selection file has exactly `{"providerPIDs":[...]}`: the complete current
+provider PIDs from the owner's read-only continuity baseline, not commands or
+permission claims. Each supplied PID must still belong to an observed running
+managed laptop, with unchanged birth, executable, root and namespace identity.
+The helper does not claim that a supplied PID list discovers omitted providers.
+
+```bash
+nix run .#worker-service -- --config "$broker_config" --diagnostic \
+  prepare-transport-upgrade --operation "$upgrade_operation" --selection "$provider_selection"
+nix run .#worker-service -- --config "$broker_config" --diagnostic \
+  apply-transport-upgrade --operation "$upgrade_operation" --plan-sha256 "$prepared_plan_sha256"
+```
+
+Preparation writes a finite ten-minute plan without service effects. Apply has a
+single 180-second budget and durable one-attempt latch. It requires the current
+canonical reservation domain, sufficient actual headroom, no retained resource
+operation and a valid settled/absent host-job fence. This installed operation
+schema has no released operation state; `VERIFY_RECORDED` still retains a claim.
+An installed protected terminal/resource actor requires its separate coordinated
+maintenance path. Unknown or changed facts refuse; they never become capacity
+credit, authorization to clear a fence or permission to provision/reset a domain.
+
+The old and new closures remain pinned. Apply stops only the recognized broker,
+proves it exited, replaces the two generation links by CAS, then starts the new
+broker and verifies its actual immutable source/program and private phone peers.
+All laptop CIDs, provider births, canonical storage roots and owner intent must
+remain unchanged. Phone/outer terminal transports disconnect during this window;
+reattach them using the supported existing-only path after continuity checks.
+Do not recreate a provider to repair an outer pane. Coordinate the window to
+exclude new work/launches; this tool does not make unrelated owner operations
+atomic with the whole upgrade.
+
+Final content reads and descriptor cleanup finish before the last live-process
+checks; physical roots and static file/link checks follow those process reads.
+A late refusal leaves the attempt retained and never publishes `DONE`.
+
+Any consumed failure retains its attempt, step intents and both generations;
+there is no automatic retry or rollback. Inspect and reconcile those facts before
+any later operation. A source test or prepared plan is not an installed transport
+acceptance, active GPU proof or permission to run a workload.

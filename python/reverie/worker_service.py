@@ -367,16 +367,28 @@ def main(argv=None):
     parser.add_argument('--diagnostic', action='store_true',
                         help='On failure print a bounded redacted category and vetted guard reason; never authorizes replay')
     parser.add_argument('action', choices=('check', 'check-backend', 'install', 'start', 'stop', 'status', 'logs', 'uninstall',
-                                                 'prepare-gpu-upgrade', 'apply-gpu-upgrade'))
+                                                 'prepare-gpu-upgrade', 'apply-gpu-upgrade',
+                                                 'prepare-transport-upgrade', 'apply-transport-upgrade'))
     parser.add_argument('--lines', type=int, default=100)
-    parser.add_argument('--operation', type=Path, help='Fresh private GPU-only generation migration directory')
-    parser.add_argument('--selection', type=Path, help='Closed owner-private GPU upgrade selection')
+    parser.add_argument('--operation', type=Path, help='Fresh private one-attempt migration directory')
+    parser.add_argument('--selection', type=Path, help='Closed owner-private upgrade selection')
     parser.add_argument('--plan-sha256', help='Exact prepared GPU-only plan digest')
     args = parser.parse_args(argv)
     os.umask(0o077)
     service = WorkerService(args.config)
     try:
-        if args.action in ('prepare-gpu-upgrade', 'apply-gpu-upgrade'):
+        if args.action in ('prepare-transport-upgrade', 'apply-transport-upgrade'):
+            from .worker_service_transport_upgrade import TransportUpgrade
+            if args.operation is None:
+                raise ValueError('Select the private one-attempt operation directory')
+            migration = TransportUpgrade(service, args.operation)
+            if args.action == 'prepare-transport-upgrade':
+                if args.selection is None:
+                    raise ValueError('Select the closed private transport provider input')
+                result = migration.prepare(args.selection)
+            else:
+                result = migration.apply(args.plan_sha256)
+        elif args.action in ('prepare-gpu-upgrade', 'apply-gpu-upgrade'):
             from .worker_service_upgrade import GPUUpgrade
             if args.operation is None:
                 raise ValueError('Select the private one-attempt operation directory')
