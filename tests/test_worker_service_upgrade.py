@@ -131,15 +131,30 @@ class GPUServiceUpgradeTests(unittest.TestCase):
             # root custody. Nix user namespaces can map / and /tmp to uid 65534.
             # Only those fixed roots are modeled; all private ancestor modes,
             # inodes, symlinks and replacement observations remain actual.
-            original = Path.lstat
-            mapped_root = Path('/').stat().st_uid
+            original_lstat, original_fstat = Path.lstat, os.fstat
+            mapped_root = original_lstat(Path('/')).st_uid
+            fixed_roots = {
+                (info.st_dev, info.st_ino, info.st_uid)
+                for info in (original_lstat(Path('/')), original_lstat(Path('/tmp')))
+                if info.st_uid == mapped_root
+            }
+            def host_root(info):
+                if (info.st_dev, info.st_ino, info.st_uid) not in fixed_roots:
+                    return info
+                values = list(info); values[4] = 0
+                extra = {key: getattr(info, key) for key in
+                         ('st_atime_ns', 'st_mtime_ns', 'st_ctime_ns',
+                          'st_blksize', 'st_blocks', 'st_rdev')}
+                return os.stat_result(values, extra)
             def lstat(path, *args, **kwargs):
-                info = original(path, *args, **kwargs)
-                if path in (Path('/'), Path('/tmp')) and info.st_uid == mapped_root:
-                    values = list(info); values[4] = 0
-                    return os.stat_result(values)
-                return info
+                info = original_lstat(path, *args, **kwargs)
+                return host_root(info) if path in (Path('/'), Path('/tmp')) else info
+            def fstat(fd):
+                # Match the captured physical root/tmp inodes, not a guessed
+                # /proc/fd pathname. Every private directory remains actual.
+                return host_root(original_fstat(fd))
             self.enterContext(patch.object(Path, 'lstat', lstat))
+            self.enterContext(patch.object(os, 'fstat', fstat))
 
     def company(self):
         Path(self.config['companyFile']).write_text(json.dumps({'employees': [self.employee, self.peer]}))
@@ -239,6 +254,24 @@ class GPUServiceUpgradeTests(unittest.TestCase):
             self.assert_not_attempted()
         finally:
             self.service.unit.parent.chmod(0o755)
+
+    def test_fixture_fd_metadata_models_only_fixed_root_inodes(self):
+        for path in (Path('/'), Path('/tmp'), self.operation):
+            with self.subTest(path=path):
+                fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    actual, by_name, by_fd = path.stat(), path.lstat(), os.fstat(fd)
+                    self.assertEqual((by_fd.st_dev, by_fd.st_ino, by_fd.st_mode),
+                                     (actual.st_dev, actual.st_ino, actual.st_mode))
+                    self.assertEqual(by_name.st_uid, by_fd.st_uid)
+                    self.assertEqual((by_fd.st_mtime_ns, by_fd.st_ctime_ns),
+                                     (actual.st_mtime_ns, actual.st_ctime_ns))
+                    if path == self.operation:
+                        self.assertEqual(by_fd, actual)
+                    elif os.environ.get('NIX_BUILD_TOP'):
+                        self.assertEqual(by_fd.st_uid, 0)
+                finally:
+                    os.close(fd)
 
     def test_owner_vacation_refuses_before_attempt_even_when_stopped_off(self):
         self.employee['desiredRunning'] = False; self.employee['onVacation'] = True; self.company()
