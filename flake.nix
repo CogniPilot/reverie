@@ -188,7 +188,7 @@
           '';
           workerServiceSetup = pkgs.writeShellApplication {
             name = "reverie-worker-service";
-            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.systemd pkgs.nix ];
+            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client pkgs.systemd pkgs.nix ];
             text = ''
               export PYTHONPATH=${source}/python
               export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
