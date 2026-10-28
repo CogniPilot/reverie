@@ -341,9 +341,20 @@ export class ChatroomService {
     const owed = new Set(
       [...this.owedReplies.values()].filter((m) => m.sessionId === sessionId).map((m) => `${m.roomId}\0${m.messageId}`)
     );
-    const employeeId = this.deps.employeeOf?.(sessionId);
-    const candidates: TurnSummaryCandidate[] = [];
+    // One synchronous request gets one identity projection per session. The host
+    // lookup refreshes the full company file; never repeat it for every message,
+    // and never retain these results across requests or explicit resolution.
     const identity = this.depsWithIdentity();
+    const employeeIds = new Map<string, string | undefined>();
+    const employeeOf = identity.employeeOf;
+    if (employeeOf) identity.employeeOf = (id) => {
+      if (!employeeIds.has(id)) employeeIds.set(id, employeeOf(id));
+      return employeeIds.get(id);
+    };
+    const employeeId = identity.employeeOf?.(sessionId);
+    const recipient: NoticeRecipient = { owner: session.owner ?? null,
+      kind: employeeId ? 'employee' : 'session', id: employeeId ?? sessionId };
+    const candidates: TurnSummaryCandidate[] = [];
     const budget = { rows: 1000, bytes: 8 * 1024 * 1024 };
     const coverage: NoticeHistoryCoverage = { state: this.db ? 'complete' : 'recent-only', rooms: [] };
     const rooms = this.store.roomsFor(sessionId);
@@ -374,11 +385,10 @@ export class ChatroomService {
         .map((m) => messageWithEmployeeIdentity(m, room.owner, identity));
       const seen = this.seen.get(sessionId, room.id);
       const seenIndex = seen ? messages.findIndex((m) => m.id === seen.messageId) : -1;
-      const recipient = this.noticeRecipient(sessionId);
       // One indexed scan, including current validated retirement mappings; no name-only inheritance.
       const ownReplies = new Map<string, ChatMessage[]>();
       for (const reply of messages) {
-        if (!reply.replyTo || !this.ownNoticeReply(reply, sessionId, room.owner)) continue;
+        if (!reply.replyTo || !this.ownNoticeReply(reply, sessionId, room.owner, identity, employeeId)) continue;
         const replies = ownReplies.get(reply.replyTo) ?? [];
         replies.push(reply);
         ownReplies.set(reply.replyTo, replies);
@@ -396,9 +406,9 @@ export class ChatroomService {
         )
           continue;
         const key = `${room.id}\0${message.id}`;
-        const sourceDigest = noticeDigest(this.messageIdentity(room, message));
+        const sourceDigest = noticeDigest(this.messageIdentity(room, message, identity));
         const records = this.notices.forSource(recipient, room.id, message.id);
-        const attention = this.noticeAttention(sessionId, room, message, records, ownReplies.get(message.id) ?? []);
+        const attention = this.noticeAttention(sessionId, room, message, records, ownReplies.get(message.id) ?? [], identity);
         const transportPending = held.has(key) || queued.has(key);
         if (attention.disposition !== 'pending' && !transportPending) continue;
         const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
@@ -450,15 +460,15 @@ export class ChatroomService {
     return { owner: session.owner ?? null, kind: employeeId ? 'employee' : 'session', id: employeeId ?? sessionId };
   }
 
-  private ownNoticeReply(reply: ChatMessage, sessionId: string, owner: string | undefined): boolean {
+  private ownNoticeReply(reply: ChatMessage, sessionId: string, owner: string | undefined,
+    identity: ChatIdentityLookup, employeeId: string | undefined): boolean {
     if (reply.from.kind !== 'agent') return false;
     const session = this.deps.getSession(sessionId);
     if (!session || session.owner !== owner) return false;
     // Recompute employee identity from current session/retirement custody, not a claimed stored name/ID.
     const from = { ...reply.from };
     delete from.employeeId;
-    const current = messageWithEmployeeIdentity({ ...reply, from }, owner, this.depsWithIdentity()).from;
-    const employeeId = this.deps.employeeOf?.(sessionId);
+    const current = messageWithEmployeeIdentity({ ...reply, from }, owner, identity).from;
     if (reply.from.employeeId && reply.from.employeeId !== employeeId) return false;
     return current.kind === 'agent' &&
       (current.sessionId === sessionId || !!(employeeId && current.employeeId === employeeId));
@@ -479,9 +489,10 @@ export class ChatroomService {
   }
 
   private noticeAttention(sessionId: string, room: ChatRoom, message: ChatMessage,
-    records: import('./chatroom-notice-state.js').NoticeRecord[], replies: ChatMessage[]): NoticeAttention {
+    records: import('./chatroom-notice-state.js').NoticeRecord[], replies: ChatMessage[],
+    identity: ChatIdentityLookup): NoticeAttention {
     if (!this.notices.available) return { disposition: 'pending' };
-    const digest = noticeDigest(this.messageIdentity(room, message));
+    const digest = noticeDigest(this.messageIdentity(room, message, identity));
     // Latest proof for the current source version; an invalid replacement never falls back to an old proof.
     const record = records.filter(r => r.source.digest === digest).at(-1);
     if (record) {
@@ -499,7 +510,7 @@ export class ChatroomService {
     if (!message.edited) {
       const reply = replies.find(r => !r.deleted && !r.edited && r.at >= message.at);
       if (reply) return { disposition: 'handled', proof: { kind: 'linked-reply', reply: {
-        roomId: room.id, messageId: reply.id, digest: noticeDigest(this.messageIdentity(room, reply)),
+        roomId: room.id, messageId: reply.id, digest: noticeDigest(this.messageIdentity(room, reply, identity)),
       } } };
     }
     return { disposition: 'pending' };
@@ -638,10 +649,10 @@ export class ChatroomService {
     return { getSession: (sessionId) => this.deps.getSession(sessionId), employeeOf: this.deps.employeeOf, retired: this.retired };
   }
 
-  private messageIdentity(room: ChatRoom, message: ChatMessage): ChatMessage {
+  private messageIdentity(room: ChatRoom, message: ChatMessage, identity = this.depsWithIdentity()): ChatMessage {
     const visible = { ...message };
     delete visible.phoneWakes;
-    const view = messageWithEmployeeIdentity(visible, room.owner, this.depsWithIdentity());
+    const view = messageWithEmployeeIdentity(visible, room.owner, identity);
     return view.attachments?.length ? { ...view, attachments: view.attachments.map(file => ({ ...file, path: sharedAttachmentPath(room.id, file) })) } : view;
   }
 

@@ -187,3 +187,43 @@ it('refuses a future database schema before creating any new notice index', asyn
   expect(f.db.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('messages_owner_notice','messages_notice_reply')").all()).toEqual([]);
   expect(f.db.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()!.value).toBe('2');
 });
+
+
+it('bounds employee lookups by distinct sessions, not linked-reply count', async () => {
+  const f = await fixture([owner('owner-q'), ...Array.from({ length: 999 }, (_, i) => ({
+    ...peer('reply-' + i, i + 10), replyTo: 'owner-q',
+  }))]);
+  const lookup = vi.spyOn((f.service as any).deps, 'employeeOf');
+  const summary = f.service.turnSummary(A);
+  // Phone-mode selection retains its own current-recipient lookup.
+  expect(lookup.mock.calls).toEqual([[A], [A], [B]]);
+  expect(summary.messages.some(m => m.messageId === 'owner-q')).toBe(true);
+});
+
+it('refreshes employee identity and current owner on the next summary request', async () => {
+  const answer = { ...peer('answer', 2), replyTo: 'original',
+    from: { kind: 'agent' as const, sessionId: A, employeeId: 'employee-a', name: 'Reviewer' } };
+  const f = await fixture([owner('original'), answer]);
+  const lookup = vi.spyOn((f.service as any).deps, 'employeeOf');
+  expect(f.service.turnSummary(A).messages.some(m => m.messageId === 'original')).toBe(false);
+  lookup.mockClear();
+  lookup.mockImplementation((id: string) => id === A ? 'rebound-employee' : 'employee-b');
+  expect(f.service.turnSummary(A).messages.some(m => m.messageId === 'original')).toBe(true);
+  expect(lookup.mock.calls).toEqual([[A], [A]]);
+  f.sessions.get(A)!.owner = 'another-owner';
+  expect(f.service.turnSummary(A).total).toBe(0);
+});
+
+it('memoizes missing bindings only for the current request', async () => {
+  const f = await fixture([owner('original'), ...Array.from({ length: 30 }, (_, i) => ({
+    ...peer('reply-' + i, i + 10), replyTo: 'original',
+  }))]);
+  const lookup = vi.spyOn((f.service as any).deps, 'employeeOf').mockReturnValue(undefined);
+  f.service.turnSummary(A);
+  // Phone-mode selection retains its own current-recipient lookup.
+  expect(lookup.mock.calls).toEqual([[A], [A], [B]]);
+  lookup.mockClear();
+  f.service.turnSummary(A);
+  // Phone-mode selection retains its own current-recipient lookup.
+  expect(lookup.mock.calls).toEqual([[A], [A], [B]]);
+});
