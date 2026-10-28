@@ -240,3 +240,84 @@ it fit. Without that supported transition, enablement remains unavailable.
 An installed protected terminal generation also pins the configuration's raw
 bytes/inode: settle and rebind it around a legitimate configuration CAS. The
 metadata report exposes different current/proposed domain digests, not a permit.
+
+## Explicit broker generation upgrade
+
+The packaged `worker-service` launcher provides `prepare-gpu-upgrade` and
+`apply-gpu-upgrade` for the first employee GPU/capacity installation. This is a
+host-owner CLI operation, not an Office API or a resource actor entitlement. It
+uses the launcher's fixed immutable broker unit and preserves the selected
+configuration filename, image, all resource limits and unrelated laptop policies.
+It does not stop laptops, change employee intent, issue a wake or run a workload.
+
+Coordinate a provider checkpoint and normal exit for the selected employee first;
+preparation requires its existing laptop already stopped. Keep its current SID,
+generation, account, conversation, home and private Nix data. Broker maintenance
+briefly disconnects phone/terminal transports even while peer containers and
+provider processes remain running. Arrange that window before applying.
+
+Choose fresh private, canonical operation and reservation directories outside all
+configured or actual container mounts. The reservation directory must be empty;
+existing, removed-option or uncertain canonical reservation state refuses. Select
+an owner-private mode-0600 JSON file with exactly these keys:
+
+```json
+{
+  "employeeId": "11111111-1111-4111-8111-111111111111",
+  "device": "nvidia.com/gpu=GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "cdiSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resourceReservations": {
+    "directory": "/absolute/owner-selected/private/control",
+    "companyId": "22222222-2222-4222-8222-222222222222",
+    "poolId": "33333333-3333-4333-8333-333333333333",
+    "ownerScopeDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "hostReserveMiB": 4096
+  },
+  "providerPIDs": [12345]
+}
+```
+
+All identifiers/digests/PIDs above are synthetic. Bind the actual company, pool,
+owner scope, reviewed CDI specification and complete known provider continuity
+set from fresh private metadata. PID inputs are invariants, never authority: the
+helper records their real process births, namespaces, roots and executable inode,
+and requires membership in observed running containers. This selected set is not
+a claim to discover every possible provider process. Native host/kernel/ancestor,
+actual website cap and existing worker commitments determine capacity; the full
+selected laptop memory is additionally reserved in the prospective check. No
+value in this file raises the existing pool or selected laptop limits.
+
+From the reviewed source/package, with paths selected outside the repository:
+
+```sh
+nix run .#worker-service -- --config "$broker_config" prepare-gpu-upgrade \
+  --operation "$private_operation" --selection "$private_selection"
+nix run .#worker-service -- --config "$broker_config" apply-gpu-upgrade \
+  --operation "$private_operation" --plan-sha256 "$exact_prepared_plan_sha256"
+```
+
+Review the finite ten-minute plan and raw backups before apply. Apply reobserves
+current metadata and writes a consumed attempt before any generation pin or
+service effect. It preserves both immutable generations as GC roots, stops only
+the recognized broker service, confirms inactive state and peer/provider
+continuity, then atomically replaces the exact old configuration and unit/root
+links. It explicitly provisions the initial canonical reservation domain with the
+intended GPU grant already included, reloads the user manager and starts the new
+broker. It never resets a journal or installs the optional H/RAM actor.
+
+The helper verifies actual new broker/phone listeners with `SO_PEERCRED`, current
+capacity and unchanged peers. Normal website reconnection may start the same
+owner-requested selected session. Such activation is accepted only when its new
+full CID, unchanged image/resources/security, selected CDI device, actual
+character-device identities and canonical home/Nix/scratch bindings match. A
+normal runtime-thread update is allowed; identity, account/recipe or owner-intent
+drift refuses. This is metadata qualification, not rendering, CUDA, scientific
+correctness, exclusive GPU use or a VRAM quota. Follow it with a separately
+reviewed bounded harmless device canary before the employee's scientific job.
+
+Any failure after `ATTEMPT.json` leaves that attempt, backups and whatever durable
+canonical initialization fence exists. A timeout or missing response is unknown,
+not permission to rerun, clear markers or restore old files over a newer broker.
+There is no automatic rollback. Reconcile exact native/configuration state and
+preserve evidence before authorizing a separate recovery. Success is the CLI's
+successful terminal result and durable `DONE.json`, not mere file existence.

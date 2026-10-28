@@ -266,13 +266,28 @@ class WorkerService:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('action', choices=('check', 'check-backend', 'install', 'start', 'stop', 'status', 'logs', 'uninstall'))
+    parser.add_argument('action', choices=('check', 'check-backend', 'install', 'start', 'stop', 'status', 'logs', 'uninstall',
+                                                 'prepare-gpu-upgrade', 'apply-gpu-upgrade'))
     parser.add_argument('--lines', type=int, default=100)
+    parser.add_argument('--operation', type=Path, help='Fresh private GPU-only generation migration directory')
+    parser.add_argument('--selection', type=Path, help='Closed owner-private GPU upgrade selection')
+    parser.add_argument('--plan-sha256', help='Exact prepared GPU-only plan digest')
     args = parser.parse_args(argv)
     os.umask(0o077)
     service = WorkerService(args.config)
     try:
-        if args.action in ('check', 'check-backend'):
+        if args.action in ('prepare-gpu-upgrade', 'apply-gpu-upgrade'):
+            from .worker_service_upgrade import GPUUpgrade
+            if args.operation is None:
+                raise ValueError('Select the private one-attempt operation directory')
+            migration = GPUUpgrade(service, args.operation)
+            if args.action == 'prepare-gpu-upgrade':
+                if args.selection is None:
+                    raise ValueError('Select the closed private GPU upgrade input')
+                result = migration.prepare(args.selection)
+            else:
+                result = migration.apply(args.plan_sha256)
+        elif args.action in ('check', 'check-backend'):
             service.positive_preflight(check_manager=args.action == 'check')
             result = {'capabilities': 'PASS', 'installedAcceptance': False}
         elif args.action == 'install': result = service.install()
