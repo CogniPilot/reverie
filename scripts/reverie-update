@@ -10,10 +10,14 @@ control=${REVERIE_CONTROL_DIR:-$root/runtime/control}
 build=${REVERIE_UPDATE_BUILD_DIR:-$root/scratch/update}
 state=${REVERIE_UPDATE_STATE_DIR:-$root/runtime/update-state}
 mkdir -p "$build" "$state"
-exec 9>"$state/update.lock"
-flock 9
+h_module="$(dirname -- "${BASH_SOURCE[0]}")/owner-terminal-lifecycle.mjs"
+h_socket=''
+docker() {
+  if [[ -n "$h_socket" ]]; then
+    env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_CERT_PATH -u DOCKER_TLS_VERIFY -u DOCKER_API_VERSION docker --host "unix://$h_socket" "$@"
+  else command docker "$@"; fi
+}
 running() { [[ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" == true ]]; }
-running || { echo 'Reverie is stopped; refusing an update that would restart it.' >&2; exit 1; }
 [[ -f "$REVERIE_REPO/flake.nix" ]] || { echo 'Configured checkout has no flake.nix.' >&2; exit 1; }
 if [[ ! "$port" =~ ^[0-9]+$ ]]; then echo 'Invalid REVERIE_PORT.' >&2; exit 1; fi
 if ((port < 1 || port > 65535)); then echo 'Invalid REVERIE_PORT.' >&2; exit 1; fi
@@ -36,10 +40,103 @@ coding_setting() {
   ' "$root/deployment.json"
 }
 coding_evidence=$(coding_setting)
-rm -f -- "$control/update.request"
+protected_setting() {
+  if [[ ! -f "$root/deployment.json" ]]; then printf '%s\n' disabled; return; fi
+  jq -er --arg name "$name" '
+    if type != "object" or .containerName != $name then error("Deployment settings do not select this console")
+    elif has("protectedWebsite") and (.protectedWebsite | type) != "boolean" then error("protectedWebsite must be a boolean")
+    elif .protectedWebsite == true then "enabled" else "disabled" end
+  ' "$root/deployment.json"
+}
+protected_website=$(protected_setting)
+runtime_setting() {
+  if [[ ! -f "$root/deployment.json" ]]; then printf '%s\n' default; return; fi
+  jq -er --arg name "$name" '
+    if type != "object" or .containerName != $name then error("Deployment settings do not select this console")
+    elif has("websiteRuntime") and (.websiteRuntime | type) != "string" then error("websiteRuntime must be a closed string")
+    else .websiteRuntime // "default" end |
+    if . == "default" or . == "resource" or . == "terminal" or . == "resource-terminal" then .
+    else error("Unknown websiteRuntime") end
+  ' "$root/deployment.json"
+}
+website_runtime=$(runtime_setting)
+if [[ -f "$root/deployment.json" ]]; then
+  jq -e 'if has("ownerTerminalConfig") then (.ownerTerminalConfig | type == "string" and startswith("/") and (test("[[:cntrl:],]") | not)) else true end' "$root/deployment.json" >/dev/null || {
+    echo 'ownerTerminalConfig must be an absolute path without control characters.' >&2; exit 1;
+  }
+fi
+if [[ "$website_runtime" == terminal || "$website_runtime" == resource-terminal || -e "$HOME/.config/systemd/user/reverie-owner-terminal.service" || -L "$HOME/.config/systemd/user/reverie-owner-terminal.service" ]]; then
+  h_selected=$(jq -er '.ownerTerminalConfig | select(type=="string" and startswith("/"))' "$root/deployment.json")
+  h_socket=$(node "$h_module" engine-socket "$h_selected")
+fi
+running || { echo 'Reverie is stopped; refusing an update that would restart it.' >&2; exit 1; }
+case "$website_runtime" in
+  default) image_attribute=dockerImage; image_tag=reverie:latest ;;
+  resource) image_attribute=resourceActorImage; image_tag=reverie:latest ;;
+  terminal) image_attribute=ownerTerminalImage; image_tag=reverie-owner-terminal:latest ;;
+  resource-terminal) image_attribute=resourceTerminalImage; image_tag=reverie-owner-terminal:latest ;;
+esac
+[[ "$website_runtime" == default || "$protected_website" == enabled ]] || {
+  echo 'Optional website runtimes require protectedWebsite.' >&2; exit 1;
+}
 # Extract argv with NUL delimiters; no request or container text is evaluated as shell.
 # Reuse existing named volumes and bind mounts, including all owner-selected scratch disks.
 metadata=$(docker inspect "$name")
+h_participates=0
+h_installation=''
+h_helper=''
+h_operation=''
+old_runtime=$(printf '%s' "$metadata" | jq -er '.[0].Config.Labels["org.reverie.website.runtime"] // "default"')
+case "$old_runtime" in default|resource|terminal|resource-terminal) ;; *) echo 'Unknown existing website runtime.' >&2; exit 1 ;; esac
+if [[ "$website_runtime" == terminal || "$website_runtime" == resource-terminal || "$old_runtime" == terminal || "$old_runtime" == resource-terminal || -e "$HOME/.config/systemd/user/reverie-owner-terminal.service" || -L "$HOME/.config/systemd/user/reverie-owner-terminal.service" ]]; then
+  h_participates=1
+  h_installation=$(jq -er '.ownerTerminalConfig | select(type == "string" and startswith("/") and length > 1)' "$root/deployment.json") || {
+    echo 'Protected H or its registered unit needs the existing private ownerTerminalConfig; refusing bypass.' >&2; exit 1;
+  }
+  if [[ -z "$h_socket" ]]; then
+    h_socket=$(node "$h_module" engine-socket "$h_installation")
+    selected_metadata=$(docker inspect "$name")
+    [[ "$(printf '%s' "$selected_metadata" | jq -r '.[0].Id')" == "$(printf '%s' "$metadata" | jq -r '.[0].Id')" ]] || {
+      echo 'H private engine selection differs from the observed deployment; refusing cross-engine replacement.' >&2; exit 1;
+    }
+  fi
+  h_description=$(node "$h_module" describe "$REVERIE_REPO" "$root" "$website_runtime" "$h_installation" "$old_runtime" "$state")
+  [[ "$(printf '%s' "$h_description" | jq -r '.engineSocket')" == "$h_socket" ]] || { echo 'H engine selection changed during describe.' >&2; exit 1; }
+  h_helper=$(printf '%s' "$h_description" | jq -er '.program | select(type == "string" and startswith("/"))')
+  h_operation=$(printf '%s' "$h_description" | jq -er '.operation | select(type == "string" and startswith("/"))')
+  h_initial_sha=$(printf '%s' "$h_description" | jq -er '.description.installationSHA256 | select(test("^[a-f0-9]{64}$"))')
+  [[ "$(printf '%s' "$h_description" | jq -r '.description.lockPath')" == "$state/update.lock" ]] || {
+    echo 'H lifecycle and updater do not select the same maintenance lock.' >&2; exit 1;
+  }
+fi
+# Describe is read-only and precedes lock acquisition. <> never truncates a
+# maintenance file; the protected helper checks the actual inherited OFD9.
+exec 9<>"$state/update.lock"
+if [[ "$h_participates" == 1 ]]; then
+  node "$h_module" bind-lock "$h_operation/DESCRIBE.json" 9 "$h_operation/LOCK-BOUND.json"
+fi
+if [[ "$h_participates" == 1 ]]; then flock --exclusive --timeout 120 9; else flock 9; fi
+if [[ "$h_participates" == 1 ]]; then
+  node "$h_module" check-lock "$h_operation/DESCRIBE.json" 9 "$h_operation/LOCK-BOUND.json"
+fi
+running || { echo 'Reverie stopped before admission; leaving it stopped.' >&2; exit 1; }
+[[ "$(docker inspect "$name" | jq -Sc '.[0] | {Id,Image,Config,HostConfig,Mounts:(.Mounts|map(if type=="object" then . else error("Malformed mount") end)|sort)}')" == \
+   "$(printf '%s' "$metadata" | jq -Sc '.[0] | {Id,Image,Config,HostConfig,Mounts:(.Mounts|map(if type=="object" then . else error("Malformed mount") end)|sort)}')" ]] || {
+  echo 'Website changed before admission; refusing stale replacement.' >&2; exit 1;
+}
+h_phase() {
+  local phase=$1; shift
+  case "$phase" in settle|preflight-created|prepare-created|start-listener|await-ready) ;; *) return 1 ;; esac
+  node "$h_module" check-lock "$h_operation/DESCRIBE.json" 9 "$h_operation/LOCK-BOUND.json"
+  [[ "$(sha256sum "$h_installation" | cut -d' ' -f1)" == "$h_initial_sha" ]] || { echo 'H initial installation changed.' >&2; return 1; }
+  (set -o noclobber; printf '%s\n' '{"state":"ATTEMPT_NO_REPLAY"}' > "$h_operation/$phase-ATTEMPT.json")
+  if ! "$h_helper" --installation "$h_installation" --lock-fd 9 "$phase" "$@" > "$h_operation/$phase-RESULT.json"; then
+    printf '%s\n' '{"state":"UNKNOWN_NO_REPLAY"}' > "$h_operation/$phase-UNKNOWN.json"
+    return 1
+  fi
+  node "$h_module" check-lock "$h_operation/DESCRIBE.json" 9 "$h_operation/LOCK-BOUND.json"
+}
+rm -f -- "$control/update.request"
 if printf '%s' "$metadata" | jq -e '.[0].Config.Env | any(startswith("REVERIE_WORKER_SOCKET="))' >/dev/null; then
   echo 'This deployment uses isolated workers. Use reverie-isolate prepare and activate to keep the server and worker images paired.' >&2
   exit 1
@@ -49,6 +146,46 @@ image_env=$(docker image inspect --format '{{json .Config.Env}}' "$image_id")
 user=$(printf '%s' "$metadata" | jq -er '.[0].Config.User | select(type == "string" and length > 0)')
 [[ "$user" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)?$ ]] || { echo 'Existing container has an invalid user identity.' >&2; exit 1; }
 process_args=(--user "$user")
+protected_facts() {
+  # Only the exact launcher profile is portable here, never arbitrary tmpfs/options.
+  jq -e --arg run "$protected_run" '
+    def clear_nix: type == "string" and startswith("/") and . != "/" and . != "/nix" and (startswith("/nix/") | not);
+    def options: if type == "string" then split(",") | sort else null end;
+    .[0] as $c | $c.HostConfig as $h |
+    $h.ReadonlyRootfs == true and $h.Privileged == false and
+    $h.CapDrop == ["ALL"] and ($h | has("CapAdd")) and ($h.CapAdd == null or $h.CapAdd == []) and
+    $h.PidMode == "" and $h.IpcMode == "private" and
+    ($h.SecurityOpt == ["no-new-privileges"] or $h.SecurityOpt == ["no-new-privileges:true"]) and
+    ($h.Tmpfs | type) == "object" and ($h.Tmpfs | keys) == ["/run", "/tmp"] and
+    ($h.Tmpfs["/tmp"] | options) == ("rw,nosuid,nodev,size=256m,mode=1777" | options) and
+    ($h.Tmpfs["/run"] | options) == ($run | options) and
+    ($h.MaskedPaths | type) == "array" and all($h.MaskedPaths[]; clear_nix) and
+    ($h.ReadonlyPaths | type) == "array" and all($h.ReadonlyPaths[]; clear_nix) and
+    ($c.Mounts | type) == "array" and
+    ([$c.Mounts[].Destination] | length) == ([$c.Mounts[].Destination] | unique | length) and
+    all($c.Mounts[]; (.Destination | clear_nix) and
+      (if .Destination == "/tmp" or .Destination == "/run" then .Type == "tmpfs"
+       else .Type == "bind" or .Type == "volume" end)) and
+    ($c.Config.Env | type) == "array" and all($c.Config.Env[];
+      type == "string" and (test("^(LD_|(NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|GCONV_PATH|OPENSSL_CONF|OPENSSL_MODULES)(=|$))") | not))
+  ' >/dev/null
+}
+if [[ "$protected_website" == enabled ]]; then
+  [[ "$user" =~ ^[1-9][0-9]*:[0-9]+$ ]] || { echo 'Protected website requires an explicit non-root numeric UID:GID.' >&2; exit 1; }
+  protected_run="rw,nosuid,nodev,noexec,size=16m,mode=0755,uid=${user%:*},gid=${user#*:}"
+  printf '%s' "$metadata" | protected_facts || { echo 'Protected website facts differ or are unknown; refusing replacement.' >&2; exit 1; }
+  protected_snapshot=$(printf '%s' "$metadata" | jq -Sc '.[0] | {Id,Image,Config,HostConfig,Mounts:(.Mounts|map(if type=="object" then . else error("Malformed mount") end)|sort)}')
+  process_args+=(--read-only --cap-drop ALL --security-opt no-new-privileges --ipc private
+    --tmpfs '/tmp:rw,nosuid,nodev,size=256m,mode=1777' --tmpfs "/run:$protected_run")
+else
+  printf '%s' "$metadata" | jq -e '.[0].HostConfig | .ReadonlyRootfs != true and ((.Tmpfs // {}) | length) == 0' >/dev/null || {
+    echo 'Existing protected/tmpfs website requires its explicit protectedWebsite selection; refusing downgrade.' >&2; exit 1;
+  }
+fi
+if [[ "$h_participates" == 1 ]]; then
+  printf '%s' "$metadata" > "$h_operation/PRE-STOP-SOURCE.json"
+  node "$h_module" check-source-host "$h_operation/PRE-STOP-SOURCE.json" "$port"
+fi
 deployment_override=${REVERIE_DEPLOYMENT_SIGNATURE:-}
 [[ -z "$deployment_override" || "$deployment_override" =~ ^[a-f0-9]{64}$ ]] || { echo 'Invalid owner deployment signature.' >&2; exit 1; }
 deployment=$(printf '%s' "$metadata" | jq -r '.[0].Config.Labels["reverie.deployment"] // ""')
@@ -73,9 +210,11 @@ process_args+=(--pids-limit "$pids")
 mount_file="$build/mounts-$$"
 env_file="$build/env-$$"
 trap 'rm -f -- "$mount_file" "$env_file"' EXIT
-printf '%s' "$metadata" | jq -j '
+printf '%s' "$metadata" | jq -j --arg protected "$protected_website" --arg old "$old_runtime" --arg next "$website_runtime" '
   .[0].Mounts[] |
-  if (.Type != "volume" and .Type != "bind") then error("unsupported mount type") else . end |
+  if ($old == "terminal" or $old == "resource-terminal") and ($next != "terminal" and $next != "resource-terminal") and .Destination == "/run/reverie-owner-terminal" then empty
+  elif .Type == "tmpfs" and $protected == "enabled" and (.Destination == "/tmp" or .Destination == "/run") then empty
+  elif (.Type != "volume" and .Type != "bind") then error("unsupported mount type") else . end |
   (.Name // .Source) as $source |
   if (($source | contains(",")) or (.Destination | contains(","))) then error("mount paths containing commas need owner configuration") else . end |
   "--mount\u0000type=\(.Type),src=\($source),dst=\(.Destination)\(if .RW then "" else ",readonly" end)\u0000"
@@ -112,15 +251,32 @@ while :; do
 done
 # Nix auto-selects Git checkouts (excluding .git) and unpacked source archives.
 repo=$(realpath -- "$REVERIE_REPO")
-nix build "$repo#dockerImage" --out-link "$build/image" \
+nix build "$repo#$image_attribute" --out-link "$build/image" \
   --option build-dir "$nix_build"
 docker load --input "$build/image" >/dev/null
 candidate="reverie:update-$(date -u +%Y%m%dT%H%M%S)-$$"
-docker tag reverie:latest "$candidate"
+docker tag "$image_tag" "$candidate"
 # A stop during a slow build is authoritative.
 running || { echo 'Reverie was stopped during the build; leaving it stopped.' >&2; exit 1; }
 [[ "$(phone_setting)" == "$phone_wake" ]] || { echo 'Admin phone startup setting changed during the build; retry the update.' >&2; exit 1; }
 [[ "$(coding_setting)" == "$coding_evidence" ]] || { echo 'Owner coding evidence startup setting changed during the build; retry the update.' >&2; exit 1; }
+[[ "$(protected_setting)" == "$protected_website" ]] || { echo 'Protected website selection changed during the build; refusing replacement.' >&2; exit 1; }
+[[ "$(runtime_setting)" == "$website_runtime" ]] || { echo 'Website runtime changed during the build; refusing replacement.' >&2; exit 1; }
+if [[ "$protected_website" == enabled ]]; then
+  current_metadata=$(docker inspect "$name")
+  printf '%s' "$current_metadata" | protected_facts || { echo 'Protected website facts changed during the build.' >&2; exit 1; }
+  [[ "$(printf '%s' "$current_metadata" | jq -Sc '.[0] | {Id,Image,Config,HostConfig,Mounts:(.Mounts|map(if type=="object" then . else error("Malformed mount") end)|sort)}')" == "$protected_snapshot" ]] || {
+    echo 'Protected website configuration or limits changed during the build; refusing replacement.' >&2; exit 1;
+  }
+  docker image inspect --format '{{json .Config.Env}}' "$candidate" | jq -e '
+    type == "array" and all(.[]; type == "string" and
+      (test("^(LD_|(NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|GCONV_PATH|OPENSSL_CONF|OPENSSL_MODULES)(=|$))") | not))
+  ' >/dev/null || { echo 'Candidate protected website has unknown or overridden interpreter environment.' >&2; exit 1; }
+fi
+if [[ "$website_runtime" == terminal || "$website_runtime" == resource-terminal ]]; then
+  docker image inspect "$candidate" | jq -ec '.[0]' > "$h_operation/PRE-STOP-IMAGE.json"
+  node "$h_module" check-image "$h_operation/PRE-STOP-IMAGE.json" "$h_operation/DESCRIBE.json"
+fi
 backup="$name-rollback-$$"
 stopped=0
 renamed=0
@@ -130,6 +286,11 @@ rollback() {
   trap - EXIT
   rm -f -- "$mount_file" "$env_file"
   if [[ "$success" == 0 && "$stopped" == 1 ]]; then
+    if [[ "$h_participates" == 1 ]]; then
+      printf '%s\n' '{"state":"UNKNOWN_RETAIN_CONTAINERS_AND_H_GENERATION_NO_LEGACY_ROLLBACK"}' > "$h_operation/UPDATE-UNKNOWN.json"
+      echo 'Protected H update outcome is unconfirmed; preserving containers and private generation. No legacy rollback/start.' >&2
+      exit "$result"
+    fi
     echo 'Update failed; restoring the previous container.' >&2
     if [[ "$renamed" == 1 ]]; then
       docker rm --force "$name" >/dev/null 2>&1 || true
@@ -140,12 +301,53 @@ rollback() {
   exit "$result"
 }
 trap rollback EXIT
+if [[ "$h_participates" == 1 ]]; then h_phase settle; fi
 docker stop --time 30 "$name" >/dev/null
 stopped=1
 docker rename "$name" "$backup"
 renamed=1
-docker run --detach --init --name "$name" --restart unless-stopped \
-  --publish "127.0.0.1:$port:3000" "${process_args[@]}" "${mounts[@]}" "${environment[@]}" "$candidate" >/dev/null
+if [[ "$website_runtime" == terminal || "$website_runtime" == resource-terminal ]]; then
+  bootstrap=$(printf '%s' "$h_description" | jq -er '.description.bootstrapMount.Source')
+  # Retain the explicit stable bootstrap grant, without adding a duplicate.
+  existing_bootstrap=$(printf '%s' "$metadata" | jq -r '.[0].Mounts[] | select(.Destination=="/run/reverie-owner-terminal") | .Source')
+  if [[ -n "$existing_bootstrap" ]]; then
+    [[ "$existing_bootstrap" == "$bootstrap" ]] || { echo 'Existing H bootstrap root differs.' >&2; exit 1; }
+  else mounts+=(--mount "type=bind,src=$bootstrap,dst=/run/reverie-owner-terminal,readonly"); fi
+  cid=$(docker create --pull never --init --name "$name" --restart unless-stopped \
+    --publish "127.0.0.1:$port:3000" "${process_args[@]}" "${mounts[@]}" "${environment[@]}" "$candidate")
+  [[ "$cid" =~ ^[a-f0-9]{64}$ ]] || { echo 'Create returned no exact H website CID.' >&2; exit 1; }
+  docker inspect "$cid" | jq -ec '.[0]' > "$h_operation/CREATED.json"
+  docker image inspect "$candidate" | jq -ec '.[0]' > "$h_operation/IMAGE.json"
+  # Construct intent from the preserved, pre-stop owner selection and fixed
+  # argv, not from the created readback. The shared qualifier checks every
+  # generated grant and bounds all native HostConfig authority surfaces.
+  printf '%s' "$metadata" | jq -ec --arg name "$name" --arg user "$user" --arg workdir "$working_dir" \
+    --argjson memory "$memory" --argjson swap "$swap" --argjson pids "$pids" --argjson port "$port" \
+    --arg bootstrap "$bootstrap" --arg gpu "$gpu" --arg deployment "$deployment" --arg run "$protected_run" \
+    --args '. as $old | $ARGS.positional as $argv | {name:$name,user:$user,workdir:$workdir,memory:$memory,swap:$swap,pids:$pids,port:$port,
+      tmpfs:{"/tmp":"rw,nosuid,nodev,size=256m,mode=1777","/run":$run},
+      hostFloors:{MaskedPaths:$old[0].HostConfig.MaskedPaths,ReadonlyPaths:$old[0].HostConfig.ReadonlyPaths},
+      labels:(if $deployment=="" then {} else {"reverie.deployment":$deployment} end),
+      environment:[$argv|to_entries[]|select(.value=="--env")|$argv[.key+1]],
+      mounts:([$old[0].Mounts[]|select(.Type!="tmpfs")|{type:.Type,source:(.Name//.Source),destination:.Destination,readonly:(.RW|not)}]
+        |if any(.[];.destination=="/run/reverie-owner-terminal") then . else .+[{type:"bind",source:$bootstrap,destination:"/run/reverie-owner-terminal",readonly:true}] end
+        |if $gpu!="" and (any(.[];.destination=="/host-published")|not) then .+[{type:"bind",source:$gpu,destination:"/host-published",readonly:true}] else . end)}' \
+    -- "${environment[@]}" > "$h_operation/INTENT.json"
+  spec_sha=$(node "$h_module" validate-created "$h_operation/CREATED.json" "$h_operation/IMAGE.json" "$h_operation/INTENT.json" "$h_operation/APPROVED-SPEC.json")
+  h_phase preflight-created --container-id "$cid" --spec "$h_operation/APPROVED-SPEC.json" --spec-sha "$spec_sha"
+  jq -e --arg cid "$cid" --arg sha "$spec_sha" 'keys==["containerId","specSHA256","state","version","workerEffects"] and .version==1 and .state=="STOPPED_WEBSITE_CAPACITY_QUALIFIED" and .containerId==$cid and .specSHA256==$sha and .workerEffects==false' \
+    "$h_operation/preflight-created-RESULT.json" >/dev/null || { echo 'H stopped candidate has no native capacity qualification.' >&2; exit 1; }
+  h_phase prepare-created --container-id "$cid" --spec "$h_operation/APPROVED-SPEC.json" --spec-sha "$spec_sha"
+  h_phase start-listener
+  docker start "$cid" >/dev/null
+  h_phase await-ready
+  if [[ "$website_runtime" == resource-terminal ]]; then
+    node "$h_module" refresh-resource "$repo" "$h_installation" "$h_operation" 9
+  fi
+else
+  docker run --detach --init --name "$name" --restart unless-stopped \
+    --publish "127.0.0.1:$port:3000" "${process_args[@]}" "${mounts[@]}" "${environment[@]}" "$candidate" >/dev/null
+fi
 ready=0
 for _ in $(seq 1 60); do
   if running && [[ "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$port/api/status" || true)" == 401 ]]; then ready=1; break; fi

@@ -6095,6 +6095,8 @@ class ReverieChatApp {
       const returning = employee.onVacation === true;
       entries.push({ label: returning ? 'Enter office' : 'Leave office', success: returning, danger: !returning, run: () => returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee) });
     }
+    if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
+      entries.push({ label: 'Human terminal', run: () => this.openHumanTerminal(employee) });
     if (!caIsDm(this.room)) {
       entries.push(
         { sep: true },
@@ -6337,9 +6339,19 @@ class ReverieChatApp {
         this.closeProfile();
         this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); });
       }, { text: 'Edit profile' }));
+    if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
+      actions.append(this.button('ca-btn', 'Human terminal', () => this.openHumanTerminal(employee), { text: 'Human terminal' }));
     card.append(actions, technical);
     this.presentCard(card, anchor);
     this.loadAgentProfile(m, card, local, full);
+  }
+
+  async openHumanTerminal(employee) {
+    this.closeProfile();
+    try {
+      if (!this.doc.defaultView.ReverieOwnerTerminal) throw new Error('Terminal display unavailable');
+      await this.doc.defaultView.ReverieOwnerTerminal.open(this.app, employee.id, employee.name);
+    } catch { this.toast('Human terminal is unavailable', 'error'); }
   }
 
   /**

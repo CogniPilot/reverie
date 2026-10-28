@@ -170,7 +170,7 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     from reverie.worker_resource_reservations import option as reservation_option
     reservation_option(config)
@@ -186,6 +186,10 @@ def validate_config(config):
         value=config['browserJobPolicy']
         if not isinstance(value,str) or not Path(value).is_absolute() or Path(value).resolve()!=Path(value):
             raise ValueError('Invalid private fixed-browser-job binding')
+    if 'resourceActorConfig' in config:
+        value=config['resourceActorConfig']
+        if not isinstance(value,str) or not Path(value).is_absolute() or Path(value).resolve()!=Path(value):
+            raise ValueError('Invalid private resource-purpose binding')
     from reverie.worker_command_telemetry import configuration
     configuration(config)
     validate_gpu_config(config)
@@ -727,19 +731,25 @@ class Broker:
         self.command_telemetry = CommandTelemetry(config, self.run_engine)
         from reverie.worker_resource_reservations import ReservationGate, configured
         self.resource_reservations = ReservationGate(self) if configured(config) else None
+        self.resource_actor = None
+        if config.get('resourceActorConfig') is not None:
+            from reverie.worker_resource_actor import ResourceActorService
+            self.resource_actor = ResourceActorService(self)
         self.browser_jobs = None
         if config.get('browserJobPolicy') is not None:
             from reverie.browser_job_requests import BrowserJobRequests
             self.browser_jobs = BrowserJobRequests(self,config['browserJobPolicy'])
 
-    def resource_admission(self, sid=None):
+    def resource_admission(self, sid=None, *, protected_start=None):
         if self.resource_reservations is None:
+            if protected_start is not None:
+                raise ValueError('Protected resource admission is unavailable')
             # A removed configuration option must not hide a durable prior fence.
             from reverie.worker_resource_reservations import configured
             if configured(self.config):
                 raise ValueError('Resource reservation control requires reconciliation')
             return nullcontext()
-        return self.resource_reservations.admission(sid)
+        return self.resource_reservations.admission(sid,protected_start=protected_start)
 
     def _release_resource_admission(self, guard):
         try:
@@ -810,17 +820,101 @@ class Broker:
             raise RuntimeError('Plan move state is unavailable; refusing detached worker execution')
         return True
 
-    def stop(self, name, *, retain_storage=False):
-        self.run_engine(['stop', '--time', '2', name], optional=True)
-        state = self.run_engine(['inspect', name], optional=True)
-        if state.returncode == 0 and json.loads(state.stdout)[0]['State']['Running']:
-            self.run_engine(['kill', name])
-            state = self.run_engine(['inspect', name])
-            if json.loads(state.stdout)[0]['State']['Running']:
-                raise RuntimeError('Laptop did not stop')
+    def stop(self, name, *, retain_storage=False, expected_id=None, expected_process=None):
+        gate = getattr(self, 'resource_reservations', None)
+        if gate is None:
+            from reverie.worker_resource_reservations import configured
+            if configured(self.config):
+                raise ValueError('Resource reservation control requires reconciliation')
+            return Broker._stop_observed(self, name, retain_storage=retain_storage,
+                                         expected_id=expected_id, expected_process=expected_process)
+        if getattr(gate._local, 'depth', 0):
+            gate.check_stop(name, expected_id, expected_process)
+            return Broker._stop_observed(self, name, retain_storage=retain_storage,
+                                         expected_id=expected_id, expected_process=expected_process)
+        with gate.admission():
+            gate.check_stop(name, expected_id, expected_process)
+            return Broker._stop_observed(self, name, retain_storage=retain_storage,
+                                         expected_id=expected_id, expected_process=expected_process)
+
+    def _stop_observed(self, name, *, retain_storage=False, expected_id=None, expected_process=None):
+        # Optional private resource-actor path: address the captured immutable
+        # CID, never an owner-replaced container which recycled its name.
+        target=name
+        if expected_process is not None and expected_id is None:
+            raise ValueError('Exact source process needs an immutable container identity')
+        if expected_id is not None:
+            if (not isinstance(expected_id,str) or not re.fullmatch('[0-9a-f]{64}',expected_id) or
+                    not name.startswith(self.config['deployment']+'-agent-') or
+                    not SESSION.fullmatch(name.removeprefix(self.config['deployment']+'-agent-'))):
+                raise ValueError('Exact owned laptop identity required')
+            before=self.run_engine(['inspect',name])
+            rows=json.loads(before.stdout)
+            sid=name.removeprefix(self.config['deployment']+'-agent-')
+            if (not isinstance(rows,list) or len(rows)!=1 or rows[0].get('Id')!=expected_id or
+                    rows[0].get('Name')!='/'+name or
+                    (rows[0].get('Config',{}).get('Labels') or {}).get('reverie.worker')!=self.config['deployment'] or
+                    (rows[0]['Config']['Labels'] or {}).get('reverie.session')!=sid or
+                    (rows[0]['Config']['Labels'] or {}).get('reverie.worker-policy')!=policy_digest(self.config,sid)):
+                raise ValueError('Exact owned laptop identity changed')
+            status=rows[0].get('State',{})
+            if (type(status.get('Running')) is not bool or type(status.get('Pid')) is not int or
+                    (status['Pid']<=0 if status['Running'] else status['Pid']!=0)):
+                raise ValueError('Exact owned laptop state is unavailable')
+            if expected_process is not None:
+                from reverie.worker_resource_reservations import _pid
+                if (type(expected_process) is not dict or set(expected_process)!={'pid','start'} or
+                        type(expected_process['pid']) is not int or expected_process['pid']<=0 or
+                        type(expected_process['start']) is not str or not expected_process['start'].isascii() or
+                        not expected_process['start'].isdecimal() or status['Pid']!=expected_process['pid'] or
+                        _pid(expected_process['pid'])!=expected_process['start']):
+                    raise ValueError('Exact source process incarnation changed')
+            target=expected_id
+            from reverie.worker_resource_reservations import _pid
+            original_pid=status['Pid']
+            original_start=_pid(original_pid) if status['Running'] else None
+            if expected_process is not None and original_start!=expected_process['start']:
+                raise ValueError('Exact source process incarnation changed')
+            metadata={key:rows[0].get(key) for key in ('Id','Name','Image','Config','HostConfig','Mounts')}
+            def protected_record(result):
+                records=json.loads(result.stdout) if result.returncode==0 else []
+                if (not isinstance(records,list) or len(records)!=1 or
+                        {key:records[0].get(key) for key in metadata}!=metadata):
+                    raise RuntimeError('Exact source laptop metadata changed')
+                observed=records[0].get('State',{})
+                if (type(observed.get('Running')) is not bool or type(observed.get('Pid')) is not int or
+                        (observed['Pid']<=0 if observed['Running'] else observed['Pid']!=0)):
+                    raise RuntimeError('Exact source laptop state is unavailable')
+                return observed
+            released=status
+            if status['Running']:
+                self.run_engine(['stop', '--time', '2', target], optional=True)
+                state=self.run_engine(['inspect',target],optional=True)
+                released=protected_record(state)
+                if released['Running']:
+                    # Inspect is the last blocking native operation before the
+                    # final original-process check and a possible signal.
+                    if released['Pid']!=original_pid or _pid(original_pid)!=original_start:
+                        raise RuntimeError('Exact source process incarnation changed before kill')
+                    self.run_engine(['kill',target])
+                    released=protected_record(self.run_engine(['inspect',target]))
+            if released.get('Running') is not False or type(released.get('Pid')) is not int or released['Pid']!=0:
+                raise RuntimeError('Exact source laptop release is unconfirmed')
+        else:
+            self.run_engine(['stop', '--time', '2', target], optional=True)
+            state = self.run_engine(['inspect', target], optional=True)
+            if state.returncode == 0 and json.loads(state.stdout)[0]['State']['Running']:
+                self.run_engine(['kill', target])
+                state = self.run_engine(['inspect', target])
+                if json.loads(state.stdout)[0]['State']['Running']:
+                    raise RuntimeError('Laptop did not stop')
         sid = name.removeprefix(self.config['deployment']+'-agent-')
         if SESSION.fullmatch(sid) and not retain_storage:
             self.release_storage(sid)
+        if expected_id is not None:
+            # Retain the unused source network. A replacement sharing its name
+            # must never be disconnected/deleted by a stale operation.
+            return {'containerId':expected_id,'running':False,'networkRetained':True}
         network = name+'-lan'
         result = self.run_engine(['network', 'inspect', network], optional=True)
         if result.returncode == 0:
@@ -1197,8 +1291,11 @@ class Broker:
         self.laptops=recovered
 
     def stop_laptops(self):
-        with self.lock:
-            self._stop_laptops_locked()
+        # Same admission -> broker -> journal ordering as launch/reload. Never
+        # acquire the global allocation lock while holding the broker mutex.
+        with self.resource_admission():
+            with self.lock:
+                self._stop_laptops_locked()
 
     def _stop_laptops_locked(self):
         self.draining.set()
@@ -1432,7 +1529,7 @@ class Broker:
                 except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, subprocess.SubprocessError):
                     pass
 
-    def handle(self, connection):
+    def handle(self, connection, *, _resource_launch=None):
         self.handlers[connection] = threading.current_thread()
         name = None
         child = None
@@ -1460,6 +1557,12 @@ class Broker:
             if peer[1] != self.config['uid']:
                 raise ValueError('Worker peer identity is not authorized')
             kind, raw = receive_frame(connection)
+            if kind == b'Q':
+                from reverie.worker_resource_actor import ResourceActorService
+                if json.loads(raw)!={'purpose':'resource-replacement-v1','version':1} or type(self.resource_actor) is not ResourceActorService:
+                    raise ValueError('Protected resource purpose is unavailable')
+                self.resource_actor.accept(connection,peer)
+                return
             if kind == b'G':
                 projection = json.loads(raw)
                 if not isinstance(projection, dict) or projection != {'action': 'goal-custody'}:
@@ -1486,9 +1589,23 @@ class Broker:
                 result = self.control(control['action'], control.get('caller'))
                 send_frame(connection, b'J', json.dumps(result).encode())
                 return
-            if kind != b'J':
+            if kind == b'L':
+                from reverie.worker_resource_actor import ResourceActorService
+                private=json.loads(raw)
+                if type(self.resource_actor) is not ResourceActorService or type(private) is not dict or set(private)!={'reference','request'}:
+                    raise ValueError('Protected resource launch is unavailable')
+                request=validate_request(private['request'],self.config)
+                _resource_launch=self.resource_actor.resolve_launch(private['reference'],request,peer)
+            elif kind == b'J':
+                request = validate_request(json.loads(raw), self.config)
+            else:
                 raise ValueError('Expected worker launch request')
-            request = validate_request(json.loads(raw), self.config)
+            protected_start = None
+            if _resource_launch is not None:
+                # Fixed private actor joins this same canonical producer. A
+                # public frame cannot create or select the process-local join.
+                from reverie.worker_resource_native import request_for_launch
+                protected_start = request_for_launch(self, _resource_launch, request)
             if self.config_file:
                 updated = load_config(self.config_file)
                 with self.lock:
@@ -1498,10 +1615,11 @@ class Broker:
             session_id = request['sessionId']
             # Queued owner GPU intent can be applied only to an already stopped
             # current seat, before canonical creation admission/preparation.
-            if self.resource_reservations is not None and not request.get('attachOnly'):
+            if protected_start is None and self.resource_reservations is not None and not request.get('attachOnly'):
                 from reverie.worker_gpu_access import cold_boundary as gpu_cold_boundary
                 gpu_cold_boundary(self, session_id)
-            pending_guard = self.resource_admission(session_id)
+            pending_guard = (self.resource_admission(session_id) if protected_start is None else
+                             self.resource_admission(session_id, protected_start=protected_start))
             pending_guard.__enter__()
             resource_guard = pending_guard
             generation = self.generation
@@ -1637,6 +1755,9 @@ class Broker:
                         raise RuntimeError('Current employee running intent changed before creation')
                     self.command_telemetry.check_create_args(args)
                     creation = self.run_engine(args)
+                    if _resource_launch is not None:
+                        from reverie.worker_resource_native import record_created
+                        record_created(self, _resource_launch, creation)
                     if retention_ready is not None:
                         retention_container_id = creation.stdout.strip()
                     owned = True
@@ -1664,12 +1785,18 @@ class Broker:
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
                     self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
                     self.run_engine(tmux_exec_args(name, 'set-option', '-g', 'status', 'off'))
+                    if _resource_launch is not None:
+                        from reverie.worker_resource_native import record_cli_started
+                        record_cli_started(self, _resource_launch)
                     nix_guard.__exit__(None, None, None)
                     nix_guard = None
                 started = True
             pending_guard = resource_guard
             resource_guard = None
             self._release_resource_admission(pending_guard)
+            if _resource_launch is not None:
+                from reverie.worker_resource_native import record_canonical_released
+                record_canonical_released(self,_resource_launch)
             master, slave = pty.openpty()
             tty.setraw(slave)
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', request['rows'], request['cols'], 0, 0))
@@ -1742,6 +1869,9 @@ class Broker:
             except OSError:
                 pass
         finally:
+            if _resource_launch is not None:
+                from reverie.worker_resource_native import record_canonical_closed
+                record_canonical_closed(self,_resource_launch)
             if resource_guard is not None:
                 try:
                     self._release_resource_admission(resource_guard)
@@ -1752,7 +1882,7 @@ class Broker:
                 nix_guard.__exit__(None, None, None)
             try:
                 completed = exit_file is not None and exit_file.is_file()
-                if admitted and name and owned and ((not started and not existing_running) or completed):
+                if _resource_launch is None and admitted and name and owned and ((not started and not existing_running) or completed):
                     try:
                         self.stop(name)
                     except (OSError, RuntimeError, subprocess.TimeoutExpired):
@@ -1768,7 +1898,7 @@ class Broker:
                         if fd is not None:
                             try: os.close(fd)
                             except OSError: pass
-                    if launch and not started:
+                    if launch and not started and _resource_launch is None:
                         launch.unlink(missing_ok=True)
                     if claimed:
                         deadline = self.stopping.deadline
@@ -1778,13 +1908,13 @@ class Broker:
                         else:
                             try:
                                 self.active.pop(session_id, None)
-                                if (not started and not existing_running) or completed:
+                                if _resource_launch is None and ((not started and not existing_running) or completed):
                                     self.laptops.pop(session_id, None)
                                     office = self.offices.pop(session_id, None)
                                     if office: self._close_office(office)
                             finally:
                                 self.lock.release()
-                    if storage_claimed:
+                    if storage_claimed and _resource_launch is None:
                         # 3be: viewer EOF alone does not end a laptop's data lease. Release only after observing that
                         # exact named laptop is no longer live. Merge: bounded like the Goal's provider cleanup.
                         try:
@@ -1967,6 +2097,11 @@ def client(args):
     info = Path(path).lstat()
     if not stat.S_ISSOCK(info.st_mode) or info.st_mode & 0o077:
         raise ValueError('Worker socket is unavailable or not private')
+    resource_ref=getattr(args,'resource_ref',None)
+    if resource_ref is not None:
+        if (not SESSION.fullmatch(resource_ref) or args.attach_only or args.control or
+                args.goal_custody or args.caller_session):
+            raise ValueError('Closed resource launch reference required')
     if getattr(args, 'goal_custody', False):
         from reverie.goal_custody_client import project
         return project(args)
@@ -1992,7 +2127,8 @@ def client(args):
     signal.signal(signal.SIGWINCH, lambda *_: resized.set())
     with socket.socket(socket.AF_UNIX) as connection:
         connection.connect(path)
-        send_frame(connection, b'J', json.dumps(request).encode())
+        send_frame(connection, b'L' if resource_ref is not None else b'J',
+                   json.dumps({'reference':resource_ref,'request':request} if resource_ref is not None else request).encode())
         if previous:
             tty.setraw(0)
         try:
@@ -2066,6 +2202,7 @@ def main():
     execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
     execute.add_argument('--caller-session')
     execute.add_argument('--attach-only', action='store_true')
+    execute.add_argument('--resource-ref', help='Server-private registered resource launch reference')
     execute.add_argument('--session-id')
     execute.add_argument('--cwd')
     execute.add_argument('--command')

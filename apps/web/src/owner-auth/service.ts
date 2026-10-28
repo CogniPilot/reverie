@@ -194,6 +194,7 @@ export class OwnerAuthService {
   private setupBusy = false;
   private readonly setupSources = new Map<string, { at: number; count: number }>();
   private readonly connections = new Map<string, Set<Socket>>();
+  private readonly connectionClosers = new WeakMap<Socket, Map<string, () => void>>();
   /** The last account read successfully: kept when the file later goes missing or corrupt. */
   private lastGood: OwnerAccount | undefined;
   private warned = { missing: false, corrupt: false };
@@ -581,12 +582,28 @@ export class OwnerAuthService {
   track(token: string, socket: Socket): void {
     const key = sha256(token);
     const set = this.connections.get(key) ?? new Set<Socket>();
+    if (set.has(socket)) return;
     set.add(socket);
     this.connections.set(key, set);
-    socket.once('close', () => {
-      set.delete(socket);
-      if (!set.size) this.connections.delete(key);
-    });
+    const handlers = this.connectionClosers.get(socket) ?? new Map<string, () => void>();
+    const closed = () => this.untrackKey(key, socket);
+    handlers.set(key, closed); this.connectionClosers.set(socket, handlers);
+    socket.once('close', closed);
+  }
+
+  /** A private operation may release its logout fence after all native work.
+   * Reusing the same channel must not accumulate stale session close handlers. */
+  untrack(token: string, socket: Socket): void {
+    this.untrackKey(sha256(token), socket);
+  }
+  private untrackKey(key: string, socket: Socket): void {
+    const set = this.connections.get(key);
+    set?.delete(socket);
+    if (!set?.size) this.connections.delete(key);
+    const handlers = this.connectionClosers.get(socket), closed = handlers?.get(key);
+    if (closed) socket.off('close', closed);
+    handlers?.delete(key);
+    if (!handlers?.size) this.connectionClosers.delete(socket);
   }
 
   /** Close every tracked connection whose session has ended (sign-out, epoch change, expiry). */

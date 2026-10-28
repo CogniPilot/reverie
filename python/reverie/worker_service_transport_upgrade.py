@@ -10,6 +10,8 @@ from pathlib import Path
 import stat
 import re
 import time
+import selectors
+import subprocess
 
 from . import worker_resource_reservations as R
 from .worker_host_job import require_idle
@@ -19,6 +21,53 @@ from .worker_resources import policy_digest
 from .worker_storage import read_metadata, storage_paths, validate_storage
 
 KIND = 'SAME_CONFIG_TRANSPORT_UPGRADE_V1'
+
+
+INTERPRETER_PROBE = ("import json,sys;from pathlib import Path;"
+    "print(json.dumps({'version':1,'implementation':sys.implementation.name,"
+    "'isolated':sys.flags.isolated,'bytecode':not sys.dont_write_bytecode,"
+    "'exe':str(Path('/proc/self/exe').resolve(strict=True)),"
+    "'argv0':Path('/proc/self/cmdline').read_bytes().split(bytes([0]))[0].decode()}),flush=True);"
+    "sys.stdin.buffer.read(1)")
+NIX = r'/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._?=-]+'
+
+
+def _signature(path):
+    value=path.stat()
+    return [value.st_dev,value.st_ino,value.st_mode,value.st_uid,value.st_gid,
+            value.st_size,value.st_mtime_ns,value.st_ctime_ns]
+
+
+def _immutable(path, *, executable=False, limit=2*1024*1024):
+    path=Path(path); canonical=path.resolve(strict=True)
+    need(path.is_absolute() and canonical.is_relative_to('/nix/store'),'Immutable broker program required')
+    value=canonical.stat(); signature=_signature(canonical)
+    need(stat.S_ISREG(value.st_mode) and value.st_uid in(0,os.getuid()) and not value.st_mode&0o222 and
+         (not executable or value.st_mode&0o111) and 0<value.st_size<=limit,'Immutable broker program required')
+    with canonical.open('rb')as stream:raw=stream.read(limit+1)
+    need(len(raw)<=limit and _signature(canonical)==signature and path.resolve(strict=True)==canonical,
+         'Immutable broker program changed')
+    return {'canonical':str(canonical),'signature':signature,'identity':[value.st_dev,value.st_ino],
+            'sha256':digest(raw)}
+
+
+def _argv(proc):
+    with(proc/'cmdline').open('rb')as stream:raw=stream.read(16385)
+    need(0<len(raw)<=16384 and raw.endswith(b'\0') and not raw.endswith(b'\0\0'),
+         'Broker argv exceeds bound or is unavailable')
+    return raw
+
+
+def _wrapper_program(raw):
+    need(type(raw)is bytes and 0<len(raw)<=65536,'Recognized immutable broker source required')
+    text=raw.decode(); need('\r' not in text and '\0' not in text,'Recognized immutable broker source required')
+    lines=[line for line in text.splitlines()if re.match(r'^\s*exec(?:\s|$)',line)]
+    need(len(lines)==1,'Recognized immutable broker source required')
+    legacy=re.fullmatch(r'exec python3 ('+NIX+r'/python/reverie/worker\.py) broker "\$@"',lines[0])
+    isolated=re.fullmatch(r'exec ('+NIX+r'/bin/python3) -I -B ('+NIX+r'/python/reverie/worker\.py) broker "\$@"',lines[0])
+    need(bool(legacy)!=bool(isolated),'Recognized immutable broker source required')
+    return {'kind':'legacy','source':legacy[1],'interpreter':None}if legacy else {
+        'kind':'isolated','source':isolated[2],'interpreter':isolated[1]}
 
 
 class TransportUpgrade:
@@ -32,29 +81,119 @@ class TransportUpgrade:
     def _time(self):
         need(time.monotonic() < self.deadline, 'Transport upgrade deadline exhausted')
 
+    def _interpreter(self, declared):
+        """Fixed isolated metadata probe; never a broker/config/engine entry.
+
+        Nix Python environments may use an ELF makeBinaryWrapper, so resolving
+        symlinks is not evidence of the actual kernel executable. Bind the
+        declared invocation to an actual owned, parked probe and its procfs
+        executable/argv; return stable facts only, never this process's handle.
+        """
+        need(getattr(self, '_probe_child', None) is None, 'Interpreter probe settlement unknown')
+        before = _immutable(declared, executable=True)
+        deadline = min(self.deadline, time.monotonic()+5)
+        need(time.monotonic()<deadline, 'Interpreter probe deadline exhausted')
+        child = None; streams = []; result = None; settled = False
+        self._probe_child = 'spawning'
+        try:
+            child = subprocess.Popen([str(declared), '-I', '-B', '-c', INTERPRETER_PROBE],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env={'LANG':'C.UTF-8'}, start_new_session=True)
+            self._probe_child = child
+            streams = [child.stdin, child.stdout, child.stderr]
+            from .worker_gpu_preflight import _process
+            initial = _process(child.pid)
+            output = bytearray()
+            with selectors.DefaultSelector() as selected:
+                os.set_blocking(child.stdout.fileno(),False)
+                os.set_blocking(child.stderr.fileno(),False)
+                selected.register(child.stdout,selectors.EVENT_READ,'out')
+                selected.register(child.stderr,selectors.EVENT_READ,'err')
+                while b'\n' not in output:
+                    need(time.monotonic()<deadline and child.poll() is None, 'Interpreter probe unavailable')
+                    for key,_ in selected.select(min(.05,max(0,deadline-time.monotonic()))):
+                        part=os.read(key.fileobj.fileno(),4097-len(output))
+                        need(key.data!='err' or not part,'Interpreter probe stderr refused')
+                        if key.data=='err' and not part:selected.unregister(key.fileobj)
+                        need(key.data!='out' or part,'Interpreter probe output unavailable')
+                        if key.data=='out':output.extend(part)
+                        need(len(output)<=4096,'Interpreter probe output exceeds bound')
+            need(output.endswith(b'\n') and output.count(b'\n')==1,'Interpreter probe framing refused')
+            value=json.loads(output)
+            need(type(value)is dict and set(value)=={'version','implementation','isolated','bytecode','exe','argv0'}
+                 and value['version']==1 and type(value['version'])is int
+                 and value['implementation']=='cpython' and type(value['isolated'])is int and value['isolated']==1
+                 and value['bytecode'] is False,'Interpreter probe schema refused')
+            proc=Path('/proc')/str(child.pid)
+            exe=(proc/'exe').resolve(strict=True); executable=_immutable(exe,executable=True)
+            argv=_argv(proc)
+            need(value['argv0']==str(declared),'Declared interpreter invocation was not preserved')
+            need(argv.split(b'\0')[:-1]==[os.fsencode(value['argv0']),b'-I',b'-B',b'-c',INTERPRETER_PROBE.encode()]
+                 and value['exe']==str(exe) and _process(child.pid)==initial,'Interpreter probe process changed')
+            need(_immutable(declared,executable=True)==before,'Declared interpreter changed during probe')
+            result={'declared':str(declared),'invocation':before['canonical'],'sha256':before['sha256'],
+                    'identity':before['identity'],'identitySignature':before['signature'],'executable':str(exe),'exeIdentity':executable['identity'],
+                    'argv0':value['argv0']}
+            child.stdin.write(b'x');child.stdin.flush();child.stdin.close()
+            while child.poll() is None and time.monotonic()<deadline:time.sleep(.005)
+            need(child.poll()==0,'Interpreter probe completion unconfirmed')
+            settled=True
+        finally:
+            if child is not None and child.poll() is None:
+                child.kill()
+                while child.poll() is None and time.monotonic()<deadline:time.sleep(.005)
+            if child is not None:settled=child.poll() is not None
+            try:
+                for stream in streams:
+                    if not stream.closed:stream.close()
+            finally:
+                if child is None or settled:self._probe_child=None
+            need(child is None or settled,'Interpreter probe cleanup unconfirmed')
+        self._time()
+        return result
+
     def broker(self, unit):
         current = self.tools.manager_state(active=True)
         entry = Path(unit['entries']['ExecStart']['path'])
-        raw = entry.read_bytes()
-        need(digest(raw) == unit['entries']['ExecStart']['sha256'], 'Broker wrapper changed')
-        found = re.findall(r'^exec python3 (/nix/store/[^\s]+/python/reverie/worker\.py) broker "\$@"$', raw.decode(), re.M)
-        need(len(found) == 1, 'Recognized immutable broker source required')
-        source = Path(found[0])
-        need(source.resolve() == source and source.is_file() and not source.stat().st_mode & 0o022,
-             'Immutable broker source required')
+        with entry.open('rb') as stream:raw=stream.read(65537)
+        need(len(raw)<=65536 and digest(raw)==unit['entries']['ExecStart']['sha256'],'Broker wrapper changed')
+        program = _wrapper_program(raw)
+        wrapper = _immutable(entry, executable=True, limit=65536)
+        need(wrapper['sha256']==digest(raw),'Broker wrapper changed')
+        source = Path(program['source'])
+        need(source.resolve(strict=True)==source,'Immutable broker source required')
+        source_file = _immutable(source)
         pid = current['process']['pid']; proc = Path('/proc') / str(pid)
-        with (proc / 'cmdline').open('rb') as stream: argv = stream.read(16385)
-        need(len(argv) <= 16384, 'Broker argv exceeds bound')
-        words = argv.rstrip(b'\0').split(b'\0')
-        need(len(words) == 5 and words[1:] == [os.fsencode(source), b'broker', b'--config', os.fsencode(self.service.config_path)],
-             'Actual broker argv differs from immutable generation')
-        exe = (proc / 'exe').resolve(strict=True); info = exe.stat()
-        need(exe.is_relative_to('/nix/store') and stat.S_ISREG(info.st_mode) and not info.st_mode & 0o022,
-             'Immutable broker interpreter required')
+        argv = _argv(proc); words = argv.split(b'\0')[:-1]
+        interpreter = None
+        if program['kind']=='isolated':
+            declared=Path(program['interpreter'])
+            interpreter=self._interpreter(declared)
+            need(words==[os.fsencode(interpreter['argv0']),b'-I',b'-B',os.fsencode(source),
+                         b'broker',b'--config',os.fsencode(self.service.config_path)],
+                 'Actual isolated broker argv differs from immutable generation')
+        else:
+            # Preserve the legacy contract: Bash/Python environment wrappers
+            # may materialize argv0 as a resolved invocation rather than python3.
+            need(len(words)==5 and words[1:]==[os.fsencode(source),b'broker',b'--config',os.fsencode(self.service.config_path)],
+                 'Actual broker argv differs from immutable generation')
+        exe = (proc / 'exe').resolve(strict=True); executable = _immutable(exe,executable=True)
+        if interpreter is not None:
+            need(str(exe)==interpreter['executable'] and executable['identity']==interpreter['exeIdentity'],
+                 'Actual broker interpreter differs from declared isolated interpreter')
+        need(_argv(proc)==argv,'Broker argv changed during program observation')
         from .worker_gpu_preflight import _process
         need(_process(pid) == current['process'], 'Broker process changed during program observation')
-        return {**current, 'program': {'source': str(source), 'sourceSHA256': digest(source.read_bytes()),
-                                     'exe': str(exe), 'exeIdentity': [info.st_dev, info.st_ino], 'argvSHA256': digest(argv)}}
+        # All blocking producers/FD cleanup precede the final static leaf checks.
+        need(_signature(entry)==wrapper['signature'] and _signature(source)==source_file['signature'] and
+             _signature(exe)==executable['signature'],'Broker immutable program changed')
+        if interpreter is not None:
+            need(Path(interpreter['declared']).resolve(strict=True)==Path(interpreter['invocation']) and
+                 _signature(Path(interpreter['invocation']))==interpreter['identitySignature'],
+                 'Declared isolated interpreter changed')
+        return {**current, 'program': {'source': str(source), 'sourceSHA256': source_file['sha256'],
+                                     'exe': str(exe), 'exeIdentity': executable['identity'], 'argvSHA256': digest(argv),
+                                     'wrapperKind':program['kind'], 'isolatedInterpreter':interpreter}}
 
     def selection(self, path):
         path = Path(path)

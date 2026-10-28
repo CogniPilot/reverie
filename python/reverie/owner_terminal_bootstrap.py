@@ -6,8 +6,10 @@ Call before application initialization; no broker/PTY/provider operation here.
 import os
 import socket
 import stat
+import time
 
 PATH = '/run/reverie-owner-terminal/bootstrap.sock'
+SETUP_SECONDS = 120
 
 
 def exec_backend(node, argv):
@@ -26,17 +28,25 @@ def exec_backend(node, argv):
     if any(name in os.environ for name in ('NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'PYTHONPATH', 'PYTHONHOME')):
         raise ValueError('Backend startup injection controls refused')
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(5)
+        deadline = time.monotonic() + SETUP_SECONDS
+        def remaining():
+            value = deadline - time.monotonic()
+            if value <= 0:
+                raise TimeoutError('Protected bootstrap setup expired')
+            return value
+        connection.settimeout(remaining())
         if os.get_inheritable(connection.fileno()):
             raise ValueError('Bootstrap descriptor custody unavailable')
         connection.connect(PATH)
         reply = bytearray()
         while len(reply) < 5:
+            connection.settimeout(remaining())
             chunk = connection.recv(5 - len(reply))
             if not chunk:
                 raise ValueError('Protected bootstrap unavailable')
             reply.extend(chunk)
         if bytes(reply) != b'EXEC\n':
             raise ValueError('Protected bootstrap refused')
+        remaining()
         # CLOEXEC intentionally closes this connection. Node opens a fresh one.
         os.execv(node, argv)

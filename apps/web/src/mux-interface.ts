@@ -7,6 +7,7 @@
  */
 
 import type { EventEmitter } from 'node:events';
+import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 import type {
   ProcessStats,
   PersistedRespawnConfig,
@@ -93,6 +94,8 @@ export interface CreateSessionOptions {
   codexTrustWorkspace?: string;
   /** Internal reconnect: the broker must never launch a new provider. */
   workerAttachOnly?: boolean;
+  /** Process-local fixed resource actor join, never a persisted/wire option. */
+  workerResourceLaunch?: ResourceWorkerLaunch;
   sessionId: string;
   workingDir: string;
   mode: SessionMode;

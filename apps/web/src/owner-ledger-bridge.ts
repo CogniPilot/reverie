@@ -52,6 +52,7 @@ export class OwnerLedgerBridge<R extends AuthorityRequest> {
   [inspect.custom](): string { return '[Private owner-terminal ledger bridge]'; }
   toJSON(): never { throw new LedgerBridgeError('refused'); }
   close(): void { this.#fail(); }
+  assertCurrent(): void { this.#guard(); }
   #fail(): void {
     if (this.#failed) return;
     this.#failed = true;
@@ -191,7 +192,13 @@ export class OwnerLedgerBridge<R extends AuthorityRequest> {
       let current: PrivateAuthorityContext;
       try { current = await this.#capture(request, record.employeeId); } catch { throw new LedgerBridgeError('refused'); }
       if (!(current.ownerScopeDigest === record.context.ownerScopeDigest
+        && current.expiresAtEpochMs === record.context.expiresAtEpochMs
         && JSON.stringify(current.target) === JSON.stringify(record.context.target))) throw new LedgerBridgeError('refused');
+      this.#guard();
+      // Same immutable owner scope/expiry, freshly authenticated actual request.
+      // Handover from the completed HTTP issue to its live owner WebSocket must
+      // not continue checking the old HTTP transport after keepalive closes.
+      record.context = current; this.#contexts.set(record.handle, current);
       const value = await this.#command(revoke ? 'revoke' : 'status', {reference}, record.handle, record.context);
       acknowledged = true;
       await record.context.recheck(); this.#guard();
@@ -204,6 +211,46 @@ export class OwnerLedgerBridge<R extends AuthorityRequest> {
         this.#fail(); throw new LedgerBridgeError('unconfirmed');
       }
       throw error;
+    } finally { this.#busy = false; }
+  }
+  /** Fixed installed H operations, using the privately retained context/proof.
+   * The browser receives no native request/proof, command or executable field.
+   * Lost responses remain unconfirmed and permanently close this channel.
+   */
+  async terminal(request: R, reference: string, action: 'open' | 'input' | 'resize' | 'poll' | 'end',
+    payload: string | [number, number] | null = null): Promise<Readonly<{state: string; output?: string; shellId?: string}>> {
+    if (this.#busy || this.#checking) throw new LedgerBridgeError('busy');
+    this.#busy = true;
+    try {
+      this.#guard();
+      requireThat(UUID.test(reference));
+      const record = this.#records.get(reference);
+      if (!record) throw new LedgerBridgeError('refused');
+      if (action === 'input') requireThat(typeof payload === 'string' && payload.length <= 5464
+        && Buffer.from(payload, 'base64').toString('base64') === payload);
+      else if (action === 'resize') requireThat(Array.isArray(payload) && payload.length === 2
+        && Number.isInteger(payload[0]) && payload[0] >= 2 && payload[0] <= 300
+        && Number.isInteger(payload[1]) && payload[1] >= 2 && payload[1] <= 120);
+      else requireThat(payload === null);
+      const current = await this.#capture(request, record.employeeId);
+      requireThat(current.ownerScopeDigest === record.context.ownerScopeDigest
+        && current.expiresAtEpochMs === record.context.expiresAtEpochMs
+        && JSON.stringify(current.target) === JSON.stringify(record.context.target));
+      this.#guard(); record.context = current; this.#contexts.set(record.handle, current);
+      const value = await this.#command(action, {reference, payload}, record.handle, record.context);
+      requireThat(value !== null && typeof value === 'object' && !Array.isArray(value));
+      const result = value as Row;
+      requireThat(result.state === 'OPEN' || result.state === 'SETTLED');
+      if (action === 'open') { exact(result, ['state', 'shellId']); requireThat(result.shellId === record.request.shellId); }
+      else if (action === 'end') exact(result, ['state']);
+      else { exact(result, ['state', 'output']); requireThat(typeof result.output === 'string' && result.output.length <= 5464
+        && Buffer.from(result.output, 'base64').toString('base64') === result.output); }
+      await record.context.recheck(); this.#guard();
+      return Object.freeze(result) as Readonly<{state: string; output?: string; shellId?: string}>;
+    } catch (error) {
+      // H may already have consumed/spawned/applied an input. No retry or
+      // effect-free refusal after entering this path, including a lost ACK.
+      this.#fail(); throw new LedgerBridgeError('unconfirmed');
     } finally { this.#busy = false; }
   }
 }

@@ -79,7 +79,7 @@ def resource_config(config,sid):
     validate_session_resources(config)
     # Native control custody is not a laptop grant and must not change any
     # existing laptop's create arguments or reattachment policy label.
-    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy','employeeGpuGrants')}
+    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy','resourceActorConfig','employeeGpuGrants')}
     employee_gpu=config.get('employeeGpuGrants',{})
     if type(employee_gpu)is not dict:raise ValueError('Invalid owner employee GPU grant map')
     if employee_gpu:

@@ -30,7 +30,7 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which (lib.getBin pkgs.util-linux) ];
+    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
@@ -92,6 +92,9 @@ let
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts test/plan-five-hour-ui.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
+        test/resource-owner-authority.test.ts test/resource-native-client.test.ts \
+        test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
+        test/resource-replacement-controller.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
@@ -117,6 +120,7 @@ let
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
       # The console owns this Python/Node composition check after its TS build.
+      npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
       # memoryPackage's Python discovery never depends on the console output.
       PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
         OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
@@ -203,7 +207,40 @@ let
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
+  # The protected resource bootstrap pins this manifest, rather than inferring
+  # an interpreter or package import path from the website's environment.
+  workerResourceClientManifest = pkgs.runCommand "reverie-resource-client-manifest" {
+    nativeBuildInputs = [ pkgs.buildPackages.python3 ];
+  } ''
+    mkdir -p "$out/share/reverie"
+    export REVERIE_RESOURCE_CLIENT_OUTPUT="$out/share/reverie/resource-client.json"
+    ${pkgs.buildPackages.python3}/bin/python3 -I -B <<'PY'
+    import hashlib, json, os
+    from pathlib import Path
+    invocation = "${pkgs.python3}/bin/python3"
+    executable = Path(invocation).resolve(strict=True)
+    entry = Path("${src}/python/reverie/worker.py")
+    assert str(executable).startswith('/nix/store/') and executable.is_file()
+    with executable.open('rb') as stream:
+        assert stream.read(4) == b'\x7fELF', 'The private client requires a native Python ELF'
+    assert entry.resolve(strict=True) == entry and entry.is_file()
+    value = {
+        'version': 1,
+        'purpose': 'resource-replacement-client-v1',
+        'pythonInvocation': invocation,
+        'pythonExecutable': str(executable),
+        'entry': str(entry),
+        'entrySHA256': hashlib.sha256(entry.read_bytes()).hexdigest(),
+        'argvPrefix': [invocation, '-I', '-B', str(entry), 'client'],
+    }
+    Path(os.environ['REVERIE_RESOURCE_CLIENT_OUTPUT']).write_text(json.dumps(value, indent=2) + '\n')
+    PY
+  '';
   workerExec = pkgs.writeShellScriptBin "reverie-worker-exec" ''
+    # Protected bootstrap metadata: ${workerResourceClientManifest}/share/reverie/resource-client.json
+    if [ "''${1:-}" = --resource-ref ]; then
+      exec ${pkgs.python3}/bin/python3 -I -B ${src}/python/reverie/worker.py client "$@"
+    fi
     exec ${memory}/bin/python3 -m reverie.worker client "$@"
   '';
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
@@ -287,4 +324,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest; }

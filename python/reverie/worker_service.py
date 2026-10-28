@@ -4,6 +4,7 @@ No website process, employee wake, host OS rebuild or engine socket grant is
 created here. Positive operations require an existing private admission policy.
 """
 import argparse
+import hashlib
 import errno
 import json
 import math
@@ -13,6 +14,12 @@ import stat
 import subprocess
 import sys
 import time
+
+if __package__ in (None, ''):
+    # The immutable host launcher uses isolated Python and this fixed entry.
+    # Do not import a package from the caller's cwd or PYTHONPATH.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    __package__ = 'reverie'
 
 from .worker import load_config
 
@@ -72,17 +79,30 @@ class WorkerService:
 
     def pin_unit(self, target):
         root = self.store_root(target)
-        self.gcroot.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        info = self.gcroot.parent.stat()
-        if self.gcroot.parent.resolve() != self.gcroot.parent or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        self.pin_store(root, self.gcroot)
+
+    def pin_store(self, root, gcroot):
+        gcroot.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = gcroot.parent.stat()
+        if gcroot.parent.resolve() != gcroot.parent or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ValueError('Private durable service root directory required')
-        if self.gcroot.exists() or self.gcroot.is_symlink():
-            if not self.gcroot.is_symlink() or self.gcroot.resolve() != root:
+        if gcroot.exists() or gcroot.is_symlink():
+            if not gcroot.is_symlink() or gcroot.resolve() != root:
                 raise ValueError('Existing service generation root differs; owner review required')
         else:
-            result = self.run(['nix-store', '--add-root', str(self.gcroot), '--indirect', '--realise', str(root)])
-            if result.returncode or not self.gcroot.is_symlink() or self.gcroot.resolve() != root:
+            result = self.run(['nix-store', '--add-root', str(gcroot), '--indirect', '--realise', str(root)])
+            if result.returncode or not gcroot.is_symlink() or gcroot.resolve() != root:
                 raise RuntimeError('Durable service GC root publication is unconfirmed')
+
+    def pin_resource_actor(self, path):
+        from .website_image_provenance import immutable
+        path = immutable(path, 65536)
+        parts = path.relative_to(STORE_ROOT).parts
+        if len(parts) != 4 or parts[1:] != ('share', 'reverie', 'website-image.json'):
+            raise ValueError('Fixed resource-actor provenance package layout required')
+        identity = hashlib.sha256(path.read_bytes()).hexdigest()
+        gcroot = self.gcroot.parent/'resource-actor'/identity/'root'
+        self.pin_store(STORE_ROOT/parts[0], gcroot)
 
     def positive_preflight(self, *, check_manager=True, installing=False):
         if sys.platform != 'linux' or os.geteuid() == 0:
@@ -131,6 +151,9 @@ class WorkerService:
                 value.get('Name') == 'docker-desktop' or str(value.get('CgroupVersion')) != '2' or
                 any(value.get(key) is not True for key in ('MemoryLimit', 'SwapLimit', 'PidsLimit'))):
             raise ValueError('Engine must support cgroup-v2 RAM, no-swap and PID ceilings; refusing unbounded fallback')
+        if config.get('resourceActorConfig') is not None:
+            from .website_peer_facts import socket_identity
+            self.resource_engine = (endpoint[7:], socket_identity(endpoint[7:]), value.get('ID'))
         from .worker_capacity_policy import legacy_headroom_fits
         from .worker_resource_reservations import option, configured, marker, pending, NativeObserver, ReservationGate
         selected = option(config)
@@ -190,8 +213,12 @@ class WorkerService:
                 return result
         return InstallProbe()
 
-    def install(self):
+    def install(self, *, resource_actor_provenance=None, resource_actor_engine_socket=None):
         config = self.positive_preflight(installing=True)
+        if (resource_actor_provenance is None) != (resource_actor_engine_socket is None):
+            raise ValueError('Explicit resource actor preparation requires both immutable provenance and a local engine socket')
+        if resource_actor_provenance is not None and config.get('resourceActorConfig') is None:
+            raise ValueError('Resource actor preparation must be selected in the private broker configuration')
         if self.manager('is-active', UNIT, required=False).returncode == 0:
             raise ValueError('Broker is active; coordinate its transport maintenance before replacing the installed unit')
         target = self.target_unit()
@@ -219,6 +246,24 @@ class WorkerService:
                     pass
             else:
                 provision(probe)  # Explicit install only; never a runtime fallback.
+        if config.get('resourceActorConfig') is not None:
+            from .resource_actor_install import prepare, InstalledFacts
+            probe = self.resource_probe(config)
+            if resource_actor_provenance is not None:
+                from .website_peer_facts import socket_identity
+                endpoint, identity, engine_id = self.resource_engine
+                if (Path(resource_actor_engine_socket).resolve(strict=True) != Path(endpoint).resolve(strict=True) or
+                        socket_identity(str(resource_actor_engine_socket)) != identity):
+                    raise ValueError('Resource actor socket differs from the actual broker engine endpoint')
+                self.pin_resource_actor(resource_actor_provenance)
+                prepare(probe, str(resource_actor_provenance), str(resource_actor_engine_socket), engine_id)
+            else:
+                if os.path.lexists(config['socket']):
+                    raise ValueError('Resource actor installation requires inactive broker transport')
+                installed = InstalledFacts(probe, ReservationGate(probe))  # Existing-only; never runtime provision.
+                self.pin_resource_actor(installed.value['imageProvenance']['path'])
+            if load_config(self.config_path) != config:
+                raise ValueError('Private broker configuration changed during resource actor preparation')
         self.pin_unit(target)  # Keep unit, broker and checker closures after nix run/GC/reboot.
         if not self.environment.exists():
             fd = os.open(self.environment, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -233,6 +278,27 @@ class WorkerService:
         self.manager('daemon-reload')
         self.manager('enable', UNIT)  # No implicit start, website or provider wake.
         return {'installed': True, 'started': False, 'unit': UNIT}
+
+    def refresh_resource_actor(self, *, resource_actor_provenance, resource_actor_engine_socket):
+        """Explicit owner-local rebind; no service, allocation or employee restart."""
+        config = self.positive_preflight()
+        if (config.get('resourceActorConfig') is None or resource_actor_provenance is None or
+                resource_actor_engine_socket is None):
+            raise ValueError('Selected existing resource actor and matching package/socket required')
+        from .resource_actor_install import prepare
+        from .resource_actor_refresh import RegisteredTransport
+        from .website_peer_facts import socket_identity
+        endpoint, identity, engine_id = self.resource_engine
+        if (Path(resource_actor_engine_socket).resolve(strict=True) != Path(endpoint).resolve(strict=True) or
+                socket_identity(str(resource_actor_engine_socket)) != identity):
+            raise ValueError('Resource actor socket differs from the actual broker engine endpoint')
+        self.pin_resource_actor(resource_actor_provenance)
+        transport = RegisteredTransport(self, config)
+        try:
+            return prepare(self.resource_probe(config), str(resource_actor_provenance),
+                           str(resource_actor_engine_socket), engine_id, transport=transport)
+        finally:
+            transport.close()  # Already finalized before publication release on success.
 
     def action(self, action):
         if sys.platform != 'linux' or os.geteuid() == 0:
@@ -366,10 +432,14 @@ def main(argv=None):
     parser.add_argument('--config', type=Path)
     parser.add_argument('--diagnostic', action='store_true',
                         help='On failure print a bounded redacted category and vetted guard reason; never authorizes replay')
-    parser.add_argument('action', choices=('check', 'check-backend', 'install', 'start', 'stop', 'status', 'logs', 'uninstall',
+    parser.add_argument('action', choices=('check', 'check-backend', 'install', 'refresh-resource-actor', 'start', 'stop', 'status', 'logs', 'uninstall',
                                                  'prepare-gpu-upgrade', 'apply-gpu-upgrade',
                                                  'prepare-transport-upgrade', 'apply-transport-upgrade'))
     parser.add_argument('--lines', type=int, default=100)
+    parser.add_argument('--resource-actor-provenance', type=Path,
+                        help='On explicit install or facts refresh, select immutable Nix website-image provenance')
+    parser.add_argument('--resource-actor-engine-socket', type=Path,
+                        help='Local Unix engine socket used by that optional preparation; no daemon is started')
     parser.add_argument('--operation', type=Path, help='Fresh private one-attempt migration directory')
     parser.add_argument('--selection', type=Path, help='Closed owner-private upgrade selection')
     parser.add_argument('--plan-sha256', help='Exact prepared GPU-only plan digest')
@@ -377,6 +447,8 @@ def main(argv=None):
     os.umask(0o077)
     service = WorkerService(args.config)
     try:
+        if args.action not in ('install', 'refresh-resource-actor') and (args.resource_actor_provenance is not None or args.resource_actor_engine_socket is not None):
+            raise ValueError('Optional resource actor preparation applies only to explicit install or facts refresh')
         if args.action in ('prepare-transport-upgrade', 'apply-transport-upgrade'):
             from .worker_service_transport_upgrade import TransportUpgrade
             if args.operation is None:
@@ -402,7 +474,15 @@ def main(argv=None):
         elif args.action in ('check', 'check-backend'):
             service.positive_preflight(check_manager=args.action == 'check')
             result = {'capabilities': 'PASS', 'installedAcceptance': False}
-        elif args.action == 'install': result = service.install()
+        elif args.action == 'install':
+            if args.resource_actor_provenance is None and args.resource_actor_engine_socket is None:
+                result = service.install()
+            else:
+                result = service.install(resource_actor_provenance=args.resource_actor_provenance,
+                                         resource_actor_engine_socket=args.resource_actor_engine_socket)
+        elif args.action == 'refresh-resource-actor':
+            result = service.refresh_resource_actor(resource_actor_provenance=args.resource_actor_provenance,
+                                                     resource_actor_engine_socket=args.resource_actor_engine_socket)
         elif args.action == 'logs':
             if not 1 <= args.lines <= 1000: raise ValueError('Log lines must be 1..1000')
             result = service.run(['journalctl', '--user', '--unit', UNIT, '--lines', str(args.lines), '--no-pager'])

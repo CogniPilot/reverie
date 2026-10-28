@@ -1,4 +1,4 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null }:
+{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
@@ -9,6 +9,7 @@ let
     else if pkgs.stdenv.hostPlatform.isAarch64 then "/lib/ld-linux-aarch64.so.1"
     else null;
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  humanToolkit = import ./human-terminal-toolkit.nix { inherit pkgs src; };
   nixPrepare = pkgs.writeShellApplication {
     name = "reverie-nix-store-prepare";
     runtimeInputs = [ pkgs.nix pkgs.coreutils ];
@@ -26,7 +27,12 @@ let
   }) (baseContents ++ [ reverie console memory entrypoint ]));
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
-in assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
+in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
+assert ownerTerminalWebsite == null || (!worker && !resourceReplacement && builtins.elem ownerTerminalWebsite.webArgs [
+  [ "web" "--host" "0.0.0.0" "--port" "3000" ]
+  [ "web" "--host" "0.0.0.0" "--port" "3000" "--resource-replacement" ]
+]);
+assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
   && uid < 2147483648 && gid < 2147483648
   && builtins.isInt rootlessDocker.subuidStart && rootlessDocker.subuidStart > 0
   && builtins.isInt rootlessDocker.subgidStart && rootlessDocker.subgidStart > 0
@@ -36,10 +42,11 @@ in assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.is
   && !(uid >= rootlessDocker.subuidStart && uid < rootlessDocker.subuidStart + rootlessDocker.subidCount)
   && !(gid >= rootlessDocker.subgidStart && gid < rootlessDocker.subgidStart + rootlessDocker.subidCount));
 pkgs.dockerTools.buildLayeredImage {
-  name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else "reverie";
+  name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else if ownerTerminalWebsite != null then "reverie-owner-terminal" else "reverie";
   tag = "latest";
   created = "1970-01-01T00:00:01Z";
-  contents = baseContents ++ pkgs.lib.optional worker nixBase;
+  contents = baseContents ++ pkgs.lib.optional worker nixBase
+    ++ pkgs.lib.optional (ownerTerminalWebsite != null) ownerTerminalWebsite;
   extraCommands = ''
     mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace reverie_workspace scratch/tmp instances tmp
     unlink bin/reverie
@@ -100,6 +107,10 @@ pkgs.dockerTools.buildLayeredImage {
       ln -s ${pkgs.stdenv.cc.bintools.dynamicLinker} .${claudeInterpreter}
     ''}
     ${pkgs.lib.optionalString worker ''
+      mkdir -p opt/reverie/human/bin
+      # Direct image-root files, not links into the laptop's writable /nix.
+      cp ${humanToolkit}/opt/reverie/human/bin/{reverie-human-shell,bash} opt/reverie/human/bin/
+      chmod 555 opt/reverie/human/bin/{reverie-human-shell,bash}
       mkdir -p opt/reverie/autoenv/bin opt/reverie/autoenv/lib
       cp ${src}/scripts/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
       cp ${src}/scripts/reverie-autoenv bin/reverie-autoenv
@@ -159,7 +170,10 @@ pkgs.dockerTools.buildLayeredImage {
     User = "${toString uid}:${toString gid}";
     WorkingDir = "/reverie_workspace";
     Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
-    Cmd = if worker then [ "infinity" ] else [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
+    Cmd = if worker then [ "infinity" ] else if ownerTerminalWebsite != null then
+      ([ "${ownerTerminalWebsite}/libexec/reverie" ] ++ ownerTerminalWebsite.webArgs) else
+      [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ]
+      ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];
     Env = [ (if worker then "PATH=/opt/reverie/autoenv/bin:/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin" else "PATH=/bin")
       "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
       "REVERIE_VERSION=${console.version}"
@@ -183,6 +197,10 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.uid" = toString uid;
       "org.reverie.worker.gid" = toString gid;
       "org.reverie.worker.rootless-docker" = if rootlessDocker == null then "0" else "1";
+    } // pkgs.lib.optionalAttrs (!worker && (resourceReplacement || ownerTerminalWebsite != null)) {
+      "org.reverie.website.runtime" = if ownerTerminalWebsite == null then "resource"
+        else if builtins.elem "--resource-replacement" ownerTerminalWebsite.webArgs then "resource-terminal"
+        else "terminal";
     } // pkgs.lib.optionalAttrs (browserRuntime != null) {
       "org.reverie.worker.browser" = "1";
     } // pkgs.lib.optionalAttrs (rootlessDocker != null) {

@@ -307,3 +307,158 @@ class TransportUpgradeTests(unittest.TestCase):
             self.upgrade.apply(sha)
         self.assertEqual(changed, [True]); self.assertFalse((self.operation / 'DONE.json').exists())
         self.assertTrue((self.operation / 'ATTEMPT.json').exists())
+
+
+class WrapperGrammar(unittest.TestCase):
+    def test_exact_legacy_and_isolated_forms_reject_ambiguous_flags_or_source(self):
+        source='/nix/store/'+'a'*32+'-reverie-source/python/reverie/worker.py'
+        python='/nix/store/'+'b'*32+'-python3-env/bin/python3'
+        legacy=f'exec python3 {source} broker "$@"\n'
+        isolated=f'exec {python} -I -B {source} broker "$@"\n'
+        self.assertEqual(T._wrapper_program(legacy.encode())['kind'],'legacy')
+        self.assertEqual(T._wrapper_program(isolated.encode())['interpreter'],python)
+        for body in [legacy+isolated,legacy+legacy,isolated.replace('-I -B','-B -I'),
+                     isolated.replace('-I -B','-IB'),isolated.replace('-I -B','-I'),
+                     isolated.replace(' -I',' -E -I'),isolated.replace('worker.py','other.py'),
+                     isolated.replace('broker "$@"','client "$@"'),isolated.replace('exec ','exec env '),
+                     isolated.replace('\n','\r\n'),isolated+'exec /unrelated\n']:
+            with self.subTest(body=body),self.assertRaises(ValueError):T._wrapper_program(body.encode())
+
+
+LEGACY_WRAPPER=os.environ.get('NIX_REVERIE_TEST_TRANSPORT_LEGACY_WRAPPER')
+ISOLATED_WRAPPER=os.environ.get('NIX_REVERIE_TEST_TRANSPORT_ISOLATED_WRAPPER')
+
+
+class PackagedTransportProgram(unittest.TestCase):
+    """Actual packaged derivation templates with inert immutable source only.
+
+    The source-literal-only fixture prints READY then parks on its owned stdin.
+    No busywait, ptrace, loader injection, Broker, engine or service is used.
+    """
+    def setUp(self):
+        import tempfile
+        import time
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name).resolve();self.config=self.root/'invalid-config.json'
+        self.config.write_bytes(b'{}');self.config.chmod(0o600)
+        from reverie import worker_gpu_preflight as P
+        self.native_process=P._process
+        self.children=[];self.addCleanup(self.settle)
+        self.probe=T.TransportUpgrade.__new__(T.TransportUpgrade);self.probe.deadline=time.monotonic()+60
+        from types import SimpleNamespace
+        self.probe.service=SimpleNamespace(config_path=self.config)
+
+    def settle(self):
+        for child in self.children:
+            try:
+                if child.poll() is None:
+                    child.stdin.write(b'x');child.stdin.flush();child.stdin.close()
+                    try:child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        child.kill();child.wait(timeout=5)
+            finally:
+                for stream in (child.stdin,child.stdout,child.stderr):
+                    if stream is not None and not stream.closed:stream.close()
+        self.children=[]
+
+    def child(self, wrapper, *, argv=None):
+        import selectors
+        wrapper=Path(wrapper);program=T._wrapper_program(wrapper.read_bytes())
+        args=argv or [str(wrapper),'--config',str(self.config)]
+        child=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            env={'LANG':'C.UTF-8','PATH':'/nonexistent'})
+        self.children.append(child)
+        with selectors.DefaultSelector()as selected:
+            selected.register(child.stdout,selectors.EVENT_READ)
+            self.assertTrue(selected.select(5),'Immutable inert-source READY unavailable')
+            self.assertEqual(os.read(child.stdout.fileno(),64),b'TRANSPORT_ABI_READY\n')
+        self.assertIsNone(child.poll())
+        return child
+
+    def unit(self, wrapper):
+        return {'entries':{'ExecStart':{'path':str(wrapper),'sha256':T.digest(Path(wrapper).read_bytes())}}}
+
+    def bind(self, child):
+        from types import SimpleNamespace
+        self.probe.tools=SimpleNamespace(manager_state=lambda **_: {'properties':{'MainPID':str(child.pid)},
+            'process':self.native_process(child.pid)})
+
+    @unittest.skipUnless(LEGACY_WRAPPER and ISOLATED_WRAPPER,'Pinned packaged broker wrappers required')
+    def test_actual_packaged_wrappers_qualify_and_new_interpreter_matches_kernel_elf(self):
+        for wrapper,kind in [(LEGACY_WRAPPER,'legacy'),(ISOLATED_WRAPPER,'isolated')]:
+            with self.subTest(kind=kind):
+                child=self.child(wrapper);self.bind(child)
+                result=self.probe.broker(self.unit(wrapper))
+                self.assertEqual(result['program']['wrapperKind'],kind)
+                self.assertEqual(result['program']['exe'],str(Path('/proc/self/exe').resolve(strict=True)))
+                self.assertEqual(self.probe.broker(self.unit(wrapper)),result)
+                self.settle()
+
+    @unittest.skipUnless(ISOLATED_WRAPPER,'Pinned isolated packaged broker required')
+    def test_actual_wrong_flags_interpreter_source_config_digest_and_birth_refuse(self):
+        from types import SimpleNamespace
+        program=T._wrapper_program(Path(ISOLATED_WRAPPER).read_bytes())
+        declared=program['interpreter'];source=program['source']
+        bare=str(Path('/proc/self/exe').resolve(strict=True))
+        cases=[([declared,'-B','-I',source,'broker','--config',str(self.config)],'argv'),
+               ([bare,'-I','-B',source,'broker','--config',str(self.config)],'argv'),
+               ([declared,'-I','-B',source,'broker','--config',str(self.root/'other-config')],'argv')]
+        if LEGACY_WRAPPER:
+            other=T._wrapper_program(Path(LEGACY_WRAPPER).read_bytes())['source']
+            cases.append(([declared,'-I','-B',other,'broker','--config',str(self.config)],'argv'))
+        for args,reason in cases:
+            with self.subTest(args=args):
+                # Observe the selected source of this owned direct invocation.
+                # The production qualifier still consumes the real fixed wrapper.
+                if args[3]!=source:
+                    child=self.child(LEGACY_WRAPPER,argv=args)
+                else:child=self.child(ISOLATED_WRAPPER,argv=args)
+                self.bind(child)
+                with self.assertRaisesRegex(ValueError,reason):self.probe.broker(self.unit(ISOLATED_WRAPPER))
+                self.settle()
+        child=self.child(ISOLATED_WRAPPER);self.bind(child)
+        unit=self.unit(ISOLATED_WRAPPER);unit['entries']['ExecStart']['sha256']='0'*64
+        with self.assertRaisesRegex(ValueError,'wrapper changed'):self.probe.broker(unit)
+        expected=self.native_process(child.pid);expected['startTick']+=1
+        self.probe.tools=SimpleNamespace(manager_state=lambda **_:{'process':expected})
+        with self.assertRaisesRegex(ValueError,'process changed'):self.probe.broker(self.unit(ISOLATED_WRAPPER))
+
+    @unittest.skipUnless(LEGACY_WRAPPER and ISOLATED_WRAPPER,'Pinned packaged broker wrappers required')
+    def test_actual_apply_reaches_new_isolated_program_readback_before_done(self):
+        import time,types
+        from reverie import worker_gpu_preflight as P
+        case=TransportUpgradeTests();case.setUp();self.addCleanup(case.doCleanups)
+        upgrade=case.upgrade;f=case.f;generation=upgrade.tools.generation
+        old=self.child(LEGACY_WRAPPER,argv=[LEGACY_WRAPPER,'--config',str(case.service.config_path)])
+        selected=[old]
+        self.enterContext(patch.object(P,'_process',side_effect=lambda pid:
+            f.process(pid)if pid in(123,124,500)else self.native_process(pid)))
+        def manager_state(*,active):
+            f.manager_state(active=active)
+            if not active:return {'properties':{'MainPID':'0'}}
+            return {'properties':{'MainPID':str(selected[0].pid)},'process':self.native_process(selected[0].pid)}
+        upgrade.tools.manager_state=manager_state
+        def records():
+            value=generation()
+            for key,wrapper in [('unit',LEGACY_WRAPPER if f.broker_generation==1 else ISOLATED_WRAPPER),
+                                ('newUnit',ISOLATED_WRAPPER)]:
+                value[key]['entries']['ExecStart']=self.unit(wrapper)['entries']['ExecStart']
+            return value
+        upgrade.tools.generation=records
+        upgrade.broker=types.MethodType(T.TransportUpgrade.broker,upgrade)
+        upgrade.broker_leaf=types.MethodType(T.TransportUpgrade.broker_leaf,upgrade)
+        command=f.command
+        def phase(args,*,deadline=None):
+            result=command(args,deadline=deadline)
+            if args[:3]==['systemctl','--user','stop']:
+                self.settle()
+            elif args[:3]==['systemctl','--user','start']:
+                selected[0]=self.child(ISOLATED_WRAPPER,argv=[ISOLATED_WRAPPER,'--config',str(case.service.config_path)])
+            return result
+        case.service.run=phase
+        result=upgrade.apply(case.prepare())
+        self.assertEqual(result['state'],'TRANSPORT_REPLACED')
+        self.assertEqual(result['broker']['program']['wrapperKind'],'isolated')
+        self.assertTrue((case.operation/'DONE.json').exists())
+        case.unchanged()
+        self.assertFalse(any(c[0]=='docker'for c in f.commands))

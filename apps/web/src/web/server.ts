@@ -78,6 +78,8 @@ import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
+import { createOwnerTerminalRuntime } from '../owner-terminal-runtime.js';
+import { registerOwnerTerminalRoutes } from './routes/owner-terminal-routes.js';
 import fastifyMultipart from '@fastify/multipart';
 import { pasteImageDirInUseByOtherSession, startPasteImageGc, uploadDirs } from './paste-image-gc.js';
 import { CLEAN_EXIT_CLOSE_REASON, shouldCloseCleanlyExitedSession } from '../pane-exit-sweep.js';
@@ -328,6 +330,7 @@ import { PlanRequestCapabilities } from '../plan-request-capability.js';
 import { deliverPlanRequest } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
+import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { PlanService } from '../plan-accounts.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
 import { readFixedPr } from '../cron/fixed-github-watch.js';
@@ -559,7 +562,8 @@ export class WebServer extends EventEmitter {
     basePath: string = '',
     private readonly goalPorts?: GoalServerInput,
     /** Explicit tracked service authentication config; absent means /api/service-decisions always answers 403. */
-    private readonly serviceAuthConfig?: string
+    private readonly serviceAuthConfig?: string,
+    private readonly resourceReplacementEnabled: boolean = false
   ) {
     super();
     this.setMaxListeners(0);
@@ -1084,6 +1088,10 @@ export class WebServer extends EventEmitter {
 
     // WebSocket support (terminal I/O — low-latency bidirectional channel)
     await this.app.register(fastifyWebsocket);
+    const ownerTerminal = createOwnerTerminalRuntime(verifiedOwner, ownerAuth);
+    registerOwnerTerminalRoutes(this.app, verifiedOwner, (request, employeeId) =>
+      this.companyService?.view(ownerFor(request)).employees.some(employee => employee.id === employeeId) === true,
+    ownerAuth, ownerTerminal);
 
     // Multipart parsing (used by paste-image). Replaces a hand-rolled
     // boundary scanner that had several edge-case bugs: literal boundary
@@ -2188,6 +2196,13 @@ export class WebServer extends EventEmitter {
         },
         ownerFor(request)
       );
+    if (this.resourceReplacementEnabled === true) {
+      const resources = new ResourceReplacementController(this.app, ownerAuth, this.companyService,
+        this.planService, this.chatroomService, planMoves, planMoveStore, ctx, this.mux,
+        process.env.REVERIE_WORKER_SOCKET);
+      registerResourceReplacementRoutes(this.app, resources);
+      this.app.addHook('onClose', async () => resources.close());
+    }
     const availablePlanTarget = async (target: string) => {
       const account = await this.planService.account(target);
       if (!account) throw new PlanMoveError('Choose an available destination plan');
@@ -5418,8 +5433,10 @@ export async function startWebServer(
   allowUnauthenticatedNetwork: boolean = false,
   basePath: string = '',
   goalPorts?: GoalServerInput,
-  serviceAuthConfig?: string
+  serviceAuthConfig?: string,
+  resourceReplacementEnabled: boolean = false
 ): Promise<WebServer> {
+  const resourceArgs: [] | [boolean] = resourceReplacementEnabled === true ? [true] : [];
   const server = new WebServer(
     port,
     https,
@@ -5429,7 +5446,8 @@ export async function startWebServer(
     allowUnauthenticatedNetwork,
     basePath,
     goalPorts,
-    serviceAuthConfig
+    serviceAuthConfig,
+    ...resourceArgs
   );
   await server.start();
   return server;

@@ -5,16 +5,16 @@ import {OwnerLaptopTerminalAuthority} from './dist/owner-laptop-terminal-authori
 import {OwnerLedgerBridge} from './dist/owner-ledger-bridge.js';
 import {connectOwnerTerminal} from './fixture-connect.mjs';
 const target=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-let owner=true, observerCount=0;
+let owner=true, observerCount=0, httpAlive=true;
 const authority=new OwnerLaptopTerminalAuthority({
  verifiedOwner:()=>owner,
  officeAuth:{session:()=>owner?{restricted:false,role:'owner'}:undefined,
   identity:()=>owner?{id:'owner',username:'Owned fixture',role:'owner',primary:true}:undefined},
- ingress:{externalOrigin:'https://owner.test',assertRequestBinding:()=>undefined},
+ ingress:{externalOrigin:'https://owner.test',assertRequestBinding:value=>{if(value.transport==='http'&&!httpAlive)throw Error('owned expired HTTP transport');}},
  observeLaptop:async()=>{observerCount++;return {...target};},
  protectedChannel:{assertCurrent:async()=>undefined},
 });
-const request={headers:{origin:'https://owner.test',host:'owner.test'},cookies:{reverie_owner:'OWNED_FIXTURE_ONLY'}};
+let request={transport:'http',headers:{origin:'https://owner.test',host:'owner.test'},cookies:{reverie_owner:'OWNED_FIXTURE_ONLY'}};
 const sock=await connectOwnerTerminal();
 let lastCommand;
 const write=sock.write.bind(sock);
@@ -26,6 +26,7 @@ lines.on('line',line=>{
  const message=JSON.parse(line);
  if(message.control){
   if(message.control==='owner-off')owner=false;
+  if(message.control==='http-to-ws'){httpAlive=false;request={...request,transport:'ws'};}
   if(message.control==='shutdown')authority.shutdown();
   if(message.control==='new-incarnation')target.containerId='2'.repeat(64);
   if(message.control==='replay')write(lastCommand);
@@ -42,6 +43,7 @@ lines.on('line',line=>{
   try{
    let value;
    if(message.action==='issue')value=await bridge.issue(request,target.employeeId,80,24,30);
+   else if(['open','input','resize','poll','end'].includes(message.action))value=await bridge.terminal(request,message.reference,message.action,message.payload??null);
    else value=await bridge.metadata(request,message.reference,message.action==='revoke');
    console.log(JSON.stringify({event:'result',value,observerCount}));
   }catch(error){console.log(JSON.stringify({event:'error',state:error.state??'refused',observerCount}));}

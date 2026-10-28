@@ -960,6 +960,7 @@ function addWebLaunchOptions(cmd: Command): Command {
     .option('--title-hostname <hostname>', 'Override the hostname shown in the browser title')
     .option('--goal-private-config <path>', 'Explicit operator-private Goal bootstrap (absent means unavailable)')
     .option('--service-auth-config <path>', 'Explicit tracked service authentication config (absent means unavailable)')
+    .option('--resource-replacement', 'Enable the installed protected resource actor (broker private bootstrap also required)')
     .option(
       '--allow-unauthenticated-network',
       'Allow non-loopback web access without REVERIE_PASSWORD (dangerous; terminal control is exposed)'
@@ -981,6 +982,7 @@ function toWebLaunchOptions(options: {
   multiuser?: boolean;
   goalPrivateConfig?: string;
   serviceAuthConfig?: string;
+  resourceReplacement?: boolean;
 }): WebLaunchOptions {
   const port = parseInt(options.port, 10);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -1004,6 +1006,7 @@ function toWebLaunchOptions(options: {
     multiuser: !!options.multiuser,
     ...(options.goalPrivateConfig === undefined ? {} : { goalPrivateConfig: options.goalPrivateConfig }),
     ...(options.serviceAuthConfig === undefined ? {} : { serviceAuthConfig: options.serviceAuthConfig }),
+    ...(options.resourceReplacement === true ? {resourceReplacement: true} : {}),
   };
 }
 

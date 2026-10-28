@@ -45,6 +45,7 @@ const RecordSchema = z
       profileDigest: z.string().regex(/^[a-f0-9]{64}$/),
       previewDigest: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict().optional(),
+    resourceOwnerScope: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     resourcePhase: z.enum(['reserved', 'preparing', 'prepared', 'verifying', 'verified']).optional(),
   })
   .strict()
@@ -55,7 +56,9 @@ const RecordSchema = z
       context.addIssue({ code: 'custom', message: 'A refresh journal must bind its unchanged account and runtime' });
     if (record.resourceIntent ? record.purpose !== 'runtime-refresh' : record.resourcePhase !== undefined)
       context.addIssue({ code: 'custom', message: 'Resource state requires its same-account refresh intent' });
-    if (record.resourceIntent && !record.owner)
+    if (record.resourceOwnerScope !== undefined && !record.resourceIntent)
+      context.addIssue({code: 'custom', message: 'A private resource owner scope requires resource intent'});
+    if (record.resourceIntent && !record.owner && !record.resourceOwnerScope)
       context.addIssue({ code: 'custom', message: 'Resource intent requires its explicit owner scope' });
     if (record.resourceIntent && record.phase === 'failed')
       context.addIssue({ code: 'custom', message: 'Resource failures retain recovery until their separate actor reconciles them' });
@@ -81,6 +84,38 @@ export class PlanMoveStore {
   private chain: Promise<void> = Promise.resolve();
 
   constructor(readonly file: string) {}
+
+  /** Private live actor inspection only. Unlike load(), this does not turn a
+   * current completed record into restart recovery. It grants no execution or
+   * native completion authority; the caller must retain its current binding.
+   */
+  async resourceRecord(id: string): Promise<Readonly<PlanMoveRecord>> {
+    await this.chain;
+    const handle = await fs.open(this.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = await handle.stat({bigint: true});
+      if (!before.isFile() || before.nlink !== 1n || before.size > 1024n * 1024n ||
+        (before.mode & 0o777n) !== 0o600n || (process.getuid && before.uid !== BigInt(process.getuid())))
+        throw new Error('Private resource move journal is unavailable');
+      const raw = Buffer.alloc(Number(before.size) + 1); let offset = 0;
+      while (offset < raw.length) {
+        const {bytesRead} = await handle.read(raw, offset, raw.length - offset, null);
+        if (!bytesRead) break; offset += bytesRead;
+      }
+      const after = await handle.stat({bigint: true}), named = await fs.lstat(this.file, {bigint: true});
+      const stamp = (value: typeof before) => [value.dev, value.ino, value.mode, value.uid, value.nlink,
+        value.size, value.mtimeNs, value.ctimeNs].map(String).join(':');
+      if (offset !== Number(before.size) || stamp(before) !== stamp(after) || stamp(before) !== stamp(named))
+        throw new Error('Private resource move journal changed');
+      const bytes = raw.subarray(0, offset), text = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+      const decoded: unknown = JSON.parse(text);
+      if (JSON.stringify(decoded) !== text) throw new Error('Noncanonical private move journal');
+      const records = JournalSchema.parse(decoded), matches = records.filter(record => record.id === id);
+      if (matches.length !== 1 || !matches[0].resourceIntent || !matches[0].resourceOwnerScope)
+        throw new Error('Current private resource move is unavailable');
+      return Object.freeze(structuredClone(matches[0]));
+    } finally {await handle.close();}
+  }
 
   private recoveryFile(id: string, kind: 'pending' | 'verified'): string {
     return `${this.file}.recovery-${createHash('sha256').update(id).digest('hex')}.${kind}.json`;

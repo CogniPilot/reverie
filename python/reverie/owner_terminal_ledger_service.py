@@ -107,7 +107,7 @@ class LedgerService:
     fixed ports, not metadata sent by Node. Missing native target refuses before
     opening the ledger. No broker-consume command exists on the owner channel.
     """
-    def __init__(self, channel, directory, *, native_target=None, consumer_verifier=None):
+    def __init__(self, channel, directory, *, native_target=None, consumer_verifier=None, terminal=None):
         need(callable(getattr(native_target, 'observe', None)), 'NATIVE_TARGET_UNAVAILABLE')
         self.wire = FramedChannel(channel)
         self.observe = native_target.observe
@@ -118,18 +118,23 @@ class LedgerService:
         self.registrations = {}  # reference -> private context handle and EID.
         self.__issued = {}  # Private memory only: no status/log/JSON exposure.
         self.ledger = capabilities.CapabilityLedger(directory, issuer=self, peer_verifier=consumer_verifier)
+        self.terminal = terminal
 
     def close(self):
+        settled = True
+        if self.terminal is not None:
+            settled = self.terminal.close()  # Unknown cleanup retains its durable intent.
         self.wire.close()
         self.registrations.clear()
         self.__issued.clear()
         self.ledger.close()
+        return settled
 
     def _begin(self, binding):
         need(threading.get_ident() == self.thread and self.active is None, 'SERIAL_LOOP_REQUIRED')
         self.wire.deadline = time.monotonic() + 5
         self.wire.guard()
-        self.active = {**binding, 'checks': 0, 'scope': None, 'target': None, 'expires': None}
+        self.active = {**binding, 'checks': 0, 'scope': None, 'target': None, 'expires': None, 'native': None}
 
     def _authority(self):
         need(self.active is not None, 'ACTIVE_OWNER_OPERATION_REQUIRED')
@@ -160,6 +165,16 @@ class LedgerService:
         need(protocol.canonical(current) == protocol.canonical(answer['target']), 'NATIVE_TARGET_DRIFT')
         need(current['running'] is True and current['desiredRunning'] is True
              and current['onVacation'] is False and current['humanTerminalEntitled'] is True, 'NATIVE_TARGET_UNAVAILABLE')
+        if self.terminal is not None:
+            native = self.terminal.capture_target(op['employeeId'])
+            exact(native, {'target', 'binding'})
+            need(protocol.canonical(native['target']) == protocol.canonical(current)
+                 and type(native['binding']) is dict and native['binding']
+                 and len(protocol.canonical(native)) <= MAX_FRAME, 'H_NATIVE_TARGET_CHANGED')
+            expected = self.__issued.get(op.get('reference'), {}).get('native', op['native'])
+            if expected is not None:
+                need(protocol.canonical(expected) == protocol.canonical(native), 'H_NATIVE_INCARNATION_CHANGED')
+            op['native'] = copy.deepcopy(native)
         if op['scope'] is not None:
             need(op['scope'] == answer['scopeDigest'] and op['expires'] == expires
                  and protocol.canonical(op['target']) == protocol.canonical(current), 'OWNER_SCOPE_OR_TARGET_DRIFT')
@@ -187,8 +202,10 @@ class LedgerService:
         command = self.wire.read()
         common = {'kind', 'n', 'operationId', 'action', 'handle', 'employeeId'}
         action = command.get('action') if type(command) is dict else None
-        exact(command, common | ({'cols', 'rows', 'lifetimeSeconds'} if action == 'issue' else {'reference'}))
-        need(command['kind'] == 'command' and action in ('issue', 'status', 'revoke'), 'FIXED_OPERATION_REQUIRED')
+        terminal_action = action in ('open', 'input', 'resize', 'poll', 'end')
+        exact(command, common | ({'cols', 'rows', 'lifetimeSeconds'} if action == 'issue' else
+                                 {'reference', 'payload'} if terminal_action else {'reference'}))
+        need(command['kind'] == 'command' and action in ('issue', 'status', 'revoke', 'open', 'input', 'resize', 'poll', 'end'), 'FIXED_OPERATION_REQUIRED')
         need(type(command['n']) is int and command['n'] == self.next_sequence <= MAX_OPERATIONS, 'SEQUENCE_OR_REPLAY')
         for key in ('operationId', 'handle', 'employeeId'):
             need(type(command[key]) is str and protocol.UUID.fullmatch(command[key]), 'SERVER_REFERENCE')
@@ -210,10 +227,28 @@ class LedgerService:
                 committed_return = True
                 self.registrations[result['request']['authorizationRef']] = (command['handle'], command['employeeId'])
                 self.__issued[result['request']['authorizationRef']] = copy.deepcopy(result)
+                if self.terminal is not None:
+                    self.__issued[result['request']['authorizationRef']]['native'] = copy.deepcopy(self.active['native'])
             else:
                 need(self.registrations.get(command['reference']) == (command['handle'], command['employeeId']), 'REFERENCE_CONTEXT_DRIFT')
-                result = self.ledger.status(command['reference']) if action == 'status' else self.ledger.revoke(command['reference'])
-                committed_return = action == 'revoke'
+                if terminal_action:
+                    need(self.terminal is not None, 'INSTALLED_H_UNAVAILABLE')
+                    private = self.__issued[command['reference']]
+                    shim = capabilities.LedgerCapability(self.ledger, private['proof'], self.terminal.digest)
+                    # Existing sessions retain their original consumed shim.
+                    # This wrapper is used only for open's single consume.
+                    class ActiveCapability:
+                        request = copy.deepcopy(private['request'])
+                        def consume(self, value): return shim.consume(value)
+                        def recheck(self, value): return shim.recheck(value)
+                    self._authority()
+                    # Once handed to H, any exception may follow a durable
+                    # consume or process launch; never label it effect-free.
+                    committed_return = True
+                    result = self.terminal.handle(action, ActiveCapability(), self.observe(command['employeeId']), command['payload'])
+                else:
+                    result = self.ledger.status(command['reference']) if action == 'status' else self.ledger.revoke(command['reference'])
+                    committed_return = action == 'revoke'
             self._authority()
         except capabilities.CommitUncertain:
             state = 'unconfirmed'
@@ -257,7 +292,8 @@ class LedgerService:
                 owned_operation = None
                 try:
                     need(protocol.canonical(current_request) == protocol.canonical(request), 'CONSUMER_REQUEST_DRIFT')
-                    service._begin({'n': 0, 'operationId': str(uuid.uuid4()), 'handle': handle, 'employeeId': employee})
+                    service._begin({'n': 0, 'operationId': str(uuid.uuid4()), 'handle': handle, 'employeeId': employee,
+                                    'reference': reference})
                     owned_operation = service.active
                     getattr(shim, method)(current_request)
                 except BaseException:

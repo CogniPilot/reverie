@@ -10,6 +10,7 @@ import { composerReadyMark } from './cli-agent.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
 import { submitRecoveryPrompt } from './company-recovery-prompt.js';
+import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
 
 /** Fixed server-private resource actor. Request references and launchKey are not
  * authorization: each method must check the durable owner/capacity/profile claim.
@@ -20,14 +21,20 @@ import { submitRecoveryPrompt } from './company-recovery-prompt.js';
  * An unavailable/uncertain provider must refuse and preserve its operation claim.
  */
 export interface PlanMoveResourceRuntime {
+  readonly ownerAuthority?: ResourceOwnerBinding;
   reserve(
     input: Readonly<PlanMoveInput>,
-    owner: string,
+    owner: string | undefined,
     launch: Readonly<ReturnType<typeof planMoveLaunch>>
   ): Promise<{ sessionId: string; launchKey: object }>;
   prepare(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<void>;
+  /** Concrete native providers must stop the exact claimed old incarnation.
+   * An omitted legacy adapter remains representable, but cannot stop a source
+   * through an ordinary Session cleanup fallback. */
+  stopSource?(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<void>;
   start(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<void>;
   verify(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<() => unknown>;
+  finalize?(launchKey: object, record: Readonly<PlanMoveRecord>): Promise<void>;
 }
 
 export interface PlanMoveRuntime {
@@ -50,6 +57,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   // Capture the fixed implementation once; later object mutation cannot replace
   // one method halfway through a resource operation.
   const supplied = runtime.resourceReplacement;
+  const ownerAuthority = supplied?.ownerAuthority;
   const resources =
     supplied &&
     ['reserve', 'prepare', 'start', 'verify'].every(
@@ -58,8 +66,10 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       ? Object.freeze({
           reserve: supplied.reserve.bind(supplied),
           prepare: supplied.prepare.bind(supplied),
+          stopSource: supplied.stopSource?.bind(supplied),
           start: supplied.start.bind(supplied),
           verify: supplied.verify.bind(supplied),
+          finalize: supplied.finalize?.bind(supplied),
         })
       : undefined;
   const resourceCandidates = new Map<
@@ -71,7 +81,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       prepared?: Readonly<PlanMoveRecord>;
       prepareRequested?: boolean;
       startRequested?: boolean;
+      stopRequested?: boolean;
       started?: boolean;
+      verified?: boolean;
     }
   >();
   const candidates = new Map<string, string>();
@@ -112,6 +124,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
 
   const resourceTarget = (record: Readonly<PlanMoveRecord>) => {
     assertAuthorized();
+    if (record.resourceOwnerScope !== undefined && (!ownerAuthority ||
+        assertResourceOperation(ownerAuthority, owner, record) !== record.resourceOwnerScope))
+      throw new PlanMoveError('The current private resource owner context changed', 403);
     const state = record.newSession ? resourceCandidates.get(record.newSession) : undefined;
     const expected = state?.input,
       actual = record.resourceIntent,
@@ -129,6 +144,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       record.fromAccount !== expected.fromAccount ||
       record.toAccount !== expected.toAccount ||
       record.purpose !== 'runtime-refresh' ||
+      record.resourceOwnerScope !== expected.resourceOwnerScope ||
       Object.keys(intent).some((key) => actual[key as keyof typeof actual] !== intent[key as keyof typeof intent]) ||
       runtime.sessions.get(record.newSession!) !== state.candidate ||
       binding(record.employeeId) !== record.newSession
@@ -158,9 +174,17 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
             if (typeof fence !== 'function') throw new PlanMoveError('Resource native verification has no final fence');
             return () => {
               resourceTarget(record);
-              return fence();
+              const result = fence();
+              if (result === undefined) state.verified = true;
+              return result;
             };
           },
+          ...(resources.finalize ? {completeResources: async (record: Readonly<PlanMoveRecord>) => {
+            const state = resourceTarget(record);
+            if (!state.verified || !state.started || record.phase !== 'completed' || record.resourcePhase !== 'verified')
+              throw new PlanMoveError('Resource verification must precede protected native settlement');
+            await resources.finalize!(state.launchKey, record);
+          }} : {}),
         }
       : {}),
     verifyRecovery: async (record) => {
@@ -258,7 +282,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (input.resourceIntent) {
         if (!resources) throw new PlanMoveError('The private resource reservation/launch actor is unavailable', 503);
         if (
-          !owner ||
+          (input.resourceOwnerScope === undefined ? !owner : !ownerAuthority ||
+            assertResourceOperation(ownerAuthority, owner, input) !== input.resourceOwnerScope) ||
           requestedOwner !== owner ||
           input.purpose !== 'runtime-refresh' ||
           input.fromAccount !== input.toAccount ||
@@ -283,7 +308,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           source.isWorking
         )
           throw new PlanMoveError('The checkpointed resource source changed before reservation');
-        const reserved = await resources!.reserve(input, owner!, Object.freeze(payload));
+        const reserved = await resources!.reserve(input, owner, Object.freeze(payload));
         assertAuthorized();
         if (
           !reserved ||
@@ -411,6 +436,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       await runtime.company.rebind(employeeId, owner, id, owner ?? 'owner');
     },
     stop: async (id) => {
+      if (resourceCandidates.has(id))
+        throw new PlanMoveError('Resource candidate cleanup requires its protected native recovery operation');
       // Rollback may still clean our candidate after logout; stopping the original always needs live owner authority.
       if (!createdCandidates.has(id)) assertAuthorized();
       const current = session(id);
@@ -419,6 +446,17 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (!identities.length && !candidates.has(id))
         throw new PlanMoveError('Cannot verify the old process before cleanup');
       if (!createdCandidates.has(id)) assertAuthorized();
+      const resource = [...resourceCandidates.values()].find(state => state.input.sessionId === id);
+      if (resource) {
+        if (!resources?.stopSource || !resource.prepared || resource.stopRequested)
+          throw new PlanMoveError('The protected resource source-stop operation is unavailable or already attempted');
+        resourceTarget(resource.prepared);
+        resource.stopRequested = true;
+        await resources.stopSource(resource.launchKey, resource.prepared);
+        resourceTarget(resource.prepared);
+        if (runtime.sessions.get(id) !== current)
+          throw new PlanMoveError('The original session incarnation changed during protected source stop');
+      }
       try { await runtime.cleanup(id, true, 'plan_move'); }
       finally { if (createdCandidates.has(id)) releaseDelivery(); }
       candidates.delete(id);

@@ -2,6 +2,7 @@ import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
+import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
  *
@@ -760,6 +761,7 @@ export class Session extends EventEmitter {
   // at spawn, preserved across respawns via persisted state. Not written to .claude/settings.local.json.
   private _envOverrides: Record<string, string> | undefined;
   private readonly _workerAttachOnly: boolean;
+  private readonly _workerResourceLaunch?: ResourceWorkerLaunch;
 
   // Claude CLI effort level — injected as a `--settings` soft default at spawn so the
   // user can still switch in-session via /effort (incl. ultracode). Never carried as
@@ -886,6 +888,8 @@ export class Session extends EventEmitter {
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
       workerAttachOnly?: boolean;
+      /** Internal, in-process only. Normal HTTP create schemas do not admit it. */
+      workerResourceLaunch?: ResourceWorkerLaunch;
       subscriptionProfile?: SessionState['subscriptionProfile'];
       runtimeThreads?: Record<string, string>;
       /** Claude CLI effort level (soft default via --settings, switchable in-session via /effort) */
@@ -933,6 +937,7 @@ export class Session extends EventEmitter {
 
     this.id = config.id || uuidv4();
     this._workerAttachOnly = config.workerAttachOnly === true;
+    this._workerResourceLaunch = config.workerResourceLaunch;
     this.workingDir = config.workingDir;
     this.createdAt = config.createdAt || Date.now();
     this._mode = config.mode || 'claude';
@@ -2942,6 +2947,8 @@ export class Session extends EventEmitter {
   }
 
   async startInteractive(): Promise<void> {
+    if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
+      throw new Error('Resource replacement requires the normal local native worker multiplexer');
     if (this._closing) {
       throw new Error('Session is being closed');
     }
@@ -3085,6 +3092,7 @@ export class Session extends EventEmitter {
           createSessionOptions: {
             codexTrustWorkspace: this._codexTrustWorkspace,
             workerAttachOnly: this._workerAttachOnly,
+            workerResourceLaunch: this._workerResourceLaunch,
             sessionId: this.id,
             workingDir: this.workingDir,
             mode: this.mode,
@@ -3204,6 +3212,7 @@ export class Session extends EventEmitter {
           this._armPaneSettle(true);
         }
       } catch (err) {
+        if (this._workerResourceLaunch) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;

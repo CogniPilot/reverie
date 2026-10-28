@@ -21,7 +21,7 @@
           };
           start = pkgs.writeShellApplication {
             name = "reverie-start";
-            runtimeInputs = [ pkgs.nodejs_22 pkgs.nix pkgs.docker-client ];
+            runtimeInputs = [ pkgs.nodejs_22 pkgs.nix pkgs.docker-client (pkgs.lib.getBin pkgs.util-linux) ];
             text = ''
               export REVERIE_REPO="''${REVERIE_REPO:-${source}}"
               exec node ${source}/scripts/reverie-start "$@"
@@ -29,7 +29,7 @@
           };
           update = pkgs.writeShellApplication {
             name = "reverie-update";
-            runtimeInputs = [ pkgs.nix pkgs.docker-client pkgs.jq pkgs.curl pkgs.coreutils (pkgs.lib.getBin pkgs.util-linux) ];
+            runtimeInputs = [ pkgs.nodejs_22 pkgs.nix pkgs.docker-client pkgs.jq pkgs.curl pkgs.coreutils (pkgs.lib.getBin pkgs.util-linux) ];
             text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ./scripts/reverie-update);
           };
           gpuPublisher = pkgs.writeShellApplication {
@@ -75,6 +75,22 @@
           opsCore = import ./nix/ops-core.nix { inherit pkgs; src = source; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
           ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
+          ownerTerminalHost = import ./nix/owner-terminal-host.nix {
+            inherit pkgs; src = source; inherit (packages) console memory memoryPackage entrypoint;
+          };
+          ownerTerminalWebsiteManifest = self.packages.${system}.ownerTerminalHost.websiteManifest;
+          ownerTerminalImageProvenance = import ./nix/website-image-provenance.nix {
+            inherit pkgs; src = source;
+            image = self.packages.${system}.ownerTerminalImage;
+            console = packages.console;
+            clientManifest = packages.workerResourceClientManifest;
+            startupManifest = self.packages.${system}.ownerTerminalWebsiteManifest;
+          };
+          ownerTerminalImage = import ./nix/image.nix {
+            inherit pkgs; src = source; inherit (packages) reverie console memory runtime;
+            ownerTerminalWebsite = self.packages.${system}.ownerTerminalHost.website;
+          };
+          humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
           # Optional diagnostic candidate only; never part of default runtime/image.
           codexObserver = import ./nix/codex-observer.nix { inherit pkgs; };
           codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
@@ -118,9 +134,9 @@
           };
           workerBroker = pkgs.writeShellApplication {
             name = "reverie-worker-broker";
-            # The fixed owner GPU control validates installed NVIDIA CDI YAML.
+            # Fixed GPU CDI YAML parser; retain the protected isolated entry.
             runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client ];
-            text = ''exec python3 ${source}/python/reverie/worker.py broker "$@"'';
+            text = ''exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -I -B ${source}/python/reverie/worker.py broker "$@"'';
           };
           employeeLaptopMigrate = pkgs.writeShellApplication {
             name = "reverie-employee-laptop-migrate";
@@ -191,9 +207,81 @@
             name = "reverie-worker-service";
             runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client pkgs.systemd pkgs.nix ];
             text = ''
-              export PYTHONPATH=${source}/python
               export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
-              exec python3 -m reverie.worker_service "$@"
+              export REVERIE_WORKER_SERVICE_PYTHON=${pkgs.python3}/bin/python3
+              export REVERIE_WORKER_SERVICE_ENTRY=${source}/python/reverie/worker.py
+              exec python3 -I -B ${source}/python/reverie/worker_service.py "$@"
+            '';
+          };
+          resourceActorImage = import ./nix/image.nix {
+            inherit pkgs; src = source;
+            inherit (packages) reverie console memory runtime;
+            resourceReplacement = true;
+          };
+          resourceActorImageProvenance = import ./nix/website-image-provenance.nix {
+            inherit pkgs; src = source;
+            image = self.packages.${system}.resourceActorImage;
+            console = packages.console;
+            clientManifest = packages.workerResourceClientManifest;
+          };
+          resourceTerminalHost = import ./nix/owner-terminal-host.nix {
+            inherit pkgs; src = source;
+            inherit (packages) console memory memoryPackage entrypoint;
+            resourceReplacement = true;
+          };
+          resourceTerminalWebsiteManifest = self.packages.${system}.resourceTerminalHost.websiteManifest;
+          resourceTerminalImage = import ./nix/image.nix {
+            inherit pkgs; src = source;
+            inherit (packages) reverie console memory runtime;
+            ownerTerminalWebsite = self.packages.${system}.resourceTerminalHost.website;
+          };
+          resourceTerminalImageProvenance = import ./nix/website-image-provenance.nix {
+            inherit pkgs; src = source;
+            image = self.packages.${system}.resourceTerminalImage;
+            console = packages.console;
+            clientManifest = packages.workerResourceClientManifest;
+            startupManifest = self.packages.${system}.resourceTerminalWebsiteManifest;
+          };
+          ownerTerminalLifecycle = import ./nix/owner-terminal-lifecycle.nix {
+            inherit pkgs; src = source; memory = packages.memory;
+            profile = "terminal";
+            websiteManifest = self.packages.${system}.ownerTerminalWebsiteManifest;
+            imageProvenance = self.packages.${system}.ownerTerminalImageProvenance;
+            toolkit = self.packages.${system}.humanTerminalToolkit;
+          };
+          resourceTerminalLifecycle = import ./nix/owner-terminal-lifecycle.nix {
+            inherit pkgs; src = source; memory = packages.memory;
+            profile = "resource-terminal";
+            websiteManifest = self.packages.${system}.resourceTerminalWebsiteManifest;
+            imageProvenance = self.packages.${system}.resourceTerminalImageProvenance;
+            toolkit = self.packages.${system}.humanTerminalToolkit;
+          };
+          resourceActorInstaller = pkgs.writeShellApplication {
+            name = "reverie-resource-actor-install";
+            text = ''
+              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service install \
+                --resource-actor-provenance ${self.packages.${system}.resourceActorImageProvenance}/share/reverie/website-image.json "$@"
+            '';
+          };
+          resourceActorRefresh = pkgs.writeShellApplication {
+            name = "reverie-resource-actor-refresh";
+            text = ''
+              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service refresh-resource-actor \
+                --resource-actor-provenance ${self.packages.${system}.resourceActorImageProvenance}/share/reverie/website-image.json "$@"
+            '';
+          };
+          resourceTerminalInstaller = pkgs.writeShellApplication {
+            name = "reverie-resource-terminal-install";
+            text = ''
+              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service install \
+                --resource-actor-provenance ${self.packages.${system}.resourceTerminalImageProvenance}/share/reverie/website-image.json "$@"
+            '';
+          };
+          resourceTerminalRefresh = pkgs.writeShellApplication {
+            name = "reverie-resource-terminal-refresh";
+            text = ''
+              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service refresh-resource-actor \
+                --resource-actor-provenance ${self.packages.${system}.resourceTerminalImageProvenance}/share/reverie/website-image.json "$@"
             '';
           };
           isolate = pkgs.writeShellApplication {
@@ -243,6 +331,12 @@
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
+        resource-actor-install = { type = "app"; program = "${self.packages.${system}.resourceActorInstaller}/bin/reverie-resource-actor-install"; meta.description = "Explicit inactive resource-actor installation using the matching immutable website image"; };
+        resource-actor-refresh = { type = "app"; program = "${self.packages.${system}.resourceActorRefresh}/bin/reverie-resource-actor-refresh"; meta.description = "Explicit facts rebind for a registered running broker, without employee restart or owner approval"; };
+        resource-terminal-install = { type = "app"; program = "${self.packages.${system}.resourceTerminalInstaller}/bin/reverie-resource-terminal-install"; meta.description = "Explicit resource actor installation for the matching protected terminal website"; };
+        resource-terminal-refresh = { type = "app"; program = "${self.packages.${system}.resourceTerminalRefresh}/bin/reverie-resource-terminal-refresh"; meta.description = "Rebind resource facts after a coordinated protected terminal website replacement"; };
+        owner-terminal-lifecycle = { type = "app"; program = "${self.packages.${system}.ownerTerminalLifecycle}/bin/reverie-owner-terminal-lifecycle"; meta.description = "Coordinate the fixed protected terminal website lifecycle using private owner installation data"; };
+        resource-terminal-lifecycle = { type = "app"; program = "${self.packages.${system}.resourceTerminalLifecycle}/bin/reverie-owner-terminal-lifecycle"; meta.description = "Coordinate the matching protected resource and terminal website lifecycle"; };
         worker-gpu = { type = "app"; program = "${self.packages.${system}.workerGpuSupport}/bin/reverie-worker-gpu"; meta.description = "Read-only selected employee GPU/CDI/image preflight; no setup or laptop effects"; };
         ops-service = { type = "app"; program = "${self.packages.${system}.opsCore}/bin/reverie-ops-service"; meta.description = "Install/control the private authenticated OPS executor; no grants or automatic effects"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };

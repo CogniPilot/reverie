@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
+import {ResourceHistoricalSettlement} from './resource-native-client.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -51,6 +53,8 @@ export interface PlanMoveInput {
   purpose?: 'runtime-refresh';
   runtimeDigest?: string;
   resourceIntent?: PlanMoveResourceIntent;
+  /** Private owner-session scope reference; not data ownership or authority. */
+  resourceOwnerScope?: string;
 }
 
 export interface PlanMoveRecord {
@@ -73,6 +77,7 @@ export interface PlanMoveRecord {
   purpose?: 'runtime-refresh';
   runtimeDigest?: string;
   resourceIntent?: PlanMoveResourceIntent;
+  resourceOwnerScope?: string;
   resourcePhase?: PlanMoveResourcePhase;
 }
 
@@ -114,6 +119,10 @@ export interface PlanMovePort {
    * Missing native observation or settlement must refuse, never return a no-op.
    */
   verifyResources?(record: Readonly<PlanMoveRecord>): Promise<() => unknown>;
+  /** Actual protected native final settlement after durable completion/audit.
+   * The private owner-purpose actor must provide it; no ACK hash is credit.
+   */
+  completeResources?(record: Readonly<PlanMoveRecord>): Promise<void>;
 }
 
 export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed'>;
@@ -160,7 +169,8 @@ export class PlanMoves {
   private view(record: PlanMoveRecord): PlanMoveRecord {
     // A completion journal write is provisional while final native/audit fences
     // are still pending. Readers must not turn that window into successful Apply.
-    return record.resourceIntent && record.phase === 'completed' && this.aborts.has(record.id)
+    return record.resourceIntent && record.phase === 'completed' &&
+      (this.aborts.has(record.id) || this.intents.has(record.id))
       ? { ...record, phase: 'checking', resourcePhase: 'verifying' }
       : { ...record };
   }
@@ -179,24 +189,37 @@ export class PlanMoves {
       .reverse();
   }
 
-  async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port): Promise<PlanMoveRecord> {
+  async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port,
+    ownerAuthority?: ResourceOwnerBinding): Promise<PlanMoveRecord> {
     // Capture references before the first await. No caller mutation may redirect
     // a queued transaction or silently turn a resource refresh into a plain one.
     input = { ...input, ...(input.resourceIntent !== undefined ? { resourceIntent: resourceIntent(input.resourceIntent) } : {}) };
-    if (input.resourceIntent && (typeof owner !== 'string' || !owner || owner.length > 200))
-      throw new PlanMoveError('Resource refresh requires an explicit verified owner scope', 403);
+    const checkOwnerScope = () => {
+      if (input.resourceOwnerScope !== undefined) {
+        try {
+          if (!input.resourceIntent || !/^[a-f0-9]{64}$/.test(input.resourceOwnerScope) || !ownerAuthority ||
+              assertResourceOperation(ownerAuthority, owner, input) !== input.resourceOwnerScope)
+            throw new Error('missing private scope');
+        } catch { throw new PlanMoveError('Resource refresh requires its current private owner context', 403); }
+      } else if (input.resourceIntent && (typeof owner !== 'string' || !owner || owner.length > 200))
+        throw new PlanMoveError('Resource refresh requires an explicit verified owner scope', 403);
+    };
+    checkOwnerScope();
     if (input.resourceIntent && (input.purpose !== 'runtime-refresh' ||
-        typeof executor.prepareResources !== 'function' || typeof executor.verifyResources !== 'function'))
+        typeof executor.prepareResources !== 'function' || typeof executor.verifyResources !== 'function' ||
+        input.resourceOwnerScope !== undefined && typeof executor.completeResources !== 'function'))
       throw new PlanMoveError('Resource refresh requires its fixed preparation and native verification actor', 503);
     if ((input.purpose !== undefined && input.purpose !== 'runtime-refresh') ||
         (!input.purpose && input.runtimeDigest !== undefined))
       throw new PlanMoveError('Unknown plan move purpose');
     await this.init();
+    checkOwnerScope();
     const requestDigest = createHash('sha256')
       .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '', input.targetMode ?? '',
         ...(input.purpose ? [input.purpose, input.runtimeDigest] : []),
         ...(input.resourceIntent ? ['resources-v1', input.resourceIntent.operationId, input.resourceIntent.reservationId,
-          input.resourceIntent.profileVersion, input.resourceIntent.profileDigest, input.resourceIntent.previewDigest] : [])]))
+          input.resourceIntent.profileVersion, input.resourceIntent.profileDigest, input.resourceIntent.previewDigest,
+          ...(input.resourceOwnerScope === undefined ? [] : [input.resourceOwnerScope])] : [])]))
       .digest('hex');
     const existing = this.records.get(input.id);
     if (existing) {
@@ -219,6 +242,7 @@ export class PlanMoves {
     this.intents.add(input.id);
     try {
       const snapshot = await executor.snapshot(input.employeeId, owner, input.purpose);
+      checkOwnerScope();
       if (snapshot.sessionId !== input.sessionId || snapshot.account !== input.fromAccount)
         throw new PlanMoveError('The employee or account changed; refresh before moving');
       if (input.purpose === 'runtime-refresh') {
@@ -248,9 +272,11 @@ export class PlanMoves {
         requestDigest,
         ...(input.purpose ? { purpose: input.purpose, runtimeDigest: input.runtimeDigest } : {}),
         ...(input.resourceIntent ? { resourceIntent: input.resourceIntent } : {}),
+        ...(input.resourceOwnerScope === undefined ? {} : {resourceOwnerScope: input.resourceOwnerScope}),
       };
       this.records.set(record.id, record);
       await this.save();
+      checkOwnerScope();
       void this.run(record, input, executor);
       return { ...record };
     } catch (error) {
@@ -277,6 +303,37 @@ export class PlanMoves {
     if (record.phase !== 'waiting' || !this.aborts.has(id))
       throw new PlanMoveError('Only a move still waiting for idle can be cancelled');
     this.aborts.get(id)!.abort(new PlanMoveError('Move cancelled by the owner'));
+  }
+
+  /** Recognize a historical settlement through the fixed live host producer.
+   * Metadata only: no executor, old handle, launch, stop, handoff or credit.
+   * Every new website process still starts these records in recovery.
+   */
+  async reconcileResourceCompletion(id: string, proof: ResourceHistoricalSettlement,
+    owner?: string): Promise<PlanMoveRecord> {
+    await this.init();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    if (!(proof instanceof ResourceHistoricalSettlement) || !record.resourceIntent ||
+      record.phase !== 'recovery-required' || this.intents.has(id) || this.aborts.has(id) ||
+      [...this.records.values()].some(row => row.id !== id && row.employeeId === record.employeeId &&
+        !['completed','failed'].includes(row.phase)))
+      throw new PlanMoveError('Resource completion requires unambiguous fresh native inspection', 503);
+    proof.assertRecord(record); this.intents.add(id);
+    const before = {...record};
+    try {
+      record.phase = 'completed'; delete record.error;
+      await this.save();
+      await proof.recheck({...record});
+      proof.assertRecord(record);
+      this.locked.delete(record.employeeId);
+      return {...record};
+    } catch (error) {
+      Object.assign(record, before, {phase: 'recovery-required', error: 'Historical resource settlement remains unconfirmed'});
+      this.locked.add(record.employeeId);
+      try {await this.save();} catch { /* Keep in-memory fence; restart also requalifies. */ }
+      throw error;
+    } finally {this.intents.delete(id);}
   }
 
   /** Resolve a stopped-source move by adopting its existing verified destination. Never launches or replays a handoff. */
@@ -417,6 +474,10 @@ export class PlanMoves {
       recheckResources();
       await executor.audit({ ...record });
       recheckResources();
+      if (record.resourceOwnerScope !== undefined) {
+        if (!executor.completeResources) throw new PlanMoveError('Protected native resource settlement is unavailable');
+        await executor.completeResources(Object.freeze({...record}));
+      }
     } catch (error) {
       record.error = error instanceof Error ? error.message : 'Move failed';
       let recovered = !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;

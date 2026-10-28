@@ -2356,7 +2356,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
         : remote
           ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
-          : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
+          : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly, options.workerResourceLaunch);
 
       // Create tmux session in three steps to handle cold-start (no server running)
       // and avoid the race where the command exits before remain-on-exit is set:

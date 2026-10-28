@@ -164,3 +164,38 @@ Any consumed failure retains its attempt, step intents and both generations;
 there is no automatic retry or rollback. Inspect and reconcile those facts before
 any later operation. A source test or prepared plan is not an installed transport
 acceptance, active GPU proof or permission to run a workload.
+
+## Optional protected container website
+
+For a **new, separately reviewed container deployment**, set the strict boolean
+`"protectedWebsite": true` in the owner-selected `deployment.json` before using
+`nix run .#start`. Omitted or `false` preserves the ordinary launcher and its
+existing deployment signature. Changing the selection never replaces an existing
+container: preserve its data and use the normal reviewed replacement workflow.
+The launcher refuses reuse if the selected protection is missing or unknown,
+even if the deployment label matches.
+
+This profile uses a read-only image root, drops all capabilities, adds
+`no-new-privileges`, and keeps private PID/default engine seccomp and private IPC
+namespaces. Writable `/tmp` (256 MiB) and `/run` (16 MiB, owned by the selected host
+UID/GID) are private tmpfs mounts charged to the existing website memory limit;
+`/run` is non-executable. Existing explicit data, home, workspace, scratch,
+project and optional control-directory binds retain their selected access.
+No host Nix store, daemon, service configuration or new host privilege is added.
+Reuse rejects Nix-path masks/binds and loader/interpreter override environment.
+
+This is only a container startup profile. It does **not** install an owner
+terminal/resource actor, grant capabilities or provide protected-channel custody.
+Actual image startup, provider installation, tmpfs/kernel limits, full mount and
+HostConfig/entrypoint verification, and fixed trusted bootstrap acceptance need
+separate native qualification before those optional backends can become ready.
+An ordinary current website is not retroactively protected by this source flag.
+
+The existing `reverie-update` helper preserves only this exact pair of bounded
+tmpfs mounts and security settings when the same durable selection is enabled.
+It refuses unknown temporary mounts, sizes, UID/GID, modes, loader overrides or
+protection; changing the selection does not silently enable or disable it. After
+the build it rechecks the current configuration, mounts and limits before stop.
+The existing isolated-worker refusal remains: paired broker/website or protected
+bootstrap changes still require their separate reviewed update workflow. Do not
+remove security settings or temporary mounts to bypass a refusal.

@@ -203,6 +203,40 @@ it('requires preparation before private start and never uses the generic interac
   expect(h.ports.start).toHaveBeenCalledWith(h.key, h.record);
   expect(h.runtime.request).not.toHaveBeenCalled();
 });
+it('never uses legacy Session cleanup when the protected resource source stop is absent', async () => {
+  const h = await resourceHarness();
+  await h.executor.create(h.refresh, owner);
+  await h.executor.prepareResources!(h.record);
+  await expect(h.executor.stop('old')).rejects.toThrow('protected resource source-stop');
+  expect(h.runtime.cleanup).not.toHaveBeenCalled();
+});
+it('never sends uncertain resource candidate cleanup through legacy Session stop', async () => {
+  const h = await resourceHarness(); await h.executor.create(h.refresh, owner);
+  Object.assign(h.candidate, {pid: 125, muxName: 'replacement'});
+  await expect(h.executor.stop(newSID)).rejects.toThrow('protected native recovery');
+  expect(h.runtime.cleanup).not.toHaveBeenCalled(); expect(h.runtime.capture).not.toHaveBeenCalled();
+  expect(h.candidate.pid).toBe(125);
+});
+it('runs the fixed source stop before normal viewer cleanup and never retries an uncertain stop', async () => {
+  const h = await resourceHarness();
+  const stopSource = vi.fn(async () => { throw new Error('controlled native stop uncertain'); });
+  h.runtime.resourceReplacement = {...h.ports, stopSource};
+  const executor = planMoveExecutor(h.runtime, owner);
+  await executor.create(h.refresh, owner); await executor.prepareResources!(h.record);
+  await expect(executor.stop('old')).rejects.toThrow('native stop uncertain');
+  expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  await expect(executor.stop('old')).rejects.toThrow('already attempted');
+  expect(stopSource).toHaveBeenCalledTimes(1);
+});
+it('refuses normal cleanup when the source Session is replaced during the protected stop', async () => {
+  const h = await resourceHarness();
+  const stopSource = vi.fn(async () => { h.sessions.set('old', {...h.sessions.get('old')!} as Session); });
+  h.runtime.resourceReplacement = {...h.ports, stopSource};
+  const executor = planMoveExecutor(h.runtime, owner);
+  await executor.create(h.refresh, owner); await executor.prepareResources!(h.record);
+  await expect(executor.stop('old')).rejects.toThrow('session incarnation changed');
+  expect(h.runtime.cleanup).not.toHaveBeenCalled();
+});
 it('checks the exact operation references before prepare, after await and before start', async () => {
   for (const fault of ['operation', 'profile', 'owner', 'binding', 'replaced-object']) {
     const h = await resourceHarness();
