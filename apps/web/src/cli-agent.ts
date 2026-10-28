@@ -1475,6 +1475,56 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
   return EXIT.ok;
 }
 
+/** One bounded read-only owner-attention history page; never advances seen or ACKs. */
+export async function agentChatPending(deps: AgentDeps, options: { room?: string; beforeAt?: string; beforeId?: string }): Promise<number> {
+  if ((options.beforeAt === undefined) !== (options.beforeId === undefined) ||
+      (options.beforeAt !== undefined && (!/^\d{1,16}$/.test(options.beforeAt) || !Number.isSafeInteger(Number(options.beforeAt)))) ||
+      (options.beforeId !== undefined && (!options.beforeId || options.beforeId.length > 200)))
+    return fail(deps, 'Use paired --before-at epoch-ms and --before-id exact message ID');
+  const target = await resolveChatRoom(deps, options.room);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/notices/history',
+    query: { roomId: target.room.id, ...(options.beforeAt !== undefined ? { beforeAt: options.beforeAt, beforeId: options.beforeId! } : {}) } });
+  const data = result.json?.data as { text?: string; historyCoverage?: unknown; sourceReferences?: Array<{ roomId?: string; messageId?: string }> } | undefined;
+  if (!result.json?.success || typeof data?.text !== 'string' || !data.historyCoverage ||
+      !Array.isArray(data.sourceReferences) || data.sourceReferences.length > 1000 ||
+      data.sourceReferences.some(ref => ref.roomId !== target.room.id || typeof ref.messageId !== 'string'))
+    return fail(deps, 'Owner-attention history not confirmed; no read or handling was acknowledged');
+  if (deps.json) emitJson(deps, data);
+  else deps.io.out(JSON.stringify(data));
+  return EXIT.ok;
+}
+
+/** Explicit own attention resolution; exact reads support intent but never ACK delivery here. */
+export async function agentChatHandle(deps: AgentDeps, options: { room?: string; message: string; supersededBy?: string }): Promise<number> {
+  const target = await resolveChatRoom(deps, options.room);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  if (!options.message || options.message.length > 200 ||
+      (options.supersededBy !== undefined && (!options.supersededBy || options.supersededBy.length > 200 || options.supersededBy === options.message)))
+    return fail(deps, 'Use an exact message identity and a distinct optional replacement');
+  const exact = async (messageId: string) => {
+    const response = await deps.request(deps.ctx, { method: 'GET',
+      path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/messages/${encodeURIComponent(messageId)}` });
+    const data = response.json?.data as { message?: ChatMessageRow; readToken?: string } | undefined;
+    return response.json?.success && data?.message?.id === messageId && typeof data.readToken === 'string'
+      ? { roomId: target.room.id, messageId, readToken: data.readToken } : undefined;
+  };
+  const source = await exact(options.message);
+  if (!source) return fail(deps, 'Exact source read failed; attention unchanged');
+  const replacement = options.supersededBy ? await exact(options.supersededBy) : undefined;
+  if (options.supersededBy && !replacement) return fail(deps, 'Exact replacement read failed; attention unchanged');
+  const disposition = replacement ? 'superseded' : 'handled';
+  const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/v1/chatrooms/notices/resolve',
+    body: { ...source, disposition, ...(replacement ? { replacement } : {}) } });
+  const data = result.json?.data as { source?: { roomId?: string; messageId?: string }; attention?: { disposition?: string; replacement?: { messageId?: string } } } | undefined;
+  if (!result.json?.success || data?.source?.roomId !== target.room.id || data.source.messageId !== options.message ||
+      data.attention?.disposition !== disposition || (replacement && data.attention.replacement?.messageId !== replacement.messageId))
+    return fail(deps, 'Attention resolution not confirmed; inspect current summary before retrying');
+  if (deps.json) emitJson(deps, data);
+  else deps.io.out(`Notice ${options.message} ${disposition}. Delivery and task state unchanged.`);
+  return EXIT.ok;
+}
+
 /** Fetch one room-scoped attachment through the ordinary authenticated session transport. */
 export async function agentChatFetch(
   deps: AgentDeps,
@@ -2736,6 +2786,27 @@ export function registerAgentCommands(program: Command): Command {
       run(Boolean(options.json), (deps) =>
         agentChatRead(deps, { room: options.room, limit: parsePositiveInt(options.limit, 30, '--limit'), message: options.message, acknowledge: options.acknowledge })
       )
+    );
+
+  chat
+    .command('pending')
+    .description('Inspect one bounded own owner-attention history page without marking anything read/handled')
+    .option('-r, --room <room>', 'Room id or name')
+    .option('--before-at <epoch-ms>', 'Older-page cursor timestamp, paired with --before-id')
+    .option('--before-id <id>', 'Older-page cursor message identity, paired with --before-at')
+    .option('--json', 'Machine-readable output including source references and coverage')
+    .action((options: { room?: string; beforeAt?: string; beforeId?: string; json?: boolean }) =>
+      run(Boolean(options.json), deps => agentChatPending(deps, options))
+    );
+
+  chat
+    .command('handle <message-id>')
+    .description('Resolve your own attention for an exact notice; does not ACK delivery or complete work')
+    .option('-r, --room <room>', 'Room id or name')
+    .option('--superseded-by <id>', 'Visible replacement message in the same room')
+    .option('--json', 'Machine-readable output')
+    .action((message: string, options: { room?: string; supersededBy?: string; json?: boolean }) =>
+      run(Boolean(options.json), deps => agentChatHandle(deps, { message, room: options.room, supersededBy: options.supersededBy }))
     );
 
   chat

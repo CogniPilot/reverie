@@ -31,6 +31,7 @@ interface SqlStatement {
   run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
   get(...params: unknown[]): Record<string, unknown> | undefined;
   all(...params: unknown[]): Array<Record<string, unknown>>;
+  iterate(...params: unknown[]): IterableIterator<Record<string, unknown>>;
 }
 export interface SqlDatabase {
   exec(sql: string): void;
@@ -95,6 +96,11 @@ CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS messages(room_id TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(room_id, id));
 CREATE INDEX IF NOT EXISTS messages_room_at ON messages(room_id, at, id);
+CREATE INDEX IF NOT EXISTS messages_owner_notice ON messages(room_id, at DESC, id DESC)
+  WHERE json_extract(data, '$.from.kind') = 'user'
+    AND json_extract(data, '$.from.mark') IN ('owner_typed', 'owner_spoken');
+CREATE INDEX IF NOT EXISTS messages_notice_reply ON messages(room_id, json_extract(data, '$.replyTo'), at, id)
+  WHERE json_extract(data, '$.from.kind') = 'agent' AND json_extract(data, '$.replyTo') IS NOT NULL;
 CREATE TABLE IF NOT EXISTS txns(id TEXT PRIMARY KEY);
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(text, sender, tokenize = 'unicode61 remove_diacritics 2');
 `;
@@ -143,6 +149,13 @@ export class ChatDb {
       if (check.length !== 1 || check[0].integrity_check !== 'ok') {
         throw new ChatDbError(`chat database ${file} failed its integrity check: ${JSON.stringify(check.slice(0, 5))}`);
       }
+      // Refuse a newer database before installing this build's additive indexes.
+      // A fresh database has no meta table until SCHEMA is installed below.
+      if (db.prepare("SELECT 1 AS hit FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get()) {
+        const existingVersion = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get()?.value;
+        if (existingVersion !== undefined && Number(existingVersion) > CHAT_DB_SCHEMA_VERSION)
+          throw new ChatDbError(`chat database ${file} has schema ${existingVersion}; this build knows ${CHAT_DB_SCHEMA_VERSION}`);
+      }
       db.exec(SCHEMA);
       const version = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get()?.value;
       if (version === undefined) {
@@ -166,6 +179,35 @@ export class ChatDb {
   committedTxns(ids: Iterable<string>): Set<string> {
     const has = this.db.prepare('SELECT 1 AS hit FROM txns WHERE id = ?');
     return new Set([...ids].filter((id) => has.get(id) !== undefined));
+  }
+
+  /** Indexed owner-source discovery, not an unbounded history walk. Budget is shared across rooms. */
+  noticeHistory(roomId: string, budget: { rows: number; bytes: number }, before?: { at: number; id: string }):
+    { messages: ChatMessage[]; replies: ChatMessage[]; complete: boolean; before?: { at: number; id: string } } {
+    const messages: ChatMessage[] = [], replies: ChatMessage[] = [];
+    const owner = this.db.prepare(`SELECT data FROM messages INDEXED BY messages_owner_notice WHERE room_id = ?
+      AND json_extract(data, '$.from.kind') = 'user'
+      AND json_extract(data, '$.from.mark') IN ('owner_typed', 'owner_spoken')
+      ${before ? 'AND (at, id) < (?, ?)' : ''} ORDER BY at DESC, id DESC LIMIT ?`);
+    let complete = true;
+    const take = (rows: IterableIterator<Record<string, unknown>>, into: ChatMessage[]) => {
+      for (const row of rows) {
+        const raw = String(row.data), bytes = Buffer.byteLength(raw);
+        if (budget.rows <= 0 || bytes > budget.bytes) { complete = false; break; }
+        budget.rows--; budget.bytes -= bytes;
+        into.push(JSON.parse(raw) as ChatMessage);
+      }
+    };
+    const ownerLimit = Math.min(1000, Math.max(0, budget.rows));
+    take(owner.iterate(roomId, ...(before ? [before.at, before.id] : []), ownerLimit + 1), messages);
+    const next = !complete ? (messages.length ? { at: messages.at(-1)!.at, id: messages.at(-1)!.id } : before) : undefined;
+    if (messages.length) {
+      const answers = this.db.prepare(`SELECT data FROM messages INDEXED BY messages_notice_reply WHERE room_id = ?
+        AND json_extract(data, '$.from.kind') = 'agent' AND json_extract(data, '$.replyTo') IS NOT NULL
+        AND json_extract(data, '$.replyTo') IN (SELECT value FROM json_each(?)) LIMIT ?`);
+      take(answers.iterate(roomId, JSON.stringify(messages.map(m => m.id)), Math.min(1000, Math.max(0, budget.rows)) + 1), replies);
+    }
+    return { messages, replies, complete, ...(next ? { before: next } : {}) };
   }
 
   /** Every room, each with its newest `window` messages (oldest first); what the store starts from. */

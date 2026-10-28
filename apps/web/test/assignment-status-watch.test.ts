@@ -140,6 +140,133 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     await watch.tick();
     expect(posts).toHaveLength(1);
   });
+  it.each([
+    [
+      'On track for the bounded SOURCE slice only; native acceptance remains open.',
+      'for the bounded SOURCE slice only; native acceptance remains open.',
+    ],
+    ['On track: preparation only, not full delivery.', 'preparation only, not full delivery.'],
+    [
+      'On track: source checks passed.\nInstalled qualification remains open.',
+      'source checks passed.\nInstalled qualification remains open.',
+    ],
+  ])('records a timely qualified direct status without a false missing-response alert: %s', async (text, reason) => {
+    await watch.tick();
+    const deadline = watch.status().entries[0]!.deadline;
+    at += 299998;
+    reply(text);
+    const original = structuredClone(room.messages.at(-1)!);
+    await watch.tick();
+    const entry = watch.status().entries[0]!;
+    expect(entry.response).toMatchObject({ messageId: original.id, status: 'on-track', reason, applied: true });
+    expect(entry.deadline).toBe(deadline);
+    expect(entry.response!.at).toBeLessThanOrEqual(deadline);
+    expect(board.snapshot().issues).toHaveLength(1);
+    expect(board.snapshot().issues[0]!.status).toBe('doing');
+    expect(posts.at(-1)!.text).toContain('Recorded on-track');
+    expect(room.messages.find((m) => m.id === original.id)).toEqual(original);
+    watch = create();
+    await watch.init();
+    await watch.tick();
+    await watch.tick();
+    expect(posts).toHaveLength(2); // One prompt and one acknowledgement across restart/ticks.
+  });
+  it.each([
+    ['blocked', 'On track: source only; task remains BLOCKED'],
+    ['blocked', 'On track for source verification only; native acceptance remains blocked'],
+    ['doing', 'On track: bounded preparation only'],
+    ['doing', 'On track for the source slice only'],
+  ])('preserves every actual %s task field for a qualified report: %s', async (status, text) => {
+    await board.update({}, s => {
+      s.issues[0]!.status = status as 'doing' | 'blocked';
+      s.issues[0]!.reason = 'Actual native/external dependency remains open';
+    });
+    await watch.tick();
+    const task = structuredClone(board.snapshot().issues.find(i => i.id === 'task')!);
+    reply(text);
+    await watch.tick();
+    expect(watch.status().entries[0]!.response).toMatchObject({ status: 'on-track', applied: true });
+    expect(board.snapshot().issues.find(i => i.id === 'task')).toEqual(task);
+    expect(posts.at(-1)!.text).toContain('Scoped progress recorded; task status, reason and dates unchanged.');
+    watch = create();
+    await watch.init();
+    await watch.tick();
+    expect(posts).toHaveLength(2);
+    expect(board.snapshot().issues.find(i => i.id === 'task')).toEqual(task);
+  });
+  it('late qualified progress resolves only its attention card, preserving the actual blocker', async () => {
+    await board.update({}, s => {
+      s.issues[0]!.status = 'blocked';
+      s.issues[0]!.reason = 'Actual operator acceptance is unavailable';
+    });
+    await watch.tick();
+    const task = structuredClone(board.snapshot().issues.find(i => i.id === 'task')!);
+    const deadline = watch.status().entries[0]!.deadline;
+    at += 300001;
+    await watch.tick();
+    reply('On track: source checks only; full task stays blocked');
+    await watch.tick();
+    expect(watch.status().entries[0]!.deadline).toBe(deadline);
+    expect(watch.status().entries[0]!.response!.at).toBeGreaterThan(deadline);
+    expect(board.snapshot().issues.find(i => i.id === 'task')).toEqual(task);
+    expect(board.snapshot().issues.find(i => i.tags.includes('assignment-attention'))!.status).toBe('done');
+  });
+  it('preserves the existing bare On track unblock policy', async () => {
+    await board.update({}, s => {
+      s.issues[0]!.status = 'blocked';
+      s.issues[0]!.reason = 'Earlier blocker';
+    });
+    await watch.tick();
+    reply('On track');
+    await watch.tick();
+    expect(board.snapshot().issues.find(i => i.id === 'task')!.status).toBe('doing');
+    expect(board.snapshot().issues.find(i => i.id === 'task')!.reason).toBeUndefined();
+    expect(posts.at(-1)!.text).not.toContain('Scoped progress');
+  });
+  it('retains a long qualified status through its source identity, without truncating the chat message', async () => {
+    await watch.tick();
+    reply('On track: ' + 'Source preparation only. '.repeat(30) + 'No native acceptance claimed.');
+    const original = structuredClone(room.messages.at(-1)!);
+    await watch.tick();
+    expect(watch.status().entries[0]!.response).toMatchObject({ status: 'on-track', applied: true });
+    expect(watch.status().entries[0]!.response!.reason).toContain(original.id);
+    expect(watch.status().entries[0]!.response!.reason.length).toBeLessThanOrEqual(500);
+    expect(room.messages.find((m) => m.id === original.id)).toEqual(original);
+  });
+  it.each(['On track:', 'On track for', 'On trackish', 'Not on track', 'I am on track', '"On track"'])(
+    'does not infer an on-track report from invalid or quoted text: %s',
+    async (text) => {
+      await watch.tick();
+      reply(text);
+      await watch.tick();
+      expect(watch.status().entries[0]!.response).toBeUndefined();
+      expect(board.snapshot().issues).toHaveLength(1);
+    }
+  );
+  it('qualified wording does not bypass the original prompt or current employee/session binding', async () => {
+    await watch.tick();
+    reply('On track: source only', { replyTo: 'another-cycle-prompt' });
+    reply('On track for source only', {
+      from: { kind: 'agent', sessionId: 'foreign', employeeId: 'foreign', name: 'Foreign' },
+    });
+    await watch.tick();
+    expect(watch.status().entries[0]!.response).toBeUndefined();
+    expect(board.snapshot().issues).toHaveLength(1);
+    expect(posts).toHaveLength(1);
+  });
+  it('records a late qualified reply without changing its original deadline or completing the task', async () => {
+    await watch.tick();
+    const deadline = watch.status().entries[0]!.deadline;
+    at += 300001;
+    await watch.tick();
+    reply('On track: bounded source work only');
+    await watch.tick();
+    const entry = watch.status().entries[0]!;
+    expect(entry.response!.at).toBeGreaterThan(deadline);
+    expect(entry.deadline).toBe(deadline);
+    expect(board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))!.status).toBe('done');
+    expect(board.snapshot().issues.find((i) => i.id === 'task')!.status).toBe('doing');
+  });
   it.each(['done', 'wontdo', 'todo', 'triage'])('skips inactive task status %s', async (status) => {
     await board.update({}, (s) => {
       s.issues[0]!.status = status as never;

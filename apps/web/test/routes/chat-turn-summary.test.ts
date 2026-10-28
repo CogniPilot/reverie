@@ -13,13 +13,14 @@ const B = '00000038-0043-4000-8000-000000000060';
 const headers = { 'x-reverie-parent-session': A };
 afterEach(() => vi.unstubAllEnvs());
 
-async function fixture(owner?: string) {
+async function fixture(owner?: string, database = false) {
   vi.stubEnv('REVERIE_MULTIUSER', owner ? '1' : undefined);
   const directory = await mkdtemp(join(tmpdir(), 'turn-summary-'));
   let context!: MockRouteContext;
   let now = Date.now();
   const service = new ChatroomService({
     file: join(directory, 'rooms.json'),
+    ...(database ? { database: join(directory, 'chat.db') } : {}),
     employeeOf: (id) => 'employee-' + id,
     getSession: (id) => context.sessions.get(id),
     now: () => now,
@@ -422,4 +423,79 @@ it('recognizes unstamped self history and linked answers through retired employe
   } finally {
     await f.app.close();
   }
+});
+
+it('explicit own notice resolution requires exact reads; unknown actor/path/query input is refused', async () => {
+  const f = await fixture('alice');
+  try {
+    const question = f.emit();
+    const read = f.service.exactAgentRead(A, f.room.id, question.id);
+    const body = { roomId: f.room.id, messageId: question.id, readToken: read.readToken, disposition: 'handled' };
+    for (const extra of [{ actor: B }, { file: '/private/state' }, { owner: 'alice' }, { sessionId: B }]) {
+      expect((await f.app.inject({ method: 'POST', url: '/api/chatrooms/notices/resolve', headers, payload: { ...body, ...extra } })).statusCode).toBe(400);
+    }
+    for (const caller of [{}, { ...headers, 'x-reverie-service-token': 'fixture' }]) {
+      expect((await f.app.inject({ method: 'POST', url: '/api/chatrooms/notices/resolve', headers: caller, payload: body })).statusCode).toBe(403);
+    }
+    expect((await f.app.inject({ method: 'POST', url: '/api/chatrooms/notices/resolve?target=' + B, headers, payload: body })).statusCode).toBe(400);
+    expect((await f.app.inject({ method: 'POST', url: '/api/chatrooms/notices/resolve', headers: { 'x-reverie-parent-session': B }, payload: body })).statusCode).toBe(409);
+    expect(f.service.turnSummary(A).messages).toContainEqual(expect.objectContaining({ messageId: question.id }));
+    const ack = vi.spyOn(f.service.delivery, 'acknowledgeRead');
+    const result = await f.app.inject({ method: 'POST', url: '/api/chatrooms/notices/resolve', headers, payload: body });
+    expect(result.statusCode).toBe(200); expect(result.headers['cache-control']).toBe('no-store');
+    expect(result.json()).toMatchObject({ success: true, data: { source: { messageId: question.id }, attention: { disposition: 'handled' } } });
+    expect(ack).not.toHaveBeenCalled();
+    expect(f.service.turnSummary(A).messages).not.toContainEqual(expect.objectContaining({ messageId: question.id }));
+  } finally { await f.app.close(); }
+});
+
+it('supersession requires two current visible reads, a distinct replacement and unchanged ownership/DM access', async () => {
+  const f = await fixture('alice');
+  try {
+    const source = f.emit(), replacement = f.emit();
+    const body = { roomId: f.room.id, messageId: source.id, readToken: f.service.exactAgentRead(A, f.room.id, source.id).readToken,
+      disposition: 'superseded', replacement: { roomId: f.room.id, messageId: replacement.id,
+        readToken: f.service.exactAgentRead(A, f.room.id, replacement.id).readToken } };
+    const resolve = (payload = body) => f.app.inject({ method: 'POST', url: '/api/chatrooms/notices/resolve', headers, payload });
+    expect((await resolve({ ...body, replacement: { ...body, disposition: undefined, replacement: undefined } } as never)).statusCode).toBe(400);
+    f.room.kind = 'dm'; f.room.dm = ['user', B];
+    expect((await resolve()).statusCode).toBe(404);
+    f.room.dm = ['user', A];
+    expect((await resolve({ ...body, replacement: { roomId: body.roomId, messageId: body.messageId, readToken: body.readToken } })).statusCode).toBe(400);
+    expect((await resolve()).statusCode).toBe(200);
+    f.ctx.sessions.get(A)!.owner = 'bob';
+    expect((await resolve()).statusCode).toBe(403);
+  } finally { await f.app.close(); }
+});
+
+it('owner history inspection is exact-caller, strict, read-only, current-access and phone filtered', async () => {
+  const f = await fixture('alice', true);
+  try {
+    const q = f.service.post(f.room.id, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, 'ordinary owner request', 'all', { deliver: false });
+    const url = '/api/chatrooms/notices/history?roomId=' + f.room.id;
+    const ack = vi.spyOn(f.service.delivery, 'acknowledgeRead');
+    const seen = f.service.lastSeen(A, f.room.id);
+    const response = await f.app.inject({ url, headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toMatchObject({ success: true, data: { historyCoverage: { state: 'complete' }, sourceReferences: [{ roomId: f.room.id, messageId: q.id }] } });
+    expect(ack).not.toHaveBeenCalled(); expect(f.service.lastSeen(A, f.room.id)).toEqual(seen);
+    for (const suffix of ['&actor=' + B, '&beforeAt=1000', '&beforeAt=9999999999999999&beforeId=x', '&beforeAt=1&beforeId='])
+      expect((await f.app.inject({ url: url + suffix, headers })).statusCode).toBe(400);
+    expect((await f.app.inject({ url, headers: {} })).statusCode).toBe(403);
+    expect((await f.app.inject({ url, headers: { ...headers, 'x-reverie-service-token': 'fixture' } })).statusCode).toBe(403);
+    await f.service.setAlertMode(A, 'silent', 10000);
+    expect((await f.app.inject({ url, headers })).json().data.sourceReferences).toEqual([]);
+    f.room.owner = 'bob';
+    expect((await f.app.inject({ url, headers })).statusCode).toBe(404);
+  } finally { await f.app.close(); }
+});
+
+it('legacy recent-only history is explicit and cannot claim complete durable coverage', async () => {
+  const f = await fixture();
+  try {
+    expect(f.service.turnSummary(A)).toMatchObject({ historyCoverage: { state: 'recent-only' } });
+    expect(f.service.turnSummary(A).text).toContain('Older requests are not resolved');
+    expect((await f.app.inject({ url: '/api/chatrooms/notices/history?roomId=' + f.room.id, headers })).statusCode).toBe(503);
+  } finally { await f.app.close(); }
 });

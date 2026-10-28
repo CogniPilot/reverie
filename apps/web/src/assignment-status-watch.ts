@@ -493,7 +493,7 @@ export class AssignmentStatusWatch {
           await this.save(entry);
           continue;
         }
-        const text = `${marker(entry)} ${safeName(employee.name)}: status for assigned Board task ${task.id}? Reply directly to this message with On track, New ETA: YYYY-MM-DDTHH:mm:ssZ | reason, or Blocked: reason. Due ${new Date(entry.deadline).toISOString()}. This does not mark the work complete.`;
+        const text = `${marker(entry)} ${safeName(employee.name)}: status for assigned Board task ${task.id}? Reply directly to this message with On track (optionally ': reason'), New ETA: YYYY-MM-DDTHH:mm:ssZ | reason, or Blocked: reason. Due ${new Date(entry.deadline).toISOString()}. This does not mark the work complete.`;
         const message = this.post(bot, room.id, text, [employee.sessionId], recent.length);
         entry.promptId = message.id;
         this.stampAsked(entry, message);
@@ -571,8 +571,19 @@ export class AssignmentStatusWatch {
     )
       return;
     const text = m.text.trim();
-    if (/^on track[.!]?$/i.test(text))
-      return { messageId: m.id, at: m.at, status: 'on-track', reason: '', applied: false, planApplied: false };
+    // Keep the typed status at the start, but retain a source-slice qualifier.
+    // Existing direct replies also use "On track for ..."; these are not missing
+    // responses simply because they explain the scope of their progress.
+    const onTrack = /^on track(?:[.!]?|:\s*(\S[\s\S]*)|\s+(for\s+\S[\s\S]*))$/i.exec(text);
+    if (onTrack)
+      return {
+        messageId: m.id,
+        at: m.at,
+        status: 'on-track',
+        reason: boardReason(m.id, (onTrack[1] ?? onTrack[2] ?? '').trim()),
+        applied: false,
+        planApplied: false,
+      };
     const blocked = /^blocked:\s*([\s\S]+)$/i.exec(text);
     if (blocked && blocked[1]!.trim())
       return {
@@ -613,7 +624,10 @@ export class AssignmentStatusWatch {
       await this.save(entry);
       return;
     }
-    if (this.deps.canEdit(current.employee.id)) {
+    // A scoped progress report records a response, not whole-task readiness.
+    // Keep the existing bare-form policy; qualifiers must not clear a blocker,
+    // change the task status/reason/dates, or touch its updatedAt timestamp.
+    if (this.deps.canEdit(current.employee.id) && !(response.status === 'on-track' && response.reason.length > 0)) {
       let planApplied = false;
       await this.deps.board.update(
         {
@@ -691,7 +705,7 @@ export class AssignmentStatusWatch {
       this.post(
         bot,
         entry.roomId,
-        `[assignment-response:${entry.id}] Recorded ${response.status} for task ${entry.taskId}.${response.status === 'new-eta' && !response.planApplied ? ' Reported ETA retained; canonical commitment unchanged because plan editing is not granted.' : ''} Work completion was not inferred.`,
+        `[assignment-response:${entry.id}] Recorded ${response.status} for task ${entry.taskId}.${response.status === 'on-track' && response.reason ? ' Scoped progress recorded; task status, reason and dates unchanged.' : ''}${response.status === 'new-eta' && !response.planApplied ? ' Reported ETA retained; canonical commitment unchanged because plan editing is not granted.' : ''} Work completion was not inferred.`,
         [entry.sessionId],
         recent.length
       );
