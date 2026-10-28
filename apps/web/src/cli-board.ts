@@ -109,7 +109,7 @@ export async function boardIssueMove(deps: AgentDeps, options: { id: string; sta
     return fail(deps, `status is one of ${ISSUE_STATUSES.join('|')}`);
   }
   const body: Record<string, unknown> = { status: options.status };
-  if (options.reason) body.reason = options.reason;
+  if (options.reason !== undefined) body.reason = options.reason;
   const result = await call(deps, { method: 'PATCH', path: `/api/board/issues/${encodeURIComponent(options.id)}`, body });
   return done(deps, result, (i) => `${i.id} is now ${i.status}`);
 }
@@ -129,7 +129,44 @@ export async function boardIssueTag(deps: AgentDeps, options: { id: string; tags
   return done(deps, result, (i) => `${i.id} tags: ${(i.tags as string[]).join(', ') || '(none)'}`);
 }
 
-export async function boardShow(deps: AgentDeps): Promise<number> {
+export interface BoardShowOptions {
+  mine?: boolean;
+  owner?: string[];
+  status?: string[];
+  tag?: string[];
+  fields?: string;
+}
+
+// An explicitly given --fields (even empty) is a filter request: it is validated, never the whole-board path.
+const filtered = (o: BoardShowOptions) => Boolean(o.mine || o.owner?.length || o.status?.length || o.tag?.length || o.fields !== undefined);
+
+/** Filtered issues from GET /api/board/issues: the server narrows and projects, so the whole board is never fetched. */
+async function boardIssues(deps: AgentDeps, o: BoardShowOptions): Promise<number> {
+  // A repeated flag and a comma list are the same thing: --status doing --status todo == --status doing,todo.
+  const list = (values?: string[]) => (values?.length ? values.flatMap((v) => v.split(',')).map((v) => v.trim()).filter(Boolean).join(',') : undefined);
+  const status = list(o.status);
+  const bad = status?.split(',').find((s) => !(ISSUE_STATUSES as readonly string[]).includes(s));
+  if (bad) return fail(deps, `status is one of ${ISSUE_STATUSES.join('|')}`);
+  const fields = o.fields === undefined ? undefined : list([o.fields]);
+  if (o.fields !== undefined && !fields) return fail(deps, '--fields needs at least one field name, e.g. id,title,status');
+  if (fields && !deps.json) return fail(deps, '--fields selects JSON fields; add --json');
+  const query = { mine: o.mine ? true : undefined, owner: list(o.owner), status, tag: list(o.tag), fields };
+  const result = await call(deps, { method: 'GET', path: '/api/board/issues', query });
+  if (!result.ok) return result.code;
+  const data = result.data as { rev: number; issues: Issue[] };
+  if (deps.json) {
+    deps.io.out(JSON.stringify(data, null, 2));
+    return EXIT.ok;
+  }
+  deps.io.out(palette.emph(`Board rev ${data.rev} · ${data.issues.length} issue${data.issues.length === 1 ? '' : 's'}`));
+  for (const i of data.issues) {
+    deps.io.out(`  ${i.id}  ${i.status}  ${i.title}  · ${i.owner ?? i.ownerLabel ?? '-'}${i.tags.length ? `  [${i.tags.join(', ')}]` : ''}${i.reason ? `  — ${i.reason}` : ''}`);
+  }
+  return EXIT.ok;
+}
+
+export async function boardShow(deps: AgentDeps, options: BoardShowOptions = {}): Promise<number> {
+  if (filtered(options)) return boardIssues(deps, options);
   const board = await view(deps);
   if (!board) return EXIT.error;
   if (deps.json) {
@@ -205,9 +242,22 @@ export function registerBoardCommands(program: Command): Command {
 
   board
     .command('show')
-    .description('Print the board (issues by status, milestones, pace, open blockers and decisions)')
-    .option('--json', 'The whole GET /api/board view')
-    .action((o: { json?: boolean }) => runAgentVerb(json(o), boardShow));
+    .description('Print the board (issues by status, milestones, pace, open blockers and decisions); any filter prints only matching issues')
+    .option('--mine', 'Only issues owned by this session\'s employee')
+    .option('--owner <member>', 'Only issues owned by this member id or name (repeatable; with --mine, either)', collect)
+    .option('--status <status>', `Only issues in this status (repeatable): ${ISSUE_STATUSES.join('|')}`, collect)
+    .option('--tag <tag>', 'Only issues with this tag (repeatable; any of them)', collect)
+    .option('--fields <list>', 'With --json: only these issue fields, comma-separated (e.g. id,title,status,end)')
+    .option('--json', 'The whole GET /api/board view, or with a filter {rev, issues}')
+    .addHelpText('after', `
+Examples:
+  reverie board show --mine --status doing,todo --json --fields id,title,status,start,end
+  reverie board show --owner Kit --tag slam_web
+  reverie board show --status blocked --json
+
+Filters run on the server: only matching issues (and only --fields) come back. Values within one
+filter are alternatives; different filters must all match.`)
+    .action((o: BoardShowOptions & { json?: boolean }) => runAgentVerb(json(o), (d) => boardShow(d, o)));
 
   const issue = board.command('issue').alias('card').description('File, move and tag issues');
   issue
@@ -216,7 +266,7 @@ export function registerBoardCommands(program: Command): Command {
     .requiredOption('--title <text>', 'Title')
     .option('--owner <member>', 'Owner: member id or name')
     .option('--status <status>', ISSUE_STATUSES.join('|'))
-    .option('--reason <text>', 'Required for blocked and wontdo')
+    .option('--reason <text>', 'Required for blocked and wontdo; an empty string clears it for other statuses')
     .option('--tag <tag>', 'Tag (repeatable)', collect)
     .option('--milestone <id>', 'Milestone id')
     .option('--link <url>', 'Link (repeatable)', collect)
@@ -229,7 +279,7 @@ export function registerBoardCommands(program: Command): Command {
   issue
     .command('move <id> <status>')
     .description(`Move an issue (${ISSUE_STATUSES.join('|')}); done stamps doneAt`)
-    .option('--reason <text>', 'Required for blocked and wontdo')
+    .option('--reason <text>', 'Required for blocked and wontdo; an empty string clears it for other statuses')
     .option('--json', 'Machine-readable output')
     .action((id: string, status: string, o: { reason?: string; json?: boolean }) =>
       runAgentVerb(json(o), (d) => boardIssueMove(d, { id, status, reason: o.reason }))

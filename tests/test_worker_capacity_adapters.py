@@ -29,7 +29,7 @@ class CapacityAdapters(unittest.TestCase):
     def write(self):
         self.path.write_text(json.dumps(self.f.config)); self.path.chmod(0o600)
 
-    def run_metadata(self, args):
+    def run_metadata(self, args, *, deadline=None):
         self.calls.append(args)
         if args[:3] == ['docker', 'context', 'inspect']:
             return subprocess.CompletedProcess(args, 0, json.dumps('unix:///owned-fixture.sock'), '')
@@ -132,7 +132,7 @@ class CapacityAdapters(unittest.TestCase):
     def broker(self):
         f = self.f; broker = Broker.__new__(Broker)
         broker.config = f.config; broker.laptops = {}; broker.resource_reservations = f.gate
-        def metadata(args, optional=False):
+        def metadata(args, optional=False, *, deadline=None):
             if args[0] == 'inspect' and '--format' not in args:
                 rows = [r for r in f.native.rows if r['Name'] == '/'+args[1]]
                 return subprocess.CompletedProcess(args, 0 if rows else 1, json.dumps(rows), '')

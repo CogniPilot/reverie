@@ -147,14 +147,14 @@ describe('explicit named PAT CLI', () => {
       fetchGrantedCredentials(c.deps, { kind: 'agent', sessionId: SID, employeeId: 'another' })
     ).rejects.toThrow();
   });
-  it('registers list and install without a destination or print-material flag', () => {
+  it('registers list, status and install without a destination, actor or print-material flag', () => {
     const program = new Command();
     registerAgentCommands(program);
     const command = program.commands
       .find((x) => x.name() === 'agent')!
       .commands.find((x) => x.name() === 'credentials')!;
-    expect(command.commands.map((x) => x.name())).toEqual(['list', 'install']);
-    expect(command.commands[1].options.map((x) => x.long)).toEqual(['--json']);
+    expect(command.commands.map((x) => x.name())).toEqual(['list', 'status', 'install']);
+    for (const child of command.commands) expect(child.options.map((x) => x.long)).toEqual(['--json']);
   });
   it('lists only sanitized metadata and never requests material', async () => {
     const c = client({ list: { employeeId: EID, sessionId: SID, credentials: [{ ...row, material: SECRET }] } });

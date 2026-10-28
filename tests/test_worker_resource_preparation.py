@@ -119,7 +119,7 @@ class Preparation(unittest.TestCase):
         f.native.config_file=path;f.native.lock=threading.RLock()
         name=f.config['deployment']+'-agent-'+F.SID;f.native.laptops={F.SID:name}
         run=f.native.run_engine
-        def engine(args,optional=False):
+        def engine(args,optional=False,*,deadline=None):
             if args==['inspect',name]:return run(['inspect',f.native.rows[0]['Id']],optional)
             return run(args,optional)
         f.native.run_engine=engine

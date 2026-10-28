@@ -10,6 +10,7 @@ import copy
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -18,7 +19,7 @@ import time
 
 from . import laptop_resource_operations as journal
 from .employee_resource_profiles import ProfileStore
-from .worker_resources import RESOURCE_FIELDS, effective_config, policy_digest, validate_resource_reload
+from .worker_resources import RESOURCE_FIELDS, effective_config, policy_digest, project_resource_policy, validate_resource_reload
 from .worker_storage import read_metadata, storage_paths, storage_start_allowed
 from .worker_cold_tmp import read_mount_table, _mount_location
 from .worker_capacity_policy import explicit_host_headroom_fits, pool_headroom_fits
@@ -88,7 +89,10 @@ def configured(config):
 def domain_digest(config):
     # Match the existing reload boundary; a restart cannot silently rebind the
     # same control journal to another company file, storage or mount domain.
-    ignored = RESOURCE_FIELDS | {'sessionResources', 'employeeResources', 'image'}
+    # This host-only request policy is independently pinned by each host-job
+    # intent. Removing it must not hide the durable intent or strand existing
+    # transports; its presence never changes per-worker launch identity.
+    ignored = RESOURCE_FIELDS | {'sessionResources', 'employeeResources', 'image', 'browserJobPolicy'}
     return journal.fingerprint({k: v for k, v in config.items() if k not in ignored})
 
 
@@ -184,6 +188,7 @@ class NativeObserver:
     """Fixed read-only broker engine/kernel producer, never a wire callback."""
     def __init__(self, broker):
         self.broker = broker
+        self._local = threading.local()
 
     def host_root(self):
         """Qualify a full hierarchy; a namespaced/mounted subroot is not max."""
@@ -221,9 +226,9 @@ class NativeObserver:
         return facts
 
     def inventory(self, deadline=None):
-        deadline = time.monotonic() + 30 if deadline is None else deadline
+        deadline = self._deadline(deadline)
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
-        result = self.broker.run_engine(['ps', '-aq', '--no-trunc'])
+        result = self.broker.run_engine(['ps', '-aq', '--no-trunc'], deadline=deadline)
         need(len(result.stdout) <= MAX_NATIVE_BYTES, 'RESERVATION_ENGINE_BOUND')
         ids = result.stdout.splitlines()
         need(len(ids) <= MAX_CONTAINERS and len(ids) == len(set(ids)) and
@@ -232,7 +237,8 @@ class NativeObserver:
         rows = []
         for offset in range(0, len(ids), 32):
             need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
-            raw = self.broker.run_engine(['inspect', '--format', ENGINE_FORMAT, *ids[offset:offset + 32]]).stdout
+            raw = self.broker.run_engine(['inspect', '--format', ENGINE_FORMAT, *ids[offset:offset + 32]],
+                                         deadline=deadline).stdout
             need(len(raw) <= MAX_NATIVE_BYTES, 'RESERVATION_ENGINE_BOUND')
             batch = [json.loads(line) for line in raw.splitlines()]
             need(type(batch) is list and len(batch) == len(ids[offset:offset + 32]),
@@ -241,11 +247,21 @@ class NativeObserver:
         need(all(type(row) is dict for row in rows) and
              sorted(row.get('Id', '') for row in rows) == sorted(ids),
              'RESERVATION_COMPLETE_INVENTORY')
+        # Docker's inspect Mounts array can be emitted from an unordered map.
+        # Preserve every record/field while comparing the complete set in a
+        # deterministic order; actual source, flags and multiplicity still bind.
+        for row in rows:
+            mounts=row.get('Mounts')
+            need(type(mounts) is list and all(type(m) is dict for m in mounts),
+                 'RESERVATION_MOUNT_INVENTORY')
+            row['Mounts']=sorted(mounts,key=lambda m:json.dumps(m,sort_keys=True,
+                separators=(',',':'),allow_nan=False))
+        rows.sort(key=lambda row:row['Id'])
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
         return rows
 
-    def custody(self, root, binding):
-        deadline = time.monotonic() + 30
+    def custody(self, root, binding, *, deadline=None):
+        deadline = self._deadline(deadline)
         config = self.broker.config
         table = read_mount_table()
         rows = self.inventory(deadline)
@@ -326,7 +342,7 @@ class NativeObserver:
                         'nanoCpus': cpu, 'image': row['Image']}
 
     def capacity(self, rows, selected):
-        deadline = time.monotonic() + 30
+        deadline = self._deadline()
         host = self.host_root()
         config = self.broker.config
         sites = [r for r in rows if r.get('Name') == '/' + config['serverContainer']]
@@ -370,6 +386,19 @@ class NativeObserver:
             result[destination] = before
         need(_pid(pid) == start, 'RESERVATION_NATIVE_PID_CHANGED')
         return result
+
+    def _deadline(self, supplied=None):
+        now = time.monotonic()
+        value = getattr(self._local, 'deadline', None)
+        bounds = [now + 30]
+        for selected in (value, supplied):
+            if selected is not None:
+                need(type(selected) in (int, float) and math.isfinite(selected),
+                     'RESERVATION_OBSERVATION_DEADLINE')
+                bounds.append(selected)
+        end = min(bounds)
+        need(now < end, 'RESERVATION_OBSERVATION_DEADLINE')
+        return end
 
 
 class _RetainedClaim:
@@ -420,7 +449,7 @@ class ReservationGate:
                  for v in self.binding['locks'].values()), 'RESERVATION_BINDING_SCHEMA')
 
     def _guard(self, selected=None):
-        deadline = time.monotonic() + 30
+        deadline = self.native._deadline()
         need(getattr(self._local, 'depth', 0) > 0, 'RESERVATION_ADMISSION_LOCK_REQUIRED')
         need(option(self.broker.config) == self.option and
              (selected is None or selected == self.scope), 'RESERVATION_SCOPE_CHANGED')
@@ -465,14 +494,15 @@ class ReservationGate:
         return rows
 
     @contextmanager
-    def admission(self, sid=None):
+    def admission(self, sid=None, *, deadline=None):
         # Global flock -> broker mutex -> journal flock is the only lock order.
         # No interactive viewer retains this lock after canonical launch settles.
-        with self._mutex:
+        with self._admission_mutex(deadline):
             need(not getattr(self._local, 'depth', 0), 'RESERVATION_REENTRANT_ADMISSION')
             fd = os.open(self.root / 'admission.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.native._local.deadline = deadline
                 self._local.fd, self._local.depth = fd, 1
                 self._local.terminal_claim = None
                 self._local.preparation_boundary = None
@@ -497,6 +527,7 @@ class ReservationGate:
                 self._local.approved_profile = None
                 self._local.claim_native = None
                 self._local.depth = 0
+                self.native._local.deadline = None
                 os.close(fd)
 
     def _store(self):
@@ -640,6 +671,8 @@ class ReservationGate:
                 store.close()
 
     def check_creation(self, sid, resources):
+        from .worker_host_job import require_idle
+        require_idle(self)
         self.check_launch(sid)
         need(resources['budgetMode'] == 'admission' and
              resources['poolMemoryMiB'] == self.broker.config['poolMemoryMiB'],
@@ -669,6 +702,8 @@ class ReservationGate:
         Caller holds admission. Unlike ordinary existing transport/recovery,
         INSTALL must qualify every retained old-source commitment assumption.
         """
+        from .worker_host_job import require_idle
+        require_idle(self)
         rows = self._guard()
         total, budget, _site, _commitments = self.native.capacity(rows, self.option)
         retained = self._retained_delta(self._document())
@@ -736,7 +771,8 @@ class ReservationGate:
              profile['binding']['current_generation'] == generation and
              profile['resources']['budgetMode'] == 'admission', 'RESERVATION_PROFILE_BINDING')
         current = effective_config(config, paths.session)
-        need(all(profile['resources'][k] == current[k] for k in RESOURCE_FIELDS if k != 'memoryMiB'),
+        projected = project_resource_policy(config, profile['resources'])
+        need(all(projected[k] == current[k] for k in RESOURCE_FIELDS if k != 'memoryMiB'),
              'RESERVATION_RAM_ONLY_PROFILE')
         total, budget, site, commitments = self.native.capacity(rows, self.option)
         target = []; target_row = None
@@ -798,6 +834,8 @@ class ReservationGate:
         retained = None
         try:
             with self.admission():
+                from .worker_host_job import require_idle
+                require_idle(self)
                 observed = self.observe(self.scope, request['pool_id'], request['employee_id'])
                 profile = self._profile(request['employee_id'])
                 need(profile is not None and request['requested_memory_bytes'] ==
@@ -846,6 +884,34 @@ class ReservationGate:
         finally:
             self._local.approved_profile = None
             self._local.claim_native = None
+
+    @contextmanager
+    def _admission_mutex(self, deadline):
+        if deadline is None:
+            with self._mutex:
+                yield
+            return
+        need(type(deadline) in (int, float) and math.isfinite(deadline) and
+             0 < deadline - time.monotonic() <= 3600, 'RESERVATION_ADMISSION_DEADLINE')
+        need(self._mutex.acquire(timeout=max(0, deadline - time.monotonic())),
+             'RESERVATION_ADMISSION_DEADLINE')
+        try:
+            need(time.monotonic() < deadline, 'RESERVATION_ADMISSION_DEADLINE')
+            yield
+        finally:
+            self._mutex.release()
+
+    def begin_host_job(self, spec, *, deadline=None):
+        from .worker_host_job import begin
+        return begin(self, spec, deadline=deadline)
+
+    def bind_host_job(self, handle, binding, *, deadline=None):
+        from .worker_host_job import bind
+        return bind(self, handle, binding, deadline=deadline)
+
+    def finish_host_job(self, handle, binding, *, deadline=None):
+        from .worker_host_job import finish
+        return finish(self, handle, binding, deadline=deadline)
 
 
 def compatibility_candidate(before, projected, old_sid, target_sid):

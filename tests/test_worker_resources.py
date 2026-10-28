@@ -19,6 +19,31 @@ class ResourcePolicyTests(unittest.TestCase):
         fixture.WorkerTests.setUp(self)
         self.config.update(budgetMode='admission',memoryMiB=4096,pidsLimit=512,poolMemoryMiB=44032,poolTasksMax=8192)
 
+    def test_reservation_pool_is_global_and_stale_copies_do_not_change_labels(self):
+        stale=self.mixed();stale['resourceReservations']={'configured':True}
+        stale.update(poolMemoryMiB=51200,poolTasksMax=4096)
+        normalized=deepcopy(stale)
+        normalized['sessionResources'][SID].update(poolMemoryMiB=51200,poolTasksMax=4096)
+        self.assertEqual(effective_config(stale,SID)['poolMemoryMiB'],51200)
+        self.assertEqual(effective_config(stale,SID)['poolTasksMax'],4096)
+        self.assertEqual(policy_digest(stale,SID),policy_digest(normalized,SID))
+        self.assertEqual(create_args(stale,SID,self.root/'home'),create_args(normalized,SID,self.root/'home'))
+        # Legacy mixed-mode labels remain exact when the reservation option is absent.
+        legacy=self.mixed();expected={k:v for k,v in legacy.items() if k!='sessionResources'}
+        expected.update(legacy['sessionResources'][SID])
+        self.assertEqual(effective_config(legacy,SID),expected)
+
+    def test_central_pool_validates_actual_global_limit_and_closed_legacy_fields(self):
+        config=self.mixed();config['resourceReservations']={'configured':True}
+        config['sessionResources'][SID].update(budgetMode='admission',memoryMiB=50000)
+        config['poolMemoryMiB']=51200
+        self.assertEqual(effective_config(config,SID)['memoryMiB'],50000)
+        for key,value in [('poolMemoryMiB',True),('poolTasksMax',None),('extra',1)]:
+            bad=deepcopy(config);bad['sessionResources'][SID][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):effective_config(bad,SID)
+        config['poolMemoryMiB']=49152
+        with self.assertRaises(ValueError):effective_config(config,SID)
+
     def mixed(self):
         return {**self.config,'sessionResources':{SID:dict(budgetMode='pool',memoryMiB=0,pidsLimit=4096,cpus=0,poolMemoryMiB=49152,poolTasksMax=8192)}}
 

@@ -240,3 +240,21 @@ interrupted. Automatic device fallback prefers a matching locale and its named
 default, rather than the first voice the browser lists (car recognition currently uses
 English, US). A saved matching-language choice takes precedence. No matching device
 voice, or a failed device replay, leaves an interruption notice; the text stays in chat.
+
+
+## Actionable agent digest
+
+`reverie agent chat digest` returns one bounded cross-room view of unread messages
+and pending attention for the current agent, including unanswered owner requests
+below its read cursor. `--json` includes the company timezone, source version hashes,
+exact source links, producer priority order, omitted counts and history coverage.
+The read-only endpoint is `GET /api/chatrooms/digest`; it accepts no target or paging
+parameters. Existing membership, owner and phone filters apply on every request.
+
+A bounded or recent-only history result leaves older requests unresolved. Inspect
+one named room with `reverie agent chat pending` and use only its returned paired
+cursor for another explicit page. Generating or repeating a digest never reads,
+acknowledges, handles, resends or completes anything. Edited or invalidated proofs
+remain the producer's responsibility and are re-evaluated on the next request.
+The digest revision identifies this view for comparison; it is not a read cursor,
+handling proof or exactly-once hook receipt. Existing summary hooks are separate.

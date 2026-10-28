@@ -2,7 +2,9 @@
 
 The bundle contains the Docker image archive, README, documentation and setup
 script from one release, with `SHA256SUMS` and `IMAGE-REF.txt`. The latter records
-the exact saved image tag, including its registry/name and release version.
+the commit, immutable image ID, Repository and saved Tags, including the release
+version. New releases use `ghcr.io/cognipilot/reverie`; repository-owner forks
+use the same lowercase policy.
 Use a host matching the image CPU architecture stated in the bundled README.
 
 On Debian the host needs Docker Engine installed and running, Bash, tar,
@@ -16,9 +18,10 @@ From the extracted bundle directory:
 
 ```bash
 sha256sum -c SHA256SUMS
-IMAGE_REF=$(cat IMAGE-REF.txt)
+IMAGE=$(sed -n 's/^Repository: //p' IMAGE-REF.txt)
+VERSION=$(sed -n 's/^Version: //p' IMAGE-REF.txt)
 bash setup.sh --engine docker --offline ./reverie-image.tar \
-  --image "${IMAGE_REF%:*}" --version "${IMAGE_REF##*:}"
+  --image "$IMAGE" --version "$VERSION"
 ```
 
 `--offline` without a path uses `./reverie-image.tar`; an explicit path may also
@@ -56,3 +59,7 @@ volume across recreation. Install a later bundle with the same name and volume
 using that bundle's image tag and archive. Registry installs and rollback options
 are documented in [the image guide](image.md); offline installation does not
 download any missing older rollback image.
+
+Historical bundles retain their original setup script and metadata format. Use
+their recorded namespace explicitly when using a newer standalone setup script;
+there is no implicit migration of older `ghcr.io/jgoppert/reverie` archives.

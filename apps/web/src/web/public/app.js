@@ -1059,9 +1059,9 @@ class ReverieApp {
     this.init();
   }
 
-  // Cached element getter - avoids repeated DOM queries
+  // Reuse connected elements, and refresh entries when a panel replaces a node.
   $(id) {
-    if (!this._elemCache[id]) {
+    if (!this._elemCache[id]?.isConnected) {
       this._elemCache[id] = document.getElementById(id);
     }
     return this._elemCache[id];
@@ -3716,7 +3716,7 @@ class ReverieApp {
     };
     const rows = [row('Claude', data, true), row('Codex', data.codex, false)].filter(Boolean);
     chip.innerHTML = rows.length ? rows.join('') : '—';
-    const resetStr = (w) => (w && w.resetAt ? new Date(w.resetAt).toLocaleString() : '—');
+    const resetStr = (w) => (w && w.resetAt ? (globalThis.ReverieTime?.format(w.resetAt) ?? new Date(w.resetAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })) : '—');
     const details = (provider, usage, idle) => {
       const lines = [];
       const five = pct(usage?.fiveHour);
@@ -6192,7 +6192,7 @@ class ReverieApp {
     const stamp = (key, ts, fmt, cls) => {
       const text = this._sidebarRichStampText(ts, fmt);
       const title = ts
-        ? ` title="${escapeHtml(`${key === 'created' ? 'First created' : key}: ${new Date(ts).toLocaleString()}`)}"`
+        ? ` title="${escapeHtml(`${key === 'created' ? 'First created' : key}: ${(globalThis.ReverieTime?.format(ts) ?? new Date(ts).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`)}"`
         : '';
       return `<span class="tab-meta-item ${cls}"${title}><span class="tab-meta-key">${escapeHtml(key)}</span><span data-tab-ts="${ts || 0}" data-tab-fmt="${fmt}">${escapeHtml(text)}</span></span>`;
     };
@@ -6224,8 +6224,8 @@ class ReverieApp {
     // hover targets that remain; an item's own title still wins over this one
     // where the item is visible.
     const lineTitle = [
-      row.createdAt ? `First created: ${new Date(row.createdAt).toLocaleString()}` : '',
-      row.since && row.since.at ? `${row.since.key}: ${new Date(row.since.at).toLocaleString()}` : '',
+      row.createdAt ? `First created: ${(globalThis.ReverieTime?.format(row.createdAt) ?? new Date(row.createdAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}` : '',
+      row.since && row.since.at ? `${row.since.key}: ${(globalThis.ReverieTime?.format(row.since.at) ?? new Date(row.since.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}` : '',
     ]
       .filter(Boolean)
       .join('  \u00B7  ');

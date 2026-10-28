@@ -5,7 +5,7 @@ Canonical binding/ownership inputs require trusted current actor provenance.
 """
 import copy,fcntl,hashlib,json,os,re,stat,secrets
 from pathlib import Path
-from .worker_resources import validate_resources,validate_session_resources,validate_resource_reload,policy_digest,SESSION
+from .worker_resources import validate_resources,validate_session_resources,validate_resource_reload,policy_digest,project_resource_policy,SESSION
 MAX_BYTES=131072
 class Refusal(ValueError):pass
 class CommitUncertain(Refusal):pass
@@ -117,8 +117,9 @@ class ProfileStore:
    sid=canonical_binding['target_sid']
    # Both are projections of this locked canonical profile. Retain the target
    # SID projection for compatibility; later SIDs inherit the stable EID entry.
-   after.setdefault('employeeResources',{})[eid]=copy.deepcopy(p['resources'])
-   after.setdefault('sessionResources',{})[sid]=copy.deepcopy(p['resources']);validate_resource_reload(before,after)
+   resources=project_resource_policy(config,p['resources'])
+   after.setdefault('employeeResources',{})[eid]=copy.deepcopy(resources)
+   after.setdefault('sessionResources',{})[sid]=copy.deepcopy(resources);validate_resource_reload(before,after)
    for other,policy in before.get('sessionResources',{}).items():
     if other!=sid:need(encode(after['sessionResources'][other])==encode(policy),'UNRELATED_POLICY_CHANGED')
    for other,policy in before.get('employeeResources',{}).items():

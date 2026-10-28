@@ -6,6 +6,7 @@ import {
 } from '../../publication-credentials.js';
 import { ownerFor, resolveParentSessionId } from '../route-helpers.js';
 import type { SessionPort } from '../ports/session-port.js';
+import { ownCredentialStatus } from '../../publication-credential-status.js';
 
 export interface PublicationEmployee {
   id: string;
@@ -122,6 +123,16 @@ export function registerPublicationRoutes(
         employeeId: current.employeeId, sessionId: current.sessionId,
         credentials: metadata.filter(entry => current.ids.includes(entry.id)),
       } };
+    } catch (error) { return failure(reply, error); }
+  });
+  app.get('/api/publication/credentials/status', options, async (request, reply) => {
+    privateResponse(reply);
+    try {
+      if (Object.keys(request.query as object).length) throw new PublicationVaultError('PUBLICATION_INVALID');
+      const first = currentAgent(request);
+      const metadata = await deps.vault.metadata(first.owner);
+      const current = currentAgent(request); sameActor(first, current);
+      return { success: true, data: ownCredentialStatus(current, metadata) };
     } catch (error) { return failure(reply, error); }
   });
   app.post<{ Params: { id: string } }>('/api/publication/credentials/:id/material', options, async (request, reply) => {

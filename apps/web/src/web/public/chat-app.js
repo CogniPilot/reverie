@@ -464,7 +464,7 @@ function caDayKey(ms) {
 
 /** "October 11, 2026" for a day divider. */
 function caDayLabel(ms) {
-  return new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return new Date(ms).toLocaleDateString('en-US', { timeZone: globalThis.ReverieTime?.timeZone || 'UTC', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 /** Same sender and addressing, close in time, no day change between: a continuation line. */
@@ -861,7 +861,7 @@ function caAgentProfile(data) {
   const when = (v) => {
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0) return '';
-    return new Date(n < 1e12 ? n * 1000 : n).toLocaleString();
+    return (globalThis.ReverieTime?.format(n < 1e12 ? n * 1000 : n) ?? new Date(n < 1e12 ? n * 1000 : n).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
   };
   const num = (v) => caCount(v);
   const out = { persona: null, personaError: '', sections: [], switchInfo: null };
@@ -1205,7 +1205,7 @@ class ReverieChatApp {
   /** The server sends unread counts and direct messages (the new part); an older one does not. */
   get serverFeatures() {
     const f = this.app._chatFeatures || {};
-    return { pollingModes: Array.isArray(f.pollingModes) ? f.pollingModes.filter(mode => typeof mode === 'string') : [], unread: !!f.unread, dms: !!f.dms, placement: !!f.placement, replies: !!f.replies, deletes: !!f.deletes, reports: !!f.reports, topics: !!f.topics, edits: !!f.edits, pins: !!f.pins, order: !!f.order, notify: !!f.notify, replace: !!f.replace };
+    return { search: !!f.search, pollingModes: Array.isArray(f.pollingModes) ? f.pollingModes.filter(mode => typeof mode === 'string') : [], unread: !!f.unread, dms: !!f.dms, placement: !!f.placement, replies: !!f.replies, deletes: !!f.deletes, reports: !!f.reports, topics: !!f.topics, edits: !!f.edits, pins: !!f.pins, order: !!f.order, notify: !!f.notify, replace: !!f.replace };
   }
 
   get active() {
@@ -1336,6 +1336,7 @@ class ReverieChatApp {
     const res = await this.app._chatApi('/api/company');
     if (!res.ok) { this.discardBoardFrame(); return; }
     this.company = res.data;
+    globalThis.ReverieTime?.setTimeZone(res.data?.settings?.timeZone);
     await this.loadPhoneStatus();
     if (this.canManageOffice()) this.scheduleBoardWarm(); else this.discardBoardFrame();
     this.ownerName = String(res.data?.settings?.ownerName || '').trim();
@@ -1571,6 +1572,11 @@ class ReverieChatApp {
     inviteBtn.hidden = true;
     const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
     pinsBtn.hidden = true;
+    const searchBtn = this.button('ca-icon-btn ca-head-search', 'Search channel messages', () => this.openMessageSearch(), { icon: 'search' });
+    searchBtn.append(this.el('span', 'ca-search-label', 'Search messages'));
+    searchBtn.hidden = true;
+    searchBtn.setAttribute('aria-expanded', 'false');
+    searchBtn.setAttribute('aria-controls', 'ca-message-search');
     const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
     const mutedBadge = this.el('span', 'ca-muted-badge', 'Muted');
     mutedBadge.hidden = true;
@@ -1584,7 +1590,7 @@ class ReverieChatApp {
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
     speakBtn.hidden = true;
-    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, phoneBtn, membersBtn, moreBtn);
+    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, searchBtn, phoneBtn, membersBtn, moreBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1602,7 +1608,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
+      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, searchBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -2207,7 +2213,7 @@ class ReverieChatApp {
         const li = this.el('li', 'ca-invite-row');
         const text = this.el('div', 'ca-invite-text');
         const successor = this.app.sessions?.get?.(r.successorId)?.name || r.successorId.slice(0, 8);
-        text.append(this.el('strong', '', r.name), this.el('span', 'ca-invite-sub', `Replaced by ${successor}, ${new Date(r.at).toLocaleString()}`), this.el('span', 'ca-hint', r.rooms.length ? `Was in ${r.rooms.map((x) => x.name).join(', ')}` : 'Was in no room'));
+        text.append(this.el('strong', '', r.name), this.el('span', 'ca-invite-sub', `Replaced by ${successor}, ${(globalThis.ReverieTime?.format(r.at) ?? new Date(r.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`), this.el('span', 'ca-hint', r.rooms.length ? `Was in ${r.rooms.map((x) => x.name).join(', ')}` : 'Was in no room'));
         li.append(text);
         const restore = this.button('ca-btn', `Restore ${r.name}`, async () => {
           if (!this.doc.defaultView?.confirm(`Move ${r.name}'s places back? ${successor} will be retired in its stead.`)) return;
@@ -4273,7 +4279,7 @@ class ReverieChatApp {
         this.toast(`Reported to ${lead.name} in your direct message`, 'info');
         return;
       }
-      const when = new Date(m.at).toLocaleString();
+      const when = (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
       const why = reason.value.trim();
       const text = `REPORT from the user: a message by ${this.authorOf(m.from)} (${when}): "${caSnippet(m.text, 200)}"${why ? ` Reason: ${why}` : ''} Please look into it and tell the user what you find.`;
       const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages`, {
@@ -4297,7 +4303,7 @@ class ReverieChatApp {
     const by = m.pinned.kind === 'agent' ? `${m.pinned.by} (coordinator)` : 'you';
     const el = this.el('div', 'ca-pin-mark');
     el.append(this.icon('pin'), this.el('span', '', `Pinned by ${by}`));
-    el.title = `Pinned ${new Date(m.pinned.at).toLocaleString()}`;
+    el.title = `Pinned ${(globalThis.ReverieTime?.format(m.pinned.at) ?? new Date(m.pinned.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
     return el;
   }
 
@@ -4380,7 +4386,7 @@ class ReverieChatApp {
         const li = this.el('li', 'ca-pins-row');
         const text = this.el('div', 'ca-pins-text');
         const by = p.pinned.kind === 'agent' ? `${p.pinned.by} (coordinator)` : 'you';
-        text.append(this.el('strong', '', `${this.authorOf(p.from)}`), this.el('span', 'ca-pins-snippet', caSnippet(p.text, 200)), this.el('span', 'ca-hint', `Pinned by ${by}, ${new Date(p.pinned.at).toLocaleString()}`));
+        text.append(this.el('strong', '', `${this.authorOf(p.from)}`), this.el('span', 'ca-pins-snippet', caSnippet(p.text, 200)), this.el('span', 'ca-hint', `Pinned by ${by}, ${(globalThis.ReverieTime?.format(p.pinned.at) ?? new Date(p.pinned.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`));
         const jump = this.button('ca-btn', 'Show in channel', () => {
           dlg.close();
           this.msgEl(p.id)?.scrollIntoView?.({ block: 'center' });
@@ -4407,7 +4413,7 @@ class ReverieChatApp {
     const who = this.isHumanMessageMine(m.from) ? 'a message from you' : `a message from ${this.authorOf(m.from)}`;
     body.append(this.el('span', 'ca-deleted-text', `This ${who} was deleted.`));
     if (this.serverFeatures.deletes) {
-      const restore = this.button('ca-btn ca-restore', `Restore the deleted message at ${new Date(m.at).toLocaleTimeString()} (agents are not sent it again)`, () => this.restoreMessage(m), { text: 'Restore' });
+      const restore = this.button('ca-btn ca-restore', `Restore the deleted message at ${(globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))} (agents are not sent it again)`, () => this.restoreMessage(m), { text: 'Restore' });
       body.append(restore);
     }
     el.append(body);
@@ -4439,6 +4445,137 @@ class ReverieChatApp {
     }
     b.addEventListener('click', () => this.jumpTo(m.replyTo));
     return b;
+  }
+
+  closeMessageSearch(focus = true) {
+    const state = this.messageSearch;
+    if (!state) return;
+    this.messageSearch = null;
+    state.request++;
+    state.abort?.abort();
+    state.pane.remove();
+    this.els.searchBtn?.setAttribute('aria-expanded', 'false');
+    if (focus) this.els.searchBtn?.focus();
+  }
+
+  openMessageSearch() {
+    if (!this.serverFeatures.search) return;
+    if (this.messageSearch) { this.messageSearch.input.focus(); return; }
+    const pane = this.el('aside', 'ca-message-search');
+    pane.id = 'ca-message-search';
+    pane.setAttribute('aria-label', 'Channel message search');
+    const head = this.el('div', 'ca-search-head');
+    head.append(this.el('h2', '', 'Search messages'), this.button('ca-icon-btn', 'Close search', () => this.closeMessageSearch(), { text: '×' }));
+    const form = this.el('form', 'ca-search-form');
+    const input = this.el('input', 'ca-field');
+    input.type = 'search'; input.maxLength = 160; input.required = true;
+    input.placeholder = 'Search words'; input.setAttribute('aria-label', 'Search message words');
+    const scope = this.el('select', 'ca-field'); scope.setAttribute('aria-label', 'Search channel');
+    const all = this.el('option', '', 'All accessible channels'); all.value = ''; scope.append(all);
+    for (const room of this.rooms.filter(room => !caIsDm(room))) {
+      const option = this.el('option', '', `# ${room.name}`); option.value = room.id; scope.append(option);
+    }
+    const submit = this.el('button', 'ca-btn', 'Search'); submit.type = 'submit';
+    form.append(input, scope, submit);
+    const status = this.el('p', 'ca-hint', 'Search words or word beginnings in full channel history, newest first.');
+    status.setAttribute('role', 'status');
+    const results = this.el('div', 'ca-search-results');
+    const more = this.button('ca-btn', 'Load older results', () => this.runMessageSearch(true), { text: 'Load older results' }); more.hidden = true;
+    pane.append(head, form, status, results, more);
+    const state = { pane, input, scope, status, results, more, request: 0, abort: null, next: null, query: null };
+    this.messageSearch = state;
+    form.addEventListener('submit', event => { event.preventDefault(); this.runMessageSearch(); });
+    // Changing either control invalidates requests immediately; a slow previous response cannot repaint it.
+    const invalidate = () => { state.request++; state.abort?.abort(); state.next = null; more.hidden = true; results.replaceChildren(); status.textContent = 'Press Search to find messages.'; };
+    input.addEventListener('input', invalidate); scope.addEventListener('change', invalidate);
+    pane.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); this.closeMessageSearch(); } });
+    this.els.body.append(pane);
+    this.els.searchBtn?.setAttribute('aria-expanded', 'true');
+    input.focus();
+  }
+
+  async runMessageSearch(older = false) {
+    const state = this.messageSearch;
+    if (!state) return;
+    const q = state.input.value.trim(), roomId = state.scope.value;
+    if (!q) { state.status.textContent = 'Enter search words.'; return; }
+    if (older && (!state.next || state.query !== JSON.stringify([q, roomId]))) return;
+    const before = older ? state.next : null;
+    const request = ++state.request;
+    state.abort?.abort(); state.abort = new AbortController(); state.more.hidden = true;
+    if (!older) state.results.replaceChildren();
+    state.status.textContent = 'Searching…';
+    const params = new URLSearchParams({ q });
+    if (roomId) params.set('roomId', roomId);
+    if (before) params.set('before', JSON.stringify(before));
+    let response;
+    try { response = await this.app._chatApi(`/api/chatrooms/search?${params}`, { signal: state.abort.signal }); }
+    catch (error) { response = { ok: false, error: error?.name === 'AbortError' ? 'Search cancelled.' : 'Search unavailable. Try again.' }; }
+    if (this.messageSearch !== state || state.request !== request) return;
+    if (!response.ok) {
+      state.results.replaceChildren(); state.next = null; state.status.textContent = response.error || 'Search unavailable.'; return;
+    }
+    state.query = JSON.stringify([q, roomId]); state.next = response.data.next; state.timeZone = response.data.timeZone || 'UTC';
+    for (const hit of response.data.hits) {
+      const item = this.el('article', 'ca-search-hit');
+      item.append(this.el('strong', '', `# ${hit.roomName}`), this.el('div', 'ca-hint', `${hit.sender} · ${this.searchMessageTime(hit.at)}`), this.searchExcerpt(hit.text, q));
+      item.append(this.button('ca-btn', 'View message in context', () => this.openSearchContext(hit), { text: 'View context' }));
+      state.results.append(item);
+    }
+    state.status.textContent = state.results.children.length ? `${state.results.children.length} results shown · newest first${state.next ? ' · more available' : ''}` : 'No matching messages.';
+    state.more.hidden = !state.next;
+  }
+
+  searchExcerpt(text, query) {
+    const node = this.el('p', 'ca-search-excerpt');
+    const terms = (query.match(/[\p{L}\p{N}_]+/gu) || []).slice(0, 12);
+    if (!terms.length) { node.textContent = text; return node; }
+    const pattern = new RegExp(terms.join('|'), 'giu');
+    let from = 0;
+    for (const match of text.matchAll(pattern)) {
+      node.append(this.doc.createTextNode(text.slice(from, match.index)), this.el('mark', '', match[0]));
+      from = match.index + match[0].length;
+    }
+    node.append(this.doc.createTextNode(text.slice(from)));
+    return node;
+  }
+
+  searchMessageTime(at) {
+    const options = { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' };
+    try { return new Intl.DateTimeFormat('en-US', { ...options, timeZone: this.messageSearch?.timeZone || 'UTC' }).format(at); }
+    catch { return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(at); }
+  }
+
+  async openSearchContext(hit) {
+    const state = this.messageSearch;
+    if (!state) return;
+    const request = ++state.request;
+    state.abort?.abort(); state.abort = new AbortController(); state.more.hidden = true;
+    state.results.replaceChildren(); state.status.textContent = 'Loading original context…';
+    let response;
+    try { response = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(hit.roomId)}/search-context/${encodeURIComponent(hit.id)}`, { signal: state.abort.signal }); }
+    catch { response = { ok: false, error: 'Context unavailable. Search again.' }; }
+    if (this.messageSearch !== state || state.request !== request) return;
+    if (!response.ok) { state.status.textContent = response.error || 'Message unavailable or access changed.'; return; }
+    state.timeZone = response.data.timeZone || 'UTC';
+    state.status.textContent = `# ${response.data.roomName} · original message and nearby context`;
+    const nav = this.el('div', 'ca-search-nav');
+    nav.append(this.button('ca-btn', 'Back to search results', () => this.runMessageSearch(), { text: 'Back to results' }),
+      this.button('ca-btn', 'Open channel', async () => { await this.selectRoom(hit.roomId); if (this.messageSearch === state) this.jumpToVisibleSearchHit(hit.id); }, { text: 'Open channel' }));
+    state.results.append(nav);
+    for (const message of response.data.messages) {
+      const item = this.el('article', 'ca-search-hit'); item.dataset.sourceId = message.id;
+      if (message.id === hit.id) { item.classList.add('is-selected'); item.setAttribute('aria-label', 'Selected original message'); }
+      item.append(this.el('strong', '', `${message.sender} · ${this.searchMessageTime(message.at)}`), this.el('p', 'ca-search-excerpt', message.text));
+      state.results.append(item);
+    }
+    state.results.querySelector('.is-selected')?.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  jumpToVisibleSearchHit(id) {
+    const feed = this.app._chatEls?.feed;
+    if (feed && [...feed.querySelectorAll('[data-msg-id]')].some(node => node.dataset.msgId === id)) this.jumpTo(id);
+    // Older sources remain selected in the history context pane; never replace live conversation/drafts.
   }
 
   jumpTo(id) {
@@ -5742,6 +5879,8 @@ class ReverieChatApp {
     const { headTitle, headTopic } = this.els;
     const room = this.room;
     this.renderMemberChip();
+    if (this.els.searchBtn) this.els.searchBtn.hidden = !this.serverFeatures.search || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
+    if (!this.serverFeatures.search || this.embed || this.embassy?.selected) this.closeMessageSearch(false);
     const voiceControls = !!room && caSpeaks(room) && !this.embed && !this.embassy?.selected && !this.app._chatCreating;
     this.els.head?.classList.toggle('has-voice-controls', voiceControls);
     if (this.els.speakBtn) {
@@ -6186,7 +6325,7 @@ class ReverieChatApp {
     section('Usage', facts.usage);
     if (session?.createdAt) {
       section('Session', [
-        ['Started', new Date(session.createdAt).toLocaleString()],
+        ['Started', (globalThis.ReverieTime?.format(session.createdAt) ?? new Date(session.createdAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))],
         ...(session.lastActivityAt ? [['Last active', this.app._chatAgo(session.lastActivityAt)]] : []),
       ]);
     }
@@ -6881,7 +7020,7 @@ class ReverieChatApp {
         const block = this.el('section', 'ca-startup-reported');
         const sameBinding = report.sessionId === data.sessionId && report.sessionGeneration === data.sessionGeneration && report.runtimeBinding === data.runtimeBinding;
         block.append(this.literalText('h3', '', label),
-          this.literalText('p', 'ca-hint', `Stage ${report.stage} · Session ${report.sessionId} · Generation ${report.sessionGeneration} · Reported ${new Date(report.reportedAt).toLocaleString()}`),
+          this.literalText('p', 'ca-hint', `Stage ${report.stage} · Session ${report.sessionId} · Generation ${report.sessionGeneration} · Reported ${(globalThis.ReverieTime?.format(report.reportedAt) ?? new Date(report.reportedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`),
           this.literalText('p', 'ca-hint', sameBinding ? 'This report names the current session binding.' : 'This report names another session binding or runtime incarnation. It is not the current session’s captured startup.'),
           this.el('p', 'ca-hint', 'Harness-reported input does not independently establish provider consumption. Retained for this website process only; a website restart clears the report.'));
         const text = this.el('textarea', 'ca-field ca-startup-preview'); text.readOnly = true; text.rows = 8; text.value = report.context; text.setAttribute('aria-label', label);
@@ -6898,7 +7037,7 @@ class ReverieChatApp {
       if (data.startup.status === 'captured') renderReport('Captured startup input', data.startup.report);
       if (data.lastManagedDelivery) renderReport('Last harness-reported input', data.lastManagedDelivery);
       content.append(this.el('h3', '', 'Current configured preview'),
-        this.literalText('p', 'ca-hint', `Generated ${new Date(data.generatedAt).toLocaleString()} · Session ${data.sessionId || 'not bound'} · Generation ${data.sessionGeneration ?? 'not bound'}`));
+        this.literalText('p', 'ca-hint', `Generated ${(globalThis.ReverieTime?.format(data.generatedAt) ?? new Date(data.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))} · Session ${data.sessionId || 'not bound'} · Generation ${data.sessionGeneration ?? 'not bound'}`));
       preview.value = data.context; content.append(preview);
       const sections = this.el('section', 'ca-startup-sections');
       for (const section of data.sections) {
@@ -7960,7 +8099,7 @@ class ReverieChatApp {
     const muted = caIsMuted(pref);
     const noun = room.noun || (caIsDm(room) ? 'conversation' : 'channel');
     const mute = muted
-      ? { label: `Unmute ${noun}`, hint: pref.until === -1 ? '' : `until ${new Date(pref.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, run: () => this.setNotify(room.id, { until: 0 }) }
+      ? { label: `Unmute ${noun}`, hint: pref.until === -1 ? '' : `until ${(globalThis.ReverieTime?.format(pref.until) ?? new Date(pref.until).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`, run: () => this.setNotify(room.id, { until: 0 }) }
       : {
           label: `Mute ${noun}`,
           sub: CA_MUTE_CHOICES.map(([label, ms]) => ({ label, run: () => this.setNotify(room.id, { until: ms === -1 ? -1 : Date.now() + ms }) })),
@@ -8371,7 +8510,7 @@ class ReverieChatApp {
     const status = !view.open
       ? 'Closed'
       : view.closesAt
-        ? `Closes ${new Date(view.closesAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+        ? `Closes ${(globalThis.ReverieTime?.format(view.closesAt) ?? new Date(view.closesAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`
         : 'Open';
     head.append(this.el('span', 'ca-poll-status', `${status}${view.multi ? ' \u00B7 choose any' : ''}`));
     card.append(head, this.el('div', 'ca-poll-q', m.poll.question));
@@ -8463,7 +8602,7 @@ class ReverieChatApp {
       const el = this.el('div', 'ca-sys');
       el.dataset.msgId = m.id;
       el.append(this.el('span', 'ca-sys-arrow', '→'), this.el('span', 'ca-sys-text', m.text));
-      el.append(this.el('time', 'ca-time', new Date(m.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })));
+      el.append(this.el('time', 'ca-time', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))));
       return el;
     }
     if (m.deleted) return this.tombstoneEl(m);
@@ -8481,8 +8620,8 @@ class ReverieChatApp {
     if (head) {
       gutter.append(this.avatarFor(m.from, name, { size: 'md' }));
     } else {
-      const t = this.el('time', 'ca-time-hover', new Date(m.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
-      t.title = new Date(m.at).toLocaleString();
+      const t = this.el('time', 'ca-time-hover', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })));
+      t.title = (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
       gutter.append(t);
     }
     const body = this.el('div', 'ca-msg-body');
@@ -8495,7 +8634,7 @@ class ReverieChatApp {
       if (m.from.sessionId && m.from.sessionId === this.room?.coordinatorId) from.append(this.el('span', 'ca-tag', 'Admin'));
       if (m.from.kind === 'bot') from.append(this.el('span', 'ca-tag ca-tag--bot', 'Bot'));
       if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag', m.from.kind === 'human' ? 'Limited' : 'Owner'));
-      const time = this.el('time', 'ca-time', new Date(m.at).toLocaleString([], { month: 'numeric', day: 'numeric', year: '2-digit', hour: 'numeric', minute: '2-digit' }));
+      const time = this.el('time', 'ca-time', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })));
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
       if (m.external) meta.append(this.el('span', m.own ? 'ca-tag eg-own' : 'ca-tag eg-trust', m.own ? 'Sent from this console' : 'UNTRUSTED EXTERNAL'));
@@ -8513,7 +8652,7 @@ class ReverieChatApp {
       if (!m.external) this.decorateWorkspaceFiles(text);
       if (m.edited) {
         const mark = this.el('span', 'ca-edited', '(edited)');
-        mark.title = `Edited ${new Date(m.edited.at).toLocaleString()}`;
+        mark.title = `Edited ${(globalThis.ReverieTime?.format(m.edited.at) ?? new Date(m.edited.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
         text.append(' ', mark);
       }
       body.append(text);

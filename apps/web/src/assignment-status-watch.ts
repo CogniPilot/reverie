@@ -1,5 +1,6 @@
 /** Typed assignment check-ins. No model, shell, employee wake, permission grant or completion inference. */
 import { createHash, randomUUID } from 'node:crypto';
+import { displayTime, displayTimeZone, offsetTimestamp, parseOffsetTimestamp } from './display-time.js';
 import { z } from 'zod';
 import type { ChatBot } from './chat-bots.js';
 import type { BoardStore } from './board-store.js';
@@ -86,6 +87,7 @@ export interface AssignmentEmployee {
 export interface AssignmentWatchDeps {
   board: BoardStore;
   employees(): readonly AssignmentEmployee[];
+  timeZone?(owner: string | undefined): string | undefined;
   running(sessionId: string): boolean;
   bot(id: string): ChatBot | undefined;
   room(id: string): ChatRoom | undefined;
@@ -493,7 +495,8 @@ export class AssignmentStatusWatch {
           await this.save(entry);
           continue;
         }
-        const text = `${marker(entry)} ${safeName(employee.name)}: status for assigned Board task ${task.id}? Reply directly to this message with On track, New ETA: YYYY-MM-DDTHH:mm:ssZ | reason, or Blocked: reason. Due ${new Date(entry.deadline).toISOString()}. This does not mark the work complete.`;
+        const zone = displayTimeZone(this.deps.timeZone?.(employee.owner));
+        const text = `${marker(entry)} ${safeName(employee.name)}: status for assigned Board task ${task.id}? Reply directly to this message with On track (optionally ': reason'), New ETA: ISO timestamp with offset | reason (example ${offsetTimestamp(entry.deadline, zone)}; legacy Z accepted), or Blocked: reason. Due ${displayTime(entry.deadline, zone)} (${zone}). This does not mark the work complete.`;
         const message = this.post(bot, room.id, text, [employee.sessionId], recent.length);
         entry.promptId = message.id;
         this.stampAsked(entry, message);
@@ -571,8 +574,19 @@ export class AssignmentStatusWatch {
     )
       return;
     const text = m.text.trim();
-    if (/^on track[.!]?$/i.test(text))
-      return { messageId: m.id, at: m.at, status: 'on-track', reason: '', applied: false, planApplied: false };
+    // Keep the typed status at the start, but retain a source-slice qualifier.
+    // Existing direct replies also use "On track for ..."; these are not missing
+    // responses simply because they explain the scope of their progress.
+    const onTrack = /^on track(?:[.!]?|:\s*(\S[\s\S]*)|\s+(for\s+\S[\s\S]*))$/i.exec(text);
+    if (onTrack)
+      return {
+        messageId: m.id,
+        at: m.at,
+        status: 'on-track',
+        reason: boardReason(m.id, (onTrack[1] ?? onTrack[2] ?? '').trim()),
+        applied: false,
+        planApplied: false,
+      };
     const blocked = /^blocked:\s*([\s\S]+)$/i.exec(text);
     if (blocked && blocked[1]!.trim())
       return {
@@ -583,21 +597,21 @@ export class AssignmentStatusWatch {
         applied: false,
         planApplied: false,
       };
-    const eta = /^new eta:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\s*\|\s*([\s\S]+)$/i.exec(text);
+    const eta = /^new eta:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:Z|[+-]\d\d:\d\d))\s*\|\s*([\s\S]+)$/i.exec(text);
+    const etaAt = eta ? parseOffsetTimestamp(eta[1]!) : undefined;
     if (
       eta &&
       eta[2]!.trim() &&
-      Number.isFinite(Date.parse(eta[1]!)) &&
-      new Date(Date.parse(eta[1]!)).toISOString().replace('.000Z', 'Z') === eta[1] &&
-      Date.parse(eta[1]!) > this.now() &&
-      Date.parse(eta[1]!) > (current.task.end ?? 0)
+      etaAt !== undefined &&
+      etaAt > this.now() &&
+      etaAt > (current.task.end ?? 0)
     )
       return {
         messageId: m.id,
         at: m.at,
         status: 'new-eta',
         reason: boardReason(m.id, eta[2]!.trim()),
-        extendUntil: Date.parse(eta[1]!),
+        extendUntil: etaAt,
         priorEnd: current.task.end,
         applied: false,
         planApplied: false,
@@ -613,7 +627,10 @@ export class AssignmentStatusWatch {
       await this.save(entry);
       return;
     }
-    if (this.deps.canEdit(current.employee.id)) {
+    // A scoped progress report records a response, not whole-task readiness.
+    // Keep the existing bare-form policy; qualifiers must not clear a blocker,
+    // change the task status/reason/dates, or touch its updatedAt timestamp.
+    if (this.deps.canEdit(current.employee.id) && !(response.status === 'on-track' && response.reason.length > 0)) {
       let planApplied = false;
       await this.deps.board.update(
         {
@@ -691,7 +708,7 @@ export class AssignmentStatusWatch {
       this.post(
         bot,
         entry.roomId,
-        `[assignment-response:${entry.id}] Recorded ${response.status} for task ${entry.taskId}.${response.status === 'new-eta' && !response.planApplied ? ' Reported ETA retained; canonical commitment unchanged because plan editing is not granted.' : ''} Work completion was not inferred.`,
+        `[assignment-response:${entry.id}] Recorded ${response.status} for task ${entry.taskId}.${response.status === 'on-track' && response.reason ? ' Scoped progress recorded; task status, reason and dates unchanged.' : ''}${response.status === 'new-eta' && !response.planApplied ? ' Reported ETA retained; canonical commitment unchanged because plan editing is not granted.' : ''} Work completion was not inferred.`,
         [entry.sessionId],
         recent.length
       );

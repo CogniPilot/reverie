@@ -18,42 +18,118 @@ nix build .#browserRuntime --out-link "$HOME/scratch/reverie/browser-runtime"
 nix build .#workerBrowserImage --out-link "$HOME/scratch/reverie/worker-browser-image"
 ```
 
-Use the reviewed immutable browser worker image ID in the external owner-only
-broker configuration. The image choice currently applies to all workers managed
-by that broker; browser binaries grant no GPU access by themselves. Add optional
-`gpuGrants` only for explicitly selected session UUIDs:
+For a laptop already using the rootless Docker capability profile, keep the
+same UID/GID, subordinate-ID ranges, base tools and mount-layout settings. The
+existing `lib.workerDockerImage` factory accepts an optional **boolean**
+`browser = true`; omitted and `false` produce the exact same derivation in the
+same source graph. The browser variant adds the existing browser runtime and
+`org.reverie.worker.browser=1`, retaining the rootless profile. Do not replace a
+UID/GID capability image with the generic UID-2000 `workerBrowserImage`.
+
+For example, from the reviewed checkout, with existing mapping inputs selected
+by the owner (these defaults must already be authorized by `/etc/subuid` and
+`/etc/subgid`):
+
+```sh
+image_output="$(mktemp -d /tmp/reverie-worker-gpu.XXXXXX)"
+export REVERIE_GPU_BUILD_FLAKE="$(pwd -P)"
+export REVERIE_GPU_BUILD_UID="$(id -u)" REVERIE_GPU_BUILD_GID="$(id -g)"
+nix build --impure --expr '
+  let f = builtins.getFlake (builtins.getEnv "REVERIE_GPU_BUILD_FLAKE");
+  in f.lib.workerDockerImage {
+    system = builtins.currentSystem;
+    uid = builtins.fromJSON (builtins.getEnv "REVERIE_GPU_BUILD_UID");
+    gid = builtins.fromJSON (builtins.getEnv "REVERIE_GPU_BUILD_GID");
+    subuidStart = 100000; subgidStart = 100000; subidCount = 65536;
+    browser = true;
+  }' --out-link "$image_output/result"
+```
+
+Device access alone does not require a browser image: keep an existing qualified
+UID/GID image when project flakes/private Nix already provide the needed tools.
+The broker's immutable image selection applies to future creations in that
+broker. Browser binaries alone grant no device access. Prefer the owner-private
+`employeeGpuGrants` map so a grant follows the permanent employee identity:
 
 ```json
 {
-  "gpuGrants": {
+  "employeeGpuGrants": {
     "11111111-1111-1111-1111-111111111111": "nvidia.com/gpu=GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
   }
 }
 ```
 
-These are synthetic identifiers. Select the actual session and reviewed physical
-GPU UUID on the host; organizational titles and employee names grant no access.
-An absent or empty mapping is valid. Wildcards, numeric GPU indices, `all`, raw
-device paths and arbitrary engine flags are rejected. The only added engine
-arguments are `--device` and that selected CDI name. Runtime execution requests
-cannot change the grants. GPU grants participate in the worker policy digest;
-changing them is an owner-managed configuration/recreation step, not a live
-permission toggle. Preserve current desired-running/vacation state at cutover.
+These identifiers are synthetic. Resolve the current SID and generation through
+the trusted company/storage metadata, never a name, title or request-provided
+employee ID. A historical/retired SID does not inherit the employee grant. An
+explicit legacy `gpuGrants` SID entry takes precedence; its existing policy bytes
+are preserved. Both maps default empty, with at most 32 owner selections combined.
+New employee grants change only the selected laptop's projected policy; unrelated
+legacy policy labels and creation arguments stay byte-equivalent. OFF/vacation
+continues to block startup independently; a permission is not a wake request.
 
-CPU stays uncapped by default, and existing memory/task limits, read-only root,
-capability drop, no-new-privileges, per-agent homes, scratch and networks remain
-enforced. Device access does not impose a GPU memory quota. A granted process
+Numeric indices, `all`, raw device paths, flags and wildcards remain invalid.
+The engine producer adds `--device` with one exact NVIDIA CDI UUID. Selected
+GPU containers also receive the fixed default
+`LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib`, using the reviewed
+CDI guest library aliases rather than host store paths. Explicit per-launch
+library-path overrides remain unchanged. Existing containers gain this default
+only on their next normal recreation; this source change does not restart them.
+GPU grants require reviewed configuration and selected-laptop recreation;
+the resource-only hot reload cannot change them. An older broker does not accept
+the new map: update its reviewed package/configuration through the normal inactive
+service workflow. No running container is resized or granted a device in place.
+
+CPU stays uncapped by default; memory/task limits, read-only root, private homes,
+scratch and networks stay unchanged. The ordinary profile retains capability
+drop and no-new-privileges. The existing rootless Docker profile retains its
+narrow SETUID/SETGID capabilities, pinned seccomp/idmap rules and existing
+namespace settings; it intentionally differs from the ordinary NNP profile.
+This GPU option adds no capability or sandbox exception. Device access does not impose a GPU memory quota. A granted process
 can contend with the local model server beyond this test helper's safeguards.
 
 ## Host CDI and browser sandbox prerequisites
 
-The host needs native Docker CDI support and a reviewed NVIDIA CDI specification
-matching its running driver. On NixOS the pinned module offers
-`hardware.nvidia-container-toolkit.enable` and
-`hardware.nvidia-container-toolkit.device-name-strategy = "uuid"`. These are
-host settings requiring ordinary owner activation when a change is needed;
-Reverie does not enable or activate them. Do not change an already working driver
-or restart the engine merely to prepare this source capability.
+The optional tools use the application's pinned flake and existing local Linux
+engine/driver. The ordinary deployment remains usable without a GPU or toolkit.
+No NixOS configuration, kernel-driver installation, daemon reconfiguration or
+system-service activation is performed by this feature.
+
+Run the metadata-only owner-local preflight after selecting the actual employee,
+physical CDI UUID and already loaded immutable image:
+
+```sh
+nix run .#worker-gpu -- --config "$HOME/reverie/runtime/worker-isolation/broker.json" \
+  --employee OWNER_SELECTED_EMPLOYEE_UUID --device nvidia.com/gpu=GPU-OWNER_SELECTED_UUID \
+  --image sha256:QUALIFIED_IMAGE_DIGEST --browser --cdi-sha256 REVIEWED_SPEC_DIGEST
+```
+
+It binds the current company SID/generation and intent, actual local engine/CDI
+specification bytes, immutable image UID/GID profile, existing laptop labels,
+RAM/swap/PID limits, and current kernel process/root/namespace metadata. It uses
+only fixed engine metadata commands, bounded file reads and child processes.
+It cannot install, reload, restart, grant access or run a GPU workload. Its JSON
+is a review aid, never native effect authority, a VRAM reservation or a rendering
+pass. Missing/ambiguous facts exit 77 without a fallback. YAML support is bundled
+with this optional tool; the ordinary worker needs no YAML dependency.
+
+On a host lacking the prerequisites, first install a supported NVIDIA kernel
+driver and CDI-capable engine through its normal owner-selected installation.
+[Docker enables CDI by default from version 28.3.0](https://docs.docker.com/reference/cli/dockerd/#configure-cdi-devices); its configured specification
+directories must contain the reviewed driver/device definition. The pinned
+`workerGpuToolkit` output supplies `nvidia-ctk` for an explicit private candidate:
+
+```sh
+nix shell .#workerGpuToolkit --command nvidia-ctk cdi generate \
+  --format=json --device-name-strategy=uuid \
+  --output "$HOME/reverie/runtime/gpu/nvidia.candidate.json"
+```
+
+Create that private directory first. Generation is not installation: publishing
+into an engine's configured CDI directory requires its legitimate owner/admin
+setup. The app never writes `/etc/cdi`, changes a daemon, uses the engine as an
+admin workaround or edits a personal host configuration. Unsupported installation
+stays unavailable; do not change an already working driver to prepare source.
 
 Review the selected CDI entry **and** global `containerEdits`: CDI can inject
 device nodes, read-only driver mounts, environment and host hooks. UUID validation
@@ -135,3 +211,132 @@ other experts, current running intent, model settings and all durable homes.
 - [Docker daemon CDI configuration](https://docs.docker.com/reference/cli/dockerd/#configure-cdi-devices)
 - [Chromium hardware GPU in headless mode](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/gpu/using-gpu-hardware-in-headless-chrome.md)
 - [Chrome's documented Vulkan headless options](https://developer.chrome.com/blog/supercharge-web-ai-testing)
+
+## Selected-laptop activation and continuity
+
+Source tests, built tooling and metadata checks do not enable a laptop. First
+qualify the exact image and current pinned CDI edits with a separately admitted
+throwaway worker using the same UID/GID/rootless profile and no business accounts.
+In particular, driver-library dependencies, CDI hooks under the read-only root
+and private Nix store, device identities, and the real browser sandbox remain
+native gates. Do not add privileged mode, broad devices, writable host Nix or
+`--no-sandbox` to make a probe pass. Rendering/compute needs its own bounded
+acceptance; an existing RAM ceiling does not limit GPU memory.
+
+Before changing a working employee laptop, coordinate a pause/checkpoint window.
+Retain its previous image/configuration and preserve the same employee home/Nix
+roots, session/account/conversation binding and owner ON/OFF/vacation intent.
+Update the inactive broker package/configuration without waking employees; capture
+and recheck all unrelated laptop/provider identities and office-phone continuity.
+Then recreate only the selected laptop through its supported owner-authorized
+lifecycle. Existing peer policies and caps must stay exact. A GPU grant uses that
+laptop's existing allocation; it does not consume the separate fixed host-browser
+job reservation or authorize that job. No scientific input, threshold, account or
+permission changes follow from these installation steps.
+
+A device grant is authority in the canonical admission domain. Neither GPU map
+is excluded from that domain digest. If the admission root is already
+provisioned, changing a GPU map requires a supported owner-controlled policy
+reconciliation after all claims, host jobs and uncertain/install fences are
+settled, retaining the existing operation journal and profile lineage. The
+resource-only reload cannot perform that transition. Do not delete/recreate a
+marker or journal, ignore the authority field, or create a second ledger to make
+it fit. Without that supported transition, enablement remains unavailable.
+An installed protected terminal generation also pins the configuration's raw
+bytes/inode: settle and rebind it around a legitimate configuration CAS. The
+metadata report exposes different current/proposed domain digests, not a permit.
+
+## Explicit broker generation upgrade
+
+The packaged `worker-service` launcher provides `prepare-gpu-upgrade` and
+`apply-gpu-upgrade` for the first employee GPU/capacity installation. This is a
+host-owner CLI operation, not an Office API or a resource actor entitlement. It
+uses the launcher's fixed immutable broker unit and preserves the selected
+configuration filename, image, all resource limits and unrelated laptop policies.
+It does not stop laptops, change employee intent, issue a wake or run a workload.
+
+Coordinate a provider checkpoint and normal exit for the selected employee first;
+preparation requires its existing laptop already stopped. A normal provider exit
+may set desired-running OFF: configuration maintenance preserves that exact OFF
+state and does not require turning it ON. Vacation mode still refuses. Keep its current SID,
+generation, account, conversation, home and private Nix data. Broker maintenance
+briefly disconnects phone/terminal transports even while peer containers and
+provider processes remain running. Arrange that window before applying.
+
+Choose fresh private, canonical operation and reservation directories outside all
+configured or actual container mounts. The reservation directory must be empty;
+existing, removed-option or uncertain canonical reservation state refuses. Select
+an owner-private mode-0600 JSON file with exactly these keys:
+
+```json
+{
+  "employeeId": "11111111-1111-4111-8111-111111111111",
+  "device": "nvidia.com/gpu=GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "cdiSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resourceReservations": {
+    "directory": "/absolute/owner-selected/private/control",
+    "companyId": "22222222-2222-4222-8222-222222222222",
+    "poolId": "33333333-3333-4333-8333-333333333333",
+    "ownerScopeDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "hostReserveMiB": 4096
+  },
+  "providerPIDs": [12345]
+}
+```
+
+All identifiers/digests/PIDs above are synthetic. Bind the actual company, pool,
+owner scope, reviewed CDI specification and complete known provider continuity
+set from fresh private metadata. PID inputs are invariants, never authority: the
+helper records their real process births, namespaces, roots and executable inode,
+and requires membership in observed running containers. This selected set is not
+a claim to discover every possible provider process. Native host/kernel/ancestor,
+actual website cap and existing worker commitments determine capacity; the full
+selected laptop memory is additionally reserved in the prospective check. No
+value in this file raises the existing pool or selected laptop limits.
+
+From the reviewed source/package, with paths selected outside the repository:
+
+```sh
+nix run .#worker-service -- --config "$broker_config" prepare-gpu-upgrade \
+  --operation "$private_operation" --selection "$private_selection"
+nix run .#worker-service -- --config "$broker_config" apply-gpu-upgrade \
+  --operation "$private_operation" --plan-sha256 "$exact_prepared_plan_sha256"
+```
+
+Review the finite ten-minute plan and raw backups before apply. Apply reobserves
+current metadata and writes a consumed attempt before any generation pin or
+service effect. It preserves both immutable generations as GC roots, stops only
+the recognized broker service, confirms inactive state and peer/provider
+continuity, then atomically replaces the exact old configuration and unit/root
+links. It explicitly provisions the initial canonical reservation domain with the
+intended GPU grant already included, reloads the user manager and starts the new
+broker. It never resets a journal or installs the optional H/RAM actor.
+
+The helper verifies actual new broker/phone listeners with `SO_PEERCRED`, current
+capacity and unchanged peers. When current owner intent is ON, normal website reconnection may start the same
+owner-requested selected session. An OFF employee remains unavailable through
+the existing broker/storage start guards; GPU configuration is no start grant.
+A subsequent normal owner GUI start is separate from this maintenance operation.
+Observed activation is accepted only for an unchanged valid ON binding and when its new
+full CID, unchanged image/resources/security, selected CDI device, actual
+character-device identities and canonical home/Nix/scratch bindings match. A
+normal runtime-thread update is allowed; identity, account/recipe or owner-intent
+drift refuses. This is metadata qualification, not rendering, CUDA, scientific
+correctness, exclusive GPU use or a VRAM quota. Follow it with a separately
+reviewed bounded harmless device canary before the employee's scientific job.
+
+Any failure after `ATTEMPT.json` leaves that attempt, backups and whatever durable
+canonical initialization fence exists. A timeout or missing response is unknown,
+not permission to rerun, clear markers or restore old files over a newer broker.
+There is no automatic rollback. Reconcile exact native/configuration state and
+preserve evidence before authorizing a separate recovery. Success is the CLI's
+successful terminal result and durable `DONE.json`, not mere file existence.
+
+For the **first** owner-local service/upgrade call, add `--diagnostic` to request
+a bounded JSON failure category and vetted static guard reason on stderr. Unknown
+messages, private paths, command arguments, captured subprocess bodies and
+credentials are withheld. Diagnostics keep the original nonzero exit and do not
+change an attempt, roll back configuration, publish `DONE.json` or authorize a
+retry. A past generic refusal's exact cause remains unknown; do not repeat a
+consumed operation to obtain diagnostics. `worker-service --help` describes the
+flag; retain its stderr with the private operation evidence.

@@ -24,9 +24,17 @@ The fair per-task queue prioritizes never-asked/oldest tasks, permits one un-esc
 
 The check-in asks the current assignee to reply directly to that message with exactly:
 
-- `On track`
+- `On track` or `On track: concrete scope/reason`
 - `New ETA: 2026-12-01T16:00:00Z | concrete reason`
 - `Blocked: concrete reason`
+
+Direct replies beginning `On track for ...` also retain that progress qualifier.
+The qualifier remains in the correlated reply/ledger; it does not qualify runtime
+acceptance or mark the work complete. A qualified report preserves the task's
+status, blocker reason, dates and update timestamp; its acknowledgement says so.
+The existing bare `On track` behavior is unchanged. Empty `On track:`/`On track for` fragments,
+quoted status text and replies to a different prompt do not count as a report. A late reply keeps its
+original deadline; accepting it does not backdate the response.
 
 Only an unedited message stamped by the existing chat service with the current exact employee/session/generation binding and matching reply identity counts. A title, quoted text, manager reply, owner message or another session cannot answer for the assignee. Replies after the deadline still count. Later replies can unblock the same check-in; prior responses and reasons remain in history. The current canonical reply and room/bot policy are rechecked after an awaited audit and immediately before acknowledgement. An edited, deleted, rebound or revoked-source reply stays pending for reconciliation; it cannot change a plan or receive a false success acknowledgement.
 

@@ -4325,17 +4325,99 @@ Object.assign(ReverieApp.prototype, {
     location.setAttribute('aria-label', 'File location');
     extra.append(back, location);
     title.closest('.file-preview-header')?.after(extra);
-    for (const element of document.body.children) {
-      if (element === overlay || element.contains(overlay) || element.tagName === 'SCRIPT') continue;
-      state.inert.push([element, element.inert]);
-      element.inert = true;
+    const split = node('button', 'Split with chat', 'file-preview-source-split');
+    split.type = 'button';
+    split.setAttribute('aria-pressed', 'false');
+    extra.append(split);
+    const divider = node('div', undefined, 'file-preview-split-divider');
+    divider.tabIndex = 0;
+    divider.setAttribute('role', 'separator');
+    divider.setAttribute('aria-label', 'Resize document pane');
+    divider.setAttribute('aria-orientation', 'vertical');
+    overlay.append(divider);
+    state.divider = divider;
+    const wide = window.matchMedia?.('(min-width: 1100px)');
+    const canSplit = () => !!wide?.matches && document.documentElement.dataset.reverieView === 'chat'
+      && !!document.querySelector('.ca-root');
+    const layout = () => {
+      if (this._readOnlyFilePreview !== state) return;
+      for (const [element, inert] of state.inert) element.inert = inert;
+      state.inert = [];
+      state.split = !!this._filePreviewSplitPreferred && canSplit();
+      split.hidden = !canSplit();
+      split.textContent = state.split ? 'Expand document' : 'Split with chat';
+      split.setAttribute('aria-pressed', String(state.split));
+      divider.hidden = !state.split;
+      overlay.classList.toggle('file-preview-split', state.split);
+      document.documentElement.classList.toggle('file-preview-chat-split', state.split);
+      overlay.setAttribute('role', state.split ? 'complementary' : 'dialog');
+      if (state.split) {
+        overlay.removeAttribute('aria-modal');
+        const shell = this._chatApp || window.reverieChat;
+        if (shell?.embed) shell.closePage();
+        width(this._filePreviewSplitWidth || window.innerWidth / 2, false);
+      }
+      else {
+        overlay.setAttribute('aria-modal', 'true');
+        for (const element of document.body.children) {
+          if (element === overlay || element.contains(overlay) || element.tagName === 'SCRIPT') continue;
+          state.inert.push([element, element.inert]);
+          element.inert = true;
+        }
+        if (!overlay.contains(document.activeElement)) back.focus({ preventScroll: true });
+      }
+    };
+    split.onclick = () => {
+      this._filePreviewSplitPreferred = !state.split;
+      layout();
+    };
+    state.layoutMedia = wide;
+    state.layout = layout;
+    wide?.addEventListener?.('change', layout);
+    if (window.MutationObserver) {
+      state.layoutObserver = new window.MutationObserver(layout);
+      state.layoutObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-reverie-view'] });
     }
+    const width = (value, remember = true) => {
+      if (!state.split) return;
+      const pixels = Math.round(Math.min(Math.max(360, value), window.innerWidth - 640));
+      if (remember) this._filePreviewSplitWidth = pixels;
+      document.documentElement.style.setProperty('--file-preview-split-width', pixels + 'px');
+      divider.setAttribute('aria-valuemin', '360');
+      divider.setAttribute('aria-valuemax', String(window.innerWidth - 640));
+      divider.setAttribute('aria-valuenow', String(pixels));
+    };
+    state.viewportResize = () => {
+      if (this._readOnlyFilePreview === state && state.split)
+        width(this._filePreviewSplitWidth || window.innerWidth / 2, false);
+    };
+    window.addEventListener('resize', state.viewportResize);
+    divider.addEventListener('pointerdown', event => {
+      if (!state.split || event.button !== 0) return;
+      event.preventDefault();
+      divider.setPointerCapture(event.pointerId);
+      state.resizing = true;
+      divider.focus();
+    });
+    divider.addEventListener('pointermove', event => { if (state.resizing) width(window.innerWidth - event.clientX); });
+    divider.addEventListener('pointerup', () => { state.resizing = false; });
+    divider.addEventListener('pointercancel', () => { state.resizing = false; });
+    divider.onkeydown = event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const currentWidth = overlay.getBoundingClientRect().width;
+      width(event.key === 'Home' ? 360 : event.key === 'End' ? window.innerWidth - 640
+        : currentWidth + (event.key === 'ArrowLeft' ? 32 : -32));
+    };
+    layout();
     state.keydown = (event) => {
+      // A docked document is modeless: chat keeps its own Escape and Tab behavior.
+      if (state.split && !overlay.contains(event.target)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
         this.closeFilePreview();
-      } else if (event.key === 'Tab') {
+      } else if (event.key === 'Tab' && !state.split) {
         const focusable = [...overlay.querySelectorAll('button,a[href],[tabindex="0"]')].filter(
           (el) => !el.disabled && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none'
         );
@@ -4348,7 +4430,7 @@ Object.assign(ReverieApp.prototype, {
     };
     document.addEventListener('keydown', state.keydown, true);
     state.backdrop = event => {
-      if (event.target === overlay && this._readOnlyFilePreview === state) this.closeFilePreview();
+      if (!state.split && event.target === overlay && this._readOnlyFilePreview === state) this.closeFilePreview();
     };
     overlay.addEventListener('click', state.backdrop);
     back.focus({ preventScroll: true });
@@ -4551,6 +4633,13 @@ Object.assign(ReverieApp.prototype, {
     this._filePreviewLoad = (this._filePreviewLoad || 0) + 1;
     for (const url of state.urls) URL.revokeObjectURL(url);
     for (const [element, inert] of state.inert) element.inert = inert;
+    state.layoutMedia?.removeEventListener?.('change', state.layout);
+    window.removeEventListener('resize', state.viewportResize);
+    state.layoutObserver?.disconnect();
+    state.divider?.remove();
+    document.documentElement.classList.remove('file-preview-chat-split');
+    document.documentElement.style.removeProperty('--file-preview-split-width');
+    state.overlay.classList.remove('file-preview-split');
     document.removeEventListener('keydown', state.keydown, true);
     state.overlay.removeEventListener('click', state.backdrop);
     state.extra?.remove();
@@ -5103,6 +5192,8 @@ Object.assign(ReverieApp.prototype, {
     const detachBtn = this.$('filePreviewDetachBtn');
     if (detachBtn) detachBtn.hidden = true;
     if (sourceState?.trigger?.isConnected) sourceState.trigger.focus({ preventScroll: true });
+    else if (sourceState && this._filePreviewSplitPreferred)
+      document.querySelector('.ca-root .chatroom-input')?.focus({ preventScroll: true });
   },
 
   /**

@@ -32,11 +32,9 @@ export async function githubCredentialReferences(home = process.env.REVERIE_AGEN
 export async function agentCapabilities(deps: AgentDeps, references = githubCredentialReferences): Promise<number> {
   const response = await deps.request(deps.ctx, { method: 'GET', path: '/api/board', timeoutMs: 10000 });
   if (!response.json?.success) {
-    const reason =
-      typeof response.json?.error === 'string'
-        ? response.json.error.slice(0, 300).replace(/[\r\n\t]/g, ' ')
-        : `HTTP ${response.status}`;
-    const error = `Capabilities could not be verified: ${reason}. Do not guess grants from a title or old chat.`;
+    // Error bodies can contain secret-adjacent paths; report only the transport status.
+    const status = Number.isInteger(response.status) ? response.status : 'unknown';
+    const error = `Capabilities could not be verified: HTTP ${status}. Do not guess grants from a title or old chat.`;
     if (deps.json) deps.io.out(JSON.stringify({ success: false, error }));
     else deps.io.err(error);
     return response.status === 401 || response.status === 403 ? EXIT.refused : EXIT.error;
@@ -61,11 +59,17 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     );
     return EXIT.refused;
   }
-  const github = await references();
+  const local = await references();
+  // Preserve the internal locator API for installation, but summary/capability output carries names only.
+  const github = {
+    bindings: local.bindings.filter(binding => /^[a-z][a-z0-9-]{0,47}$/.test(binding.name))
+      .map(binding => ({ name: binding.name })),
+    note: 'Local reference names only; paths are omitted. Other locations are not searched. Presence does not prove a current grant or repository access.',
+  };
   let publication: { status: 'verified' | 'unavailable'; credentials: GrantedCredentialMetadata[]; note: string };
   try {
     const granted = await fetchGrantedCredentials(deps, capabilities.identity);
-    publication = { status: 'verified', credentials: granted.credentials,
+    publication = { status: 'verified', credentials: granted.credentials.map(({ id, name, repositories, createdAt, updatedAt }) => ({ id, name, repositories, createdAt, updatedAt })),
       note: 'These named PAT grants permit retrieval only. Repository descriptions are owner-declared; GitHub enforces the actual token permissions. Revoking a grant prevents new retrieval, not use of a previously copied token.' };
   } catch {
     publication = { status: 'unavailable', credentials: [],
@@ -97,6 +101,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
       publicationCredentials: 'reverie agent credentials list --json',
+      publicationCredentialStatus: 'reverie agent credentials status --json',
       installPublicationCredential: 'reverie agent credentials install "<name>" --json',
     },
     context:
@@ -123,10 +128,10 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       `Website restart: host grant must be checked. Redeploy: host operator required; restart does not install new code.`
     );
     deps.io.out(
-      `GitHub credential references: ${github.bindings.length ? github.bindings.map((b) => `${b.name}: ${b.path}${b.declaredRepositories?.length ? ' (owner-declared: ' + b.declaredRepositories.join(', ') + ')' : ''}`).join(', ') : 'none installed'} (${github.directory})`
+      `GitHub credential reference names: ${github.bindings.length ? github.bindings.map(b => b.name).join(', ') : 'none in the supported location'}. ${github.note}`
     );
     deps.io.out(`Named PAT grants: ${publication.status === 'verified' ? publication.credentials.map(item => item.name).join(', ') || 'none' : 'unavailable'}. ${publication.note}`);
-    deps.io.out(`PATs: ${report.commands.publicationCredentials}; install privately: ${report.commands.installPublicationCredential}`);
+    deps.io.out(`PATs: ${report.commands.publicationCredentials}; availability: ${report.commands.publicationCredentialStatus}; install privately: ${report.commands.installPublicationCredential}`);
     deps.io.out(`Decision command: ${report.commands.fileDecision}`);
     deps.io.out(
       `Channels: ${report.commands.channels}; read: ${report.commands.readChannel}. Memory: ${report.memoryGuide}`

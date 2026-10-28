@@ -56,6 +56,17 @@ class EmployeeResourceTests(unittest.TestCase):
         self.assertTrue(storage_start_allowed(staged,storage_paths(staged,NEW)))
         self.assertEqual(validate_config(staged),staged)
 
+    def test_approved_new_sid_inherits_employee_memory_and_global_pool(self):
+        config=self.projected();config.update(poolMemoryMiB=51200,poolTasksMax=4096,
+                                              resourceReservations={'configured':True})
+        self.employee['sessionId']=NEW;self.company()
+        policy=effective_config(config,NEW)
+        self.assertEqual((policy['memoryMiB'],policy['poolMemoryMiB'],policy['poolTasksMax']),
+                         (8192,51200,4096))
+        config['sessionResources']={NEW:dict(self.resources,memoryMiB=2048)}
+        self.assertEqual(effective_config(config,NEW)['memoryMiB'],2048)
+        self.assertEqual(effective_config(config,NEW)['poolMemoryMiB'],51200)
+
     def test_precedence_and_unrelated_effective_digest_compatibility(self):
         base=policy_digest(self.config,OTHER)
         config=self.projected()

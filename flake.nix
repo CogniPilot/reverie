@@ -106,6 +106,9 @@
             worker = true;
           };
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
+          workerGpuSupport = import ./nix/worker-gpu-support.nix { inherit pkgs; src = source; };
+          workerGpuToolkit = pkgs.nvidia-container-toolkit;
+          browserJobRuntime = import ./nix/browser-job-runtime.nix { inherit pkgs; src = source; };
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
@@ -185,7 +188,7 @@
           '';
           workerServiceSetup = pkgs.writeShellApplication {
             name = "reverie-worker-service";
-            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.systemd pkgs.nix ];
+            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client pkgs.systemd pkgs.nix ];
             text = ''
               export PYTHONPATH=${source}/python
               export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
@@ -225,19 +228,21 @@
         observationsPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
       };
       packages = forAllSystems packagesFor;
-      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
+      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false }:
         let pkgs = pkgsFor system; packages = packagesFor system;
-        in import ./nix/image.nix {
+        in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs; src = source;
           inherit (packages) reverie console memory runtime;
           worker = true;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
+          browserRuntime = if browser then packages.browserRuntime else null;
         };
       apps = forAllSystems (system: {
         prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
+        worker-gpu = { type = "app"; program = "${self.packages.${system}.workerGpuSupport}/bin/reverie-worker-gpu"; meta.description = "Read-only selected employee GPU/CDI/image preflight; no setup or laptop effects"; };
         ops-service = { type = "app"; program = "${self.packages.${system}.opsCore}/bin/reverie-ops-service"; meta.description = "Install/control the private authenticated OPS executor; no grants or automatic effects"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
@@ -247,6 +252,7 @@
         kokoro = { type = "app"; program = "${self.packages.${system}.kokoro}/bin/reverie-kokoro"; meta.description = "Local Kokoro speech service with persistent models"; };
         local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
         isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
+        collect = { type = "app"; program = "${self.packages.${system}.cleanupObservations}/bin/reverie-observations"; meta.description = "Explicit opt-in user resource observations; no cleanup authority"; };
         preview-proxy = { type = "app"; program = "${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy"; meta.description = "Serve isolated HTTPS previews of opted-in laptop ports"; };
         worker-nix-migrate = { type = "app"; program = "${self.packages.${system}.workerNixMigrate}/bin/reverie-nix-store-migrate"; meta.description = "Inventory and explicitly migrate one stopped laptop Nix store"; };
         employee-laptop-migrate = { type = "app"; program = "${self.packages.${system}.employeeLaptopMigrate}/bin/reverie-employee-laptop-migrate"; meta.description = "Publish stopped paired home and Nix data by permanent employee identity"; };

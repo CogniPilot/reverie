@@ -81,7 +81,7 @@ function fixture(
     context
   );
   const app: any = Object.create((context as any).App.prototype);
-  app.$ = (id: string) => document.getElementById(id);
+  app._elemCache = {};
   app.sessions = new Map();
   app.activeSessionId = 'SHOULD-NEVER-BE-USED';
   app._copyText = vi.fn(async () => true);
@@ -94,6 +94,189 @@ function fixture(
   return { dom, document, app, calls, urls, revoked, trigger, context };
 }
 const source = (name = 'notes.md') => ({ kind: 'room-attachment', roomId: 'room-a', attachmentId: 'file-a', name });
+
+function splitFixture() {
+  const f = fixture();
+  f.document.documentElement.dataset.reverieView = 'chat';
+  const chat = f.document.createElement('div');
+  chat.className = 'ca-root';
+  chat.innerHTML = '<textarea class="chatroom-input"></textarea><button>Send</button>';
+  f.document.body.prepend(chat);
+  const listeners = new Set<() => void>();
+  const media = { matches: true, addEventListener: (_type: string, fn: () => void) => listeners.add(fn),
+    removeEventListener: (_type: string, fn: () => void) => listeners.delete(fn) };
+  f.context.window.matchMedia = vi.fn(() => media);
+  f.context.window.innerWidth = 1280;
+  const viewportListeners = new Set<() => void>();
+  f.context.window.addEventListener = vi.fn((kind: string, fn: () => void) => {
+    if (kind === 'resize') viewportListeners.add(fn);
+  });
+  f.context.window.removeEventListener = vi.fn((kind: string, fn: () => void) => {
+    if (kind === 'resize') viewportListeners.delete(fn);
+  });
+  return { ...f, chat, media, listeners, viewportListeners, changeWidth(width: number) {
+    f.context.window.innerWidth = width;
+    media.matches = width >= 1100;
+    for (const fn of listeners) fn();
+  } };
+}
+
+it('DS-1: refreshes effective separator range within a breakpoint and removes resize listeners', async () => {
+  const f = splitFixture();
+  await f.app.openReadOnlyFilePreview(source());
+  const body = f.document.getElementById('filePreviewBody')!;
+  f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!.click();
+  let divider = f.document.querySelector<HTMLElement>('.file-preview-split-divider')!;
+  divider.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  expect(divider.getAttribute('aria-valuenow')).toBe('640');
+  const resize = (width: number) => {
+    f.context.window.innerWidth = width;
+    // No matchMedia change: both widths remain in the desktop range.
+    for (const fn of f.viewportListeners) fn();
+  };
+  expect(f.viewportListeners.size).toBe(1);
+  resize(1150);
+  expect(divider.getAttribute('aria-valuemax')).toBe('510');
+  expect(divider.getAttribute('aria-valuenow')).toBe('510');
+  expect(f.document.documentElement.style.getPropertyValue('--file-preview-split-width')).toBe('510px');
+  expect(f.app._filePreviewSplitPreferred).toBe(true);
+  expect(f.app._filePreviewSplitWidth).toBe(640);
+  expect(f.document.getElementById('filePreviewBody')).toBe(body);
+  expect(f.calls).toHaveLength(1);
+  resize(1280);
+  expect(divider.getAttribute('aria-valuenow')).toBe('640');
+  const oldCallback = [...f.viewportListeners][0];
+  await f.app.openReadOnlyFilePreview(source('second.md'));
+  expect(f.viewportListeners.size).toBe(1);
+  expect(f.viewportListeners.has(oldCallback)).toBe(false);
+  divider = f.document.querySelector<HTMLElement>('.file-preview-split-divider')!;
+  expect(divider.getAttribute('aria-valuemax')).toBe('640');
+  f.app.closeFilePreview();
+  expect(f.viewportListeners.size).toBe(0);
+  resize(1150); oldCallback();
+  expect(f.document.documentElement.style.getPropertyValue('--file-preview-split-width')).toBe('');
+});
+
+it('splits the existing document beside live chat without re-fetching or trapping chat keys', async () => {
+  const f = splitFixture();
+  await f.app.openReadOnlyFilePreview(source(), f.trigger);
+  const body = f.document.getElementById('filePreviewBody')!;
+  const overlay = f.document.getElementById('filePreviewOverlay')!;
+  const button = f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!;
+  expect(button.hidden).toBe(false);
+  expect(f.chat.inert).toBe(true);
+  button.click();
+  expect(button.textContent).toBe('Expand document');
+  expect(f.chat.inert).not.toBe(true);
+  expect(overlay.getAttribute('role')).toBe('complementary');
+  expect(overlay.hasAttribute('aria-modal')).toBe(false);
+  expect(f.document.documentElement.classList.contains('file-preview-chat-split')).toBe(true);
+  const input = f.chat.querySelector<HTMLTextAreaElement>('textarea')!;
+  input.focus(); input.value = 'Discuss the open document';
+  const send = vi.fn(); f.chat.querySelector('button')!.onclick = send;
+  f.chat.querySelector<HTMLButtonElement>('button')!.click();
+  expect(send).toHaveBeenCalledOnce();
+  for (const key of ['Escape', 'Tab']) {
+    const event = new f.dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+  expect(overlay.classList.contains('visible')).toBe(true);
+  expect(body.textContent).toContain('Heading');
+  expect(f.calls).toHaveLength(1);
+  button.click();
+  expect(button.textContent).toBe('Split with chat');
+  expect(f.chat.inert).toBe(true);
+  expect(overlay.getAttribute('aria-modal')).toBe('true');
+  expect(f.document.getElementById('filePreviewBody')).toBe(body);
+  expect(f.calls).toHaveLength(1);
+});
+
+it('resizes the split document by keyboard and pointer within readable chat/document bounds', async () => {
+  const f = splitFixture();
+  await f.app.openReadOnlyFilePreview(source());
+  f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!.click();
+  const divider = f.document.querySelector<HTMLElement>('.file-preview-split-divider')!;
+  const overlay = f.document.getElementById('filePreviewOverlay')!;
+  overlay.getBoundingClientRect = () => ({ width: 500 } as DOMRect);
+  const key = (key: string) => divider.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key, bubbles: true }));
+  key('ArrowLeft'); expect(divider.getAttribute('aria-valuenow')).toBe('532');
+  key('ArrowRight'); expect(divider.getAttribute('aria-valuenow')).toBe('468');
+  key('Home'); expect(divider.getAttribute('aria-valuenow')).toBe('360');
+  key('End'); expect(divider.getAttribute('aria-valuenow')).toBe('640');
+  divider.setPointerCapture = vi.fn();
+  divider.dispatchEvent(new f.dom.window.MouseEvent('pointerdown', { button: 0, bubbles: true }));
+  divider.dispatchEvent(new f.dom.window.MouseEvent('pointermove', { clientX: 800, bubbles: true }));
+  expect(divider.getAttribute('aria-valuenow')).toBe('480');
+  divider.dispatchEvent(new f.dom.window.MouseEvent('pointercancel', { bubbles: true }));
+  divider.dispatchEvent(new f.dom.window.MouseEvent('pointermove', { clientX: 100, bubbles: true }));
+  expect(divider.getAttribute('aria-valuenow')).toBe('480');
+  expect(f.document.documentElement.style.getPropertyValue('--file-preview-split-width')).toBe('480px');
+});
+
+it('returns to a modal on narrow screens and restores split mode without losing the document', async () => {
+  const f = splitFixture();
+  await f.app.openReadOnlyFilePreview(source());
+  const body = f.document.getElementById('filePreviewBody')!;
+  const button = f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!;
+  button.click();
+  f.chat.querySelector<HTMLTextAreaElement>('textarea')!.focus();
+  f.changeWidth(393);
+  expect(button.hidden).toBe(true);
+  expect(f.chat.inert).toBe(true);
+  expect(f.document.getElementById('filePreviewOverlay')!.contains(f.document.activeElement)).toBe(true);
+  expect(f.document.documentElement.classList.contains('file-preview-chat-split')).toBe(false);
+  f.changeWidth(1440);
+  expect(button.hidden).toBe(false);
+  expect(f.chat.inert).not.toBe(true);
+  expect(f.document.documentElement.classList.contains('file-preview-chat-split')).toBe(true);
+  expect(f.document.getElementById('filePreviewBody')).toBe(body);
+  expect(f.calls).toHaveLength(1);
+});
+
+it('closes the workspace page when explicitly splitting so the conversation is reachable', async () => {
+  const f = splitFixture();
+  const closePage = vi.fn(() => f.trigger.remove());
+  f.context.window.reverieChat = { embed: 'workspace', closePage };
+  await f.app.openReadOnlyFilePreview(source());
+  expect(closePage).not.toHaveBeenCalled();
+  f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!.click();
+  expect(closePage).toHaveBeenCalledOnce();
+  expect(f.document.getElementById('filePreviewBody')!.textContent).toContain('Heading');
+  f.app.closeFilePreview();
+  expect(f.document.activeElement).toBe(f.chat.querySelector('textarea'));
+});
+
+it('cleans up split state, media listeners and divider when closing or replacing a document', async () => {
+  const f = splitFixture();
+  await f.app.openReadOnlyFilePreview(source('first.md'));
+  f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!.click();
+  const old = f.document.querySelector('.file-preview-split-divider')!;
+  await f.app.openReadOnlyFilePreview(source('second.md'));
+  expect(old.isConnected).toBe(false);
+  expect(f.listeners.size).toBe(1);
+  expect(f.document.querySelectorAll('.file-preview-split-divider')).toHaveLength(1);
+  expect(f.document.documentElement.classList.contains('file-preview-chat-split')).toBe(true);
+  const overlay = f.document.getElementById('filePreviewOverlay')!;
+  overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(overlay.classList.contains('visible')).toBe(true);
+  f.app.closeFilePreview();
+  expect(f.listeners.size).toBe(0);
+  expect(f.document.querySelector('.file-preview-split-divider')).toBeNull();
+  expect(f.document.documentElement.classList.contains('file-preview-chat-split')).toBe(false);
+  expect(f.document.documentElement.style.getPropertyValue('--file-preview-split-width')).toBe('');
+  expect(f.chat.inert).not.toBe(true);
+});
+
+it('keeps the existing modal in debug mode even on a wide screen', async () => {
+  const f = splitFixture();
+  f.document.documentElement.dataset.reverieView = 'debug';
+  f.app._filePreviewSplitPreferred = true;
+  await f.app.openReadOnlyFilePreview(source());
+  expect(f.document.querySelector<HTMLButtonElement>('.file-preview-source-split')!.hidden).toBe(true);
+  expect(f.document.getElementById('filePreviewOverlay')!.getAttribute('aria-modal')).toBe('true');
+  expect(f.document.documentElement.classList.contains('file-preview-chat-split')).toBe(false);
+});
 const binding = 'a'.repeat(64);
 const metadata = {
   kind: 'workspace',

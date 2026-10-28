@@ -138,11 +138,11 @@ Object.assign(ReverieApp.prototype, {
     const label = labels[mode];
     let title = label;
     if (live) {
-      const et = (opts) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...opts });
+      const et = (opts) => new Intl.DateTimeFormat('en-US', { timeZone: globalThis.ReverieTime?.timeZone || 'UTC', ...opts });
       const day = (t) => et({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
-      const time = et({ hour: 'numeric', minute: '2-digit' }).format(until);
+      const time = et({ hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(until);
       const when = day(until) === day(Date.now()) ? time : `${et({ weekday: 'short' }).format(until)} ${time}`;
-      title = `${label} until ${when} ET${a.mode === 'vibrate' ? ' (wakes on a direct @mention or the owner)' : ' (only an owner @mention or @everyone wakes it)'}`;
+      title = `${label} until ${when}${a.mode === 'vibrate' ? ' (wakes on a direct @mention or the owner)' : ' (only an owner @mention or @everyone wakes it)'}`;
     }
     const badge = this._chatEl('span', className);
     badge.style.cssText = 'display:inline-flex;vertical-align:middle;margin-left:4px;color:var(--text-muted,#919aa6);width:16px;height:16px;flex-shrink:0';
@@ -1432,7 +1432,7 @@ Object.assign(ReverieApp.prototype, {
         m.from.sessionId || this._chatRoom?.members.find((x) => m.text.startsWith(`${x.name} joined`))?.sessionId;
       if (subject) el.append(this._chatAvatar(subject, this._chatNameOf(subject), { size: 'xs' }));
       el.append(this._chatEl('span', '', m.text));
-      el.title = new Date(m.at).toLocaleString();
+      el.title = (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
       return el;
     }
     const mine = m.from.kind === 'user';
@@ -1460,7 +1460,7 @@ Object.assign(ReverieApp.prototype, {
     const time = this._chatEl(
       'time',
       'chatroom-msg-time',
-      new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))
     );
     time.dateTime = new Date(m.at).toISOString();
     meta.append(from, to, time);

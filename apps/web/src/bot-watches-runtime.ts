@@ -18,6 +18,7 @@ export interface BotWatchesRuntimeDeps {
   chat: ChatroomService;
   board: BoardStore;
   employees(): CompanyEmployee[];
+  timeZone?(owner: string | undefined): string | undefined;
   coordinatorId?(owner: string | undefined): string | undefined;
   running(sessionId: string): boolean;
   verifiedOwner: OwnerVerifier;
@@ -51,6 +52,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
   const assignments = new AssignmentStatusWatch(d.dataPath('assignment-status-watch.json'), {
     board: d.board,
     employees: d.employees,
+    timeZone: d.timeZone,
     running: d.running,
     bot: (id) => d.bots.get(id),
     room: (id) => d.chat.room(id),

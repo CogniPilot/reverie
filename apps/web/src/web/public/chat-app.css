@@ -1620,3 +1620,22 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 @keyframes ca-office-slide-up { from { opacity: 0; transform: translateY(100%); clip-path: inset(0 0 100% 0); } to { opacity: 1; transform: translateY(0); clip-path: inset(0); } }
 @media (max-width: 767px) { .ca-root .ca-rail { bottom: 56px; } .ca-root:not([data-drawer='channels']) > .ca-office-pane { display: none; } }
 @media (prefers-reduced-motion: reduce) { .ca-root > .ca-office-pane, .ca-root > .ca-office-pane.ca-office-pane-opening { animation: none; } }
+
+/* Search is a separate read-only rail: conversation/composer retain their own scroll and draft. */
+.ca-message-search { flex: 0 0 clamp(300px, 30vw, 420px); min-width: 0; overflow: auto; border-left: 1px solid var(--ca-line); padding: 12px; background: var(--ca-side-bg); }
+.ca-search-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ca-search-head h2 { font-size: 16px; margin: 4px 0 12px; }
+.ca-search-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.ca-search-form input { grid-column: 1 / -1; }
+.ca-search-form select { min-width: 0; }
+.ca-search-hit { margin: 10px 0; padding: 10px; border: 1px solid var(--ca-line); border-radius: 6px; overflow-wrap: anywhere; }
+.ca-search-excerpt { white-space: pre-wrap; margin: 8px 0; font-size: 13px; }
+.ca-search-hit.is-selected { border-color: var(--accent, #5b8def); outline: 1px solid var(--accent, #5b8def); }
+.ca-search-nav { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .ca-message-search { position: absolute; right: 0; top: 0; bottom: 0; width: min(420px, 100%); box-sizing: border-box; z-index: 20; box-shadow: -4px 0 20px #0005; }
+}
+
+.ca-head .ca-head-search { width: auto; padding: 0 10px; gap: 8px; border: 1px solid var(--ca-line); border-radius: 5px; font-size: 12px; }
+.ca-search-excerpt mark { background: color-mix(in srgb, var(--accent, #5b8def) 30%, transparent); color: inherit; }
+@media (max-width: 1000px) { .ca-head-search .ca-search-label { display: none; } .ca-head .ca-head-search { width: 36px; padding: 0; } }

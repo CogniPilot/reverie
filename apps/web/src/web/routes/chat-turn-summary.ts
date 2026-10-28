@@ -3,6 +3,23 @@ import type { FastifyInstance } from 'fastify';
 import type { ChatroomService } from '../../chatroom-service.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../route-helpers.js';
+import { ChatroomError } from '../../chatroom-store.js';
+import { z } from 'zod';
+
+const ref = z
+  .object({ roomId: z.string().min(1).max(200), messageId: z.string().min(1).max(200), readToken: z.string().uuid() })
+  .strict();
+const resolution = ref.extend({ disposition: z.enum(['handled', 'superseded']), replacement: ref.optional() }).strict();
+const historyQuery = z
+  .object({
+    roomId: z.string().min(1).max(200),
+    beforeAt: z
+      .string()
+      .regex(/^\d{1,16}$/)
+      .optional(),
+    beforeId: z.string().min(1).max(200).optional(),
+  })
+  .strict();
 
 export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, service: ChatroomService): void {
   app.get('/api/chatrooms/turn-summary', async (req, reply) => {
@@ -17,5 +34,76 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
       return reply.code(400).send({ success: false, error: 'Summary takes no target or query parameters' });
     reply.header('Cache-Control', 'no-store');
     return { success: true, data: service.turnSummary(self) };
+  });
+
+  app.get('/api/chatrooms/digest', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (!self || req.headers['x-reverie-parent-session'] !== self ||
+        req.headers['x-reverie-service-token'] !== undefined)
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    if (Object.keys(req.query as object).length)
+      return reply.code(400).send({ success: false, error: 'Digest takes no target or query parameters' });
+    reply.header('Cache-Control', 'no-store');
+    return { success: true, data: service.actionableDigest(self) };
+  });
+
+  app.post('/api/chatrooms/notices/resolve', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (
+      !self ||
+      req.headers['x-reverie-parent-session'] !== self ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    if (Object.keys(req.query as object).length)
+      return reply.code(400).send({ success: false, error: 'Resolution takes no query parameters' });
+    const parsed = resolution.safeParse(req.body);
+    if (!parsed.success)
+      return reply
+        .code(400)
+        .send({ success: false, error: 'Expected exact source/readToken, disposition and optional replacement' });
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return { success: true, data: service.resolveNotice(self, parsed.data) };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      const code =
+        error.code === 'NOT_FOUND' ? 404 : error.code === 'CONFLICT' ? 409 : error.code === 'UNAVAILABLE' ? 503 : 400;
+      return reply.code(code).send({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/chatrooms/notices/history', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (
+      !self ||
+      req.headers['x-reverie-parent-session'] !== self ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    const parsed = historyQuery.safeParse(req.query);
+    if (
+      !parsed.success ||
+      (parsed.data.beforeAt === undefined) !== (parsed.data.beforeId === undefined) ||
+      (parsed.data.beforeAt !== undefined && !Number.isSafeInteger(Number(parsed.data.beforeAt)))
+    )
+      return reply
+        .code(400)
+        .send({ success: false, error: 'Expected own roomId and optional paired beforeAt/beforeId' });
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return {
+        success: true,
+        data: service.turnSummary(self, {
+          roomId: parsed.data.roomId,
+          ...(parsed.data.beforeAt !== undefined
+            ? { before: { at: Number(parsed.data.beforeAt), id: parsed.data.beforeId! } }
+            : {}),
+        }),
+      };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      return reply.code(error.code === 'NOT_FOUND' ? 404 : 503).send({ success: false, error: error.message });
+    }
   });
 }

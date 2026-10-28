@@ -317,6 +317,23 @@ Object.assign(ReverieApp.prototype, {
           })
         );
         panel.append(ownerForm);
+        const timeForm = el('form');
+        timeForm.append(el('h3', 'Timezone'));
+        const zoneInput = el('input');
+        zoneInput.type = 'text';
+        zoneInput.value = data.settings.timeZone || 'UTC';
+        zoneInput.placeholder = 'America/New_York';
+        zoneInput.setAttribute('aria-label', 'Company timezone');
+        timeForm.append(zoneInput, el('p', 'Used for chat timestamps, agent briefs, reset displays and company schedules. Daylight-saving changes are automatic. Existing reset instants and explicitly zoned jobs are not rewritten.'));
+        timeForm.addEventListener('submit', event => event.preventDefault());
+        timeForm.append(button('Save timezone', async () => {
+          const timeZone = zoneInput.value.trim();
+          new Intl.DateTimeFormat('en-US', { timeZone });
+          await this._companyApi('/settings', 'PUT', { ...data.settings, timeZone });
+          globalThis.ReverieTime?.setTimeZone(timeZone);
+          await this._renderCompany();
+        }));
+        panel.append(timeForm);
         const settings = el('form');
         settings.append(el('h3', 'Nightly exploration & morning briefing'));
         const enabled = el('input');
@@ -327,7 +344,6 @@ Object.assign(ReverieApp.prototype, {
         settings.append(enableLabel, el('br'));
         const controls = {};
         for (const [key, label, type] of [
-          ['timeZone', 'IANA timezone', 'text'],
           ['nightHour', 'Night hour (0–23)', 'number'],
           ['morningHour', 'Morning hour (0–23)', 'number'],
           ['researchMinutes', 'Research minutes per employee (1–120)', 'number'],

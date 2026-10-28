@@ -28,8 +28,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-    env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/reverie
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,15 +117,16 @@ jobs:
           # Save both offline install tags, then scan the exact archive that will ship.
           version=0.0.0-ci
           if [ "${{ github.event_name }}" = release ]; then version="${{ github.event.release.tag_name }}"; version=${version#v}; fi
-          docker tag "reverie:$GITHUB_SHA" "ghcr.io/jgoppert/reverie:$version"
-          docker tag "reverie:$GITHUB_SHA" ghcr.io/jgoppert/reverie:latest
-          docker save ghcr.io/jgoppert/reverie:latest "ghcr.io/jgoppert/reverie:$version" --output "$image_archive"
+          image=$(bash scripts/setup.sh --print-image-repository "$GITHUB_REPOSITORY_OWNER")
+          docker tag "reverie:$GITHUB_SHA" "$image:$version"
+          docker tag "reverie:$GITHUB_SHA" "$image:latest"
+          docker save "$image:latest" "$image:$version" --output "$image_archive"
           "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
           mkdir -p offline-bundle
           mv "$image_archive" offline-bundle/reverie-image.tar
           cp scripts/setup.sh offline-bundle/setup.sh
           cp docs/INSTALL.md offline-bundle/INSTALL.md
-          printf 'Version: %s\nCommit: %s\nImage-ID: %s\nTags: ghcr.io/jgoppert/reverie:latest ghcr.io/jgoppert/reverie:%s\n' "$version" "$GITHUB_SHA" "$(cat image-id.txt)" "$version" > offline-bundle/IMAGE-REF.txt
+          bash scripts/release-image.sh metadata "$GITHUB_REPOSITORY_OWNER" "$version" "$GITHUB_SHA" "$(cat image-id.txt)" > offline-bundle/IMAGE-REF.txt
           (cd offline-bundle && sha256sum reverie-image.tar setup.sh INSTALL.md IMAGE-REF.txt > SHA256SUMS)
           tar -C offline-bundle -czf "reverie-$version.tar.gz" .
 
@@ -248,11 +247,8 @@ jobs:
           mkdir bundle/extracted
           tar -xzf bundle/reverie-*.tar.gz -C bundle/extracted
           (cd bundle/extracted && sha256sum --check SHA256SUMS)
-          test "$(sed -n 's/^Commit: //p' bundle/extracted/IMAGE-REF.txt)" = "$(git rev-parse HEAD)"
-          image=$(sed -n 's/^Image-ID: //p' bundle/extracted/IMAGE-REF.txt)
-          printf '%s\n' "$image" | grep -Eq '^sha256:[0-9a-f]{64}$'
-          docker load --input bundle/extracted/reverie-image.tar
-          test "$(docker image inspect ghcr.io/jgoppert/reverie:latest --format '{{.Id}}')" = "$image"
+          version=$(sed -n 's/^Version: //p' bundle/extracted/IMAGE-REF.txt)
+          image=$(bash scripts/release-image.sh load docker bundle/extracted "$GITHUB_REPOSITORY_OWNER" "$version" "$(git rev-parse HEAD)")
           rm -rf bundle
           printf '%s\n' "$image" > "$RUNNER_TEMP/tested-image-id"
       - name: Exercise real isolated workers using the tested image
@@ -317,8 +313,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/reverie
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -341,13 +335,7 @@ jobs:
           mkdir tested-image
           tar -xzf "bundle/reverie-$version.tar.gz" -C tested-image
           (cd tested-image && sha256sum -c SHA256SUMS)
-          test "$(sed -n 's/^Version: //p' tested-image/IMAGE-REF.txt)" = "$version"
-          test "$(sed -n 's/^Commit: //p' tested-image/IMAGE-REF.txt)" = "$GITHUB_SHA"
-          expected=$(sed -n 's/^Image-ID: //p' tested-image/IMAGE-REF.txt)
-          [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
-          docker load --input tested-image/reverie-image.tar
-          actual=$(docker image inspect --format '{{.Id}}' "$IMAGE:$version")
-          test "$actual" = "$expected"
+          actual=$(bash scripts/release-image.sh load docker tested-image "$GITHUB_REPOSITORY_OWNER" "$version" "$GITHUB_SHA")
           docker tag "$actual" "reverie:$GITHUB_SHA"
       - name: Publish the release
         if: github.event_name == 'release' && !github.event.release.prerelease
@@ -355,6 +343,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          IMAGE=$(bash scripts/setup.sh --print-image-repository "$GITHUB_REPOSITORY_OWNER")
           version=${TAG#v}
           line=${version%.*}
           tags=$version
@@ -375,7 +364,7 @@ jobs:
           docker pull "$digest"
           test "$(docker image inspect --format '{{.Id}}' "$digest")" = \
             "$(docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA")"
-          printf '%s\n' "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf 'Image publication verified: %s\n' "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
 
   release-assets:
     needs: [image, debian-install, worker-browser]
@@ -396,4 +385,7 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" "bundle/reverie-${TAG#v}.tar.gz" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"
+        # Asset attachment and GHCR publication are independent outcomes.
+        run: |
+          gh release upload "$TAG" "bundle/reverie-${TAG#v}.tar.gz" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"
+          printf 'Release assets attached for %s; see publish-image separately for GHCR status.\n' "$TAG" >> "$GITHUB_STEP_SUMMARY"

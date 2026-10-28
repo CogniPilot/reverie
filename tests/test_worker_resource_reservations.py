@@ -45,7 +45,7 @@ class NativeFixture:
                 'State': {'Running': True, 'Pid': pid}, 'Mounts': [],
                 'HostConfig': {'Memory': memory * MIB, 'MemorySwap': memory * MIB, 'PidsLimit': 128, 'NanoCpus': 0}}
 
-    def run_engine(self, args, optional=False):
+    def run_engine(self, args, optional=False, *, deadline=None):
         self.calls.append(args)
         if args == ['ps', '-aq', '--no-trunc']:
             data = '\n'.join(r['Id'] for r in self.rows)
@@ -58,6 +58,36 @@ class NativeFixture:
         else:
             raise AssertionError('Native mutation is not a fixture port')
         return subprocess.CompletedProcess(args, 0, data, '')
+
+
+class CompleteInventoryTests(unittest.TestCase):
+    def observe(self,rows):
+        class Probe:
+            def run_engine(self,args,*,deadline=None):
+                if args[0]=='ps':data='\n'.join(row['Id']for row in rows)
+                else:data='\n'.join(json.dumps(row)for row in rows)
+                return subprocess.CompletedProcess(args,0,data,'')
+        return R.NativeObserver(Probe()).inventory()
+
+    def test_complete_mount_permutations_are_stable_without_dropping_fields_or_duplicates(self):
+        mounts=[{'Type':'bind','Source':'/owned/a','Destination':'/a','RW':True,
+                 'Propagation':'rprivate','Extra':{'preserved':True}},
+                {'Type':'bind','Source':'/owned/b','Destination':'/b','RW':False}]
+        rows=[{'Id':'b'*64,'Mounts':mounts+[copy.deepcopy(mounts[0])],'Other':'preserved'},
+              {'Id':'a'*64,'Mounts':[]}]
+        permuted=copy.deepcopy(rows[::-1]);permuted[1]['Mounts'].reverse()
+        observed=self.observe(rows)
+        self.assertEqual(observed,self.observe(permuted))
+        self.assertEqual(len(observed[1]['Mounts']),3)
+        self.assertEqual(observed[1]['Other'],'preserved')
+        for field,value in [('Source','/owned/different'),('RW',False),('Propagation','rshared')]:
+            changed=copy.deepcopy(rows);changed[0]['Mounts'][0][field]=value
+            self.assertNotEqual(observed,self.observe(changed))
+
+    def test_unknown_mount_collections_refuse_instead_of_inventing_empty_inventory(self):
+        for mounts in (None,{},['unknown']):
+            with self.subTest(mounts=mounts),self.assertRaisesRegex(ValueError,'MOUNT_INVENTORY'):
+                self.observe([{'Id':'a'*64,'Mounts':mounts}])
 
 
 class Reservations(unittest.TestCase):
@@ -140,6 +170,27 @@ class Reservations(unittest.TestCase):
     def claim(self):
         return self.gate.reserve(KEY, self.request())
 
+    def test_global_pool_change_still_requires_running_policy_transition(self):
+        after=copy.deepcopy(self.config);after['poolMemoryMiB']=9216
+        broker=Broker(self.config,config_file='unused');broker.laptops={SID:'test-agent-'+SID}
+        broker.resource_reservations=self.gate  # Existing controlled native ports, actual admission.
+        labels={'reverie.worker':'test','reverie.session':SID,'reverie.worker-policy':policy_digest(self.config,SID)}
+        broker.run_engine=lambda argv,optional=False:subprocess.CompletedProcess(argv,0,json.dumps([{'Config':{'Labels':labels},'State':{'Running':True}}]))
+        with patch('reverie.worker.load_config',return_value=after),self.assertRaisesRegex(ValueError,'Stop only'):
+            broker.control('reload-resources')
+        self.assertIs(broker.config,self.config)
+
+    def test_stale_profile_pool_metadata_uses_global_but_other_limits_still_refuse(self):
+        profile=self.profiles.snapshot()['profiles'][EID]
+        resources=dict(profile['resources'],poolMemoryMiB=6144,poolTasksMax=4096)
+        self.profiles.put(EID,resources,profile['binding'],expected_revision=1,
+                          expected_profile_version=1,expected_binding=profile['binding'])
+        self.assertEqual(self.observed()['current_memory_bytes'],str(2048*MIB))
+        resources['pidsLimit']+=1
+        self.profiles.put(EID,resources,profile['binding'],expected_revision=2,
+                          expected_profile_version=2,expected_binding=profile['binding'])
+        with self.assertRaisesRegex(ValueError,'RESERVATION_RAM_ONLY_PROFILE'):self.observed()
+
     def test_fixed_native_observation_matches_existing_closed_journal_schema(self):
         value = self.observed(); J.observation(value)
         self.assertEqual(value['committed_bytes'], str(2048 * MIB))
@@ -183,7 +234,7 @@ class Reservations(unittest.TestCase):
 
     def test_complete_inventory_missing_duplicate_and_changed_sources_refuse(self):
         original = self.native.run_engine
-        def missing(args, optional=False):
+        def missing(args, optional=False, *, deadline=None):
             result = original(args, optional)
             if args[0] == 'inspect':result.stdout = '[]'
             return result

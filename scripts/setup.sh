@@ -2,7 +2,7 @@
 # Reverie setup: run one Reverie server from the published image with Docker or Podman.
 #
 #   setup.sh                    install or start the latest release
-#   setup.sh --version 0.1.0    install or switch to that release (an upgrade backs up console state first)
+#   setup.sh --version 0.3.0    install or switch to that release (an upgrade backs up console state first)
 #   setup.sh --rollback         go back to the release that ran before the last switch, with its backed-up state
 #   setup.sh --password         print the internal runtime credential (advanced)
 #   setup.sh --owner            manual host provisioning; prints a temporary password
@@ -10,12 +10,28 @@
 #   setup.sh --dry-run ...      print every command, change nothing
 #
 # Options: --port N (default 3000), --name NAME (default reverie; also the volumes NAME-data and NAME-home),
-#          --image REF (default ghcr.io/jgoppert/reverie), --with-claude-code (installs that CLI at start,
+#          --image REF (default ghcr.io/cognipilot/reverie), --with-claude-code (installs that CLI at start,
 #          under your own account and its license), --engine docker|podman.
 # The server listens on 127.0.0.1 only. Expose it further only behind your own authenticated proxy or tunnel.
 set -euo pipefail
 
-image=ghcr.io/jgoppert/reverie version=latest port=3000 name=reverie engine= mode=install dry=0 clis=
+# Shared new-release reference policy. CI calls this same standalone file;
+# downloaded setup.sh has no sibling-script or source-checkout dependency.
+image_repository() {
+  local LC_ALL=C
+  local owner=${1-CogniPilot}
+  [[ "$owner" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]] || {
+    echo 'Invalid GitHub repository owner' >&2; return 2;
+  }
+  printf 'ghcr.io/%s/reverie\n' "${owner,,}"
+}
+if [ "${1:-}" = --print-image-repository ]; then
+  [ "$#" -le 2 ] || { echo 'Expected at most one repository owner' >&2; exit 2; }
+  image_repository "${2-CogniPilot}"
+  exit
+fi
+
+image=$(image_repository) version=latest port=3000 name=reverie engine= mode=install dry=0 clis=
 offline=0 archive=./reverie-image.tar
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -14,6 +14,7 @@ function fixture() {
     throwPost: false,
   };
   const watch = createInputWatch({ bot: () => state.bot, employee: () => state.employee,
+    timeZone: () => 'America/New_York',
     room: id => state.rooms[id], now: () => state.at,
     post: (bot, roomId, text, recent) => {
       if (state.throwPost) throw Error('private pane content');
@@ -29,7 +30,7 @@ function fixture() {
 test('permission event posts once with fixed safe text and 12-hour time', () => {
   const x = fixture(); x.event(); x.event();
   assert.equal(x.state.posts.length, 1);
-  assert.match(x.state.posts[0].text, /6:00 PM ET/);
+  assert.match(x.state.posts[0].text, /6:00:00 PM EDT/);
   assert.match(x.state.posts[0].text, /prompt reported for employee employee/);
   assert.doesNotMatch(x.state.posts[0].text, /SECRET|@everyone|COMMAND/);
 });

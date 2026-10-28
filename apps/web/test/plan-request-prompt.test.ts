@@ -36,7 +36,8 @@ describe('queued expert plan approval messages', () => {
     expect(text).toContain('reverie agent plan-move approve request --handoff-file');
     expect(text).toContain('reverie agent plan-move list');
     expect(text).toContain('Claude harness');
-    expect(text).toContain('1970-01-01T00:30:00.000Z');
+    expect(text).toContain('Jan 1, 1970');
+    expect(text).toContain('12:30:00 AM UTC');
     expect(text).not.toMatch(/[a-f0-9]{64}|plan-request-capabilities/);
     expect(m.deleteMessage).not.toHaveBeenCalled();
   });

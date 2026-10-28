@@ -83,7 +83,9 @@ let
         test/session-health-provider.test.ts test/session-health-provider-routes.test.ts test/health-canonical-reader.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
-        test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \
+        test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts \
+        test/chatroom-digest.test.ts test/chatroom-notice-state.test.ts test/chatroom-notice-history.test.ts test/chatroom-notice-cli.test.ts test/chat-db.test.ts test/chat-message-search.test.ts \
+        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/menu-viewport.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
@@ -95,7 +97,8 @@ let
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
         test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
-      npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts
+      npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts test/resource-history.test.ts
+      npm test -- test/browser-job-evidence.test.ts
       npm test -- test/file-preview-source-reader.test.ts test/file-preview-sources-ui.test.ts \
         test/file-preview-worker-policy.test.ts test/workspace-preview-source.test.ts \
         test/pdf-preview-terminal-state.test.ts test/pdf-preview-worker-cancellation.test.ts
@@ -103,13 +106,13 @@ let
         test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts \
         test/github-watches-ui.test.ts test/office-footer-panel.test.ts
       npm test -- test/board-permissions.test.ts test/owner-auth-board-decisions.test.ts \
-        test/publication-credentials.test.ts test/publication-routes.test.ts \
+        test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
         test/company-board-permissions-ui.test.ts test/company-publication-ui.test.ts \
         test/company-reporting-ui.test.ts test/company-core-context-ui.test.ts
       NIX_REVERIE_TEST_ROOT_CUSTODY=1 npm test -- test/cli-agent-credentials.test.ts
       npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts test/company-lifecycle-fence.test.ts
-      npm test -- test/assignment-status-watch.test.ts test/assignment-refused-reservation.test.ts test/public-issue-watch.test.ts \
+      npm test -- test/assignment-status-watch.test.ts test/display-time.test.ts test/assignment-refused-reservation.test.ts test/public-issue-watch.test.ts \
         test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts \
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
