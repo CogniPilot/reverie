@@ -185,6 +185,64 @@ describe('board routes', () => {
     expect(audit.at(-1)).not.toHaveProperty('scale');
   });
 
+  it.each([
+    ['todo', { tags: ['existing', 'added'] }],
+    ['todo', { tags: [] }],
+    ['doing', { tags: ['existing', 'added'] }],
+    ['doing', { status: 'doing' }],
+    ['doing', { status: 'todo' }],
+    ['blocked', { tags: ['existing', 'added'] }],
+    ['blocked', { tags: [] }],
+    ['blocked', { status: 'doing' }],
+  ] as const)('preserves every omitted field for %s with %j', async (status, change) => {
+    const created = (await post('/api/board/issues', {
+      title: 'Preserved work item', owner: 'e-builder', status,
+      reason: 'Waiting for the reviewed input; retain this context.',
+      tags: ['existing'], scale: 'hour', start: NOW, end: NOW + 3600_000,
+      links: [{ url: 'https://example.com/report', kind: 'report' }],
+      source: { roomId: 'r1', messageId: 'original-request' },
+    }, COORD)).json().data.item;
+    const response = await patch(`/api/board/issues/${created.id}`, change, BUILDER);
+    expect(response.statusCode).toBe(200);
+    const expected = { ...created, ...change };
+    expect(response.json().data.item).toEqual(expected);
+    expect(store.snapshot().issues[0]).toEqual(expected);
+    const reloaded = new BoardStore(join(dir, 'board.json'));
+    await reloaded.init();
+    expect(reloaded.snapshot().issues[0]).toEqual(expected);
+    for (const field of ['reason', 'owner', 'start', 'end', 'links', 'source', 'scale'])
+      expect(audit.at(-1)).not.toHaveProperty(field);
+  });
+
+  it('requires explicit intent to clear a reason, and retains blocked validation', async () => {
+    const created = (await post('/api/board/issues', {
+      title: 'Explicit clearing', owner: 'e-builder', status: 'blocked', reason: 'Required input',
+    }, COORD)).json().data.item;
+    const before = store.snapshot();
+    expect((await patch(`/api/board/issues/${created.id}`, { reason: '' }, BUILDER)).statusCode).toBe(400);
+    expect(store.snapshot()).toEqual(before);
+    expect(audit).toHaveLength(1);
+    const response = await patch(`/api/board/issues/${created.id}`, { status: 'doing', reason: '' }, BUILDER);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.item).toEqual({ ...created, status: 'doing', reason: '' });
+    const reloaded = new BoardStore(join(dir, 'board.json'));
+    await reloaded.init();
+    expect(reloaded.snapshot().issues[0]).toEqual(response.json().data.item);
+    expect(audit.at(-1)).toMatchObject({ status: 'doing', reason: '' });
+  });
+
+  it('refuses stale or unauthorized partial updates without changing the saved card', async () => {
+    const created = (await post('/api/board/issues', {
+      title: 'Guarded context', owner: 'e-builder', reason: 'Preserve on refusal', tags: ['existing'],
+    }, COORD)).json().data.item;
+    const before = store.snapshot();
+    expect((await patch(`/api/board/issues/${created.id}`, { tags: [], ifRev: before.rev - 1 }, BUILDER)).statusCode).toBe(409);
+    expect((await patch(`/api/board/issues/${created.id}`, { reason: '' }, STRANGER)).statusCode).toBe(403);
+    expect(store.snapshot()).toEqual(before);
+    expect(JSON.parse(readFileSync(join(dir, 'board.json'), 'utf8'))).toEqual(before);
+    expect(audit).toHaveLength(1);
+  });
+
   it('PATCH accepts explicit empty tags and day scale without changing unrelated fields', async () => {
     const created = (
       await post(

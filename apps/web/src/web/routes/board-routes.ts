@@ -484,7 +484,6 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         Object.assign(issue, rest, { updatedAt: at });
         if (owner === null) delete issue.owner;
         else if (owner !== undefined) issue.owner = owner;
-        if (issue.status !== 'wontdo' && issue.status !== 'blocked' && change.reason === undefined) delete issue.reason;
         stampDone(issue, previous, at);
         checkIssue(s, issue);
         return issue;

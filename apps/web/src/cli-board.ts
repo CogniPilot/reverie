@@ -109,7 +109,7 @@ export async function boardIssueMove(deps: AgentDeps, options: { id: string; sta
     return fail(deps, `status is one of ${ISSUE_STATUSES.join('|')}`);
   }
   const body: Record<string, unknown> = { status: options.status };
-  if (options.reason) body.reason = options.reason;
+  if (options.reason !== undefined) body.reason = options.reason;
   const result = await call(deps, { method: 'PATCH', path: `/api/board/issues/${encodeURIComponent(options.id)}`, body });
   return done(deps, result, (i) => `${i.id} is now ${i.status}`);
 }
@@ -216,7 +216,7 @@ export function registerBoardCommands(program: Command): Command {
     .requiredOption('--title <text>', 'Title')
     .option('--owner <member>', 'Owner: member id or name')
     .option('--status <status>', ISSUE_STATUSES.join('|'))
-    .option('--reason <text>', 'Required for blocked and wontdo')
+    .option('--reason <text>', 'Required for blocked and wontdo; an empty string clears it for other statuses')
     .option('--tag <tag>', 'Tag (repeatable)', collect)
     .option('--milestone <id>', 'Milestone id')
     .option('--link <url>', 'Link (repeatable)', collect)
@@ -229,7 +229,7 @@ export function registerBoardCommands(program: Command): Command {
   issue
     .command('move <id> <status>')
     .description(`Move an issue (${ISSUE_STATUSES.join('|')}); done stamps doneAt`)
-    .option('--reason <text>', 'Required for blocked and wontdo')
+    .option('--reason <text>', 'Required for blocked and wontdo; an empty string clears it for other statuses')
     .option('--json', 'Machine-readable output')
     .action((id: string, status: string, o: { reason?: string; json?: boolean }) =>
       runAgentVerb(json(o), (d) => boardIssueMove(d, { id, status, reason: o.reason }))

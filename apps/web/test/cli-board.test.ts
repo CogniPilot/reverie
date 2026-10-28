@@ -82,6 +82,14 @@ describe('reverie board', () => {
     expect(calls[0]).toMatchObject({ method: 'PATCH', path: '/api/board/issues/i-1', body: { status: 'wontdo', reason: 'dup' } });
   });
 
+  it('move distinguishes an omitted reason from explicit empty clearing', async () => {
+    const { deps, calls } = fake();
+    await boardIssueMove(deps, { id: 'i-1', status: 'doing' });
+    expect(calls[0].body).toEqual({ status: 'doing' });
+    await boardIssueMove(deps, { id: 'i-1', status: 'doing', reason: '' });
+    expect(calls[1].body).toEqual({ status: 'doing', reason: '' });
+  });
+
   it('tag merges and sends the rev it read', async () => {
     const { deps, calls } = fake();
     await boardIssueTag(deps, { id: 'i-1', tags: ['b', 'a'] });
