@@ -31,6 +31,7 @@
 import http from 'node:http';
 import { agentCapabilities } from './cli-agent-capabilities.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
+import { agentCredentialStatus } from './cli-agent-credential-status.js';
 import { agentContext, agentContextReceipt } from './cli-agent-context.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import https from 'node:https';
@@ -2375,6 +2376,8 @@ export function registerAgentCommands(program: Command): Command {
   const credentials = agent.command('credentials').description('List granted named PATs or explicitly install one private local copy; never prints material');
   credentials.command('list').description('List current named publication credential grants without secret values').option('--json', 'Machine-readable granted credential metadata')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialsList));
+  credentials.command('status').description('Inspect own registration/grant availability; expiry and repository access stay explicit unknowns').option('--json', 'Machine-readable own credential availability without paths or material')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialStatus));
   credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
   registerGoalCommands(agent, run);

@@ -117,6 +117,49 @@ describe('owner-managed PAT metadata and self-scoped material', () => {
     expect((await agent('POST', '/api/publication/credentials/' + meta.id + '/material', SID, { employeeId: 'employee-two' })).statusCode).toBe(400);
   });
 
+  it('reports only own registration/grant availability without material IO, expiry guesses or repository probes', async () => {
+    const own = await create();
+    await owner('POST', '/api/publication/tokens', { name: 'other-employee-only', token: NEXT, label: '/private/secret-path' });
+    const material = vi.spyOn(vault, 'material');
+    const empty = await agent('GET', '/api/publication/credentials/status');
+    expect(empty.json().data.credentials).toEqual([]);
+    employee.permissions!.publicationTokenIds = [own.id, '99999999-9999-4999-8999-999999999999'];
+    const response = await agent('GET', '/api/publication/credentials/status');
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ visibility: 'current-employee-grants-only', registrationAuthority: 'owner-only',
+      credentials: [
+        { id: own.id, name: 'release', registration: 'registered', grant: 'current',
+          expiry: { state: 'unknown', reason: 'not-recorded' }, repositoryAccess: { state: 'not-verified' } },
+        { registration: 'missing', grant: 'unavailable' },
+      ] });
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).not.toMatch(/ghp_|github_pat_|other-employee-only|secret-path/);
+    expect(material).not.toHaveBeenCalled();
+    expect((await agent('GET', '/api/publication/credentials/status?employeeId=employee-two')).statusCode).toBe(400);
+    expect((await owner('GET', '/api/publication/credentials/status')).statusCode).toBe(403);
+    expect((await agent('POST', '/api/publication/tokens', SID, { name: 'bypass', token: NEXT })).statusCode).toBe(403);
+  });
+  it('rechecks revoked grants and changed generation after status metadata IO', async () => {
+    const own = await create(); employee.permissions!.publicationTokenIds = [own.id];
+    const original = vault.metadata.bind(vault);
+    const metadata = vi.spyOn(vault, 'metadata').mockImplementation(async selected => {
+      const rows = await original(selected); employee.permissions!.publicationTokenIds = []; return rows;
+    });
+    expect((await agent('GET', '/api/publication/credentials/status')).json().data.credentials).toEqual([]);
+    metadata.mockImplementation(async selected => {
+      const rows = await original(selected); employee.sessionGeneration!++; return rows;
+    });
+    const response = await agent('GET', '/api/publication/credentials/status');
+    expect(response.statusCode).toBe(403); expect(response.body).not.toContain(PAT);
+  });
+  it('status storage failure is typed and does not expose raw filesystem/provider errors', async () => {
+    vi.spyOn(vault, 'metadata').mockRejectedValue(Error('expired ' + PAT + ' at /private/token-file'));
+    const response = await agent('GET', '/api/publication/credentials/status');
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ success: false, errorCode: 'PUBLICATION_UNAVAILABLE' });
+    expect(response.body).not.toMatch(/expired|ghp_|\/private/);
+  });
+
   it.each(['desired-off', 'vacation', 'stopped', 'exited', 'migration'])(
     'refuses %s current employee material without a fallback identity', async mode => {
       const meta = await create(); employee.permissions!.publicationTokenIds = [meta.id];

@@ -106,7 +106,7 @@ let
         test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts \
         test/github-watches-ui.test.ts test/office-footer-panel.test.ts
       npm test -- test/board-permissions.test.ts test/owner-auth-board-decisions.test.ts \
-        test/publication-credentials.test.ts test/publication-routes.test.ts \
+        test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
         test/company-board-permissions-ui.test.ts test/company-publication-ui.test.ts \
         test/company-reporting-ui.test.ts test/company-core-context-ui.test.ts

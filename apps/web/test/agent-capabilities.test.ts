@@ -108,12 +108,14 @@ describe('current agent capability command', () => {
   });
   it('reports a real API refusal without converting it into an empty deny-all report', async () => {
     const f = fixture();
-    f.deps.request = async () => ({ status: 403, text: '', json: { success: false, error: 'Unknown caller session' } });
+    f.deps.request = async () => ({ status: 403, text: '', json: { success: false, error: 'Unknown caller session SECRET /private/owner' } });
     expect(await agentCapabilities(f.deps, refs)).toBe(4);
     expect(JSON.parse(f.output[0])).toEqual({
       success: false,
-      error: expect.stringContaining('Unknown caller session'),
+      error: expect.stringContaining('HTTP 403'),
     });
+    expect(f.output.join(' ')).not.toContain('Unknown caller session');
+    expect(f.output.join(' ')).not.toMatch(/SECRET|\/private/);
   });
   it('reports named PAT metadata without retrieving or printing secret material', async () => {
     const f = fixture();
@@ -149,6 +151,22 @@ describe('current agent capability command', () => {
     expect(JSON.stringify(result)).not.toContain('SECRET');
     await chmod(folder, 0o755);
     expect((await githubCredentialReferences(home)).bindings).toEqual([]);
+  });
+  it('capability output omits local locator paths and free-form credential labels', async () => {
+    const f = fixture();
+    const request = f.deps.request;
+    f.deps.request = async (ctx, options) => options.path === '/api/publication/credentials'
+      ? { status: 200, text: '', json: { success: true, data: { employeeId: 'employee-one', sessionId: 'self-session', credentials: [{
+        id: '44444444-4444-4444-8444-444444444444', name: 'release', repositories: ['example/project'],
+        createdAt: 1, updatedAt: 1, label: '/private/free-form-label',
+      }] } } }
+      : request(ctx, options);
+    expect(await agentCapabilities(f.deps, async () => ({ directory: '/private/token-directory',
+      bindings: [{ name: 'release', path: '/private/token-directory/release.token' }], note: '/private/note' }))).toBe(0);
+    const result = JSON.parse(f.output[0]!);
+    expect(result.github.bindings).toEqual([{ name: 'release' }]);
+    expect(result.commands.publicationCredentialStatus).toBe('reverie agent credentials status --json');
+    expect(f.output.join(' ')).not.toContain('/private/');
   });
   it('gives useful plain-language commands and distinguishes filing from approval', async () => {
     const f = fixture();
