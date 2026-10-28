@@ -25,7 +25,6 @@ import {OwnerAuthService} from '../src/owner-auth/service.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../src/resource-replacement-controller.js';
 import {buildSpawnCommand} from '../src/tmux-manager.js';
 import {workerLaunchCommand} from '../src/worker-execution.js';
-import {composerReadyMark} from '../src/cli-agent.js';
 import type {SessionPort} from '../src/web/ports/session-port.js';
 import type {TerminalMultiplexer, CreateSessionOptions, MuxSession} from '../src/mux-interface.js';
 
@@ -36,6 +35,8 @@ let child: ChildProcess, peers: Set<Socket>, verbs: string[], handoffs: string[]
 let eid: string, draft: Record<string, unknown>, reference: string, options: Map<string, MuxSession>;
 let rejectAt: string | undefined;
 let nativeSettled: boolean;
+let occupyCandidate: boolean, composerBodies: Map<string, string>, handoffScreens: string[], handoffMuxCalls: string[];
+const codexPane = (body: string) => `› ${body}\n\nGPT-6.1-Sol high · /owned/resource-fixture\n? for shortcuts`;
 let restartController: () => Promise<void>;
 type Frame = Record<string, unknown>;
 const encoded = (value: unknown) => {const raw = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4);
@@ -57,6 +58,7 @@ beforeEach(async () => {
   token = await auth.setup('FixtureOwner', 'Quasar!fixture-8-passphrase', 'Quasar!fixture-8-passphrase', '127.0.0.1');
   sessions = new Map(); options = new Map(); peers = new Set(); verbs = []; handoffs = []; candidateCommands = [];
   rejectAt = undefined; nativeSettled = false;
+  occupyCandidate = false; composerBodies = new Map(); handoffScreens = []; handoffMuxCalls = [];
   // Harmless OWN child supplies a real start identity for the existing normal
   // process-survivor checks. Only this exact fixture child is ever terminated.
   child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio: 'ignore'});
@@ -75,8 +77,22 @@ beforeEach(async () => {
         createdAt: Date.now(), workingDir: value.workingDir, mode: value.mode, attached: false};
       options.set(value.sessionId, row); return row;
     },
-    capturePaneText: () => '› ' + composerReadyMark('codex'),
-    sendInput: async (_id: string, text: string) => {handoffs.push(text); return true;},
+    capturePaneText: (name: string) => {
+      const row = [...options.values()].find(row => row.muxName === name);
+      const body = row && composerBodies.has(row.sessionId) ? composerBodies.get(row.sessionId)! :
+        (name.startsWith('fixture-') && occupyCandidate ? 'existing owner draft' : '');
+      return codexPane(body);
+    },
+    sendInput: async (id: string, text: string, writeOptions?: {requireEmptyComposer?: boolean}) => {
+      handoffMuxCalls.push(id); expect(writeOptions?.requireEmptyComposer).toBe(true);
+      expect(composerBodies.get(id) ?? (occupyCandidate ? 'existing owner draft' : '')).toBe('');
+      handoffs.push(text); composerBodies.set(id, text.replace(/\r/g, ''));
+      handoffScreens.push(codexPane(composerBodies.get(id)!));
+      // sendInput models the actual mux's text/Enter transaction; the returned
+      // rendered pane now confirms the owned handoff left the composer.
+      await Promise.resolve(); composerBodies.set(id, ''); handoffScreens.push(codexPane(''));
+      return true;
+    },
     killSession: async (id: string) => {options.delete(id); return true;},
     setAttached: () => {}, getPaneCurrentCommand: () => 'codex', getSessionName: () => 'owned-pane',
   }, {get(target, name) {if (name in target) return target[name as keyof typeof target];
@@ -239,9 +255,28 @@ it('runs normal metadata, explicit source stop, Session readiness, handoff and p
   expect(record.phase, record.error).toBe('completed');
   expect(verbs).toEqual(['draft','claim','publication','prepare','source-stop','start','verify','finalize']);
   expect(handoffs).toEqual(['Resume the preserved work and inspect its checkpoint.\r']);
+  expect(handoffScreens).toEqual([codexPane('Resume the preserved work and inspect its checkpoint.'), codexPane('')]);
   expect(candidateCommands).toHaveLength(1); expect(candidateCommands[0]).toContain('--resource-ref');
   expect((await journal.resourceRecord(String(draft.operationId))).resourcePhase).toBe('verified');
   expect(company.registeredEmployees()[0].sessionId).toBe(draft.targetSid);
+}, 20_000);
+
+it('retains native recovery without typing over a candidate owner draft or reaching verify/finalize', async () => {
+  occupyCandidate = true;
+  const preview = (await post('preview', {employeeId: eid, memoryMiB: 3072})).json().data;
+  expect((await post('apply', {previewId: preview.draftId, handoff: 'Preserve this approved handoff.'})).statusCode).toBe(200);
+  const record = await until(async () => (await post('result', {operationId: draft.operationId})).json().data as PlanMoveRecord,
+    value => value?.phase === 'recovery-required');
+  expect(record.error).toContain('Recovery instruction could not be typed');
+  expect(handoffMuxCalls).toEqual([]); expect(handoffs).toEqual([]); expect(handoffScreens).toEqual([]);
+  // Result lookup may make the existing read-only historical-completion query;
+  // nonterminal native state refuses it and must never add lifecycle effects.
+  expect(verbs.filter(verb => verb !== 'completion')).toEqual(['draft','claim','publication','prepare','source-stop','start']);
+  expect(nativeSettled).toBe(false); expect(sessions.has(String(draft.targetSid))).toBe(true);
+  expect(company.registeredEmployees()[0].sessionId).toBe(draft.targetSid);
+  const before = [...verbs];
+  expect((await post('apply', {previewId: preview.draftId, handoff: 'Retry'})).statusCode).toBe(503);
+  expect(verbs).toEqual(before);
 }, 20_000);
 
 it.each(['verify','finalize'])('a host %s refusal retains durable recovery and never uses generic candidate cleanup', async fault => {
