@@ -20,6 +20,7 @@ import {
   readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { renderTurnSummary } from '../src/chatroom-turn-summary.js';
 import { SETTINGS_PATH } from '../src/web/route-helpers.js';
 import { tmpdir, homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -1783,4 +1784,39 @@ describe('per-turn message summary hooks', () => {
       rmSync(external, { force: true });
     }
   });
+});
+
+
+it('deduplicates actual zoned summary snapshots across clock ticks', () => {
+  const dir = join(tmpdir(), 'reverie-clock-dedup-' + randomUUID());
+  mkdirSync(dir, { mode: 0o700 });
+  const sessionId = randomUUID();
+  writeFileSync(join(dir, 'reverie'), `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:process.argv.at(-1),additionalContext:process.env.SUMMARY_TEXT}}));\n`, { mode: 0o700 });
+  const candidate = { roomId: 'room', room: 'Office', messageId: 'source', sender: 'Owner', role: 'owner',
+    at: 1000, excerpt: 'An unchanged request', state: 'reply-pending' as const, priority: 1 };
+  const snapshot = (now: number, zone = 'America/New_York', excerpt = candidate.excerpt) =>
+    renderTurnSummary('ring', [{ ...candidate, excerpt }], { state: 'complete', rooms: [] }, zone, now);
+  const run = (text: string, event: 'PostToolUse' | 'UserPromptSubmit' = 'PostToolUse') => {
+    const result = spawnSync(process.execPath, ['-e', generateTurnSummaryScript(event)], {
+      env: { ...process.env, TMPDIR: dir, PATH: dir + ':' + process.env.PATH,
+        REVERIE_SESSION_ID: sessionId, REVERIE_API_URL: 'http://inert', SUMMARY_TEXT: text },
+      input: '', encoding: 'utf8', timeout: 4000,
+    });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    return result.stdout;
+  };
+  try {
+    const first = snapshot(Date.parse('2026-10-28T00:00:00Z'));
+    const next = snapshot(Date.parse('2026-10-28T00:00:01Z'));
+    expect(run(first.text)).not.toBe('');
+    expect(run(next.text)).toBe('');
+    expect(next.generatedAt).not.toBe(first.generatedAt);
+    expect(run(snapshot(Date.parse('2026-10-29T00:00:01Z')).text)).toBe('');
+    expect(run(next.text, 'UserPromptSubmit')).not.toBe('');
+    expect(run(snapshot(next.generatedAt!, 'Asia/Kathmandu').text)).not.toBe('');
+    expect(run(snapshot(next.generatedAt!, 'Asia/Kathmandu', 'Actually changed request').text)).not.toBe('');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

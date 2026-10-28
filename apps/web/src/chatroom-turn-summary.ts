@@ -53,7 +53,7 @@ export function renderTurnSummary(
   now = Date.now()
 ): TurnSummary {
   const zone = timeZone === undefined ? undefined : displayTimeZone(timeZone);
-  const clock = zone ? `Display timezone: ${zone}; now ${displayTime(now, zone)}. Use this timezone and include its abbreviation for human-facing chat/deadline/reset times; retain explicit offsets for machine timestamps.\n` : '';
+  const clock = zone ? `Display timezone: ${zone}. Use this timezone and include its abbreviation for human-facing chat/deadline/reset times; retain explicit offsets for machine timestamps.\n` : '';
   // Owners first, then directed/owed traffic before passive chatter, newest within a class.
   const sorted = candidates.sort(
     (a, b) =>

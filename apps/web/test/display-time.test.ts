@@ -144,3 +144,18 @@ describe('configured display timezone', () => {
     expect(server).toMatch(/this\.inputWatch = createInputWatch\(\{\s*ledgerFile:[^\n]+\n\s*timeZone: owner => this\.companyService\.view\(owner\)\.settings\.timeZone,/);
   });
 });
+
+
+it('keeps hook text stable while advancing snapshot time metadata', () => {
+  const at = Date.parse('2026-10-28T00:00:00Z');
+  const candidate = { roomId: 'room', room: 'Office', messageId: 'owner-source', sender: 'Owner', role: 'owner',
+    at, excerpt: 'Still unanswered', state: 'reply-pending' as const, priority: 6 };
+  const first = renderTurnSummary('ring', [candidate], undefined, 'Asia/Kathmandu', at);
+  const later = renderTurnSummary('ring', [candidate], undefined, 'Asia/Kathmandu', at + 1000);
+  expect(later.text).toBe(first.text);
+  expect(later.generatedAt).toBe(at + 1000);
+  expect(later.messages[0].atLocal).toContain('5:45:00 AM');
+  expect(later.text).toContain('Display timezone: Asia/Katmandu.');
+  expect(renderTurnSummary('ring', [], undefined, 'UTC', at).text)
+    .toBe(renderTurnSummary('ring', [], undefined, 'UTC', at + 86400000).text);
+});
