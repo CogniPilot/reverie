@@ -202,7 +202,9 @@ class WorkerService:
         service = self
         class InstallProbe:
             """Fixed metadata-only adapter; no browser/worker resource authority."""
-            def __init__(self): self.config = config
+            def __init__(self):
+                self.config = config
+                self.config_file = service.config_path
             def run_engine(self, args, optional=False, *, deadline=None):
                 if not args or args[0] not in ('ps', 'inspect'):
                     raise ValueError('Installation probe is metadata-only')
@@ -333,6 +335,60 @@ class WorkerService:
 # Exact fixed guard text only. Never print arbitrary exception strings,
 # filenames, commands, environment, private JSON or subprocess output.
 _DIAGNOSTIC_REASONS = frozenset({
+    'WORKER_IMAGE_LOADED_MANAGER_ENCODING',
+    'WORKER_IMAGE_LOADED_MANAGER_MISMATCH',
+    'WORKER_IMAGE_LOADED_PROGRAM_ENCODING',
+    'WORKER_IMAGE_LOADED_PROGRAM_MISMATCH',
+    'WORKER_IMAGE_MATCHING_GENERATION_REQUIRED',
+    'WORKER_IMAGE_ARCHIVE_BINDING',
+    'WORKER_IMAGE_ATTEMPT_USED',
+    'WORKER_IMAGE_BROKER_SOCKET_PRESENT',
+    'WORKER_IMAGE_CANONICAL_CONFIG_REQUIRED',
+    'WORKER_IMAGE_CONFIGURATION_CHANGED',
+    'WORKER_IMAGE_CONFIGURATION_CUSTODY',
+    'WORKER_IMAGE_CONFIGURATION_STALE',
+    'WORKER_IMAGE_CONFIG_IN_R_ROOT',
+    'WORKER_IMAGE_DEADLINE',
+    'WORKER_IMAGE_DEPLOYMENT_BINDING',
+    'WORKER_IMAGE_DEPLOYMENT_CHANGED',
+    'WORKER_IMAGE_DEPLOYMENT_PATH',
+    'WORKER_IMAGE_EXACT_DISTINCT_IDS',
+    'WORKER_IMAGE_EXISTING_PROFILE_UNQUALIFIED',
+    'WORKER_IMAGE_EXISTING_R_REQUIRED',
+    'WORKER_IMAGE_FACTORY_IDENTITY',
+    'WORKER_IMAGE_FACTORY_LABELS',
+    'WORKER_IMAGE_FINAL_FILES_CHANGED',
+    'WORKER_IMAGE_FIXED_PROVENANCE_REQUIRED',
+    'WORKER_IMAGE_INSTALLED_CONSUMER_REQUIRES_MAINTENANCE',
+    'WORKER_IMAGE_LOADED_PROFILE_MISMATCH',
+    'WORKER_IMAGE_MAINTENANCE_LOCK_CHANGED',
+    'WORKER_IMAGE_MAINTENANCE_OVERRIDE',
+    'WORKER_IMAGE_NATIVE_CHANGED',
+    'WORKER_IMAGE_NONIMAGE_CHANGE',
+    'WORKER_IMAGE_OPERATION_LOCATION',
+    'WORKER_IMAGE_OPERATION_USED',
+    'WORKER_IMAGE_ORDINARY_OWNER',
+    'WORKER_IMAGE_PENDING_CHANGED',
+    'WORKER_IMAGE_PENDING_CUSTODY',
+    'WORKER_IMAGE_PENDING_WRITE',
+    'WORKER_IMAGE_PLAN_CHANGED',
+    'WORKER_IMAGE_PLAN_DIGEST',
+    'WORKER_IMAGE_PLAN_EXPIRED',
+    'WORKER_IMAGE_PLAN_SCHEMA',
+    'WORKER_IMAGE_PROFILE_CHANGED',
+    'WORKER_IMAGE_PROFILE_PAIR',
+    'WORKER_IMAGE_PROVENANCE_CHANGED',
+    'WORKER_IMAGE_READBACK',
+    'WORKER_IMAGE_RECONCILIATION_REQUIRED',
+    'WORKER_IMAGE_REGISTERED_CONFIG_CHANGED',
+    'WORKER_IMAGE_REGISTERED_SERVICE_REQUIRED',
+    'WORKER_IMAGE_RETAINED_WORK',
+    'WORKER_IMAGE_SELECTION',
+    'WORKER_IMAGE_SOURCE_BINDING',
+    'WORKER_IMAGE_SOURCE_CHANGED',
+    'WORKER_IMAGE_SPEC_SCHEMA',
+    'WORKER_IMAGE_TOOLKIT_BINDING',
+    'WORKER_IMAGE_TOOLKIT_CHANGED',
     'Use the pinned Reverie worker-service flake launcher',
     'Immutable packaged worker unit required',
     'Select an existing canonical private broker configuration',
@@ -433,6 +489,7 @@ def main(argv=None):
     parser.add_argument('--diagnostic', action='store_true',
                         help='On failure print a bounded redacted category and vetted guard reason; never authorizes replay')
     parser.add_argument('action', choices=('check', 'check-backend', 'install', 'refresh-resource-actor', 'start', 'stop', 'status', 'logs', 'uninstall',
+                                                 'prepare-worker-image-switch', 'apply-worker-image-switch',
                                                  'prepare-resource-actor-enable', 'apply-resource-actor-enable',
                                                  'prepare-gpu-upgrade', 'apply-gpu-upgrade',
                                                  'prepare-transport-upgrade', 'apply-transport-upgrade'))
@@ -443,14 +500,27 @@ def main(argv=None):
                         help='Local Unix engine socket used by that optional preparation; no daemon is started')
     parser.add_argument('--operation', type=Path, help='Fresh private one-attempt migration directory')
     parser.add_argument('--selection', type=Path, help='Closed owner-private upgrade selection')
-    parser.add_argument('--plan-sha256', help='Exact prepared GPU-only plan digest')
+    parser.add_argument('--plan-sha256', help='Exact prepared fixed maintenance plan digest')
     args = parser.parse_args(argv)
     os.umask(0o077)
     service = WorkerService(args.config)
     try:
         if args.action not in ('install', 'refresh-resource-actor') and (args.resource_actor_provenance is not None or args.resource_actor_engine_socket is not None):
             raise ValueError('Optional resource actor preparation applies only to explicit install or facts refresh')
-        if args.action in ('prepare-resource-actor-enable', 'apply-resource-actor-enable'):
+        if args.action in ('prepare-worker-image-switch', 'apply-worker-image-switch'):
+            from .worker_image_switch import WorkerImageSwitch
+            if args.operation is None:
+                raise ValueError('Select a fresh private worker-image operation directory')
+            migration = WorkerImageSwitch(service, args.operation)
+            if args.action == 'prepare-worker-image-switch':
+                if args.selection is None or args.plan_sha256 is not None:
+                    raise ValueError('Select the closed immutable-profile worker-image input')
+                result = migration.prepare(args.selection)
+            else:
+                if args.selection is not None:
+                    raise ValueError('Apply uses only its exact prepared worker-image plan')
+                result = migration.apply(args.plan_sha256)
+        elif args.action in ('prepare-resource-actor-enable', 'apply-resource-actor-enable'):
             from .resource_actor_bootstrap import Bootstrap
             if args.operation is None:
                 raise ValueError('Select a fresh private actor-enable operation directory')

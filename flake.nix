@@ -338,6 +338,16 @@
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
           browserRuntime = if browser then packages.browserRuntime else null;
         };
+      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false }:
+        let
+          pkgs = pkgsFor system;
+          arguments = { inherit system uid gid subuidStart subgidStart subidCount browser; };
+        in import ./nix/worker-image-provenance.nix {
+          inherit pkgs; src = source;
+          image = self.lib.workerDockerImage arguments;
+          toolkit = self.packages.${system}.humanTerminalToolkit;
+          factory = { name = "lib.workerDockerImage"; } // arguments;
+        };
       apps = forAllSystems (system: {
         prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };

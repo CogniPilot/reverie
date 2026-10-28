@@ -480,6 +480,7 @@ class ReservationGate:
                  for v in self.binding['locks'].values()), 'RESERVATION_BINDING_SCHEMA')
 
     def _guard(self, selected=None):
+        from .worker_image_switch import capture_current_image, image_still_current
         deadline = self.native._deadline()
         need(getattr(self._local, 'depth', 0) > 0, 'RESERVATION_ADMISSION_LOCK_REQUIRED')
         need(option(self.broker.config) == self.option and
@@ -488,8 +489,10 @@ class ReservationGate:
         if os.path.lexists(pending(self.broker.config)):
             from .worker_gpu_access import owns_pending
             from .resource_actor_bootstrap import owns_pending as actor_bootstrap_pending
-            need(owns_pending(self) or actor_bootstrap_pending(self),
+            from .worker_image_switch import owns_pending as image_switch_pending
+            need(owns_pending(self) or actor_bootstrap_pending(self) or image_switch_pending(self),
                  'RESERVATION_INSTALL_REQUIRES_RECONCILIATION')
+        image_configuration = capture_current_image(self.broker)
         need(_file(marker(self.broker.config), self.broker.config['uid']) == self.binding,
              'RESERVATION_BINDING_CHANGED')
         statefd, state_identity = _directory(Path(self.broker.config['stateRoot']), self.broker.config['uid'])
@@ -531,7 +534,11 @@ class ReservationGate:
         if getattr(self._local, 'actor_bootstrap', None) is not None:
             from .resource_actor_bootstrap import check_transition_rows as actor_bootstrap_rows
             actor_bootstrap_rows(self, rows)
+        if getattr(self._local, 'image_switch', None) is not None:
+            from .worker_image_switch import check_transition_rows as image_switch_rows
+            image_switch_rows(self, rows)
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
+        image_still_current(image_configuration)
         return rows
 
     @contextmanager

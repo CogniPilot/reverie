@@ -239,5 +239,18 @@ class NativeStart(unittest.TestCase):
 
     def test_in_memory_policy_drift_is_not_qualified_by_unchanged_policy_file(self):
         permit=self.stopped();self.f.native.config=dict(self.f.native.config,image='sha256:'+'9'*64)
+        effects=list(self.effects)
+        # The cold admission guard now rejects stale image configuration before
+        # a native start permit can be qualified.
+        with self.assertRaisesRegex(ValueError,'WORKER_IMAGE_CONFIGURATION_STALE'):
+            with self.f.gate.admission():
+                self.fail('stale image configuration entered admission')
+        self.assertEqual(self.effects,effects)
+
+    def test_in_memory_resource_drift_is_not_qualified_by_unchanged_policy_file(self):
+        permit=self.stopped();self.f.native.config=dict(self.f.native.config,
+            pidsLimit=self.f.native.config['pidsLimit']+1)
+        effects=list(self.effects)
         with self.f.gate.admission(),self.assertRaisesRegex(ValueError,'CONFIG_CHANGED'):
             N.qualify_start(self.f.gate,permit)
+        self.assertEqual(self.effects,effects)
