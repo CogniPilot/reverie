@@ -106,6 +106,8 @@
             worker = true;
           };
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
+          workerGpuSupport = import ./nix/worker-gpu-support.nix { inherit pkgs; src = source; };
+          workerGpuToolkit = pkgs.nvidia-container-toolkit;
           browserJobRuntime = import ./nix/browser-job-runtime.nix { inherit pkgs; src = source; };
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
@@ -226,19 +228,21 @@
         observationsPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
       };
       packages = forAllSystems packagesFor;
-      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
+      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false }:
         let pkgs = pkgsFor system; packages = packagesFor system;
-        in import ./nix/image.nix {
+        in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs; src = source;
           inherit (packages) reverie console memory runtime;
           worker = true;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
+          browserRuntime = if browser then packages.browserRuntime else null;
         };
       apps = forAllSystems (system: {
         prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
+        worker-gpu = { type = "app"; program = "${self.packages.${system}.workerGpuSupport}/bin/reverie-worker-gpu"; meta.description = "Read-only selected employee GPU/CDI/image preflight; no setup or laptop effects"; };
         ops-service = { type = "app"; program = "${self.packages.${system}.opsCore}/bin/reverie-ops-service"; meta.description = "Install/control the private authenticated OPS executor; no grants or automatic effects"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };

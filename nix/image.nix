@@ -183,6 +183,8 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.uid" = toString uid;
       "org.reverie.worker.gid" = toString gid;
       "org.reverie.worker.rootless-docker" = if rootlessDocker == null then "0" else "1";
+    } // pkgs.lib.optionalAttrs (browserRuntime != null) {
+      "org.reverie.worker.browser" = "1";
     } // pkgs.lib.optionalAttrs (rootlessDocker != null) {
       "org.reverie.worker.subuid-start" = toString rootlessDocker.subuidStart;
       "org.reverie.worker.subgid-start" = toString rootlessDocker.subgidStart;

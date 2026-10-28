@@ -60,6 +60,36 @@ class NativeFixture:
         return subprocess.CompletedProcess(args, 0, data, '')
 
 
+class CompleteInventoryTests(unittest.TestCase):
+    def observe(self,rows):
+        class Probe:
+            def run_engine(self,args,*,deadline=None):
+                if args[0]=='ps':data='\n'.join(row['Id']for row in rows)
+                else:data='\n'.join(json.dumps(row)for row in rows)
+                return subprocess.CompletedProcess(args,0,data,'')
+        return R.NativeObserver(Probe()).inventory()
+
+    def test_complete_mount_permutations_are_stable_without_dropping_fields_or_duplicates(self):
+        mounts=[{'Type':'bind','Source':'/owned/a','Destination':'/a','RW':True,
+                 'Propagation':'rprivate','Extra':{'preserved':True}},
+                {'Type':'bind','Source':'/owned/b','Destination':'/b','RW':False}]
+        rows=[{'Id':'b'*64,'Mounts':mounts+[copy.deepcopy(mounts[0])],'Other':'preserved'},
+              {'Id':'a'*64,'Mounts':[]}]
+        permuted=copy.deepcopy(rows[::-1]);permuted[1]['Mounts'].reverse()
+        observed=self.observe(rows)
+        self.assertEqual(observed,self.observe(permuted))
+        self.assertEqual(len(observed[1]['Mounts']),3)
+        self.assertEqual(observed[1]['Other'],'preserved')
+        for field,value in [('Source','/owned/different'),('RW',False),('Propagation','rshared')]:
+            changed=copy.deepcopy(rows);changed[0]['Mounts'][0][field]=value
+            self.assertNotEqual(observed,self.observe(changed))
+
+    def test_unknown_mount_collections_refuse_instead_of_inventing_empty_inventory(self):
+        for mounts in (None,{},['unknown']):
+            with self.subTest(mounts=mounts),self.assertRaisesRegex(ValueError,'MOUNT_INVENTORY'):
+                self.observe([{'Id':'a'*64,'Mounts':mounts}])
+
+
 class Reservations(unittest.TestCase):
     def setUp(self):
         f = fixture.WorkerTests(); f.setUp(); self.addCleanup(f.doCleanups)

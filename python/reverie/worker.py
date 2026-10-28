@@ -43,7 +43,7 @@ import uuid
 from urllib.parse import unquote, urlsplit
 
 if __package__:
-    from .worker_gpu import gpu_create_args, validate_gpu_grants
+    from .worker_gpu import gpu_create_args, validate_gpu_grants, validate_gpu_config
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
@@ -71,6 +71,7 @@ else:
     _gpu_spec.loader.exec_module(_gpu_module)
     gpu_create_args = _gpu_module.gpu_create_args
     validate_gpu_grants = _gpu_module.validate_gpu_grants
+    validate_gpu_config = _gpu_module.validate_gpu_config
     _resource_spec = importlib.util.spec_from_file_location('reverie_worker_resources', Path(__file__).with_name('worker_resources.py'))
     _resource_module = importlib.util.module_from_spec(_resource_spec)
     _resource_spec.loader.exec_module(_resource_module)
@@ -169,7 +170,7 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     from reverie.worker_resource_reservations import option as reservation_option
     reservation_option(config)
@@ -187,7 +188,7 @@ def validate_config(config):
             raise ValueError('Invalid private fixed-browser-job binding')
     from reverie.worker_command_telemetry import configuration
     configuration(config)
-    validate_gpu_grants(config.get('gpuGrants', {}))
+    validate_gpu_config(config)
     validate_session_resources(config)
     rootless_docker_enabled(config)
     if 'goalPrivateConfig' in config:

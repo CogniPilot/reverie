@@ -247,6 +247,16 @@ class NativeObserver:
         need(all(type(row) is dict for row in rows) and
              sorted(row.get('Id', '') for row in rows) == sorted(ids),
              'RESERVATION_COMPLETE_INVENTORY')
+        # Docker's inspect Mounts array can be emitted from an unordered map.
+        # Preserve every record/field while comparing the complete set in a
+        # deterministic order; actual source, flags and multiplicity still bind.
+        for row in rows:
+            mounts=row.get('Mounts')
+            need(type(mounts) is list and all(type(m) is dict for m in mounts),
+                 'RESERVATION_MOUNT_INVENTORY')
+            row['Mounts']=sorted(mounts,key=lambda m:json.dumps(m,sort_keys=True,
+                separators=(',',':'),allow_nan=False))
+        rows.sort(key=lambda row:row['Id'])
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
         return rows
 
