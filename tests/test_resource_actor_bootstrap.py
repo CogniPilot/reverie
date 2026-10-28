@@ -13,6 +13,7 @@ from reverie import employee_resource_profiles as E
 from reverie.worker_service import WorkerService
 from reverie.worker_resources import policy_digest
 from tests import test_worker_resource_reservations as F
+from tests.test_resource_actor_install import model_nix_fixture_ancestry
 
 
 class BootstrapTests(unittest.TestCase):
@@ -55,6 +56,10 @@ class BootstrapTests(unittest.TestCase):
         self.bootstrap = B.Bootstrap(self.service, self.operation)
         self.before = self.path.read_bytes()
         self.marker = R.marker(self.config).read_bytes()
+        # This store/fault fixture models only the observed Nix namespace's
+        # fixed root ownership. Private paths and every permission stay real.
+        if os.environ.get('NIX_BUILD_TOP') and Path('/').stat().st_uid == 65534:
+            model_nix_fixture_ancestry(self)
 
     def run_manager(self, args, *, deadline=None):
         self.assertEqual(args[:3], ['systemctl', '--user', 'show'])
@@ -70,6 +75,37 @@ class BootstrapTests(unittest.TestCase):
     def assert_untouched(self):
         self.assertEqual(self.path.read_bytes(), self.before)
         self.assertEqual(R.marker(self.config).read_bytes(), self.marker)
+
+    def test_fixture_ancestry_keeps_real_modes_inodes_and_private_metadata(self):
+        mapped = bool(os.environ.get('NIX_BUILD_TOP')) and Path('/').stat().st_uid == 65534
+        for path in (Path('/'), Path('/tmp'), self.root, self.operation, self.path):
+            actual, modeled = path.stat(), path.lstat()
+            self.assertEqual((modeled.st_dev, modeled.st_ino, modeled.st_gid, modeled.st_mode),
+                             (actual.st_dev, actual.st_ino, actual.st_gid, actual.st_mode))
+            expected_uid = 0 if mapped and path in (Path('/'), Path('/tmp')) and actual.st_uid == 65534 else actual.st_uid
+            self.assertEqual(modeled.st_uid, expected_uid)
+            if path not in (Path('/'), Path('/tmp')):
+                self.assertEqual(modeled, actual)
+
+    def test_fixture_does_not_mask_unsafe_private_parent_or_foreign_root_owner(self):
+        unsafe = self.root / 'unsafe-private-parent'; unsafe.mkdir(mode=0o700)
+        leaf = unsafe / 'leaf'; leaf.touch(mode=0o600)
+        unsafe.chmod(0o770)
+        try:
+            with self.assertRaisesRegex(ValueError, 'ACTOR_BOOTSTRAP_PARENT'):
+                B._parents([leaf])
+        finally:
+            unsafe.chmod(0o700)
+        original = Path.lstat
+        def foreign_root(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if path == Path('/'):
+                values = list(info); values[4] = os.getuid() + 100000
+                return os.stat_result(values)
+            return info
+        with patch.object(Path, 'lstat', foreign_root):
+            with self.assertRaisesRegex(ValueError, 'ACTOR_BOOTSTRAP_PARENT'):
+                B._parents([self.path])
 
     def test_pristine_enable_preserves_original_bytes_ids_stores_and_policy(self):
         stores = {p: p.read_bytes() for p in self.control.glob('*/*') if p.is_file()}

@@ -14,6 +14,7 @@ from reverie import worker as W
 from tests import test_worker_resource_preparation as F
 from tests import test_worker_resource_reservations as RF
 from tests import test_owner_terminal_native as HF
+from tests.test_resource_actor_install import model_nix_fixture_ancestry
 
 
 class CanonicalResourceBinding(unittest.TestCase):
@@ -32,6 +33,11 @@ class CanonicalResourceBinding(unittest.TestCase):
         self.port.start(); self.addCleanup(self.port.stop)
         self.baseline = copy.deepcopy(self.f.config)
         self.binding = B.capture(self.baseline, str(self.path), None)
+        # These store/purpose-boundary controls model a qualified host's fixed
+        # namespace roots. Nix maps / and /tmp to uid65534; keep every actual
+        # private path/mode/inode observation. End this patch before the nested
+        # fixture cleanups (which call patch.stopall) to preserve patch lifetime.
+        model_nix_fixture_ancestry(self)
 
     def current(self):
         return json.loads(self.path.read_text())
@@ -379,3 +385,13 @@ class PurposeRootSeparation(unittest.TestCase):
              self.assertRaisesRegex(RuntimeError,'unknown backing'):
             B.require_disjoint_roots(self.config,self.roots.values())
         self.assertEqual({path:path.read_bytes()for path in before},before)
+
+    def test_modeled_namespace_roots_do_not_hide_writable_private_parent(self):
+        import stat
+        original = stat.S_IMODE(self.hroot.stat().st_mode)
+        try:
+            self.hroot.chmod(0o770)
+            with self.assertRaisesRegex(ValueError, 'RESERVATION_CONTROL_ANCESTOR'):
+                B.require_disjoint_roots(self.config, self.roots.values())
+        finally:
+            self.hroot.chmod(original)
