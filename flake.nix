@@ -118,7 +118,8 @@
           };
           workerBroker = pkgs.writeShellApplication {
             name = "reverie-worker-broker";
-            runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
+            # The fixed owner GPU control validates installed NVIDIA CDI YAML.
+            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client ];
             text = ''exec python3 ${source}/python/reverie/worker.py broker "$@"'';
           };
           employeeLaptopMigrate = pkgs.writeShellApplication {

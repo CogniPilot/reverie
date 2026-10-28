@@ -7181,6 +7181,106 @@ class ReverieChatApp {
     try { await inventory(); } catch (failure) { status.textContent = ''; error.textContent = failure.message; }
   }
 
+  employeeGpuFields(container, employee, dialog) {
+    const group = this.el('fieldset', 'ca-employee-gpu'); group.append(this.el('legend', '', 'Laptop GPU access'));
+    const wrap = this.el('label', 'ca-hint'), enabled = this.el('input'); enabled.type = 'checkbox';
+    enabled.setAttribute('aria-label', `GPU access for ${employee.name}`); enabled.disabled = true; enabled.indeterminate = true;
+    wrap.append(enabled, this.doc.createTextNode(' Request GPU access'));
+    const devices = this.el('select', 'ca-field'); devices.setAttribute('aria-label', `GPU device for ${employee.name}`); devices.disabled = true;
+    const state = this.el('p', 'ca-hint', 'Loading host GPU status…'); state.setAttribute('role', 'status');
+    const facts = this.el('dl', 'ca-gpu-facts');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), { text: 'Save GPU request' });
+    const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), { text: 'Refresh status' });
+    save.disabled = true;
+    group.append(wrap, devices, facts, state, error, save, refresh,
+      this.el('p', 'ca-hint', 'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'));
+    container.append(group);
+    let report = null, busy = false, sequence = 0;
+    const live = () => dialog.isConnected && dialog.open && group.isConnected &&
+      (!dialog._companyOrigin || this.companyPage === dialog._companyOrigin);
+    const controls = () => {
+      enabled.disabled = busy || !report;
+      devices.disabled = busy || !report || !enabled.checked || report.choices.known !== true;
+      save.disabled = busy || !report || enabled.indeterminate || (enabled.checked && (report.choices.known !== true ||
+        !report.choices.devices.some(item => item.deviceUuid === devices.value)));
+      refresh.disabled = busy;
+    };
+    const paint = value => {
+      if (value?.version !== 1 || value.employeeId !== employee.id || value.current?.sessionId !== employee.sessionId ||
+          value.current?.sessionGeneration !== employee.sessionGeneration || !Array.isArray(value.choices?.devices) ||
+          !value.applied || !value.active || !Number.isSafeInteger(value.revision))
+        throw new Error('The laptop binding or GPU status changed. Reopen the profile before requesting a change.');
+      report = value;
+      // An absent request preserves a pre-existing applied grant; it is never
+      // converted into an implicit false write by the ordinary profile form.
+      const choice = report.requested ? report.requested.enabled : report.applied.known ? report.applied.enabled : null;
+      enabled.checked = choice === true; enabled.indeterminate = choice === null;
+      const selected = report.requested?.deviceUuid || report.applied.deviceUuid || '';
+      devices.replaceChildren();
+      const placeholder = this.el('option', '', report.choices.known ? 'Choose a GPU' : 'GPU inventory unavailable'); placeholder.value = ''; devices.append(placeholder);
+      for (const item of report.choices.devices) {
+        const option = this.el('option', '', `${item.model} · ${item.deviceUuid}`); option.value = item.deviceUuid; devices.append(option);
+      }
+      if (selected && !report.choices.devices.some(item => item.deviceUuid === selected)) {
+        const old = this.el('option', '', 'Existing GPU · inventory unavailable'); old.value = selected; devices.append(old);
+      }
+      devices.value = selected || (report.choices.devices.length === 1 ? report.choices.devices[0].deviceUuid : '');
+      facts.replaceChildren();
+      const yesNo = value => value === true ? 'On' : value === false ? 'Off' : 'Unknown';
+      const rows = [['Requested', report.requested ? yesNo(report.requested.enabled) : 'No explicit request'],
+        ['Host policy', report.applied.known ? yesNo(report.applied.enabled) + (report.applied.source === 'legacy-session' ? ' · session override' : '') : 'Unknown'],
+        ['Active device access', report.active.known ? yesNo(report.active.enabled) : 'Unknown']];
+      for (const [label, text] of rows) facts.append(this.el('dt', '', label), this.el('dd', '', text));
+      state.textContent = report.state === 'reconciliation-required'
+        ? 'Host reconciliation is required. Current work has not been restarted; an owner operator must inspect the pending policy.'
+        : report.state === 'pending'
+          ? 'Request saved; host policy is pending. Current work keeps running. A coordinated host update is required before the next normal laptop recreation.'
+          : report.requested && report.applied.known && report.requested.enabled === report.applied.enabled
+            ? report.active.running === false
+              ? 'Host policy applied. Start the laptop normally when ready; no startup was requested.'
+              : !report.active.known
+                ? 'Host policy applied. Active device access is unknown; no work was restarted.'
+                : report.active.enabled !== report.requested.enabled
+                  ? 'Host policy applied. Restart needed to change active device access; current work was not stopped.'
+                  : 'Host policy and active device access match. No laptop restart was requested.'
+            : 'Current host policy shown. No laptop restart was requested.';
+      controls();
+    };
+    const load = async () => {
+      if (!live() || busy) return; const token = ++sequence; busy = true; controls(); error.textContent = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`);
+        if (!live() || token !== sequence) return;
+        if (!result.ok) throw new Error(result.error || 'Host GPU controls are unavailable. Current access is unknown.');
+        paint(result.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) { report = null; enabled.indeterminate = true; state.textContent = 'Host GPU status unavailable; no policy change is confirmed.'; error.textContent = failure.message; }
+      } finally { if (live() && token === sequence) { busy = false; controls(); } }
+    };
+    const submit = async () => {
+      if (!live() || busy || save.disabled || !report) return;
+      const token = ++sequence, baseline = report;
+      const body = { expected: { ...baseline.current, revision: baseline.revision }, enabled: enabled.checked,
+        ...(enabled.checked ? { deviceUuid: devices.value } : {}) };
+      busy = true; controls(); error.textContent = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`, { method: 'POST', body });
+        if (!live() || token !== sequence) return;
+        if (!result.ok) throw new Error(result.error || 'GPU request not confirmed. Refresh status before trying again.');
+        paint(result.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) {
+          report = null; error.textContent = failure.message; state.textContent = 'Request not confirmed. Refresh before trying again; it was not retried automatically.';
+        }
+      } finally { if (live() && token === sequence) { busy = false; controls(); } }
+    };
+    enabled.addEventListener('change', () => { enabled.indeterminate = false; controls(); });
+    devices.addEventListener('change', controls);
+    dialog.addEventListener('close', () => { sequence++; }, { once: true });
+    void load();
+  }
+
   employeePermissionFields(container, employee) {
     const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
     const recovery = this.el('input', '');
@@ -7467,7 +7567,7 @@ class ReverieChatApp {
       }
       form.hidden = key === 'permissions';
       saveHint.textContent = key === 'permissions'
-        ? 'Permissions and session actions apply immediately. Cancel does not undo them.'
+        ? 'Permissions save immediately. GPU requests show their own status. Cancel does not undo saved requests or session actions.'
         : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
       body.scrollTop = 0;
     };
@@ -7499,6 +7599,7 @@ class ReverieChatApp {
       for (const key of ['permissions', 'effectiveBoardPermissions', 'boardPermissionSources', 'onVacation', 'desiredRunning', 'sessionId', 'sessionGeneration'])
         if (Object.hasOwn(current, key)) employee[key] = current[key];
       management.replaceChildren(); this.employeePermissionFields(management, employee);
+      this.employeeGpuFields(management, employee, dialog);
       this.publicationCredentialsFields(management, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
     }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });

@@ -31,6 +31,7 @@ import { loadServiceAuthConfig } from '../service-auth-config.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
+import {EmployeeGpuClient, registerEmployeeGpuRoutes} from '../employee-gpu-access.js';
 import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
@@ -1692,6 +1693,7 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     });
+    registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
     registerCompanyRoutes(
       this.app,
       ctx,

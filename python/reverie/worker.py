@@ -1474,6 +1474,13 @@ class Broker:
                 return
             if kind == b'C':
                 control = json.loads(raw)
+                if isinstance(control, dict) and control.get('action') in ('gpu-access-status', 'gpu-access-request'):
+                    # C is owner-local only; OfficeAPI never forwards these verbs.
+                    # No UID/title/owner flag supplied in JSON is an approval.
+                    from reverie.worker_gpu_access import dispatch as gpu_dispatch, decode_control as gpu_decode
+                    result = gpu_dispatch(self, gpu_decode(raw))
+                    send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
+                    return
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
                     raise ValueError('Invalid office power request')
                 result = self.control(control['action'], control.get('caller'))
@@ -1489,6 +1496,11 @@ class Broker:
                         raise RuntimeError('Restart the host broker after changing worker policy')
                     self.config = updated
             session_id = request['sessionId']
+            # Queued owner GPU intent can be applied only to an already stopped
+            # current seat, before canonical creation admission/preparation.
+            if self.resource_reservations is not None and not request.get('attachOnly'):
+                from reverie.worker_gpu_access import cold_boundary as gpu_cold_boundary
+                gpu_cold_boundary(self, session_id)
             pending_guard = self.resource_admission(session_id)
             pending_guard.__enter__()
             resource_guard = pending_guard
