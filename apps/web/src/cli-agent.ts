@@ -449,6 +449,20 @@ export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Pro
   return 0;
 }
 
+/** Fresh own digest; no hook installation, suppression marker or consumption state. */
+export async function agentChatDigest(deps: AgentDeps): Promise<number> {
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000 });
+  const data = result.json?.data as { version?: unknown; generatedAt?: unknown; text?: unknown; revision?: unknown } | undefined;
+  const age = (deps.now?.() ?? Date.now()) - Number(data?.generatedAt);
+  if (!result.json?.success || data?.version !== 1 || typeof data.text !== 'string' || data.text.length > 12000 ||
+      typeof data.revision !== 'string' || !/^[a-f0-9]{64}$/.test(data.revision) ||
+      typeof data.generatedAt !== 'number' || !Number.isSafeInteger(data.generatedAt) || age < -5000 || age > 30000)
+    return fail(deps, 'Fresh actionable digest unavailable; attention and read state are unchanged');
+  if (deps.json) emitJson(deps, data);
+  else deps.io.out(data.text);
+  return EXIT.ok;
+}
+
 /** Print `data` as JSON (the `--json` path) — always the envelope's `data`, never a reshaped copy. */
 function emitJson(deps: AgentDeps, data: unknown): void {
   deps.io.out(JSON.stringify(data, null, 2));
@@ -2629,6 +2643,12 @@ export function registerAgentCommands(program: Command): Command {
   const chat = agent
     .command('chat')
     .description('Talk in the Reverie chatroom(s) this session belongs to: say, read, who, status, add, new, rooms');
+
+  chat
+    .command('digest')
+    .description('One bounded actionable cross-room delta with source links; no read or handling acknowledgement')
+    .option('--json', 'Machine-readable snapshot')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentChatDigest));
 
   chat
     .command('summary')

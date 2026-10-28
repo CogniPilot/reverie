@@ -7,7 +7,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
-import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueTag, boardScheduleSet, memberRef, wallTime } from '../src/cli-board.js';
+import { Command } from 'commander';
+import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueTag, boardScheduleSet, boardShow, memberRef, registerBoardCommands, wallTime } from '../src/cli-board.js';
 
 const board = {
   rev: 7,
@@ -29,6 +30,7 @@ function fake() {
     request: async (_ctx, options) => {
       calls.push(options);
       if (options.path === '/api/board') return { status: 200, text: '', json: { success: true, data: board } };
+      if (options.path === '/api/board/issues') return { status: 200, text: '', json: { success: true, data: { rev: 7, issues: board.issues } } };
       if (options.path === '/api/v1/chatrooms') {
         return { status: 200, text: '', json: { success: true, data: { rooms: [{ id: '08dfd0fa-1111', name: 'reverie', dm: [] }] } } };
       }
@@ -104,6 +106,73 @@ describe('reverie board', () => {
     writeFileSync(file, JSON.stringify({ today: { date: '2026-10-17' } }));
     expect(await boardScheduleSet(deps, { file, dryRun: true })).toBe(0);
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/board/import', body: { schedule: { today: { date: '2026-10-17' } }, dryRun: true } });
+  });
+
+  it('show without a filter is unchanged: one GET /api/board, the whole view as JSON', async () => {
+    const f = fake();
+    expect(await boardShow(f.deps)).toBe(0);
+    expect(await boardShow(f.deps, {})).toBe(0);
+    expect(f.calls).toEqual([{ method: 'GET', path: '/api/board' }, { method: 'GET', path: '/api/board' }]);
+    expect(JSON.parse(f.out[0])).toEqual(board);
+  });
+
+  it('show with filters asks the server once and never fetches the whole board', async () => {
+    const f = fake();
+    expect(await boardShow(f.deps, { mine: true, owner: ['Kit'], status: ['doing,todo', 'blocked'], tag: ['slam'], fields: 'id,title' })).toBe(0);
+    expect(f.calls).toEqual([{
+      method: 'GET',
+      path: '/api/board/issues',
+      query: { mine: true, owner: 'Kit', status: 'doing,todo,blocked', tag: 'slam', fields: 'id,title' },
+    }]);
+    expect(JSON.parse(f.out[0])).toEqual({ rev: 7, issues: board.issues });
+  });
+
+  it('show refuses a bad status, and --fields without --json, before any request', async () => {
+    const f = fake();
+    expect(await boardShow(f.deps, { status: ['doing', 'finished'] })).not.toBe(0);
+    f.deps.json = false;
+    expect(await boardShow(f.deps, { mine: true, fields: 'id' })).not.toBe(0);
+    expect(f.calls).toEqual([]);
+    expect(f.out.join('\n')).toContain('--json');
+  });
+
+  it('an explicitly empty --fields is refused before any request, with or without --json; never the whole board', async () => {
+    for (const json of [true, false]) {
+      for (const fields of ['', ' ', ',', ' , ']) {
+        for (const options of [{ fields }, { mine: true, fields }]) {
+          const f = fake();
+          f.deps.json = json;
+          expect(await boardShow(f.deps, options), JSON.stringify({ json, options })).not.toBe(0);
+          expect(f.calls, JSON.stringify({ json, options })).toEqual([]);
+          expect(f.out.join('\n')).toContain('--fields needs at least one field name');
+        }
+      }
+    }
+    // Absent is not empty: the unfiltered path is unchanged.
+    const f = fake();
+    expect(await boardShow(f.deps, { fields: undefined })).toBe(0);
+    expect(f.calls).toEqual([{ method: 'GET', path: '/api/board' }]);
+  });
+
+  it('the real `board show` parser hands an empty --fields through as given, not as absent', () => {
+    // A fresh program per parse: commander keeps option values between parses of one instance.
+    const parsed = (args: string[]) => {
+      const program = new Command().exitOverride();
+      const show = registerBoardCommands(program).commands.find((c) => c.name() === 'show')!;
+      let seen: Record<string, unknown> | undefined;
+      show.action((o: Record<string, unknown>) => { seen = o; });
+      program.parse(['board', 'show', ...args], { from: 'user' });
+      return seen;
+    };
+    expect(parsed(['--fields', '', '--json'])).toMatchObject({ fields: '', json: true });
+    expect(parsed([])?.fields).toBeUndefined();
+  });
+
+  it('filtered text output is one line per matching issue', async () => {
+    const f = fake();
+    f.deps.json = false;
+    expect(await boardShow(f.deps, { tag: ['a'] })).toBe(0);
+    expect(f.out.map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))).toEqual(['Board rev 7 · 1 issue', '  i-1  todo  t  · -  [a]']);
   });
 
   it('helpers', () => {

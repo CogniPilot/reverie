@@ -36,6 +36,17 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
     return { success: true, data: service.turnSummary(self) };
   });
 
+  app.get('/api/chatrooms/digest', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (!self || req.headers['x-reverie-parent-session'] !== self ||
+        req.headers['x-reverie-service-token'] !== undefined)
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    if (Object.keys(req.query as object).length)
+      return reply.code(400).send({ success: false, error: 'Digest takes no target or query parameters' });
+    reply.header('Cache-Control', 'no-store');
+    return { success: true, data: service.actionableDigest(self) };
+  });
+
   app.post('/api/chatrooms/notices/resolve', async (req, reply) => {
     const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
     if (

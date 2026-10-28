@@ -70,7 +70,12 @@ class FakeNative:
 
 class GPUServiceUpgradeTests(unittest.TestCase):
     def setUp(self):
-        f = service_fixture.WorkerServiceTests(); f.setUp(); self.addCleanup(f.doCleanups)
+        # Generation checks every unit-directory ancestor. Nix may place its
+        # default TMPDIR under a writable, non-sticky build ancestor; use the
+        # standard sticky temporary root without relaxing production checks.
+        with patch.object(service_fixture.fixture.tempfile, 'tempdir', '/tmp'):
+            f = service_fixture.WorkerServiceTests(); f.setUp()
+        self.addCleanup(f.doCleanups)
         self.root, self.config, self.service = f.root, f.config, f.service
         self.config.update(poolMemoryMiB=8192)
         self.service.gcroot.parent.mkdir(mode=0o700, parents=True)

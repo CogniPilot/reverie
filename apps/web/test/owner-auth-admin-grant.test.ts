@@ -95,6 +95,7 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
       ...ADMIN_ROUTES,
       ...OWNER_ONLY.map(([method, url]) => `${method} ${url}`),
       'GET /api/board',
+      'GET /api/board/issues',
       'GET /api/publication/credentials/status',
       'GET /api/sessions/:id',
       'POST /api/board/issues',
@@ -113,7 +114,7 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
   });
 
   it('the board and own credential status are agent routes: any agent reads and moves cards, an unsigned caller does not', async () => {
-    for (const [method, url] of [['GET', '/api/board'], ['GET', '/api/publication/credentials/status'], ['POST', '/api/board/issues'], ['PATCH', '/api/board/issues/7']]) {
+    for (const [method, url] of [['GET', '/api/board'], ['GET', '/api/board/issues'], ['GET', '/api/publication/credentials/status'], ['POST', '/api/board/issues'], ['PATCH', '/api/board/issues/7']]) {
       expect((await call(method, url, STRANGER)).statusCode, url).toBe(200);
       expect((await call(method, url)).statusCode, url).toBe(401);
     }

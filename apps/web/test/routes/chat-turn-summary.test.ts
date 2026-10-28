@@ -24,6 +24,7 @@ async function fixture(owner?: string, database = false) {
     employeeOf: (id) => 'employee-' + id,
     getSession: (id) => context.sessions.get(id),
     now: () => now,
+    timeZone: () => 'America/New_York',
     broadcast: () => {},
   });
   const { app, ctx } = await createRouteTestHarness(
@@ -498,4 +499,39 @@ it('legacy recent-only history is explicit and cannot claim complete durable cov
     expect(f.service.turnSummary(A).text).toContain('Older requests are not resolved');
     expect((await f.app.inject({ url: '/api/chatrooms/notices/history?roomId=' + f.room.id, headers })).statusCode).toBe(503);
   } finally { await f.app.close(); }
+});
+
+
+it('digest rechecks exact caller and preserves read, delivery and unresolved owner attention', async () => {
+  const f = await fixture('alice');
+  try {
+    const owner = f.emit({ from: { kind: 'user', name: 'Owner', mark: 'owner_typed' }, text: '@Reviewer unresolved request' });
+    f.service.markSeen(A, f.room.id, owner.id);
+    const before = { room: JSON.stringify(f.room), seen: f.service.lastSeen(A, f.room.id), delivery: f.service.deliveryStatus(A) };
+    const mark = vi.spyOn(f.service, 'markSeen');
+    const resolve = vi.spyOn(f.service, 'resolveNotice');
+    const summary = vi.spyOn(f.service, 'turnSummary');
+    for (const caller of [{}, { 'x-reverie-parent-session': A.slice(0, 8) }, { ...headers, 'x-reverie-service-token': 'fixture' }])
+      expect((await f.app.inject({ url: '/api/chatrooms/digest', headers: caller })).statusCode).toBe(403);
+    expect((await f.app.inject({ url: '/api/chatrooms/digest?target=' + B, headers })).statusCode).toBe(400);
+    for (let i = 0; i < 2; i++) {
+      const response = await f.app.inject({ url: '/api/chatrooms/digest', headers });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      const data = response.json().data;
+      expect(data.timeZone).toBe('America/New_York');
+      expect(data.items[0]).toMatchObject({ source: { messageId: owner.id }, attention: 'pending' });
+      expect(data.historyCoverage.state).toBe('recent-only');
+    }
+    expect(summary).toHaveBeenCalledTimes(2);
+    expect(summary.mock.calls.every(call => call.length === 1)).toBe(true);
+    expect(mark).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect({ room: JSON.stringify(f.room), seen: f.service.lastSeen(A, f.room.id), delivery: f.service.deliveryStatus(A) }).toEqual(before);
+    f.ctx.sessions.get(A)!.owner = 'bob';
+    expect((await f.app.inject({ url: '/api/chatrooms/digest', headers })).statusCode).toBe(403);
+  } finally {
+    vi.restoreAllMocks();
+    await f.app.close();
+  }
 });

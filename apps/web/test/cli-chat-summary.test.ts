@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentChatSummary, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
+import { agentChatSummary, agentChatDigest, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 function client(data: unknown, success = true) {
   const out: string[] = [],
     err: string[] = [],
@@ -15,6 +15,30 @@ function client(data: unknown, success = true) {
   };
   return { deps, out, err, calls };
 }
+describe('fresh read-only digest client', () => {
+  const now = Date.UTC(2026, 9, 28, 4);
+  const data = { version: 1, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
+  it('uses one bounded GET without paging, ACKs or hook output', async () => {
+    const c = client(data);
+    c.deps.now = () => now;
+    expect(await agentChatDigest(c.deps)).toBe(0);
+    expect(c.calls).toEqual([{ method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000 }]);
+    expect(c.out).toEqual(['quoted digest']);
+    c.deps.json = true;
+    expect(await agentChatDigest(c.deps)).toBe(0);
+    expect(JSON.parse(c.out[1])).toEqual(data);
+  });
+  it.each([undefined, { ...data, generatedAt: now - 30001 }, { ...data, generatedAt: now + 5001 },
+    { ...data, generatedAt: null }, { ...data, text: 'x'.repeat(12001) }, { ...data, revision: 'fake' }])(
+    'refuses stale or malformed context without an empty-attention claim: %s', async input => {
+      const c = client(input);
+      c.deps.now = () => now;
+      expect(await agentChatDigest(c.deps)).not.toBe(0);
+      expect(c.out).toEqual([]);
+      expect(c.calls).toHaveLength(1);
+    }
+  );
+});
 describe('read-only summary client', () => {
   it('fetches own bounded summary and prints model context without API envelope', async () => {
     const c = client({ text: 'pending excerpt', total: 1 });

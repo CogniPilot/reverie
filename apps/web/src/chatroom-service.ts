@@ -1,3 +1,4 @@
+import { buildChatDigest } from './chatroom-digest.js';
 /**
  * @fileoverview Chatroom service: store + persistence + pane delivery + SSE.
  *
@@ -318,6 +319,14 @@ export class ChatroomService {
   }
 
   displayTimeZone(owner?: string): string { return displayTimeZone(this.deps.timeZone?.(owner)); }
+
+  /** One fresh actionable view; producer eligibility, proof and read cursors remain authoritative. */
+  actionableDigest(sessionId: string) {
+    const session = this.deps.getSession(sessionId);
+    if (!session || session.pid === null) throw new ChatroomError('A live own session is required', 'NOT_FOUND');
+    return buildChatDigest(this.turnSummary(sessionId), this.deps.now?.() ?? Date.now(),
+      this.deps.timeZone?.(session.owner) ?? 'UTC');
+  }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
   turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } }): TurnSummary {

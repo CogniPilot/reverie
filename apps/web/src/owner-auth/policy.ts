@@ -112,6 +112,7 @@ const AGENT_ROUTES = new Set([
   'POST /api/experts/:id/retire',
   // The board: every agent's `reverie board` reads and moves cards.
   'GET /api/board',
+  'GET /api/board/issues',
   'GET /api/publication/credentials',
   'GET /api/publication/credentials/status',
   'POST /api/publication/credentials/:id/material',

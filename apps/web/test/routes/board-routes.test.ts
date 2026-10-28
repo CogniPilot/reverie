@@ -479,6 +479,147 @@ describe('board routes', () => {
     expect(audit).toEqual([]);
   });
 
+  describe('GET /api/board/issues', () => {
+    const issue = (id: string, fields: Partial<Issue>): Issue => ({ id, title: id, status: 'todo', tags: [], links: [], scale: 'day', createdAt: 1, updatedAt: 1, ...fields });
+    const issues = [
+      issue('b-doing', { owner: 'e-builder', status: 'doing', tags: ['slam'], start: NOW, end: NOW + 3600000 }),
+      issue('b-blocked', { owner: 'e-builder', status: 'blocked', reason: 'waiting', tags: ['web'] }),
+      issue('b-label', { ownerLabel: ' builder ', tags: ['slam', 'web'] }),
+      issue('r-doing', { owner: 'e-reviewer', status: 'doing', tags: ['web'] }),
+      issue('r-done', { owner: 'e-reviewer', status: 'done', doneAt: NOW }),
+      issue('gone', { owner: 'e-retired', status: 'todo' }),
+      issue('triage', { status: 'triage', tags: ['slam'] }),
+    ];
+    const get = (query: string, session?: string) => app.inject({ method: 'GET', url: `/api/board/issues${query}`, headers: as(session) });
+    const full = async (session?: string) => (await app.inject({ method: 'GET', url: '/api/board', headers: as(session) })).json().data as BoardView;
+    const ids = (res: { json: () => { data: { issues: { id: string }[] } } }) => res.json().data.issues.map((i) => i.id);
+    beforeEach(async () => {
+      await store.update({}, (state) => { state.issues = structuredClone(issues); });
+    });
+
+    it('mine is the caller\'s own employee, resolved like the board display, and equals the full snapshot filtered', async () => {
+      const res = await get('?mine=true', BUILDER);
+      expect(res.statusCode).toBe(200);
+      const view = await full(BUILDER);
+      const expected = view.issues.filter((i) => view.ownerIds[i.id] === 'e-builder');
+      expect(res.json().data).toEqual({ rev: view.rev, issues: expected });
+      expect(ids(res)).toEqual(['b-doing', 'b-blocked', 'b-label']);
+      expect(ids(await get('?mine=true', COORD))).toEqual(['r-doing', 'r-done']);
+    });
+
+    it('mine needs an employee session; the owner and a non-employee session are refused, not shown everything', async () => {
+      for (const session of [undefined, STRANGER]) {
+        const res = await get('?mine=true', session);
+        expect(res.statusCode).toBe(400);
+        expect(res.json()).toEqual({ success: false, error: 'mine needs an employee agent session' });
+      }
+      expect(ids(await get('?mine=false', STRANGER))).toEqual(issues.map((i) => i.id));
+    });
+
+    it('callers are authorized exactly as GET /api/board: a prefix or unknown session is refused', async () => {
+      for (const session of [BUILDER.slice(0, 8), '99999999-0000-4000-8000-000000000000']) {
+        expect((await get('?status=doing', session)).statusCode).toBe(403);
+        expect((await app.inject({ method: 'GET', url: '/api/board', headers: as(session) })).statusCode).toBe(403);
+      }
+    });
+
+    it('owner, status and tag compose: values within a filter are alternatives, filters all match', async () => {
+      const view = await full(COORD);
+      const cases: [string, (i: Issue) => boolean][] = [
+        ['?owner=Reviewer', (i) => view.ownerIds[i.id] === 'e-reviewer'],
+        ['?owner=e-builder&status=doing', (i) => view.ownerIds[i.id] === 'e-builder' && i.status === 'doing'],
+        ['?status=doing,blocked', (i) => ['doing', 'blocked'].includes(i.status)],
+        ['?status=doing&status=todo', (i) => ['doing', 'todo'].includes(i.status)],
+        ['?tag=web', (i) => i.tags.includes('web')],
+        ['?tag=slam,web', (i) => i.tags.includes('slam') || i.tags.includes('web')],
+        ['?tag=slam,web&status=todo', (i) => (i.tags.includes('slam') || i.tags.includes('web')) && i.status === 'todo'],
+        ['?owner=e-retired', (i) => i.owner === 'e-retired'],
+      ];
+      for (const [query, keep] of cases) {
+        const res = await get(query, COORD);
+        expect(res.statusCode, query).toBe(200);
+        expect(res.json().data.issues, query).toEqual(view.issues.filter(keep));
+      }
+    });
+
+    it('mixed owners: mine and owner together are one owner set', async () => {
+      expect(ids(await get('?mine=true&owner=Reviewer', BUILDER))).toEqual(['b-doing', 'b-blocked', 'b-label', 'r-doing', 'r-done']);
+      expect(ids(await get('?mine=true&owner=Reviewer&status=doing', BUILDER))).toEqual(['b-doing', 'r-doing']);
+    });
+
+    it('a filter that matches nothing is an empty list with the current rev', async () => {
+      for (const query of ['?status=wontdo', '?owner=Reviewer&tag=slam', '?tag=none']) {
+        const res = await get(query, BUILDER);
+        expect(res.statusCode, query).toBe(200);
+        expect(res.json().data, query).toEqual({ rev: store.snapshot().rev, issues: [] });
+      }
+    });
+
+    it('fields project each issue to exactly the selected fields, in order, leaving absent optional fields absent', async () => {
+      const view = await full(BUILDER);
+      const res = await get('?mine=true&fields=id,status,end,reason', BUILDER);
+      expect(res.statusCode).toBe(200);
+      const expected = view.issues.filter((i) => view.ownerIds[i.id] === 'e-builder').map((i) => {
+        const out: Record<string, unknown> = { id: i.id, status: i.status };
+        if (i.end !== undefined) out.end = i.end;
+        if (i.reason !== undefined) out.reason = i.reason;
+        return out;
+      });
+      expect(res.json().data.issues).toEqual(expected);
+      expect(Object.keys(res.json().data.issues[0])).toEqual(['id', 'status', 'end']);
+      expect(res.json().data.issues[1]).toEqual({ id: 'b-blocked', status: 'blocked', reason: 'waiting' });
+    });
+
+    it('rejects invalid fields, statuses, owners, empty lists and unknown parameters without data', async () => {
+      for (const query of [
+        '?fields=id,password', '?fields=', '?fields=,', '?status=finished', '?status=', '?owner=nobody', '?owner=',
+        '?tag=', '?mine=yes', '?limit=5', '?status=doing&unknown=1',
+      ]) {
+        const res = await get(query, BUILDER);
+        expect(res.statusCode, query).toBe(400);
+        expect(res.json().success, query).toBe(false);
+        expect(res.json().data, query).toBeUndefined();
+      }
+    });
+
+    it('an ambiguous owner name is refused, never guessed', async () => {
+      const own = Fastify();
+      registerBoardRoutes(own, { sessions: new Map([[BUILDER, { id: BUILDER, pid: 1 }]]) } as never, {
+        store,
+        company: () => ({ employees: [{ id: 'e-1', name: 'Sam', sessionId: BUILDER }, { id: 'e-2', name: 'sam' }], settings: { timeZone: 'UTC', ownerName: 'Owner' } }),
+        rooms: () => [],
+        audit: async () => {},
+        now: () => NOW,
+      });
+      await own.ready();
+      const res = await own.inject({ method: 'GET', url: '/api/board/issues?owner=Sam', headers: as(BUILDER) });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain('names 2 members');
+      expect((await own.inject({ method: 'GET', url: '/api/board/issues?owner=e-2', headers: as(BUILDER) })).statusCode).toBe(200);
+      await own.close();
+    });
+
+    it('reads without writing: no audit line, no board change, no event', async () => {
+      const before = JSON.stringify(store.snapshot());
+      const eventsBefore = events.length;
+      await get('?mine=true&fields=id', BUILDER);
+      await get('?fields=bogus', BUILDER);
+      expect(JSON.stringify(store.snapshot())).toBe(before);
+      expect(audit).toEqual([]);
+      expect(events.length).toBe(eventsBefore);
+    });
+
+    it('a filtered response is a fraction of the full board response it replaces', async () => {
+      const whole = await app.inject({ method: 'GET', url: '/api/board', headers: as(BUILDER) });
+      const mine = await get('?mine=true', BUILDER);
+      const narrow = await get('?mine=true&status=doing&fields=id,title,status,end', BUILDER);
+      const bytes = [whole, mine, narrow].map((r) => Buffer.byteLength(r.body));
+      expect(bytes[1]).toBeLessThan(bytes[0]);
+      expect(bytes[2]).toBeLessThan(bytes[1]);
+      expect(narrow.json().data.issues).toEqual([{ id: 'b-doing', title: 'b-doing', status: 'doing', end: NOW + 3600000 }]);
+    });
+  });
+
   it('imports schedule-data.json and content.json idempotently, keeping unmatched names', async () => {
     const schedule = {
       today: { date: '2026-10-17', rows: [{ who: 'Builder', blocks: [[13.0, 14.0, 'Smoke test', 'done'], [14.0, 15.0, 'Suite', 'now']] }], marks: [[17.08, 'check-ins']] },

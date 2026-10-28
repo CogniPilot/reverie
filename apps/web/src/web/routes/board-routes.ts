@@ -122,6 +122,32 @@ const AgentInput = z
   .strict();
 const MarksInput = z.object({ marks: z.array(MarkSchema).max(100) }).merge(IfRev).strict();
 const ImportInput = z.object({ content: z.unknown().optional(), schedule: z.unknown().optional(), dryRun: z.boolean().optional() }).merge(IfRev).strict();
+const ISSUE_FIELDS = Object.keys(IssueSchema.shape) as (keyof Issue)[];
+/** A comma-separated query value (repeats are joined); an empty list is an error, never "match everything". */
+const csv = <T extends string>(item: z.ZodType<T, string>) =>
+  z.preprocess(v => (Array.isArray(v) ? v.join(',') : v), z.string().max(2000))
+    .transform(s => [...new Set(s.split(',').map(x => x.trim()).filter(Boolean))])
+    .refine(list => list.length > 0, 'needs at least one value')
+    .pipe(z.array(item));
+const IssueQuery = z.object({
+  mine: z.enum(['true', 'false']).transform(v => v === 'true').optional(),
+  owner: csv(z.string().max(100)).optional(),
+  status: csv(z.enum(ISSUE_STATUSES)).optional(),
+  tag: csv(z.string().max(40)).optional(),
+  fields: csv(z.enum(ISSUE_FIELDS as [keyof Issue, ...(keyof Issue)[]])).optional(),
+}).strict();
+
+/**
+ * An owner filter, resolved like the board's display owner (boardOwnerIds): an employee id, a unique employee name, or
+ * an owner some issue still names that matches no employee. An unknown or ambiguous name is an error, never a guess.
+ */
+function ownerFilter(employees: readonly Pick<Employee, 'id' | 'name'>[], issues: readonly Issue[], ref: string): string | { error: string } {
+  if (employees.some(e => e.id === ref)) return ref;
+  const hits = employees.filter(e => e.name.trim().toLowerCase() === ref.trim().toLowerCase());
+  if (hits.length === 1) return hits[0].id;
+  if (!hits.length && issues.some(i => (i.owner ?? i.ownerLabel) === ref)) return ref;
+  return { error: hits.length ? `"${ref}" names ${hits.length} members; use the id` : `no member is called "${ref}"` };
+}
 
 type Caller =
   | { kind: 'owner'; by: string; owner: string | undefined }
@@ -381,6 +407,38 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         pace: boardPace(state, at, ownerIds),
       };
       return view;
+    })
+  );
+  // The same issues GET /api/board shows this caller, narrowed and projected here so a client never filters the whole
+  // board itself. Filters only narrow; `mine` is the caller's own employee id, never a query value.
+  app.get('/api/board/issues', async (req, reply) =>
+    run(reply, async () => {
+      const c = caller(req);
+      const q = parse(IssueQuery, req.query);
+      const state = deps.store.snapshot();
+      const employees = deps.company(c.owner).employees;
+      const ownerIds = boardOwnerIds(state.issues, employees);
+      const ownerOf = (issue: Issue) => (Object.hasOwn(ownerIds, issue.id) ? ownerIds[issue.id] : issue.owner ?? issue.ownerLabel);
+      const wanted = new Set<string>();
+      if (q.mine) {
+        if (c.kind !== 'agent' || !c.memberId) throw new BoardError('mine needs an employee agent session', 400);
+        wanted.add(c.memberId);
+      }
+      for (const ref of q.owner ?? []) {
+        const owner = ownerFilter(employees, state.issues, ref);
+        if (typeof owner !== 'string') throw new BoardError(`owner: ${owner.error}`, 400);
+        wanted.add(owner);
+      }
+      // mine and owner together are one owner set: --mine --owner Kit is "mine or Kit's".
+      const issues = state.issues.filter(issue =>
+        (!wanted.size || wanted.has(ownerOf(issue) ?? '')) &&
+        (!q.status || q.status.includes(issue.status)) &&
+        (!q.tag || q.tag.some(tag => issue.tags.includes(tag))));
+      const fields = q.fields;
+      return {
+        rev: state.rev,
+        issues: fields ? issues.map(issue => Object.fromEntries(fields.flatMap(f => (f in issue ? [[f, issue[f]]] : [])))) : issues,
+      };
     })
   );
 
