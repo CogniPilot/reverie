@@ -614,7 +614,7 @@ Object.assign(ReverieApp.prototype, {
       setTimeout(() => (copy.textContent = 'Copy'), 1500);
     };
     const pre = this._chatEl('pre', 'chatroom-code');
-    const source = this._chatEl('code', '', code);
+    const source = globalThis.ReverieChatCode?.highlight(code, language) || this._chatEl('code', '', code);
     if (typeof language === 'string' && /^[a-z0-9_+-]{1,40}$/.test(language)) source.classList.add(`language-${language}`);
     pre.append(source);
     wrap.append(copy, pre);

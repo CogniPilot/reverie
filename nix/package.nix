@@ -95,7 +95,7 @@ let
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
-        test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
+        test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/chat-code-highlighting.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
       npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts test/resource-history.test.ts
       npm test -- test/browser-job-evidence.test.ts

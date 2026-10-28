@@ -9,7 +9,10 @@ const read = (name: string) => readFileSync(resolve(PUBLIC, name), 'utf8');
 const harness = readFileSync(resolve(import.meta.dirname, 'helpers/chat-app-harness.mjs'), 'utf8');
 const appStub = harness.match(/window\.eval\(`([\s\S]*?)`\);/)![1];
 const A = '00000026-002d-4000-8000-00000000003c';
-const raw = 'Discuss $E=mc^2$\n$$\\int_0^1 x^2 \\, dx = \\frac{1}{3}$$';
+const raw =
+  'Discuss $E=mc^2$\n$$\\int_0^1 x^2 \\, dx = \\frac{1}{3}$$\n' +
+  '```python\ndef hello():\n    return "hello"\n```\n' +
+  '```modelica\nmodel Ball\n  Real x;\nend Ball;\n```';
 
 describe('optional math in the actual chat shell, Chromium', () => {
   let browser: Browser, page: Page;
@@ -75,11 +78,20 @@ describe('optional math in the actual chat shell, Chromium', () => {
       ${appStub}
     `,
     });
-    for (const file of ['chatroom-ui.js', 'chat-media.js']) await page.addScriptTag({ content: read(file) });
+    for (const file of [
+      'chatroom-ui.js',
+      'vendor/dompurify.min.js',
+      'sanitize-html.js',
+      'vendor/highlight-11.12.0.min.js',
+      'modelica-highlight.js',
+      'chat-code-highlighting.js',
+      'chat-media.js',
+    ])
+      await page.addScriptTag({ content: read(file) });
     await page.addScriptTag({
       content: `window.app = new ReverieApp(); window.app.sessions.set('${A}', {id:'${A}', name:'Maple', mode:'claude'});`,
     });
-    for (const file of ['chat-app.js', 'vendor/dompurify.min.js', 'chat-plugins.js', 'chat-math-plugin.js'])
+    for (const file of ['chat-app.js', 'chat-plugins.js', 'chat-math-plugin.js'])
       await page.addScriptTag({ content: read(file) });
     await page.waitForSelector('.ca-msg');
   });
@@ -91,6 +103,8 @@ describe('optional math in the actual chat shell, Chromium', () => {
   }
 
   it('enables through shared settings, toggles original source, edits a draft and sends the exact math source', async () => {
+    expect(await page.locator('code.language-python .hljs-keyword').count()).toBeGreaterThan(0);
+    expect(await page.locator('code.language-modelica .hljs-type').count()).toBeGreaterThan(0);
     expect(assets).toEqual([]);
     expect(await page.locator('.chat-math-toolbar').count()).toBe(0);
     await setEnabled(true);
@@ -144,5 +158,7 @@ describe('optional math in the actual chat shell, Chromium', () => {
     expect(await input.inputValue()).toBe(hostile);
     expect(external).toEqual([]);
     expect(errors).toEqual([]);
+    if (process.env.CHAT_CODE_MOBILE_SCREENSHOT)
+      await page.screenshot({ path: process.env.CHAT_CODE_MOBILE_SCREENSHOT });
   });
 });

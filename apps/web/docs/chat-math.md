@@ -21,6 +21,11 @@ mathematical LaTeX; this is not a full document or PDF editor. Math uses dollar
 delimiters, with at most 32 formulas and 4,096 characters per formula in a text run.
 Disabling the plugin restores ordinary chat and keeps unsent text unchanged.
 
+Label fenced code with `python` / `py` or `modelica` / `mo` to show syntax
+colors. Highlighting uses bundled assets and works offline. Copy preserves the
+exact source; language assistance still edits a separate scratch copy. Unknown,
+unlabelled and oversized snippets remain plain text.
+
 The parser, renderer safety settings and generated HTML sanitizer reuse Mira's
 reviewed `chat-rendering-final-operator-composition-r1` packet. This plugin adds
 an opt-in lifecycle and source/edit/preview controls without enabling that packet's
