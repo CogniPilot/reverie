@@ -80,10 +80,12 @@ export interface SessionWriteOptions {
    * `'person'`: the text is a person's (remote wake, an approval's text answer), so a leading "!" is left for them.
    */
   opencodeGuard?: boolean | 'person';
+  /** Automated chat must leave an occupied/unknown Codex composer untouched. */
+  requireEmptyComposer?: boolean;
   /**
-   * Told once how a write that carried Enter ended (session-submit-verifier.ts): `submitted` when the composer was seen without
-   * it, `stranded` when it was still there after the whole schedule, `unverified` when nothing could be read (no composer glyph,
-   * no pane, a newer write). Chat delivery counts a message as seen only on `submitted`.
+   * Told once how a write that carried Enter ended (session-submit-verifier.ts): `submitted` when the composer was seen empty,
+   * `stranded` when it was still there after the whole schedule, `unverified` for unreadable/different content or a newer write.
+   * Chat delivery counts a message as seen only on `submitted`.
    */
   onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void;
 }

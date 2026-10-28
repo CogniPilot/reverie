@@ -11,10 +11,10 @@
  * the input route on 2026-09-19: an Enter at 28 s stranded, one at 51 s submitted.
  *
  * The rule: after a write that carried a carriage return, read the pane on a short
- * schedule; while the LAST composer line (the CLI's own prompt glyph) still holds the
- * head of what was sent, send Enter again. An empty composer ends it, and so does a
- * composer holding anything else, because that text is the user's or the CLI's, never
- * ours. A pane with no composer line at all (a shell, a CLI whose glyph is not
+ * schedule; only while the complete LAST composer (including wrapped rows and paste
+ * chips) represents what was sent, send Enter again. Only an empty composer confirms
+ * submission. Different or incomplete content stays unverified and is never submitted
+ * for the user. A pane with no composer line at all (a shell, a CLI whose glyph is not
  * declared, a direct-PTY session with no pane to read) does nothing: this runs for
  * EVERY programmatic sender, so a blind Enter here could confirm a dialog nobody asked
  * about. The composer is the last glyph line on purpose: Claude Code echoes a submitted
@@ -36,64 +36,134 @@ export const SUBMIT_VERIFY_DELAYS_MS: readonly number[] = [
   2_000, 3_000, 5_000, 5_000, 5_000, 10_000, 10_000, 10_000, 10_000,
 ];
 
-/** How many leading characters of the prompt have to match, whitespace removed. */
-const PROMPT_HEAD_CHARS = 24;
-
 /**
  * A long paste that the CLI folded into a placeholder instead of showing its text. Codex draws
  * `[Pasted Content 1801 chars]`, so the composer never starts with the prompt's head and the
  * check used to read it as somebody else's text and stop, leaving a room delivery unsent for
- * hours (2026-10-16). A placeholder counts as ours only when its character count is the length
- * of what we just typed (a few characters of slack for the line ending): a person's own paste
- * of another size is still left alone.
+ * hours (2026-10-16). All chips and visible text must account for the complete prompt;
+ * matching one chip beside another draft does not establish ownership. An entirely opaque
+ * chip additionally requires an observed empty composer before this write.
  */
 const PASTE_PLACEHOLDER = /\[Pasted (?:Content|text)[^\]]*?(\d+) chars\]/gi;
 const PASTE_SLACK_CHARS = 4;
 /** After the last Enter of the schedule, how long to wait before the final look. */
 const FINAL_LOOK_MS = 2_000;
 
-/** Whether `composer` (one line, glyph removed) holds a paste placeholder the size of `prompt`. */
-export function placeholderHoldsPrompt(composer: string, prompt: string): boolean {
-  const length = prompt.length;
-  let total = 0, count = 0;
-  for (const m of composer.matchAll(PASTE_PLACEHOLDER)) {
-    total += Number(m[1]); count++;
-    if (Math.abs(Number(m[1]) - length) <= PASTE_SLACK_CHARS) return true;
+/** The complete last composer, including wrapped text, ending before the CLI's chrome. */
+export function composerBody(screen: string, glyph: string): string | undefined {
+  if (!glyph || screen.length > 1_048_576) return undefined;
+  const lines = stripAnsi(screen).split('\n');
+  const codexFooter = /^(?:GPT|gpt)-\d[\w.-]*(?:\s+[\w()-]+)?\s+·\s+(?:\/|~\/)/u;
+  const footers = glyph === '›' ? lines.flatMap((line, i) => codexFooter.test(line.trim()) ? [i] : []) : [];
+  // Codex draft rows may contain blanks, rulers, box drawing and literal glyphs. Only
+  // its actual model/path footer bounds the composer; absent/ambiguous chrome refuses.
+  if (glyph === '›' && footers.length !== 1) return undefined;
+  const end = glyph === '›' ? footers[0] : lines.length;
+  let last = -1;
+  for (let i = 0; i < end; i++) {
+    // Codex's real prompt is at column zero. An indented literal glyph is draft content.
+    if ((glyph === '›' ? lines[i] : lines[i].trimStart()).startsWith(glyph)) {
+      if (glyph === '›' && last >= 0 && !lines.slice(last + 1, i).some(line =>
+        /^[•●✻]/u.test(line)
+        )) return undefined;
+      last = i;
+    }
   }
-  return count > 1 && Math.abs(total - length) <= PASTE_SLACK_CHARS;
+  if (last < 0) return undefined;
+  const body = [lines[last].trimStart().slice(glyph.length).trimStart()];
+  for (const line of lines.slice(last + 1, end)) {
+    const text = line.trim();
+    if (glyph !== '›' && (/^[─━═╭╮╰╯]/u.test(line) || /^⏵⏵/u.test(text))) break;
+    body.push(line);
+  }
+  return body.join('\n').trim();
 }
 
-const compact = (s: string): string => s.replace(/\s+/g, '');
+export function composerIsEmpty(screen: string | null | undefined, glyph: string): boolean {
+  return screen != null && composerBody(screen, glyph) === '';
+}
+
+/** Match every visible segment and every opaque span, in order; never just one matching chip. */
+export function placeholderHoldsPrompt(composer: string, prompt: string, allowOpaque = false): boolean {
+  return !!composer.match(PASTE_PLACEHOLDER) && renderedHoldsPrompt(composer, prompt, allowOpaque);
+}
+
+function renderedHoldsPrompt(composer: string, prompt: string, allowOpaque = false): boolean {
+  const chips = [...composer.matchAll(PASTE_PLACEHOLDER)];
+  if (chips.length > 64 || prompt.length > 131_072) return false;
+  const literal = composer.replace(PASTE_PLACEHOLDER, '');
+  // A count alone cannot distinguish a person's paste. Only a write observed from an empty
+  // composer may use that evidence; mixed pastes additionally bind all their visible text.
+  if (!literal.trim() && !allowOpaque) return false;
+  const pieces: Array<string | number> = [];
+  let offset = 0;
+  for (const chip of chips) {
+    pieces.push(composer.slice(offset, chip.index), Number(chip[1]));
+    offset = chip.index! + chip[0].length;
+  }
+  pieces.push(composer.slice(offset));
+  const match = (chars: string[]): boolean => {
+    let positions = new Set([0]);
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i];
+      const next = new Set<number>();
+      for (const start of positions) {
+        if (typeof piece === 'number') {
+          if (!Number.isSafeInteger(piece) || piece <= 0) continue;
+          const end = start + piece;
+          if (end <= chars.length) next.add(end);
+          // Only an otherwise wholly opaque paste can include its terminal line ending.
+          else if (!literal.trim() && allowOpaque && end - chars.length <= PASTE_SLACK_CHARS) next.add(chars.length);
+        } else {
+          let at = new Set([start]);
+          const visible = Array.from(piece);
+          for (let j = 0; j < visible.length; j++) {
+            const char = visible[j];
+            const after = new Set<number>();
+            if (char === '\n') {
+              // A rendered wrap can split a token or replace its one space. Only row
+              // indentation is layout; spaces inside a visible row remain significant.
+              while (j + 1 < visible.length && /[ \t]/u.test(visible[j + 1])) j++;
+              for (const pos of at) { after.add(pos); if (chars[pos] === ' ') after.add(pos + 1); }
+            } else for (const pos of at) if (chars[pos] === char) after.add(pos + 1);
+            at = after;
+            if (!at.size) break;
+          }
+          for (const pos of at) next.add(pos);
+        }
+      }
+      positions = next;
+      if (!positions.size) return false;
+    }
+    return positions.has(chars.length);
+  };
+  // Rust CLI counters use Unicode scalars; other CLIs report JavaScript UTF-16 length.
+  return match(Array.from(prompt)) || match(prompt.split(''));
+}
 
 /**
  * Whether `prompt` is still sitting unsubmitted in the composer of `screen`.
  *
- * - `true`: the last `glyph` line holds the prompt's head.
- * - `false`: the composer is empty (the prompt was taken) or holds other text.
- * - `undefined`: no composer line at all; nothing can be said, so nothing is sent.
+ * - `true`: the entire last composer represents this prompt.
+ * - `false`: the composer is empty (the prompt was taken).
+ * - `undefined`: missing, different or ambiguous composer; nothing is sent.
  *
- * Whitespace is removed on both sides before comparing, because the composer wraps a
- * long prompt onto indented continuation lines and Claude Code draws a no-break space
- * after the glyph; `\s` covers that one in JavaScript.
+ * Rendered row breaks and continuation indentation may be layout. Spaces within each
+ * visible row remain significant; a changed token must never become an automatic Enter.
  */
-export function promptStillInComposer(screen: string, prompt: string, glyph: string): boolean | undefined {
-  if (!glyph) return undefined;
-  const composerLines = stripAnsi(screen)
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith(glyph));
-  if (composerLines.length === 0) return undefined;
-  const line = composerLines[composerLines.length - 1].slice(glyph.length);
-  const composer = compact(line);
-  if (!composer) return false;
-  const head = compact(prompt).slice(0, PROMPT_HEAD_CHARS);
-  if (head.length > 0 && composer.startsWith(head)) return true;
-  return placeholderHoldsPrompt(line, prompt);
+export function promptStillInComposer(screen: string, prompt: string, glyph: string, allowOpaque = false): boolean | undefined {
+  const body = composerBody(screen, glyph);
+  if (body === undefined) return undefined;
+  if (!body) return false;
+  if (body.match(PASTE_PLACEHOLDER)) {
+    return placeholderHoldsPrompt(body, prompt, allowOpaque) ? true : undefined;
+  }
+  return renderedHoldsPrompt(body, prompt) ? true : undefined;
 }
 
 /**
  * How a prompt ended, reported once per `arm`:
- * - `submitted`: a check found the composer without it (empty, or holding someone else's text).
+ * - `submitted`: a check found the composer empty.
  * - `stranded`: still in the composer after the whole schedule; a person has to look.
  * - `unverified`: there is no composer to read (no glyph, no pane), or a newer write replaced the
  *   check before it decided. Nothing can be said, so callers must not count it as seen.
@@ -123,7 +193,7 @@ export class SubmitVerifier {
 
   constructor(private readonly deps: SubmitVerifierDeps) {}
 
-  arm(text: string, onOutcome?: (outcome: SubmitOutcome) => void): void {
+  arm(text: string, onOutcome?: (outcome: SubmitOutcome) => void, fromEmptyComposer = false): void {
     this.cancel();
     const gen = this.generation;
     const pending = { onOutcome };
@@ -148,7 +218,7 @@ export class SubmitVerifier {
         this.timer = setTimeout(() => {
           this.timer = null;
           if (gen !== this.generation) return;
-          const still = promptStillInComposer(this.deps.capture() ?? '', text, this.deps.glyph());
+          const still = promptStillInComposer(this.deps.capture() ?? '', text, this.deps.glyph(), fromEmptyComposer);
           if (still === true) {
             this.deps.log?.(`prompt still in the composer after ${Math.round(elapsed / 1000)}s; giving up, it needs a person`);
             settle('stranded');
@@ -166,7 +236,7 @@ export class SubmitVerifier {
       this.timer = null;
       if (gen !== this.generation) return;
       const screen = this.deps.capture();
-      const still = promptStillInComposer(screen ?? '', text, this.deps.glyph());
+      const still = promptStillInComposer(screen ?? '', text, this.deps.glyph(), fromEmptyComposer);
       if (still === false) return settle('submitted');
       if (still === undefined) return settle('unverified');
       resent++;

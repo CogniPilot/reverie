@@ -121,6 +121,8 @@ let
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
       # The console owns this Python/Node composition check after its TS build.
       npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
+      npm test -- test/submit-settle.test.ts test/session-submit-verifier.test.ts \
+        test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts
       # memoryPackage's Python discovery never depends on the console output.
       PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
         OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \

@@ -10,25 +10,26 @@ import { placeholderHoldsPrompt, promptStillInComposer, SubmitVerifier, type Sub
 import { ChatroomDelivery, type DeliveredMessage, type DeliverySession } from '../src/chatroom-delivery.js';
 import { LastSeenStore } from '../src/chatroom-last-seen.js';
 
+const FOOTER = 'GPT-6.1-Sol high · /owned/fixture';
 const LINE = '[Reverie chat "general"] "Reviewer" (coordinator): "@Verifier BLOCKING review: please fix the exporter before the commit"';
 
 describe('a folded paste in the composer', () => {
   it('is recognised as our prompt when its size matches what we typed, Codex style', () => {
-    const screen = `• Working\n› [Pasted Content ${LINE.length} chars]\n  GPT-6.1-Sol medium`;
-    expect(promptStillInComposer(screen, LINE, '›')).toBe(true);
-    expect(placeholderHoldsPrompt(`[Pasted Content ${LINE.length + 2} chars]`, LINE)).toBe(true); // line-ending slack
+    const screen = `• Working\n› [Pasted Content ${LINE.length} chars]\n  GPT-6.1-Sol medium · /owned/fixture`;
+    expect(promptStillInComposer(screen, LINE, '›', true)).toBe(true);
+    expect(placeholderHoldsPrompt(`[Pasted Content ${LINE.length + 2} chars]`, LINE, true)).toBe(true); // line-ending slack
   });
 
-  it('counts when ours sits next to an older stranded one, and not when only other sizes are there', () => {
+  it('refuses a matching chip next to an older stranded one because the whole buffer is not ours', () => {
     const both = `› [Pasted Content 1801 chars][Pasted Content ${LINE.length} chars]`;
-    expect(promptStillInComposer(both, LINE, '›')).toBe(true);
-    expect(promptStillInComposer('› [Pasted Content 1801 chars]', LINE, '›')).toBe(false); // a person's own paste
+    expect(promptStillInComposer(both, LINE, '›', true)).toBeUndefined();
+    expect(promptStillInComposer('› [Pasted Content 1801 chars]', LINE, '›')).toBeUndefined(); // a person's own paste
     expect(placeholderHoldsPrompt(`[Pasted Content ${LINE.length + 10} chars]`, LINE)).toBe(false);
   });
 
   it('leaves the plain cases as they were', () => {
-    expect(promptStillInComposer(`› ${LINE}`, LINE, '›')).toBe(true);
-    expect(promptStillInComposer('› ', LINE, '›')).toBe(false);
+    expect(promptStillInComposer(`› ${LINE}\n\n${FOOTER}`, LINE, '›')).toBe(true);
+    expect(promptStillInComposer(`› \n\n${FOOTER}`, LINE, '›')).toBe(false);
     expect(promptStillInComposer(`[Pasted Content ${LINE.length} chars]`, LINE, '')).toBeUndefined();
   });
 });
@@ -39,7 +40,7 @@ describe('SubmitVerifier outcomes', () => {
   const outcomes: SubmitOutcome[] = [];
   const make = (glyph = '›', delaysMs: readonly number[] = [1_000, 1_000, 1_000]) =>
     new SubmitVerifier({
-      capture: () => screen,
+      capture: () => screen.includes('GPT-6.1-Sol') ? screen : `${screen}\n\n${FOOTER}`,
       sendEnter: () => {
         sends++;
       },
@@ -56,7 +57,7 @@ describe('SubmitVerifier outcomes', () => {
   it('reports submitted once the composer empties, after pressing Enter through a folded paste', async () => {
     screen = `› [Pasted Content ${LINE.length} chars]`;
     const v = make();
-    v.arm(LINE, (o) => outcomes.push(o));
+    v.arm(LINE, (o) => outcomes.push(o), true);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(sends).toBe(1); // the Enter the old check never sent
     screen = '› ';
@@ -69,7 +70,7 @@ describe('SubmitVerifier outcomes', () => {
   it('reports stranded only after a final look past the last Enter', async () => {
     screen = `› ${LINE}`;
     const v = make('›', [1_000, 1_000]);
-    v.arm(LINE, (o) => outcomes.push(o));
+    v.arm(LINE, (o) => outcomes.push(o), true);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(sends).toBe(2);
     expect(outcomes).toEqual([]);
@@ -80,7 +81,7 @@ describe('SubmitVerifier outcomes', () => {
   it('the final look turns a last-moment submit into submitted, not stranded', async () => {
     screen = `› ${LINE}`;
     const v = make('›', [1_000]);
-    v.arm(LINE, (o) => outcomes.push(o));
+    v.arm(LINE, (o) => outcomes.push(o), true);
     await vi.advanceTimersByTimeAsync(1_000);
     screen = '› ';
     await vi.advanceTimersByTimeAsync(2_000);
@@ -90,12 +91,12 @@ describe('SubmitVerifier outcomes', () => {
   it('says unverified with no composer to read, and when a newer write replaces the check', async () => {
     screen = 'plain shell output';
     const v = make();
-    v.arm(LINE, (o) => outcomes.push(o));
+    v.arm(LINE, (o) => outcomes.push(o), true);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(outcomes).toEqual(['unverified']);
     expect(sends).toBe(0);
     screen = `› ${LINE}`;
-    v.arm(LINE, (o) => outcomes.push(o));
+    v.arm(LINE, (o) => outcomes.push(o), true);
     v.arm('a newer prompt', (o) => outcomes.push(o));
     expect(outcomes).toEqual(['unverified', 'unverified']);
   });

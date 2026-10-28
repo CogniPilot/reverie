@@ -256,6 +256,18 @@
             imageProvenance = self.packages.${system}.resourceTerminalImageProvenance;
             toolkit = self.packages.${system}.humanTerminalToolkit;
           };
+          resourceActorBootstrap = pkgs.writeShellApplication {
+            name = "reverie-resource-actor-enable";
+            text = ''
+              case "''${1-}" in
+                prepare) action=prepare-resource-actor-enable ;;
+                apply) action=apply-resource-actor-enable ;;
+                *) echo "Use prepare or apply with the private operation arguments" >&2; exit 2 ;;
+              esac
+              shift
+              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service "$action" "$@"
+            '';
+          };
           resourceActorInstaller = pkgs.writeShellApplication {
             name = "reverie-resource-actor-install";
             text = ''
@@ -331,6 +343,7 @@
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
+        resource-actor-enable = { type = "app"; program = "${self.packages.${system}.resourceActorBootstrap}/bin/reverie-resource-actor-enable"; meta.description = "Explicit pristine existing-domain actor-key enablement; no installation or service start"; };
         resource-actor-install = { type = "app"; program = "${self.packages.${system}.resourceActorInstaller}/bin/reverie-resource-actor-install"; meta.description = "Explicit inactive resource-actor installation using the matching immutable website image"; };
         resource-actor-refresh = { type = "app"; program = "${self.packages.${system}.resourceActorRefresh}/bin/reverie-resource-actor-refresh"; meta.description = "Explicit facts rebind for a registered running broker, without employee restart or owner approval"; };
         resource-terminal-install = { type = "app"; program = "${self.packages.${system}.resourceTerminalInstaller}/bin/reverie-resource-terminal-install"; meta.description = "Explicit resource actor installation for the matching protected terminal website"; };

@@ -433,6 +433,7 @@ def main(argv=None):
     parser.add_argument('--diagnostic', action='store_true',
                         help='On failure print a bounded redacted category and vetted guard reason; never authorizes replay')
     parser.add_argument('action', choices=('check', 'check-backend', 'install', 'refresh-resource-actor', 'start', 'stop', 'status', 'logs', 'uninstall',
+                                                 'prepare-resource-actor-enable', 'apply-resource-actor-enable',
                                                  'prepare-gpu-upgrade', 'apply-gpu-upgrade',
                                                  'prepare-transport-upgrade', 'apply-transport-upgrade'))
     parser.add_argument('--lines', type=int, default=100)
@@ -449,7 +450,18 @@ def main(argv=None):
     try:
         if args.action not in ('install', 'refresh-resource-actor') and (args.resource_actor_provenance is not None or args.resource_actor_engine_socket is not None):
             raise ValueError('Optional resource actor preparation applies only to explicit install or facts refresh')
-        if args.action in ('prepare-transport-upgrade', 'apply-transport-upgrade'):
+        if args.action in ('prepare-resource-actor-enable', 'apply-resource-actor-enable'):
+            from .resource_actor_bootstrap import Bootstrap
+            if args.operation is None:
+                raise ValueError('Select a fresh private actor-enable operation directory')
+            migration = Bootstrap(service, args.operation)
+            if args.action == 'prepare-resource-actor-enable':
+                if args.selection is None:
+                    raise ValueError('Select the private provider PID roster')
+                result = migration.prepare(args.selection)
+            else:
+                result = migration.apply(args.plan_sha256)
+        elif args.action in ('prepare-transport-upgrade', 'apply-transport-upgrade'):
             from .worker_service_transport_upgrade import TransportUpgrade
             if args.operation is None:
                 raise ValueError('Select the private one-attempt operation directory')

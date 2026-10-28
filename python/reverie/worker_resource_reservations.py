@@ -487,7 +487,9 @@ class ReservationGate:
         need(domain_digest(self.broker.config) == self.binding['configurationDigest'], 'RESERVATION_DOMAIN_CHANGED')
         if os.path.lexists(pending(self.broker.config)):
             from .worker_gpu_access import owns_pending
-            need(owns_pending(self), 'RESERVATION_INSTALL_REQUIRES_RECONCILIATION')
+            from .resource_actor_bootstrap import owns_pending as actor_bootstrap_pending
+            need(owns_pending(self) or actor_bootstrap_pending(self),
+                 'RESERVATION_INSTALL_REQUIRES_RECONCILIATION')
         need(_file(marker(self.broker.config), self.broker.config['uid']) == self.binding,
              'RESERVATION_BINDING_CHANGED')
         statefd, state_identity = _directory(Path(self.broker.config['stateRoot']), self.broker.config['uid'])
@@ -526,6 +528,9 @@ class ReservationGate:
         if getattr(self._local, 'gpu_transition', None) is not None:
             from .worker_gpu_access import check_transition_rows
             check_transition_rows(self, rows)
+        if getattr(self._local, 'actor_bootstrap', None) is not None:
+            from .resource_actor_bootstrap import check_transition_rows as actor_bootstrap_rows
+            actor_bootstrap_rows(self, rows)
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
         return rows
 

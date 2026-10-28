@@ -3775,7 +3775,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * - `Enter` key is sent as a SEPARATE tmux invocation after a small delay
    * - Ink (Claude CLI) needs text and Enter split to avoid treating Enter as a newline
    */
-  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person' } = {}): Promise<boolean> {
+  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean } = {}): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       console.error(
@@ -3844,7 +3844,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           typeText: (text: string) =>
             execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS }),
         };
-        await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`);
+        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer);
+        if (outcome === 'not-written') return false;
       } else if (textPart) {
         // Text only, no Enter
         await execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {

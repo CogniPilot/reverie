@@ -10,7 +10,7 @@
  * Pure apart from the injected IO, so the timing and the single retry are unit-tested with a fake mux
  * (test/submit-settle.test.ts).
  */
-import { promptStillInComposer } from './session-submit-verifier.js';
+import { composerIsEmpty, promptStillInComposer } from './session-submit-verifier.js';
 import { stripAnsi } from './utils/index.js';
 
 /** Text up to this long keeps the old fixed gap before Enter: it is typed, not pasted, and must not be slowed. */
@@ -81,8 +81,12 @@ export interface TurnSignals {
  * longer does. `false`: the composer still holds it, or the CLI has a busy line that has not shown. `undefined`: nothing on
  * screen can say (no pane, no glyph, no busy line), so no Enter is re-sent.
  */
-export function turnStarted(screen: string | null, text: string, signals: TurnSignals, heldBefore: boolean): boolean | undefined {
+export function turnStarted(screen: string | null, text: string, signals: TurnSignals, heldBefore: boolean, fromEmptyComposer = false): boolean | undefined {
   if (screen === null) return undefined;
+  const still = signals.glyph ? promptStillInComposer(screen, text, signals.glyph, fromEmptyComposer) : undefined;
+  // A historical busy line is not evidence that the current composer was submitted.
+  if (still === true) return false;
+  if (signals.glyph === '›' && still === undefined) return undefined;
   if (signals.workingLine) {
     try {
       if (new RegExp(signals.workingLine).test(stripAnsi(screen))) return true;
@@ -90,19 +94,17 @@ export function turnStarted(screen: string | null, text: string, signals: TurnSi
       // A bad pattern from ~/.reverie/clis.json is no evidence either way.
     }
   }
-  const still = signals.glyph ? promptStillInComposer(screen, text, signals.glyph) : undefined;
-  if (still === true) return false;
   if (still === false && heldBefore) return true;
   return signals.workingLine ? false : undefined;
 }
 
-export type SubmitOutcome = 'started' | 'started-after-retry' | 'not-started' | 'unverified';
+export type SubmitOutcome = 'started' | 'started-after-retry' | 'not-started' | 'unverified' | 'not-written';
 
-async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSignals, heldBefore: boolean): Promise<boolean | undefined> {
+async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSignals, heldBefore: boolean, fromEmptyComposer: boolean): Promise<boolean | undefined> {
   let seen: boolean | undefined;
   for (let waited = 0; waited < CONFIRM_WINDOW_MS; waited += CONFIRM_POLL_MS) {
     await io.sleep(CONFIRM_POLL_MS);
-    seen = turnStarted(io.capture(), text, signals, heldBefore);
+    seen = turnStarted(io.capture(), text, signals, heldBefore, fromEmptyComposer);
     if (seen !== false) return seen;
   }
   return seen;
@@ -112,18 +114,21 @@ async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSigna
  * Press Enter for `text` that is already in the composer and has settled, then confirm a turn started; when the pane says it
  * did not, press Enter exactly once more. Logs and returns the outcome.
  */
-export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane'): Promise<SubmitOutcome> {
+export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane', fromEmptyComposer = false, requireOwnership = false): Promise<SubmitOutcome> {
   const before = io.capture();
-  const heldBefore = !!signals.glyph && before !== null && promptStillInComposer(before, text, signals.glyph) === true;
+  const heldBefore = !!signals.glyph && before !== null && promptStillInComposer(before, text, signals.glyph, fromEmptyComposer) === true;
+  if (requireOwnership && signals.glyph === '›' && !heldBefore) return 'unverified';
   await io.sendEnter();
   let outcome: SubmitOutcome;
-  const first = await watchForTurn(io, text, signals, heldBefore);
+  const first = await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer);
   if (first === true) outcome = 'started';
   else if (first === undefined) outcome = 'unverified';
   else {
+    // A user can edit while the confirm window expires. Recheck complete ownership before retry.
+    if (signals.glyph === '›' && promptStillInComposer(io.capture() ?? '', text, signals.glyph, fromEmptyComposer) !== true) return 'unverified';
     io.log?.(`${label}: no turn started ${CONFIRM_WINDOW_MS} ms after Enter (${text.length} chars), pressing Enter once more`);
     await io.sendEnter();
-    outcome = (await watchForTurn(io, text, signals, heldBefore)) === true ? 'started-after-retry' : 'not-started';
+    outcome = (await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer)) === true ? 'started-after-retry' : 'not-started';
   }
   io.log?.(`${label}: submit ${outcome} (${text.length} chars)`);
   return outcome;
@@ -134,9 +139,12 @@ export async function typeAndSubmit(
   io: SubmitSettleIo & { typeText(text: string): Promise<unknown> },
   text: string,
   signals: TurnSignals,
-  label?: string
+  label?: string,
+  requireEmptyComposer = false
 ): Promise<SubmitOutcome> {
+  const fromEmptyComposer = !!signals.glyph && composerIsEmpty(io.capture(), signals.glyph);
+  if (requireEmptyComposer && signals.glyph === '›' && !fromEmptyComposer) return 'not-written';
   await io.typeText(text);
   await waitForPasteSettle(io, text.length);
-  return submitAndConfirm(io, text, signals, label);
+  return submitAndConfirm(io, text, signals, label, fromEmptyComposer, requireEmptyComposer);
 }

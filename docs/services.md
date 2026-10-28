@@ -165,6 +165,58 @@ there is no automatic retry or rollback. Inspect and reconcile those facts befor
 any later operation. A source test or prepared plan is not an installed transport
 acceptance, active GPU proof or permission to run a workload.
 
+### Coordinated website writer pause for a transport-only upgrade
+
+When website recovery counters churn the whole company file, do not drop those
+fields or weaken a consumed attempt. The opt-in host-only
+`reverie.worker_transport_maintenance` controller can quiesce only an explicitly
+selected existing website incarnation while the unchanged strict transport helper
+prepares and applies a **fresh** operation. It never starts, recreates or restarts
+a website/provider, changes policy/grants/limits, or accepts a failed broker stop.
+
+This is an ordinary owner-local deployment tool, with no HTTP endpoint or new
+capability authority. All instance selection belongs in a separate private closed
+policy outside Git: exact website CID/image/init PID/birth, local engine, config,
+complete current provider census and owner projection, old/new immutable unit
+records, selected immutable tool paths/hashes, and fresh control/helper directories.
+The policy must name a fixed **private 0700 source-copy closure**, not a normal
+0755 checkout or root-owned immutable source directory. Copy the qualified helper's
+complete Python package source closure from its immutable source plus the reviewed controller;
+retain only regular singly linked owned files, preserve required subpackages (including `cleanup`), pin every recursive `.py` byte, and use
+canonical private parents. The current source validator rejects symlink/hardlink
+substitutions and undeclared recursive Python files. Initial native custody checks all
+program/policy/control/evidence roots against every actual/configured bind,
+including broad, read-only, stopped and aliased mounts. UID/0600 alone is not proof.
+
+Invoke the exact reviewed private entry with the pinned interpreter and isolated
+Python options, after review and fresh binding; no effect happens merely by import:
+
+```bash
+"$python_tool" -I -B "$private_entry" --execute \
+  --policy "$maintenance_policy" --policy-sha256 "$maintenance_policy_sha256"
+```
+
+The controller retains one durable attempt before arming a separate unpause-only
+watchdog. Work is bounded to 240 seconds; the watchdog recovers the same CID/image/
+init birth on channel loss or at 270 seconds, with a bounded recovery client. The
+existing 600-second office outage grace is unchanged. Whole protected snapshots,
+including the full company file, must match before/after pause and preparation.
+Only the exact closed prepared generation/config/native/provider plan is applied.
+Policy expiry is rechecked at effect fences; recovery unpause remains allowed after
+expiry. Mutating helper clients run in an actual owned session: group cleanup and
+reaping precede ordinary unpause/cancellation; partial or unconfirmed settlement
+cannot publish success. Only fixed helper diagnostic categories/reasons and output
+lengths/hashes are retained, never raw stderr/config/credential bodies.
+
+The recovery timer guarantees neither broker completion nor rollback. On parent
+loss it may resume the writer while a previously issued backend action is still
+unknown; retain all helper/controller attempts and reconcile actual facts. Any
+failure unpauses only the same observed website incarnation and cannot produce
+`DONE` through a late descriptor/fsync failure. Normal completion publishes its
+last rename only after finalizers and final expiry/static checks. These source and
+owned mock-OS tests are not installed/native acceptance; a coordinated owner window
+and independent native provider/config/website postchecks remain required.
+
 ## Optional protected container website
 
 For a **new, separately reviewed container deployment**, set the strict boolean

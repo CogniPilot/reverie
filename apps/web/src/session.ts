@@ -131,7 +131,7 @@ import {
 import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
-import { SubmitVerifier } from './session-submit-verifier.js';
+import { composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
 import { resolveSessionCliVersion } from './utils/cli-resolver.js';
 import {
@@ -4901,25 +4901,34 @@ export class Session extends EventEmitter {
    * session.writeViaMux('/init\r');   // Send /init command
    * ```
    */
+  canAcceptChatInput(): boolean {
+    if (this.mode !== 'codex') return true;
+    const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+    return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName), glyph);
+  }
+
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
+    const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
+    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
     const opencode = !!guard && this.mode === 'opencode';
     if (opencode) data = guardShellKey(data, { keepLeading: guard === 'person' });
-    const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
-      const sent = await this._mux.sendInput(this.id, data, opencode ? { opencode: guard === 'person' ? 'person' : true } : undefined);
+      const muxOptions = { ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
+        ...(options.requireEmptyComposer ? { requireEmptyComposer: true } : {}) };
+      const sent = await this._mux.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
       if (sent) {
-        this._emitSubmittedPrompt(submittedPrompt);
-        this._verifySubmitted(data, options.onOutcome);
+        this._emitSubmittedPrompt(this._trackSubmit(data, options));
+        this._verifySubmitted(data, options.onOutcome, fromEmptyComposer);
       }
       return sent;
     }
     // Fallback to PTY write
     if (this.ptyProcess) {
       this.ptyProcess.write(data);
-      this._emitSubmittedPrompt(submittedPrompt);
+      this._emitSubmittedPrompt(this._trackSubmit(data, options));
       // No pane to read: nothing can say the prompt left the composer.
       options.onOutcome?.('unverified');
       return true;
@@ -4943,7 +4952,7 @@ export class Session extends EventEmitter {
    * so the pair `sendInput` just sent can leave the text stranded. Only a mux session
    * can read its pane, only text can be stranded, and the glyph is the CLI's own.
    */
-  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome']): void {
+  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome'], fromEmptyComposer = false): void {
     const unverified = (): void => {
       try {
         onOutcome?.('unverified');
@@ -4975,7 +4984,7 @@ export class Session extends EventEmitter {
       glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
       log: (m) => console.log(`[Session ${this.id.slice(0, 8)}] ${m}`),
     });
-    this._submitVerifier.arm(text, onOutcome);
+    this._submitVerifier.arm(text, onOutcome, fromEmptyComposer);
   }
 
   /** The conversation any CLI's own config resumes (resume-guard.ts), so start() keeps the same thread alias the constructor set. */
