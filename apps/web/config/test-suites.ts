@@ -41,6 +41,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/board-preload.browser.test.ts',
   'test/github-watches.browser.test.ts',
   'test/office-footer-panel.browser.test.ts',
+  'test/owner-ui-batch.browser.test.ts',
   'test/plan-five-hour.browser.test.ts',
   'test/company-hire-wizard.browser.test.ts',
   'test/company-reporting-tree.browser.test.ts',
