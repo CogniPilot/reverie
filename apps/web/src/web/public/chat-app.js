@@ -9565,6 +9565,8 @@ class ReverieEmbassyView {
     const focusLabel = focused?.getAttribute('aria-label');
     previous?.remove();
     host.querySelector('.eg-access-note')?.remove();
+    // Embassies are shared rooms beside the server's channels, not part of Direct Messages (James 10-20).
+    if (this.shell.workspace === 'home') return;
     if (!this.allowed) {
       if (this.ownerRequired) {
         const note = this.el('section', 'eg-access-note');

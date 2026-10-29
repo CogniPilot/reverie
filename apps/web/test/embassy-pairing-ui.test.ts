@@ -281,3 +281,11 @@ it('built-in hosting is ready locally and asks for a shareable address before cr
  h.button('Save address and invite').click();await h.flush(30);
  expect(h.calls.find(c=>c.path==='/api/embassy-host/settings').body).toEqual({origin});expect(h.drawn).toEqual([qr]);
 });
+it('keeps Embassies beside the server channels and out of Direct Messages',async()=>{
+ const h=await setup();const shell=h.window.reverieChat;
+ expect(h.document.querySelectorAll('.eg-category')).toHaveLength(1);
+ shell.workspace='home';shell.renderSidebar();await h.flush(5);
+ expect(h.document.querySelector('.eg-category')).toBeNull();
+ shell.workspace='';shell.renderSidebar();await h.flush(5);
+ expect(h.document.querySelectorAll('.eg-category')).toHaveLength(1);
+});
