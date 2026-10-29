@@ -35,8 +35,11 @@
       signal: AbortSignal.timeout(10000),
       ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Preview request failed.');
+    const reply = await response.json();
+    // Every /api reply arrives in the console envelope ({success, data}); a console error envelope carries its error
+    // itself. The preview route's own reply, an error included, is the envelope's data.
+    const data = reply && typeof reply === 'object' && 'success' in reply && reply.data !== undefined ? reply.data : reply;
+    if (!response.ok) throw new Error(data?.error || reply?.error || 'Preview request failed.');
     return data;
   }
   function navigate(url, tab) {
@@ -48,7 +51,7 @@
   }
   async function loadRoster() {
     const company = await api('company');
-    const employees = company.data?.employees || [];
+    const employees = company?.employees || [];
     const selected = $('expose').elements.sessionId.value || suggestedSession;
     const options = [];
     names.clear();
