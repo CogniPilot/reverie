@@ -2141,8 +2141,8 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const { input, useMux, seq, clientId, wait, waitTimeout, ifIdle } = parseBody(SessionInputWithLimitSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
-    // Checked here, before the dedup seq is spent, and again by the empty-composer write below: the CLI's own idle check
-    // is only a pre-check, and a turn can start between the two.
+    // A cheap early refusal, before the dedup seq is spent. It is NOT the idle decision: a turn can start during any await
+    // below (the wake-target probe among them), so the session decides again at the write itself (writeViaMux requireIdle).
     if (ifIdle && session.isWorking) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
     }
@@ -2191,7 +2191,9 @@ export function registerSessionRoutes(
     // TCP connect on wake-enabled hosts only, at most once per
     // REMOTE_WAKE_PROBE_MIN_INTERVAL_MS.
     if (!duplicate && (await remoteWake.hasWakeTarget(session))) {
-      if (wantsWait) {
+      // An idle-only write must not be buffered: the registry would flush it later with no idle check at all. Wake the host,
+      // then let the gated write below decide.
+      if (wantsWait || ifIdle) {
         // Send-and-wait keeps the response open anyway, so blocking on the wake is
         // simpler and more correct than buffering (buffering would break the wait).
         // A host that never comes back is an error here, as on the create/attach
@@ -2199,6 +2201,8 @@ export function registerSessionRoutes(
         // timeout, which is the combination the API docs send callers to the wrong
         // recovery for.
         if (!(await remoteWake.ensureAwake(session))) {
+          // Nothing was typed, so a refused wake's seq is handed back for its retry.
+          if (ifIdle && tagged) session.forgetInputSeq(clientId as string, seq as number);
           return createErrorResponse(
             ApiErrorCode.OPERATION_FAILED,
             `${session.remote?.label ?? 'the remote host'} did not come back after a wake-on-LAN request — nothing was sent`
@@ -2275,6 +2279,8 @@ export function registerSessionRoutes(
     // BOTH writes, and telling the caller "delivered, but it timed out" points it at
     // the wrong recovery — wait longer, when the truth is "restart the worker".
     let delivered = false;
+    // An idle-only write whose text went in but whose Enter was withheld (a turn started in between): reported, never retried.
+    let typedUnsent = false;
 
     // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
     // ask for it: written straight into the pane it arrives as one burst, and Claude
@@ -2297,8 +2303,12 @@ export function registerSessionRoutes(
     } else if (ifIdle) {
       // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
       // just started a turn or holds a draft gets nothing typed.
-      delivered = await session.writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true }).catch(() => false);
-      if (!delivered) undoOnFailure();
+      delivered = await session
+        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true, onTypedUnsent: () => { typedUnsent = true; } })
+        .catch(() => false);
+      // Typed but Enter withheld is not "nothing was typed": the text sits unsent in the composer, so the seq stays spent
+      // and a retry cannot type it a second time.
+      if (!delivered && !typedUnsent) undoOnFailure();
     } else if ((useMux || autoMux) && waitPromise) {
       // The response is already staying open for the wait, so the tmux write can be
       // awaited here. This is the ONE path where a writeViaMux failure is observable.
@@ -2345,7 +2355,7 @@ export function registerSessionRoutes(
 
     // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
     // just started, or a draft in the composer) must not read as accepted.
-    if (!waitPromise) return ifIdle ? { delivered } : {};
+    if (!waitPromise) return ifIdle ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
     try {
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse

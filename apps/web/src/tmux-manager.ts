@@ -24,7 +24,7 @@ import { cliConfigContent } from './cli-config-content.js';
 
 import { randomBytes } from 'node:crypto';
 import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
-import { pastesInsteadOfKeys, typeAndSubmit, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
@@ -3782,12 +3782,18 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * - `Enter` key is sent as a SEPARATE tmux invocation after a small delay
    * - Ink (Claude CLI) needs text and Enter split to avoid treating Enter as a newline
    */
-  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean } = {}): Promise<boolean> {
+  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean } = {}): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       console.error(
         `[TmuxManager] sendInput failed: no session found for ${sessionId}. Known: ${Array.from(this.sessions.keys()).join(', ')}`
       );
+      return false;
+    }
+
+    // A gated write (idle-only wake, capacity retry) is only ever a gated text + Enter (typeAndSubmit re-checks before each
+    // key); any other shape would go out ungated, so it is refused before any transport, test mode included.
+    if ((options.stillIdle || writeGateActive()) && (options.opencode || !input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))) {
       return false;
     }
 
@@ -3808,7 +3814,6 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     try {
       const hasCarriageReturn = input.includes('\r');
       const textPart = input.replace(/\r/g, '').replace(/\n/g, '').trimEnd();
-
       if (options.opencode) {
         // OpenCode's "!" key flips its composer into shell mode mid-burst: see src/opencode-input.ts.
         const tmux = this.tmux();
@@ -3858,7 +3863,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
               .then(() => execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS }));
           },
         };
-        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer);
+        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer, options.stillIdle);
         if (outcome === 'not-written') return false;
       } else if (textPart) {
         // Text only, no Enter

@@ -277,6 +277,13 @@ describe('agent wake', () => {
     expect(await agentWake(busy, { id: OTHER })).toBe(EXIT.refused);
   });
 
+  it('says a wake was typed but left unsent when Enter was withheld, never "nothing was typed"', async () => {
+    const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: false, typedUnsent: true })]);
+    expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.refused);
+    expect(deps.err.join('')).toMatch(/typed — Enter was withheld, so the text is left unsent .* will not be retried/);
+    expect(deps.err.join('')).not.toMatch(/nothing was typed/);
+  });
+
   it('leaves a working or unknown-state session alone and never wakes itself', async () => {
     for (const status of ['busy', undefined]) {
       const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status }])]);

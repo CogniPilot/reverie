@@ -10,6 +10,7 @@
  * Pure apart from the injected IO, so the timing and the single retry are unit-tested with a fake mux
  * (test/submit-settle.test.ts).
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { composerIsEmpty, promptStillInComposer } from './session-submit-verifier.js';
 import { stripAnsi } from './utils/index.js';
 
@@ -129,7 +130,7 @@ async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSigna
  * Press Enter for `text` that is already in the composer and has settled, then confirm a turn started; when the pane says it
  * did not, press Enter exactly once more. Logs and returns the outcome.
  */
-export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane', fromEmptyComposer = false, requireOwnership = false): Promise<SubmitOutcome> {
+export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane', fromEmptyComposer = false, requireOwnership = false, stillIdle?: () => boolean): Promise<SubmitOutcome> {
   const before = io.capture();
   const heldBefore = !!signals.glyph && before !== null && promptStillInComposer(before, text, signals.glyph, fromEmptyComposer) === true;
   if (requireOwnership && signals.glyph === '›' && !heldBefore) return 'unverified';
@@ -141,6 +142,12 @@ export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals
   else {
     // A user can edit while the confirm window expires. Recheck complete ownership before retry.
     if (signals.glyph === '›' && promptStillInComposer(io.capture() ?? '', text, signals.glyph, fromEmptyComposer) !== true) return 'unverified';
+    if (!gateOpen(stillIdle)) {
+      // The text is still in the composer and the retry Enter is withheld: unsent, so nothing may press Enter for it later.
+      const store = writeGate.getStore();
+      if (store) store.typedUnsent = true;
+      return 'unverified';
+    }
     io.log?.(`${label}: no turn started ${CONFIRM_WINDOW_MS} ms after Enter (${text.length} chars), pressing Enter once more`);
     await io.sendEnter();
     outcome = (await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer)) === true ? 'started-after-retry' : 'not-started';
@@ -149,17 +156,48 @@ export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals
   return outcome;
 }
 
+/**
+ * A write's own gate, carried by the async call that makes the write rather than by the mux layer's options, so it reaches
+ * the keys whatever sits between the session and this helper. The session opens one around an idle-only wake (still idle)
+ * and a capacity retry (not paused by a plan move); a gate that closes stops the keys still to come.
+ */
+const writeGate = new AsyncLocalStorage<{ open: () => boolean; typedUnsent: boolean }>();
+/** Runs `write` under `gate`; `typedUnsent` says its text went in but the gate withheld Enter, so it sits unsent. */
+export async function withWriteGate<T>(gate: () => boolean, write: () => Promise<T>): Promise<{ result: T; typedUnsent: boolean }> {
+  const store = { open: gate, typedUnsent: false };
+  const result = await writeGate.run(store, write);
+  return { result, typedUnsent: store.typedUnsent };
+}
+/** Whether the current async call is a gated write; any key shape other than a gated text + Enter must refuse it. */
+export function writeGateActive(): boolean {
+  return writeGate.getStore() !== undefined;
+}
+function gateOpen(stillIdle?: () => boolean): boolean {
+  return (stillIdle ? stillIdle() : true) && (writeGate.getStore()?.open() ?? true);
+}
+
 /** The generic (non-OpenCode) delivery: type the text, let it settle, then Enter as a separate keystroke, confirmed. */
 export async function typeAndSubmit(
   io: SubmitSettleIo & { typeText(text: string): Promise<unknown> },
   text: string,
   signals: TurnSignals,
   label?: string,
-  requireEmptyComposer = false
+  requireEmptyComposer = false,
+  stillIdle?: () => boolean
 ): Promise<SubmitOutcome> {
   const fromEmptyComposer = !!signals.glyph && composerIsEmpty(io.capture(), signals.glyph);
-  if (requireEmptyComposer && signals.glyph === '›' && !fromEmptyComposer) return 'not-written';
+  // An idle-only write (stillIdle) needs a provably empty composer whatever the harness, not just Codex's.
+  if (requireEmptyComposer && (signals.glyph === '›' || stillIdle) && !fromEmptyComposer) return 'not-written';
+  // The write's gate is decided here, at the keys: re-checked right before the text and again right before Enter. A closed
+  // gate after the text withholds Enter and leaves the text unsent; nothing is cleared or typed again.
+  if (!gateOpen(stillIdle)) return 'not-written';
   await io.typeText(text);
   await waitForPasteSettle(io, text.length);
-  return submitAndConfirm(io, text, signals, label, fromEmptyComposer, requireEmptyComposer);
+  if (!gateOpen(stillIdle)) {
+    const store = writeGate.getStore();
+    if (store) store.typedUnsent = true;
+    io.log?.(`${label}: the write's gate closed while the text settled (session busy, or a plan move took the composer): Enter withheld, text left unsent`);
+    return 'not-written';
+  }
+  return submitAndConfirm(io, text, signals, label, fromEmptyComposer, requireEmptyComposer, stillIdle);
 }

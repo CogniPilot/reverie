@@ -712,11 +712,14 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
   // An idle-only send refused because the session is working is a refusal, not an error.
   if (!res.json?.success) return fail(deps, describeFailure(res), options.ifIdle && res.status === 409 ? EXIT.refused : EXIT.error);
   const data = res.json.data as
-    | { delivered?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; workerDead?: boolean; wait?: WaitResult }
+    | { delivered?: boolean; typedUnsent?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; workerDead?: boolean; wait?: WaitResult }
     | undefined;
   if (deps.json) emitJson(deps, data ?? {});
   if (options.ifIdle && data?.delivered === false && !data.duplicate) {
-    if (!deps.json) deps.io.err(palette.err(`${GLYPH.fail} not woken: ${target.id} is busy or has a draft in its composer — nothing was typed`));
+    if (!deps.json)
+      deps.io.err(palette.err(data.typedUnsent
+        ? `${GLYPH.fail} not woken: ${target.id} became busy after the wake text was typed — Enter was withheld, so the text is left unsent in its composer and will not be retried`
+        : `${GLYPH.fail} not woken: ${target.id} is busy or has a draft in its composer — nothing was typed`));
     return EXIT.refused;
   }
   // Fire-and-forget to a remote session whose host is asleep (wake-on-LAN): the server

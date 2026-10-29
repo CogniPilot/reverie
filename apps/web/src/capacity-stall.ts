@@ -88,6 +88,11 @@ export class CapacityRetry {
     return this.deps.delaysMs ?? CAPACITY_RETRY_DELAYS_MS;
   }
 
+  /** Whether something else (a plan move) owns the composer right now; a retry already typing must not press Enter. */
+  get paused(): boolean {
+    return this.pauses > 0;
+  }
+
   /** Hold retries while something else owns the composer; the returned release is idempotent. */
   pause(): () => void {
     this.pauses++;

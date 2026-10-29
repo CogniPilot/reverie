@@ -132,6 +132,7 @@ import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
+import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
 import { resolveSessionCliVersion } from './utils/cli-resolver.js';
 import {
@@ -659,6 +660,9 @@ export class Session extends EventEmitter {
   private _autoOps!: SessionAutoOps;
   /** Resumes a Codex turn that ended on a model-capacity error (capacity-stall.ts); null when turned off. */
   private _capacityRetry: CapacityRetry | null = null;
+  /** A capacity retry's "continue" is being typed, or was typed and its Enter fenced (left unsent): until the composer
+   *  reads empty again, no other empty-composer write (a plan move's handoff, chat) may type after it. */
+  private _capacityTextPending = false;
 
   // Image watcher setting (per-session toggle)
   private _imageWatcherEnabled: boolean = false;
@@ -698,6 +702,11 @@ export class Session extends EventEmitter {
   private _viewerInputHeld = false;
   private _viewerClientLost = false;
   private _muxWritesInFlight = 0;
+  /** One id per mux write in flight (the counter above is always its size): a gated write's gate counts only the OTHER
+   *  writes, and its id leaves this set in that write's finally, so its delayed verifier cannot take a different write's
+   *  keys for its own. */
+  private _muxWriteIds = new Set<number>();
+  private _nextMuxWriteId = 0;
   private readonly _workerBacked = Boolean(process.env.REVERIE_WORKER_SOCKET);
   /**
    * How many starts, attaches or relaunches are running for this session's
@@ -1191,7 +1200,19 @@ export class Session extends EventEmitter {
         glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
         isWorking: () => this._isWorking,
         isStopped: () => this._isStopped,
-        send: (prompt) => this.writeViaMux(`${prompt}\r`, { requireEmptyComposer: true }),
+        // A plan move that pauses retries mid-write (during paste settlement) also fences that write's pending Enter.
+        send: async (prompt) => {
+          this._capacityTextPending = true;
+          let unsent = false;
+          try {
+            return await this.writeViaMux(`${prompt}\r`, { requireEmptyComposer: true, capacityRetry: true,
+              writeGate: () => !this._capacityRetry?.paused, onTypedUnsent: () => { unsent = true; } });
+          } finally {
+            // Fenced after typing: the text stays (never cleared, never typed again) and keeps later writes off it.
+            this._capacityTextPending = unsent;
+            if (unsent) console.log(`[Session ${this.id.slice(0, 8)}] capacity retry: "${prompt}" typed, Enter withheld (a plan move took the composer); left unsent, not retried`);
+          }
+        },
         onEvent: (event) => this.emit('capacityRetry', event),
         log: (message) => console.log(`[Session ${this.id.slice(0, 8)}] ${message}`),
       });
@@ -5039,6 +5060,45 @@ export class Session extends EventEmitter {
     return this._capacityRetry?.pause() ?? (() => {});
   }
 
+  private _capacityWrites = 0;
+  /** The gate of the write the submit verifier is tracking (null: an ungated write); see _verifySubmitted. */
+  private _verifierGate: (() => boolean) | null = null;
+  private _capacityRetryWriting(): boolean {
+    return this._capacityWrites > 0;
+  }
+
+  private _beginMuxWrite(): number {
+    const id = ++this._nextMuxWriteId;
+    this._muxWriteIds.add(id);
+    this._muxWritesInFlight++;
+    return id;
+  }
+
+  private _endMuxWrite(id: number): void {
+    if (this._muxWriteIds.delete(id)) this._muxWritesInFlight--;
+  }
+
+  /** Whether a mux write other than `ownId` is in flight (null: any write at all). */
+  private _otherMuxWrite(ownId: number | null): boolean {
+    for (const id of this._muxWriteIds) if (id !== ownId) return true;
+    return false;
+  }
+
+  /**
+   * Whether an idle-only write (agent wake) may type now. `ownId` is the caller's own in-flight mux write (null before it
+   * claims the pane); any OTHER write in flight means not idle. `composer` also requires the composer to read empty, which
+   * is only provable for harnesses whose composer the screen reader is verified on (Codex `›`, Claude Code `❯`); any other
+   * harness fails closed rather than risk typing into a draft it cannot see.
+   */
+  private _idleForWake(ownId: number | null, composer: boolean): boolean {
+    if (this._viewerInputHeld || this.paneLifecycleInFlight || this._isStopped || this._isWorking) return false;
+    if ((this._workerBacked && this._paneExit) || this._otherMuxWrite(ownId)) return false;
+    if (!composer) return true;
+    const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+    if ((glyph !== '›' && glyph !== '❯') || !this._mux || !this._muxSession) return false;
+    return composerIsEmpty(this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
+  }
+
   canAcceptChatInput(): boolean {
     if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
     if (this.mode !== 'codex') return true;
@@ -5050,6 +5110,17 @@ export class Session extends EventEmitter {
     if (this._viewerInputHeld) return false;
     const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
     if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
+    // Idle-only is decided here, at the write, not by the route's earlier look: a turn can start during any await before it.
+    // The check and the claim below (_beginMuxWrite) run with no await between them, so two wakes cannot both pass.
+    if (options.requireIdle && (!this._mux || !this._muxSession || !this._idleForWake(null, true))) return false;
+    // A capacity retry's text in flight or left unsent owns the composer until it reads empty again.
+    if (this._capacityTextPending && !options.capacityRetry) {
+      const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+      const empty = !!glyph && !!this._muxSession && !this._capacityRetryWriting() &&
+        composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
+      if (empty) this._capacityTextPending = false;
+      else if (options.requireEmptyComposer || options.requireIdle) return false;
+    }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
     const opencode = !!guard && this.mode === 'opencode';
@@ -5057,16 +5128,35 @@ export class Session extends EventEmitter {
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
       const muxOptions = { ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
-        ...(options.requireEmptyComposer ? { requireEmptyComposer: true } : {}) };
-      this._muxWritesInFlight++;
+        ...(options.requireEmptyComposer || options.requireIdle ? { requireEmptyComposer: true } : {}),
+        };
+      const writeId = this._beginMuxWrite();
+      // A gated write (idle-only wake, capacity retry) owns the composer only while no OTHER write is in flight, and only for
+      // its own id: once this write's finally drops the id, the same gate (held by its delayed verifier) admits no write.
+      const gated = !!options.requireIdle || !!options.writeGate;
+      const gate = gated
+        ? () => !this._otherMuxWrite(writeId) && (options.requireIdle ? this._idleForWake(writeId, false) : true) &&
+          (options.writeGate ? options.writeGate() : true)
+        : undefined;
+      if (options.requireIdle) (muxOptions as { stillIdle?: () => boolean }).stillIdle = gate;
       try {
-        const sent = await this._mux.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
+        const send = () => this._mux!.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
+        let sent: boolean;
+        if (gate) {
+          if (options.capacityRetry) this._capacityWrites++;
+          try {
+            const outcome = await withWriteGate(gate, send);
+            // Typed but Enter withheld (before the first Enter, or at the retry): not sent, so no verifier is armed for it.
+            sent = outcome.result && !outcome.typedUnsent;
+            if (outcome.typedUnsent) options.onTypedUnsent?.();
+          } finally { if (options.capacityRetry) this._capacityWrites--; }
+        } else sent = await send();
         if (sent) {
           this._emitSubmittedPrompt(this._trackSubmit(data, options));
-          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer);
+          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate);
         }
         return sent;
-      } finally { this._muxWritesInFlight--; }
+      } finally { this._endMuxWrite(writeId); }
     }
     // Fallback to PTY write
     if (this.ptyProcess) {
@@ -5095,7 +5185,9 @@ export class Session extends EventEmitter {
    * so the pair `sendInput` just sent can leave the text stranded. Only a mux session
    * can read its pane, only text can be stranded, and the glyph is the CLI's own.
    */
-  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome'], fromEmptyComposer = false): void {
+  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome'], fromEmptyComposer = false, gate?: () => boolean): void {
+    // A gated write's later Enter (2s..60s) answers to the same gate as its first keys: the verifier tracks one write at a
+    // time, so the gate of the write it now tracks travels with it.
     const unverified = (): void => {
       try {
         onOutcome?.('unverified');
@@ -5114,9 +5206,17 @@ export class Session extends EventEmitter {
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
       sendEnter: async () => {
         if (this._viewerInputHeld) return false;
-        this._muxWritesInFlight++;
+        const gate = this._verifierGate;
+        if (gate && !gate()) {
+          // Closed once (busy, or a plan move took the composer): this write's verification ends here and its text stays unsent.
+          this._verifierGate = null;
+          console.log(`[Session ${this.id.slice(0, 8)}] submit check: the write's gate closed; later Enter withheld, text left unsent`);
+          queueMicrotask(() => this._submitVerifier?.cancel());
+          return false;
+        }
+        const enterId = this._beginMuxWrite();
         try { return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined); }
-        finally { this._muxWritesInFlight--; }
+        finally { this._endMuxWrite(enterId); }
       },
       // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
       // Only claude, codex, pi, opencode, omp and gemini declare a promptGlyph; the other modes would fall back
@@ -5132,6 +5232,7 @@ export class Session extends EventEmitter {
       glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
       log: (m) => console.log(`[Session ${this.id.slice(0, 8)}] ${m}`),
     });
+    this._verifierGate = gate ?? null; // set only when the verifier is re-armed for this write
     this._submitVerifier.arm(text, onOutcome, fromEmptyComposer);
   }
 

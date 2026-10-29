@@ -315,7 +315,7 @@ export interface TerminalMultiplexer extends EventEmitter {
   /**
    * Send input to a session via tmux send-keys.
    */
-  sendInput(sessionId: string, input: string, options?: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean }): Promise<boolean>;
+  sendInput(sessionId: string, input: string, options?: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean }): Promise<boolean>;
 
   // ========== Metadata ==========
 
