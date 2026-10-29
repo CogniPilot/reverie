@@ -1622,7 +1622,8 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-rail > .ca-office-launcher { position: absolute; left: 0; flex: 0 0 auto; margin: 0; width: 100%; justify-content: center; padding: 0; }
 .ca-rail .ca-office-gear { width: 40px; height: 36px; }
 .ca-rail .ca-office-gear svg { width: 24px; height: 24px; flex: none; }
-.ca-root > .ca-office-pane { position: absolute; z-index: 30; left: var(--ca-rail); width: var(--ca-side); box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--ca-line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--ca-side-bg, var(--ca-main-bg)); box-shadow: 0 -8px 24px #0004; overflow-y: auto; }
+/* One rule above the panel, like the one under the server name (.ca-side-title), and no box around it (James 10-27). */
+.ca-root > .ca-office-pane { position: absolute; z-index: 30; left: var(--ca-rail); width: var(--ca-side); box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 0; border-top: 1px solid var(--ca-line); border-radius: 0; background: var(--ca-side-bg, var(--ca-main-bg)); box-shadow: none; overflow-y: auto; }
 .ca-root > .ca-office-pane.ca-office-pane-opening { animation: ca-office-slide-up .16s ease-out; }
 .ca-root > .ca-office-pane[hidden] { display: none; }
 .ca-root > .ca-office-pane .ca-office-pane-link { flex: 0 0 auto; min-height: 34px; width: 100%; padding: 6px 9px; border: 0; background: transparent; text-align: left; white-space: nowrap; }
