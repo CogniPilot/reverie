@@ -1,4 +1,4 @@
-/** Kit AUTH-ROUTE1/REG1: the ACTUAL WebServer composition. Real OfficeAuthService accounts (owner and limited), real owner
+/** AUTH-ROUTE1/REG1: the ACTUAL WebServer composition. Real OfficeAuthService accounts (owner and limited), real owner
  * policy, the real createGoalServerAssembly in owner-only mode (Goal automation OFF), CompanyService.goals carrying the ONE
  * configured registry, the service grant routes and setup page on that facade and boundary, and the service decision on
  * the same store. Synthetic fixtures only. */
@@ -103,7 +103,7 @@ beforeEach(async () => {
         {
           purpose: 'OPS_WEBSITE_RESTART',
           principal: 'ops',
-          employees: ['bev'],
+          employees: ['sam'],
           resources: ['website'],
           expiresInHours: 24,
         },
@@ -116,9 +116,9 @@ beforeEach(async () => {
   await store.update((state) => {
     state.employees.push(
       EmployeeSchema.parse({
-        id: 'bev',
+        id: 'sam',
         sessionId: SESSION,
-        name: 'Bev',
+        name: 'Sam',
         icon: 'B',
         position: 'QA',
         expertise: ['x'],
@@ -203,7 +203,7 @@ const body = () => ({
   purpose: 'OPS_WEBSITE_RESTART',
   principal: 'ops',
   epoch: 'e1',
-  employeeIds: ['bev'],
+  employeeIds: ['sam'],
   resources: ['website'],
   expiresAt: Date.now() + 60_000,
 });
@@ -222,7 +222,7 @@ it('service grant routes are exact owner-only actions on the Goal boundary, neve
 it('actual assembly with Goal automation OFF: setup, issue, decision and revoke work for the owner only', async () => {
   const setup = await call('GET', '/api/service-grants/setup', owner);
   expect(setup.statusCode, setup.body).toBe(200);
-  expect(setup.body).toContain('Bev (bev)');
+  expect(setup.body).toContain('Sam (sam)');
   for (const token of [undefined, limited])
     expect((await call('GET', '/api/service-grants/setup', token)).statusCode).toBeGreaterThanOrEqual(401);
   // Refused callers: no cookie, limited login, cross-origin owner, owner cookie plus Basic, service header, unknown purpose.
@@ -246,7 +246,7 @@ it('actual assembly with Goal automation OFF: setup, issue, decision and revoke 
   const grant = issued.json().data;
   expect(grant).toMatchObject({
     purpose: 'OPS_WEBSITE_RESTART',
-    employees: [{ employeeId: 'bev', sessionId: SESSION }],
+    employees: [{ employeeId: 'sam', sessionId: SESSION }],
     resources: ['website'],
   });
   const assertion = () =>
@@ -260,7 +260,7 @@ it('actual assembly with Goal automation OFF: setup, issue, decision and revoke 
       expiresAt: Date.now() + 5000,
       nonce: (++n).toString(16).padStart(32, '0'),
     });
-  const ask = { action: 'reverie.ops.website.restart', employeeId: 'bev', resourceId: 'website' };
+  const ask = { action: 'reverie.ops.website.restart', employeeId: 'sam', resourceId: 'website' };
   expect(await decisions.decide(assertion(), ask)).toMatchObject({ decision: 'allowed' });
   expect(await decisions.decide(assertion(), { ...ask, resourceId: 'other' })).toMatchObject({ decision: 'denied' });
   expect((await call('POST', `/api/service-grants/${grant.id}/revoke`, limited, {})).statusCode).toBe(403);
