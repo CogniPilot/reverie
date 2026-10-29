@@ -584,6 +584,23 @@ export class ChatroomService {
     return messages.map(message => this.messageIdentity(room, message));
   }
 
+  /** One indexed, room-scoped historical identity; never scans or restores the recent window. */
+  private historicalMessage(roomId: string, messageId: string): ChatMessage | undefined {
+    const row = this.db?.db.prepare('SELECT data FROM messages WHERE room_id = ? AND id = ?').get(roomId, messageId);
+    if (!row) return undefined;
+    const message = JSON.parse(String(row.data)) as ChatMessage | null;
+    return message?.id === messageId && message.roomId === roomId ? message : undefined;
+  }
+
+  /** A bounded delivery view keeps normal reply quoting/wake rules after the parent leaves the window. */
+  private withReplyContext(room: ChatRoom, replyTo?: string): ChatRoom {
+    if (!replyTo) return room;
+    // Posting can trim the oldest parent before delivery renders its quote.
+    if (room.messages.some(message => message.id === replyTo)) return { ...room, messages: [...room.messages] };
+    const parent = this.historicalMessage(room.id, replyTo);
+    return parent && !parent.deleted ? { ...room, messages: [parent, ...room.messages] } : room;
+  }
+
   private exactVisibleMessage(sessionId: string, roomId: string, messageId: string): ChatMessage {
     const room = this.store.get(roomId);
     const session = this.deps.getSession(sessionId);
@@ -591,7 +608,7 @@ export class ChatroomService {
       throw new ChatroomError('No visible room for this live session', 'NOT_FOUND');
     }
     const message = room.messages.find((m) => m.id === messageId)
-      ?? (this.db ? JSON.parse(String(this.db.db.prepare('SELECT data FROM messages WHERE room_id = ? AND id = ?').get(roomId, messageId)?.data ?? 'null')) as ChatMessage | null : null);
+      ?? this.historicalMessage(roomId, messageId);
     if (!message || message.id !== messageId || message.roomId !== roomId) throw new ChatroomError('No such message in this room', 'NOT_FOUND');
     if (message.deleted) throw new ChatroomError('Deleted messages require separate owner resolution', 'CONFLICT');
     return structuredClone(this.messageIdentity(room, message));
@@ -700,7 +717,7 @@ export class ChatroomService {
   async init(): Promise<void> {
     await this.loadRetired();
     const rooms = this.deps.database ? await this.openDatabase(this.deps.database) : await loadChatrooms(this.deps.file);
-    this.store = new ChatroomStore(rooms);
+    this.store = new ChatroomStore(rooms, (roomId, messageId) => this.historicalMessage(roomId, messageId));
     await this.seen.load();
     this.learnNames(rooms);
     if (this.deps.file) {
@@ -784,17 +801,17 @@ export class ChatroomService {
         continue;
       }
       const message = room?.messages.find((m) => m.id === entry.messageId)
-        ?? (this.db ? JSON.parse(String(this.db.db.prepare('SELECT data FROM messages WHERE room_id = ? AND id = ?')
-          .get(entry.roomId, entry.messageId)?.data ?? 'null')) as ChatMessage | null : null);
+        ?? this.historicalMessage(entry.roomId, entry.messageId);
       // Membership and owner scope are checked again, never inferred from persisted recipients.
       if (!room || !member || !session || member.postOnly || session.owner !== room.owner || message?.deleted
         || (message && !messageRecipients(room, message).includes(entry.sessionId))) {
         pending.remove([entry.id]);
         continue;
       }
+      const deliveryRoom = this.withReplyContext(room, message?.replyTo);
       // A linked answer may have committed just before a crash interrupted
       // pending-store cleanup. Reconcile it before restoring another prompt.
-      if (message && isAddressedVoiceTurn(room, message, entry.sessionId, this.nameOf) &&
+      if (message && isAddressedVoiceTurn(deliveryRoom, message, entry.sessionId, this.nameOf) &&
           room.messages.some(answer => answer.from.kind === 'agent' &&
             answer.from.sessionId === entry.sessionId && answer.replyTo === entry.messageId)) {
         pending.remove([entry.id]);
@@ -807,8 +824,8 @@ export class ChatroomService {
         continue;
       }
       const recipients = messageRecipients(room, message);
-      const awake = wakeRecipients(room, message, recipients, this.nameOf);
-      this.delivery.enqueue(entry.sessionId, room, renderForRecipient(room, message, entry.sessionId, this.nameOf), {
+      const awake = wakeRecipients(deliveryRoom, message, recipients, this.nameOf);
+      this.delivery.enqueue(entry.sessionId, room, renderForRecipient(deliveryRoom, message, entry.sessionId, this.nameOf), {
         deliveryId: entry.id, messageId: entry.messageId, at: entry.at,
         passive: entry.passive || !awake.has(entry.sessionId),
       });
@@ -1113,10 +1130,11 @@ export class ChatroomService {
 
   /** One canonical room/member selection for pane delivery and polling phones. */
   private deliverySelection(room: ChatRoom, message: ChatMessage, pollingPhones = false) {
+    const context = this.withReplyContext(room, message.replyTo);
     const recipients = messageRecipients(room, message).filter(id =>
       room.members.some(member => member.sessionId === id && (!member.postOnly ||
         (pollingPhones && modePollsChat(this.deps.getSession(id)?.mode)))));
-    const awake = wakeRecipients(room, message, recipients, this.nameOf, process.env, id => {
+    const awake = wakeRecipients(context, message, recipients, this.nameOf, process.env, id => {
       const session = this.deps.getSession(id);
       return !!session && session.pid !== null && (paneAcceptsChat(session.mode) ||
         (pollingPhones && modePollsChat(session.mode)));
@@ -1507,13 +1525,14 @@ export class ChatroomService {
     const room = this.store.require(roomId);
     const { deliver = true, ...extra } = options;
     from = stampEmployeeSender(from, room.owner, this.depsWithIdentity());
+    const deliveryRoom = this.withReplyContext(room, extra.replyTo);
     const message = this.store.post(roomId, from, text, to, this.now(), extra);
     // Only an agent's own signature names a session: a user, an external sender or the system never does.
     if (from.kind === 'agent' && cleanName(from.name)) this.knownNames.set(from.sessionId, cleanName(from.name));
-    const selection = this.deliverySelection(room, message);
+    const selection = this.deliverySelection(deliveryRoom, message);
     // Polling seats are stored post-only to prevent pane typing; their phone still obeys normal filters.
     if (this.adminPhoneWakeEnabled) {
-      const phoneSelection = this.deliverySelection(room, message, true);
+      const phoneSelection = this.deliverySelection(deliveryRoom, message, true);
       // Muted/non-delivered traffic stays discarded even if the phone is unmuted before its next scan.
       message.phoneWakes = deliver && !message.voice ? phoneSelection.recipients.filter(id =>
         this.alertAllows(id, roomId, message.id) &&
@@ -1522,8 +1541,8 @@ export class ChatroomService {
     // Persisted before it is shown or delivered: with the database, committed before anyone sees it.
     this.schedulePersist(room.id);
     if (message.from.kind === 'agent' && message.replyTo) {
-      const asked = room.messages.find(item => item.id === message.replyTo);
-      if (asked && isAddressedVoiceTurn(room, asked, message.from.sessionId, this.nameOf)) {
+      const asked = deliveryRoom.messages.find(item => item.id === message.replyTo);
+      if (asked && isAddressedVoiceTurn(deliveryRoom, asked, message.from.sessionId, this.nameOf)) {
         // The member answered during its current turn: no redundant wake remains.
         this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
       }
@@ -1531,7 +1550,7 @@ export class ChatroomService {
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message: this.messageIdentity(room, message) });
     // A spoken turn was already answered by the voice service: show it, never type it into a pane.
     if (deliver) {
-      this.delivery.deliverMessage(room, message, selection.recipients, this.nameOf, selection.awake);
+      this.delivery.deliverMessage(deliveryRoom, message, selection.recipients, this.nameOf, selection.awake);
     }
     this.trackOwedReplies(room, message, deliver);
     for (const listener of this.messageListeners) listener(room, message);
@@ -1540,7 +1559,7 @@ export class ChatroomService {
       // Use the same durable queue and flush gates: busy/offline/uncertain
       // sessions stay held, and concurrent triggers cannot submit it twice.
       for (const member of room.members) {
-        if (isAddressedVoiceTurn(room, message, member.sessionId, this.nameOf))
+        if (isAddressedVoiceTurn(deliveryRoom, message, member.sessionId, this.nameOf))
           void this.delivery.flush(member.sessionId).catch(() => {});
       }
     }
