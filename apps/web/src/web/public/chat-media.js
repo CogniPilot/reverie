@@ -512,24 +512,40 @@ Object.assign(ReverieApp.prototype, {
         img.onclick = () => this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, img);
         img.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); img.click(); } };
         wrap.append(img);
+      } else if (/^video\/(mp4|webm)$/.test(a.type)) {
+        // Movies play in place, Discord-style: the first frame with a play button (James 10-29). The server serves the
+        // file inline only when its bytes are that container; anything else fails to load and becomes the download card.
+        const video = this._chatEl('video', 'chatroom-video');
+        video.src = url;
+        video.controls = true;
+        video.preload = 'metadata';
+        video.playsInline = true;
+        video.setAttribute('aria-label', a.name);
+        video.addEventListener('error', () => video.replaceWith(this._chatFileCard(m, a, url)), { once: true });
+        wrap.append(video);
       } else {
-        const card = this._chatEl('a', 'chatroom-file');
-        card.href = url;
-        card.setAttribute('aria-label', `Preview ${a.name}`);
-        card.onclick = event => {
-          if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          void this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, card);
-        };
-        card.append(
-          this._chatEl('span', 'chatroom-file-icon', '\u{1F4C4}'),
-          this._chatEl('span', 'chatroom-file-name', a.name),
-          this._chatEl('span', 'chatroom-file-size', chatFileSize(a.size))
-        );
-        wrap.append(card);
+        wrap.append(this._chatFileCard(m, a, url));
       }
     }
     return wrap;
+  },
+
+  /** A download card that opens the read-only preview on a plain click. */
+  _chatFileCard(m, a, url) {
+    const card = this._chatEl('a', 'chatroom-file');
+    card.href = url;
+    card.setAttribute('aria-label', `Preview ${a.name}`);
+    card.onclick = event => {
+      if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      void this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, card);
+    };
+    card.append(
+      this._chatEl('span', 'chatroom-file-icon', '\u{1F4C4}'),
+      this._chatEl('span', 'chatroom-file-name', a.name),
+      this._chatEl('span', 'chatroom-file-size', chatFileSize(a.size))
+    );
+    return card;
   },
 
   _openChatLightbox(url, name) {

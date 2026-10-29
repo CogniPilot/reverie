@@ -50,7 +50,7 @@ import {
   type ChatRoom,
   type ChatSender,
 } from '../../chatroom-store.js';
-import { ChatFileError, MAX_FILE_BYTES, isInlineImage, type ChatFileStore } from '../../chatroom-files.js';
+import { ChatFileError, MAX_FILE_BYTES, VIDEO_SNIFF_BYTES, inlineVideoType, isInlineImage, type ChatFileStore } from '../../chatroom-files.js';
 import fs from 'node:fs/promises';
 import { parseByteRange } from '../http-range.js';
 import { isRollCommand, rollCommand } from '../../chatroom-dice.js';
@@ -1151,10 +1151,16 @@ export function registerChatroomRoutes(
         throw new ChatroomError('No such file', 'NOT_FOUND');
       }
       const size = (await handle.stat()).size;
-      const inline = isInlineImage(file.type);
+      let inlineType = isInlineImage(file.type) ? file.type : null;
+      if (!inlineType && file.type.startsWith('video/')) {
+        const head = Buffer.alloc(VIDEO_SNIFF_BYTES);
+        const { bytesRead } = await handle.read(head, 0, head.length, 0);
+        inlineType = inlineVideoType(file.type, head.subarray(0, bytesRead));
+      }
+      const inline = inlineType !== null;
       const encoded = encodeURIComponent(file.name);
       reply
-        .header('Content-Type', inline ? file.type : 'application/octet-stream')
+        .header('Content-Type', inlineType ?? 'application/octet-stream')
         .header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encoded}`)
         .header('X-Content-Type-Options', 'nosniff')
         .header('Content-Security-Policy', "default-src 'none'; sandbox")
