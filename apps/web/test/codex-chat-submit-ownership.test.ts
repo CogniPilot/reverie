@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { composerBody, composerIsEmpty, placeholderHoldsPrompt, promptStillInComposer, SubmitVerifier } from '../src/session-submit-verifier.js';
 import { CODEX_KEY_BURST_MAX_CHARS, pastesInsteadOfKeys, submitAndConfirm, typeAndSubmit } from '../src/submit-settle.js';
 import { ChatroomDelivery } from '../src/chatroom-delivery.js';
@@ -172,5 +174,21 @@ describe('Codex composer as captured with SGR codes (codex-cli 0.163.0)', () => 
     expect(promptStillInComposer(screen, 'steered delivery', '›')).toBe(false);
     // A literal glyph row straight under the composer is still refused.
     expect(composerBody(`${echo('busy turn')}\n\n${working}\n${GLYPH} draft\n› literal\n\n${FOOT}`, '›')).toBeUndefined();
+  });
+});
+
+describe('real codex-cli 0.163.0 multi-line draft render (owned witness, 2026-10-29)', () => {
+  // `capture-pane -p -e` of a real Codex pane after pasting the draft "original draft\n› literal\n• literal bullet\n› ".
+  // Codex draws every draft row after the first indented by two columns, so a literal glyph or bullet inside a draft is
+  // never at column zero, and while this draft is shown the model/path footer is not drawn at all.
+  const screen = readFileSync(resolve(import.meta.dirname, 'fixtures/codex-0.163-multiline-draft.ansi'), 'utf8');
+  it('indents draft continuation rows, including literal glyphs and bullets', () => {
+    const rows = screen.replace(/\u001b\[[0-9;]*m/g, '').split('\n').filter((row) => row.trim());
+    const at = rows.findIndex((row) => row.startsWith('› original draft'));
+    expect(rows.slice(at + 1, at + 4)).toEqual(['  › literal', '  • literal bullet', '  ›']);
+  });
+  it('never reads that draft as an empty composer, so no delivery is typed over it', () => {
+    expect(composerIsEmpty(screen, '›')).toBe(false);
+    expect(composerBody(screen, '›')).toBeUndefined();
   });
 });
