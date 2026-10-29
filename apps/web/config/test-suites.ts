@@ -30,6 +30,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/embassy-guest-ui.browser.test.ts',
   'test/embassy-qr.browser.test.ts',
   'test/embassy-pairing.browser.test.ts',
+  'test/mobile-install-hint.browser.test.ts',
   'test/embassy-builtin.browser.test.ts',
   'test/embassy-pairing-csrf.browser.test.ts',
   'test/member-menu.browser.test.ts',
