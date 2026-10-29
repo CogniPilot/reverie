@@ -22,6 +22,8 @@ async function setup(emptyLocal=false){
   }
   else if(path==='/api/embassy-host')data={status:state.host,origin:state.needsOrigin?'':origin,builtin:!!state.builtin,needsAdvertisedOrigin:!!state.needsOrigin,room:{id:roomId,name:'Shared room'}};
   else if(path==='/api/embassy-host/settings'){state.needsOrigin=false;data={builtin:true,origin,needsAdvertisedOrigin:false};}
+  else if(path==='/api/embassy-host/rename')data={room:{id:roomId,name:options.body.name}};
+  else if(path==='/api/embassy-host/close')data={closed:true,revoked:2};
   else if(path==='/api/embassy-host/invites'&&options.method==='POST'){
    if(state.delayed)return state.delayed();
    if(state.createFailure)return {ok:false,status:502,json:async()=>({error:{code:'EMBASSY_UNREACHABLE'}})};
@@ -288,4 +290,16 @@ it('keeps Embassies beside the server channels and out of Direct Messages',async
  expect(h.document.querySelector('.eg-category')).toBeNull();
  shell.workspace='';shell.renderSidebar();await h.flush(5);
  expect(h.document.querySelectorAll('.eg-category')).toHaveLength(1);
+});
+it('lets the owner rename the hosted embassy and close it only after a second, explicit click',async()=>{
+ const h=await setup();await h.pair.open();
+ h.button('Embassy name and closing').click();await h.flush(5);
+ const input=h.document.querySelector('.eg-pair-body input, dialog input[type="text"]') as HTMLInputElement;
+ input.value='  Drone Lab Embassy  ';h.button('Save name').click();await h.flush(10);
+ expect(h.calls.find(c=>c.path==='/api/embassy-host/rename')?.body).toEqual({name:'Drone Lab Embassy'});
+ h.button('Close embassy').click();await h.flush(5);
+ expect(h.calls.some(c=>c.path==='/api/embassy-host/close')).toBe(false);
+ h.button('Confirm: close and end guest access').click();await h.flush(10);
+ expect(h.calls.find(c=>c.path==='/api/embassy-host/close')?.body).toEqual({confirm:'close'});
+ expect(h.document.body.textContent).toContain('Guest access has ended');
 });

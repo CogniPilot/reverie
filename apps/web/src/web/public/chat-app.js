@@ -10303,6 +10303,7 @@ class ReverieEmbassyPairingView {
     const choices = this.el('div', 'eg-pair-choices'); choices.append(invite, join); this.body.append(choices);
     this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? (this.host.needsAdvertisedOrigin ? 'Embassy is ready locally. Set a shareable HTTPS address to invite another company.' : `${this.host.room.name} · ${this.host.origin}`) : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
     if (this.host.status === 'ready') this.body.append(this.button('Manage invitations', () => this.invites()));
+    if (this.host.status === 'ready') this.body.append(this.button('Embassy name and closing', () => this.hostRoom()));
     if (this.host.builtin) this.body.append(this.button('Embassy address', () => this.hostAddress()));
     if (this.handles.length) {
       const list = this.el('section', 'eg-pair-recent'); list.append(this.el('h3', '', 'Connections in progress'));
@@ -10315,6 +10316,35 @@ class ReverieEmbassyPairingView {
     const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Other ways to connect'));
     fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
     this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
+  }
+  /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access (James 10-23). */
+  hostRoom() {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    this.clearBody(); this.title.textContent = 'Embassy name and closing'; const epoch = this.epoch;
+    const label = this.el('label', '', 'Embassy name'), input = this.el('input');
+    input.type = 'text'; input.maxLength = 120; input.autocomplete = 'off'; input.value = this.host.room?.name || ''; label.append(input); this.body.append(label);
+    const note = this.el('p', 'eg-pair-status'); note.setAttribute('role', 'status');
+    const save = this.button('Save name', async () => {
+      if (this.busy || !this.owner || !this.isCurrent(epoch) || !input.value.trim()) return;
+      this.busy = true; save.disabled = true;
+      const result = await this.api('/api/embassy-host/rename', { method: 'POST', body: { name: input.value.trim() } });
+      this.busy = false; if (!this.isCurrent(epoch)) return; save.disabled = false;
+      if (!result.ok) { note.textContent = this.error(result); return; }
+      note.textContent = 'Name saved.'; await this.refresh();
+    }, true);
+    this.body.append(save, this.el('p', 'ca-hint', 'Closing ends every guest\'s access right away and revokes open invitations. The room keeps its history and a new invitation can reopen it.'));
+    let armed = false;
+    const close = this.button('Close embassy', async () => {
+      if (this.busy || !this.owner || !this.isCurrent(epoch)) return;
+      if (!armed) { armed = true; close.textContent = 'Confirm: close and end guest access'; return; }
+      this.busy = true; close.disabled = true;
+      const result = await this.api('/api/embassy-host/close', { method: 'POST', body: { confirm: 'close' } });
+      this.busy = false; if (!this.isCurrent(epoch)) return; close.disabled = false;
+      if (!result.ok) { note.textContent = this.error(result); return; }
+      note.textContent = 'Embassy closed. Guest access has ended.'; armed = false; close.textContent = 'Close embassy';
+    });
+    this.body.append(close, note);
+    this.actions.append(this.button('Back', () => this.home())); input.focus();
   }
   hostAddress() {
     if (this.busy || !this.owner || !this.host.builtin) return;

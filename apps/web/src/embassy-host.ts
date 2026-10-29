@@ -125,6 +125,8 @@ export const EmbassyHostLookupSchema = z.union([
 export const EmbassyHostDecisionSchema = z
   .object({ requestId: z.string().regex(UUID), code: z.string().max(16) })
   .strict();
+export const EmbassyHostRenameSchema = z.object({ name: z.string().trim().min(1).max(120) }).strict();
+export const EmbassyHostCloseSchema = z.object({ confirm: z.literal('close') }).strict();
 export const EmbassyHostPostSchema = z
   .object({ text: z.string().min(1).max(4096), requestId: z.string().uuid().optional() })
   .strict();
@@ -396,5 +398,17 @@ export class EmbassyHost {
   async post(input: z.infer<typeof EmbassyHostPostSchema>) {
     const res = await this.call('POST', '/posts', input);
     return this.parsed(z.object({ post: z.unknown() }), res.body);
+  }
+
+  /** Rename the hosted room (an embassy without this call refuses with its own code). */
+  async rename(input: z.infer<typeof EmbassyHostRenameSchema>) {
+    const res = await this.call('POST', '/name', input);
+    return this.parsed(z.object({ room: z.object({ id: z.string(), name: label }) }), res.body);
+  }
+
+  /** Close the hosted room: every invite and guest pairing is revoked and the room posts that it closed. */
+  async close() {
+    const res = await this.call('POST', '/close', {});
+    return this.parsed(z.object({ closed: z.literal(true), revoked: z.number().int().min(0) }), res.body);
   }
 }

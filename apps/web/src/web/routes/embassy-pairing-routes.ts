@@ -8,7 +8,9 @@ import {
   EmbassyHostDecisionSchema,
   EmbassyHostInviteSchema,
   EmbassyHostLookupSchema,
+  EmbassyHostCloseSchema,
   EmbassyHostPostSchema,
+  EmbassyHostRenameSchema,
   type EmbassyHost,
 } from '../../embassy-host.js';
 import { EmbassyPairingCreateSchema, type EmbassyPairing } from '../../embassy-pairing.js';
@@ -113,6 +115,17 @@ export function registerEmbassyPairingRoutes(
   app.post(
     '/api/embassy-host/posts',
     handle((req) => host.post(parseBody(EmbassyHostPostSchema, req.body)))
+  );
+  app.post(
+    '/api/embassy-host/rename',
+    handle((req) => host.rename(parseBody(EmbassyHostRenameSchema, req.body)))
+  );
+  app.post(
+    '/api/embassy-host/close',
+    handle((req) => {
+      parseBody(EmbassyHostCloseSchema, req.body);
+      return host.close();
+    })
   );
 
   // ---------- guest side ----------
