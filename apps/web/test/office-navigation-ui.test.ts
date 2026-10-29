@@ -36,7 +36,7 @@ it.each([false, true])('the workspace-gutter panel exposes only Company and Boar
   expect(menu.tagName).toBe('NAV'); expect((menu as HTMLElement).hidden).toBe(false);
   expect(h.app.settingsOpened).toBeUndefined();
   const entries = [...menu.querySelectorAll<HTMLButtonElement>('button')];
-  expect(entries.map(n => n.textContent)).toEqual(['Company', 'Board']);
+  expect(entries.map(n => n.textContent)).toEqual(['Company', 'Board', 'Workspace']);
   entries.find(button => button.textContent === 'Company')!.click(); await h.flush();
   h.document.querySelector<HTMLButtonElement>('.ca-company-tools-button')!.click(); await h.flush();
   [...h.document.querySelectorAll<HTMLButtonElement>('[aria-label="Company tools"] button')].find(button => button.textContent === 'Terminal settings')!.click();

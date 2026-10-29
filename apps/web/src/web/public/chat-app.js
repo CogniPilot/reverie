@@ -3405,7 +3405,8 @@ class ReverieChatApp {
     this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
-      ? ['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
+      // Workspace sits beside Company and Board as a quick link (James 10-27).
+      ? ['company', 'board', 'workspace'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
       : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
     for (const entry of entries) pane.append(this.button('ca-btn ca-office-pane-link', entry.label, async () => {
       if (owner) {
