@@ -12,7 +12,7 @@
  *     host must do first; so this is off by default (see docs/opencode-shell-mode.md).
  *  3. Before Enter, a pane whose footer says it is in shell mode gets Escape, which keeps the text and returns to normal mode.
  */
-import { submitAndConfirm, waitForPasteSettle, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { markTypedUnsent, submitAndConfirm, waitForPasteSettle, writeGateOpen, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 
 /** The fullwidth exclamation mark that stands in for "!". */
 export const FULLWIDTH_BANG = '！';
@@ -88,9 +88,19 @@ async function shellModeShown(io: OpencodeTypingIo): Promise<boolean> {
  * Type `opts.text` into an OpenCode pane and (with `enter`) submit it. Returns 'blocked' when the pane stayed in shell mode after
  * the Escapes: the text is left in the box and Enter is NOT pressed (it would run the line in bash); the submit verifier tries
  * again later.
+ *
+ * A gated write (submit-settle withWriteGate: an agent's input while a plan move may take the composer) is re-checked right
+ * before the text, before each Escape and before Enter, and submitAndConfirm re-checks it before its retry. Closed before the
+ * text: 'not-written', nothing typed. Closed after it: 'withheld', the text is left unsent and recorded as such.
  */
-export async function typeIntoOpencode(io: OpencodeTypingIo, opts: OpencodeTypingOptions): Promise<'sent' | 'blocked'> {
+export async function typeIntoOpencode(io: OpencodeTypingIo, opts: OpencodeTypingOptions): Promise<'sent' | 'blocked' | 'not-written' | 'withheld'> {
   const text = guardShellKey(opts.text, { keepLeading: opts.person });
+  if (!writeGateOpen()) return 'not-written';
+  const withheld = (): 'withheld' => {
+    markTypedUnsent();
+    io.log?.(`${opts.confirm?.label ?? 'opencode'}: the write's gate closed after the text (a plan move took the composer): Enter withheld, text left unsent`);
+    return 'withheld';
+  };
   if (text) {
     if (opts.paste) {
       await io.tmux(['load-buffer', '-b', opts.buffer, '-'], text);
@@ -107,11 +117,13 @@ export async function typeIntoOpencode(io: OpencodeTypingIo, opts: OpencodeTypin
   if (!opts.person || !opts.text.startsWith('!')) {
     for (let escapes = 0; await shellModeShown(io); escapes++) {
       if (escapes >= MAX_ESCAPES) return 'blocked';
+      if (!writeGateOpen()) return withheld();
       // Back to normal mode with the text kept; then, a beat later and only once the footer agrees, Enter.
       await io.tmux(['send-keys', '-t', opts.target, 'Escape']);
       await io.sleep(ESCAPE_SETTLE_MS);
     }
   }
+  if (!writeGateOpen()) return withheld();
   if (opts.confirm && text) await submitAndConfirm(enterIo, text, opts.confirm, opts.confirm.label);
   else await enterIo.sendEnter();
   return 'sent';

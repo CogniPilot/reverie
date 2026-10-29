@@ -14,6 +14,7 @@ import {
 } from '../src/opencode-input.js';
 import { Session } from '../src/session.js';
 import { ChatroomDelivery, type DeliverySession } from '../src/chatroom-delivery.js';
+import { withWriteGate } from '../src/submit-settle.js';
 
 const SHELL_FOOTER = '  ~/work\n\n  ! ls -la\n\n  esc exit shell mode                      enter send';
 const NORMAL_FOOTER = '  Ask anything...\n\n  tab agents  ctrl+p commands';
@@ -120,6 +121,51 @@ describe('typing into an OpenCode pane', () => {
     const b = io();
     await typeIntoOpencode(b.fake, { ...opts, text: '' });
     expect(b.calls).toEqual([{ args: ['send-keys', '-t', 'pane1', 'Enter'] }]);
+  });
+
+  // A gated write (an agent's input while a plan move may take the composer) answers to its gate at each of OpenCode's keys.
+  it('a gate closed before the text types nothing', async () => {
+    const { fake, calls } = io();
+    const out = await withWriteGate(() => false, () => typeIntoOpencode(fake, opts));
+    expect(out).toEqual({ result: 'not-written', typedUnsent: false });
+    expect(calls).toEqual([]);
+  });
+
+  it('a gate that closes once the text is in withholds Enter and reports the text unsent', async () => {
+    const { fake, calls } = io();
+    let open = true;
+    const typing: OpencodeTypingIo = { ...fake, tmux: async (args, stdin) => { await fake.tmux(args, stdin); open = false; } };
+    const out = await withWriteGate(() => open, () => typeIntoOpencode(typing, opts));
+    expect(out).toEqual({ result: 'withheld', typedUnsent: true });
+    expect(calls.map((c) => c.args.at(-1))).toEqual([guardShellKey(opts.text)]); // the text only: no Escape, no Enter
+  });
+
+  it('a gate that closes while shell mode is being cleared sends no further Escape and no Enter', async () => {
+    const { fake, calls } = io([SHELL_FOOTER]);
+    let escapes = 0;
+    const typing: OpencodeTypingIo = { ...fake, tmux: async (args, stdin) => { await fake.tmux(args, stdin); if (args.at(-1) === 'Escape') escapes++; } };
+    const out = await withWriteGate(() => escapes === 0, () => typeIntoOpencode(typing, opts));
+    expect(out).toEqual({ result: 'withheld', typedUnsent: true });
+    expect(calls.map((c) => c.args.at(-1))).toEqual([guardShellKey(opts.text), 'Escape']);
+  });
+
+  it('a gate that closes after Enter, while no turn has started, withholds the confirm retry Enter', async () => {
+    const pane = `┃ ${guardShellKey(opts.text)}\n\n  tab agents  ctrl+p commands`; // the first Enter was ignored: text still there
+    const { fake, calls } = io([pane]);
+    let open = true;
+    const typing: OpencodeTypingIo = { ...fake, tmux: async (args, stdin) => { await fake.tmux(args, stdin); if (args.at(-1) === 'Enter') open = false; } };
+    const out = await withWriteGate(() => open, () => typeIntoOpencode(typing, { ...opts, confirm: { glyph: '┃', workingLine: 'esc interrupt' } }));
+    expect(out.typedUnsent).toBe(true);
+    expect(calls.map((c) => c.args.at(-1))).toEqual([guardShellKey(opts.text), 'Enter']); // one Enter, no retry
+  });
+
+  it('an open gate, or none at all (a person\u2019s typing, the move\u2019s own handoff), types and submits as before', async () => {
+    const gated = io();
+    expect(await withWriteGate(() => true, () => typeIntoOpencode(gated.fake, opts))).toEqual({ result: 'sent', typedUnsent: false });
+    const plain = io();
+    expect(await typeIntoOpencode(plain.fake, opts)).toBe('sent');
+    expect(gated.calls).toEqual(plain.calls);
+    expect(plain.calls.map((c) => c.args.at(-1))).toEqual([guardShellKey(opts.text), 'Enter']);
   });
 });
 

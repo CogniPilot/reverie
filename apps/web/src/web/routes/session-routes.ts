@@ -2286,8 +2286,12 @@ export function registerSessionRoutes(
     // BOTH writes, and telling the caller "delivered, but it timed out" points it at
     // the wrong recovery — wait longer, when the truth is "restart the worker".
     let delivered = false;
-    // An idle-only write whose text went in but whose Enter was withheld (a turn started in between): reported, never retried.
+    // A gated write whose text went in but whose Enter was withheld (a turn started, or a plan move took the composer, in
+    // between): reported, never retried.
     let typedUnsent = false;
+    // An agent's write refused before any byte because a plan move took the composer after the early check above (during the
+    // wake-target probe, say): busy, with the seq handed back for a retry once the move is done.
+    let heldByMove = false;
 
     // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
     // ask for it: written straight into the pane it arrives as one burst, and Claude
@@ -2298,9 +2302,16 @@ export function registerSessionRoutes(
     const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
     // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
     // a person's own typing, which names no session, is left exactly as typed.
-    const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
+    // An agent's write also answers to a plan move's hold at the write itself (agentInput); a person's typing does not.
+    const agentHold = agentCaller ? { agentInput: true, onMoveHeld: () => { heldByMove = true; } } : {};
+    const muxOptions = agentCaller
+      ? { fromUser: true, opencodeGuard: true, ...agentHold, onTypedUnsent: () => { typedUnsent = true; } }
+      : { fromUser: true };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
     const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
+    const rawOptions = { fromUser: true, ...agentHold };
+    // A mux write that failed may fall back to a raw write only when it typed nothing and no move hold refused it.
+    const mayFallBack = () => !typedUnsent && !heldByMove;
 
     if (duplicate) {
       // Redelivery of an already-applied input: skip the write, but still honor the
@@ -2320,39 +2331,41 @@ export function registerSessionRoutes(
       const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
       if (ok) {
         delivered = true;
-      } else {
+      } else if (mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        delivered = session.write(rawInput, { fromUser: true });
+        delivered = session.write(rawInput, rawOptions);
         if (!delivered) undoOnFailure();
-      }
+      } else if (!typedUnsent) undoOnFailure();
     } else if (autoMux) {
       // Awaited, unlike the explicit useMux branch below. This shape also reaches here
       // from the browser's POST fallback, which sends its frames one at a time and
       // waits for each 2xx; answering only once Enter has gone out is what keeps the
       // next keystroke from overtaking it.
       const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
-      if (!ok) {
+      if (!ok && mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
-      }
+        if (!session.write(rawInput, rawOptions)) undoOnFailure();
+      } else if (!ok && !typedUnsent) undoOnFailure();
     } else if (useMux) {
       // Fire-and-forget: don't block the HTTP response on a tmux child process.
       // Fallback to a direct write on failure. Unchanged from before send-and-wait.
       session
         .writeViaMux(inputStr, muxOptions)
         .then((ok) => {
-          if (ok) return;
+          if (ok || typedUnsent) return;
+          if (heldByMove) return undoOnFailure();
           console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-          if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+          if (!session.write(rawInput, rawOptions)) undoOnFailure();
         })
         .catch(() => {
-          if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+          if (mayFallBack() && session.write(rawInput, rawOptions)) return;
+          if (!typedUnsent) undoOnFailure();
         });
     } else {
       // Same rollback. NOT an error response, deliberately: a session can
       // legitimately have no PTY yet (created but not started), and callers have
       // always been able to write to one without a 4xx.
-      delivered = session.write(rawInput, { fromUser: true });
+      delivered = session.write(rawInput, rawOptions);
       if (!delivered && tagged) {
         session.forgetInputSeq(clientId as string, seq as number);
       }
@@ -2360,7 +2373,10 @@ export function registerSessionRoutes(
 
     // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
     // just started, or a draft in the composer) must not read as accepted.
-    if (!waitPromise) return ifIdle ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
+    if (heldByMove && !waitPromise) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+    }
+    if (!waitPromise) return ifIdle || typedUnsent ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
     try {
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse
@@ -2381,11 +2397,15 @@ export function registerSessionRoutes(
       if (selfReleased) abort.abort();
 
       const result = await waitPromise;
+      if (heldByMove) {
+        return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+      }
       return {
         success: true,
         data: {
           delivered,
           duplicate,
+          ...(typedUnsent ? { typedUnsent } : {}),
           // The pane's own liveness, so a failed write is not mistaken for a dead worker: during a broker or website
           // pause the write fails while the worker keeps running, and restarting it would cut a live turn.
           workerDead,

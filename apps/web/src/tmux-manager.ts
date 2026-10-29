@@ -3791,9 +3791,12 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return false;
     }
 
-    // A gated write (idle-only wake, capacity retry) is only ever a gated text + Enter (typeAndSubmit re-checks before each
-    // key); any other shape would go out ungated, so it is refused before any transport, test mode included.
-    if ((options.stillIdle || writeGateActive()) && (options.opencode || !input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))) {
+    // A gated write (idle-only wake, capacity retry, an agent's input under a plan move's hold) is only ever a gated text +
+    // Enter (typeAndSubmit, or typeIntoOpencode, re-checks before each key); any other shape would go out ungated, so it is
+    // refused before any transport, test mode included. OpenCode's typer follows the write's gate but has no idle check, so an
+    // idle-only write (stillIdle) is still refused there.
+    if ((options.stillIdle || writeGateActive()) &&
+      ((options.opencode && options.stillIdle) || !input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))) {
       return false;
     }
 
@@ -3842,7 +3845,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return true;
+        return outcome !== 'not-written';
       }
 
       if (textPart && hasCarriageReturn) {

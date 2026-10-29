@@ -175,6 +175,15 @@ export function writeGateActive(): boolean {
 function gateOpen(stillIdle?: () => boolean): boolean {
   return (stillIdle ? stillIdle() : true) && (writeGate.getStore()?.open() ?? true);
 }
+/** Whether the current write's own gate, if it has one, is open now: a typer with its own key sequence checks it at each key. */
+export function writeGateOpen(): boolean {
+  return gateOpen();
+}
+/** Records that the current gated write's text went in but its gate withheld Enter: unsent, so nothing may press Enter for it. */
+export function markTypedUnsent(): void {
+  const store = writeGate.getStore();
+  if (store) store.typedUnsent = true;
+}
 
 /** The generic (non-OpenCode) delivery: type the text, let it settle, then Enter as a separate keystroke, confirmed. */
 export async function typeAndSubmit(

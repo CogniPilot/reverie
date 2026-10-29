@@ -4909,6 +4909,11 @@ export class Session extends EventEmitter {
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
     if (this._viewerInputHeld) return false;
+    // An agent's raw write (a mux failure's fallback, an explicit raw send) is checked here, with no await before the write.
+    if (options.agentInput && this._moveHolds > 0) {
+      options.onMoveHeld?.();
+      return false;
+    }
     const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
     if (!this.ptyProcess) return false;
@@ -5124,6 +5129,12 @@ export class Session extends EventEmitter {
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
     if (this._viewerInputHeld) return false;
+    // An agent's input is refused here, at the write, not only by the route's earlier look: a plan move can take the composer
+    // during any await before it. From here to the first key there is no await.
+    if (options.agentInput && this._moveHolds > 0) {
+      options.onMoveHeld?.();
+      return false;
+    }
     const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
     if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
     // Idle-only is decided here, at the write, not by the route's earlier look: a turn can start during any await before it.
@@ -5149,27 +5160,42 @@ export class Session extends EventEmitter {
       const writeId = this._beginMuxWrite();
       // A gated write (idle-only wake, capacity retry) owns the composer only while no OTHER write is in flight, and only for
       // its own id: once this write's finally drops the id, the same gate (held by its delayed verifier) admits no write.
-      const gated = !!options.requireIdle || !!options.writeGate;
-      const gate = gated
-        ? () => !this._otherMuxWrite(writeId) && (options.requireIdle ? this._idleForWake(writeId, false) : true) &&
-          (options.writeGate ? options.writeGate() : true)
+      const exclusive = !!options.requireIdle || !!options.writeGate;
+      // An agent's ordinary send is gated on the move hold alone (other writes in flight do not refuse it), and its keys only in
+      // the one shape the gate follows key by key: text + Enter, OpenCode included (tmux refuses any other shape under a gate).
+      // Any other shape is a single write checked at the top; its later Enter, if any, still answers to the hold below.
+      let heldByMove = false;
+      const moveFree = () => {
+        if (this._moveHolds === 0) return true;
+        heldByMove = true;
+        return false;
+      };
+      const agentKeys = !!options.agentInput && !!data.replace(/[\r\n]/g, '').trimEnd() && data.includes('\r');
+      const gate = exclusive || agentKeys
+        ? () => (!exclusive || !this._otherMuxWrite(writeId)) && (options.requireIdle ? this._idleForWake(writeId, false) : true) &&
+          (options.writeGate ? options.writeGate() : true) && (options.agentInput ? moveFree() : true)
         : undefined;
       if (options.requireIdle) (muxOptions as { stillIdle?: () => boolean }).stillIdle = gate;
       try {
         const send = () => this._mux!.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
         let sent: boolean;
+        let unsent = false;
         if (gate) {
           if (options.capacityRetry) this._capacityWrites++;
           try {
             const outcome = await withWriteGate(gate, send);
             // Typed but Enter withheld (before the first Enter, or at the retry): not sent, so no verifier is armed for it.
-            sent = outcome.result && !outcome.typedUnsent;
-            if (outcome.typedUnsent) options.onTypedUnsent?.();
+            unsent = outcome.typedUnsent;
+            sent = outcome.result && !unsent;
+            if (unsent) options.onTypedUnsent?.();
           } finally { if (options.capacityRetry) this._capacityWrites--; }
         } else sent = await send();
         if (sent) {
           this._emitSubmittedPrompt(this._trackSubmit(data, options));
-          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate);
+          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate ?? (options.agentInput ? moveFree : undefined));
+        } else if (heldByMove && !unsent) {
+          // The gate closed before the text: nothing was typed.
+          options.onMoveHeld?.();
         }
         return sent;
       } finally { this._endMuxWrite(writeId); }
