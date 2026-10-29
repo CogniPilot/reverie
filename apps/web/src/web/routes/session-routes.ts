@@ -2146,6 +2146,13 @@ export function registerSessionRoutes(
     if (ifIdle && session.isWorking) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
     }
+    // An agent's input (send, wake: the request names its calling session) never types into a composer a plan move owns: the
+    // move's handoff goes into that composer and would be appended to it. A person's own typing stays allowed.
+    const agentCaller =
+      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
+    if (agentCaller && session.composerHeldByMove) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+    }
 
     const inputStr = String(input);
     if (inputStr.length > MAX_INPUT_LENGTH) {
@@ -2291,8 +2298,6 @@ export function registerSessionRoutes(
     const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
     // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
     // a person's own typing, which names no session, is left exactly as typed.
-    const agentCaller =
-      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
     const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
     const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;

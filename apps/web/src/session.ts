@@ -5055,9 +5055,25 @@ export class Session extends EventEmitter {
    * session.writeViaMux('/init\r');   // Send /init command
    * ```
    */
-  /** Hold the model-capacity auto-resume while something else (a plan move) owns this composer. */
+  /** Plan-move holds on this composer (pauseCapacityRetry), counted even when the capacity auto-resume is off. */
+  private _moveHolds = 0;
+
+  /** Whether a plan move owns this composer now: no agent may type into it (the move's own handoff is not an agent write). */
+  get composerHeldByMove(): boolean {
+    return this._moveHolds > 0;
+  }
+
+  /** Hold the model-capacity auto-resume, and every agent's input, while something else (a plan move) owns this composer. */
   pauseCapacityRetry(): () => void {
-    return this._capacityRetry?.pause() ?? (() => {});
+    this._moveHolds++;
+    const resume = this._capacityRetry?.pause() ?? (() => {});
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._moveHolds--;
+      resume();
+    };
   }
 
   private _capacityWrites = 0;
@@ -5091,7 +5107,7 @@ export class Session extends EventEmitter {
    * harness fails closed rather than risk typing into a draft it cannot see.
    */
   private _idleForWake(ownId: number | null, composer: boolean): boolean {
-    if (this._viewerInputHeld || this.paneLifecycleInFlight || this._isStopped || this._isWorking) return false;
+    if (this._viewerInputHeld || this.paneLifecycleInFlight || this._isStopped || this._isWorking || this._moveHolds > 0) return false;
     if ((this._workerBacked && this._paneExit) || this._otherMuxWrite(ownId)) return false;
     if (!composer) return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
