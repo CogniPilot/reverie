@@ -1,5 +1,10 @@
 # Upstream credit
 
+Chat code highlighting includes highlight.js 11.12.0 (BSD-3-Clause), copyright
+2006 Ivan Sagalaev. Its license is retained at
+`apps/web/src/web/public/vendor/highlight-LICENSE.txt`; pinned inputs and hashes
+are in `vendor/chat-highlighting.json`. The Modelica grammar is project source.
+
 The optional chat math plugin includes KaTeX 0.19.0 (MIT), with its license at
 `apps/web/src/web/public/vendor/katex-0.19.0/LICENSE`. Its local JavaScript,
 WOFF2 fonts and CSS come from the reviewed Reverie chat rendering packet;

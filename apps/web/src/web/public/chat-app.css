@@ -1182,6 +1182,12 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .chatroom-inline-code.is-copied { outline: 1px solid var(--accent, #4aa3ff); }
 .chatroom-inline-code.is-copy-failed { outline: 1px solid var(--danger, #e5534b); }
 .chatroom-code-copy { position: absolute; top: 4px; right: 4px; padding: 3px 8px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--border, #2b3441); background: var(--bg-secondary, #1c222b); color: inherit; cursor: pointer; }
+.chatroom-code .hljs { display: block; color: var(--text); background: none; }
+.chatroom-code .hljs-keyword, .chatroom-code .hljs-selector-tag, .chatroom-code .hljs-type { color: var(--accent, #8cb4ff); font-weight: 600; }
+.chatroom-code .hljs-string, .chatroom-code .hljs-attr { color: var(--green, #57cfa1); }
+.chatroom-code .hljs-number, .chatroom-code .hljs-literal, .chatroom-code .hljs-symbol { color: var(--yellow, #e2bf72); }
+.chatroom-code .hljs-comment { color: var(--text-muted, #919aa6); font-style: italic; }
+.chatroom-code .hljs-title, .chatroom-code .hljs-built_in, .chatroom-code .hljs-function { color: var(--accent); }
 
 /* Board and Plans: pinned above the list, shown in the main pane over the conversation. */
 .ca-office-gear.is-active { color:var(--accent); background:var(--ca-active); }
