@@ -711,7 +711,7 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
   });
   if (!res.json?.success) return fail(deps, describeFailure(res));
   const data = res.json.data as
-    | { delivered?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; wait?: WaitResult }
+    | { delivered?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; workerDead?: boolean; wait?: WaitResult }
     | undefined;
   if (deps.json) emitJson(deps, data ?? {});
   // Fire-and-forget to a remote session whose host is asleep (wake-on-LAN): the server
@@ -731,6 +731,16 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
   // `delivered:false` without `duplicate` is the route's "the bytes went nowhere":
   // the PTY exited or send-keys hit a dead pane. The field exists so a client does not
   // say "wait longer" when the truth is "restart the worker" — so it is a failure here.
+  if (data?.delivered === false && !data.duplicate && data.workerDead === false) {
+    // The server checked the pane and it is alive: the write itself failed (a broker or website pause), so this is a
+    // retry, not a restart. Restarting a live worker would cut its turn.
+    if (!deps.json) {
+      deps.io.err(
+        palette.err(`${GLYPH.fail} not delivered: the write to ${target.id} failed but its worker is still running — retry shortly; do not restart it`)
+      );
+    }
+    return EXIT.error;
+  }
   if (data?.delivered === false && !data.duplicate) {
     if (!deps.json) {
       deps.io.err(

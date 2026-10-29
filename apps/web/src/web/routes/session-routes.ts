@@ -2369,6 +2369,9 @@ export function registerSessionRoutes(
         data: {
           delivered,
           duplicate,
+          // The pane's own liveness, so a failed write is not mistaken for a dead worker: during a broker or website
+          // pause the write fails while the worker keeps running, and restarting it would cut a live turn.
+          workerDead,
           status: session.status,
           limitPaused: session.isLimitPaused,
           // Identical `wait` object to the two GET endpoints, so one client helper

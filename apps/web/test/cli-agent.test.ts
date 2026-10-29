@@ -318,6 +318,15 @@ describe('agent send', () => {
     expect(deps.err.join('')).toMatch(/not delivered.*restart/);
   });
 
+  it('a failed write to a worker the server still sees running is a retry, never "restart it" (broker pause)', async () => {
+    const deps = fakeDeps([ok({ delivered: false, duplicate: false, workerDead: false, wait: { ended: true, signal: null } })]);
+    expect(await agentSend(deps, { id: OTHER, text: 'go', enter: true, wait: true })).toBe(EXIT.error);
+    expect(deps.err.join('')).toMatch(/worker is still running.*retry shortly; do not restart/);
+    expect(deps.err.join('')).not.toMatch(/no live worker/);
+    const dead = fakeDeps([ok({ delivered: false, duplicate: false, workerDead: true, wait: { ended: true, signal: null } })]);
+    expect(await agentSend(dead, { id: OTHER, text: 'go', enter: true, wait: true })).toBe(EXIT.dead);
+  });
+
   it('fire-and-forget says "accepted", not "delivered" (the route answers before the write)', async () => {
     const deps = fakeDeps([ok({})]);
     expect(await agentSend(deps, { id: OTHER, text: 'go', enter: true })).toBe(EXIT.ok);
