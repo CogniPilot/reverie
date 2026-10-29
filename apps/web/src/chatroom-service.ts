@@ -409,8 +409,9 @@ export class ChatroomService {
         const sourceDigest = noticeDigest(this.messageIdentity(room, message, identity));
         const records = this.notices.forSource(recipient, room.id, message.id);
         const attention = this.noticeAttention(sessionId, room, message, records, ownReplies.get(message.id) ?? [], identity);
-        const transportPending = held.has(key) || queued.has(key);
-        if (attention.disposition !== 'pending' && !transportPending) continue;
+        // A notice its recipient already handled stays listed only while its delivery is uncertain (do not resend it); one
+        // merely still queued for the pane is not news, and listing it after every command buried the requests still open.
+        if (attention.disposition !== 'pending' && !held.has(key)) continue;
         const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
         const direct = message.to !== 'all' || (uniquelyNamed && textMentions(message.text, name));
         const pendingVersion = attention.disposition === 'pending' &&

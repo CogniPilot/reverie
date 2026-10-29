@@ -241,6 +241,43 @@ describe('current exact recipient/source attention boundary', () => {
       await f.service.stop();
     }
   });
+  it('drops a handled notice that is only still queued for the pane, and counts what still needs attention', async () => {
+    const f = await fixture();
+    try {
+      const handled = f.question('first owner request');
+      const open = f.question('second owner request');
+      vi.spyOn(f.service.delivery, 'queuedMessagesFor').mockReturnValue(
+        [handled, open].map((m) => ({ roomId: f.room.id, messageId: m.id }))
+      );
+      const before = f.service.turnSummary(A);
+      expect(before.messages.map((m) => m.messageId)).toEqual(expect.arrayContaining([handled.id, open.id]));
+      expect(before.text).toContain(`: ${before.total} need your attention.`);
+      const read = f.service.exactAgentRead(A, f.room.id, handled.id);
+      f.service.resolveNotice(A, { roomId: f.room.id, messageId: handled.id, readToken: read.readToken, disposition: 'handled' });
+      const after = f.service.turnSummary(A);
+      expect(after.messages.map((m) => m.messageId)).not.toContain(handled.id); // queued, but handled: not news
+      expect(after.messages.map((m) => m.messageId)).toContain(open.id);
+      expect(after.total).toBe(before.total - 1);
+      expect(after.text).toContain(`: ${after.total} need${after.total === 1 ? 's' : ''} your attention.`);
+    } finally {
+      await f.service.stop();
+    }
+  });
+  it('counts a handled notice whose delivery is uncertain as listed but not as needing attention', async () => {
+    const f = await fixture();
+    try {
+      const question = f.question();
+      f.service.delivery.holdForInspection(A, [{ roomId: f.room.id, messageId: question.id }]);
+      const read = f.service.exactAgentRead(A, f.room.id, question.id);
+      f.service.resolveNotice(A, { roomId: f.room.id, messageId: question.id, readToken: read.readToken, disposition: 'handled' });
+      const summary = f.service.turnSummary(A);
+      expect(summary.messages.map((m) => m.messageId)).toContain(question.id);
+      const open = summary.messages.filter((m) => m.attention?.disposition === 'pending').length;
+      expect(summary.text).toContain(`: ${open} need${open === 1 ? 's' : ''} your attention.`);
+    } finally {
+      await f.service.stop();
+    }
+  });
   it.each(['edited', 'deleted'])('invalidates a %s linked reply below the read cursor', async (change) => {
     const f = await fixture();
     try {
