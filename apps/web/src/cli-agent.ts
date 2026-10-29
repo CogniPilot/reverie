@@ -757,6 +757,31 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
   return waitExitCode(data?.wait);
 }
 
+/** What `agent wake` types: one standard nudge, so a woken agent knows why it was prompted and where to look. */
+export const WAKE_PROMPT =
+  'Wake-up check from a colleague: you look idle. Read what needs you (reverie agent chat digest), check your Board cards (reverie board show --mine), then carry on with your current work or say what is blocking you.';
+
+/**
+ * `agent wake` — type the standard resume prompt into an idle colleague's composer (James 10-19: an agent should be
+ * able to wake a sleeping agent with one command). It goes through the same input route as `send`, so the server decides who
+ * may type where; a session that is working is left alone rather than interrupted mid-turn.
+ */
+export async function agentWake(deps: AgentDeps, options: { id: string }): Promise<number> {
+  if (isSelfSession(deps.ctx.selfId, options.id)) {
+    return fail(deps, `refusing: ${options.id} is me — I am awake`, EXIT.refused);
+  }
+  const target = await resolveSessionId(deps, options.id);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/sessions' });
+  if (!res.json?.success) return fail(deps, describeFailure(res));
+  const row = ((res.json.data as SessionRow[] | undefined) ?? []).find((s) => s.id === target.id);
+  if (!row) return fail(deps, `no session ${target.id} (see \`agent ls\`)`, EXIT.error);
+  if (row.status !== 'idle') {
+    return fail(deps, `not waking ${row.name ?? target.id}: it is ${row.status ?? 'in an unknown state'}, not idle`, EXIT.refused);
+  }
+  return agentSend(deps, { id: target.id, text: WAKE_PROMPT, enter: true });
+}
+
 function describeWait(wait: WaitResult): string {
   if (wait.signal === 'exit') return palette.err(`${GLYPH.fail} the session exited`);
   if (wait.ended) {
@@ -2528,6 +2553,12 @@ export function registerAgentCommands(program: Command): Command {
           });
         })
     );
+
+  agent
+    .command('wake <id>')
+    .description('Nudge an idle colleague: type the standard "check your rooms and Board, then carry on" prompt (a working session is left alone)')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentWake(deps, { id })));
 
   agent
     .command('wait <id>')

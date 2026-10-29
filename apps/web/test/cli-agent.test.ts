@@ -18,6 +18,8 @@ import {
   agentRead,
   agentRm,
   agentSend,
+  agentWake,
+  WAKE_PROMPT,
   agentSpawn,
   agentWait,
   baseHeaders,
@@ -252,6 +254,26 @@ describe('agent ls', () => {
     const deps = fakeDeps([{ status: 401, text: 'Unauthorized' }]);
     expect(await agentLs(deps)).toBe(EXIT.error);
     expect(deps.err.join('')).toMatch(/401.*password/);
+  });
+});
+
+describe('agent wake', () => {
+  it('types the standard prompt into an idle colleague through the normal input route', async () => {
+    const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: true })]);
+    expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.ok);
+    expect(deps.calls[0]).toMatchObject({ method: 'GET', path: '/api/v1/sessions' });
+    expect(deps.calls[1]).toMatchObject({ method: 'POST', path: `/api/v1/sessions/${OTHER}/input`, body: { input: `${WAKE_PROMPT}\r` } });
+  });
+
+  it('leaves a working or unknown-state session alone and never wakes itself', async () => {
+    for (const status of ['busy', undefined]) {
+      const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status }])]);
+      expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.refused);
+      expect(deps.calls.filter((c) => c.method === 'POST')).toEqual([]);
+    }
+    const self = fakeDeps([]);
+    expect(await agentWake(self, { id: SELF })).toBe(EXIT.refused);
+    expect(self.calls).toEqual([]);
   });
 });
 
