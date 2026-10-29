@@ -127,6 +127,26 @@ class ArchiveProvenanceTests(unittest.TestCase):
         self.assertEqual(actual,value);self.assertEqual(pair['sha256'],hashlib.sha256(path.read_bytes()).hexdigest())
         self.assertNotIn('ownerApproved',actual)
 
+    def test_wrapped_python_graph_requires_both_declared_wrapper_and_real_elf(self):
+        import shutil
+        path,console,node,value=self.startup()
+        invocation=str(Path(shutil.which('python3')))
+        wrapper=str(Path(invocation).resolve(strict=True))
+        bare=str(Path('/proc/self/exe').resolve(strict=True))
+        self.assertNotEqual(wrapper,bare)
+        value['startupPython']['invocation']=invocation
+        value['startupPython']['executable']=bare
+        value['startupPython']['argvPrefix'][0]=invocation
+        value['codeFiles'][bare]={'sha256':'c'*64,'bytes':1}
+        value['codeFiles'][wrapper]={'sha256':'b'*64,'bytes':1}
+        path.write_text(json.dumps(value))
+        with patch.object(P,'immutable',return_value=path):
+            actual,_=P.startup_program(path,console,node)
+        self.assertEqual(actual,value)
+        del value['codeFiles'][wrapper];path.write_text(json.dumps(value))
+        with patch.object(P,'immutable',return_value=path),self.assertRaisesRegex(ValueError,'Incomplete startup code graph'):
+            P.startup_program(path,console,node)
+
     def test_startup_code_omission_or_different_application_cannot_bind(self):
         path,console,node,value=self.startup()
         for change in ['missing','different']:

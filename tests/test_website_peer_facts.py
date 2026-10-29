@@ -144,6 +144,41 @@ class WebsiteFactTests(unittest.TestCase):
             self.assertIsInstance(replacement.bootstrap,F.NamespaceProgram);self.assertNotEqual(replacement.bootstrap.argv,peer.bootstrap.argv)
             with self.assertRaises(ValueError):peer.with_bootstrap(Program('/nix/store/not-qualified',(str(self.invocation),)))
 
+    def test_python_wrapper_and_bare_image_copies_are_both_qualified(self):
+        bare=Path('/proc/self/exe').resolve(strict=True)
+        self.assertNotEqual(bare,self.executable,'Declared flake environment wrapper required')
+        guest_bare=self.root/'bare-image-copy';shutil.copyfile(bare,guest_bare);guest_bare.chmod(0o444)
+        self.selection['bootstrap']={'executable':str(bare),'argv':[str(self.invocation),'-I']}
+        self.selection['codeFiles'][str(bare)]={'sha256':hashlib.sha256(bare.read_bytes()).hexdigest(),'bytes':bare.stat().st_size}
+        mapped=os.environ.get('NIX_BUILD_TOP') and Path('/').stat().st_uid==Path('/nix/store').stat().st_uid==65534
+        with self.ports(),ExitStack() as extra:
+            image_open=F.open_in_root;native_stat=Path.stat;native_fstat=os.fstat
+            def image(root,path,**kwargs):
+                return os.open(guest_bare,os.O_RDONLY|os.O_CLOEXEC)if path==str(bare) and not kwargs.get('path_link') else image_open(root,path,**kwargs)
+            extra.enter_context(patch.object(F,'open_in_root',side_effect=image))
+            if mapped:
+                selected={bare,self.executable}
+                def host_stat(path,*args,**kwargs):
+                    value=native_stat(path,*args,**kwargs)
+                    return SimpleNamespace(**{**{k:getattr(value,k)for k in dir(value)if k.startswith('st_')},'st_uid':0})if path in selected and value.st_uid==65534 else value
+                identity=(native_stat(bare).st_dev,native_stat(bare).st_ino)
+                def host_fstat(fd):
+                    value=native_fstat(fd)
+                    if(value.st_dev,value.st_ino)==identity and value.st_uid==65534:
+                        fields=list(value);fields[4]=0;return os.stat_result(fields)
+                    return value
+                extra.enter_context(patch.object(Path,'stat',host_stat))
+                extra.enter_context(patch.object(os,'fstat',host_fstat))
+            facts=self.bound();program=facts.program(str(bare),(str(self.invocation),'-I'))
+            st=guest_bare.stat();process={'exe':(st.st_dev,st.st_ino),'argv':hashlib.sha256(b'\0'.join(v.encode()for v in program.argv)+b'\0').hexdigest()}
+            program.matches(process)
+            wrong=dict(process,exe=(self.guest.stat().st_dev,self.guest.stat().st_ino))
+            with self.assertRaisesRegex(ValueError,'PROGRAM_CHANGED'):program.matches(wrong)
+            with self.assertRaisesRegex(ValueError,'INVOCATION_EXECUTABLE_CHANGED'):
+                facts.program(str(bare),(str(self.invocation),'--unreviewed'))
+            guest_bare.chmod(0o644);data=guest_bare.read_bytes();guest_bare.write_bytes(bytes([data[0]^1])+data[1:]);guest_bare.chmod(0o444)
+            with self.assertRaisesRegex(ValueError,'BACKEND_CODE_BYTES_CHANGED'):program.matches(process)
+
 
 class ImageMetadataRouteTests(unittest.TestCase):
     def test_added_capabilities_must_be_an_explicit_native_fact(self):

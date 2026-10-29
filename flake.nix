@@ -98,6 +98,10 @@
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
           workerDockerSeccomp = import ./nix/worker-docker-profile.nix { inherit pkgs; };
+          workerTaskPerfPolicy = import ./nix/worker-perf-profile.nix {
+            inherit pkgs; src = source;
+            baseProfile = self.packages.${system}.workerDockerSeccomp;
+          };
           chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
@@ -143,6 +147,8 @@
             chmod u+w "$out/python/reverie"
             cp ${self.packages.${system}.workerResumeProgram}/share/reverie/worker-resume-program.json \
               "$out/python/reverie/worker-resume-program.json"
+            cp ${self.packages.${system}.workerTaskPerfPolicy}/share/reverie/worker-perf-profile.json \
+              "$out/python/reverie/worker-perf-profile.json"
             python3 - "$out/python" <<'PY'
             import pathlib,sys
             root=pathlib.Path(sys.argv[1]);files=[p for p in root.rglob('*') if p.is_file()]
@@ -240,6 +246,16 @@
               export REVERIE_WORKER_SERVICE_PYTHON=${pkgs.python3}/bin/python3
               export REVERIE_WORKER_SERVICE_ENTRY=${self.packages.${system}.workerBrokerSource}/python/reverie/worker.py
               exec python3 -I -B ${self.packages.${system}.workerBrokerSource}/python/reverie/worker_resume_client.py "$@"
+            '';
+          };
+          workerTaskPerfClient = pkgs.writeShellApplication {
+            name = "reverie-worker-task-perf";
+            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.systemd ];
+            text = ''
+              export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
+              export REVERIE_WORKER_SERVICE_PYTHON=${pkgs.python3}/bin/python3
+              export REVERIE_WORKER_SERVICE_ENTRY=${self.packages.${system}.workerBrokerSource}/python/reverie/worker.py
+              exec python3 -I -B ${self.packages.${system}.workerBrokerSource}/python/reverie/worker_perf_client.py "$@"
             '';
           };
           resourceActorImage = import ./nix/image.nix {
@@ -383,6 +399,7 @@
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
         worker-resume = { type = "app"; program = "${self.packages.${system}.workerResumeClient}/bin/reverie-worker-resume"; meta.description = "Preview and consume a fixed host-owner batch through normal saved employee recovery"; };
+        worker-task-perf = { type = "app"; program = "${self.packages.${system}.workerTaskPerfClient}/bin/reverie-worker-task-perf"; meta.description = "Queue, preview and explicitly apply a fixed stopped-employee task perf policy"; };
         resource-actor-enable = { type = "app"; program = "${self.packages.${system}.resourceActorBootstrap}/bin/reverie-resource-actor-enable"; meta.description = "Explicit pristine existing-domain actor-key enablement; no installation or service start"; };
         resource-actor-install = { type = "app"; program = "${self.packages.${system}.resourceActorInstaller}/bin/reverie-resource-actor-install"; meta.description = "Explicit inactive resource-actor installation using the matching immutable website image"; };
         resource-actor-refresh = { type = "app"; program = "${self.packages.${system}.resourceActorRefresh}/bin/reverie-resource-actor-refresh"; meta.description = "Explicit facts rebind for a registered running broker, without employee restart or owner approval"; };

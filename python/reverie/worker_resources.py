@@ -79,7 +79,7 @@ def resource_config(config,sid):
     validate_session_resources(config)
     # Native control custody is not a laptop grant and must not change any
     # existing laptop's create arguments or reattachment policy label.
-    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy','resourceActorConfig','employeeGpuGrants')}
+    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy','resourceActorConfig','employeeGpuGrants','employeePerfPolicies')}
     employee_gpu=config.get('employeeGpuGrants',{})
     if type(employee_gpu)is not dict:raise ValueError('Invalid owner employee GPU grant map')
     if employee_gpu:
@@ -99,6 +99,18 @@ def resource_config(config,sid):
     elif config.get('employeeResources'):
         policy=employee_policy(config,sid)
         if policy:result.update(project_resource_policy(config,policy))
+    perf=config.get('employeePerfPolicies',{})
+    if type(perf)is not dict:raise ValueError('Invalid owner employee perf policy map')
+    if perf:
+        if __package__:
+            from .worker_perf import project
+        else:
+            import importlib.util
+            from pathlib import Path
+            spec=importlib.util.spec_from_file_location(__name__+'_perf',Path(__file__).with_name('worker_perf.py'))
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            project=module.project
+        result=project(dict(result,employeePerfPolicies=perf),sid)
     return result
 
 

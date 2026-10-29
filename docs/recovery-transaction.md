@@ -168,3 +168,17 @@ admission release is not retried. Protected resource launches retain their
 one-shot admission and never enter this ordinary-J retry path. This changes no
 launch protocol or stop authority; reconnect and native readiness remain separate
 from provider replacement and completion.
+
+An ordinary saved-recipe restart may find a running laptop whose inner pane is
+confirmed dead, or whose original command published its completion receipt. At a
+full worker pool, the container still commits its old ceiling. The broker holds
+the same common resource admission and employee storage lease while it binds the
+exact old CID/init birth and completes canonical stop first. It then rechecks the
+captured owner/SID/generation/recipe/configuration and current storage/start gates
+before applying the unchanged candidate capacity calculation. No guessed old-seat
+credit or ceiling subtraction is used. A changed or unconfirmed source, foreign
+lease, OFF/vacation/concurrent replacement or failed stop cannot start a new
+harness. Healthy inner panes and attach-only requests keep their reconnect-only
+behavior; unrelated new seats and protected one-shot resource launches retain
+their existing admission checks. The later post-Nix/pre-create budget check also
+remains in place.

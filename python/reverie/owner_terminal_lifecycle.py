@@ -22,7 +22,7 @@ import subprocess
 import time
 import uuid
 
-from .owner_terminal_native import private_document, private_bytes, physical, exact, inventory, overlap, stamp as _native_stamp
+from .owner_terminal_native import private_document, private_bytes, physical, exact, inventory, overlap, stamp as _native_stamp, qualify_python
 from .owner_terminal_channel import need, read_proc, Program
 from .owner_terminal_host import exclusive
 from .human_shell_capabilities import open_directory
@@ -96,11 +96,14 @@ class RuntimeManifest:
         exact(self.host_program,('executable','argvPrefix'))
         prefix=self.host_program['argvPrefix'];entry=Path(__file__).resolve().parents[2]/'scripts/reverie-owner-terminal-host'
         need(type(prefix) is list and len(prefix)==4 and prefix[1:]==['-I','-B',str(entry)] and
-             str(entry).startswith('/nix/store/') and Path(prefix[0]).resolve(strict=True)==Path(self.host_program['executable']),
+             str(entry).startswith('/nix/store/'),
              'H_LIFECYCLE_FIXED_HOST_PROGRAM_REQUIRED')
-        for path in (Path(self.host_program['executable']),entry):
+        for path in (Path(self.host_program['executable']),Path(prefix[0]).resolve(strict=True),entry):
             info=path.stat();need(info.st_uid==0 and not info.st_mode&0o222 and stat.S_ISREG(info.st_mode),
                                  'H_LIFECYCLE_FIXED_HOST_PROGRAM_REQUIRED')
+        qualify_python(prefix[0],self.host_program['executable'])
+        startup=self.program['startupPython']
+        qualify_python(startup['invocation'],startup['executable'])
 
 
 class InitialInstallation:

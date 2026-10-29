@@ -9,6 +9,7 @@ let
     inherit profile;
     hostProgram = {
       invocation = "${memory}/bin/python3";
+      executable = pkgs.python3.interpreter;
       entry = "${src}/scripts/reverie-owner-terminal-host";
     };
     systemctl = "${pkgs.lib.getBin pkgs.systemd}/bin/systemctl";
@@ -27,11 +28,13 @@ import hashlib,json,pathlib,sys
 value=json.loads(pathlib.Path(sys.argv[1]).read_bytes())
 out=pathlib.Path(sys.argv[2])
 host=value['hostProgram']
-python=pathlib.Path(host['invocation']).resolve(strict=True)
+python=pathlib.Path(host['executable']).resolve(strict=True)
+invocation=pathlib.Path(host['invocation']).resolve(strict=True)
 entry=pathlib.Path(host['entry']).resolve(strict=True)
-for path in (python,entry):
+for path in (python,invocation,entry):
     assert str(path).startswith('/nix/store/') and path.is_file()
-with python.open('rb') as stream:assert stream.read(4)==b'\x7fELF'
+for path in (python,invocation):
+    with path.open('rb') as stream:assert stream.read(4)==b'\x7fELF'
 value['hostProgram']={'executable':str(python),
     'argvPrefix':[host['invocation'],'-I','-B',str(entry)]}
 for name in ('systemctl','engineProgram','websiteProgram','imageProvenance','toolkitManifest'):

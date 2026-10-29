@@ -185,7 +185,12 @@ def startup_program(path, console, node, *, verify_files=False, input_validator=
     python = value['startupPython']
     require(type(python) is dict and set(python) == {'invocation', 'executable', 'entry', 'bootstrapModule', 'packageInit', 'argvPrefix'}
             and type(python['argvPrefix']) is list and python['argvPrefix'][:3] == [python['invocation'], '-I', python['entry']]
-            and Path(python['invocation']).resolve(strict=True) == Path(python['executable']), 'Fixed startup Python graph required')
+            and type(python['invocation']) is str and Path(python['invocation']).is_absolute()
+            and Path(python['invocation']).is_relative_to('/nix/store')
+            and '..' not in Path(python['invocation']).parts
+            and type(python['executable']) is str and Path(python['executable']).is_absolute()
+            and Path(python['executable']).is_relative_to('/nix/store')
+            and Path(python['executable']).resolve(strict=True) == Path(python['executable']), 'Fixed startup Python graph required')
     files = value['codeFiles']; require(type(files) is dict and 1 <= len(files) <= 4096, 'Fixed startup code manifest required')
     total = 0
     for name, selected in files.items():
@@ -196,7 +201,7 @@ def startup_program(path, console, node, *, verify_files=False, input_validator=
         total += selected['bytes']; require(total <= 512 << 20, 'Fixed startup code total bound')
         if verify_files: require(code(name, input_validator=validate)[1] == selected, 'Fixed startup code bytes differ')
     required = [value['nodeExecutable'], value['nodeWrapper'], value['applicationEntry'], value['normalEntrypoint'],
-                python['executable'], python['entry'], python['bootstrapModule'], python['packageInit']]
+                str(Path(python['invocation']).resolve(strict=True)), python['executable'], python['entry'], python['bootstrapModule'], python['packageInit']]
     require(all(name in files for name in required), 'Incomplete startup code graph')
     return value, {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 

@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import time
 from urllib.parse import urlsplit
 
 from .owner_terminal_channel import read_proc, need, digest
@@ -83,6 +84,34 @@ def overlap(left, right):
     return left == right or left.is_relative_to(right) or right.is_relative_to(left)
 
 
+def qualify_python(invocation, executable):
+    """Bind a fixed immutable invocation to its actual kernel interpreter.
+
+    Nix withPackages may use an ELF wrapper rather than a symlink. Its lexical
+    argv0 remains distinct from the bare ELF; the accepted owned READY probe
+    proves that pair without granting any service or migration authority.
+    """
+    executable = physical(executable)
+    declared = Path(invocation)
+    need(declared.is_absolute() and '..' not in declared.parts and
+         str(declared.resolve(strict=True)).startswith('/nix/store/'), 'IMMUTABLE_H_PROGRAM_REQUIRED')
+    for selected in (executable, declared.resolve(strict=True)):
+        info = selected.stat()
+        need(str(selected).startswith('/nix/store/') and stat.S_ISREG(info.st_mode) and
+             info.st_uid == 0 and not info.st_mode & 0o222 and info.st_mode & 0o111,
+             'IMMUTABLE_H_PROGRAM_REQUIRED')
+        with selected.open('rb') as stream:
+            need(stream.read(4) == b'\x7fELF', 'IMMUTABLE_H_PROGRAM_REQUIRED')
+    if declared.resolve(strict=True) == executable:
+        return
+    from .worker_service_transport_upgrade import IsolatedInterpreterObserver
+    observed = IsolatedInterpreterObserver(time.monotonic() + 5).observe(declared)
+    info = executable.stat()
+    need(observed['declared'] == str(declared) and observed['argv0'] == str(declared) and
+         observed['executable'] == str(executable) and observed['exeIdentity'] == [info.st_dev, info.st_ino],
+         'H_PYTHON_INTERPRETER_CHANGED')
+
+
 def installation_contract(value, path):
     """Closed fixed installer inputs, never a wire-selected host command."""
     expected_entry = str(Path(__file__).resolve().parents[2] / 'scripts/reverie-owner-terminal-host')
@@ -91,12 +120,13 @@ def installation_contract(value, path):
     need(type(program['argv']) is list and len(program['argv']) == 6
          and program['argv'][1:] == ['-I', '-B', expected_entry, '--policy', str(path)], 'FIXED_H_ENTRY_REQUIRED')
     executable = physical(program['executable'])
-    need(str(executable).startswith('/nix/store/') and Path(program['argv'][0]).resolve(strict=True) == executable,
+    need(str(executable).startswith('/nix/store/'),
          'IMMUTABLE_H_PROGRAM_REQUIRED')
-    for selected in (executable, physical(expected_entry), physical(value['engineProgram'])):
+    for selected in (executable, Path(program['argv'][0]).resolve(strict=True), physical(expected_entry), physical(value['engineProgram'])):
         info = selected.stat()
         need(str(selected).startswith('/nix/store/') and stat.S_ISREG(info.st_mode) and info.st_uid == 0
              and not info.st_mode & 0o222, 'IMMUTABLE_HOST_PROGRAM_REQUIRED')
+    qualify_python(program['argv'][0], executable)
     engine = physical(value['engineProgram'])
     with engine.open('rb') as stream:
         need(stream.read(4) == b'\x7fELF' and engine.stat().st_mode & 0o111, 'FIXED_ENGINE_ELF_REQUIRED')

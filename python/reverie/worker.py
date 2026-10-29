@@ -170,7 +170,7 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','employeePerfPolicies','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     from reverie.worker_resource_reservations import option as reservation_option
     reservation_option(config)
@@ -193,6 +193,12 @@ def validate_config(config):
     from reverie.worker_command_telemetry import configuration
     configuration(config)
     validate_gpu_config(config)
+    perf = config.get('employeePerfPolicies', {})
+    if type(perf) is not dict:
+        raise ValueError('Perf policy requires a bounded employee map')
+    if perf:
+        from reverie.worker_perf import validate as validate_perf
+        validate_perf(config)
     validate_session_resources(config)
     rootless_docker_enabled(config)
     if 'goalPrivateConfig' in config:
@@ -496,6 +502,20 @@ class OfficeAPI:
                         if parsed.path != '/api/ops' or self.command != 'POST' or parsed.query or length > 16*1024 or len(self.headers.get_all('Content-Length', [])) > 1:
                             self.send_error(400); return
                         if ops is None:
+                            # Settle the admitted bounded HTTP body before closing
+                            # with 503; otherwise a separate client body write can
+                            # race that known refusal and raise BrokenPipeError.
+                            deadline = time.monotonic() + 15
+                            remaining = length
+                            while remaining:
+                                left = deadline - time.monotonic()
+                                if left <= 0: raise TimeoutError('Office request body deadline')
+                                self.connection.settimeout(min(15, left))
+                                part = self.rfile.read1(min(remaining, 4096))
+                                if not part:
+                                    self.send_error(400); return
+                                remaining -= len(part)
+                            if time.monotonic() >= deadline: raise TimeoutError('Office request body deadline')
                             self.send_error(503); return
                         try:
                             from reverie.ops_common import command as ops_command, strict_json
@@ -1615,6 +1635,15 @@ class Broker:
                     return
                 if isinstance(control,dict) and control.get('action') in resume_actions:
                     raise ValueError('Native host recovery requires its fixed owner channel')
+                if isinstance(control, dict) and control.get('action') in ('perf-policy-status','perf-policy-request','perf-policy-preview','perf-policy-apply'):
+                    # Distinct actual host kernel peer; never an OfficeAPI or
+                    # browser owner identity, employee flag, or GPU approval.
+                    from reverie.worker_resume_peer import host_peer
+                    host_peer(peer, self.config['uid'])
+                    from reverie.worker_perf_access import dispatch as perf_dispatch, decode as perf_decode
+                    result = perf_dispatch(self, perf_decode(raw))
+                    send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
+                    return
                 if isinstance(control, dict) and control.get('action') in ('gpu-access-status', 'gpu-access-request'):
                     # C is owner-local only; OfficeAPI never forwards these verbs.
                     # No UID/title/owner flag supplied in JSON is an approval.
@@ -1752,6 +1781,17 @@ class Broker:
                     pane = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead}'), optional=True)
                     if pane.returncode or pane.stdout.strip() != '0':
                         raise ValueError('The existing laptop process has exited')
+                # A running container whose original command has completed is
+                # still a full kernel commitment until canonical stop settles.
+                # Do not subtract it or reserve a second copy of the same seat.
+                replacing_running = protected_start is None and existing_running and not reuse
+                replacement_source = dead_inner
+                if replacing_running and replacement_source is None:
+                    from reverie.worker_resource_reservations import _pid
+                    pid=old['State']['Pid'];identity=old.get('Id')
+                    if type(pid) is not int or pid<=0 or type(identity) is not str or not re.fullmatch('[a-f0-9]{64}',identity):
+                        raise RuntimeError('Existing laptop process identity is unavailable')
+                    replacement_source={'id':identity,'pid':pid,'start':_pid(pid)}
                 resources=effective_config(self.config,session_id)
                 if reuse and resources['budgetMode']=='pool':
                     self.check_pool(config=resources,require_headroom=False)
@@ -1763,17 +1803,33 @@ class Broker:
                         self.check_pool(config=resources)
                     else:
                         self.check_pool()
-                    self.check_creation_budget(session_id,resources)
-                admitted = True
+                    if not replacing_running:
+                        self.check_creation_budget(session_id,resources)
+                admitted = not replacing_running
                 if previous.returncode==0 and not reuse:
                     if dead_inner is not None:
                         pane = self.run_engine(tmux_exec_args(dead_inner['id'], 'display-message', '-p', '-t', 'office', '#{pane_dead}'), optional=True)
                         if pane.returncode or pane.stdout.strip() != '1':
                             raise RuntimeError('Existing laptop pane changed; reconnect before restarting')
+                        if replacing_running:wait_current()
                         self.stop(name,retain_storage=paths.kind=='employee',expected_id=dead_inner['id'],
                                   expected_process={'pid':dead_inner['pid'],'start':dead_inner['start']})
+                    elif replacing_running:
+                        wait_current()
+                        self.stop(name,retain_storage=paths.kind=='employee',expected_id=replacement_source['id'],
+                                  expected_process={'pid':replacement_source['pid'],'start':replacement_source['start']})
                     elif paths.kind=='employee':self.stop(name,retain_storage=True)
                     else:self.stop(name)
+                if replacing_running:
+                    # Same admission and EID lease span stop and this fresh
+                    # budget check. No capacity is credited before real stop.
+                    wait_current()
+                    if storage_paths(self.config,session_id)!=paths or not storage_start_allowed(self.config,paths):
+                        raise RuntimeError('Employee storage or running intent changed during replacement')
+                    if effective_config(self.config,session_id)!=resources:
+                        raise RuntimeError('Laptop policy changed during replacement')
+                    self.check_creation_budget(session_id,resources)
+                    admitted=True
                 if not reuse:
                     record_storage_binding(self.config,paths)
                     nix_guard = store_guard(self.config, session_id)

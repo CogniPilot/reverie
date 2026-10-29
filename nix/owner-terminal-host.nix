@@ -42,6 +42,7 @@ exec_backend("${nodeInvocation}", tuple(${builtins.toJSON nodeArgv}))
     argvPrefix = nodeArgv;
     startupPython = {
       invocation = pythonInvocation;
+      executable = pkgs.python3.interpreter;
       entry = "${website}/libexec/reverie";
       bootstrapModule = "${memoryPackage}/${pkgs.python3.sitePackages}/reverie/owner_terminal_bootstrap.py";
       packageInit = "${memoryPackage}/${pkgs.python3.sitePackages}/reverie/__init__.py";
@@ -67,8 +68,9 @@ exec_backend("${nodeInvocation}", tuple(${builtins.toJSON nodeArgv}))
 import hashlib,json,pathlib,sys
 value=json.loads(pathlib.Path(sys.argv[1]).read_bytes())
 node=pathlib.Path(value['nodeInvocation']).resolve(strict=True)
-python=pathlib.Path(value['startupPython']['invocation']).resolve(strict=True)
-files=value.pop('files')+[str(node),str(python)]
+python=pathlib.Path(value['startupPython']['executable']).resolve(strict=True)
+invocation=pathlib.Path(value['startupPython']['invocation']).resolve(strict=True)
+files=value.pop('files')+[str(node),str(python),str(invocation)]
 code={}
 total=0
 for spelling in files:
@@ -79,7 +81,7 @@ for spelling in files:
     total+=size
     assert total<=512*1024**2
     code[str(path)]={'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'bytes':size}
-for executable in (node,python):
+for executable in (node,python,invocation):
     with executable.open('rb') as stream:assert stream.read(4)==b'\x7fELF'
 value['nodeExecutable']=str(node)
 value['startupPython']['executable']=str(python)

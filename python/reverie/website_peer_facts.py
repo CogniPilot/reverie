@@ -150,6 +150,18 @@ class Engine:
              and value.get('KernelVersion') == os.uname().release, 'SAME_KERNEL_ENGINE_REQUIRED')
 
 
+def _program_invocation(executable, argv, files):
+    need(argv[0].startswith('/nix/store/'), 'INVOCATION_EXECUTABLE_CHANGED')
+    declared = str(Path(argv[0]).resolve(strict=True))
+    need(executable in files and declared in files, 'MANIFESTED_PROGRAM_REQUIRED')
+    if declared != executable:
+        # This is the fixed Python bootstrap ABI, not a generic wrapper selector.
+        need(len(argv) >= 2 and argv[1] == '-I', 'INVOCATION_EXECUTABLE_CHANGED')
+        from .owner_terminal_native import qualify_python
+        qualify_python(argv[0], executable)
+    return declared
+
+
 class WebsiteFacts:
     """A fresh one-incarnation observer; constructor inputs are host-only facts.
 
@@ -190,8 +202,7 @@ class WebsiteFacts:
             need(type(value) is dict and set(value) == {'executable', 'argv'} and type(value['argv']) is list
                  and 1 <= len(value['argv']) <= 32 and all(type(x) is str and 0 < len(x) <= 4096 and '\0' not in x for x in value['argv']),
                  'FIXED_WEBSITE_PROGRAM')
-            need(value['executable'] in files and value['argv'][0].startswith('/nix/store/')
-                 and Path(value['argv'][0]).resolve(strict=True) == Path(value['executable']), 'MANIFESTED_PROGRAM_REQUIRED')
+            _program_invocation(value['executable'], value['argv'], files)
             for argument in value['argv'][1:]:
                 if argument.startswith('/nix/store/'):
                     need(str(Path(argument).resolve(strict=True)) in files, 'UNMANIFESTED_BACKEND_ARGV_CODE')
@@ -318,7 +329,7 @@ class NamespaceProgram(Program):
         need(type(executable) is str and executable in facts.selection['codeFiles'] and type(argv) is tuple
              and 1 <= len(argv) <= 32 and all(type(v) is str and 0 < len(v) <= 4096 and '\0' not in v for v in argv),
              'FIXED_MANIFESTED_PROGRAM_REQUIRED')
-        need(argv[0].startswith('/nix/store/') and Path(argv[0]).resolve(strict=True) == Path(executable), 'INVOCATION_EXECUTABLE_CHANGED')
+        _program_invocation(executable, argv, facts.selection['codeFiles'])
         for value in argv[1:]:
             if value.startswith('/nix/store/'):
                 need(str(Path(value).resolve(strict=True)) in facts.selection['codeFiles'], 'UNMANIFESTED_BACKEND_ARGV_CODE')
@@ -327,7 +338,12 @@ class NamespaceProgram(Program):
 
     def matches(self, process):
         self.facts.inspect()
-        identity = self.facts.qualify_alias(self.argv[0], self.executable)
+        declared = str(Path(self.argv[0]).resolve(strict=True))
+        identity = self.facts.qualify_alias(self.argv[0], declared)
+        if declared != self.executable:
+            # Qualify BOTH guest files; the actual guest executable inode remains
+            # distinct from host Nix-store and from the wrapper's copied inode.
+            identity = self.facts.qualify_file(self.executable)
         for value in self.argv[1:]:
             if value.startswith('/nix/store/'):
                 self.facts.qualify_alias(value, str(Path(value).resolve(strict=True)))
