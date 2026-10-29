@@ -142,6 +142,7 @@ import {
   buildShellEnv,
 } from './session-cli-builder.js';
 import { SessionAutoOps } from './session-auto-ops.js';
+import { CapacityRetry } from './capacity-stall.js';
 import { detectUsageLimitPause } from './usage-limit-patterns.js';
 import { SessionTaskCache } from './session-task-cache.js';
 import { InteractivePtyExitBreaker } from './session-pty-exit-breaker.js';
@@ -656,6 +657,8 @@ export class Session extends EventEmitter {
 
   // Auto-compact/auto-clear automation (extracted to SessionAutoOps)
   private _autoOps!: SessionAutoOps;
+  /** Resumes a Codex turn that ended on a model-capacity error (capacity-stall.ts); null when turned off. */
+  private _capacityRetry: CapacityRetry | null = null;
 
   // Image watcher setting (per-session toggle)
   private _imageWatcherEnabled: boolean = false;
@@ -1180,6 +1183,19 @@ export class Session extends EventEmitter {
     this._autoOps.on('limitPauseScheduled', (data) => this.emit('limitPauseScheduled', data));
     this._autoOps.on('limitResume', (data) => this.emit('limitResume', data));
     this._autoOps.on('limitResumeCancelled', (data) => this.emit('limitResumeCancelled', data));
+
+    // On unless REVERIE_CAPACITY_RETRY=0. It only ever acts on a Codex composer, whatever the mode is now.
+    if (process.env.REVERIE_CAPACITY_RETRY !== '0') {
+      this._capacityRetry = new CapacityRetry({
+        capture: () => (this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }) : null),
+        glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
+        isWorking: () => this._isWorking,
+        isStopped: () => this._isStopped,
+        send: (prompt) => this.writeViaMux(`${prompt}\r`, { requireEmptyComposer: true }),
+        onEvent: (event) => this.emit('capacityRetry', event),
+        log: (message) => console.log(`[Session ${this.id.slice(0, 8)}] ${message}`),
+      });
+    }
   }
 
   get status(): SessionStatus {
@@ -4006,6 +4022,7 @@ export class Session extends EventEmitter {
     // merely ready has nothing to resolve yet and could claim a neighbour's file.
     if (turnEnded) this._maybeCaptureOmpSessionId();
     this.emit('idle');
+    this._capacityRetry?.check();
   }
 
   /**
@@ -4109,6 +4126,9 @@ export class Session extends EventEmitter {
     if (!this._isWorking && getCli(this.mode)?.capabilities.workDetect) {
       if (this._workingLinePattern().test(getCleanData())) this._markWorking();
     }
+
+    // A turn that died at model capacity before it ever looked busy never reaches _concludeIdle; its error text does arrive here.
+    this._capacityRetry?.noteOutput(rawData);
 
     // Skip Claude-specific parsers for external CLI sessions (Ralph tracker,
     // BashToolParser, token + CLI-info parsing all depend on Claude's output format).
@@ -4504,6 +4524,7 @@ export class Session extends EventEmitter {
 
     // Destroy auto-compact/auto-clear automation (clears its timers)
     this._autoOps.destroy();
+    this._capacityRetry?.destroy();
 
     // Clear prompt check timers
     if (this._promptCheckInterval) {

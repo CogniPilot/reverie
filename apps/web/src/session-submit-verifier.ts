@@ -80,10 +80,12 @@ export function composerBody(screen: string, glyph: string): string | undefined 
     }
   }
   if (last < 0) return undefined;
-  // A column-zero glyph straight under another with no transcript bullet between may be a literal glyph inside a draft: refuse.
-  // Only the last pair counts. Higher up, two user rows in a row are plain history: a message steered into a running turn is
-  // echoed right under the one that started it (codex-cli 0.163.0), and refusing there left every mid-turn delivery unverified.
-  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻]/u.test(line))) return undefined;
+  // A column-zero glyph straight under another with no transcript row between may be a literal glyph inside a draft: refuse.
+  // Transcript rows start with a gutter mark: a `•` answer, or codex's `■` error (a turn that died, e.g. at model capacity)
+  // and `⚠` warning. Only the last pair counts. Higher up, two user rows in a row are plain history: a message steered into a
+  // running turn is echoed right under the one that started it (codex-cli 0.163.0), and refusing there left every mid-turn
+  // delivery unverified.
+  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻■⚠]/u.test(line))) return undefined;
   const body = [lines[last].trimStart().slice(glyph.length).trimStart()];
   for (const line of lines.slice(last + 1, end)) {
     const text = line.trim();
