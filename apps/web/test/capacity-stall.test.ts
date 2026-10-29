@@ -89,6 +89,26 @@ describe('CapacityRetry', () => {
     }
   });
 
+  it('neither schedules nor types while paused, and resumes after release', async () => {
+    vi.useFakeTimers();
+    const { state, retry } = harness();
+    const release = retry.pause();
+    retry.check();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(state.events).toEqual([]);
+    release();
+    release(); // idempotent
+    retry.check();
+    const late = retry.pause(); // a move starts after scheduling: the try is skipped, not spent
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.sent).toEqual([]);
+    late();
+    retry.check();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.sent).toEqual([CAPACITY_RETRY_PROMPT]);
+    retry.destroy();
+  });
+
   it('looks at the screen after capacity output, and only then', async () => {
     vi.useFakeTimers();
     const { state, retry } = harness();

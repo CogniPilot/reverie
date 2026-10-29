@@ -298,6 +298,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const payload = planMoveLaunch(source.toState(), account, input, policy(source));
       const pauseSource = runtime.chat.delivery?.pauseForMigration(input.sessionId);
       if (pauseSource) releases.push(pauseSource);
+      // The capacity auto-resume (capacity-stall.ts) must not type "continue" into a composer the move owns.
+      const holdSourceRetry = source.pauseCapacityRetry?.();
+      if (holdSourceRetry) releases.push(holdSourceRetry);
       try {
       let id: string;
       if (input.resourceIntent) {
@@ -346,6 +349,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         refreshCandidates.set(id, { source: input.sessionId, digest: input.runtimeDigest!, account: input.toAccount });
       const pauseCandidate = runtime.chat.delivery?.pauseForMigration(id);
       if (pauseCandidate) releases.push(pauseCandidate);
+      const holdCandidateRetry = runtime.sessions.get(id)?.pauseCapacityRetry?.();
+      if (holdCandidateRetry) releases.push(holdCandidateRetry);
       return id;
       } catch (error) { releaseDelivery(); throw error; }
     },

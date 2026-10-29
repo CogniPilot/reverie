@@ -5034,6 +5034,11 @@ export class Session extends EventEmitter {
    * session.writeViaMux('/init\r');   // Send /init command
    * ```
    */
+  /** Hold the model-capacity auto-resume while something else (a plan move) owns this composer. */
+  pauseCapacityRetry(): () => void {
+    return this._capacityRetry?.pause() ?? (() => {});
+  }
+
   canAcceptChatInput(): boolean {
     if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
     if (this.mode !== 'codex') return true;

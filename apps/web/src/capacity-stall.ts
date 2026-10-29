@@ -79,11 +79,24 @@ export class CapacityRetry {
   private checkTimer: NodeJS.Timeout | null = null;
   private attempts = 0;
   private gaveUp = false;
+  /** Holders that own the composer (a plan move): no check and no retry while any is held. */
+  private pauses = 0;
 
   constructor(private readonly deps: CapacityRetryDeps) {}
 
   private get delays(): readonly number[] {
     return this.deps.delaysMs ?? CAPACITY_RETRY_DELAYS_MS;
+  }
+
+  /** Hold retries while something else owns the composer; the returned release is idempotent. */
+  pause(): () => void {
+    this.pauses++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.pauses--;
+    };
   }
 
   /** Streamed output: an error that ends a turn too fast to ever show it working gets looked at too. */
@@ -95,7 +108,7 @@ export class CapacityRetry {
 
   /** Read the screen: arm the next retry when the last turn died at capacity, forget the streak when it did not. */
   check(): void {
-    if (this.deps.isStopped() || this.deps.isWorking() || this.retryTimer) return;
+    if (this.pauses > 0 || this.deps.isStopped() || this.deps.isWorking() || this.retryTimer) return;
     const line = capacityStallLine(this.deps.capture(), this.deps.glyph());
     if (!line) {
       // A turn ended some other way: the provider is back, or a person took over. The next stall starts afresh.
@@ -120,7 +133,8 @@ export class CapacityRetry {
 
   private async fire(): Promise<void> {
     this.retryTimer = null;
-    if (this.deps.isStopped() || this.deps.isWorking()) return;
+    // Paused (a plan move owns the composer): skip this try without spending it; the next turn end looks again.
+    if (this.pauses > 0 || this.deps.isStopped() || this.deps.isWorking()) return;
     // The screen decides again: anything typed or printed since the schedule means it is not ours to resume.
     if (!capacityStallLine(this.deps.capture(), this.deps.glyph())) { this.attempts = 0; return; }
     this.attempts++;
