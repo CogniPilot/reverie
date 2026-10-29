@@ -4504,8 +4504,17 @@ Object.assign(ReverieApp.prototype, {
       if (!current()) return;
       footer.prepend(node('span', result.sourceLabel + ' · ' + this.formatFileSize(result.bytes.length) + ' '));
       if (result.mediaType.startsWith('image/')) {
-        const url = URL.createObjectURL(new Blob([result.bytes], { type: result.mediaType }));
-        state.urls.push(url);
+        // An SVG gets a data: URL, never a blob: one. A blob: URL is same-origin, so "Open image in new tab" would run the
+        // file's <script> on the Reverie origin with the viewer's session; browsers refuse top-level data: navigation.
+        let url;
+        if (result.mediaType === 'image/svg+xml') {
+          let binary = '';
+          for (let i = 0; i < result.bytes.length; i += 0x8000) binary += String.fromCharCode(...result.bytes.subarray(i, i + 0x8000));
+          url = `data:image/svg+xml;base64,${btoa(binary)}`;
+        } else {
+          url = URL.createObjectURL(new Blob([result.bytes], { type: result.mediaType }));
+          state.urls.push(url);
+        }
         const img = node('img');
         img.alt = result.name;
         img.src = url;

@@ -58,6 +58,7 @@ function fixture(
     MobileDetection: {},
     Uint8Array,
     TextDecoder,
+    btoa,
     AbortController,
     Blob,
     URL: {
@@ -384,6 +385,15 @@ it('renders a raster using a typed blob and revokes it on replacement', async ()
   expect(zoom.textContent).toBe('Actual size');
   await f.app.openReadOnlyFilePreview({ ...source(), attachmentId: 'new-file', name: 'second.png' });
   expect(f.revoked).toContain('blob:fixture-0');
+});
+it('renders an SVG from a data: URL, never a same-origin blob: that could run its script in a new tab', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><script>sentinel()</script></svg>';
+  const f = fixture(async () => new Response(svg));
+  await f.app.openReadOnlyFilePreview(source('figure.svg'));
+  const src = f.document.querySelector<HTMLImageElement>('#filePreviewBody img')!.getAttribute('src')!;
+  expect(src.startsWith('data:image/svg+xml;base64,')).toBe(true);
+  expect(Buffer.from(src.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8')).toBe(svg);
+  expect([...f.urls.keys()]).toEqual([]);
 });
 it('resolves actual Workspace crumbs before a binding-checked read and navigates the selected folder', async () => {
   const f = fixture(async (url) =>
