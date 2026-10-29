@@ -91,7 +91,8 @@ async function shellModeShown(io: OpencodeTypingIo): Promise<boolean> {
  *
  * A gated write (submit-settle withWriteGate: an agent's input while a plan move may take the composer) is re-checked right
  * before the text, before each Escape and before Enter, and submitAndConfirm re-checks it before its retry. Closed before the
- * text: 'not-written', nothing typed. Closed after it: 'withheld', the text is left unsent and recorded as such.
+ * text, or while a paste's buffer is staged: 'not-written', nothing typed. Closed after it: 'withheld', the text is left unsent
+ * and recorded as such.
  */
 export async function typeIntoOpencode(io: OpencodeTypingIo, opts: OpencodeTypingOptions): Promise<'sent' | 'blocked' | 'not-written' | 'withheld'> {
   const text = guardShellKey(opts.text, { keepLeading: opts.person });
@@ -104,6 +105,11 @@ export async function typeIntoOpencode(io: OpencodeTypingIo, opts: OpencodeTypin
   if (text) {
     if (opts.paste) {
       await io.tmux(['load-buffer', '-b', opts.buffer, '-'], text);
+      // Staging the buffer types nothing; a gate that closed meanwhile gets nothing pasted (the buffer is dropped, unused).
+      if (!writeGateOpen()) {
+        await io.tmux(['delete-buffer', '-b', opts.buffer]).catch(() => {});
+        return 'not-written';
+      }
       await io.tmux(['paste-buffer', '-p', '-d', '-b', opts.buffer, '-t', opts.target]);
     } else {
       await io.tmux(['send-keys', '-t', opts.target, '-l', text]);

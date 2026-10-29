@@ -131,6 +131,15 @@ describe('typing into an OpenCode pane', () => {
     expect(calls).toEqual([]);
   });
 
+  it('a gate that closes while a paste buffer is staged pastes nothing: the buffer is dropped, not typed', async () => {
+    const { fake, calls } = io();
+    let open = true;
+    const typing: OpencodeTypingIo = { ...fake, tmux: async (args, stdin) => { await fake.tmux(args, stdin); if (args[0] === 'load-buffer') open = false; } };
+    const out = await withWriteGate(() => open, () => typeIntoOpencode(typing, { ...opts, paste: true }));
+    expect(out).toEqual({ result: 'not-written', typedUnsent: false });
+    expect(calls.map((c) => c.args[0])).toEqual(['load-buffer', 'delete-buffer']); // no paste-buffer, no Enter
+  });
+
   it('a gate that closes once the text is in withholds Enter and reports the text unsent', async () => {
     const { fake, calls } = io();
     let open = true;

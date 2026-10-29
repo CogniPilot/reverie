@@ -200,7 +200,8 @@ export async function typeAndSubmit(
   // The write's gate is decided here, at the keys: re-checked right before the text and again right before Enter. A closed
   // gate after the text withholds Enter and leaves the text unsent; nothing is cleared or typed again.
   if (!gateOpen(stillIdle)) return 'not-written';
-  await io.typeText(text);
+  // A typer that stages its text first (a paste buffer) answers false when the gate closed before anything reached the pane.
+  if ((await io.typeText(text)) === false) return 'not-written';
   await waitForPasteSettle(io, text.length);
   if (!gateOpen(stillIdle)) {
     const store = writeGate.getStore();
