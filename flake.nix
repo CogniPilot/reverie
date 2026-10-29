@@ -294,6 +294,12 @@
             imageProvenance = self.packages.${system}.ownerTerminalImageProvenance;
             toolkit = self.packages.${system}.humanTerminalToolkit;
           };
+          ownerTerminalWebsiteSetup = import ./nix/owner-terminal-website.nix {
+            inherit pkgs; src = source; memory = packages.memory;
+            lifecycle = self.packages.${system}.ownerTerminalLifecycle;
+            workerUnit = self.packages.${system}.workerService;
+            workerBrokerSource = self.packages.${system}.workerBrokerSource;
+          };
           resourceTerminalLifecycle = import ./nix/owner-terminal-lifecycle.nix {
             inherit pkgs; src = source; memory = packages.memory;
             profile = "resource-terminal";
@@ -406,6 +412,7 @@
         resource-terminal-install = { type = "app"; program = "${self.packages.${system}.resourceTerminalInstaller}/bin/reverie-resource-terminal-install"; meta.description = "Explicit resource actor installation for the matching protected terminal website"; };
         resource-terminal-refresh = { type = "app"; program = "${self.packages.${system}.resourceTerminalRefresh}/bin/reverie-resource-terminal-refresh"; meta.description = "Rebind resource facts after a coordinated protected terminal website replacement"; };
         owner-terminal-lifecycle = { type = "app"; program = "${self.packages.${system}.ownerTerminalLifecycle}/bin/reverie-owner-terminal-lifecycle"; meta.description = "Coordinate the fixed protected terminal website lifecycle using private owner installation data"; };
+        owner-terminal-website = { type = "app"; program = "${self.packages.${system}.ownerTerminalWebsiteSetup}/bin/reverie-owner-terminal-website"; meta.description = "Prepare and apply the first protected laptop-terminal website using fixed native owner tools"; };
         resource-terminal-lifecycle = { type = "app"; program = "${self.packages.${system}.resourceTerminalLifecycle}/bin/reverie-owner-terminal-lifecycle"; meta.description = "Coordinate the matching protected resource and terminal website lifecycle"; };
         worker-gpu = { type = "app"; program = "${self.packages.${system}.workerGpuSupport}/bin/reverie-worker-gpu"; meta.description = "Read-only selected employee GPU/CDI/image preflight; no setup or laptop effects"; };
         ops-service = { type = "app"; program = "${self.packages.${system}.opsCore}/bin/reverie-ops-service"; meta.description = "Install/control the private authenticated OPS executor; no grants or automatic effects"; };
