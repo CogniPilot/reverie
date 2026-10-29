@@ -19,6 +19,11 @@ afterEach(() => {
   for (const page of pages.splice(0)) page.window.close();
 });
 
+/** What the plans frame posts once its first load settled (the jsdom frame never loads by itself). */
+const plansReady = (handle: any) => {
+  const frame = handle.document.querySelector('#ca-company-plans iframe') as HTMLIFrameElement;
+  handle.window.dispatchEvent(new handle.window.MessageEvent('message', { data: { type: 'company-plans-ready' }, source: frame.contentWindow, origin: handle.window.location.origin }));
+};
 const shell = async (hash = '') => {
   const handle = await createHarness({ hash, rooms: [room('room', 'General', [member('agent', 'Agent')])], sessions: [{ id: 'agent', name: 'Agent' }], company: { employees: [], settings: {} } });
   handles.push(handle);
@@ -97,6 +102,7 @@ describe('Company owns plans and burn rate', () => {
     expect(handle.document.querySelectorAll('.ca-office-nav')).toHaveLength(0);
     expect(handle.document.querySelector('.ca-user-org')).toBeNull();
     await handle.shell.openCompany();
+    plansReady(handle);
     const page = handle.document.querySelector('.ca-company')!;
     expect(page.tagName).toBe('SECTION');
     expect(page.closest('.ca-page')).not.toBeNull();
@@ -109,6 +115,7 @@ describe('Company owns plans and burn rate', () => {
   it('opens old Company plans bookmarks on the unified page', async () => {
     const handle = await shell('#company-plans');
     await handle.flush(30);
+    plansReady(handle);
     expect(handle.document.querySelector('iframe')!.getAttribute('src')).toBe('/company/plans');
     expect((handle.document.querySelector('#ca-company-people') as HTMLElement).hidden).toBe(false);
     expect(handle.document.querySelector('[role="tablist"]')).toBeNull();
@@ -193,6 +200,7 @@ describe('Company owns plans and burn rate', () => {
     expect(frame).not.toBeNull();
     complete({ ok: true, data: { employees: [], settings: {} } });
     await pending;
+    plansReady(handle);
     expect(handle.document.querySelector('#ca-company-plans iframe')).toBe(frame);
     expect((handle.document.querySelector('#ca-company-people') as HTMLElement).hidden).toBe(false);
   });

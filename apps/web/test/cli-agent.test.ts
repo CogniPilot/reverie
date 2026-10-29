@@ -18,6 +18,8 @@ import {
   agentRead,
   agentRm,
   agentSend,
+  agentWake,
+  WAKE_PROMPT,
   agentSpawn,
   agentWait,
   baseHeaders,
@@ -255,6 +257,45 @@ describe('agent ls', () => {
   });
 });
 
+describe('agent wake', () => {
+  it('types the standard prompt into an idle colleague through the normal input route', async () => {
+    const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: true })]);
+    expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.ok);
+    expect(deps.calls[0]).toMatchObject({ method: 'GET', path: '/api/v1/sessions' });
+    expect(deps.calls[1]).toMatchObject({ method: 'POST', path: `/api/v1/sessions/${OTHER}/input`, body: { input: `${WAKE_PROMPT}\r`, ifIdle: true } });
+  });
+
+  it('reports a server-refused wake (turn just started, or a draft) as not woken, never "accepted"', async () => {
+    const draft = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: false })]);
+    expect(await agentWake(draft, { id: OTHER })).toBe(EXIT.refused);
+    expect(draft.err.join('')).toMatch(/not woken: .* busy or has a draft/);
+    expect(draft.out.join('')).not.toMatch(/accepted|delivered to/);
+    const busy = fakeDeps([
+      ok([{ id: OTHER, name: 'Sam', status: 'idle' }]),
+      { status: 409, json: { success: false, error: 'Session is working; nothing was typed', errorCode: 'SESSION_BUSY' }, text: '' },
+    ]);
+    expect(await agentWake(busy, { id: OTHER })).toBe(EXIT.refused);
+  });
+
+  it('says a wake was typed but left unsent when Enter was withheld, never "nothing was typed"', async () => {
+    const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: false, typedUnsent: true })]);
+    expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.refused);
+    expect(deps.err.join('')).toMatch(/typed — Enter was withheld, so the text is left unsent .* will not be retried/);
+    expect(deps.err.join('')).not.toMatch(/nothing was typed/);
+  });
+
+  it('leaves a working or unknown-state session alone and never wakes itself', async () => {
+    for (const status of ['busy', undefined]) {
+      const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status }])]);
+      expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.refused);
+      expect(deps.calls.filter((c) => c.method === 'POST')).toEqual([]);
+    }
+    const self = fakeDeps([]);
+    expect(await agentWake(self, { id: SELF })).toBe(EXIT.refused);
+    expect(self.calls).toEqual([]);
+  });
+});
+
 describe('agent send', () => {
   it('refuses to type into its own composer', async () => {
     const deps = fakeDeps([]);
@@ -294,6 +335,15 @@ describe('agent send', () => {
     expect(await agentSend(deps, { id: OTHER, text: 'go', enter: true, wait: true })).toBe(EXIT.dead);
     expect(deps.out.join('')).not.toMatch(/delivered to/);
     expect(deps.err.join('')).toMatch(/not delivered.*restart/);
+  });
+
+  it('a failed write to a worker the server still sees running is a retry, never "restart it" (broker pause)', async () => {
+    const deps = fakeDeps([ok({ delivered: false, duplicate: false, workerDead: false, wait: { ended: true, signal: null } })]);
+    expect(await agentSend(deps, { id: OTHER, text: 'go', enter: true, wait: true })).toBe(EXIT.error);
+    expect(deps.err.join('')).toMatch(/worker is still running.*retry shortly; do not restart/);
+    expect(deps.err.join('')).not.toMatch(/no live worker/);
+    const dead = fakeDeps([ok({ delivered: false, duplicate: false, workerDead: true, wait: { ended: true, signal: null } })]);
+    expect(await agentSend(dead, { id: OTHER, text: 'go', enter: true, wait: true })).toBe(EXIT.dead);
   });
 
   it('fire-and-forget says "accepted", not "delivered" (the route answers before the write)', async () => {

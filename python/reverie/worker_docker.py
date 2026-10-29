@@ -94,12 +94,19 @@ def enabled(config):
     profile = json.loads(data)
     if profile.get('defaultAction') != 'SCMP_ACT_ERRNO':
         raise ValueError('Rootless Docker profile must retain default syscall denials')
+    perf_rule = None
+    if '_taskPerfPolicy' in config:
+        from reverie.worker_perf import recognized, RULE
+        recognized(config, profile)
+        perf_rule = RULE
     caps = {'CAP_SETUID', 'CAP_SETGID'}
     for rule in profile['syscalls']:
         guarded = set(rule.get('includes', {}).get('caps', []))
         excluded = set(rule.get('excludes', {}).get('caps', []))
         applies = (not guarded or bool(guarded & caps)) and not bool(excluded & caps)
         if applies and rule['action'] == 'SCMP_ACT_ALLOW' and set(rule['names']) & {'keyctl', 'add_key', 'request_key', 'bpf', 'perf_event_open'}:
+            if perf_rule is not None and rule == perf_rule:
+                continue
             raise ValueError('Rootless Docker must not expose host keyrings or tracing')
     return True
 

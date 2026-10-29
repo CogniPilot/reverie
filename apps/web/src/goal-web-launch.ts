@@ -6,6 +6,7 @@ import { startWebServer } from './web/server.js';
 
 export async function startConfiguredWebServer(launch: WebLaunchOptions) {
   const goals = loadGoalPrivateBootstrap(launch.goalPrivateConfig, dataPath('company.json'));
+  const resourceArgs: [] | [boolean] = launch.resourceReplacement === true ? [true] : [];
   try {
     return await startWebServer(
       launch.port,
@@ -16,7 +17,8 @@ export async function startConfiguredWebServer(launch: WebLaunchOptions) {
       launch.allowUnauthenticatedNetwork ?? false,
       launch.basePath ?? '',
       goals,
-      launch.serviceAuthConfig
+      launch.serviceAuthConfig,
+      ...resourceArgs
     );
   } catch (error) {
     goals?.close?.();

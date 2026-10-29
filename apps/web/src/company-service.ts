@@ -2,6 +2,7 @@ import { displayTime } from './display-time.js';
 import { RuntimeRecipeSchema, type RuntimeRecipe } from './expert-runtime-recipe.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import type { ChatroomService } from './chatroom-service.js';
 import { CompanyStore } from './company-store.js';
 import { ChatroomError } from './chatroom-store.js';
@@ -33,6 +34,17 @@ export class CompanyError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Compare-and-swap evidence, never owner authorization. The private replacement
+ * actor captures it before approval and still checks the current owner context. */
+export interface ExpectedCompanyBinding {
+  readonly employee: Readonly<CompanyEmployee>;
+  readonly targetRecipe: Readonly<RuntimeRecipe>;
+}
+
+function persistedEmployee(employee: Readonly<CompanyEmployee>): CompanyEmployee {
+  return EmployeeSchema.parse(JSON.parse(JSON.stringify(employee)));
 }
 
 function validateEffectiveCore(company: readonly string[] = [], personal: readonly string[] = []): void {
@@ -75,6 +87,9 @@ export interface CompanyResearchBackend {
 }
 
 interface CompanySession {
+  runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
+  runtimeHealthScope?: 'provider' | 'terminal';
+  workerViewerReconnect?: boolean;
   id: string;
   owner?: string;
   name: string;
@@ -166,13 +181,14 @@ export class CompanyService {
   prepareRuntimeRestart(sessionId: string, owner: string | undefined): RuntimeRestartIntent | undefined {
     const original = this.store.snapshot().employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
     if (!original) return undefined;
-    if (original.onVacation || this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId))
+    if (original.onVacation || original.bindingMigration || this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId))
       throw new CompanyError('This expert changed or is already restarting', 409);
     const transaction = { cancelled: false, closed: false };
     this.runtimeRestarts.set(sessionId, transaction);
     let claimed = false;
     const matches = (employee: CompanyEmployee | undefined): employee is CompanyEmployee => !!employee && employee.id === original.id &&
-      employee.sessionId === sessionId && sameOwner(employee.owner, owner) && !employee.onVacation;
+      employee.sessionId === sessionId && employee.sessionGeneration === original.sessionGeneration &&
+      sameOwner(employee.owner, owner) && !employee.onVacation && !employee.bindingMigration;
     const current = () => !transaction.cancelled && !transaction.closed &&
       this.runtimeRestarts.get(sessionId) === transaction;
     return {
@@ -230,7 +246,11 @@ export class CompanyService {
     const employees = state.employees.filter((e) => sameOwner(e.owner, owner));
     const ids = new Set(employees.map((e) => e.id));
     return {
-      employees: employees.map((e) => ({ ...e, available: !!this.deps.getSession(e.sessionId) })),
+      employees: employees.map((e) => {
+        const session = this.deps.getSession(e.sessionId);
+        return { ...e, available: !!session, runtimeHealth: session?.runtimeHealth ?? 'unknown',
+          runtimeHealthScope: session?.runtimeHealthScope ?? 'provider', workerViewerReconnect: session?.workerViewerReconnect === true };
+      }),
       settings: state.settings.find((s) => sameOwner(s.owner, owner)) ?? CompanySettingsSchema.parse({ owner }),
       cycles: state.cycles.filter((c) => sameOwner(c.owner, owner)),
       memories: state.memories.filter((m) => ids.has(m.employeeId)),
@@ -525,13 +545,26 @@ export class CompanyService {
     by = 'owner',
     /** Bug 19: the owner replacement spawn's own restart transaction (RuntimeRestartIntent.token) survives the rebind;
      * every other in-flight restart or wake of the previous session is still cancelled. */
-    keep?: object
+    keep?: object,
+    expected?: ExpectedCompanyBinding
   ): Promise<CompanyEmployee> {
     const session = this.deps.getSession(sessionId);
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
     const recipe = this.deps.runtimeRecipeOf?.(sessionId);
     if (this.deps.runtimeRecipeOf && !recipe) throw new CompanyError('Runtime launch settings are unavailable', 409);
     const nextRecipe = recipe ? RuntimeRecipeSchema.parse(recipe) : undefined;
+    const expectedEmployee = expected ? persistedEmployee(expected.employee) : undefined;
+    const persistedRecipe = (value: unknown) => RuntimeRecipeSchema.parse(JSON.parse(JSON.stringify(value)));
+    const expectedRecipe = expected ? persistedRecipe(expected.targetRecipe) : undefined;
+    const validateCandidate = () => {
+      if (expected && (this.deps.getSession(sessionId) !== session ||
+          !sameOwner(session.owner, owner) || !isDeepStrictEqual(
+            persistedRecipe(this.deps.runtimeRecipeOf?.(sessionId)), expectedRecipe)))
+        throw new CompanyError('Approved replacement session or recipe changed', 409);
+    };
+    if (expected && (!nextRecipe || !isDeepStrictEqual(persistedRecipe(nextRecipe), expectedRecipe)))
+      throw new CompanyError('Approved replacement recipe changed', 409);
+    validateCandidate();
     let previous: string | undefined;
     let previousThread: string | undefined;
     let previousRecipe: RuntimeRecipe | undefined;
@@ -539,6 +572,8 @@ export class CompanyService {
     const bound = await this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
+      if (expectedEmployee && !isDeepStrictEqual(persistedEmployee(employee), expectedEmployee))
+        throw new CompanyError('Approved employee binding changed', 409);
       if (employee.bindingMigration)
         throw new CompanyError('Binding migration requires reconciliation before another rebind', 409);
       if (state.employees.some((e) => e.id !== employeeId && e.sessionId === sessionId))
@@ -558,7 +593,7 @@ export class CompanyService {
       const thread = this.deps.threadOf?.(sessionId);
       if (thread) employee.threadId = thread;
       return employee;
-    });
+    }, validateCandidate);
     // The employee is the identity and the session only its current runtime: room seats, DMs and undelivered lines follow it, and
     // the replaced session leaves every room at once instead of lingering as a second copy of the same person.
     if (previous && previous !== sessionId) {
@@ -591,6 +626,7 @@ export class CompanyService {
           const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
           if (
             !employee ||
+            (expected && !isDeepStrictEqual(persistedEmployee(employee), persistedEmployee(bound))) ||
             employee.bindingMigration?.id !== migrationId ||
             employee.sessionId !== bound.sessionId ||
             employee.sessionGeneration !== bound.sessionGeneration
@@ -599,8 +635,9 @@ export class CompanyService {
           employee.sessionId = sessionId;
           delete employee.bindingMigration;
           return employee;
-        })
+        }, validateCandidate)
       : bound;
+    validateCandidate();
     this.deps.bindIdentity?.(committed);
     return committed;
   }

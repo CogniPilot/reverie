@@ -23,6 +23,13 @@ class EntrypointTest(unittest.TestCase):
         installer = self.bin / "reverie-install-clis"
         installer.write_text(executable_script("#!/bin/sh\necho 'synthetic provider installation unavailable' >&2\nexit 1\n"))
         installer.chmod(0o755)
+        # Own every optional background helper: an installed service on PATH can
+        # outlive the fake console and keep capture_output's pipes open.
+        # The dedicated speech test replaces its stub to assert startup policy.
+        for name in ("reverie-kokoro", "reverie-model-relay"):
+            helper = self.bin / name
+            helper.write_text(executable_script("#!/bin/sh\nexit 0\n"))
+            helper.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()

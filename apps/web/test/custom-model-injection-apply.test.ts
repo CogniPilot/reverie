@@ -16,10 +16,11 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getCli } from '../src/config/cli-registry/index.js';
 import { applyCustomModelInjection, customModelConfigDir } from '../src/custom-model-injection-apply.js';
 import type { CustomModelEndpoint } from '../src/custom-model-injection.js';
+import { dataPath } from '../src/config/instance.js';
 
 const endpoint: CustomModelEndpoint = {
   id: 'ep1',
@@ -94,6 +95,26 @@ describe('applyCustomModelInjection: CLAUDE_CONFIG_DIR isolation', () => {
     const second = applyCustomModelInjection(entryOrThrow('claude'), endpoint, 'qwen3', sessionId);
     expect(second?.configDir).toBe(first?.configDir);
     expect(existsSync(first!.configDir!)).toBe(true);
+  });
+
+  // The isolated-laptop broker (account_mounts, python/reverie/worker.py) mounts a selected
+  // CLAUDE_CONFIG_DIR only from below <data>/accounts and refuses the launch otherwise.
+  it('claude on an isolated laptop: config dir is broker-mountable and holds a real projects dir', () => {
+    const sessionId = 'sess-cfgdir-laptop';
+    vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/owned-fixture/broker.sock');
+    try {
+      sessionsToClean.push(sessionId);
+      const applied = applyCustomModelInjection(entryOrThrow('claude'), endpoint, 'qwen3', sessionId, 262144, '/workspace');
+      expect(applied?.configDir).toBe(join(dataPath('accounts'), '.custom-models', sessionId));
+      expect(applied?.envOverrides.CLAUDE_CONFIG_DIR).toBe(applied?.configDir);
+      expect(applied?.envOverrides.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe('262144');
+      // No link back to the console's own ~/.claude/projects, which a laptop cannot see.
+      expect(existsSync(join(applied!.configDir!, 'projects'))).toBe(false);
+      expect(readdirSync(applied!.configDir!).sort()).toEqual(['.claude.json', 'settings.json']);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(join(dataPath('accounts'), '.custom-models', sessionId), { recursive: true, force: true });
+    }
   });
 
   it('pi: configDir-kind CLIs are unaffected — no configDirVar concept for them', () => {

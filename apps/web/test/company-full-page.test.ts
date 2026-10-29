@@ -32,6 +32,12 @@ async function fixture(extraEmployees: object[] = []) {
   return { handle, employee, company, board, boardRead };
 }
 
+/** What the plans frame posts once its first load settled (the jsdom frame never loads by itself). */
+function plansReady(handle: any, height?: number) {
+  const frame = handle.document.querySelector('#ca-company-plans iframe') as HTMLIFrameElement;
+  handle.window.dispatchEvent(new handle.window.MessageEvent('message', { data: { type: 'company-plans-ready', height }, source: frame.contentWindow, origin: handle.window.location.origin }));
+}
+
 async function openProfile(handle: any, name: string) {
   handle.document.querySelector('.ca-expert-profile')?.close();
   handle.document.querySelector(`[aria-label="Edit profile for ${name}"]`)!.click();
@@ -49,6 +55,7 @@ describe('Company is one page for plans and people', () => {
   it('keeps plans and people together without duplicate headings or tabs', async () => {
     const { handle, boardRead } = await fixture();
     await handle.shell.openCompany();
+    plansReady(handle);
     const page = handle.document.querySelector('.ca-page')!;
     expect(page.contains(handle.document.querySelector('.ca-side'))).toBe(false);
     expect(handle.document.querySelector('dialog.ca-company')).toBeNull();
@@ -103,6 +110,7 @@ describe('Company is one page for plans and people', () => {
     const { handle } = await fixture();
     handle.shell.openPage('company-people');
     await handle.flush();
+    plansReady(handle);
     expect(handle.window.location.hash).toBe('#company');
     expect((handle.document.querySelector('#ca-company-people') as HTMLElement).hidden).toBe(false);
     expect((handle.document.querySelector('#ca-company-plans') as HTMLElement).hidden).toBe(false);
@@ -112,6 +120,32 @@ describe('Company is one page for plans and people', () => {
     handle.window.history.replaceState({}, '', '#board');
     handle.shell.openPage('company-people', { push: false });
     expect(handle.window.location.hash).toBe('#board');
+  });
+
+  it('holds People back until the burn rate has loaded, then reopens at the last burn-rate height', async () => {
+    const { handle } = await fixture();
+    await handle.shell.openCompany();
+    await handle.flush();
+    const people = handle.document.querySelector('#ca-company-people') as HTMLElement;
+    const plans = handle.document.querySelector('#ca-company-plans') as HTMLElement;
+    expect(people.hidden).toBe(true);
+    plansReady(handle, 640);
+    expect(people.hidden).toBe(false);
+    expect(plans.style.height).toBe('640px');
+    handle.shell.closePage();
+    await handle.shell.openCompany();
+    expect((handle.document.querySelector('#ca-company-plans') as HTMLElement).style.height).toBe('640px');
+  });
+
+  it('shows People anyway when the burn-rate frame never reports', async () => {
+    const { handle } = await fixture();
+    const timers = vi.spyOn(handle.window, 'setTimeout');
+    await handle.shell.openCompany();
+    const people = handle.document.querySelector('#ca-company-people') as HTMLElement;
+    expect(people.hidden).toBe(true);
+    const fallback = timers.mock.calls.find(([, delay]) => delay === 4000)?.[0] as () => void;
+    fallback();
+    expect(people.hidden).toBe(false);
   });
 
   it('accepts height only from its own same-origin plans frame and removes the listener on close', async () => {

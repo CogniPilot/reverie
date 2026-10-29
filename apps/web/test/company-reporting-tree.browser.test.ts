@@ -44,6 +44,8 @@ it.each([
     await page.addScriptTag({ content: read('chat-app.js') });
     await page.waitForSelector('.ca-rail', { state: 'attached' });
     await page.evaluate(() => (window as any).reverieChat.openCompany('people'));
+    // People wait for the burn-rate frame above them (it never reports ready here, so up to its 4 s limit) before they show.
+    await page.waitForFunction(() => Boolean(document.querySelector<HTMLElement>('.ca-company-map-viewport')?.clientWidth), undefined, { timeout: 8000 });
     await page.waitForFunction(() => Boolean(document.querySelector<HTMLElement>('.ca-company-map-viewport')?.dataset.scale));
     const initial = await page.evaluate(() => { const v=document.querySelector('.ca-company-map-viewport')!.getBoundingClientRect(), o=document.querySelector('.ca-company-owner')!.getBoundingClientRect(); return {left:v.left,right:v.right,ownerCenter:(o.left+o.right)/2}; });
     expect(initial.ownerCenter).toBeGreaterThan(initial.left); expect(initial.ownerCenter).toBeLessThan(initial.right);

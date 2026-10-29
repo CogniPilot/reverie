@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import laptop_resource_operations as J
 from .employee_resource_profiles import ProfileStore
+from .worker_resources import effective_config, RESOURCE_FIELDS, validate_resources
 from .goal_private import private_entry
 from .worker_storage import read_metadata, storage_paths, storage_start_allowed
 from .worker_capacity_policy import pool_headroom_fits
@@ -52,6 +53,35 @@ def _document(gate):
         finally:store.close()
 
 
+def _owner_live(claim):
+    authority=claim.get('owner_authority')
+    if authority is not None:
+        from .worker_resource_actor import _OwnerOperation
+        need(type(authority) is _OwnerOperation,'RESOURCE_ACTOR_OWNER_CONTEXT_REQUIRED')
+        authority.assert_live()
+    if claim.get('plan_context') is not None:
+        from .worker_resource_actor import _plan_current
+        _plan_current(claim)
+
+
+def _target_recipe(before):
+    """Normal same-account runtime-refresh selectors, not a context transfer.
+
+    The normal TS transaction sends the owner's explicit handoff only after
+    initial readiness. No historical provider resume ID supplies that proof.
+    """
+    recipe=copy.deepcopy(before)
+    need(type(recipe) is dict and recipe.get('mode') in ('claude','codex'),
+         'RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED')
+    recipe['runtimeThreads']={}
+    if recipe['mode']=='codex':
+        config=recipe.get('configs',{}).get('codexConfig')
+        if config is not None:
+            need(type(config) is dict,'RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED')
+            config.pop('resumeSessionId',None)
+    return recipe
+
+
 def _policy_current(gate,claim):
     """Final anchored metadata read only; no native producer may follow it."""
     from .worker import validate_config
@@ -71,6 +101,7 @@ def _policy_current(gate,claim):
     need([str(current.st_dev),str(current.st_ino),str(current.st_size),str(current.st_mtime_ns),
           str(current.st_ctime_ns)]==signature and stat.S_IMODE(current.st_mode)==0o600 and
          [parent.st_dev,parent.st_ino]==claim['policy_directory'],'RESOURCE_PREPARATION_CONFIG_CHANGED')
+    _owner_live(claim)
 
 
 @dataclass(frozen=True)
@@ -153,6 +184,7 @@ def _finish_phase(gate, boundary):
              target.kind=='session' and target.identity==profile['binding']['target_sid'] and
              not os.path.lexists(Path(gate.broker.config['stateRoot'])/profile['binding']['target_sid']),
              'RESOURCE_PREPARATION_STORAGE_CHANGED')
+    _owner_live(claim)
 
 
 @dataclass(frozen=True)
@@ -207,12 +239,72 @@ class ResourcePreparationOwner:
         claim = self._claims.get(key)
         need(claim is not None and type(claim['lease']) is _RetainedClaim and
              not claim['lease'].closed, 'RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED')
+        authority=claim.get('owner_authority')
+        if authority is not None:
+            from .worker_resource_actor import _OwnerOperation
+            need(type(authority) is _OwnerOperation and authority.connection.owner is self,
+                 'RESOURCE_ACTOR_OWNER_CONTEXT_REQUIRED')
+            authority.assert_current()
         return claim
 
-    def draft(self,employee_id,idempotency_key):
+    def _select_profile(self,employee_id,memory_mib):
+        """Pre-approval RAM intent only, under the existing admission lock.
+
+        All identity and non-RAM fields come from current canonical data. This
+        may invalidate an older preview; it never changes an executing claim,
+        a laptop policy, company binding or native allocation.
+        """
+        need(type(memory_mib) is int and 512<=memory_mib<=1048576,
+             'RESOURCE_PREPARATION_RAM_REQUEST')
+        history=self.gate._document()
+        need(not any(op['request']['employee_id']==employee_id
+                     for op in self.gate.active_operations(history)),
+             'RESOURCE_PREPARATION_EMPLOYEE_CLAIM_RETAINED')
+        rows=self.gate._guard()
+        company=read_metadata(self.broker.config['companyFile'],self.broker.config['uid'])
+        employees=[row for row in company['employees'] if row.get('id')==employee_id]
+        need(len(employees)==1,'RESOURCE_PREPARATION_CURRENT_EMPLOYEE_REQUIRED')
+        employee=employees[0];sid=employee.get('sessionId');J.canonical_uuid(sid)
+        generation=employee.get('sessionGeneration');J.version(generation,True)
+        need(employee.get('desiredRunning') is True and not employee.get('onVacation') and
+             not employee.get('bindingMigration') and
+             J.fingerprint({'company_id':self.gate.scope['company_id'],'owner':employee.get('owner')})==
+             self.gate.scope['owner_scope_digest'],'RESOURCE_PREPARATION_CURRENT_EMPLOYEE_REQUIRED')
+        paths=storage_paths(self.broker.config,sid)
+        need(paths.kind=='employee' and paths.identity==employee_id and
+             storage_start_allowed(self.broker.config,paths),'RESOURCE_PREPARATION_CURRENT_EMPLOYEE_REQUIRED')
+        current=effective_config(self.broker.config,sid)
+        resources={name:copy.deepcopy(current[name]) for name in RESOURCE_FIELDS}
+        resources['memoryMiB']=memory_mib;validate_resources(resources)
+        need(resources['budgetMode']=='admission','RESOURCE_PREPARATION_ADMISSION_REQUIRED')
+        target=str(uuid.uuid4())
+        occupied={identifier for op in history['operations'].values() for identifier in
+                  (op['id'],op['reservation_id'],op['reserved_sid'],op['observation']['current_sid'])}
+        need(target!=sid and target not in occupied and
+             storage_paths(self.broker.config,target).kind=='session' and
+             not os.path.lexists(Path(self.broker.config['stateRoot'])/target) and
+             not any((row.get('Config',{}).get('Labels') or {}).get('reverie.session')==target for row in rows),
+             'RESOURCE_PREPARATION_DRAFT_IDS')
+        profiles=ProfileStore(self.gate.root/'profiles')
+        try:
+            snapshot=profiles.snapshot();old=snapshot['profiles'].get(employee_id)
+            need(not any(target in (value['binding']['current_sid'],value['binding']['target_sid'])
+                         for value in snapshot['profiles'].values()),'RESOURCE_PREPARATION_DRAFT_IDS')
+            need(self.gate._guard()==rows and
+                 read_metadata(self.broker.config['companyFile'],self.broker.config['uid'])==company and
+                 storage_paths(self.broker.config,sid)==paths,
+                 'RESOURCE_PREPARATION_SOURCE_CHANGED')
+            profiles.put(employee_id,resources,{'employee_id':employee_id,'current_sid':sid,'target_sid':target,
+                'current_generation':generation,'target_generation':generation+1},
+                expected_revision=snapshot['revision'],expected_profile_version=old['version'] if old else 0,
+                expected_binding=old['binding'] if old else None)
+        finally:profiles.close()
+
+    def draft(self,employee_id,idempotency_key,*,memory_mib=None):
         """Private preview preselection; no claim, handle or capacity hold."""
         J.canonical_uuid(employee_id);J.canonical_uuid(idempotency_key)
         with self.gate.admission():
+            if memory_mib is not None:self._select_profile(employee_id,memory_mib)
             store=self.gate._store()
             try:
                 profile=self.gate._profile(employee_id)
@@ -255,6 +347,8 @@ class ResourcePreparationOwner:
         return {'draftId':record['draftId'],'operationId':record['operationId'],'reservationId':record['reservationId'],
                 'targetSid':record['targetSid'],'profileVersion':str(profile['version']),
                 'profileDigest':J.fingerprint(profile),'previewDigest':J.fingerprint(record),
+                'resources':copy.deepcopy(profile['resources']),
+                'sourceMemoryMiB':int(record['observation']['current_memory_bytes'])//J.MIB,
                 'capacityHeld':False,'nativeEffects':False}
 
     def reserve(self,draft_id,expected_preview_digest):
@@ -285,7 +379,8 @@ class ResourcePreparationOwner:
             need(len(source) == 1, 'RESOURCE_PREPARATION_SOURCE_CHANGED')
             key = object()
             self._claims[key] = {'lease':lease, 'before':before, 'source_paths':paths,
-                                 'source_id':source[0]['Id'], 'preparing_attempted':False, 'published':False,
+                                 'source_id':source[0]['Id'], 'native_baseline':copy.deepcopy(lease.native_baseline),
+                                 'preparing_attempted':False, 'published':False,
                                  'config_attempted':False}
             return {'sessionId':binding['target_sid'], 'claimKey':key,
                     'operation':copy.deepcopy(lease.view)}
@@ -308,10 +403,12 @@ class ResourcePreparationOwner:
                 before = copy.deepcopy(lease.context['employee']); after = copy.deepcopy(before)
                 after.update(sessionId=profile['binding']['target_sid'],
                              sessionGeneration=profile['binding']['target_generation'])
-                receipt = {'schema':'reverie-resource-publication-intent-v1',
+                if 'runtimeRecipe' in after:after['runtimeRecipe']=_target_recipe(after['runtimeRecipe'])
+                receipt = {'schema':'reverie-resource-publication-intent-v2',
                     'operationId':lease.view['operation']['id'], 'reservationId':lease.view['operation']['reservation_id'],
                     'profileVersion':profile['version'], 'profileDigest':J.fingerprint(profile),
                     'beforeEmployee':before, 'afterEmployee':after,
+                    'nativeBaseline':copy.deepcopy(claim['native_baseline']),
                     'beforeConfigDigest':J.fingerprint(claim['before']), 'state':'PREPARING'}
                 need(len(J.encode(receipt)) <= J.MAX_BYTES, 'RESOURCE_PREPARATION_RECEIPT_BOUND')
                 path = self.gate.root/'operations'/('publication-'+receipt['operationId']+'.json')
@@ -471,6 +568,70 @@ class ResourcePreparationOwner:
             self.gate._local.preparation_ack=None
             if directory is not None:os.close(directory)
             # Never restore config, remove attempts/temporaries or retry unknown.
+
+    def _begin_start(self,key):
+        """Private durable STARTING intent; not a started/native ACK."""
+        from .worker_resource_native import _StartPermit,_StartProbe,_StartBoundary,qualify_start
+        claim=self._current(key);lease=claim['lease']
+        need(not claim.get('start_attempted',False),'RESOURCE_NATIVE_START_ALREADY_ATTEMPTED')
+        try:
+            with self.gate.admission():
+                from .worker_host_job import require_idle
+                require_idle(self.gate)
+                op=lease.view['operation']
+                claim['prepared_receipt_digest']=op['last_receipt_digest']
+                probe=_StartProbe(self,key,op['id'],op['reservation_id'],op['reserved_sid'],op['version'])
+                qualify_start(self.gate,probe,allow_running_source=True)
+                claim['start_attempted']=True
+                lease.view=lease.store.begin_effect(self.gate.scope,lease.handle,'start',expected_version=op['version'])
+                op=lease.view['operation']
+                permit=_StartPermit(self,key,op['id'],op['reservation_id'],op['reserved_sid'],op['version'])
+                claim['start_permit']=permit
+                _write_exclusive(self.gate.root/'operations'/('start-attempt-'+op['id']+'.json'),
+                    {'schema':'reverie-resource-start-intent-v1','operationId':op['id'],
+                     'reservationId':op['reservation_id'],'targetSid':op['reserved_sid'],
+                     'nativeBaselineDigest':J.fingerprint(claim['native_baseline']),'state':'STARTING'})
+                self.gate._local.start_boundary=_StartBoundary(permit,allow_running_source=True)
+            return permit
+        except BaseException as error:
+            try:lease.close()
+            except BaseException:error.add_note('RESOURCE_NATIVE_CLAIM_CLOSE_UNCONFIRMED')
+            raise J.OperationCommitUncertain('RESOURCE_NATIVE_START_INTENT_UNCERTAIN_KEEP_CLAIM') from error
+
+    def _stop_source_once(self,key,permit):
+        """Use canonical immutable-CID stop; replacement still does not exist."""
+        from .worker_resource_native import _StartBoundary,qualify_start
+        claim=self._current(key);lease=claim['lease']
+        need(claim.get('start_permit') is permit and not claim.get('source_stop_attempted',False),
+             'RESOURCE_NATIVE_SOURCE_STOP_ALREADY_ATTEMPTED')
+        try:
+            with self.gate.admission():
+                state=qualify_start(self.gate,permit,allow_running_source=True)
+                claim['source_stop_attempted']=True
+                op=lease.view['operation']
+                _write_exclusive(self.gate.root/'operations'/('source-stop-attempt-'+op['id']+'.json'),
+                    {'schema':'reverie-resource-source-stop-v1','operationId':op['id'],
+                     'sourceId':claim['source_id'],'state':'STOP_REQUESTED'})
+                if state['state']=='SOURCE_RUNNING_NO_LAUNCH':
+                    name=claim['native_baseline']['sourceRow']['Name'].removeprefix('/')
+                    original=claim['native_baseline']['native']
+                    self.gate._local.protected_source_stop = permit
+                    try:
+                        self.broker.stop(name,expected_id=claim['source_id'],retain_storage=True,
+                            expected_process={'pid':original['pid'],'start':original['start']})
+                    finally:
+                        self.gate._local.protected_source_stop = None
+                qualify_start(self.gate,permit)
+                released=self.broker.release_storage(claim['source_paths'].session)
+                need(released is True,'RESOURCE_NATIVE_STORAGE_RELEASE_UNCONFIRMED')
+                self.gate._local.start_boundary=_StartBoundary(permit)
+            claim['source_stop_completed']=True
+            return {'state':'SOURCE_RELEASED_TARGET_NOT_CREATED','operationId':op['id'],
+                    'capacityRetained':True,'retryAllowed':False,'verified':False}
+        except BaseException as error:
+            try:lease.close()
+            except BaseException:error.add_note('RESOURCE_NATIVE_CLAIM_CLOSE_UNCONFIRMED')
+            raise J.OperationCommitUncertain('RESOURCE_NATIVE_SOURCE_STOP_UNCERTAIN_KEEP_CLAIM') from error
 
     def close(self):
         for claim in self._claims.values():claim['lease'].close()

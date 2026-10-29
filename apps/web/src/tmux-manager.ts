@@ -24,10 +24,10 @@ import { cliConfigContent } from './cli-config-content.js';
 
 import { randomBytes } from 'node:crypto';
 import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
-import { typeAndSubmit, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
-import { isSameProcess, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
+import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
 import { execSync, exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { workerLaunchCommand } from './worker-execution.js';
@@ -2356,7 +2356,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
         : remote
           ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
-          : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
+          : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly, options.workerResourceLaunch);
 
       // Create tmux session in three steps to handle cold-start (no server running)
       // and avoid the race where the command exits before remain-on-exit is set:
@@ -2562,6 +2562,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Check if the pane in a tmux session is dead (command exited but remain-on-exit keeps it).
    * Returns true if the session exists but the pane's command has exited.
    */
+  async readPaneLiveness(muxName: string) {
+    if (!isValidMuxName(muxName)) return { state: 'unreadable' as const };
+    return parseLivePane(await this.listPanesAsync(), muxName);
+  }
+
   isPaneDead(muxName: string): boolean {
     if (IS_TEST_MODE) return false;
     if (!isValidMuxName(muxName)) return false;
@@ -2655,8 +2660,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
       : remote
         ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
-        : workerLaunchCommand(localFullCmd, workingDir, sessionId);
+        : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
 
+    if (options.stillCurrent && !options.stillCurrent()) return null;
     try {
       // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.
       this._configureCliEnv(
@@ -2673,6 +2679,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
+      if (options.stillCurrent && !options.stillCurrent()) return null;
       await execAsync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {
@@ -3775,12 +3782,18 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * - `Enter` key is sent as a SEPARATE tmux invocation after a small delay
    * - Ink (Claude CLI) needs text and Enter split to avoid treating Enter as a newline
    */
-  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person' } = {}): Promise<boolean> {
+  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean } = {}): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       console.error(
         `[TmuxManager] sendInput failed: no session found for ${sessionId}. Known: ${Array.from(this.sessions.keys()).join(', ')}`
       );
+      return false;
+    }
+
+    // A gated write (idle-only wake, capacity retry) is only ever a gated text + Enter (typeAndSubmit re-checks before each
+    // key); any other shape would go out ungated, so it is refused before any transport, test mode included.
+    if ((options.stillIdle || writeGateActive()) && (options.opencode || !input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))) {
       return false;
     }
 
@@ -3801,7 +3814,6 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     try {
       const hasCarriageReturn = input.includes('\r');
       const textPart = input.replace(/\r/g, '').replace(/\n/g, '').trimEnd();
-
       if (options.opencode) {
         // OpenCode's "!" key flips its composer into shell mode mid-burst: see src/opencode-input.ts.
         const tmux = this.tmux();
@@ -3839,12 +3851,20 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         // single tmux invocation (via \;) causes Ink to interpret Enter as a newline
         // character in the input buffer rather than as form submission.
         // A long burst is read as a paste: Enter must wait for it to settle or it lands inside it (src/submit-settle.ts).
+        // Codex holds part of a long key burst back, so long text goes to it as a real bracketed paste (pastesInsteadOfKeys).
         const io = {
           ...this.submitIo(session.muxName),
-          typeText: (text: string) =>
-            execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS }),
+          typeText: (text: string) => {
+            if (!pastesInsteadOfKeys(session.mode, text)) {
+              return execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
+            }
+            const buffer = `reverie-${randomBytes(6).toString('hex')}`;
+            return execAsync(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS })
+              .then(() => execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS }));
+          },
         };
-        await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`);
+        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer, options.stillIdle);
+        if (outcome === 'not-written') return false;
       } else if (textPart) {
         // Text only, no Enter
         await execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {
@@ -3868,7 +3888,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   private submitIo(muxName: string): SubmitSettleIo {
     return {
       sendEnter: () => execAsync(`${this.tmux()} send-keys -t "${muxName}" Enter`, { timeout: EXEC_TIMEOUT_MS }),
-      capture: () => this.capturePaneText(muxName),
+      // With escapes: the composer checks must see Codex's dim placeholder as styling, not text (session-submit-verifier.ts).
+      capture: () => this.capturePaneText(muxName, undefined, { escapes: true }),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       log: (m) => console.log(m),
     };
@@ -4061,12 +4082,12 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * terminal. Returns null in tests (no tmux) so callers fall back to their
    * stream heuristics rather than reading an empty screen as "not working".
    */
-  capturePaneText(muxName: string, paneTarget?: string): string | null {
+  capturePaneText(muxName: string, paneTarget?: string, options: { escapes?: boolean } = {}): string | null {
     if (IS_TEST_MODE) return null;
     const target = resolveTmuxPaneTarget(muxName, paneTarget);
     if (!target) return null;
     try {
-      return execSync(`${this.tmux()} capture-pane -p -t ${shellescape(target)}`, {
+      return execSync(`${this.tmux()} capture-pane -p${options.escapes ? ' -e' : ''} -t ${shellescape(target)}`, {
         encoding: 'utf-8',
         timeout: EXEC_TIMEOUT_MS,
       });

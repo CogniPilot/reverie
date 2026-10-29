@@ -168,7 +168,7 @@ export function inputRefusal(text: string): string | undefined {
  */
 export function buildSendBody(
   text: string,
-  options: { enter: boolean; clientId: string; seq: number; wait?: string | true; waitTimeout?: number }
+  options: { enter: boolean; clientId: string; seq: number; wait?: string | true; waitTimeout?: number; ifIdle?: boolean }
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     input: options.enter ? `${text}\r` : text,
@@ -178,6 +178,7 @@ export function buildSendBody(
   };
   if (options.wait !== undefined) body.wait = options.wait;
   if (options.waitTimeout !== undefined) body.waitTimeout = options.waitTimeout;
+  if (options.ifIdle) body.ifIdle = true;
   return body;
 }
 
@@ -681,6 +682,8 @@ export interface SendOptions {
   timeoutMs?: number;
   clientId?: string;
   seq?: number;
+  /** Server-side idle-only write (`agent wake`): refused while the session works, never typed over a draft. */
+  ifIdle?: boolean;
 }
 
 /** `agent send` — printable text plus `\r`, exactly-once, optionally blocking on end of turn. */
@@ -698,6 +701,7 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
     seq: options.seq ?? (deps.now ?? Date.now)(),
     wait: options.wait,
     waitTimeout: options.wait !== undefined ? options.timeoutMs : undefined,
+    ifIdle: options.ifIdle,
   });
   const res = await deps.request(deps.ctx, {
     method: 'POST',
@@ -705,11 +709,19 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
     body,
     timeoutMs: (options.timeoutMs ?? 60_000) + 10_000,
   });
-  if (!res.json?.success) return fail(deps, describeFailure(res));
+  // An idle-only send refused because the session is working is a refusal, not an error.
+  if (!res.json?.success) return fail(deps, describeFailure(res), options.ifIdle && res.status === 409 ? EXIT.refused : EXIT.error);
   const data = res.json.data as
-    | { delivered?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; wait?: WaitResult }
+    | { delivered?: boolean; typedUnsent?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; workerDead?: boolean; wait?: WaitResult }
     | undefined;
   if (deps.json) emitJson(deps, data ?? {});
+  if (options.ifIdle && data?.delivered === false && !data.duplicate) {
+    if (!deps.json)
+      deps.io.err(palette.err(data.typedUnsent
+        ? `${GLYPH.fail} not woken: ${target.id} became busy after the wake text was typed — Enter was withheld, so the text is left unsent in its composer and will not be retried`
+        : `${GLYPH.fail} not woken: ${target.id} is busy or has a draft in its composer — nothing was typed`));
+    return EXIT.refused;
+  }
   // Fire-and-forget to a remote session whose host is asleep (wake-on-LAN): the server
   // holds the chunk and types it once the pane is back (`buffered`), or the chunk was
   // over the wake buffer's cap and is gone (`dropped`). The seq is spent either way,
@@ -727,6 +739,16 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
   // `delivered:false` without `duplicate` is the route's "the bytes went nowhere":
   // the PTY exited or send-keys hit a dead pane. The field exists so a client does not
   // say "wait longer" when the truth is "restart the worker" — so it is a failure here.
+  if (data?.delivered === false && !data.duplicate && data.workerDead === false) {
+    // The server checked the pane and it is alive: the write itself failed (a broker or website pause), so this is a
+    // retry, not a restart. Restarting a live worker would cut its turn.
+    if (!deps.json) {
+      deps.io.err(
+        palette.err(`${GLYPH.fail} not delivered: the write to ${target.id} failed but its worker is still running — retry shortly; do not restart it`)
+      );
+    }
+    return EXIT.error;
+  }
   if (data?.delivered === false && !data.duplicate) {
     if (!deps.json) {
       deps.io.err(
@@ -755,6 +777,32 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
   }
   if (options.wait === undefined) return EXIT.ok;
   return waitExitCode(data?.wait);
+}
+
+/** What `agent wake` types: one standard nudge, so a woken agent knows why it was prompted and where to look. */
+export const WAKE_PROMPT =
+  'Wake-up check from a colleague: you look idle. Read what needs you (reverie agent chat digest), check your Board cards (reverie board show --mine), then carry on with your current work or say what is blocking you.';
+
+/**
+ * `agent wake` — type the standard resume prompt into an idle colleague's composer (James 10-19: an agent should be
+ * able to wake a sleeping agent with one command). It goes through the same input route as `send`, so the server decides who
+ * may type where. A session that is working is left alone: the CLI checks first, and the server checks again at write time
+ * (`ifIdle`), types only into an empty composer and never falls back to a raw write.
+ */
+export async function agentWake(deps: AgentDeps, options: { id: string }): Promise<number> {
+  if (isSelfSession(deps.ctx.selfId, options.id)) {
+    return fail(deps, `refusing: ${options.id} is me — I am awake`, EXIT.refused);
+  }
+  const target = await resolveSessionId(deps, options.id);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/sessions' });
+  if (!res.json?.success) return fail(deps, describeFailure(res));
+  const row = ((res.json.data as SessionRow[] | undefined) ?? []).find((s) => s.id === target.id);
+  if (!row) return fail(deps, `no session ${target.id} (see \`agent ls\`)`, EXIT.error);
+  if (row.status !== 'idle') {
+    return fail(deps, `not waking ${row.name ?? target.id}: it is ${row.status ?? 'in an unknown state'}, not idle`, EXIT.refused);
+  }
+  return agentSend(deps, { id: target.id, text: WAKE_PROMPT, enter: true, ifIdle: true });
 }
 
 function describeWait(wait: WaitResult): string {
@@ -2528,6 +2576,12 @@ export function registerAgentCommands(program: Command): Command {
           });
         })
     );
+
+  agent
+    .command('wake <id>')
+    .description('Nudge an idle colleague: type the standard "check your rooms and Board, then carry on" prompt (a working session is left alone)')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentWake(deps, { id })));
 
   agent
     .command('wait <id>')

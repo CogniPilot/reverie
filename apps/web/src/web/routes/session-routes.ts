@@ -2139,8 +2139,20 @@ export function registerSessionRoutes(
 
   app.post('/api/sessions/:id/input', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const { input, useMux, seq, clientId, wait, waitTimeout } = parseBody(SessionInputWithLimitSchema, req.body);
+    const { input, useMux, seq, clientId, wait, waitTimeout, ifIdle } = parseBody(SessionInputWithLimitSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
+    // A cheap early refusal, before the dedup seq is spent. It is NOT the idle decision: a turn can start during any await
+    // below (the wake-target probe among them), so the session decides again at the write itself (writeViaMux requireIdle).
+    if (ifIdle && session.isWorking) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
+    }
+    // An agent's input (send, wake: the request names its calling session) never types into a composer a plan move owns: the
+    // move's handoff goes into that composer and would be appended to it. A person's own typing stays allowed.
+    const agentCaller =
+      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
+    if (agentCaller && session.composerHeldByMove) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+    }
 
     const inputStr = String(input);
     if (inputStr.length > MAX_INPUT_LENGTH) {
@@ -2186,7 +2198,9 @@ export function registerSessionRoutes(
     // TCP connect on wake-enabled hosts only, at most once per
     // REMOTE_WAKE_PROBE_MIN_INTERVAL_MS.
     if (!duplicate && (await remoteWake.hasWakeTarget(session))) {
-      if (wantsWait) {
+      // An idle-only write must not be buffered: the registry would flush it later with no idle check at all. Wake the host,
+      // then let the gated write below decide.
+      if (wantsWait || ifIdle) {
         // Send-and-wait keeps the response open anyway, so blocking on the wake is
         // simpler and more correct than buffering (buffering would break the wait).
         // A host that never comes back is an error here, as on the create/attach
@@ -2194,6 +2208,8 @@ export function registerSessionRoutes(
         // timeout, which is the combination the API docs send callers to the wrong
         // recovery for.
         if (!(await remoteWake.ensureAwake(session))) {
+          // Nothing was typed, so a refused wake's seq is handed back for its retry.
+          if (ifIdle && tagged) session.forgetInputSeq(clientId as string, seq as number);
           return createErrorResponse(
             ApiErrorCode.OPERATION_FAILED,
             `${session.remote?.label ?? 'the remote host'} did not come back after a wake-on-LAN request — nothing was sent`
@@ -2270,6 +2286,8 @@ export function registerSessionRoutes(
     // BOTH writes, and telling the caller "delivered, but it timed out" points it at
     // the wrong recovery — wait longer, when the truth is "restart the worker".
     let delivered = false;
+    // An idle-only write whose text went in but whose Enter was withheld (a turn started in between): reported, never retried.
+    let typedUnsent = false;
 
     // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
     // ask for it: written straight into the pane it arrives as one burst, and Claude
@@ -2280,8 +2298,6 @@ export function registerSessionRoutes(
     const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
     // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
     // a person's own typing, which names no session, is left exactly as typed.
-    const agentCaller =
-      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
     const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
     const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
@@ -2289,6 +2305,15 @@ export function registerSessionRoutes(
     if (duplicate) {
       // Redelivery of an already-applied input: skip the write, but still honor the
       // wait, since the caller's question ("tell me when this settles") is unanswered.
+    } else if (ifIdle) {
+      // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
+      // just started a turn or holds a draft gets nothing typed.
+      delivered = await session
+        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true, onTypedUnsent: () => { typedUnsent = true; } })
+        .catch(() => false);
+      // Typed but Enter withheld is not "nothing was typed": the text sits unsent in the composer, so the seq stays spent
+      // and a retry cannot type it a second time.
+      if (!delivered && !typedUnsent) undoOnFailure();
     } else if ((useMux || autoMux) && waitPromise) {
       // The response is already staying open for the wait, so the tmux write can be
       // awaited here. This is the ONE path where a writeViaMux failure is observable.
@@ -2333,7 +2358,9 @@ export function registerSessionRoutes(
       }
     }
 
-    if (!waitPromise) return {};
+    // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
+    // just started, or a draft in the composer) must not read as accepted.
+    if (!waitPromise) return ifIdle ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
     try {
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse
@@ -2359,6 +2386,9 @@ export function registerSessionRoutes(
         data: {
           delivered,
           duplicate,
+          // The pane's own liveness, so a failed write is not mistaken for a dead worker: during a broker or website
+          // pause the write fails while the worker keeps running, and restarting it would cut a live turn.
+          workerDead,
           status: session.status,
           limitPaused: session.isLimitPaused,
           // Identical `wait` object to the two GET endpoints, so one client helper

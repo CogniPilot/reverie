@@ -9,8 +9,8 @@
  * Emotes: `<data>/chatroom-emotes/<scope>/<name>.<ext>`, scope `global` or a room id,
  * indexed in `<data>/chatroom-emotes/index.json`. Small images only (MAX_EMOTE_BYTES).
  *
- * Only raster images in INLINE_IMAGE_TYPES are ever served inline; everything else
- * (SVG and HTML included) is served as a download (see the routes). Writes are tmp+rename
+ * Only raster images in INLINE_IMAGE_TYPES, and MP4/WebM video whose bytes really are that container (inlineVideoType), are
+ * ever served inline; everything else (SVG and HTML included) is served as a download (see the routes). Writes are tmp+rename
  * and every index write is serialized per store.
  */
 
@@ -82,6 +82,23 @@ export function safeFileName(raw: string): string {
 /** Is this content type shown inline (raster images only)? */
 export function isInlineImage(type: string): boolean {
   return INLINE_IMAGE_TYPES.has(type.toLowerCase());
+}
+
+/** Bytes a video player needs before it can show a first frame and a play button. */
+export const VIDEO_SNIFF_BYTES = 12;
+
+/**
+ * The video type to serve inline for a chat attachment, or null to keep it a download. The uploader declares the type, so
+ * it is only trusted when the file starts like that container: an MP4 `ftyp` box or the WebM/EBML magic. Movies then play
+ * in the chat like Discord's (James 10-29) instead of forcing a download.
+ */
+export function inlineVideoType(type: string, head: Uint8Array): string | null {
+  const declared = type.toLowerCase();
+  const ascii = (start: number, end: number) => String.fromCharCode(...head.subarray(start, end));
+  if (declared === 'video/mp4' && head.length >= 12 && ascii(4, 8) === 'ftyp') return 'video/mp4';
+  if (declared === 'video/webm' && head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3)
+    return 'video/webm';
+  return null;
 }
 
 async function writeAtomic(path: string, data: Buffer | string): Promise<void> {

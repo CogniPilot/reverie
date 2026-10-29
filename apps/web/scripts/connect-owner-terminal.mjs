@@ -11,11 +11,13 @@ export function connectOwnerTerminal() {
   return new Promise((resolve, reject) => {
     const connection = net.createConnection({ path: PATH });
     let settled = false, acknowledgement = Buffer.alloc(0);
+    let deadlineTimer;
     const refuse = () => {
       if (settled) return;
       settled = true;
       connection.off('data', ready);
       connection.setTimeout(0);
+      clearTimeout(deadlineTimer);
       connection.destroy();
       reject(new Error('Owner terminal protected channel unavailable'));
     };
@@ -30,10 +32,12 @@ export function connectOwnerTerminal() {
       connection.off('data', ready);
       if (data.length > count) connection.unshift(data.subarray(count));
       connection.setTimeout(0);
+      clearTimeout(deadlineTimer);
       settled = true;
       resolve(connection);
     };
-    connection.setTimeout(5000, refuse);
+    deadlineTimer = setTimeout(refuse, 120000);
+    connection.setTimeout(120000, refuse);
     connection.on('error', refuse);
     connection.once('end', refuse);
     connection.once('close', refuse);

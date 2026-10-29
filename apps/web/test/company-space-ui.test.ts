@@ -22,7 +22,7 @@ it('keeps Company and Board inline across page navigation and persists collapse 
   const gear = () => h.document.querySelector('.ca-office-gear')!;
   expect(gear().closest('.ca-rail')).not.toBeNull();
   expect(gear().getAttribute('aria-expanded')).toBe('true');
-  expect([...pane().querySelectorAll('button')].map((b: any) => b.textContent)).toEqual(['Company', 'Board']);
+  expect([...pane().querySelectorAll('button')].map((b: any) => b.textContent)).toEqual(['Company', 'Board', 'Workspace']);
   (pane().querySelector('button') as HTMLButtonElement).click(); await h.flush();
   expect(h.shell.embed).toBe('company'); expect(pane().hidden).toBe(false);
   gear().click(); await h.flush(); expect(pane().hidden).toBe(true);

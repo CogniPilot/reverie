@@ -24,7 +24,7 @@ LAPTOP = 'b' * 64
 
 class OwnerGoalBrokerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='owner-goal-broker-')
+        self.temp = tempfile.TemporaryDirectory(prefix='ogb-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.private = self.root/'private'; self.private.mkdir(mode=0o700)

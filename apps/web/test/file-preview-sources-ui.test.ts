@@ -58,6 +58,7 @@ function fixture(
     MobileDetection: {},
     Uint8Array,
     TextDecoder,
+    btoa,
     AbortController,
     Blob,
     URL: {
@@ -385,6 +386,15 @@ it('renders a raster using a typed blob and revokes it on replacement', async ()
   await f.app.openReadOnlyFilePreview({ ...source(), attachmentId: 'new-file', name: 'second.png' });
   expect(f.revoked).toContain('blob:fixture-0');
 });
+it('renders an SVG from a data: URL, never a same-origin blob: that could run its script in a new tab', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><script>sentinel()</script></svg>';
+  const f = fixture(async () => new Response(svg));
+  await f.app.openReadOnlyFilePreview(source('figure.svg'));
+  const src = f.document.querySelector<HTMLImageElement>('#filePreviewBody img')!.getAttribute('src')!;
+  expect(src.startsWith('data:image/svg+xml;base64,')).toBe(true);
+  expect(Buffer.from(src.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8')).toBe(svg);
+  expect([...f.urls.keys()]).toEqual([]);
+});
 it('resolves actual Workspace crumbs before a binding-checked read and navigates the selected folder', async () => {
   const f = fixture(async (url) =>
     url.includes('/resolve?')
@@ -495,6 +505,7 @@ it('makes actual room attachment cards preview by default and retains modified-c
     return el;
   };
   f.app._chatUrl = (path: string) => '/prefix' + path;
+  f.app._chatFileCard = proto._chatFileCard;
   const wrap = proto._chatAttachmentsEl.call(f.app, {
     roomId: 'room-a',
     attachments: [{ id: 'file-a', name: 'notes.md', type: 'text/markdown', size: 10 }],
@@ -597,4 +608,33 @@ it('keeps the existing dirty-edit confirmation before a read-only backdrop close
   confirm.mockReturnValue(true);
   overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
   expect(overlay.classList.contains('visible')).toBe(false);
+});
+it('plays MP4/WebM attachments inline and falls back to the preview card when the file is not a playable video', () => {
+  const f = fixture();
+  const mediaContext = vm.createContext({ ReverieApp: class {}, URL });
+  vm.runInContext(file('chat-media.js'), mediaContext);
+  const proto = vm.runInContext('ReverieApp.prototype', mediaContext);
+  f.app._chatEl = (tag: string, cls?: string, text?: string) => {
+    const el = f.document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text) el.textContent = text;
+    return el;
+  };
+  f.app._chatUrl = (path: string) => '/prefix' + path;
+  f.app._chatFileCard = proto._chatFileCard;
+  const wrap = proto._chatAttachmentsEl.call(f.app, {
+    roomId: 'room-a',
+    attachments: [
+      { id: 'clip', name: 'lap.mp4', type: 'video/mp4', size: 10 },
+      { id: 'other', name: 'lap.mov', type: 'video/quicktime', size: 10 },
+    ],
+  });
+  const video = wrap.querySelector('video') as HTMLVideoElement;
+  expect(video.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/clip');
+  expect(video.controls).toBe(true);
+  expect(video.preload).toBe('metadata');
+  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(1); // the .mov stays a card
+  video.dispatchEvent(new f.dom.window.Event('error'));
+  expect(wrap.querySelector('video')).toBeNull();
+  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(2);
 });

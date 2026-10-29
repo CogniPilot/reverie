@@ -84,5 +84,58 @@ class WorkerServiceDiagnosticsTests(unittest.TestCase):
         self.assertFalse(case.active)
         self.assertNotIn(str(case.service.config_path), errors.getvalue())
 
+    def test_only_fixed_transport_stage_names_are_exposed(self):
+        error = PermissionError(errno.EACCES, 'synthetic-private', '/private/synthetic-private')
+        error._reverie_transport_stage = 'POSTSTART_BROKER'
+        code, output, errors = self.call(error)
+        self.assertEqual((code, output), (1, ''))
+        self.assertEqual(json.loads(errors.splitlines()[-1]), {
+            'category': 'PATH_PERMISSION', 'reason': 'Unlisted exception details withheld.',
+            'stage': 'POSTSTART_BROKER'})
+        for value in ('/private/synthetic-private', 'POSTSTART_BROKER\nprivate', {'private': 'data'}):
+            error._reverie_transport_stage = value
+            _, _, errors = self.call(error)
+            self.assertNotIn('stage', json.loads(errors.splitlines()[-1]))
+            self.assertNotIn('synthetic-private', errors)
+
+    def test_actual_transport_poststart_failure_keeps_attempt_and_reports_fixed_stage(self):
+        from tests.test_worker_service_transport_upgrade import TransportUpgradeTests
+        from reverie import worker_service_transport_upgrade as T
+        for phase in ('POSTSTART_BROKER', 'POSTSTART_LISTENERS', 'POSTSTART_CONTINUITY'):
+            with self.subTest(phase=phase):
+                case = TransportUpgradeTests(); case.setUp()
+                try:
+                    sha = case.prepare(); original_broker = case.upgrade.broker
+                    original_continuity = case.upgrade._unchanged
+                    failure = PermissionError(errno.EACCES, 'private-payload', '/private/path')
+                    def broker(unit):
+                        if case.f.broker_generation > 1 and phase == 'POSTSTART_BROKER': raise failure
+                        return original_broker(unit)
+                    def continuity(plan, gate):
+                        if case.f.broker_generation > 1 and phase == 'POSTSTART_CONTINUITY': raise failure
+                        return original_continuity(plan, gate)
+                    case.upgrade.broker = broker; case.upgrade._unchanged = continuity
+                    if phase == 'POSTSTART_LISTENERS':
+                        # Primary readiness now precedes full broker observation;
+                        # this control targets the subsequent listener bracket.
+                        case.upgrade.tools.ready_socket.side_effect = [None, failure]
+                    output, errors = io.StringIO(), io.StringIO()
+                    args = ['--config', str(case.service.config_path), '--diagnostic', 'apply-transport-upgrade',
+                            '--operation', str(case.operation), '--plan-sha256', sha]
+                    with patch.object(S, 'WorkerService', return_value=case.service), \
+                         patch.object(T, 'TransportUpgrade', return_value=case.upgrade), \
+                         redirect_stdout(output), redirect_stderr(errors):
+                        code = S.main(args)
+                    self.assertEqual((code, output.getvalue()), (1, ''))
+                    diagnostic = json.loads(errors.getvalue().splitlines()[-1])
+                    self.assertEqual(diagnostic['stage'], phase)
+                    self.assertEqual(diagnostic['category'], 'PATH_PERMISSION')
+                    self.assertNotIn('/private/path', errors.getvalue())
+                    self.assertNotIn('private-payload', errors.getvalue())
+                    self.assertTrue((case.operation / 'ATTEMPT.json').exists())
+                    self.assertFalse((case.operation / 'DONE.json').exists())
+                    self.assertEqual(case.service.unit.resolve(), case.service.target_unit())
+                finally: case.doCleanups()
+
 
 if __name__ == '__main__': unittest.main()

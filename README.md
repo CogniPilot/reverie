@@ -242,6 +242,38 @@ before releasing disposable task data. Project mounts retain their current trust
 separate Git worktrees for concurrent source changes. Resource isolation is not a
 promise that shared writable files are protected from another expert.
 
+## Optional Linux perf profiling
+
+If you want to use `perf`, check the host's performance-counter policy:
+
+```bash
+cat /proc/sys/kernel/perf_event_paranoid
+```
+
+`1` permits per-process profiling, including kernel events; `2` permits
+user-space per-process profiling. These settings apply to the host kernel used
+by the laptops. See the [kernel's perf permissions guide](https://docs.kernel.org/admin-guide/perf-security.html).
+
+On NixOS, declare this in your own host configuration and activate it normally:
+
+```nix
+boot.kernel.sysctl."kernel.perf_event_paranoid" = 1;
+```
+
+On other Linux hosts, an administrator can apply it once and persist it for boot:
+
+```bash
+sudo sysctl -w kernel.perf_event_paranoid=1
+echo 'kernel.perf_event_paranoid = 1' | sudo tee /etc/sysctl.d/90-reverie-perf.conf
+```
+
+This is optional host setup; Reverie does not change the host setting at startup.
+Container profiling also needs `perf` installed and a container syscall policy
+that permits `perf_event_open`. The host setting alone does not enable it in
+existing laptops. Their profiling policy must be selected before creation;
+changing that policy requires recreating the affected laptop. No per-run `sudo`
+is needed once the host and laptop permissions are configured.
+
 ## Office handbook
 
 Open **Office → Handbook** from the nameplate gear, or `/handbook`, for searchable

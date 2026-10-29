@@ -2,6 +2,7 @@ import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
+import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
  *
@@ -130,7 +131,8 @@ import {
 import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
-import { SubmitVerifier } from './session-submit-verifier.js';
+import { composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
+import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
 import { resolveSessionCliVersion } from './utils/cli-resolver.js';
 import {
@@ -141,6 +143,7 @@ import {
   buildShellEnv,
 } from './session-cli-builder.js';
 import { SessionAutoOps } from './session-auto-ops.js';
+import { CapacityRetry } from './capacity-stall.js';
 import { detectUsageLimitPause } from './usage-limit-patterns.js';
 import { SessionTaskCache } from './session-task-cache.js';
 import { InteractivePtyExitBreaker } from './session-pty-exit-breaker.js';
@@ -655,6 +658,11 @@ export class Session extends EventEmitter {
 
   // Auto-compact/auto-clear automation (extracted to SessionAutoOps)
   private _autoOps!: SessionAutoOps;
+  /** Resumes a Codex turn that ended on a model-capacity error (capacity-stall.ts); null when turned off. */
+  private _capacityRetry: CapacityRetry | null = null;
+  /** A capacity retry's "continue" is being typed, or was typed and its Enter fenced (left unsent): until the composer
+   *  reads empty again, no other empty-composer write (a plan move's handoff, chat) may type after it. */
+  private _capacityTextPending = false;
 
   // Image watcher setting (per-session toggle)
   private _imageWatcherEnabled: boolean = false;
@@ -691,6 +699,15 @@ export class Session extends EventEmitter {
    * rendered as "alive".
    */
   private _paneExit: PaneExit | null = null;
+  private _viewerInputHeld = false;
+  private _viewerClientLost = false;
+  private _muxWritesInFlight = 0;
+  /** One id per mux write in flight (the counter above is always its size): a gated write's gate counts only the OTHER
+   *  writes, and its id leaves this set in that write's finally, so its delayed verifier cannot take a different write's
+   *  keys for its own. */
+  private _muxWriteIds = new Set<number>();
+  private _nextMuxWriteId = 0;
+  private readonly _workerBacked = Boolean(process.env.REVERIE_WORKER_SOCKET);
   /**
    * How many starts, attaches or relaunches are running for this session's
    * pane. While one is, a dead-pane reading may describe a pane that is being
@@ -760,6 +777,7 @@ export class Session extends EventEmitter {
   // at spawn, preserved across respawns via persisted state. Not written to .claude/settings.local.json.
   private _envOverrides: Record<string, string> | undefined;
   private readonly _workerAttachOnly: boolean;
+  private readonly _workerResourceLaunch?: ResourceWorkerLaunch;
 
   // Claude CLI effort level — injected as a `--settings` soft default at spawn so the
   // user can still switch in-session via /effort (incl. ultracode). Never carried as
@@ -886,6 +904,8 @@ export class Session extends EventEmitter {
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
       workerAttachOnly?: boolean;
+      /** Internal, in-process only. Normal HTTP create schemas do not admit it. */
+      workerResourceLaunch?: ResourceWorkerLaunch;
       subscriptionProfile?: SessionState['subscriptionProfile'];
       runtimeThreads?: Record<string, string>;
       /** Claude CLI effort level (soft default via --settings, switchable in-session via /effort) */
@@ -933,6 +953,7 @@ export class Session extends EventEmitter {
 
     this.id = config.id || uuidv4();
     this._workerAttachOnly = config.workerAttachOnly === true;
+    this._workerResourceLaunch = config.workerResourceLaunch;
     this.workingDir = config.workingDir;
     this.createdAt = config.createdAt || Date.now();
     this._mode = config.mode || 'claude';
@@ -1171,6 +1192,31 @@ export class Session extends EventEmitter {
     this._autoOps.on('limitPauseScheduled', (data) => this.emit('limitPauseScheduled', data));
     this._autoOps.on('limitResume', (data) => this.emit('limitResume', data));
     this._autoOps.on('limitResumeCancelled', (data) => this.emit('limitResumeCancelled', data));
+
+    // On unless REVERIE_CAPACITY_RETRY=0. It only ever acts on a Codex composer, whatever the mode is now.
+    if (process.env.REVERIE_CAPACITY_RETRY !== '0') {
+      this._capacityRetry = new CapacityRetry({
+        capture: () => (this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }) : null),
+        glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
+        isWorking: () => this._isWorking,
+        isStopped: () => this._isStopped,
+        // A plan move that pauses retries mid-write (during paste settlement) also fences that write's pending Enter.
+        send: async (prompt) => {
+          this._capacityTextPending = true;
+          let unsent = false;
+          try {
+            return await this.writeViaMux(`${prompt}\r`, { requireEmptyComposer: true, capacityRetry: true,
+              writeGate: () => !this._capacityRetry?.paused, onTypedUnsent: () => { unsent = true; } });
+          } finally {
+            // Fenced after typing: the text stays (never cleared, never typed again) and keeps later writes off it.
+            this._capacityTextPending = unsent;
+            if (unsent) console.log(`[Session ${this.id.slice(0, 8)}] capacity retry: "${prompt}" typed, Enter withheld (a plan move took the composer); left unsent, not retried`);
+          }
+        },
+        onEvent: (event) => this.emit('capacityRetry', event),
+        log: (message) => console.log(`[Session ${this.id.slice(0, 8)}] ${message}`),
+      });
+    }
   }
 
   get status(): SessionStatus {
@@ -1378,6 +1424,23 @@ export class Session extends EventEmitter {
     return this._paneExit ?? undefined;
   }
 
+  /** A worker pane observes terminal transport, not the provider inside its laptop. */
+  get runtimeHealthScope(): 'provider' | 'terminal' {
+    return this._workerBacked || this._remote || this._docker ? 'terminal' : 'provider';
+  }
+
+  get runtimeHealth(): 'healthy' | 'dead' | 'disconnected' | 'unknown' {
+    if (!this._paneExit && !this._viewerClientLost) return 'unknown';
+    return this.runtimeHealthScope === 'terminal' ? 'disconnected' : 'dead';
+  }
+
+  /** Fresh positive evidence only; unknown observations cannot authorize recovery. */
+  hasDeadPane(): boolean {
+    return this.paneExitApplies && !this.paneLifecycleInFlight && !this._closing &&
+      !!this._mux && !!this._muxSession && this._mux.muxSessionExists(this._muxSession.muxName) &&
+      this._mux.isPaneDead(this._muxSession.muxName);
+  }
+
   /**
    * True while a start, attach or relaunch is running for this session's pane.
    * The exited-agent sweep reads it (see `pane-exit-sweep.ts`): the dead-pane
@@ -1438,6 +1501,8 @@ export class Session extends EventEmitter {
    * Ark0N/Codeman#446 review; both now persist on their success path.
    */
   private clearPaneExitForNewPane(): void {
+    this._viewerInputHeld = false;
+    this._viewerClientLost = false;
     this.setPaneExit(undefined);
     if (this._muxSession) this._mux?.clearPaneExit?.(this._muxSession.muxName);
   }
@@ -1451,6 +1516,8 @@ export class Session extends EventEmitter {
    * free to report the raw pane reading its own remote-reconnect watcher needs.
    */
   setPaneExit(next: PaneExit | undefined): boolean {
+    // A repaired outer command has not yet proved a usable viewer.
+    if (this._viewerInputHeld && next === undefined) return false;
     const resolved = this.paneExitApplies ? (next ?? null) : null;
     const prev = this._paneExit;
     if (prev === resolved) return false;
@@ -2240,6 +2307,9 @@ export class Session extends EventEmitter {
       // it rides the existing `session:updated` broadcast and lands in state.json
       // through the same persist. `status` and `pid` above stay untouched by it.
       paneExit: this._paneExit ?? undefined,
+      runtimeHealth: this.runtimeHealth,
+      runtimeHealthScope: this.runtimeHealthScope,
+      workerViewerReconnect: this.workerViewerReconnect,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
       lastSubmitAt: this._lastSubmitAt || undefined,
       // Only a chain the CLI's own hooks vouched for is persisted, and only when
@@ -2461,6 +2531,14 @@ export class Session extends EventEmitter {
       // No extra sleep — createSession() already waits for tmux readiness
     }
 
+    this._attachExistingMuxClient(options.spawnErrLabel);
+
+    return { isRestored, respawnedResumeId, respawnedDeadPane };
+  }
+
+  /** Attach only to the already selected local mux; never creates or respawns its command. */
+  private _attachExistingMuxClient(spawnErrLabel: string): void {
+    const mux = this._mux!;
     // Integration tests need a live input/output transport without attaching to
     // the host's tmux server or agent CLI. Production still uses the real mux.
     if (!IS_TEST_MODE) {
@@ -2492,12 +2570,11 @@ export class Session extends EventEmitter {
       );
       this._notePtySpawnGeometry(ptyCols, ptyRows);
     } catch (spawnErr) {
-      console.error(`[Session] Failed to spawn PTY for ${options.spawnErrLabel}:`, spawnErr);
+      console.error(`[Session] Failed to spawn PTY for ${spawnErrLabel}:`, spawnErr);
       this.emit('error', `Failed to attach to mux session: ${spawnErr}`);
       throw spawnErr;
     }
 
-    return { isRestored, respawnedResumeId, respawnedDeadPane };
   }
 
   /**
@@ -2566,7 +2643,67 @@ export class Session extends EventEmitter {
     return this._withPaneLifecycle(() => this._doRestartCli());
   }
 
-  private async _doRestartCli(onlyIfDead = false): Promise<boolean> {
+  /** An attach-only viewer is available only for a local isolated worker pane. */
+  get workerViewerReconnect(): boolean {
+    return this._workerBacked && !this._isStopped && this.paneExitApplies && !!this._mux?.readPaneLiveness;
+  }
+
+  /** Repair only the disposable viewer. Never run provider setup, hooks or normal J. */
+  async reconnectWorkerViewer(stillCurrent: () => boolean): Promise<boolean> {
+    if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
+    if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
+    return this._withPaneLifecycle(async () => {
+      const mux = this._mux!, name = this._muxSession!.muxName;
+      const options = this._buildRespawnPaneOptions();
+      const mark = getCli(this.mode)?.capabilities.composerReadyMark;
+      if ((!mark && getCli(this.mode)?.capabilities.workDetect) || !stillCurrent() || this._closing) return false;
+      this._viewerInputHeld = true;
+      // Previous unknown submissions belong to the old viewer; never retry their Enter here.
+      this._submitVerifier?.cancel();
+      this._submitVerifier = null;
+      const before = await mux.readPaneLiveness!(name);
+      if (!stillCurrent()) return false;
+      // A previous attempt may already have attached but not reached readiness.
+      const pid = before.state === 'live' ? before.pid : before.state === 'dead'
+        ? await mux.respawnPane({ ...options, workerAttachOnly: true, onlyIfDead: true, stillCurrent }) : null;
+      if (!pid || !stillCurrent()) return false;
+      if (!this.ptyProcess) {
+        this._attachExistingMuxClient('worker viewer reconnect');
+        this._bindInteractivePty(false);
+      }
+      const client = this.ptyProcess;
+      if (!client || this._pid === null) return false;
+      const deadline = performance.now() + 10_000;
+      do {
+        if (!stillCurrent() || this._closing) return false;
+        const pane = await mux.readPaneLiveness!(name);
+        if (!stillCurrent() || pane.state !== 'live' || pane.pid !== pid) return false;
+        const text = mux.capturePaneText?.(name);
+        const working = !!text && !!getCli(this.mode)?.capabilities.workDetect?.workingLine &&
+          this._workingLinePattern().test(text);
+        if (working || (mark ? text?.includes(mark) : !!text?.trim())) {
+          const final = await mux.readPaneLiveness!(name);
+          if (!stillCurrent() || final.state !== 'live' || final.pid !== pid || this.ptyProcess !== client || this._pid === null) return false;
+          if (working) this._markWorking();
+          this.clearPaneExitForNewPane();
+          this._armPaneSettle(true);
+          this.emit('needsRefresh');
+          return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      } while (performance.now() < deadline);
+      return false;
+    });
+  }
+
+  /** Explicit owner recovery; tmux atomically refuses a pane that became live. */
+  async restartDeadCli(stillCurrent: () => boolean): Promise<boolean> {
+    if (!stillCurrent() || !this.hasDeadPane()) return false;
+    return this._withPaneLifecycle(() => this._doRestartCli(true, stillCurrent, true));
+  }
+
+  private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
+    explicitRecovery = false): Promise<boolean> {
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     const mux = this._mux;
 
@@ -2583,13 +2720,15 @@ export class Session extends EventEmitter {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
     const options = await this._buildRespawnPaneOptionsWithResumePin();
-    if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
+    if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
     this._beginClaudeConversationSelection();
-    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
+    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent } : options);
     if (!newPid) {
       console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
       return false;
     }
+    if (!stillCurrent()) return false;
+    if (explicitRecovery) this._respawnBlocked = false;
     this._pendingEnvUnsets.clear();
     // A relaunch in the same pane, so any exit observed of the previous command
     // is history. Without this the caller's persist-and-broadcast writes the old
@@ -2942,6 +3081,8 @@ export class Session extends EventEmitter {
   }
 
   async startInteractive(): Promise<void> {
+    if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
+      throw new Error('Resource replacement requires the normal local native worker multiplexer');
     if (this._closing) {
       throw new Error('Session is being closed');
     }
@@ -3085,6 +3226,7 @@ export class Session extends EventEmitter {
           createSessionOptions: {
             codexTrustWorkspace: this._codexTrustWorkspace,
             workerAttachOnly: this._workerAttachOnly,
+            workerResourceLaunch: this._workerResourceLaunch,
             sessionId: this.id,
             workingDir: this.workingDir,
             mode: this.mode,
@@ -3204,6 +3346,7 @@ export class Session extends EventEmitter {
           this._armPaneSettle(true);
         }
       } catch (err) {
+        if (this._workerResourceLaunch) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -3283,11 +3426,18 @@ export class Session extends EventEmitter {
         this.id;
     }
 
-    this._pid = this.ptyProcess.pid;
-    console.log('[Session] Interactive PTY spawned with PID:', this._pid);
-    this.fullAccessCheck = this._scheduleFullAccessCheck(this._muxSession?.pid);
+    this._bindInteractivePty();
+  }
 
-    this.ptyProcess.onData((rawData: string) => {
+  /** Normal interactive client listeners, also used for non-destructive viewer repair. */
+  private _bindInteractivePty(checkFullAccess = true): void {
+    const client = this.ptyProcess!;
+    this._pid = client.pid;
+    console.log('[Session] Interactive PTY spawned with PID:', this._pid);
+    if (checkFullAccess) this.fullAccessCheck = this._scheduleFullAccessCheck(this._muxSession?.pid);
+
+    client.onData((rawData: string) => {
+      if (this.ptyProcess !== client) return;
       // Filter out focus escape sequences and Ctrl+L (form feed)
       const data = rawData.replace(FOCUS_ESCAPE_FILTER, '').replace(CTRL_L_PATTERN, ''); // Remove Ctrl+L
       if (!data) return; // Skip if only filtered sequences
@@ -3338,7 +3488,9 @@ export class Session extends EventEmitter {
       }
     });
 
-    this.ptyProcess.onExit(({ exitCode }) => {
+    client.onExit(({ exitCode }) => {
+      if (this.ptyProcess !== client) return;
+      if (this._workerBacked && this._muxSession && !this._isStopped) this._viewerClientLost = true;
       console.log('[Session] Interactive PTY exited with code:', exitCode);
       // COD-118: record the exit in the circuit breaker BEFORE status bookkeeping.
       // A clean (0) exit resets the counter; rapid non-zero repeats trip it.
@@ -3429,6 +3581,7 @@ export class Session extends EventEmitter {
    * a two-marker match (isTrustDialogScreen), and an attempt cap.
    */
   private _maybeAcceptTrustDialog(): void {
+    if (this._viewerInputHeld) return;
     if (this._trustDialogAccepted) return;
     const now = Date.now();
     if (now - this._interactiveStartedAt > TRUST_DIALOG_WINDOW_MS) {
@@ -3890,6 +4043,7 @@ export class Session extends EventEmitter {
     // merely ready has nothing to resolve yet and could claim a neighbour's file.
     if (turnEnded) this._maybeCaptureOmpSessionId();
     this.emit('idle');
+    this._capacityRetry?.check();
   }
 
   /**
@@ -3993,6 +4147,9 @@ export class Session extends EventEmitter {
     if (!this._isWorking && getCli(this.mode)?.capabilities.workDetect) {
       if (this._workingLinePattern().test(getCleanData())) this._markWorking();
     }
+
+    // A turn that died at model capacity before it ever looked busy never reaches _concludeIdle; its error text does arrive here.
+    this._capacityRetry?.noteOutput(rawData);
 
     // Skip Claude-specific parsers for external CLI sessions (Ralph tracker,
     // BashToolParser, token + CLI-info parsing all depend on Claude's output format).
@@ -4218,6 +4375,10 @@ export class Session extends EventEmitter {
     options?: { model?: string; onProgress?: (info: { tokens?: number; status?: string }) => void }
   ): Promise<{ result: string; cost: number }> {
     return new Promise((resolve, reject) => {
+      if (this._viewerInputHeld || this.paneLifecycleInFlight) {
+        reject(new Error('The terminal viewer is reconnecting'));
+        return;
+      }
       if (this.ptyProcess) {
         reject(new Error('Session already has a running process'));
         return;
@@ -4384,6 +4545,7 @@ export class Session extends EventEmitter {
 
     // Destroy auto-compact/auto-clear automation (clears its timers)
     this._autoOps.destroy();
+    this._capacityRetry?.destroy();
 
     // Clear prompt check timers
     if (this._promptCheckInterval) {
@@ -4746,6 +4908,7 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
+    if (this._viewerInputHeld) return false;
     const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
     if (!this.ptyProcess) return false;
@@ -4892,25 +5055,129 @@ export class Session extends EventEmitter {
    * session.writeViaMux('/init\r');   // Send /init command
    * ```
    */
+  /** Plan-move holds on this composer (pauseCapacityRetry), counted even when the capacity auto-resume is off. */
+  private _moveHolds = 0;
+
+  /** Whether a plan move owns this composer now: no agent may type into it (the move's own handoff is not an agent write). */
+  get composerHeldByMove(): boolean {
+    return this._moveHolds > 0;
+  }
+
+  /** Hold the model-capacity auto-resume, and every agent's input, while something else (a plan move) owns this composer. */
+  pauseCapacityRetry(): () => void {
+    this._moveHolds++;
+    const resume = this._capacityRetry?.pause() ?? (() => {});
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._moveHolds--;
+      resume();
+    };
+  }
+
+  private _capacityWrites = 0;
+  /** The gate of the write the submit verifier is tracking (null: an ungated write); see _verifySubmitted. */
+  private _verifierGate: (() => boolean) | null = null;
+  private _capacityRetryWriting(): boolean {
+    return this._capacityWrites > 0;
+  }
+
+  private _beginMuxWrite(): number {
+    const id = ++this._nextMuxWriteId;
+    this._muxWriteIds.add(id);
+    this._muxWritesInFlight++;
+    return id;
+  }
+
+  private _endMuxWrite(id: number): void {
+    if (this._muxWriteIds.delete(id)) this._muxWritesInFlight--;
+  }
+
+  /** Whether a mux write other than `ownId` is in flight (null: any write at all). */
+  private _otherMuxWrite(ownId: number | null): boolean {
+    for (const id of this._muxWriteIds) if (id !== ownId) return true;
+    return false;
+  }
+
+  /**
+   * Whether an idle-only write (agent wake) may type now. `ownId` is the caller's own in-flight mux write (null before it
+   * claims the pane); any OTHER write in flight means not idle. `composer` also requires the composer to read empty, which
+   * is only provable for harnesses whose composer the screen reader is verified on (Codex `›`, Claude Code `❯`); any other
+   * harness fails closed rather than risk typing into a draft it cannot see.
+   */
+  private _idleForWake(ownId: number | null, composer: boolean): boolean {
+    if (this._viewerInputHeld || this.paneLifecycleInFlight || this._isStopped || this._isWorking || this._moveHolds > 0) return false;
+    if ((this._workerBacked && this._paneExit) || this._otherMuxWrite(ownId)) return false;
+    if (!composer) return true;
+    const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+    if ((glyph !== '›' && glyph !== '❯') || !this._mux || !this._muxSession) return false;
+    return composerIsEmpty(this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
+  }
+
+  canAcceptChatInput(): boolean {
+    if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
+    if (this.mode !== 'codex') return true;
+    const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+    return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
+  }
+
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
+    if (this._viewerInputHeld) return false;
+    const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
+    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
+    // Idle-only is decided here, at the write, not by the route's earlier look: a turn can start during any await before it.
+    // The check and the claim below (_beginMuxWrite) run with no await between them, so two wakes cannot both pass.
+    if (options.requireIdle && (!this._mux || !this._muxSession || !this._idleForWake(null, true))) return false;
+    // A capacity retry's text in flight or left unsent owns the composer until it reads empty again.
+    if (this._capacityTextPending && !options.capacityRetry) {
+      const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+      const empty = !!glyph && !!this._muxSession && !this._capacityRetryWriting() &&
+        composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
+      if (empty) this._capacityTextPending = false;
+      else if (options.requireEmptyComposer || options.requireIdle) return false;
+    }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
     const opencode = !!guard && this.mode === 'opencode';
     if (opencode) data = guardShellKey(data, { keepLeading: guard === 'person' });
-    const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
-      const sent = await this._mux.sendInput(this.id, data, opencode ? { opencode: guard === 'person' ? 'person' : true } : undefined);
-      if (sent) {
-        this._emitSubmittedPrompt(submittedPrompt);
-        this._verifySubmitted(data, options.onOutcome);
-      }
-      return sent;
+      const muxOptions = { ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
+        ...(options.requireEmptyComposer || options.requireIdle ? { requireEmptyComposer: true } : {}),
+        };
+      const writeId = this._beginMuxWrite();
+      // A gated write (idle-only wake, capacity retry) owns the composer only while no OTHER write is in flight, and only for
+      // its own id: once this write's finally drops the id, the same gate (held by its delayed verifier) admits no write.
+      const gated = !!options.requireIdle || !!options.writeGate;
+      const gate = gated
+        ? () => !this._otherMuxWrite(writeId) && (options.requireIdle ? this._idleForWake(writeId, false) : true) &&
+          (options.writeGate ? options.writeGate() : true)
+        : undefined;
+      if (options.requireIdle) (muxOptions as { stillIdle?: () => boolean }).stillIdle = gate;
+      try {
+        const send = () => this._mux!.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
+        let sent: boolean;
+        if (gate) {
+          if (options.capacityRetry) this._capacityWrites++;
+          try {
+            const outcome = await withWriteGate(gate, send);
+            // Typed but Enter withheld (before the first Enter, or at the retry): not sent, so no verifier is armed for it.
+            sent = outcome.result && !outcome.typedUnsent;
+            if (outcome.typedUnsent) options.onTypedUnsent?.();
+          } finally { if (options.capacityRetry) this._capacityWrites--; }
+        } else sent = await send();
+        if (sent) {
+          this._emitSubmittedPrompt(this._trackSubmit(data, options));
+          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate);
+        }
+        return sent;
+      } finally { this._endMuxWrite(writeId); }
     }
     // Fallback to PTY write
     if (this.ptyProcess) {
       this.ptyProcess.write(data);
-      this._emitSubmittedPrompt(submittedPrompt);
+      this._emitSubmittedPrompt(this._trackSubmit(data, options));
       // No pane to read: nothing can say the prompt left the composer.
       options.onOutcome?.('unverified');
       return true;
@@ -4934,7 +5201,9 @@ export class Session extends EventEmitter {
    * so the pair `sendInput` just sent can leave the text stranded. Only a mux session
    * can read its pane, only text can be stranded, and the glyph is the CLI's own.
    */
-  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome']): void {
+  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome'], fromEmptyComposer = false, gate?: () => boolean): void {
+    // A gated write's later Enter (2s..60s) answers to the same gate as its first keys: the verifier tracks one write at a
+    // time, so the gate of the write it now tracks travels with it.
     const unverified = (): void => {
       try {
         onOutcome?.('unverified');
@@ -4949,9 +5218,22 @@ export class Session extends EventEmitter {
       capture: () =>
         this._isStopped || !this._mux || !this._muxSession
           ? null
-          : this._mux.capturePaneText?.(this._muxSession.muxName),
+          : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
-      sendEnter: () => this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined),
+      sendEnter: async () => {
+        if (this._viewerInputHeld) return false;
+        const gate = this._verifierGate;
+        if (gate && !gate()) {
+          // Closed once (busy, or a plan move took the composer): this write's verification ends here and its text stays unsent.
+          this._verifierGate = null;
+          console.log(`[Session ${this.id.slice(0, 8)}] submit check: the write's gate closed; later Enter withheld, text left unsent`);
+          queueMicrotask(() => this._submitVerifier?.cancel());
+          return false;
+        }
+        const enterId = this._beginMuxWrite();
+        try { return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined); }
+        finally { this._endMuxWrite(enterId); }
+      },
       // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
       // Only claude, codex, pi, opencode, omp and gemini declare a promptGlyph; the other modes would fall back
       // to claude's `❯`, which is ALSO starship's default shell prompt (and pure's, and
@@ -4966,7 +5248,8 @@ export class Session extends EventEmitter {
       glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
       log: (m) => console.log(`[Session ${this.id.slice(0, 8)}] ${m}`),
     });
-    this._submitVerifier.arm(text, onOutcome);
+    this._verifierGate = gate ?? null; // set only when the verifier is re-armed for this write
+    this._submitVerifier.arm(text, onOutcome, fromEmptyComposer);
   }
 
   /** The conversation any CLI's own config resumes (resume-guard.ts), so start() keeps the same thread alias the constructor set. */

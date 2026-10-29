@@ -175,6 +175,13 @@ describe('explicit non-session file preview reader', () => {
       expect(result).not.toHaveProperty('sessionId');
     }
   });
+  it('marks a real SVG as an image so it is shown through <img>, never as inline markup', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><script>sentinel()</script><rect width="4" height="4"/></svg>';
+    const { app } = fixture(() => new Response(svg));
+    const result = await app._readFilePreviewSource({ ...attachment, name: 'figure.svg' });
+    expect(result.mediaType).toBe('image/svg+xml');
+    expect(new TextDecoder().decode(result.bytes)).toBe(svg);
+  });
   it('rejects an unsupported binary format before fetching', async () => {
     const { app, calls } = fixture();
     await expect(app._readFilePreviewSource({ ...attachment, name: 'archive.zip' })).rejects.toThrow('format');

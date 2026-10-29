@@ -44,15 +44,15 @@ describe('promptStillInComposer', () => {
     expect(promptStillInComposer(TAKEN, PROMPT, '❯')).toBe(false);
   });
   it('treats other text in the composer as not ours', () => {
-    expect(promptStillInComposer(STRANDED, 'Summarise the changelog', '❯')).toBe(false);
+    expect(promptStillInComposer(STRANDED, 'Summarise the changelog', '❯')).toBeUndefined();
   });
   it('answers undefined for a pane with no composer line, or no glyph', () => {
     expect(promptStillInComposer('$ ls\nfoo bar\n$ ', PROMPT, '❯')).toBeUndefined();
     expect(promptStillInComposer(STRANDED, PROMPT, '')).toBeUndefined();
   });
   it('honours the CLI glyph (Codex draws ›)', () => {
-    expect(promptStillInComposer('› Reply with PONG\n', 'Reply with PONG', '›')).toBe(true);
-    expect(promptStillInComposer('›\n', 'Reply with PONG', '›')).toBe(false);
+    expect(promptStillInComposer('› Reply with PONG\n\nGPT-6.1-Sol high · /owned/fixture', 'Reply with PONG', '›')).toBe(true);
+    expect(promptStillInComposer('›\n\nGPT-6.1-Sol high · /owned/fixture', 'Reply with PONG', '›')).toBe(false);
   });
   it('reads through ANSI colour codes', () => {
     expect(promptStillInComposer('\x1b[1m❯\x1b[0m \x1b[36mReply with PONG\x1b[0m', 'Reply with PONG', '❯')).toBe(true);

@@ -62,6 +62,8 @@ const State = z
     roomId: uuid,
     origin: z.string().nullable(),
     company: label,
+    /** The owner's name for the room (James 10-23: rename); absent means the default. */
+    name: label.optional(),
     invites: z.array(Invite).max(1000),
     requests: z.array(Request).max(1000),
     posts: z.array(Post).max(2000),
@@ -273,8 +275,26 @@ export class BuiltinEmbassy {
       if (!call.path.startsWith(prefix) || !['', '/', '?'].includes(call.path.charAt(prefix.length)))
         fail(404, 'NOT_FOUND');
       const path = call.path.slice(prefix.length);
-      const room = { id: s.roomId, name: 'Company Embassy' };
+      const room = { id: s.roomId, name: s.name ?? 'Company Embassy' };
       if (call.method === 'GET' && path === '') return { room, origin: s.origin ?? '' };
+      if (call.method === 'POST' && path === '/name') {
+        s.name = z.object({ name: label }).strict().parse(call.body).name;
+        return { room: { id: s.roomId, name: s.name } };
+      }
+      // Closing ends every guest's access at once: all invites and pairings are revoked (their sessions stop working)
+      // and the room says so in a last host post. A new invite can reopen it later.
+      if (call.method === 'POST' && path === '/close') {
+        let revoked = 0;
+        for (const invite of s.invites) if (!invite.revoked) { invite.revoked = true; revoked++; }
+        for (const q of s.requests) {
+          if (q.state !== 'revoked') revoked++;
+          q.state = 'revoked';
+          q.sessionHash = null;
+        }
+        if (s.posts.length < 2000)
+          this.post(s, { kind: 'host', company: s.company, identity: 'Host' }, 'The host closed this embassy. Guest access has ended.');
+        return { closed: true, revoked };
+      }
       if (call.method === 'POST' && path === '/invites') {
         const origin = this.requireOrigin(s);
         const { idemKey } = z.object({ idemKey: uuid }).strict().parse(call.body);

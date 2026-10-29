@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Immutable package entry; no shell, env-selected module or arbitrary action."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'python'))
+from reverie.owner_terminal_host import serve
+from reverie.owner_terminal_install import install
+from reverie.owner_terminal_native import private_bytes
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Protected owner terminal host service')
+    selected = parser.add_mutually_exclusive_group(required=True)
+    selected.add_argument('--policy')
+    selected.add_argument('--installation')
+    parser.add_argument('--installation-sha')
+    parser.add_argument('--install-unit', action='store_true')
+    parser.add_argument('--launcher')
+    args = parser.parse_args()
+    if args.installation is not None:
+        if args.install_unit or args.launcher or not args.installation_sha:
+            parser.error('Fixed lifecycle entry requires only installation and installation-sha')
+        from reverie.owner_terminal_lifecycle import select_and_exec
+        select_and_exec(args.installation, args.installation_sha)
+        raise RuntimeError('Fixed lifecycle exec unexpectedly returned')
+    if args.installation_sha is not None:
+        parser.error('installation-sha is only valid with the fixed lifecycle entry')
+    if args.install_unit:
+        if not args.launcher:
+            parser.error('--install-unit requires the immutable --launcher')
+        expected = hashlib.sha256(private_bytes(args.policy)[0]).hexdigest()
+        print(json.dumps(install(args.policy, expected, args.launcher)))
+    else:
+        if args.launcher:
+            parser.error('--launcher is only an installation input')
+        serve(args.policy)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception:
+        print('Owner terminal unavailable; retained private state requires review', file=sys.stderr)
+        raise SystemExit(1)

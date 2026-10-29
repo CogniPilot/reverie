@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createHarness } from './helpers/chat-app-harness.mjs';
 const handles: any[] = [];
 afterEach(() => {
@@ -114,4 +115,13 @@ it('only marks a gear opening for animation; persistent panel repaints and resiz
   await h.flush();
   expect(pane.hidden).toBe(false);
   expect(pane.classList.contains('ca-office-pane-opening')).toBe(true);
+});
+
+it('draws the slide-up panel with one top rule and no box', () => {
+  const css = readFileSync(new URL('../src/web/public/chat-app.css', import.meta.url), 'utf8');
+  const rule = css.match(/\.ca-root > \.ca-office-pane \{([^}]*)\}/)![1];
+  expect(rule).toContain('border: 0;');
+  expect(rule).toContain('border-top: 1px solid var(--ca-line);');
+  expect(rule).toContain('border-radius: 0;');
+  expect(rule).toContain('box-shadow: none;');
 });

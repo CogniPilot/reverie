@@ -314,7 +314,10 @@ function clip(text: string, max: number): string {
 export class ChatroomStore {
   private rooms = new Map<string, ChatRoom>();
 
-  constructor(rooms: ChatRoom[] = []) {
+  constructor(
+    rooms: ChatRoom[] = [],
+    private readonly historicalMessage?: (roomId: string, messageId: string) => ChatMessage | undefined
+  ) {
     for (const room of rooms) {
       // A room from before read cursors starts read up to its newest message, so the
       // first load does not light up every room.
@@ -698,8 +701,14 @@ export class ChatroomStore {
     if (!body && !extra.attachments?.length) throw new ChatroomError('Empty message', 'INVALID_INPUT');
     if (extra.attachments && !extra.attachments.length) delete extra.attachments;
     if (extra.replyTo === undefined) delete extra.replyTo;
-    else if (!room.messages.some((m) => m.id === extra.replyTo && !m.deleted)) {
-      throw new ChatroomError('The message being replied to is not in this room', 'INVALID_INPUT');
+    else {
+      // Only the persistence adapter can resolve history. A current tombstone
+      // wins over history, and the returned identity must still match this room.
+      const original = room.messages.find((m) => m.id === extra.replyTo)
+        ?? this.historicalMessage?.(roomId, extra.replyTo);
+      if (!original || original.id !== extra.replyTo || original.roomId !== roomId || original.deleted) {
+        throw new ChatroomError('The message being replied to is not in this room', 'INVALID_INPUT');
+      }
     }
     let recipients: 'all' | ChatRecipient[] = 'all';
     if (to !== 'all') {

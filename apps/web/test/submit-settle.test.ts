@@ -24,20 +24,21 @@ type Event = { kind: 'text'; text: string } | { kind: 'enter' } | { kind: 'sleep
  * A fake mux. `screen(enters)` is what the pane shows after that many Enters; `changing` makes every read before the first Enter
  * differ (a paste that never settles).
  */
-function fakeMux(screen: (enters: number) => string | null, changing = false) {
+function fakeMux(screen: (enters: number) => string | null, changing = false, emptyBeforeTyping = false) {
   const events: Event[] = [];
   const logs: string[] = [];
   let enters = 0;
   let reads = 0;
+  let typed = false;
   const io = {
-    typeText: async (text: string) => void events.push({ kind: 'text', text }),
+    typeText: async (text: string) => { typed = true; events.push({ kind: 'text', text }); },
     sendEnter: async () => {
       enters++;
       events.push({ kind: 'enter' });
     },
     capture: () => {
       events.push({ kind: 'capture' });
-      const s = screen(enters);
+      const s = emptyBeforeTyping && !typed ? codexComposer('') : screen(enters);
       return changing && enters === 0 && s !== null ? `${s}\n${reads++}` : s;
     },
     sleep: async (ms: number) => void events.push({ kind: 'sleep', ms }),
@@ -57,12 +58,12 @@ function fakeMux(screen: (enters: number) => string | null, changing = false) {
 }
 
 const LONG = 'x'.repeat(1801);
-const codexComposer = (body: string) => `• earlier answer\n\n› ${body}\n\n  ? for shortcuts`;
-const codexWorking = '• earlier answer\n\n› your prompt\n\n• Working (2s • esc to interrupt)\n\n› \n\n  ? for shortcuts';
+const codexComposer = (body: string) => `• earlier answer\n\n› ${body}\n\nGPT-6.1-Sol high · /owned/fixture`;
+const codexWorking = '• earlier answer\n\n› your prompt\n\n• Working (2s • esc to interrupt)\n\n› \n\nGPT-6.1-Sol high · /owned/fixture';
 
 describe('Enter is its own keystroke after the text', () => {
   it('types the text without a carriage return, then sends Enter as a separate call', async () => {
-    const m = fakeMux((n) => (n === 0 ? codexComposer('[Pasted Content 1801 chars]') : codexWorking));
+    const m = fakeMux((n) => (n === 0 ? codexComposer('[Pasted Content 1801 chars]') : codexWorking), false, true);
     expect(await typeAndSubmit(m.io, LONG, CODEX)).toBe('started');
     const kinds = m.events.filter((e) => e.kind === 'text' || e.kind === 'enter');
     expect(kinds).toEqual([{ kind: 'text', text: LONG }, { kind: 'enter' }]);
@@ -111,38 +112,38 @@ describe('the settle wait', () => {
   });
 
   it('a long paste waits past the paste-burst window before Enter', async () => {
-    const m = fakeMux((n) => (n === 0 ? codexComposer('[Pasted Content 1801 chars]') : codexWorking));
+    const m = fakeMux((n) => (n === 0 ? codexComposer('[Pasted Content 1801 chars]') : codexWorking), false, true);
     await typeAndSubmit(m.io, LONG, CODEX);
     expect(m.waitBeforeEnter()).toBeGreaterThanOrEqual(SETTLE_MIN_MS);
   });
 
   it('a short message keeps the old 50 ms gap and is not read before Enter', async () => {
-    const m = fakeMux((n) => (n === 0 ? codexComposer('hi there') : codexWorking));
+    const m = fakeMux((n) => (n === 0 ? codexComposer('hi there') : codexWorking), false, true);
     expect(await typeAndSubmit(m.io, 'hi there', CODEX)).toBe('started');
     expect(m.waitBeforeEnter()).toBe(SHORT_SETTLE_MS);
-    // one read before Enter (to know the composer held it), none spent waiting
+    // One empty-before-write read plus one complete ownership check before Enter; no extra delay.
     const firstEnter = m.events.findIndex((e) => e.kind === 'enter');
-    expect(m.events.slice(0, firstEnter).filter((e) => e.kind === 'capture')).toHaveLength(1);
+    expect(m.events.slice(0, firstEnter).filter((e) => e.kind === 'capture')).toHaveLength(2);
   });
 });
 
 describe('confirming the turn', () => {
   it('a turn that starts gets no retry', async () => {
     const m = fakeMux((n) => (n === 0 ? codexComposer('[Pasted Content 1801 chars]') : codexWorking));
-    expect(await submitAndConfirm(m.io, LONG, CODEX)).toBe('started');
+    expect(await submitAndConfirm(m.io, LONG, CODEX, 'owned fixture', true)).toBe('started');
     expect(m.enterCount()).toBe(1);
     expect(m.logs.some((l) => l.includes('submit started'))).toBe(true);
   });
 
   it('a composer that empties counts as a started turn even before the busy line shows', async () => {
     const m = fakeMux((n) => codexComposer(n === 0 ? '[Pasted Content 1801 chars]' : ''));
-    expect(await submitAndConfirm(m.io, LONG, CODEX)).toBe('started');
+    expect(await submitAndConfirm(m.io, LONG, CODEX, 'owned fixture', true)).toBe('started');
     expect(m.enterCount()).toBe(1);
   });
 
   it('no turn start leads to exactly one retry', async () => {
     const m = fakeMux(() => codexComposer('[Pasted Content 1801 chars]'));
-    expect(await submitAndConfirm(m.io, LONG, CODEX)).toBe('not-started');
+    expect(await submitAndConfirm(m.io, LONG, CODEX, 'owned fixture', true)).toBe('not-started');
     expect(m.enterCount()).toBe(2);
     expect(m.logs.some((l) => l.includes('pressing Enter once more'))).toBe(true);
     expect(m.logs.some((l) => l.includes('submit not-started'))).toBe(true);
@@ -150,13 +151,13 @@ describe('confirming the turn', () => {
 
   it('the retry that starts the turn is reported as such', async () => {
     const m = fakeMux((n) => (n < 2 ? codexComposer('[Pasted Content 1801 chars]') : codexWorking));
-    expect(await submitAndConfirm(m.io, LONG, CODEX)).toBe('started-after-retry');
+    expect(await submitAndConfirm(m.io, LONG, CODEX, 'owned fixture', true)).toBe('started-after-retry');
     expect(m.enterCount()).toBe(2);
   });
 
   it('the confirm window is bounded', async () => {
     const m = fakeMux(() => codexComposer('[Pasted Content 1801 chars]'));
-    await submitAndConfirm(m.io, LONG, CODEX);
+    await submitAndConfirm(m.io, LONG, CODEX, 'owned fixture', true);
     const slept = m.events.filter((e) => e.kind === 'sleep').reduce((n, e) => n + (e as { ms: number }).ms, 0);
     expect(slept).toBe(2 * CONFIRM_WINDOW_MS);
   });
@@ -174,7 +175,7 @@ describe('confirming the turn', () => {
   it('a pane nothing can be read from gets no blind retry', async () => {
     const none = fakeMux(() => null);
     expect(await submitAndConfirm(none.io, LONG, CODEX)).toBe('unverified');
-    expect(none.enterCount()).toBe(1);
+    expect(none.enterCount()).toBe(1); // Explicit/manual submission keeps its original first Enter.
     const shell = fakeMux(() => '$ ls');
     expect(await submitAndConfirm(shell.io, 'ls', { glyph: '', workingLine: '' })).toBe('unverified');
     expect(shell.enterCount()).toBe(1);

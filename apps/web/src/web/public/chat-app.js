@@ -509,7 +509,29 @@ function caFeedItems(messages, readAt) {
  * rail): needs (a permission or a question is blocking it), error, waiting (idle_prompt: it is done and waits for input), working,
  * idle. A member whose session is gone is gone. `hooks` is the set of pending hook types for the session.
  */
+function caEmployeeHealth(employee, session, member, viewerDisconnected = false) {
+  if (employee?.onVacation === true || employee?.desiredRunning === false)
+    return { state: 'gone', label: employee.onVacation ? 'Out of office' : 'Stopped', detail: 'Stopped by owner choice. Enter the office to start this expert.' };
+  const health = session?.runtimeHealth ?? employee?.runtimeHealth;
+  const scope = session?.runtimeHealthScope ?? employee?.runtimeHealthScope;
+  if (health === 'dead' && scope === 'provider') {
+    const exit = typeof session?.paneExit?.signal === 'number' ? ` (signal ${session.paneExit.signal})` : typeof session?.paneExit?.status === 'number' ? ` (exit ${session.paneExit.status})` : '';
+    return { state: 'dead', label: 'Dead pane', detail: `The agent has exited${exit}. Restart the session to resume its saved conversation.` };
+  }
+  if (health === 'disconnected' || (health === 'dead' && scope !== 'provider') || session?.paneExit)
+    return { state: 'disconnected', label: 'Disconnected', detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.' };
+  if (viewerDisconnected)
+    return { state: 'disconnected', label: 'Viewer disconnected', detail: health === 'healthy' && scope === 'provider' ? 'The agent is running; reconnect its terminal viewer without restarting the agent.' : 'The terminal viewer is disconnected. This does not establish that the agent has stopped.', viewerOnly: health === 'healthy' && scope === 'provider' };
+  if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
+    return { state: 'gone', label: 'Offline', detail: 'No connected session is available. Agent health has not been confirmed.' };
+  if (employee?.available === true || member?.alive === true || (typeof session?.pid === 'number' && session.pid > 0))
+    return { state: 'idle', label: 'Connected', detail: 'The terminal session is connected. Agent health has not been confirmed.' };
+  return { state: 'unknown', label: 'Health unknown', detail: 'Current agent health has not been confirmed.' };
+}
+
 function caMemberState(member, session, hooks) {
+  if (session?.runtimeHealth === 'dead' && session?.runtimeHealthScope === 'provider') return 'dead';
+  if (session?.runtimeHealth === 'disconnected' || session?.paneExit) return 'disconnected';
   if (!member || !member.alive) return 'gone';
   if (hooks && (hooks.has('permission_prompt') || hooks.has('elicitation_dialog'))) return 'needs';
   if (session && session.status === 'error') return 'error';
@@ -526,6 +548,9 @@ const CA_STATE_LABEL = {
   working: 'working',
   idle: 'idle',
   gone: 'offline',
+  dead: 'dead pane; agent exited',
+  disconnected: 'disconnected; agent health not confirmed',
+  unknown: 'health unknown',
 };
 
 function caPresence(member) {
@@ -534,11 +559,12 @@ function caPresence(member) {
 }
 
 /** One name-sorted roster: room admins/owner accounts, then online, then offline. */
-function caMemberSections(members, humans = []) {
+function caMemberSections(members, humans = [], stateOf) {
   const people = new Set(Array.isArray(humans) ? humans : []);
   const list = [...(Array.isArray(members) ? members : []), ...people];
   const admin = (m) => people.has(m) ? m.role === 'owner' : m.role === 'coordinator';
-  const present = (m) => people.has(m) ? m.online === true : caPresence(m) !== 'offline';
+  const present = (m) => people.has(m) ? m.online === true : caPresence(m) !== 'offline' &&
+    (!stateOf || !['gone', 'dead', 'disconnected'].includes(stateOf(m)));
   const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
     || String(a.name || '').localeCompare(String(b.name || ''))
     || String(a.sessionId || a.id || '').localeCompare(String(b.sessionId || b.id || ''));
@@ -961,6 +987,22 @@ function caDiskBytes(value) {
  * { key, label, value (a percentage), title, level } where level is ok, warn (>= 70) or high (>= 90). The GPU is
  * left out when the host publishes no fresh reading.
  */
+/** GPU readings kept for the history graph: one per 5 s poll, an hour at most. */
+const CA_GPU_HISTORY_MAX = 720;
+
+/**
+ * The GPU utilization history as an SVG polyline (0..width by 0..height, 100% at the top) with its average and peak, or
+ * null with fewer than two readings. Gaps are not invented: readings are placed by their own times.
+ */
+function caGpuHistoryShape(samples, width, height) {
+  const valid = (Array.isArray(samples) ? samples : []).filter(s => s && Number.isFinite(s.t) && Number.isFinite(s.u) && s.u >= 0 && s.u <= 100);
+  if (valid.length < 2) return null;
+  const t0 = valid[0].t, span = Math.max(1, valid[valid.length - 1].t - t0);
+  const points = valid.map(s => `${((s.t - t0) / span * width).toFixed(1)},${(height - s.u / 100 * height).toFixed(1)}`).join(' ');
+  const avg = Math.round(valid.reduce((n, s) => n + s.u, 0) / valid.length);
+  return { points, avg, peak: Math.max(...valid.map(s => s.u)), minutes: Math.round(span / 60000), count: valid.length };
+}
+
 function caStatsView(stats) {
   const out = [];
   const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : Number.NaN);
@@ -1275,6 +1317,12 @@ class ReverieChatApp {
       // A small file read on the server; an older server without the route simply shows no GPU.
       const gpu = await this.app._chatApi('/api/system/gpu');
       this.stats = { ...this.stats, gpu: gpu.ok ? gpu.data : undefined };
+      // The GPU history graph (James 10-27) draws from these readings, kept while this page is open.
+      const u = gpu.ok && gpu.data?.available ? Number(gpu.data.utilization) : NaN;
+      if (Number.isFinite(u)) {
+        this.gpuHistory = [...(this.gpuHistory || []), { t: Date.now(), u }].slice(-CA_GPU_HISTORY_MAX);
+        this.doc.querySelector('.ca-gpu-dialog')?.dispatchEvent(new this.doc.defaultView.Event('reverie:gpu'));
+      }
       this.renderStats();
     };
     this.stopStats();
@@ -1295,11 +1343,15 @@ class ReverieChatApp {
       box.replaceChildren();
       box.hidden = !view.length;
       for (const item of view) {
-        const chip = this.el(item.key === 'disk' ? 'button' : 'span', `ca-stat is-${item.level}`);
+        const clickable = item.key === 'disk' || item.key === 'gpu';
+        const chip = this.el(clickable ? 'button' : 'span', `ca-stat is-${item.level}`);
         chip.title = item.title;
         if (item.key === 'disk') {
           chip.type = 'button'; chip.dataset.stat = 'disk';
           chip.addEventListener('click', () => this.openDiskDetails(item.filesystems));
+        } else if (item.key === 'gpu') {
+          chip.type = 'button'; chip.dataset.stat = 'gpu';
+          chip.addEventListener('click', () => this.openGpuHistory());
         } else chip.setAttribute('role', 'img');
         chip.setAttribute('aria-label', item.title);
         const bar = this.el('span', 'ca-stat-bar');
@@ -1328,6 +1380,41 @@ class ReverieChatApp {
     dialog.append(list, close);
     dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
     dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="disk"]')?.focus(); });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+  }
+
+  /** GPU utilization over the readings this page has taken (every 5 s, up to an hour), redrawn as new ones arrive. */
+  openGpuHistory() {
+    this.doc.querySelector('.ca-gpu-dialog')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-gpu-dialog'); dialog.setAttribute('aria-label', 'GPU usage history');
+    const note = this.el('p', 'ca-dialog-note');
+    const ns = 'http://www.w3.org/2000/svg', W = 320, H = 120;
+    const svg = this.doc.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-gpu-graph'); svg.setAttribute('role', 'img');
+    const draw = () => {
+      const shape = caGpuHistoryShape(this.gpuHistory, W, H);
+      svg.replaceChildren();
+      for (const y of [0, H / 2, H]) {
+        const grid = this.doc.createElementNS(ns, 'line');
+        grid.setAttribute('x1', '0'); grid.setAttribute('x2', String(W)); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
+        grid.setAttribute('class', 'ca-gpu-grid'); svg.append(grid);
+      }
+      if (!shape) {
+        note.textContent = 'Collecting GPU readings every 5 seconds; the graph appears after the next one.';
+        svg.setAttribute('aria-label', 'No GPU history yet');
+        return;
+      }
+      const line = this.doc.createElementNS(ns, 'polyline');
+      line.setAttribute('points', shape.points); line.setAttribute('class', 'ca-gpu-line'); svg.append(line);
+      note.textContent = `Last ${shape.minutes || '<1'} min while this page was open: average ${shape.avg}%, peak ${shape.peak}%. Top line is 100%.`;
+      svg.setAttribute('aria-label', `GPU utilization over ${shape.count} readings, average ${shape.avg}%, peak ${shape.peak}%`);
+    };
+    draw();
+    dialog.addEventListener('reverie:gpu', draw);
+    const close = this.button('ca-btn', 'Close GPU history', () => dialog.close(), { text: 'Close' });
+    dialog.append(this.el('h2', '', 'GPU usage'), svg, note, close);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="gpu"]')?.focus(); });
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
   }
 
@@ -2462,7 +2549,11 @@ class ReverieChatApp {
     this._companyChartResize = () => { if (fitMode) fit(fitMode === 'company'); };
     this.doc.defaultView.addEventListener('resize', this._companyChartResize);
     apply(1);
-    this.doc.defaultView.requestAnimationFrame?.(() => { if (viewport.isConnected) fit(true); });
+    // People can still be hidden here (waiting for the burn rate above them), with no width to fit to: fit once it has one.
+    const fitOnce = () => { if (!viewport.isConnected || !viewport.clientWidth) return false; fit(true); return true; };
+    const Observer = this.doc.defaultView?.ResizeObserver;
+    if (Observer) { const shown = new Observer(() => { if (fitOnce() || !viewport.isConnected) shown.disconnect(); }); shown.observe(viewport); }
+    else this.doc.defaultView.requestAnimationFrame?.(fitOnce);
     return box;
   }
 
@@ -2522,6 +2613,17 @@ class ReverieChatApp {
     this._companySection = selectSection;
     const status = this.el('p', 'ca-hint', 'Loading company…');
     status.setAttribute('role', 'status');
+    // The burn rate sits above People but arrives later (its frame loads the board first), so People painted first and were then
+    // pushed down. People wait for the frame's first load, or a few seconds at most, and a reopen starts at the last height.
+    if (this._companyPlansHeight) plans.style.height = `${this._companyPlansHeight}px`;
+    content.hidden = true;
+    let revealTimer = null;
+    const revealPeople = () => {
+      if (!content.hidden) return;
+      this.doc.defaultView.clearTimeout(revealTimer);
+      content.hidden = false;
+    };
+    revealTimer = this.doc.defaultView.setTimeout(revealPeople, 4000);
     let refreshHireOptions = async () => {};
     this._companyResize = event => {
       const frame = plans.querySelector('iframe');
@@ -2533,8 +2635,17 @@ class ReverieChatApp {
           if (employee) void this.openRuntimeSettings(employee);
         });
       }
-      else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height))
-        plans.style.height = `${Math.max(120, Math.min(10000, event.data.height))}px`;
+      else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height)) {
+        this._companyPlansHeight = Math.max(120, Math.min(10000, event.data.height));
+        plans.style.height = `${this._companyPlansHeight}px`;
+      }
+      else if (event.data?.type === 'company-plans-ready') {
+        if (Number.isFinite(event.data.height)) {
+          this._companyPlansHeight = Math.max(120, Math.min(10000, event.data.height));
+          plans.style.height = `${this._companyPlansHeight}px`;
+        }
+        revealPeople();
+      }
     };
     this.doc.defaultView.addEventListener('message', this._companyResize);
     dlg.append(head, plans, content, status);
@@ -2580,7 +2691,9 @@ class ReverieChatApp {
       for (const employee of employees) {
         const card = this.el('article', 'ca-company-person');
         card.dataset.employeeId = employee.id;
-        card.classList.toggle('is-offline', !employee.available || employee.onVacation === true);
+        const health = this.employeeHealth(employee);
+        card.classList.toggle('is-offline', health.state === 'gone');
+        card.classList.add(`is-health-${health.state}`);
         const title = this.el(manage ? 'button' : 'div', 'ca-company-person-title ca-company-profile-trigger');
         if (manage) {
           title.type = 'button'; title.setAttribute('aria-label', `Edit profile for ${employee.name}`);
@@ -2603,8 +2716,11 @@ class ReverieChatApp {
         title.append(avatar, this.literalText('strong', '', employee.name));
         const parentId = reportingParent(employee);
         const parent = parentId !== 'owner' ? employees.find(e => e.id === parentId)?.name : data.settings?.ownerName || 'Owner';
-        card.title = `${employee.name} · ${employee.position || ''} · Reports to ${parent || 'Unassigned'} · ${employee.onVacation ? 'Out of office' : employee.available ? 'Connected' : 'Disconnected'}`;
-        card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available && !employee.onVacation ? ' is-connected' : ''}`, employee.onVacation ? 'Out of office' : employee.available ? 'Connected' : 'Disconnected'));
+        card.dataset.healthTitle = `${employee.name} · ${employee.position || ''} · Reports to ${parent || 'Unassigned'}`;
+        card.title = `${card.dataset.healthTitle} · ${health.detail}`;
+        card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.employeeHealthBadge(employee, 'ca-company-state'));
+        this._healthCards ||= new WeakMap(); this._healthCards.set(card, { manage, employee, onSaved: paint });
+        this.paintEmployeeHealth(card.querySelector('[data-employee-health]'));
         if (manage) {
           const reporting = this.el('label', 'ca-company-reporting');
           reporting.append(this.el('span', 'ca-hint', 'Reports to'));
@@ -3354,7 +3470,8 @@ class ReverieChatApp {
     this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
-      ? ['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
+      // Workspace sits beside Company and Board as a quick link (James 10-27).
+      ? ['company', 'board', 'workspace'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
       : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
     for (const entry of entries) pane.append(this.button('ca-btn ca-office-pane-link', entry.label, async () => {
       if (owner) {
@@ -4015,7 +4132,7 @@ class ReverieChatApp {
       const member = this.rooms.find((r) => r.id === t.roomId)?.members?.find((m) => m.sessionId === t.sessionId);
       const state = member ? this.presenceOf(member) : 'gone';
       if (state === 'working') t.busy = true;
-      const over = state === 'gone' || (t.busy && state !== 'working') || now - t.at > CA_TURN_MAX_MS || (!t.busy && now - t.at > CA_TURN_START_MS);
+      const over = ['gone', 'dead', 'disconnected'].includes(state) || (t.busy && state !== 'working') || now - t.at > CA_TURN_MAX_MS || (!t.busy && now - t.at > CA_TURN_START_MS);
       if (over) changed = this.dropTurn(key) || changed;
     }
     if (changed) this.renderTyping();
@@ -5360,6 +5477,9 @@ class ReverieChatApp {
     const id = member?.sessionId;
     const session = id ? this.app.sessions?.get?.(id) : undefined;
     const hooks = id ? this.app.pendingHooks?.get?.(id) : undefined;
+    const employee = this.company?.employees?.find(e => e.sessionId === id);
+    const health = this.employeeHealth(employee || { sessionId: id }, member);
+    if ((employee || session?.runtimeHealth || session?.paneExit) && ['dead', 'disconnected', 'gone', 'unknown'].includes(health.state)) return health.state;
     if (!member || !member.alive) return 'gone';
     // The terminal UI's own classifier decides, so the chat can never rank a state differently from the tab rail and the phone
     // overview; caMemberState is the same ranking for a page that does not have it.
@@ -5386,9 +5506,81 @@ class ReverieChatApp {
       if (member.sessionId !== id) continue;
       if (deleted || session?.status === 'stopped' || session?.paneExit || session?.pid === null) member.alive = false;
       else if (session?.pid !== undefined) member.alive = true;
-      if (session?.status) member.working = session.status === 'busy' || session.isWorking === true;
+      if (session?.status) member.working = !session.paneExit && (session.status === 'busy' || session.isWorking === true);
     }
     this.schedulePresence();
+  }
+
+  employeeHealth(employee, member) {
+    const session = this.app.sessions?.get?.(employee?.sessionId);
+    const viewerDisconnected = this.app._wsSessionId === employee?.sessionId &&
+      ['disconnected', 'fallback', 'reconnecting'].includes(this.app._wsState);
+    return caEmployeeHealth(employee, session, member, viewerDisconnected);
+  }
+
+  employeeHealthBadge(employee, className = 'ca-runtime-health') {
+    const node = this.el('span', className);
+    node.dataset.employeeHealth = employee.id || employee.sessionId;
+    this._healthNodes ||= new WeakMap(); this._healthNodes.set(node, { employee, className });
+    this.paintEmployeeHealth(node); return node;
+  }
+
+  paintEmployeeHealth(node) {
+    const record = this._healthNodes?.get(node); if (!record) return;
+    const employee = this.company?.employees?.find(e => e.id === record.employee.id) || record.employee;
+    const health = this.employeeHealth(employee);
+    node.className = `${record.className} is-${health.state}${health.state === 'idle' ? ' is-connected' : ''}`;
+    node.textContent = health.label; node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
+    node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${health.detail}`);
+    const card = node.closest('.ca-company-person');
+    if (card) for (const state of ['dead', 'disconnected', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
+    card?.classList.toggle('is-offline', health.state === 'gone');
+    if (card) card.title = `${card.dataset.healthTitle} · ${health.detail}`;
+    if (card) {
+      const controls = this._healthCards?.get(card);
+      const wanted = controls?.manage && ['dead', 'disconnected'].includes(health.state) && !health.viewerOnly;
+      const restart = card.querySelector('.ca-dead-pane-restart');
+      if (wanted && !restart) card.append(this.button('ca-btn is-danger ca-dead-pane-restart', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, controls.onSaved), { text: 'Restart' }));
+      else if (!wanted) restart?.remove();
+      const reconnect = card.querySelector('.ca-reconnect-viewer');
+      const canReconnect = health.viewerOnly || (controls?.manage && this.canReconnectEmployee(employee));
+      if (canReconnect && !reconnect) card.append(this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+      else if (!canReconnect) reconnect?.remove();
+    }
+  }
+
+  canReconnectEmployee(employee) {
+    const session = this.app.sessions?.get?.(employee?.sessionId);
+    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation &&
+      Number.isInteger(employee?.sessionGeneration) &&
+      (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
+      this.employeeHealth(employee).state === 'disconnected';
+  }
+
+  async reconnectEmployeeViewer(employee) {
+    const health = this.employeeHealth(employee);
+    if (health.viewerOnly) {
+      if (this.app.activeSessionId !== employee.sessionId) return;
+      this.app._connectWs?.(employee.sessionId);
+      void this.app._onSessionNeedsRefresh?.({ id: employee.sessionId });
+      return;
+    }
+    if (!this.canReconnectEmployee(employee)) return;
+    this._reconnectingEmployees ||= new Set();
+    if (this._reconnectingEmployees.has(employee.id)) return;
+    this._reconnectingEmployees.add(employee.id);
+    try {
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/reconnect`, {
+        method: 'POST', body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
+      });
+      if (!result.ok || result.data?.state !== 'viewer-connected') {
+        this.toast(result.error || 'Connection not confirmed. Check this expert’s status before trying again.', 'error');
+        return;
+      }
+      // The canonical state event, not this acknowledgement, clears the red status.
+      this.toast(`Terminal reconnected for ${employee.name}.`, 'info');
+    } catch { this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error'); }
+    finally { this._reconnectingEmployees.delete(employee.id); }
   }
 
   /** Redraw what shows a member's state (the member list and the direct-message dots), at most once a frame. */
@@ -5400,6 +5592,7 @@ class ReverieChatApp {
       this._presenceQueued = false;
       if (!this.built) return;
       this.syncTurns();
+      for (const node of this.doc.querySelectorAll('[data-employee-health]')) this.paintEmployeeHealth(node);
       // A token count or a timestamp changing is not a state change: redrawing then would replace the button under a pointer.
       const signature = this.presenceSignature();
       if (signature === this._presenceSig) return;
@@ -5945,7 +6138,10 @@ class ReverieChatApp {
     headTitle.append(headHash, this.el('span', 'ca-head-name', caRoomLabel(room)));
     if (dm) {
       const peer = caDmPeer(room);
-      headTopic.textContent = peer ? `${peer.alive ? (peer.working ? 'Working' : 'Online') : 'Offline'}${peer.goal ? ` · ${peer.goal}` : ''}` : '';
+      const state = peer ? this.presenceOf(peer) : 'gone';
+      headTopic.textContent = peer ? `${CA_STATE_LABEL[state] || 'Health unknown'}${peer.goal ? ` · ${peer.goal}` : ''}` : '';
+      headTopic.classList.toggle('ca-runtime-health', !!peer);
+      for (const kind of ['dead', 'disconnected']) headTopic.classList.toggle(`is-${kind}`, state === kind);
     } else {
       const coord = room.members.find((m) => m.role === 'coordinator');
       const memberCount = room.members.length + this.channelHumans().length;
@@ -5972,7 +6168,7 @@ class ReverieChatApp {
     if (!button) return;
     const humans = this.channelHumans();
     const members = [...(this.room?.members || []), ...humans];
-    const online = (this.room?.members || []).filter(member => this.presenceOf(member) !== 'gone').length + humans.filter(p => p.online).length;
+    const online = (this.room?.members || []).filter(member => member.alive !== false && !['gone', 'dead', 'disconnected'].includes(this.presenceOf(member))).length + humans.filter(p => p.online).length;
     const compact = !!this.doc.defaultView?.matchMedia?.('(max-width: 899px)')?.matches;
     const expanded = compact ? this.drawer === 'members' : this.membersOpen;
     button.hidden = !this.room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
@@ -6000,10 +6196,18 @@ class ReverieChatApp {
       if (!room || this.app._chatCreating) return;
       const humans = this.channelHumans();
       const people = new Set(humans);
-      for (const section of caMemberSections(room.members, humans)) {
+      for (const section of caMemberSections(room.members, humans, member => this.presenceOf(member))) {
         const h = this.el('h3', 'ca-members-head', `${section.label} — ${section.members.length}`);
         box.append(h);
-        for (const m of section.members) box.append(people.has(m) ? this.humanMemberRow(m) : this.memberRow(m));
+        for (const m of section.members) {
+          const row = people.has(m) ? this.humanMemberRow(m) : this.memberRow(m);
+          const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+          if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
+            const group = this.el('div', 'ca-member-with-actions');
+            group.append(row, this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+            box.append(group);
+          } else box.append(row);
+        }
       }
       if (!caIsDm(room)) box.append(this.addMemberRow());
     });
@@ -6036,6 +6240,7 @@ class ReverieChatApp {
     const pronouns = this.pronounsOf(m);
     b.setAttribute('aria-label', `${m.name}${pronouns ? ` (${pronouns})` : ''}, ${role}, ${CA_STATE_LABEL[state]}`);
     if (pronouns) b.title = `${m.name} (${pronouns})`;
+    if (state === 'dead' || state === 'disconnected') b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
     b.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }));
     const text = this.el('span', 'ca-member-text');
     const line = this.el('span', 'ca-member-name', m.name);
@@ -6058,7 +6263,7 @@ class ReverieChatApp {
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
-    const sub = state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
+    const sub = state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     b.append(text);
     b.addEventListener('click', () => this.openProfile(m, b));
@@ -6091,10 +6296,12 @@ class ReverieChatApp {
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
       entries.push({ label: 'Runtime settings', run: () => this.openRuntimeSettings(employee) },
         { label: 'Edit profile', run: () => this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); }) });
-      entries.push({ label: 'Restart session', danger: true, disabled: employee.onVacation === true, reason: employee.onVacation ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
+      entries.push({ label: 'Restart session', danger: true, disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
       const returning = employee.onVacation === true;
       entries.push({ label: returning ? 'Enter office' : 'Leave office', success: returning, danger: !returning, run: () => returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee) });
     }
+    if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
+      entries.push({ label: 'Laptop terminal', run: () => this.openHumanTerminal(employee) });
     if (!caIsDm(this.room)) {
       entries.push(
         { sep: true },
@@ -6283,6 +6490,7 @@ class ReverieChatApp {
     const names = this.el('div', 'ca-profile-names');
     names.append(this.literalText('strong', '', m.name));
     const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === m.sessionId);
+    if (employee) names.append(this.employeeHealthBadge(employee));
     const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', employee?.onVacation === true ? 'Out of office' : CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
     names.append(this.el('span', 'ca-profile-sub', tags));
     // Who they are in the company: position and the owner-set pronouns, from the employee record.
@@ -6337,9 +6545,23 @@ class ReverieChatApp {
         this.closeProfile();
         this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); });
       }, { text: 'Edit profile' }));
+    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.humanSelf?.role === 'owner' && ['dead', 'disconnected'].includes(this.employeeHealth(employee).state) && !this.employeeHealth(employee).viewerOnly)
+      actions.append(this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
+    if (employee && this.employeeHealth(employee).viewerOnly)
+      actions.append(this.button('ca-btn', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect view' }));
+    if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
+      actions.append(this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' }));
     card.append(actions, technical);
     this.presentCard(card, anchor);
     this.loadAgentProfile(m, card, local, full);
+  }
+
+  async openHumanTerminal(employee) {
+    this.closeProfile();
+    try {
+      if (!this.doc.defaultView.ReverieOwnerTerminal) throw new Error('Terminal display unavailable');
+      await this.doc.defaultView.ReverieOwnerTerminal.open(this.app, employee.id, employee.name);
+    } catch { this.toast('Laptop terminal is unavailable', 'error'); }
   }
 
   /**
@@ -6775,6 +6997,10 @@ class ReverieChatApp {
     const recover = this.doc.createElement('input'); recover.type = 'checkbox'; recover.disabled = true;
     recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks or activity within two minutes prevent recovery.'));
     dialog.append(recoverLabel);
+    const health = this.employeeHealth(employee);
+    const restartHealth = this.employeeHealthBadge(employee); restartHealth.dataset.healthRole = 'note'; restartHealth.setAttribute('role', 'note');
+    dialog.append(restartHealth);
+    if (health.state === 'dead') recoverLabel.hidden = true;
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const status = this.el('p', 'ca-hint', 'Checking owner access…'); status.setAttribute('role', 'status');
     const actions = this.el('div', 'ca-dialog-actions');
@@ -6798,7 +7024,8 @@ class ReverieChatApp {
           else { error.textContent = result.error || 'The session could not restart. Check Runtime settings, then try again.'; status.textContent = ''; }
           return;
         }
-        await this.loadOwner(); await onSaved?.(); dialog.close(); this.toast(`Session restarted for ${employee.name}.`, 'info');
+        await this.loadOwner(); await onSaved?.(); dialog.close();
+        this.toast(result.data?.recovery === 'normal-launch-requested' ? `Restart requested for ${employee.name}. Reconnecting…` : `Session restarted for ${employee.name}.`, 'info');
       } catch { showUnconfirmed(); }
       finally { this._restartingEmployees.delete(employee.id); restart.disabled = unconfirmed; }
     }, { text: 'Restart session' });
@@ -6811,7 +7038,7 @@ class ReverieChatApp {
       if (!dialog.isConnected) return;
       status.textContent = '';
       if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) error.textContent = 'Sign in as the owner to restart this session.';
-      else if (employee.onVacation) error.textContent = 'Bring this expert into the office before restarting.';
+      else if (employee.onVacation || employee.desiredRunning === false) error.textContent = 'Bring this expert into the office before restarting.';
       else { restart.disabled = false; recover.disabled = false; }
     } catch { if (dialog.isConnected) { status.textContent = ''; error.textContent = 'Owner access could not be checked. Close this dialog and try again.'; } }
   }
@@ -7181,6 +7408,106 @@ class ReverieChatApp {
     try { await inventory(); } catch (failure) { status.textContent = ''; error.textContent = failure.message; }
   }
 
+  employeeGpuFields(container, employee, dialog) {
+    const group = this.el('fieldset', 'ca-employee-gpu'); group.append(this.el('legend', '', 'Laptop GPU access'));
+    const wrap = this.el('label', 'ca-hint'), enabled = this.el('input'); enabled.type = 'checkbox';
+    enabled.setAttribute('aria-label', `GPU access for ${employee.name}`); enabled.disabled = true; enabled.indeterminate = true;
+    wrap.append(enabled, this.doc.createTextNode(' Request GPU access'));
+    const devices = this.el('select', 'ca-field'); devices.setAttribute('aria-label', `GPU device for ${employee.name}`); devices.disabled = true;
+    const state = this.el('p', 'ca-hint', 'Loading host GPU status…'); state.setAttribute('role', 'status');
+    const facts = this.el('dl', 'ca-gpu-facts');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), { text: 'Save GPU request' });
+    const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), { text: 'Refresh status' });
+    save.disabled = true;
+    group.append(wrap, devices, facts, state, error, save, refresh,
+      this.el('p', 'ca-hint', 'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'));
+    container.append(group);
+    let report = null, busy = false, sequence = 0;
+    const live = () => dialog.isConnected && dialog.open && group.isConnected &&
+      (!dialog._companyOrigin || this.companyPage === dialog._companyOrigin);
+    const controls = () => {
+      enabled.disabled = busy || !report;
+      devices.disabled = busy || !report || !enabled.checked || report.choices.known !== true;
+      save.disabled = busy || !report || enabled.indeterminate || (enabled.checked && (report.choices.known !== true ||
+        !report.choices.devices.some(item => item.deviceUuid === devices.value)));
+      refresh.disabled = busy;
+    };
+    const paint = value => {
+      if (value?.version !== 1 || value.employeeId !== employee.id || value.current?.sessionId !== employee.sessionId ||
+          value.current?.sessionGeneration !== employee.sessionGeneration || !Array.isArray(value.choices?.devices) ||
+          !value.applied || !value.active || !Number.isSafeInteger(value.revision))
+        throw new Error('The laptop binding or GPU status changed. Reopen the profile before requesting a change.');
+      report = value;
+      // An absent request preserves a pre-existing applied grant; it is never
+      // converted into an implicit false write by the ordinary profile form.
+      const choice = report.requested ? report.requested.enabled : report.applied.known ? report.applied.enabled : null;
+      enabled.checked = choice === true; enabled.indeterminate = choice === null;
+      const selected = report.requested?.deviceUuid || report.applied.deviceUuid || '';
+      devices.replaceChildren();
+      const placeholder = this.el('option', '', report.choices.known ? 'Choose a GPU' : 'GPU inventory unavailable'); placeholder.value = ''; devices.append(placeholder);
+      for (const item of report.choices.devices) {
+        const option = this.el('option', '', `${item.model} · ${item.deviceUuid}`); option.value = item.deviceUuid; devices.append(option);
+      }
+      if (selected && !report.choices.devices.some(item => item.deviceUuid === selected)) {
+        const old = this.el('option', '', 'Existing GPU · inventory unavailable'); old.value = selected; devices.append(old);
+      }
+      devices.value = selected || (report.choices.devices.length === 1 ? report.choices.devices[0].deviceUuid : '');
+      facts.replaceChildren();
+      const yesNo = value => value === true ? 'On' : value === false ? 'Off' : 'Unknown';
+      const rows = [['Requested', report.requested ? yesNo(report.requested.enabled) : 'No explicit request'],
+        ['Host policy', report.applied.known ? yesNo(report.applied.enabled) + (report.applied.source === 'legacy-session' ? ' · session override' : '') : 'Unknown'],
+        ['Active device access', report.active.known ? yesNo(report.active.enabled) : 'Unknown']];
+      for (const [label, text] of rows) facts.append(this.el('dt', '', label), this.el('dd', '', text));
+      state.textContent = report.state === 'reconciliation-required'
+        ? 'Host reconciliation is required. Current work has not been restarted; an owner operator must inspect the pending policy.'
+        : report.state === 'pending'
+          ? 'Request saved; host policy is pending. Current work keeps running. A coordinated host update is required before the next normal laptop recreation.'
+          : report.requested && report.applied.known && report.requested.enabled === report.applied.enabled
+            ? report.active.running === false
+              ? 'Host policy applied. Start the laptop normally when ready; no startup was requested.'
+              : !report.active.known
+                ? 'Host policy applied. Active device access is unknown; no work was restarted.'
+                : report.active.enabled !== report.requested.enabled
+                  ? 'Host policy applied. Restart needed to change active device access; current work was not stopped.'
+                  : 'Host policy and active device access match. No laptop restart was requested.'
+            : 'Current host policy shown. No laptop restart was requested.';
+      controls();
+    };
+    const load = async () => {
+      if (!live() || busy) return; const token = ++sequence; busy = true; controls(); error.textContent = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`);
+        if (!live() || token !== sequence) return;
+        if (!result.ok) throw new Error(result.error || 'Host GPU controls are unavailable. Current access is unknown.');
+        paint(result.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) { report = null; enabled.indeterminate = true; state.textContent = 'Host GPU status unavailable; no policy change is confirmed.'; error.textContent = failure.message; }
+      } finally { if (live() && token === sequence) { busy = false; controls(); } }
+    };
+    const submit = async () => {
+      if (!live() || busy || save.disabled || !report) return;
+      const token = ++sequence, baseline = report;
+      const body = { expected: { ...baseline.current, revision: baseline.revision }, enabled: enabled.checked,
+        ...(enabled.checked ? { deviceUuid: devices.value } : {}) };
+      busy = true; controls(); error.textContent = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`, { method: 'POST', body });
+        if (!live() || token !== sequence) return;
+        if (!result.ok) throw new Error(result.error || 'GPU request not confirmed. Refresh status before trying again.');
+        paint(result.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) {
+          report = null; error.textContent = failure.message; state.textContent = 'Request not confirmed. Refresh before trying again; it was not retried automatically.';
+        }
+      } finally { if (live() && token === sequence) { busy = false; controls(); } }
+    };
+    enabled.addEventListener('change', () => { enabled.indeterminate = false; controls(); });
+    devices.addEventListener('change', controls);
+    dialog.addEventListener('close', () => { sequence++; }, { once: true });
+    void load();
+  }
+
   employeePermissionFields(container, employee) {
     const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
     const recovery = this.el('input', '');
@@ -7294,8 +7621,8 @@ class ReverieChatApp {
     const paint = () => {
       host.replaceChildren();
       const restart = this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, onSaved), { text: 'Restart session' });
-      restart.disabled = employee.onVacation === true;
-      restart.title = employee.onVacation ? 'Bring this expert into the office before restarting.' : 'Interrupt current work and restart without a fresh handoff. Saved conversation, memory and files remain.';
+      restart.disabled = employee.onVacation === true || employee.desiredRunning === false;
+      restart.title = employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before restarting.' : 'Interrupt current work and restart without a fresh handoff. Saved conversation, memory and files remain.';
       const lifecycle = this.el('div', 'ca-company-actions');
       const lifecycleError = this.el('p', 'ca-company-error ca-company-lifecycle-error');
       lifecycleError.setAttribute('role', 'alert');
@@ -7372,7 +7699,7 @@ class ReverieChatApp {
     dialog._companyOrigin = this.companyPage;
     const heading = this.el('header', 'ca-profile-edit-heading');
     heading.append(this.literalText('h2', '', employee.name), this.button('ca-btn', `Close profile for ${employee.name}`, () => dialog.close(), { text: 'Close' }));
-    dialog.append(heading, this.el('p', 'ca-hint', 'Profile details and Sleep / Dream use Save profile. Permission checkboxes below save immediately.'));
+    dialog.append(heading, this.employeeHealthBadge(employee), this.el('p', 'ca-hint', 'Profile details and Sleep / Dream use Save profile. Permission checkboxes below save immediately.'));
     const contextActions = this.el('div', 'ca-dialog-actions');
     contextActions.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }), this.button('ca-btn', `View startup context for ${employee.name}`, () => this.openStartupContext(employee), { text: 'View startup context' }));
     dialog.append(contextActions);
@@ -7467,7 +7794,7 @@ class ReverieChatApp {
       }
       form.hidden = key === 'permissions';
       saveHint.textContent = key === 'permissions'
-        ? 'Permissions and session actions apply immediately. Cancel does not undo them.'
+        ? 'Permissions save immediately. GPU requests show their own status. Cancel does not undo saved requests or session actions.'
         : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
       body.scrollTop = 0;
     };
@@ -7499,6 +7826,7 @@ class ReverieChatApp {
       for (const key of ['permissions', 'effectiveBoardPermissions', 'boardPermissionSources', 'onVacation', 'desiredRunning', 'sessionId', 'sessionGeneration'])
         if (Object.hasOwn(current, key)) employee[key] = current[key];
       management.replaceChildren(); this.employeePermissionFields(management, employee);
+      this.employeeGpuFields(management, employee, dialog);
       this.publicationCredentialsFields(management, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
     }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });
@@ -9303,6 +9631,8 @@ class ReverieEmbassyView {
     const focusLabel = focused?.getAttribute('aria-label');
     previous?.remove();
     host.querySelector('.eg-access-note')?.remove();
+    // Embassies are shared rooms beside the server's channels, not part of Direct Messages (James 10-20).
+    if (this.shell.workspace === 'home') return;
     if (!this.allowed) {
       if (this.ownerRequired) {
         const note = this.el('section', 'eg-access-note');
@@ -9977,6 +10307,7 @@ class ReverieEmbassyPairingView {
     const choices = this.el('div', 'eg-pair-choices'); choices.append(invite, join); this.body.append(choices);
     this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? (this.host.needsAdvertisedOrigin ? 'Embassy is ready locally. Set a shareable HTTPS address to invite another company.' : `${this.host.room.name} · ${this.host.origin}`) : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
     if (this.host.status === 'ready') this.body.append(this.button('Manage invitations', () => this.invites()));
+    if (this.host.status === 'ready') this.body.append(this.button('Embassy name and closing', () => this.hostRoom()));
     if (this.host.builtin) this.body.append(this.button('Embassy address', () => this.hostAddress()));
     if (this.handles.length) {
       const list = this.el('section', 'eg-pair-recent'); list.append(this.el('h3', '', 'Connections in progress'));
@@ -9989,6 +10320,35 @@ class ReverieEmbassyPairingView {
     const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Other ways to connect'));
     fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
     this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
+  }
+  /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access (James 10-23). */
+  hostRoom() {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    this.clearBody(); this.title.textContent = 'Embassy name and closing'; const epoch = this.epoch;
+    const label = this.el('label', '', 'Embassy name'), input = this.el('input');
+    input.type = 'text'; input.maxLength = 120; input.autocomplete = 'off'; input.value = this.host.room?.name || ''; label.append(input); this.body.append(label);
+    const note = this.el('p', 'eg-pair-status'); note.setAttribute('role', 'status');
+    const save = this.button('Save name', async () => {
+      if (this.busy || !this.owner || !this.isCurrent(epoch) || !input.value.trim()) return;
+      this.busy = true; save.disabled = true;
+      const result = await this.api('/api/embassy-host/rename', { method: 'POST', body: { name: input.value.trim() } });
+      this.busy = false; if (!this.isCurrent(epoch)) return; save.disabled = false;
+      if (!result.ok) { note.textContent = this.error(result); return; }
+      note.textContent = 'Name saved.'; await this.refresh();
+    }, true);
+    this.body.append(save, this.el('p', 'ca-hint', 'Closing ends every guest\'s access right away and revokes open invitations. The room keeps its history and a new invitation can reopen it.'));
+    let armed = false;
+    const close = this.button('Close embassy', async () => {
+      if (this.busy || !this.owner || !this.isCurrent(epoch)) return;
+      if (!armed) { armed = true; close.textContent = 'Confirm: close and end guest access'; return; }
+      this.busy = true; close.disabled = true;
+      const result = await this.api('/api/embassy-host/close', { method: 'POST', body: { confirm: 'close' } });
+      this.busy = false; if (!this.isCurrent(epoch)) return; close.disabled = false;
+      if (!result.ok) { note.textContent = this.error(result); return; }
+      note.textContent = 'Embassy closed. Guest access has ended.'; armed = false; close.textContent = 'Close embassy';
+    });
+    this.body.append(close, note);
+    this.actions.append(this.button('Back', () => this.home())); input.focus();
   }
   hostAddress() {
     if (this.busy || !this.owner || !this.host.builtin) return;
@@ -10375,6 +10735,7 @@ if (typeof module !== 'undefined' && module.exports) {
     caProfileAvatars,
     caPollView,
     caMemberState,
+    caEmployeeHealth,
     caClosedDms,
     caNotifyPrefs,
     caIsMuted,

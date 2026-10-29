@@ -190,6 +190,19 @@ class NativeObserver:
         self.broker = broker
         self._local = threading.local()
 
+    def _deadline(self, supplied=None):
+        now = time.monotonic()
+        value = getattr(self._local, 'deadline', None)
+        bounds = [now + 30]
+        for selected in (value, supplied):
+            if selected is not None:
+                need(type(selected) in (int, float) and math.isfinite(selected),
+                     'RESERVATION_OBSERVATION_DEADLINE')
+                bounds.append(selected)
+        end = min(bounds)
+        need(now < end, 'RESERVATION_OBSERVATION_DEADLINE')
+        return end
+
     def host_root(self):
         """Qualify a full hierarchy; a namespaced/mounted subroot is not max."""
         mounts = [r for r in read_mount_table() if r['point'] == CGROUP]
@@ -341,13 +354,42 @@ class NativeObserver:
                         'cgroup': str(relative), 'memory': memory, 'tasks': tasks,
                         'nanoCpus': cpu, 'image': row['Image']}
 
+    @staticmethod
+    def stopped_website_limits(row,cid):
+        state=row.get('State',{});host_config=row.get('HostConfig',{})
+        labels=row.get('Config',{}).get('Labels') or {}
+        need(row.get('Id')==cid and state.get('Running') is False and
+             type(state.get('Pid')) is int and state['Pid']==0 and
+             not state.get('Paused') and not state.get('Restarting') and
+             type(labels) is dict and not any(k in labels for k in ('reverie.worker','reverie.nix-prepare')),
+             'RESERVATION_STOPPED_WEBSITE_REQUIRED')
+        site_memory=host_config.get('Memory');tasks=host_config.get('PidsLimit')
+        need(type(site_memory) is int and site_memory>0 and
+             type(host_config.get('MemorySwap')) is int and host_config['MemorySwap']==site_memory and
+             type(tasks) is int and 1<=tasks<=32768,
+             'RESERVATION_STOPPED_WEBSITE_LIMITS')
+        site={'containerId':cid,'declaredMemory':site_memory,'declaredTasks':tasks}
+        return site_memory,site
+
     def capacity(self, rows, selected):
+        return self._capacity(rows, selected)
+
+    def capacity_stopped_website(self, rows, selected, cid):
+        """Declared stopped site ceiling only; running workers still need kernel facts."""
+        need(type(cid) is str and len(cid)==64 and all(c in '0123456789abcdef' for c in cid),
+             'RESERVATION_STOPPED_WEBSITE_REQUIRED')
+        return self._capacity(rows, selected, stopped_website=cid)
+
+    def _capacity(self, rows, selected, *, stopped_website=None):
         deadline = self._deadline()
         host = self.host_root()
         config = self.broker.config
         sites = [r for r in rows if r.get('Name') == '/' + config['serverContainer']]
         need(len(sites) == 1, 'RESERVATION_WEBSITE_BINDING')
-        site_memory, site = self.limits(sites[0])
+        if stopped_website is None:
+            site_memory, site = self.limits(sites[0])
+        else:
+            site_memory, site = self.stopped_website_limits(sites[0],stopped_website)
         commitments = []
         for row in rows:
             need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
@@ -387,19 +429,6 @@ class NativeObserver:
         need(_pid(pid) == start, 'RESERVATION_NATIVE_PID_CHANGED')
         return result
 
-    def _deadline(self, supplied=None):
-        now = time.monotonic()
-        value = getattr(self._local, 'deadline', None)
-        bounds = [now + 30]
-        for selected in (value, supplied):
-            if selected is not None:
-                need(type(selected) in (int, float) and math.isfinite(selected),
-                     'RESERVATION_OBSERVATION_DEADLINE')
-                bounds.append(selected)
-        end = min(bounds)
-        need(now < end, 'RESERVATION_OBSERVATION_DEADLINE')
-        return end
-
 
 class _RetainedClaim:
     """Process-local journal ownership; not approval or a native launch permit."""
@@ -411,6 +440,8 @@ class _RetainedClaim:
         self.source_paths=storage_paths(gate.broker.config,binding['current_sid'])
         need(self.source_paths.kind=='employee' and self.source_paths.identity==binding['employee_id'],
              'RESOURCE_PREPARATION_STORAGE_CHANGED')
+        from .worker_resource_native import capture_original
+        self.native_baseline=capture_original(gate,self.context,self.source_paths)
         self.closed = False
 
     def close(self):
@@ -449,12 +480,20 @@ class ReservationGate:
                  for v in self.binding['locks'].values()), 'RESERVATION_BINDING_SCHEMA')
 
     def _guard(self, selected=None):
+        from .worker_image_switch import capture_current_image, image_still_current
         deadline = self.native._deadline()
         need(getattr(self._local, 'depth', 0) > 0, 'RESERVATION_ADMISSION_LOCK_REQUIRED')
         need(option(self.broker.config) == self.option and
              (selected is None or selected == self.scope), 'RESERVATION_SCOPE_CHANGED')
         need(domain_digest(self.broker.config) == self.binding['configurationDigest'], 'RESERVATION_DOMAIN_CHANGED')
-        need(not os.path.lexists(pending(self.broker.config)), 'RESERVATION_INSTALL_REQUIRES_RECONCILIATION')
+        if os.path.lexists(pending(self.broker.config)):
+            from .worker_gpu_access import owns_pending
+            from .resource_actor_bootstrap import owns_pending as actor_bootstrap_pending
+            from .worker_image_switch import owns_pending as image_switch_pending
+            from .worker_perf_access import owns_pending as perf_pending
+            need(owns_pending(self) or actor_bootstrap_pending(self) or image_switch_pending(self) or perf_pending(self),
+                 'RESERVATION_INSTALL_REQUIRES_RECONCILIATION')
+        image_configuration = capture_current_image(self.broker)
         need(_file(marker(self.broker.config), self.broker.config['uid']) == self.binding,
              'RESERVATION_BINDING_CHANGED')
         statefd, state_identity = _directory(Path(self.broker.config['stateRoot']), self.broker.config['uid'])
@@ -490,11 +529,40 @@ class ReservationGate:
              and held.st_uid == self.broker.config['uid'] and held.st_nlink == 1,
              'RESERVATION_ADMISSION_LOCK_REBOUND')
         rows = self.native.custody(self.root, marker(self.broker.config))
+        if getattr(self._local, 'gpu_transition', None) is not None:
+            from .worker_gpu_access import check_transition_rows
+            check_transition_rows(self, rows)
+        if getattr(self._local, 'actor_bootstrap', None) is not None:
+            from .resource_actor_bootstrap import check_transition_rows as actor_bootstrap_rows
+            actor_bootstrap_rows(self, rows)
+        if getattr(self._local, 'image_switch', None) is not None:
+            from .worker_image_switch import check_transition_rows as image_switch_rows
+            image_switch_rows(self, rows)
+        if getattr(self._local, 'perf_transition', None) is not None:
+            from .worker_perf_access import check_transition_rows as perf_rows
+            perf_rows(self, rows)
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
+        image_still_current(image_configuration)
         return rows
 
     @contextmanager
-    def admission(self, sid=None, *, deadline=None):
+    def _admission_mutex(self, deadline):
+        if deadline is None:
+            with self._mutex:
+                yield
+            return
+        need(type(deadline) in (int, float) and math.isfinite(deadline) and
+             0 < deadline - time.monotonic() <= 3600, 'RESERVATION_ADMISSION_DEADLINE')
+        need(self._mutex.acquire(timeout=max(0, deadline - time.monotonic())),
+             'RESERVATION_ADMISSION_DEADLINE')
+        try:
+            need(time.monotonic() < deadline, 'RESERVATION_ADMISSION_DEADLINE')
+            yield
+        finally:
+            self._mutex.release()
+
+    @contextmanager
+    def admission(self, sid=None, *, protected_start=None, deadline=None):
         # Global flock -> broker mutex -> journal flock is the only lock order.
         # No interactive viewer retains this lock after canonical launch settles.
         with self._admission_mutex(deadline):
@@ -505,14 +573,34 @@ class ReservationGate:
                 self.native._local.deadline = deadline
                 self._local.fd, self._local.depth = fd, 1
                 self._local.terminal_claim = None
+                self._local.completion_inspection = None
                 self._local.preparation_boundary = None
+                self._local.start_boundary = None
+                self._local.protected_source_stop = None
+                self._local.protected_start = protected_start
                 self._guard()
+                if protected_start is not None:
+                    from .worker_resource_native import begin_permit
+                    begin_permit(self,protected_start,sid)
+                    from .worker_resource_native import _StartBoundary
+                    self._local.start_boundary=_StartBoundary(protected_start)
                 if sid is not None:
                     self.check_launch(sid)
                 yield
                 claim = self._local.terminal_claim
                 boundary = self._local.preparation_boundary
-                if boundary is not None:
+                start_boundary=self._local.start_boundary
+                inspection=self._local.completion_inspection
+                if inspection is not None:
+                    need(claim is None and boundary is None and start_boundary is None,
+                         'RESOURCE_COMPLETION_BOUNDARY_CONFLICT')
+                    from .worker_resource_reconciliation import finish_inspection
+                    finish_inspection(self,inspection)
+                elif start_boundary is not None:
+                    need(claim is None and boundary is None,'RESOURCE_NATIVE_BOUNDARY_CONFLICT')
+                    from .worker_resource_native import finish_start_boundary
+                    finish_start_boundary(self,start_boundary)
+                elif boundary is not None:
                     need(claim is None, 'RESOURCE_PREPARATION_BOUNDARY_CONFLICT')
                     from .worker_resource_preparation import _finish_phase
                     _finish_phase(self,boundary)
@@ -522,8 +610,13 @@ class ReservationGate:
                     self._finish_claim(claim)
             finally:
                 self._local.terminal_claim = None
+                self._local.completion_inspection = None
                 self._local.preparation_boundary = None
+                self._local.start_boundary = None
+                self._local.protected_source_stop = None
+                self._local.protected_start = None
                 self._local.preparation_ack = None
+                self._local.runtime_ack = None
                 self._local.approved_profile = None
                 self._local.claim_native = None
                 self._local.depth = 0
@@ -540,6 +633,15 @@ class ReservationGate:
         if fence is not None:
             from .worker_resource_preparation import _ack_policy_current
             _ack_policy_current(self,fence)
+        fence=getattr(self._local,'runtime_ack',None)
+        if fence is not None:
+            from .worker_resource_native import _ack_runtime_current
+            _ack_runtime_current(self,fence)
+        settlement=getattr(self._local,'settlement',None)
+        if settlement is not None:
+            from .worker_resource_finalization import assert_completion
+            lease=settlement.owner._current(settlement.key)['lease']
+            assert_completion(settlement,lease.store,selected,settlement.operation)
 
     def _profile(self, eid):
         profiles = ProfileStore(self.root / 'profiles')
@@ -657,10 +759,42 @@ class ReservationGate:
         finally:
             store.close()
 
+    def active_operations(self,document):
+        from .worker_resource_finalization import completed,require_consistent_pending
+        require_consistent_pending(self,document)
+        return [op for op in document['operations'].values() if not completed(self,op)]
+
     def check_launch(self, sid):
         journal.canonical_uuid(sid)
-        need(not any(op['reserved_sid'] == sid for op in self._document()['operations'].values()),
+        permit=getattr(self._local,'protected_start',None)
+        if permit is not None:
+            from .worker_resource_native import allow_reserved_launch
+            allow_reserved_launch(self,permit,sid)
+            return
+        need(not any(op['reserved_sid'] == sid for op in self.active_operations(self._document())),
              'RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION')
+
+    def check_unprotected_stop(self, name):
+        """A normal cleanup/supervisor cannot bypass the exact-incarnation actor.
+
+        The durable fence applies after controller restart as well; no cached
+        effect handle, owner boolean or prior process observation is revived.
+        Caller retains this same admission through the whole actual stop.
+        """
+        return self.check_stop(name, None, None)
+
+    def check_stop(self, name, expected_id, expected_process):
+        rows = self._guard()
+        document = self._document()
+        sids = {sid for op in self.active_operations(document) for sid in
+                (op['observation']['current_sid'], op['reserved_sid'])}
+        names = {self.broker.config['deployment'] + '-agent-' + sid for sid in sids}
+        identities = {row['Id'] for row in rows if
+            (row.get('Config', {}).get('Labels') or {}).get('reverie.worker') == self.broker.config['deployment'] and
+            (row.get('Config', {}).get('Labels') or {}).get('reverie.session') in sids}
+        if name in names or name in identities:
+            from .worker_resource_native import allow_source_stop
+            allow_source_stop(self, name, expected_id, expected_process)
 
     def inspect(self, key):
         with self.admission():
@@ -674,6 +808,11 @@ class ReservationGate:
         from .worker_host_job import require_idle
         require_idle(self)
         self.check_launch(sid)
+        permit=getattr(self._local,'protected_start',None)
+        if permit is not None:
+            from .worker_resource_native import creation_for_permit
+            creation_for_permit(self,permit,sid,resources)
+            return
         need(resources['budgetMode'] == 'admission' and
              resources['poolMemoryMiB'] == self.broker.config['poolMemoryMiB'],
              'RESERVATION_ADMISSION_POLICY_REQUIRED')
@@ -686,14 +825,15 @@ class ReservationGate:
         need(self.native.inventory() == rows, 'RESERVATION_NATIVE_INVENTORY_CHANGED')
 
     def _retained_delta(self, document):
-        for op in document['operations'].values():
+        active=self.active_operations(document)
+        for op in active:
             # Delta arithmetic assumes the old ceiling is still committed. A
             # stopped/moved/unknown source is not automatic capacity credit.
             current = self.observe(op['scope'], op['request']['pool_id'], op['request']['employee_id'])
             need(current['source_binding_digest'] == op['observation']['source_binding_digest'] and
                  current['current_memory_bytes'] == op['observation']['current_memory_bytes'],
                  'RESERVATION_RECONCILIATION_REQUIRED')
-        retained = sum(journal.wide(op['delta_bytes']) for op in document['operations'].values())
+        retained = sum(journal.wide(op['delta_bytes']) for op in active)
         return retained
 
     def check_headroom(self):
@@ -712,9 +852,21 @@ class ReservationGate:
         need(self.native.inventory() == rows, 'RESERVATION_NATIVE_INVENTORY_CHANGED')
         return {'budgetBytes': budget, 'committedBytes': total, 'retainedBytes': retained}
 
+    def begin_host_job(self, spec, *, deadline=None):
+        from .worker_host_job import begin
+        return begin(self, spec, deadline=deadline)
+
+    def bind_host_job(self, handle, binding, *, deadline=None):
+        from .worker_host_job import bind
+        return bind(self, handle, binding, deadline=deadline)
+
+    def finish_host_job(self, handle, binding, *, deadline=None):
+        from .worker_host_job import finish
+        return finish(self, handle, binding, deadline=deadline)
+
     def check_reload(self, updated):
         document=self._document()
-        if document['operations'] and updated != self.broker.config:
+        if self.active_operations(document) and updated != self.broker.config:
             boundary=getattr(self._local,'preparation_reload',None)
             need(boundary is not None,'RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION')
             from .worker_resource_preparation import _allow_reload
@@ -729,7 +881,8 @@ class ReservationGate:
         # Current native custody/bindings are observed anew; never resurrect
         # an opaque journal handle or turn an ACK into verified completion.
         observations = []
-        for op in document['operations'].values():
+        active=self.active_operations(document)
+        for op in active:
             try:
                 value = self.observe(op['scope'], op['request']['pool_id'], op['request']['employee_id'])
                 state = 'matches' if value == op['observation'] else 'changed'
@@ -741,9 +894,9 @@ class ReservationGate:
             self._guard()
             observations.append({'operationId': op['id'], 'nativeObservation': state})
         need(self._document() == document, 'RESERVATION_JOURNAL_CHANGED_DURING_RECOVERY')
-        return {'recoveryRequired': bool(document['operations']), 'retryAllowed': False,
+        return {'recoveryRequired': bool(active), 'retryAllowed': False,
                 'reservationRetained': True, 'fencedSids': sorted(
-                    op['reserved_sid'] for op in document['operations'].values()), 'observations': observations}
+                    op['reserved_sid'] for op in active), 'observations': observations}
 
     def observe(self, selected, pool_id, eid):
         need(selected == self.scope and pool_id == self.option['poolId'], 'RESERVATION_SCOPE_CHANGED')
@@ -836,6 +989,9 @@ class ReservationGate:
             with self.admission():
                 from .worker_host_job import require_idle
                 require_idle(self)
+                history=self._document()
+                need(not any(op['state']=='COMPLETED' for op in self.active_operations(history)),
+                     'RESOURCE_COMPLETION_PENDING_RECONCILIATION')
                 observed = self.observe(self.scope, request['pool_id'], request['employee_id'])
                 profile = self._profile(request['employee_id'])
                 need(profile is not None and request['requested_memory_bytes'] ==
@@ -884,34 +1040,6 @@ class ReservationGate:
         finally:
             self._local.approved_profile = None
             self._local.claim_native = None
-
-    @contextmanager
-    def _admission_mutex(self, deadline):
-        if deadline is None:
-            with self._mutex:
-                yield
-            return
-        need(type(deadline) in (int, float) and math.isfinite(deadline) and
-             0 < deadline - time.monotonic() <= 3600, 'RESERVATION_ADMISSION_DEADLINE')
-        need(self._mutex.acquire(timeout=max(0, deadline - time.monotonic())),
-             'RESERVATION_ADMISSION_DEADLINE')
-        try:
-            need(time.monotonic() < deadline, 'RESERVATION_ADMISSION_DEADLINE')
-            yield
-        finally:
-            self._mutex.release()
-
-    def begin_host_job(self, spec, *, deadline=None):
-        from .worker_host_job import begin
-        return begin(self, spec, deadline=deadline)
-
-    def bind_host_job(self, handle, binding, *, deadline=None):
-        from .worker_host_job import bind
-        return bind(self, handle, binding, deadline=deadline)
-
-    def finish_host_job(self, handle, binding, *, deadline=None):
-        from .worker_host_job import finish
-        return finish(self, handle, binding, deadline=deadline)
 
 
 def compatibility_candidate(before, projected, old_sid, target_sid):

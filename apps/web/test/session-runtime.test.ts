@@ -22,6 +22,12 @@ vi.mock('../src/subscription-profiles.js', async (original) => ({
   }),
 }));
 
+vi.mock('../src/custom-model-hosts.js', async (original) => ({
+  ...await original<typeof import('../src/custom-model-hosts.js')>(),
+  readCustomModelHosts: vi.fn(async () => [{ id: 'qwen-box', label: 'Qwen box', baseUrl: 'http://10.0.0.5:8080',
+    models: ['qwen3.8-27b'], defaultModelId: 'qwen3.8-27b', modelContextLengths: { 'qwen3.8-27b': 262144 } }]),
+}));
+
 const makeSession = () => new Session({ id: 'expert-id', name: 'Expert', mode: 'opencode', workingDir: '/workspace',
   subscriptionProfile: { id: 'first', label: 'First', provider: 'openai' },
   envOverrides: { CODEX_HOME: '/accounts/first' }, openCodeConfig: { continueSession: 'ses_exact', autoAllowTools: true } });
@@ -182,6 +188,28 @@ describe('owner runtime transaction', () => {
       expect(session.toState().openCodeConfig?.continueSession).toBe('ses_exact');
       expect(session.getEnvOverridesForPersist()?.CODEX_HOME).toBe('/accounts/first');
       expect(ctx.persistSessionStateNow).toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it('moves an OpenCode expert on a local model to Claude Code on the same model', async () => {
+    const { app, session } = await harness();
+    session.setCustomModel({ endpointId: 'qwen-box', modelId: 'qwen3.8-27b', label: 'Qwen box',
+      envKeys: ['OPENCODE_CONFIG_CONTENT'] }, { OPENCODE_CONFIG_CONTENT: '{"model":"custom/qwen3.8-27b"}' });
+    try {
+      const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+      const result = await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers,
+        payload: { mode: 'claude', source: { kind: 'local', endpointId: 'qwen-box' }, model: 'qwen3.8-27b' } });
+      expect(result.statusCode).toBe(200);
+      expect(result.json().data).toMatchObject({ mode: 'claude', source: { kind: 'local', endpointId: 'qwen-box' }, model: 'qwen3.8-27b' });
+      expect(restart).toHaveBeenCalledOnce();
+      // What the relaunch actually receives; the persisted copy deliberately omits endpoint values.
+      type RespawnProbe = { _buildRespawnPaneOptions(): { envOverrides?: Record<string, string> } };
+      const env = (session as unknown as RespawnProbe)._buildRespawnPaneOptions().envOverrides ?? {};
+      expect(env).toMatchObject({ ANTHROPIC_BASE_URL: 'http://10.0.0.5:8080', ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3.8-27b',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3.8-27b', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '262144' });
+      expect(env.CLAUDE_CONFIG_DIR).toBe(session.getCustomModelForPersist()?.configDir);
+      expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+      expect(env.CODEX_HOME).toBeUndefined();
     } finally { await app.close(); }
   });
 

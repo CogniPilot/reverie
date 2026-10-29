@@ -126,11 +126,13 @@ class Handoff:
     Caller owns the listener; close/unlink it immediately after accept_node.
     Any exception irreversibly fails this object; a new website start is needed.
     """
-    def __init__(self, website, *, clock=time.monotonic):
+    def __init__(self, website, *, clock=time.monotonic, timeout=10):
         need(isinstance(website, WebsitePeer), 'FIXED_WEBSITE_BINDING')
         self.website = website
         self.clock = clock
-        self.deadline = clock() + 10
+        need(type(timeout) is int and 1 <= timeout <= 120, 'HANDOFF_BOUND')
+        self.deadline = clock() + timeout
+        self.node_acknowledged = False
         self.state = 'BOOTSTRAP'
         self.process = None
         self.pidfd = None
@@ -169,8 +171,9 @@ class Handoff:
         finally:
             connection.close()
 
-    def accept_node(self, connection):
+    def accept_node(self, connection, *, acknowledge=True):
         try:
+            need(type(acknowledge) is bool, 'HANDOFF_ACK_BOUND')
             need(self.state == 'NODE', 'NO_RETRY')
             self._time()
             credentials = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
@@ -183,12 +186,23 @@ class Handoff:
             self.node = connection
             self.credentials = credentials
             self.state = 'CONNECTED'
-            connection.sendall(b'READY\n')
+            if acknowledge:
+                connection.sendall(b'READY\n')
+                self.node_acknowledged = True
             return self
         except BaseException:
             connection.close()
             self.close()
             raise
+
+    def acknowledge_node(self):
+        """Fixed optional host initialization barrier, never an owner grant."""
+        need(self.state == 'CONNECTED' and not self.node_acknowledged, 'HANDOFF_ACK_NO_REPLAY')
+        self._time()
+        self.website.assert_process(self.credentials, 'node')
+        self._time()
+        self.node.sendall(b'READY\n')
+        self.node_acknowledged = True
 
     def read(self, limit=8192):
         """One bounded chunk, not a ledger operation or owner assertion.

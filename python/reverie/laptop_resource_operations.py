@@ -5,10 +5,11 @@ UUIDs, a private directory and the returned handles do not grant host authority.
 The capacity observer must share the future host admission serialization; repeated
 observations here are checks, not a replacement for that native transaction.
 
-Every claimed positive delta remains charged, including after process restart,
-cancellation or recorded verification. This component has NO release, completion,
-deletion, host-config, broker, launch, recovery actor or public HTTP endpoint.
-Protected native settlement and any credit require a separately reviewed slice.
+Every claimed positive delta remains charged after process restart, cancellation
+or recorded verification. The fixed native settlement producer alone can record
+COMPLETED; its separate pending fence remains charged until all finalizers finish.
+JSON, a digest, a cold lookup or an earlier handle never supplies that producer.
+This store has no native effects, deletion, config writer or public HTTP endpoint.
 """
 import copy
 import fcntl
@@ -29,7 +30,7 @@ MAX_VERSION = 9007199254740991
 MAX_UINT64 = '18446744073709551615'
 MIB = 1048576
 STATES = frozenset(('RESERVED', 'PREPARING', 'PREPARED', 'STARTING',
-                    'STARTED', 'VERIFYING', 'VERIFY_RECORDED', 'RECOVERY_REQUIRED'))
+                    'STARTED', 'VERIFYING', 'VERIFY_RECORDED', 'RECOVERY_REQUIRED','COMPLETED'))
 EFFECTS = {'prepare': ('RESERVED', 'PREPARING', 'PREPARED'),
            'start': ('PREPARED', 'STARTING', 'STARTED'),
            'verify': ('STARTED', 'VERIFYING', 'VERIFY_RECORDED')}
@@ -153,10 +154,10 @@ def operation(value, key):
     version(value['version'], True)
     need(value['state'] in STATES, 'STATE')
     phases = {'RESERVED': 1, 'PREPARING': 2, 'PREPARED': 3, 'STARTING': 4,
-              'STARTED': 5, 'VERIFYING': 6, 'VERIFY_RECORDED': 7}
+              'STARTED': 5, 'VERIFYING': 6, 'VERIFY_RECORDED': 7,'COMPLETED':8}
     if value['state'] in phases:
         need(value['version'] == phases[value['state']], 'PHASE_VERSION')
-        acknowledged = value['state'] in ('PREPARED', 'STARTED', 'VERIFY_RECORDED')
+        acknowledged = value['state'] in ('PREPARED', 'STARTED', 'VERIFY_RECORDED','COMPLETED')
         need((value['last_receipt_digest'] is not None) == acknowledged, 'PHASE_RECEIPT')
         need(value['reason'] is None, 'PHASE_REASON')
     else:
@@ -181,11 +182,11 @@ def document(value):
         need(op['reservation_id'] not in reservations and op['reserved_sid'] not in sids,
              'DUPLICATE_RESERVATION')
         seen.add(unique)
+        reservations.add(op['reservation_id']);sids.add(op['reserved_sid'])
+        if op['state']=='COMPLETED':continue
         employee = (op['scope']['company_id'], op['request']['employee_id'])
         need(employee not in employees, 'EMPLOYEE_HAS_RETAINED_CLAIM')
         employees.add(employee)
-        reservations.add(op['reservation_id'])
-        sids.add(op['reserved_sid'])
         observed = op['observation']
         pool = (observed['pool_revision_digest'], observed['budget_bytes'], observed['committed_bytes'])
         if observed['pool_id'] in pools:
@@ -497,6 +498,7 @@ class OperationStore:
                     return self._view(op), None  # No replayed effect handle.
             need(len(current['operations']) < MAX_OPERATIONS, 'OPERATION_LIMIT')
             need(not any(op['scope']['company_id'] == selected['company_id']
+                         and op['state']!='COMPLETED'
                          and op['request']['employee_id'] == proposed['employee_id']
                          for op in current['operations'].values()), 'EMPLOYEE_HAS_RETAINED_CLAIM')
             observed = self._observe(selected, proposed)
@@ -567,6 +569,27 @@ class OperationStore:
             op.update(state=after, last_receipt_digest=receipt_digest, reason=None)
         # An ACK hash is a reference, not native verification or capacity credit.
         return self._change(selected, handle, expected_version, acknowledge)
+
+    def complete_native(self,selected,handle,proof,*,expected_version):
+        """Fixed native settlement only; no receipt hash/JSON/callback credit.
+        Its Gate retains a pending fence through all remaining finalizers.
+        """
+        from .worker_resource_finalization import assert_completion
+        scope(selected);selected=copy.deepcopy(selected);version(expected_version,True)
+        def finish(current,context,lock):
+            matches=[key for key,lease in self._leases.items() if lease is handle]
+            need(len(matches)==1,'MISSING_ACTIVE_CLAIM');key=matches[0]
+            old=current['operations'].get(key)
+            need(old is not None and old['scope']==selected and old['state']=='VERIFY_RECORDED' and
+                 old['version']==expected_version==7,'NATIVE_COMPLETION_PHASE')
+            digest_value=assert_completion(proof,self,selected,old)
+            value=copy.deepcopy(current);value['revision']+=1
+            value['operations'][key].update(state='COMPLETED',version=8,last_receipt_digest=digest_value,reason=None)
+            def fence():
+                need(assert_completion(proof,self,selected,old)==digest_value,'NATIVE_COMPLETION_CHANGED')
+            self._commit(value,context,lock,selected,fence)
+            return self._view(value['operations'][key])
+        return self._locked(selected,finish)
 
     def mark_uncertain(self, selected, handle, *, expected_version, reason):
         need(type(reason) is str and re.fullmatch('[A-Z][A-Z0-9_]{0,79}', reason), 'REASON')

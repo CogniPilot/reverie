@@ -6,10 +6,17 @@ import { homedir, totalmem } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { TerminalLifecycle, hasTerminal, registeredTerminal, assertImageProfile, checkRetainedIntent, terminalEngineSocket } from './owner-terminal-lifecycle.mjs';
 
 function fail(message) { throw new Error(message); }
+let terminalSocket = null;
 function run(program, args, optional = false) {
-  const result = spawnSync(program, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const options = { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 };
+  if (program === 'docker' && terminalSocket) {
+    args = ['--host', 'unix://' + terminalSocket, ...args]; options.env = { ...process.env };
+    for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY', 'DOCKER_API_VERSION']) delete options.env[name];
+  }
+  const result = spawnSync(program, args, options);
   if (!optional && (result.error || result.status !== 0)) fail(program + ': ' + (result.error?.message || result.stderr || 'command failed'));
   return result;
 }
@@ -19,11 +26,12 @@ function directory(path) {
 }
 function main() {
   const args = process.argv.slice(2);
-  let root = process.env.REVERIE_ROOT || join(homedir(), 'reverie'), source = null, updates = false;
+  let root = process.env.REVERIE_ROOT || join(homedir(), 'reverie'), source = null, updates = false, restart = false;
   const projects = [];
   while (args.length) {
     const flag = args.shift();
-    if (flag === '--help') { console.log('reverie-start [--root DIR] [--project NAME=PATH] [--source PATH] [--allow-updates]'); return; }
+    if (flag === '--help') { console.log('reverie-start [--root DIR] [--project NAME=PATH] [--source PATH] [--allow-updates] [--restart]'); return; }
+    if (flag === '--restart') { restart = true; continue; }
     if (flag === '--allow-updates') { updates = true; continue; }
     if (flag === '--project') {
       const value = args.shift() || '', separator = value.indexOf('=');
@@ -48,10 +56,25 @@ function main() {
   }
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const keys = ['version', 'containerName', 'port', 'companyRoot', 'workspace', 'scratch', 'memoryMiB', 'pidsLimit'];
-  if (!config || Array.isArray(config) || Object.keys(config).some(k => ![...keys, 'adminPhoneWake', 'ownerCodingEvidence'].includes(k)) ||
+  if (!config || Array.isArray(config) || Object.keys(config).some(k => ![...keys, 'adminPhoneWake', 'ownerCodingEvidence', 'protectedWebsite', 'websiteRuntime', 'ownerTerminalConfig'].includes(k)) ||
       keys.some(k => !(k in config)) || config.version !== 1) fail('Unsupported deployment.json fields or version.');
   if ('adminPhoneWake' in config && typeof config.adminPhoneWake !== 'boolean') fail('adminPhoneWake must be a boolean.');
   if ('ownerCodingEvidence' in config && typeof config.ownerCodingEvidence !== 'boolean') fail('ownerCodingEvidence must be a boolean.');
+  if ('protectedWebsite' in config && typeof config.protectedWebsite !== 'boolean') fail('protectedWebsite must be a boolean.');
+  if ('websiteRuntime' in config && typeof config.websiteRuntime !== 'string') fail('websiteRuntime must be a closed string.');
+  const websiteRuntimes = {
+    default: { attribute: 'dockerImage', image: 'reverie:latest' },
+    resource: { attribute: 'resourceActorImage', image: 'reverie:latest' },
+    terminal: { attribute: 'ownerTerminalImage', image: 'reverie-owner-terminal:latest' },
+    'resource-terminal': { attribute: 'resourceTerminalImage', image: 'reverie-owner-terminal:latest' },
+  };
+  const runtime = config.websiteRuntime ?? 'default';
+  if (typeof runtime !== 'string' || !Object.hasOwn(websiteRuntimes, runtime)) fail('Unknown websiteRuntime.');
+  if (runtime !== 'default' && config.protectedWebsite !== true) fail('Optional website runtimes require protectedWebsite.');
+  if ('ownerTerminalConfig' in config) directory(config.ownerTerminalConfig);
+  if ((hasTerminal(runtime) || registeredTerminal()) && !config.ownerTerminalConfig) fail('Protected H needs its existing private ownerTerminalConfig; a registered unit cannot be ignored.');
+  if (hasTerminal(runtime) || registeredTerminal()) terminalSocket = terminalEngineSocket(config.ownerTerminalConfig);
+  if (restart && !hasTerminal(runtime)) fail('--restart is the protected H restart workflow; ordinary start behavior is unchanged.');
   if (typeof config.containerName !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(config.containerName)) fail('Invalid containerName.');
   for (const [key, min, max] of [['port', 1, 65535], ['memoryMiB', 512, 1048576], ['pidsLimit', 64, 65536]]) {
     if (!Number.isInteger(config[key]) || config[key] < min || config[key] > max) fail('Invalid ' + key + '.');
@@ -66,7 +89,48 @@ function main() {
   const signatureConfig = { ...config };
   if (signatureConfig.adminPhoneWake === false) delete signatureConfig.adminPhoneWake;
   if (signatureConfig.ownerCodingEvidence === true) delete signatureConfig.ownerCodingEvidence;
+  if (signatureConfig.protectedWebsite === false) delete signatureConfig.protectedWebsite;
+  // Runtime/profile selection has its own immutable image label and private H
+  // binding. Keep that mutable projection out of stable deployment identity so
+  // a reviewed runtime update can subsequently use ordinary start/restart.
+  delete signatureConfig.websiteRuntime;
+  delete signatureConfig.ownerTerminalConfig;
   const signature = createHash('sha256').update(JSON.stringify({ config: signatureConfig, source, updates, uid, gid, ...(projects.length ? { projects } : {}) })).digest('hex');
+  const privateTmpfs = {
+    '/tmp': 'rw,nosuid,nodev,size=256m,mode=1777',
+    '/run': 'rw,nosuid,nodev,noexec,size=16m,mode=0755,uid=' + uid + ',gid=' + gid,
+  };
+  const repo = realpathSync(process.env.REVERIE_REPO || resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+  let lifecycle;
+  function lifecycleFor(oldRuntime = 'default') {
+    if (!lifecycle) {
+      const state = process.env.REVERIE_UPDATE_STATE_DIR || join(root, 'runtime/update-state');
+      mkdirSync(state, { recursive: true, mode: 0o700 });
+      lifecycle = new TerminalLifecycle({ repo, root, runtime, installation: config.ownerTerminalConfig, oldRuntime, state });
+      if (lifecycle.engineSocket !== terminalSocket) fail('H engine selection changed during describe.');
+      lifecycle.acquire();
+    }
+    return lifecycle;
+  }
+  function terminalIntent() {
+    const mounts = [];
+    const add = (src, destination, readonly = false) => mounts.push({ type: 'bind', source: realpathSync(src), destination, readonly });
+    add(join(config.companyRoot, 'data'), '/instances/default'); add(join(config.companyRoot, 'home'), '/home/agent');
+    add(config.workspace, '/reverie_workspace'); add(config.scratch, '/scratch');
+    add(join(root, 'runtime/passwd'), '/etc/passwd', true); add(join(root, 'runtime/group'), '/etc/group', true);
+    if (process.env.REVERIE_GPU_PUBLISHED_DIR) add(directory(process.env.REVERIE_GPU_PUBLISHED_DIR), '/host-published', true);
+    if (source) add(source, '/workspace');
+    for (const project of projects) add(project.path, '/projects/' + project.name);
+    if (updates) add(join(root, 'runtime/control'), '/run/reverie-control');
+    add(lifecycle.description.bootstrapMount.Source, '/run/reverie-owner-terminal', true);
+    const environment = ['REVERIE_CASES_PATH=/reverie_workspace/cases', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research'];
+    if (config.adminPhoneWake === true) environment.push('REVERIE_ADMIN_PHONE_WAKE=enabled');
+    environment.push('REVERIE_OWNER_CODING_EVIDENCE=' + (config.ownerCodingEvidence === false ? 'disabled' : 'enabled'));
+    if (updates) environment.push('REVERIE_CONTROL_DIR=/run/reverie-control');
+    return { name: config.containerName, user: uid + ':' + gid, workdir: '/reverie_workspace',
+      memory: config.memoryMiB * 1048576, swap: config.memoryMiB * 1048576, pids: config.pidsLimit, port: config.port,
+      tmpfs: privateTmpfs, labels: { 'reverie.deployment': signature }, environment, mounts };
+  }
   // Refuse to replace owner files, including dangling or differently targeted symlinks.
   for (const project of projects) {
     const link = join(config.workspace, project.name), target = '/projects/' + project.name;
@@ -87,7 +151,51 @@ function main() {
       ? evidenceValues.length === 1 && evidenceValues[0] === 'REVERIE_OWNER_CODING_EVIDENCE=disabled'
       : evidenceValues.length === 0 || (evidenceValues.length === 1 && evidenceValues[0] === 'REVERIE_OWNER_CODING_EVIDENCE=enabled');
     if (!evidenceMatches) fail('Existing console coding evidence startup setting differs. Use the reviewed update workflow; nothing was replaced.');
-    if (!container.State?.Running) run('docker', ['start', config.containerName]);
+    if (config.protectedWebsite === true) {
+      // Inspect actual protection before start/reuse; the deployment label is not security evidence.
+      const host = container.HostConfig || {}, env = container.Config?.Env;
+      const options = value => typeof value === 'string' ? value.split(',').sort().join(',') : null;
+      const leavesNixVisible = path => typeof path === 'string' && path.startsWith('/') &&
+        path !== '/' && path !== '/nix' && !path.startsWith('/nix/');
+      const protectedMatch = host.ReadonlyRootfs === true && host.Privileged === false &&
+        Array.isArray(host.CapDrop) && host.CapDrop.length === 1 && host.CapDrop[0] === 'ALL' &&
+        (host.CapAdd === null || (Array.isArray(host.CapAdd) && host.CapAdd.length === 0)) &&
+        host.PidMode === '' && host.IpcMode === 'private' &&
+        Array.isArray(host.SecurityOpt) && host.SecurityOpt.length === 1 &&
+        ['no-new-privileges', 'no-new-privileges:true'].includes(host.SecurityOpt[0]) &&
+        host.Tmpfs && Object.keys(host.Tmpfs).length === 2 &&
+        Object.entries(privateTmpfs).every(([path, value]) => options(host.Tmpfs[path]) === options(value)) &&
+        Array.isArray(host.MaskedPaths) && host.MaskedPaths.every(leavesNixVisible) &&
+        Array.isArray(host.ReadonlyPaths) && host.ReadonlyPaths.every(leavesNixVisible) &&
+        Array.isArray(container.Mounts) && container.Mounts.every(mount =>
+          leavesNixVisible(mount.Destination)) &&
+        Array.isArray(env) && env.every(value => typeof value === 'string' &&
+          !/^(?:LD_|(?:NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|GCONV_PATH|OPENSSL_CONF|OPENSSL_MODULES)(?:=|$))/.test(value));
+      if (!protectedMatch) fail('Existing console protected website settings differ or are unknown. Use the reviewed update workflow; nothing was replaced.');
+    }
+    if ((container.Config?.Labels?.['org.reverie.website.runtime'] ?? 'default') !== runtime)
+      fail('Existing console websiteRuntime differs. Use the reviewed update workflow; nothing was replaced.');
+    if (hasTerminal(runtime)) {
+      const h = lifecycleFor(runtime);
+      try {
+        if (container.State?.Running && !restart) { h.phase('await-ready'); h.refreshResource(); }
+        else {
+          const image = JSON.parse(run('docker', ['image', 'inspect', '--format', '{{json .}}', container.Image]).stdout);
+          const retained = container;
+          // All current intent is checked before old H/site stop. The stopped
+          // native readback is independently requalified before publication.
+          const intent = { ...terminalIntent(), hostFloors: { MaskedPaths: retained.HostConfig.MaskedPaths, ReadonlyPaths: retained.HostConfig.ReadonlyPaths } };
+          // Match immutable image/program before touching the healthy old H.
+          assertImageProfile(image, h.description); checkRetainedIntent(retained, image, intent);
+          h.phase('settle');
+          if (retained.State?.Running) run('docker', ['stop', '--time', '30', retained.Id]);
+          const stopped = JSON.parse(run('docker', ['inspect', '--type', 'container', '--format', '{{json .}}', retained.Id]).stdout);
+          h.prepare(stopped, image, intent); h.phase('start-listener');
+          run('docker', ['start', retained.Id]); h.phase('await-ready'); h.refreshResource();
+        }
+      } catch (error) { h.recordUnknown(restart ? 'restart' : 'reuse'); throw error; }
+      finally { h.close(); }
+    } else if (!container.State?.Running) run('docker', ['start', config.containerName]);
     console.log('Reverie: http://127.0.0.1:' + config.port + ' (existing container retained)');
     return;
   }
@@ -110,18 +218,25 @@ function main() {
   mkdirSync(identity, { recursive: true, mode: 0o700 });
   writeFileSync(join(identity, 'passwd'), 'root:x:0:0:root:/root:/bin/bash\nagent:x:' + uid + ':' + gid + ':Reverie agent:/home/agent:/bin/bash\n', { mode: 0o600 });
   writeFileSync(join(identity, 'group'), 'root:x:0:\nagent:x:' + gid + ':\n', { mode: 0o600 });
-  const repo = realpathSync(process.env.REVERIE_REPO || resolve(dirname(fileURLToPath(import.meta.url)), '..'));
   // Let Nix select Git for a checkout and path for an unpacked source archive.
-  const image = run('nix', ['build', repo + '#dockerImage', '--no-link', '--print-out-paths']).stdout.trim().split('\n').at(-1);
+  if (hasTerminal(runtime)) lifecycleFor();
+  const image = run('nix', ['build', repo + '#' + websiteRuntimes[runtime].attribute,
+    ...(lifecycle ? ['--out-link', join(lifecycle.operation, 'image')] : ['--no-link']), '--print-out-paths']).stdout.trim().split('\n').at(-1);
   if (!isAbsolute(image)) fail('Nix did not return an image archive path.');
   run('docker', ['load', '--input', image]);
-  const command = ['run', '--detach', '--init', '--name', config.containerName, '--restart', 'unless-stopped',
+  const command = [hasTerminal(runtime) ? 'create' : 'run', ...(hasTerminal(runtime) ? ['--pull', 'never'] : ['--detach']), '--init', '--name', config.containerName, '--restart', 'unless-stopped',
     '--workdir', '/reverie_workspace',
     '--user', uid + ':' + gid, '--memory', config.memoryMiB + 'm', '--memory-swap', config.memoryMiB + 'm',
     '--pids-limit', String(config.pidsLimit), '--publish', '127.0.0.1:' + config.port + ':3000',
     '--label', 'reverie.deployment=' + signature];
+  if (config.protectedWebsite === true) {
+    command.push('--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--ipc', 'private');
+    for (const [path, options] of Object.entries(privateTmpfs)) command.push('--tmpfs', path + ':' + options);
+  }
+  const intentMounts = [];
   function mount(src, dst, readonly = false) {
     command.push('--mount', 'type=bind,src=' + src + ',dst=' + dst + (readonly ? ',readonly' : ''));
+    intentMounts.push({ type: 'bind', source: realpathSync(src), destination: dst, readonly });
   }
   mount(data, '/instances/default'); mount(home, '/home/agent'); mount(config.workspace, '/reverie_workspace'); mount(config.scratch, '/scratch');
   const gpu = process.env.REVERIE_GPU_PUBLISHED_DIR;
@@ -141,8 +256,23 @@ function main() {
     mount(control, '/run/reverie-control');
     command.push('--env', 'REVERIE_CONTROL_DIR=/run/reverie-control');
   }
-  command.push('reverie:latest');
-  run('docker', command);
+  if (lifecycle) mount(lifecycle.description.bootstrapMount.Source, '/run/reverie-owner-terminal', true);
+  command.push(websiteRuntimes[runtime].image);
+  if (lifecycle) {
+    try {
+      lifecycle.phase('settle');
+      const cid = run('docker', command).stdout.trim();
+      const container = JSON.parse(run('docker', ['inspect', '--type', 'container', '--format', '{{json .}}', cid]).stdout);
+      const builtImage = JSON.parse(run('docker', ['image', 'inspect', '--format', '{{json .}}', container.Image]).stdout);
+      const environment = [];
+      for (let index = 0; index < command.length - 1; index++) if (command[index] === '--env') environment.push(command[++index]);
+      lifecycle.prepare(container, builtImage, { name: config.containerName, user: uid + ':' + gid, workdir: '/reverie_workspace',
+        memory: config.memoryMiB * 1048576, swap: config.memoryMiB * 1048576, pids: config.pidsLimit, port: config.port,
+        tmpfs: privateTmpfs, labels: { 'reverie.deployment': signature }, environment, mounts: intentMounts });
+      lifecycle.phase('start-listener'); run('docker', ['start', cid]); lifecycle.phase('await-ready'); lifecycle.refreshResource();
+    } catch (error) { lifecycle.recordUnknown('start'); throw error; }
+    finally { lifecycle.close(); }
+  } else run('docker', command);
   console.log('Reverie: http://127.0.0.1:' + config.port);
   console.log('Deployment settings: ' + configPath);
   console.log('Open the address above to create your owner account or sign in.');

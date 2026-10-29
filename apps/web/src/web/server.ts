@@ -10,6 +10,7 @@ import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
+import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
@@ -31,6 +32,7 @@ import { loadServiceAuthConfig } from '../service-auth-config.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
+import {EmployeeGpuClient, registerEmployeeGpuRoutes} from '../employee-gpu-access.js';
 import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
@@ -77,6 +79,8 @@ import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
+import { createOwnerTerminalRuntime } from '../owner-terminal-runtime.js';
+import { registerOwnerTerminalRoutes } from './routes/owner-terminal-routes.js';
 import fastifyMultipart from '@fastify/multipart';
 import { pasteImageDirInUseByOtherSession, startPasteImageGc, uploadDirs } from './paste-image-gc.js';
 import { CLEAN_EXIT_CLOSE_REASON, shouldCloseCleanlyExitedSession } from '../pane-exit-sweep.js';
@@ -88,6 +92,7 @@ import { execSync } from 'node:child_process';
 import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
 import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
+import { HostResumeHandler, HostWorkerResumeStream } from '../host-worker-resume.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
 import { planMoveHarness } from '../plan-move-launch.js';
 import {
@@ -327,6 +332,7 @@ import { PlanRequestCapabilities } from '../plan-request-capability.js';
 import { deliverPlanRequest } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
+import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { PlanService } from '../plan-accounts.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
 import { readFixedPr } from '../cron/fixed-github-watch.js';
@@ -452,7 +458,9 @@ export class WebServer extends EventEmitter {
   private chatBackup: ChatBackupScheduler | undefined;
   private companyService!: CompanyService;
   private companyWake!: CompanyWake;
+  private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
+  private workerViewerReconnect?: WorkerViewerReconnect;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -558,7 +566,8 @@ export class WebServer extends EventEmitter {
     basePath: string = '',
     private readonly goalPorts?: GoalServerInput,
     /** Explicit tracked service authentication config; absent means /api/service-decisions always answers 403. */
-    private readonly serviceAuthConfig?: string
+    private readonly serviceAuthConfig?: string,
+    private readonly resourceReplacementEnabled: boolean = false
   ) {
     super();
     this.setMaxListeners(0);
@@ -1083,6 +1092,10 @@ export class WebServer extends EventEmitter {
 
     // WebSocket support (terminal I/O — low-latency bidirectional channel)
     await this.app.register(fastifyWebsocket);
+    const ownerTerminal = createOwnerTerminalRuntime(verifiedOwner, ownerAuth);
+    registerOwnerTerminalRoutes(this.app, verifiedOwner, (request, employeeId) =>
+      this.companyService?.view(ownerFor(request)).employees.some(employee => employee.id === employeeId) === true,
+    ownerAuth, ownerTerminal);
 
     // Multipart parsing (used by paste-image). Replaces a hand-rolled
     // boundary scanner that had several edge-case bugs: literal boundary
@@ -1692,6 +1705,7 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     });
+    registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
     registerCompanyRoutes(
       this.app,
       ctx,
@@ -2156,6 +2170,18 @@ export class WebServer extends EventEmitter {
       recoveryPending: (record) => planMoveStore.recoveryPending(record),
       recoveryConfirmed: (record) => planMoveStore.recoveryConfirmed(record),
     });
+    this.workerViewerReconnect = new WorkerViewerReconnect({
+      company: this.companyService,
+      session: id => this.sessions.get(id),
+      ready: () => this.companyWakeReady,
+      moveGuard: id => planMoves.viewerReconnectGuard(id),
+      pause: id => this.chatroomService.delivery.pauseForMigration(id),
+      publish: session => {
+        this._persistSessionStateNow(session);
+        this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+      },
+    });
+    registerWorkerViewerReconnect(this.app, this.workerViewerReconnect, verifiedOwner);
     const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(
         {
@@ -2186,6 +2212,13 @@ export class WebServer extends EventEmitter {
         },
         ownerFor(request)
       );
+    if (this.resourceReplacementEnabled === true) {
+      const resources = new ResourceReplacementController(this.app, ownerAuth, this.companyService,
+        this.planService, this.chatroomService, planMoves, planMoveStore, ctx, this.mux,
+        process.env.REVERIE_WORKER_SOCKET);
+      registerResourceReplacementRoutes(this.app, resources);
+      this.app.addHook('onClose', async () => resources.close());
+    }
     const availablePlanTarget = async (target: string) => {
       const account = await this.planService.account(target);
       if (!account) throw new PlanMoveError('Choose an available destination plan');
@@ -3723,6 +3756,7 @@ export class WebServer extends EventEmitter {
       this.broadcastSessionStateDebounced(session.id);
     }
     this.closeCleanlyExitedSessions();
+    void this.workerViewerReconnect?.tick().catch(() => undefined);
   }
 
   /**
@@ -3761,6 +3795,8 @@ export class WebServer extends EventEmitter {
       if (!this.sessions.has(key.slice(0, key.lastIndexOf(':')))) this.cleanExitCloseAttempts.delete(key);
     }
     for (const session of [...this.sessions.values()]) {
+      // A worker's outer pane proves transport loss, never a clean provider exit.
+      if (session.runtimeHealthScope === 'terminal') continue;
       const muxName = session.muxName;
       if (!muxName) continue;
       const close = shouldCloseCleanlyExitedSession({
@@ -4034,6 +4070,15 @@ export class WebServer extends EventEmitter {
       }
       await this.finalizeRestoredState(restored);
       this.companyWakeReady = restored;
+      this.hostResumeStream = new HostWorkerResumeStream(process.env.REVERIE_WORKER_SOCKET,
+        new HostResumeHandler({
+          company: () => ({ employees: this.companyService.registeredEmployees() }),
+          saved: id => this.store.getSession(id),
+          live: id => { const session=this.sessions.get(id);
+            return !!session && session.pid!==null && !session.paneExit && session.status!=='stopped'; },
+          wake: (id,stillCurrent) => this.companyWake.wakeOne(id,{stillCurrent}),
+        }));
+      this.hostResumeStream.start();
       await this.autoRestorePinnedAfterRestart();
 
       // Instance-scoped reaper: after restore, `docker rm -f` managed containers of
@@ -5208,6 +5253,8 @@ export class WebServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.companyWakeReady = false;
+    this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });
     await this.accountLogins?.stopAll().catch(() => {});
@@ -5416,8 +5463,10 @@ export async function startWebServer(
   allowUnauthenticatedNetwork: boolean = false,
   basePath: string = '',
   goalPorts?: GoalServerInput,
-  serviceAuthConfig?: string
+  serviceAuthConfig?: string,
+  resourceReplacementEnabled: boolean = false
 ): Promise<WebServer> {
+  const resourceArgs: [] | [boolean] = resourceReplacementEnabled === true ? [true] : [];
   const server = new WebServer(
     port,
     https,
@@ -5427,7 +5476,8 @@ export async function startWebServer(
     allowUnauthenticatedNetwork,
     basePath,
     goalPorts,
-    serviceAuthConfig
+    serviceAuthConfig,
+    ...resourceArgs
   );
   await server.start();
   return server;

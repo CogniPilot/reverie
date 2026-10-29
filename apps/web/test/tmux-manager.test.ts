@@ -23,6 +23,7 @@ import {
 } from '../src/tmux-manager.js';
 import { execSync, exec } from 'node:child_process';
 import type { MuxSession } from '../src/mux-interface.js';
+import { withWriteGate } from '../src/submit-settle.js';
 
 // ============================================================================
 // Unit Tests (mocked)
@@ -274,6 +275,18 @@ describe('TmuxManager (unit)', () => {
     it('should attach every session through the dedicated Reverie socket', () => {
       const args = manager.getAttachArgs('reverie-00000030');
       expect(args).toEqual(['-L', 'reverie', 'attach-session', '-t', 'reverie-00000030']);
+    });
+
+    it('refuses every key shape but text + Enter for a gated write, before any transport', async () => {
+      manager.registerSession({ sessionId: 'gated', muxName: 'reverie-00000031', pid: 12345, createdAt: Date.now(), workingDir: '/tmp', mode: 'codex', attached: false });
+      const gated = (input: string, options = {}) => withWriteGate(() => true, () => manager.sendInput('gated', input, options));
+      expect((await gated('\r')).result).toBe(false); // a bare Enter
+      expect((await gated('wake')).result).toBe(false); // text without Enter
+      expect((await gated('wake\r', { opencode: true })).result).toBe(false); // the ungated OpenCode typing path
+      expect(await manager.sendInput('gated', 'wake', { stillIdle: () => true })).toBe(false);
+      // Text + Enter goes on to the (test-mode) transport; an ungated write is not affected.
+      expect((await gated('wake\r')).result).toBe(true);
+      expect(await manager.sendInput('gated', '\r')).toBe(true);
     });
 
     it('should attach registered sessions on the same dedicated socket (no per-session socket)', () => {
@@ -1013,6 +1026,23 @@ process.exit(result.status === null ? 1 : result.status);`);
         const command = vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0];
         expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t 'reverie-abcd1234'`);
         if (onlyIfDead) expect(command).not.toMatch(/respawn-pane\s+-k\b/);
+      } finally { nonTestManager.destroy(); }
+    });
+
+    it.each([false, true])('emits workerAttachOnly=%s in the actual canonical respawn command only for this call', async workerAttachOnly => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/fixture/worker.sock');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const nonTestManager = new NonTestTmuxManager();
+      nonTestManager.registerSession({ sessionId: 'viewer1234', muxName: 'reverie-abcd1234', pid: 1000,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true });
+      try {
+        expect(await nonTestManager.respawnPane({ sessionId: 'viewer1234', workingDir: '/tmp', mode: 'shell',
+          onlyIfDead: true, workerAttachOnly })).toBe(4242);
+        const { exec: currentExec } = await import('node:child_process');
+        const command = String(vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0]);
+        expect(command).toContain('reverie-worker-exec');
+        expect(command.includes('--attach-only')).toBe(workerAttachOnly);
+        expect(command).not.toMatch(/respawn-pane\s+-k\b/);
       } finally { nonTestManager.destroy(); }
     });
 

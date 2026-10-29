@@ -14,12 +14,15 @@ CLEANUP_CODES = frozenset({'VIEWER_UNREAPED', 'VIEWER_START_PENDING', 'ENGINE_CL
     'OFFICE_HANDLER_ACTIVE', 'OFFICE_CLOSE_FAILED', 'LOCK_UNAVAILABLE', 'SUPERVISOR_ACTIVE',
     'HANDLER_ACTIVE', 'DEADLINE_EXHAUSTED', 'PROVIDER_CLEANUP_UNCONFIRMED', 'CLEANUP_ERROR',
     # Goal-on-3be composition: 3be's storage leases carried into the fixed diagnostic vocabulary.
-    'STORAGE_RELEASE_UNCONFIRMED', 'STORAGE_LOCK_UNAVAILABLE', 'LEASE_PEER_ACTIVE'})
+    'STORAGE_RELEASE_UNCONFIRMED', 'STORAGE_LOCK_UNAVAILABLE', 'LEASE_PEER_ACTIVE',
+    'RESOURCE_ADMISSION_RELEASE_UNCONFIRMED'})
 
 
 class CleanupUnconfirmed(RuntimeError):
     def __init__(self, codes):
-        self.codes = tuple(sorted(set(codes) & CLEANUP_CODES))
+        # Never silently erase the only reason an operation remains failed.
+        # Unknown details still stay private; they are not a successful cleanup.
+        self.codes = tuple(sorted(set(codes) & CLEANUP_CODES)) or ('CLEANUP_ERROR',)
         super().__init__('Broker cleanup unconfirmed: ' + ','.join(self.codes))
 
     def report(self):

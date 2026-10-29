@@ -1,9 +1,94 @@
 # Worker image switch core
 
+`lib.workerDockerImageProvenance` builds immutable facts for the exact same
+arguments as `lib.workerDockerImage`: `system`, `uid`, `gid`, subordinate UID/GID
+starts and count, and optional `browser` (default `false`). It selects that
+factory's archive and static human toolkit itself; there is no caller-supplied
+archive, toolkit, command or qualification flag. The output is
+`share/reverie/worker-image.json`, purpose `worker-image-provenance-v1`.
+
+Save the selected factory arguments in an owner-private JSON file outside the
+checkout, with only `system`, `uid`, `gid`, `subuidStart`, `subgidStart`,
+`subidCount` and optional `browser`. Confirm the mapping ranges against the
+existing protected host grants described in [worker-docker.md](worker-docker.md).
+From the reviewed committed checkout, build the matching archive and facts with:
+
+```sh
+export REVERIE_WORKER_FLAKE="git+file://$(pwd -P)?rev=$(git rev-parse HEAD)"
+export REVERIE_WORKER_PROFILE="$HOME/reverie/worker-image-profile.json"
+nix build --impure --expr '
+  let f = builtins.getFlake (builtins.getEnv "REVERIE_WORKER_FLAKE");
+      selected = builtins.fromJSON (builtins.readFile (builtins.getEnv "REVERIE_WORKER_PROFILE"));
+  in f.lib.workerDockerImageProvenance selected
+' --out-link "$HOME/.local/state/reverie/worker-image-provenance"
+```
+
+The facts reference the archive's immutable store path. No host account setup,
+image load, broker configuration write or laptop recreation occurs in this build.
+
+The producer binds the complete image Config/RootFS/platform/creation metadata,
+archive bytes, fixed factory/source inputs and exact static toolkit manifest. It
+pins the selected producer/import/wiring files inside the full immutable source
+path; those selected hashes alone do not attest the entire Nix toolchain closure.
+Complete Config/RootFS and archive verification remain separate required facts. It
+hashes the actual layer streams and verifies the final direct, root-owned mode
+0555 toolkit files and protected ancestors, including later replacements and
+whiteouts. It parses ELF metadata without running either program. The artifact
+is neither owner authorization nor a running-container/canary receipt. A native
+caller must independently compare the actual loaded image with these full facts,
+qualify its current lifecycle/custody/capacity/owner conditions and preserve
+uncertain outcomes. Building facts does not load, select or activate an image.
+
+Keep the owner's actual UID/GID, subordinate mappings and rootless/browser
+profile when selecting this factory. Generic `workerImage` uses UID/GID 2000 and
+does not substitute for a differently qualified fleet. Browser tooling adds no
+device grant. The static toolkit is included by `worker = true`; there is no
+separate toolkit-enable argument. Real H/channel and rootless-Docker acceptance
+remain separate canaries after an admitted installation window.
+
 The reusable `reverie.worker_image.WorkerImageUpdate` stage changes only a private
-broker configuration's top-level `image` value. It is intended for the reviewed
-paired-image planner. It currently has no worker-service CLI or flake wiring;
-that wiring remains subject to the paired contract review.
+broker configuration's top-level `image` value. It is intended for fixed host
+maintenance compositions. The core itself grants no paired website activation
+or fleet lifecycle authority.
+
+The owner-local `prepare-worker-image-switch` / `apply-worker-image-switch`
+composition is separate from paired website activation. It uses the existing
+packaged `reverie-worker-service --config ...` launcher, an already READY R
+domain, its exact installed matching broker generation, a fresh private
+`--operation`, and a closed private `--selection`:
+`oldImage`, `newImage`, `deploymentPath`, and `profile: {path, sha256}`. The
+profile must come from the fixed immutable worker factory provenance producer;
+copied instance JSON, image tags, a generic UID2000 image, or an evaluated path
+without qualification cannot replace it. The deployment must match the current
+worker's company root and website name; its existing
+`runtime/update-state/update.lock` is derived, never chosen as a command option.
+An unmatched update-state override refuses.
+Upgrade the broker transport to that exact package generation first. A legacy
+registered unit does not gain the new startup fence from the caller's code;
+an older precheck/broker generation therefore refuses before image maintenance.
+The manager's loaded precheck and broker paths and argument vectors must also
+match the immutable unit, with no drop-ins or pending reload. The on-disk link
+and `NeedDaemonReload=no` alone do not prove that systemd loaded the new code.
+
+Prepare records a finite plan and releases its locks without changing the image
+or leaving a hold. Apply requires `--plan-sha256`, obtains maintenance followed
+by the existing R admission lock, repeats the native plan, then publishes a
+closed durable purpose in the existing R pending file before calling this core.
+Only that process's fixed transition object can recognize its own fence. The
+reservation marker, resource/profile journals, owner intent and GPU grants stay
+unchanged. Both lock finalizers complete while pending remains; current facts
+and private identities are checked before the final pending unlink. A possible
+write, ACK loss or finalizer failure retains reconciliation-required evidence;
+there is no force, retry, clear or automatic rollback path.
+
+Ordinary service start, its real unit precheck, and broker recovery refuse the
+durable pending file. R admission also binds the current configuration's image
+and rechecks its identity after native observation. A process which loaded an
+old image before maintenance therefore cannot resume after fence removal and
+create using the old pin. The tool never stops a broker or laptop to satisfy its
+preconditions. An installed H/resource consumer requires its separate reviewed
+maintenance/rebind workflow. Success means only `IMAGE_PIN_COMMITTED`;
+fleet recreation and native toolkit qualification remain separate acceptance.
 
 Both image arguments must be full, lowercase `sha256:` IDs that Docker already
 has loaded. Tags, names, short IDs, URLs and omitted pins are refused. Moving a

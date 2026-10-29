@@ -371,6 +371,49 @@ class ShutdownTests(unittest.TestCase):
         self.assertEqual([c.args for c in flags.call_args_list],[(2,False),(2,True)])
 
 
+    def test_resource_release_failure_stays_fatal_and_reports_its_fixed_code(self):
+        with tempfile.TemporaryDirectory(prefix='broker-admission-cleanup-') as directory:
+            broker = Broker({'maxWorkers': 1, 'socket': directory + '/broker.sock'})
+            class FailedGuard:
+                def __exit__(self, *_args):
+                    raise OSError('synthetic private path/credential withheld')
+            guard = FailedGuard()
+            with self.assertRaisesRegex(RuntimeError, '^Resource admission release unconfirmed$'):
+                broker._release_resource_admission(guard)
+            broker.stop = Mock(side_effect=AssertionError('never stop a laptop in this control'))
+            with self.assertRaises(CleanupUnconfirmed) as caught:
+                self.serve_fixture(broker)
+            self.assertEqual(caught.exception.codes, ('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED',))
+            self.assertEqual(str(caught.exception), 'Broker cleanup unconfirmed: RESOURCE_ADMISSION_RELEASE_UNCONFIRMED')
+            self.assertIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED', broker.cleanup_uncertain)
+            broker.stop.assert_not_called()
+            with patch('reverie.worker_cleanup.os.get_blocking', return_value=True), \
+                    patch('reverie.worker_cleanup.os.set_blocking'), patch('reverie.worker_cleanup.os.write') as write:
+                caught.exception.report()
+            self.assertEqual(write.call_args.args[1], b'Broker cleanup unconfirmed: RESOURCE_ADMISSION_RELEASE_UNCONFIRMED\n')
+
+    def test_unknown_or_empty_failure_reason_is_redacted_but_never_empty(self):
+        for values in (set(), {'/synthetic/private/credential-body'}):
+            with self.subTest(values=values):
+                error = CleanupUnconfirmed(values)
+                self.assertEqual(error.codes, ('CLEANUP_ERROR',))
+                self.assertEqual(str(error), 'Broker cleanup unconfirmed: CLEANUP_ERROR')
+                self.assertNotIn('credential', str(error))
+
+    def test_all_fixed_broker_cleanup_producers_have_diagnostic_codes(self):
+        import ast
+        import reverie.worker as worker
+        from reverie.worker_cleanup import CLEANUP_CODES
+        tree = ast.parse(Path(worker.__file__).read_bytes())
+        produced = {node.args[0].value for node in ast.walk(tree)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'add' and isinstance(node.func.value, ast.Attribute)
+                    and node.func.value.attr == 'cleanup_uncertain' and len(node.args) == 1
+                    and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)}
+        self.assertIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED', produced)
+        self.assertEqual(produced - CLEANUP_CODES, set())
+
+
 class VersionTests(unittest.TestCase):
     def test_actual_g_rejects_all_noncanonical_config_versions(self):
         for version in (True, False, '1', None, 0, 2, 1.0, {}, []):

@@ -41,3 +41,58 @@ class BrokerConfiguration(unittest.TestCase):
    for bad in (None,123,[],{},False,'relative','/private/invalid\npath'):
     with self.subTest(value=bad),self.assertRaises(ValueError):load({'opsConfig':bad})
    with self.assertRaises(ValueError):load({'opsConfig':str(ops),'unknownOpsAuthority':True})
+
+class UnavailableBody(unittest.TestCase):
+ """Real local HTTP framing; unavailable ops never forwards or parses commands."""
+ def setUp(self):
+  import threading
+  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve()
+  self.reading=threading.Event();self.second_read=threading.Event();self.reads=[];self.received=[]
+  self.office=OfficeAPI(self.root/'phone',SID,lambda:(_ for _ in ()).throw(AssertionError('website touched')),self.root)
+  self.addCleanup(self.office.close);handler=self.office.server.RequestHandlerClass;test=self
+  class Observed(handler):
+   def setup(self):
+    super().setup();original=self.rfile;connection=self.connection
+    class Reader:
+     def __getattr__(self,name):return getattr(original,name)
+     def read1(self,size):
+      test.reads.append((size,connection.gettimeout()));test.reading.set()
+      if len(test.reads)>1:test.second_read.set()
+      value=original.read1(size);test.received.append(len(value));return value
+    self.rfile=Reader()
+  self.office.server.RequestHandlerClass=Observed
+ def connect(self,length=4,*,method='POST',path='/api/ops',extra=b''):
+  client=socket.socket(socket.AF_UNIX);client.settimeout(30);self.addCleanup(client.close)
+  client.connect(str(self.root/'phone/office.sock'))
+  request=f'{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {length}\r\n'.encode()+extra+b'\r\n'
+  client.sendall(request);return client
+ def response(self,client):
+  response=http.client.HTTPResponse(client);response.begin();status=response.status;response.read();response.close();return status
+ def test_split_body_finishes_before_confirmed_unavailable_response(self):
+  import select
+  client=self.connect();self.assertTrue(self.reading.wait(3),'bounded body read was never reached')
+  self.assertEqual(select.select([client],[],[],0)[0],[])
+  client.sendall(b'a');self.assertTrue(self.second_read.wait(3))
+  self.assertEqual(select.select([client],[],[],0)[0],[])
+  client.sendall(b'bcd');self.assertEqual(self.response(client),503);self.assertEqual(sum(self.received),4)
+  self.assertTrue(all(size<=4096 for size,_ in self.reads))
+ def test_exact_sixteen_KiB_invalid_json_is_discarded_without_command_parser(self):
+  from unittest.mock import patch
+  client=self.connect(16*1024)
+  with patch('reverie.ops_common.strict_json',side_effect=AssertionError('unavailable ops parser called')):
+   client.sendall(b'x'*(16*1024));self.assertEqual(self.response(client),503)
+  self.assertEqual(sum(self.received),16*1024);self.assertTrue(all(size<=4096 for size,_ in self.reads))
+ def test_invalid_framing_or_route_refuses_without_reading_or_forwarding(self):
+  for options,expected in [({'length':16*1024+1},400),({'method':'GET'},400),({'path':'/api/ops?unexpected=1'},400),({'extra':b'Content-Length: 4\r\n'},400),({'extra':b'Transfer-Encoding: chunked\r\n'},413)]:
+   with self.subTest(options=options):
+    client=self.connect(**options);self.assertEqual(self.response(client),expected);self.assertEqual(self.reads,[])
+ def test_incomplete_eof_is_bad_framing_not_a_confirmed_unavailable_request(self):
+  client=self.connect();client.sendall(b'a');client.shutdown(socket.SHUT_WR)
+  self.assertEqual(self.response(client),400);self.assertEqual(sum(self.received),1)
+ def test_real_slow_body_keeps_one_absolute_fifteen_second_deadline(self):
+  import time
+  client=self.connect();self.assertTrue(self.reading.wait(3),'bounded body read was never reached')
+  started=time.monotonic();time.sleep(5);client.sendall(b'a');self.assertTrue(self.second_read.wait(3))
+  # A new per-read15s would incorrectly grant another full window here.
+  self.assertLess(self.reads[1][1],12);self.assertEqual(client.recv(1),b'')
+  self.assertGreater(time.monotonic()-started,13);self.assertEqual(sum(self.received),1)

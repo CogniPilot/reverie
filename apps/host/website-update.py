@@ -78,7 +78,31 @@ def image_pin(image):
     require(exact(image.get('Id'),IMAGE),'Exact loaded image identity required')
     return {key:image.get(key) for key in ('Id','Config','RootFS','Os','Architecture','Variant')}
 
+def canonical_mount_records(records):
+    """Docker's outer Mounts array is producer order, not grant authority.
+
+    Preserve complete records, unknown fields and duplicate multiplicity. Only
+    this outer metadata array is canonicalized; HostConfig/RootFS stay exact.
+    """
+    require(type(records) is list and len(records)<=1024,'Complete Docker mount records required')
+    for row in records:
+        require(type(row) is dict and {'Type','Destination','RW'}<=set(row)
+                and row['Type'] in ('bind','volume','tmpfs') and type(row['Destination']) is str
+                and row['Destination'].startswith('/') and type(row['RW']) is bool,
+                'Malformed Docker mount record')
+        require((row['Type']=='tmpfs' and row.get('Source') in ('',None)) or
+                row['Type']!='tmpfs' and type(row.get('Source')) is str and row['Source'].startswith('/'),
+                'Malformed Docker mount source')
+        require(all(key not in row or type(row[key]) is str for key in ('Mode','Propagation')),
+                'Malformed Docker mount flags')
+    return sorted((copy.deepcopy(row) for row in records),key=canonical)
+
+def container_metadata(container):
+    require(type(container) is dict,'Complete container metadata required')
+    return {**container,'Mounts':canonical_mount_records(container.get('Mounts'))}
+
 def container_pin(container):
+    container=container_metadata(container)
     state=container['State']
     return {**{key:container.get(key) for key in ('Id','Name','Image','Config','HostConfig','Mounts')},
             'State':{key:state.get(key) for key in ('Running','Paused','Restarting','Dead','Pid','StartedAt')}}
@@ -93,7 +117,7 @@ def mounts(value):
 def bind_sources(container):
     result=[]
     require(type(container['Mounts']) is list and 1<=len(container['Mounts'])<=256,'Unsupported bind inventory')
-    for mount in container['Mounts']:
+    for mount in canonical_mount_records(container['Mounts']):
         require(mount['Type']=='bind','Only existing explicit bind layouts are supported')
         source=str(absolute(mount['Source']));path=Path(source);real=str(path.resolve(strict=True));info=path.stat()
         require(stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode),'Bind source is not regular data/directory')
@@ -107,7 +131,7 @@ def no_create_mounts(old):
     require(not old['Config'].get('Volumes'),'Implicit/anonymous volumes require separate review')
     result=[];used_legacy=set();used_original=set()
     propagation={'private','rprivate','shared','rshared','slave','rslave'}
-    for mount in old['Mounts']:
+    for mount in canonical_mount_records(old['Mounts']):
         require(mount['Type']=='bind','Only explicit bind layouts are supported')
         source=str(absolute(mount['Source']));target=str(absolute(mount['Destination']))
         modes=set(filter(None,(mount.get('Mode') or '').split(',')))
@@ -238,7 +262,21 @@ def _flag(argv,name):
     require(len(values)<=1,'Duplicate selected auth path')
     return values[0] if values else None
 
-def backup_map(old,spec,review):
+def _terminal_profile(value):
+    if value is not None:
+        from reverie.owner_terminal_website import TerminalWebsiteProfile
+        require(type(value) is TerminalWebsiteProfile,'Fixed H-only website profile required')
+    return value
+
+def _link_codec():
+    # Fixed read-only codecs, including when this standalone module is loaded
+    # by an immutable launcher rather than registered in sys.modules.
+    from types import SimpleNamespace
+    return SimpleNamespace(environment=environment,resolve_mounted=resolve_mounted,open_path=open_path,
+                           _stamp=_stamp,container_metadata=container_metadata)
+
+def backup_map(old,spec,review,*,terminal=None):
+    terminal=_terminal_profile(terminal)
     env=environment(spec.get('Env') or [])
     get=lambda key,default:env.get(key,key+'='+default).split('=',1)[1] or default
     data=str(absolute(get('REVERIE_DATA_DIR',get('REVERIE_DATA','/instances/default')+'/console')))
@@ -255,7 +293,9 @@ def backup_map(old,spec,review):
             a=Path(item['hostPath']);b=Path(other['hostPath'])
             require(not (a==b or a.is_relative_to(b) or b.is_relative_to(a)),'Overlapping host backup scopes')
     selected=[item for item in planned if item['containerPath']==data]
-    require(len(selected)==1 and selected[0]['rootPin']['type']=='directory' and selected[0]['exclude']==['accounts'],'Console scope must be explicit, excluding only live provider accounts')
+    expected_exclusions=['accounts'] if terminal is None else terminal.exclusions()
+    require(len(selected)==1 and selected[0]['rootPin']['type']=='directory' and selected[0]['exclude']==expected_exclusions,'Console scope must be explicit, excluding only live provider accounts and qualified H link facts')
+    if terminal is not None:terminal.assert_links(_link_codec(),old,spec)
     argv=(spec.get('Entrypoint') or [])+(spec.get('Cmd') or [])
     old_argv=(old['Config'].get('Entrypoint') or [])+(old['Config'].get('Cmd') or [])
     old_env=environment(old['Config'].get('Env') or [])
@@ -273,9 +313,11 @@ def backup_map(old,spec,review):
     # Unknown wrappers/daemon launches can hide effective bootstrap selection;
     # do not infer absence by searching just one argv spelling.
     known_entrypoint=['/bin/tini','-g','-s','--','/usr/local/bin/reverie-start']
-    for cfg in (old['Config'],spec):
-        cmd=cfg.get('Cmd')
-        require(cfg.get('Entrypoint')==known_entrypoint and type(cmd) is list and len(cmd)>=2 and cmd[0] in ('reverie','/bin/reverie') and cmd[1]=='web','Effective website launch/bootstrap layout is unsupported')
+    if terminal is None:
+        for cfg in (old['Config'],spec):
+            cmd=cfg.get('Cmd')
+            require(cfg.get('Entrypoint')==known_entrypoint and type(cmd) is list and len(cmd)>=2 and cmd[0] in ('reverie','/bin/reverie') and cmd[1]=='web','Effective website launch/bootstrap layout is unsupported')
+    else:terminal.require_launch(old['Config'],spec)
     def data_path(values):
         read=lambda key,default:values.get(key,key+'='+default).split('=',1)[1] or default
         return str(absolute(read('REVERIE_DATA_DIR',read('REVERIE_DATA','/instances/default')+'/console')))
@@ -445,10 +487,10 @@ def checkpoint(scopes,output):
     return {'file':output.name,'files':count,'bytes':total,'entries':manifest,'archiveSha256':archive_hash,'archiveBytes':archive_bytes,'treeDigest':digest(initial),'excluded':[{key:scope[key] for key in ('containerPath','exclude')} for scope in scopes]}
 
 class WebsiteStage:
-    def __init__(self,api,state_directory,deployment_path,schema_policy_path,*,guard,ready):
+    def __init__(self,api,state_directory,deployment_path,schema_policy_path,*,guard,ready,terminal=None):
         self.api=api;self.state=Path(str(absolute(str(state_directory))));self.deployment=Path(str(absolute(str(deployment_path))));self.policy=Path(str(absolute(str(schema_policy_path))))
-        self.guard=guard;self.ready=ready;self._mutex=threading.RLock();self._depth=0;self._lock_fd=None
-    def _container(self,selector):return self.api('GET','/containers/'+urllib.parse.quote(selector,safe='')+'/json')
+        self.guard=guard;self.ready=ready;self.terminal=_terminal_profile(terminal);self._mutex=threading.RLock();self._depth=0;self._lock_fd=None
+    def _container(self,selector):return container_metadata(self.api('GET','/containers/'+urllib.parse.quote(selector,safe='')+'/json'))
     def _image(self,image):
         require(exact(image,IMAGE),'Exact image SHA256 ID required; tags are unsupported')
         result=self.api('GET','/images/'+image+'/json');require(result['Id']==image,'Loaded image identity mismatch');return result
@@ -462,9 +504,17 @@ class WebsiteStage:
         require(type(review['reviewId']) is str and 1<=len(review['reviewId'])<=128 and all(32<=ord(c)<127 for c in review['reviewId']),'Missing review identity')
         require(review['approvedSpecDigest'] is None or exact(review['approvedSpecDigest'],re.compile(r'sha256:[a-f0-9]{64}')),'Invalid final-spec approval')
         require(review['oldImage']==old_image and review['newImage']==new_image and review['adoption']=='forward-only' and review['schemaFloors']==['GOAL','AUTH'],'Exact reviewed forward GOAL/AUTH adoption policy required')
-        return deployment,review,digest({'deployment':hashlib.sha256(raw).hexdigest(),'schemaPolicy':hashlib.sha256(review_raw).hexdigest()})
+        inputs={'deployment':hashlib.sha256(raw).hexdigest(),'schemaPolicy':hashlib.sha256(review_raw).hexdigest()}
+        if self.terminal is not None:inputs['terminal']=self.terminal.input_binding()
+        return deployment,review,digest(inputs)
+    def _replacement_spec(self,old,previous,target,deployment):
+        if self.terminal is not None:return self.terminal.spec(replacement_spec,old,previous,target,deployment)
+        return replacement_spec(old,previous,target,deployment['adminPhoneWake'],deployment.get('ownerCodingEvidence',True))
+    def _backup_map(self,old,spec,review):return backup_map(old,spec,review,terminal=self.terminal)
     def control_paths(self):
-        return (self.state,self.deployment,self.policy,self.deployment.parent/'runtime/update-state')
+        paths=(self.state,self.deployment,self.policy,self.deployment.parent/'runtime/update-state')
+        if self.terminal is not None:paths+=tuple(self.terminal.initial.roots[k] for k in ('controlBase','ledgerBase'))
+        return paths
     def _admit_control(self,name,old,snapshot):
         require(type(snapshot) is dict and type(snapshot.get('workerBindSources')) is list,'Qualified all-worker bind inventory unavailable')
         binding=snapshot.get('websiteControlBinding')
@@ -490,7 +540,7 @@ class WebsiteStage:
         previous=self._image(expected_image);target=self._image(target_image)
         snapshot=self.guard.snapshot();control_binding,grant_digest=self._admit_control(name,old,snapshot)
         deployment,review,input_pin=self._inputs(name,expected_image,target_image)
-        spec=replacement_spec(old,previous,target,deployment['adminPhoneWake'],deployment.get('ownerCodingEvidence',True));scopes=backup_map(old,spec,review)
+        spec=self._replacement_spec(old,previous,target,deployment);scopes=self._backup_map(old,spec,review)
         for scope in scopes:
             a=self.state;b=Path(scope['hostPath'])
             require(not (a==b or a.is_relative_to(b) or b.is_relative_to(a)),'Journal/backups overlap live state')
@@ -548,7 +598,8 @@ class WebsiteStage:
         for key,value in expected.items():
             if key in ('HostConfig','Image'):continue
             require(candidate['Config'].get(key)==value,'Candidate process/environment configuration differs')
-        require(mounts(candidate)==old_mounts,'Candidate mount grants differ')
+        if getattr(self,'terminal',None) is None:require(mounts(candidate)==old_mounts,'Candidate mount grants differ')
+        else:self.terminal.verify_mounts(candidate,old_mounts)
     def _adopted_history(self,active,plan):
         """No filename or partial adopted object proves a durable prior success."""
         record=strict(private_read(active,1024*1024))
@@ -631,6 +682,7 @@ class WebsiteStage:
             record={'version':1,'operationId':plan['operationId'],'oldId':plan['oldId'],'oldImage':plan['oldImage'],'newImage':plan['newImage'],'phase':'admission','state':'held','newId':None,'oldStopped':False,'newStartAttempted':False,'automaticOldImageRollback':False,'schemaState':'not-started','planDigest':expected_plan_digest,'controlBinding':copy.deepcopy(plan['controlBinding']),'controlGrantDigest':plan['controlGrantDigest']}
             def save():self._save(operation/'receipt.private.json',record);self._save(active,record)
             def stable():
+                if self.terminal is not None:self.terminal.assert_links(_link_codec(),observed,plan['spec'])
                 current=self.guard.snapshot();require(digest(current)==plan['guardPin'],'Worker/broker/native intent guard changed')
                 bound,grants=self._admit_control(plan['name'],observed,current)
                 require(bound==plan['controlBinding'] and grants==plan['controlGrantDigest'],'Fresh custody/control admission changed')
@@ -642,13 +694,14 @@ class WebsiteStage:
             require(digest(image_pin(previous))==plan['oldImagePin'] and digest(image_pin(target))==plan['newImagePin'],'Loaded image metadata changed')
             deployment,review,_=self._inputs(plan['name'],plan['oldImage'],plan['newImage'])
             require(review['approvedSpecDigest']==plan['specPin'],'Exact final-spec approval missing/stale')
-            expected_spec=replacement_spec(old,previous,target,deployment['adminPhoneWake'],deployment.get('ownerCodingEvidence',True));expected_spec.setdefault('Labels',{})[LABEL]=plan['operationId']
-            require(expected_spec==plan['spec'] and backup_map(old,expected_spec,review)==plan['backupScopes'],'Plan spec/backup map does not match actual reviewed inputs')
+            expected_spec=self._replacement_spec(old,previous,target,deployment);expected_spec.setdefault('Labels',{})[LABEL]=plan['operationId']
+            require(expected_spec==plan['spec'] and self._backup_map(old,expected_spec,review)==plan['backupScopes'],'Plan spec/backup map does not match actual reviewed inputs')
             require(bind_sources(old)==plan['bindSources'],'Bind source changed after plan')
             def sources_stable():require(bind_sources(old)==plan['bindSources'],'Bind source disappeared/replaced')
             estimate=validate_layout(plan['backupScopes'])
             require(__import__('shutil').disk_usage(self.state).free>estimate['bytes']+64*1024*1024,'Insufficient scoped checkpoint space')
             save();self._save(operation/'plan.private.json',plan,exclusive=True)
+            if self.terminal is not None:self.terminal.begin(self,operation,plan)
             candidate_name=plan['name']+'-candidate-'+plan['operationId'];old_name=plan['name']+'-before-'+plan['operationId'];new_id=None
             old_mounts=mounts(old)
             try:
@@ -656,17 +709,22 @@ class WebsiteStage:
                 created=self.api('POST','/containers/create?name='+candidate_name,plan['spec']);new_id=created['Id'];require(exact(new_id,CONTAINER) and new_id!=plan['oldId'],'Invalid candidate identity')
                 record.update(newId=new_id,phase='candidate-created');save()
                 candidate=self._container(new_id);require(not candidate['State']['Running'],'Candidate unexpectedly running');self._verify_created(candidate,plan,old_mounts);sources_stable()
+                if self.terminal is not None:self.terminal.validate_created(candidate,plan,old_mounts)
                 stable();old_cas();sources_stable();record['phase']='stop-old-attempt';save()
+                if self.terminal is not None:self.terminal.settle();stable();old_cas();sources_stable()
                 self.api('POST','/containers/'+plan['oldId']+'/stop?t=30')
                 stopped=self._container(plan['oldId']);require(stopped['Id']==plan['oldId'] and stopped['Image']==plan['oldImage'] and not stopped['State']['Running'],'Old website did not stop exactly')
                 record.update(oldStopped=True,phase='checkpoint');save();stable()
+                if self.terminal is not None:self.terminal.assert_links(_link_codec(),old,plan['spec'])
                 backup=checkpoint(plan['backupScopes'],operation/'website-state.private.tar');require(len(canonical(backup))<=64*1024*1024,'Checkpoint manifest exceeds history bound');self._save(operation/'checkpoint.private.json',backup,exclusive=True);stable()
                 record['phase']='rename-old-attempt';save();self.api('POST','/containers/'+plan['oldId']+'/rename?name='+old_name)
                 require(self._container(plan['oldId'])['Name']=='/'+old_name,'Old retained name differs')
                 self.api('POST','/containers/'+new_id+'/rename?name='+plan['name'])
                 selected=self._container(plan['name']);require(selected['Id']==new_id and not selected['State']['Running'],'Candidate/name changed');self._verify_created(selected,plan,old_mounts);stable();sources_stable()
+                if self.terminal is not None:self.terminal.before_start(new_id);stable();sources_stable()
                 record.update(phase='new-start-attempt',newStartAttempted=True,schemaState='unknown');save();stable();sources_stable()
                 self.api('POST','/containers/'+new_id+'/start')
+                if self.terminal is not None:self.terminal.await_ready(new_id)
                 require(self.ready(new_id,copy.deepcopy(plan['spec'])) is True,'Candidate readiness unverified')
                 selected=self._container(plan['name']);require(selected['Id']==new_id and selected['State']['Running'],'Candidate is not current/running');self._verify_created(selected,plan,old_mounts);stable()
                 require(not self._container(plan['oldId'])['State']['Running'],'Old image unexpectedly running')

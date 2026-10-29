@@ -7,6 +7,7 @@
  */
 
 import type { EventEmitter } from 'node:events';
+import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 import type {
   ProcessStats,
   PersistedRespawnConfig,
@@ -93,6 +94,8 @@ export interface CreateSessionOptions {
   codexTrustWorkspace?: string;
   /** Internal reconnect: the broker must never launch a new provider. */
   workerAttachOnly?: boolean;
+  /** Process-local fixed resource actor join, never a persisted/wire option. */
+  workerResourceLaunch?: ResourceWorkerLaunch;
   sessionId: string;
   workingDir: string;
   mode: SessionMode;
@@ -138,6 +141,8 @@ export interface CreateSessionOptions {
 
 /** Options for respawning a dead pane. */
 export interface RespawnPaneOptions {
+  /** Reconnect an existing worker viewer only; the broker refuses any cold start. */
+  workerAttachOnly?: boolean;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
   sessionId: string;
@@ -145,6 +150,8 @@ export interface RespawnPaneOptions {
   mode: SessionMode;
   /** Refuse if the pane is running at respawn time; never kill a process that won a recovery race. */
   onlyIfDead?: boolean;
+  /** Internal current-owner/binding guard, checked after awaited preparation. */
+  stillCurrent?: () => boolean;
   /** Session display name (tab name). */
   name?: string;
   /**
@@ -308,7 +315,7 @@ export interface TerminalMultiplexer extends EventEmitter {
   /**
    * Send input to a session via tmux send-keys.
    */
-  sendInput(sessionId: string, input: string, options?: { opencode?: boolean | 'person' }): Promise<boolean>;
+  sendInput(sessionId: string, input: string, options?: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean }): Promise<boolean>;
 
   // ========== Metadata ==========
 
@@ -380,6 +387,8 @@ export interface TerminalMultiplexer extends EventEmitter {
 
   /** Check if the pane in a session is dead (command exited but remain-on-exit keeps it alive) */
   isPaneDead(muxName: string): boolean;
+  /** Positive exact-pane readback; unreadable must never count as connected. */
+  readPaneLiveness?(muxName: string): Promise<import('./signal-target.js').PaneLiveness>;
 
   /**
    * What the last pane read saw of this session's agent, or `undefined` for
@@ -430,5 +439,6 @@ export interface TerminalMultiplexer extends EventEmitter {
    * currently rendering, never to replay it into an xterm. Returns null when the
    * pane cannot be read.
    */
-  capturePaneText?(muxName: string, paneTarget?: string): string | null;
+  /** `escapes` keeps SGR codes (`capture-pane -e`), for readers that must see styling such as Codex's dim placeholder. */
+  capturePaneText?(muxName: string, paneTarget?: string, options?: { escapes?: boolean }): string | null;
 }

@@ -7,7 +7,13 @@
   const prefs = () => {
     try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
   };
-  const installed = () => window.matchMedia('(display-mode: standalone)').matches;
+  const installed = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  // iPhone and iPad never offer an install prompt: Safari's Share menu adds the app, and push needs the installed app.
+  // iPadOS reports itself as a Mac, so a touch screen tells them apart.
+  const ios = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const installHelp = () => ios()
+    ? 'On iPhone or iPad, open Reverie in Safari, tap Share, then Add to Home Screen. Open it from the home screen to enable notifications (iOS 16.4 or later).'
+    : 'In Chrome, tap ⋮ → Add to home screen → Install. If Install is unavailable, choose Create shortcut.';
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     installPrompt = event;
@@ -21,7 +27,13 @@
   function refresh() {
     if (!dialog) return;
     dialog.querySelector('[data-install]').textContent = installed() ? 'Installed on this device' : 'Install Reverie';
-    dialog.querySelector('[data-install]').disabled = installed();
+    // Phones install and allow push only from a secure (HTTPS) page, so say why rather than offer a button that cannot work.
+    const insecure = !window.isSecureContext;
+    dialog.querySelector('[data-install]').disabled = installed() || insecure;
+    dialog.querySelector('[data-enable]').disabled = insecure;
+    const notice = dialog.querySelector('[data-insecure]');
+    notice.hidden = !insecure;
+    if (insecure) notice.textContent = `This page is open at ${location.origin}, a plain HTTP address. Phones only install apps and allow notifications over HTTPS, so open Reverie through its HTTPS address and try again.`;
     const permission = window.Notification?.permission;
     const subscribed = !!window.app?._pushSubscription;
     dialog.querySelector('[data-enable]').textContent = subscribed ? 'Update notifications' : 'Enable notifications';
@@ -51,7 +63,8 @@
       <div class="rm-head"><span class="rm-logo" aria-hidden="true">R</span><button type="button" data-close aria-label="Close phone setup">×</button></div>
       <h2 id="reverie-mobile-title">Your agents. In your pocket.</h2>
       <p>Install Reverie on your phone. Keep your channels, conversations and agents together.</p>
-      <section><span class="rm-step">1</span><div><h3>Add to your home screen</h3><p>Opens as its own app, straight into chat.</p><button type="button" class="rm-primary" data-install>Install Reverie</button><p class="rm-help" data-install-help hidden>In Chrome, tap ⋮ → Add to home screen → Install. If Install is unavailable, choose Create shortcut.</p></div></section>
+      <p class="rm-warning" role="alert" data-insecure hidden></p>
+      <section><span class="rm-step">1</span><div><h3>Add to your home screen</h3><p>Opens as its own app, straight into chat.</p><button type="button" class="rm-primary" data-install>Install Reverie</button><p class="rm-help" data-install-help hidden></p></div></section>
       <section><span class="rm-step">2</span><div><h3>Choose what reaches you</h3><p>Direct messages and messages addressed to you are on by default.</p><label><input type="checkbox" data-all> Also notify for all channel messages</label><label><input type="checkbox" data-preview> Show message previews on the lock screen</label><button type="button" class="rm-primary" data-enable>Enable notifications</button></div></section>
       <div class="rm-actions"><button type="button" data-test disabled>Send a test notification</button><button type="button" data-disable hidden>Turn off on this device</button></div>
       <p class="rm-status" role="status" aria-live="polite" data-status></p>
@@ -63,7 +76,12 @@
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
     dialog.addEventListener('close', () => dialog.remove());
     dialog.querySelector('[data-install]').onclick = (event) => run(event.currentTarget, async () => {
-      if (!installPrompt) { dialog.querySelector('[data-install-help]').hidden = false; return; }
+      if (!installPrompt) {
+        const help = dialog.querySelector('[data-install-help]');
+        help.textContent = installHelp();
+        help.hidden = false;
+        return;
+      }
       const prompt = installPrompt;
       installPrompt = null;
       await prompt.prompt();
@@ -71,7 +89,8 @@
       refresh();
     });
     dialog.querySelector('[data-enable]').onclick = (event) => run(event.currentTarget, async () => {
-      if (!window.isSecureContext || !('PushManager' in window) || !('Notification' in window)) throw new Error('Use Chrome and the HTTPS Reverie address for background notifications.');
+      if (ios() && !installed()) throw new Error('On iPhone or iPad, add Reverie to your home screen first, then enable notifications from the installed app.');
+      if (!window.isSecureContext || !('PushManager' in window) || !('Notification' in window)) throw new Error(ios() ? 'Notifications need iOS 16.4 or later and the HTTPS Reverie address.' : 'Use Chrome and the HTTPS Reverie address for background notifications.');
       // Permission is requested only from this explicit tap, before network work.
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') { refresh(); return; }

@@ -125,3 +125,60 @@ uncertainty clearance. Local lock release does not settle an uncertain provider
 effect; later launch/compute must respect the durable uncertainty boundary too.
 The same cleanup five-second cap remains distinct from effect authority and
 never permits another effect. No new deadline duration or policy is introduced.
+
+
+## Confirmed dead panes
+
+The verified owner's expert Restart action uses a fresh mux observation before
+recovering a dead pane. It preserves the saved account, model and native
+conversation. Stale work-detector flags do not block this recovery; actual
+running tasks, owner stop/vacation, changed EID/SID/generation, an overlapping
+restart and an unconfirmed pane observation still do. The final tmux operation
+omits `-k`, so a pane that became live is refused. Failures do not automatically
+send a second launch or break another process's storage lease.
+
+For an isolated laptop, the outside pane observes its terminal transport.
+Normal J reattaches a live inner provider; a confirmed dead inner pane is
+rechecked and passed to the existing exact-CID/PID stop and canonical recreation
+path. A read-only reconnect never creates a replacement. Runtime/account changes
+in place remain unavailable for an attached isolated laptop. An HTTP recovery
+response means the normal launch was requested, not proof of native provider
+readiness. Package and installed acceptance remain separate.
+
+Session and company projections include `runtimeHealth` and
+`runtimeHealthScope`. A confirmed local exit is `dead`/`provider`; an isolated
+worker's outside exit is `disconnected`/`terminal`. Missing evidence is `unknown`,
+never proof of healthy work. Transport-only exits do not automatically mark an
+employee OFF through the clean provider-exit sweep. These fields are observations,
+not owner intent or a permission to restart.
+
+## Plan-move storage handoff
+
+A normal successor J request cannot create or reserve capacity until it owns
+the employee's existing storage lease. If the detached source still owns that
+lease, the successor releases common resource admission before waiting. This
+lets the existing supervisor consume the durable source-stop request and finish
+the canonical laptop stop. The successor then reacquires admission and checks
+the current employee binding, generation, account/runtime recipe, owner intent,
+broker generation and configuration before claiming storage or creating anything.
+The original ten-second storage wait is not renewed.
+
+An unknown source stop keeps its storage and capacity fences. An uncertain
+admission release is not retried. Protected resource launches retain their
+one-shot admission and never enter this ordinary-J retry path. This changes no
+launch protocol or stop authority; reconnect and native readiness remain separate
+from provider replacement and completion.
+
+An ordinary saved-recipe restart may find a running laptop whose inner pane is
+confirmed dead, or whose original command published its completion receipt. At a
+full worker pool, the container still commits its old ceiling. The broker holds
+the same common resource admission and employee storage lease while it binds the
+exact old CID/init birth and completes canonical stop first. It then rechecks the
+captured owner/SID/generation/recipe/configuration and current storage/start gates
+before applying the unchanged candidate capacity calculation. No guessed old-seat
+credit or ceiling subtraction is used. A changed or unconfirmed source, foreign
+lease, OFF/vacation/concurrent replacement or failed stop cannot start a new
+harness. Healthy inner panes and attach-only requests keep their reconnect-only
+behavior; unrelated new seats and protected one-shot resource launches retain
+their existing admission checks. The later post-Nix/pre-create budget check also
+remains in place.

@@ -74,14 +74,14 @@ export class CompanyWake {
     return roots.length === 1 && roots[0].id === id;
   }
 
-  async wakeOne(employeeId: string, options: { explicitStart?: boolean } = {}): Promise<CompanyWakeReport> {
+  async wakeOne(employeeId: string, options: { explicitStart?: boolean; stillCurrent?: () => boolean } = {}): Promise<CompanyWakeReport> {
     // Owner starts queue behind an existing launch instead of dropping a click.
     // Eligibility is read again after the wait, so leaving/stopping still wins.
     if (options.explicitStart) {
       while (this.flight) await this.flight.catch(() => {});
     }
     if (this.flight) return { awakened: [], skipped: [{ employeeId, reason: 'recovery-in-progress' }] };
-    const flight = this.run(employeeId, options.explicitStart === true);
+    const flight = this.run(employeeId, options.explicitStart === true, options.stillCurrent);
     this.flight = flight;
     try {
       return await flight;
@@ -90,7 +90,7 @@ export class CompanyWake {
     }
   }
 
-  private async run(manualId?: string, explicitStart = false): Promise<CompanyWakeReport> {
+  private async run(manualId?: string, explicitStart = false, stillCurrent: () => boolean = () => true): Promise<CompanyWakeReport> {
     const report: CompanyWakeReport = { awakened: [], skipped: [] };
     const snapshot = this.deps.company();
     const order = companyWakeOrder(snapshot);
@@ -119,7 +119,7 @@ export class CompanyWake {
       const baseAllowed = () => {
         const employee = current();
         return (
-          !!employee &&
+          stillCurrent() && !!employee &&
           !employee.onVacation &&
           employee.desiredRunning !== false &&
           !this.deps.closing(employee.sessionId) &&
@@ -143,6 +143,7 @@ export class CompanyWake {
         skip('not-desired');
         continue;
       }
+      if (!stillCurrent()) { skip('changed-or-stopping'); continue; }
       if (this.deps.live(employee.sessionId)) {
         await this.deps.noteRunning(employee.sessionId);
         continue;

@@ -433,3 +433,19 @@ describe('page and org panels vs the phone drawers', () => {
     expect(z('.ca-org')).toBeLessThan(drawer);
   });
 });
+
+describe('composer text box keeps a readable width', () => {
+  // James 10-29: with the voice selector beside it the box shrank to one letter per line; the bar wraps its tools instead.
+  const top = (selector: string, prop: string): string | undefined => {
+    let found: string | undefined;
+    root.walkRules((r) => {
+      if (r.parent?.type === 'root' && r.selectors.includes(selector)) r.walkDecls(prop, (d) => (found = d.value));
+    });
+    return found;
+  };
+  it('wraps the bar and never lets the input shrink below 12em (or the full width when narrower)', () => {
+    expect(top('.ca-root .chatroom-composer', 'flex-wrap')).toBe('wrap');
+    expect(top('.ca-root .chatroom-input', 'min-width')).toBe('min(100%, 12em)');
+    expect(top('.ca-root .chatroom-handsfree', 'max-width')).toBe('10em');
+  });
+});

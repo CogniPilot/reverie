@@ -298,3 +298,37 @@ describe('isPlainPromptInput', () => {
     }
   });
 });
+
+describe('POST /api/sessions/:id/input ifIdle (agent wake)', () => {
+  let harness: { app: FastifyInstance; ctx: MockRouteContext };
+  beforeEach(async () => {
+    harness = await createEnvelopeHarness();
+  });
+  afterEach(async () => {
+    await harness.app.close();
+  });
+  const post = (body: Record<string, unknown>) =>
+    harness.app.inject({ method: 'POST', url: '/api/sessions/test-session-1/input', payload: body });
+
+  it('refuses a working session before typing or spending the seq', async () => {
+    const session = harness.ctx.sessions.get('test-session-1')!;
+    session.isWorking = true;
+    const res = await post({ input: 'wake\r', useMux: true, clientId: 'w1', seq: 1, ifIdle: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().errorCode).toBe(ApiErrorCode.SESSION_BUSY);
+    expect(session.writeBuffer).toEqual([]);
+    expect(session.shouldApplyInput('w1', 1)).toBe(true);
+  });
+
+  it('writes an idle session through the mux with an empty composer required and no raw fallback', async () => {
+    const session = harness.ctx.sessions.get('test-session-1')!;
+    const mux = vi.spyOn(session, 'writeViaMux').mockResolvedValue(false);
+    const raw = vi.spyOn(session, 'write');
+    const res = await post({ input: 'wake\r', useMux: true, clientId: 'w2', seq: 1, ifIdle: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual({ delivered: false }); // not an empty "accepted" body
+    expect(mux).toHaveBeenCalledWith('wake\r', expect.objectContaining({ requireEmptyComposer: true }));
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.shouldApplyInput('w2', 1)).toBe(true); // refused write leaves the seq retryable
+  });
+});

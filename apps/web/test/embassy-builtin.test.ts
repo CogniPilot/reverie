@@ -95,6 +95,31 @@ it('requires owner approval and private claim proof; persists, rotates and revok
   await restart.pair('cancel', proof);
   await expect(restart.guestPosts(invite.roomId, rotated.sessionToken, '0')).rejects.toMatchObject({ status: 401 });
 });
+it('renames the hosted room and closing it ends every guest session (James 10-23)', async () => {
+  const f = await setup();
+  await f.builtin.configure('https://embassy.example.com');
+  expect((await f.host.status()).room?.name).toBe('Company Embassy');
+  expect(await f.host.rename({ name: 'Drone Lab Embassy' })).toMatchObject({ room: { name: 'Drone Lab Embassy' } });
+  const restart = new BuiltinEmbassy(f.deps);
+  await restart.init();
+  expect((await f.host.status()).room?.name).toBe('Drone Lab Embassy');
+  // A joined guest, then close.
+  const invite = parsePairInvite((await f.host.createInvite(randomUUID())).qr),
+    claimSecret = randomBytes(32).toString('base64url');
+  const pending: any = await f.builtin.pair('request', {
+    roomId: invite.roomId, token: invite.token, claimHash: createHash('sha256').update(claimSecret).digest('base64url'),
+    company: 'Other company', identity: 'Guest',
+  });
+  await f.host.decide('approve', pending.requestId, pending.code);
+  const joined: any = await f.builtin.pair('claim', { requestId: pending.requestId, claimSecret });
+  await f.host.createInvite(randomUUID()); // an unused open invite
+  expect(await f.host.close()).toEqual({ closed: true, revoked: 3 });
+  await expect(f.builtin.guestPosts(invite.roomId, joined.sessionToken, '0')).rejects.toMatchObject({ status: 401 });
+  await expect(f.builtin.pair('claim', { requestId: pending.requestId, claimSecret })).rejects.toBeTruthy();
+  expect((await f.host.listInvites()).every((i: any) => i.revoked || i.state === 'revoked')).toBe(true);
+  const posts: any = await f.host.posts(0);
+  expect(JSON.stringify(posts)).toContain('The host closed this embassy');
+});
 it('limits the public protocol boundary to exact capability-authenticated routes', () => {
   expect(isEmbassyProtocolRoute('POST', '/api/embassy/pair-request')).toBe(true);
   for (const path of ['/api/company', '/api/embassy-host/settings', '/api/embassy/pair-request/extra'])

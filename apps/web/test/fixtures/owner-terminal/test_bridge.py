@@ -71,17 +71,83 @@ class BridgeTests(unittest.TestCase):
   self.process=subprocess.Popen([sys.executable,str(self.root/'boot.py'),str(NODE),str(self.root/'fixture.mjs'),str(self.root/'target.json')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env={'PATH':'/not-used'});self.addCleanup(stop_child,self.process)
   pr=Program(str(NODE),(str(NODE),));site=OwnWebsite('/not-an-engine','a'*64,'sha256:'+'b'*64,'c'*64,os.getpid(),read_proc(os.getpid())['start'],os.getuid(),os.getgid(),pr,pr)
   self.channel=Handoff(site);self.addCleanup(self.channel.close);first=accept_child(self.listener,self.process,'bootstrap');self.channel.bootstrap(first);second=accept_child(self.listener,self.process,'node');self.channel.accept_node(second)
+  self.stdout_buffer=bytearray()
   self.assertEqual(self.read()['event'],'ready')
   self.directory=self.root/'ledger';self.directory.mkdir(mode=0o700)
   self.native=NativeTarget();self.service=LedgerService(self.channel,self.directory,native_target=self.native,consumer_verifier=ConsumerPeer());self.addCleanup(self.service.close)
  def read(self):
-  self.assertTrue(select.select([self.process.stdout],[],[],3)[0],'owned Node response timeout')
-  line=self.process.stdout.readline();self.assertTrue(line,'owned Node exited before static metadata response');return json.loads(line)
+  # One console write may contain the control ACK and a lost-operation result.
+  # TextIO.readline can prefetch the second line, making select falsely report
+  # no kernel bytes. Keep a single bounded raw reader for this owned fixture.
+  end=time.monotonic()+3
+  while b'\n' not in self.stdout_buffer:
+   self.assertTrue(select.select([self.process.stdout],[],[],max(0,end-time.monotonic()))[0],'owned Node response timeout')
+   chunk=os.read(self.process.stdout.fileno(),65536)
+   self.assertTrue(chunk,'owned Node exited before static metadata response')
+   self.stdout_buffer.extend(chunk);self.assertLessEqual(len(self.stdout_buffer),131072)
+  line,_,remaining=self.stdout_buffer.partition(b'\n');self.stdout_buffer[:]=remaining
+  return json.loads(line)
  def send(self,value):self.process.stdin.write(json.dumps(value)+'\n');self.process.stdin.flush()
  def control(self,value):self.send({'control':value});self.assertEqual(self.read(),{'event':'control','control':value})
  def issue(self):
   self.send({'action':'issue'});state=self.service.serve_once();return state,self.read()
  def document(self):return json.loads((self.directory/'capabilities.json').read_text())
+ def terminal_fixture(self):
+  # The actual R2 owner/channel/ledger/protocol are exercised. This actor is a
+  # controlled final spawn port; these tests never claim a native PTY launch.
+  owner=self
+  class Terminal:
+   digest=CONSUMER
+   channel=None
+   inputs=[]
+   epoch=1
+   def capture_target(self,employee):return {'target':copy.deepcopy(owner.native.value),'binding':{'epoch':self.epoch}}
+   def handle(self,action,cap,current,payload):
+    if action=='open':
+     self.channel=protocol.Channel(cap.request,current,capability=cap)
+     return {'state':'OPEN','shellId':cap.request['shellId']}
+    self.channel._check(current)
+    if action=='input':self.inputs.append(payload)
+    return {'state':'OPEN','output':''}
+   def close(self):pass
+  terminal=Terminal();self.service.terminal=terminal;return terminal
+ def test_h_composition_consumes_once_and_owner_loss_before_input_applies_nothing(self):
+  terminal=self.terminal_fixture();_,result=self.issue();reference=result['value']['authorizationRef']
+  self.send({'action':'open','reference':reference});self.assertEqual(self.service.serve_once(),'ok');self.assertEqual(self.read()['value']['state'],'OPEN')
+  self.assertEqual(self.document()['entries'][reference]['state'],'CONSUMED')
+  before=(self.directory/'capabilities.json').read_bytes()
+  self.control('owner-off');self.send({'action':'input','reference':reference,'payload':'aW5lcnQ='})
+  self.assertEqual(self.read()['state'],'unconfirmed')
+  with self.assertRaises(BaseException):self.service.serve_once()
+  self.assertEqual(terminal.inputs,[]);self.assertEqual((self.directory/'capabilities.json').read_bytes(),before)
+ def test_h_missing_installed_actor_is_unconfirmed_without_logical_or_real_launch(self):
+  _,result=self.issue();reference=result['value']['authorizationRef'];before=(self.directory/'capabilities.json').read_bytes()
+  self.send({'action':'open','reference':reference});self.assertEqual(self.service.serve_once(),'refused')
+  self.assertEqual(self.read()['state'],'unconfirmed')
+  self.assertEqual((self.directory/'capabilities.json').read_bytes(),before)
+ def test_h_unknown_post_consume_failure_retains_consumption_and_no_retry(self):
+  terminal=self.terminal_fixture();original=terminal.handle
+  def lose(*args):original(*args);raise BrokenPipeError('owned lost H acknowledgment')
+  terminal.handle=lose
+  _,result=self.issue();reference=result['value']['authorizationRef']
+  self.send({'action':'open','reference':reference})
+  with self.assertRaises(Unconfirmed):self.service.serve_once()
+  self.assertEqual(self.read()['state'],'unconfirmed');self.assertEqual(self.document()['entries'][reference]['state'],'CONSUMED')
+ def test_fresh_same_owner_ws_transport_replaces_closed_issue_http_without_scope_renewal(self):
+  terminal=self.terminal_fixture();_,result=self.issue();reference=result['value']['authorizationRef']
+  expires=result['value']['expiresAtEpochMs']
+  self.control('http-to-ws')
+  self.send({'action':'open','reference':reference});self.assertEqual(self.service.serve_once(),'ok')
+  self.assertEqual(self.read()['value']['state'],'OPEN')
+  self.assertEqual(self.document()['entries'][reference]['request']['expiresAtEpochMs'],expires)
+  self.control('owner-off');self.send({'action':'input','reference':reference,'payload':'aW5lcnQ='})
+  self.assertEqual(self.read()['state'],'unconfirmed');self.assertEqual(terminal.inputs,[])
+ def test_h_same_container_new_native_incarnation_cannot_consume_old_issue(self):
+  terminal=self.terminal_fixture();_,result=self.issue();reference=result['value']['authorizationRef']
+  before=(self.directory/'capabilities.json').read_bytes();terminal.epoch=2
+  self.send({'action':'open','reference':reference});self.assertEqual(self.service.serve_once(),'refused')
+  self.assertEqual(self.read()['state'],'unconfirmed');self.assertIsNone(terminal.channel)
+  self.assertEqual((self.directory/'capabilities.json').read_bytes(),before)
  def test_real_issue_protocol_consume_recheck_and_public_proof_separation(self):
   state,result=self.issue();self.assertEqual(state,'ok');public=result['value'];self.assertEqual(set(public),{'shellId','authorizationRef','expiresAtEpochMs'})
   entry=self.document()['entries'][public['authorizationRef']];self.assertNotIn('proof',entry);self.assertEqual(entry['state'],'ISSUED')

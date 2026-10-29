@@ -15,6 +15,8 @@ target or grant owner access.
 
 ## Board decision requests
 
+For task status, due dates, assignment check-ins and the owner's decision buttons, start with [Board tasks and decisions](/handbook/board).
+
 An active owner-created coordinator seat allows decision-card creation. Read `reverie board show --json` to avoid duplicates. Supply **2–10 distinct options**; prose does not create buttons:
 
 ```bash

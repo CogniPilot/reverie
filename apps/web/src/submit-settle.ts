@@ -10,7 +10,8 @@
  * Pure apart from the injected IO, so the timing and the single retry are unit-tested with a fake mux
  * (test/submit-settle.test.ts).
  */
-import { promptStillInComposer } from './session-submit-verifier.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { composerIsEmpty, promptStillInComposer } from './session-submit-verifier.js';
 import { stripAnsi } from './utils/index.js';
 
 /** Text up to this long keeps the old fixed gap before Enter: it is typed, not pasted, and must not be slowed. */
@@ -25,6 +26,21 @@ export const SETTLE_MS_PER_CHAR = 0.5;
 export const SETTLE_MAX_MS = 2_000;
 /** How often the pane is read while a long paste settles; two equal reads in a row mean it stopped changing. */
 export const SETTLE_POLL_MS = 50;
+/**
+ * The longest text Codex takes reliably as a burst of keys. Measured on codex-cli 0.163.0 (2026-10-29, real pane, mock model):
+ * up to 1000 characters one Enter submits; past 1024 its paste-burst detector shows a `[Pasted Content 1024 chars]` chip and
+ * holds the rest of the burst unseen until more keys arrive, so the first Enters only release held text, the composer never
+ * represents the whole prompt, the verifier cannot claim it and the delivery strands in the composer (the junk owners found in
+ * debug terminals). A bracketed paste of the same text is one chip that a single Enter submits, idle or mid-turn.
+ */
+export const CODEX_KEY_BURST_MAX_CHARS = 1000;
+
+/** Does this text go to a pane of `mode` as a bracketed paste rather than keys? Text with control characters is always typed. */
+export function pastesInsteadOfKeys(mode: string, text: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return mode === 'codex' && text.length > CODEX_KEY_BURST_MAX_CHARS && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
+}
+
 /** After Enter, the pane is read this often, up to the window, for signs that a turn started. */
 export const CONFIRM_POLL_MS = 100;
 export const CONFIRM_WINDOW_MS = 1_000;
@@ -81,8 +97,12 @@ export interface TurnSignals {
  * longer does. `false`: the composer still holds it, or the CLI has a busy line that has not shown. `undefined`: nothing on
  * screen can say (no pane, no glyph, no busy line), so no Enter is re-sent.
  */
-export function turnStarted(screen: string | null, text: string, signals: TurnSignals, heldBefore: boolean): boolean | undefined {
+export function turnStarted(screen: string | null, text: string, signals: TurnSignals, heldBefore: boolean, fromEmptyComposer = false): boolean | undefined {
   if (screen === null) return undefined;
+  const still = signals.glyph ? promptStillInComposer(screen, text, signals.glyph, fromEmptyComposer) : undefined;
+  // A historical busy line is not evidence that the current composer was submitted.
+  if (still === true) return false;
+  if (signals.glyph === '›' && still === undefined) return undefined;
   if (signals.workingLine) {
     try {
       if (new RegExp(signals.workingLine).test(stripAnsi(screen))) return true;
@@ -90,19 +110,17 @@ export function turnStarted(screen: string | null, text: string, signals: TurnSi
       // A bad pattern from ~/.reverie/clis.json is no evidence either way.
     }
   }
-  const still = signals.glyph ? promptStillInComposer(screen, text, signals.glyph) : undefined;
-  if (still === true) return false;
   if (still === false && heldBefore) return true;
   return signals.workingLine ? false : undefined;
 }
 
-export type SubmitOutcome = 'started' | 'started-after-retry' | 'not-started' | 'unverified';
+export type SubmitOutcome = 'started' | 'started-after-retry' | 'not-started' | 'unverified' | 'not-written';
 
-async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSignals, heldBefore: boolean): Promise<boolean | undefined> {
+async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSignals, heldBefore: boolean, fromEmptyComposer: boolean): Promise<boolean | undefined> {
   let seen: boolean | undefined;
   for (let waited = 0; waited < CONFIRM_WINDOW_MS; waited += CONFIRM_POLL_MS) {
     await io.sleep(CONFIRM_POLL_MS);
-    seen = turnStarted(io.capture(), text, signals, heldBefore);
+    seen = turnStarted(io.capture(), text, signals, heldBefore, fromEmptyComposer);
     if (seen !== false) return seen;
   }
   return seen;
@@ -112,21 +130,50 @@ async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSigna
  * Press Enter for `text` that is already in the composer and has settled, then confirm a turn started; when the pane says it
  * did not, press Enter exactly once more. Logs and returns the outcome.
  */
-export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane'): Promise<SubmitOutcome> {
+export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane', fromEmptyComposer = false, requireOwnership = false, stillIdle?: () => boolean): Promise<SubmitOutcome> {
   const before = io.capture();
-  const heldBefore = !!signals.glyph && before !== null && promptStillInComposer(before, text, signals.glyph) === true;
+  const heldBefore = !!signals.glyph && before !== null && promptStillInComposer(before, text, signals.glyph, fromEmptyComposer) === true;
+  if (requireOwnership && signals.glyph === '›' && !heldBefore) return 'unverified';
   await io.sendEnter();
   let outcome: SubmitOutcome;
-  const first = await watchForTurn(io, text, signals, heldBefore);
+  const first = await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer);
   if (first === true) outcome = 'started';
   else if (first === undefined) outcome = 'unverified';
   else {
+    // A user can edit while the confirm window expires. Recheck complete ownership before retry.
+    if (signals.glyph === '›' && promptStillInComposer(io.capture() ?? '', text, signals.glyph, fromEmptyComposer) !== true) return 'unverified';
+    if (!gateOpen(stillIdle)) {
+      // The text is still in the composer and the retry Enter is withheld: unsent, so nothing may press Enter for it later.
+      const store = writeGate.getStore();
+      if (store) store.typedUnsent = true;
+      return 'unverified';
+    }
     io.log?.(`${label}: no turn started ${CONFIRM_WINDOW_MS} ms after Enter (${text.length} chars), pressing Enter once more`);
     await io.sendEnter();
-    outcome = (await watchForTurn(io, text, signals, heldBefore)) === true ? 'started-after-retry' : 'not-started';
+    outcome = (await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer)) === true ? 'started-after-retry' : 'not-started';
   }
   io.log?.(`${label}: submit ${outcome} (${text.length} chars)`);
   return outcome;
+}
+
+/**
+ * A write's own gate, carried by the async call that makes the write rather than by the mux layer's options, so it reaches
+ * the keys whatever sits between the session and this helper. The session opens one around an idle-only wake (still idle)
+ * and a capacity retry (not paused by a plan move); a gate that closes stops the keys still to come.
+ */
+const writeGate = new AsyncLocalStorage<{ open: () => boolean; typedUnsent: boolean }>();
+/** Runs `write` under `gate`; `typedUnsent` says its text went in but the gate withheld Enter, so it sits unsent. */
+export async function withWriteGate<T>(gate: () => boolean, write: () => Promise<T>): Promise<{ result: T; typedUnsent: boolean }> {
+  const store = { open: gate, typedUnsent: false };
+  const result = await writeGate.run(store, write);
+  return { result, typedUnsent: store.typedUnsent };
+}
+/** Whether the current async call is a gated write; any key shape other than a gated text + Enter must refuse it. */
+export function writeGateActive(): boolean {
+  return writeGate.getStore() !== undefined;
+}
+function gateOpen(stillIdle?: () => boolean): boolean {
+  return (stillIdle ? stillIdle() : true) && (writeGate.getStore()?.open() ?? true);
 }
 
 /** The generic (non-OpenCode) delivery: type the text, let it settle, then Enter as a separate keystroke, confirmed. */
@@ -134,9 +181,23 @@ export async function typeAndSubmit(
   io: SubmitSettleIo & { typeText(text: string): Promise<unknown> },
   text: string,
   signals: TurnSignals,
-  label?: string
+  label?: string,
+  requireEmptyComposer = false,
+  stillIdle?: () => boolean
 ): Promise<SubmitOutcome> {
+  const fromEmptyComposer = !!signals.glyph && composerIsEmpty(io.capture(), signals.glyph);
+  // An idle-only write (stillIdle) needs a provably empty composer whatever the harness, not just Codex's.
+  if (requireEmptyComposer && (signals.glyph === '›' || stillIdle) && !fromEmptyComposer) return 'not-written';
+  // The write's gate is decided here, at the keys: re-checked right before the text and again right before Enter. A closed
+  // gate after the text withholds Enter and leaves the text unsent; nothing is cleared or typed again.
+  if (!gateOpen(stillIdle)) return 'not-written';
   await io.typeText(text);
   await waitForPasteSettle(io, text.length);
-  return submitAndConfirm(io, text, signals, label);
+  if (!gateOpen(stillIdle)) {
+    const store = writeGate.getStore();
+    if (store) store.typedUnsent = true;
+    io.log?.(`${label}: the write's gate closed while the text settled (session busy, or a plan move took the composer): Enter withheld, text left unsent`);
+    return 'not-written';
+  }
+  return submitAndConfirm(io, text, signals, label, fromEmptyComposer, requireEmptyComposer, stillIdle);
 }

@@ -30,7 +30,7 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which (lib.getBin pkgs.util-linux) ];
+    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
@@ -44,7 +44,7 @@ let
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
         test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
-        test/service-installer.test.ts test/company-wake.test.ts \
+        test/service-installer.test.ts test/company-wake.test.ts test/host-worker-resume.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
         test/goal-lifecycle.test.ts test/goal-lifecycle-transactions.test.ts test/goal-api-auth.test.ts \
         test/goal-response-privacy.test.ts test/goal-successor-independent.test.ts \
@@ -79,23 +79,26 @@ let
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
         test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
-        test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
+        test/employee-gpu-access.test.ts test/employee-gpu-ui.test.ts test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
         test/session-health-provider.test.ts test/session-health-provider-routes.test.ts test/health-canonical-reader.test.ts \
-        test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
+        test/session-runtime.test.ts test/owner-dead-pane-recovery.test.ts test/company-runtime-health-ui.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
         test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts \
         test/chatroom-digest.test.ts test/chatroom-notice-state.test.ts test/chatroom-notice-history.test.ts test/chatroom-notice-cli.test.ts test/chat-db.test.ts test/chat-message-search.test.ts \
-        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \
+        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts test/worker-viewer-reconnect.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/menu-viewport.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts test/plan-five-hour-ui.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
+        test/resource-owner-authority.test.ts test/resource-native-client.test.ts \
+        test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
+        test/resource-replacement-controller.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
-        test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
+        test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/chat-code-highlighting.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
       npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts test/resource-history.test.ts
       npm test -- test/browser-job-evidence.test.ts
@@ -117,6 +120,16 @@ let
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
       # The console owns this Python/Node composition check after its TS build.
+      npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
+      npm test -- test/submit-settle.test.ts test/session-submit-verifier.test.ts \
+        test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts
+      # Keep the input ownership and newly supported reply/media regressions in artifact checks.
+      npm test -- test/capacity-stall.test.ts test/capacity-hold-control.test.ts test/late-verifier-hold-control.test.ts \
+        test/pending-writer-control.test.ts test/verifier-gate-cleared.test.ts test/wake-claude-invariant-control.test.ts \
+        test/wake-idle-boundary.test.ts test/wake-idle-invariant-control.test.ts test/wake-idle-race-witness.test.ts \
+        test/write-gate-property.test.ts test/write-gate-unsent.test.ts test/tmux-manager.test.ts \
+        test/cli-agent.test.ts test/routes/session-input-delivery.test.ts test/chatroom-archived-reply.test.ts \
+        test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
       # memoryPackage's Python discovery never depends on the console output.
       PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
         OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
@@ -141,7 +154,13 @@ let
     '';
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
   };
+  interpreterReadyFixture = import ./interpreter-ready-fixture.nix { inherit pkgs src; };
+  # Explicit noncircular ABI fixture: PATH may select the bare interpreter in
+  # buildPythonPackage checks even while this environment runs the suite.
+  pythonCheckEnvironment = pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ]);
   memoryPackage = pkgs.python3Packages.buildPythonPackage {
+    NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER = "${interpreterReadyFixture}/bin/python3";
+    NIX_REVERIE_TEST_PYTHON_ENV_WRAPPER = "${pythonCheckEnvironment}/bin/python3";
     pname = "reverie-memory";
     version = "0.1.0";
     inherit src;
@@ -151,7 +170,7 @@ let
     nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
-      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ])}/bin/python3 -m unittest discover -s tests -t .)
+      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pythonCheckEnvironment}/bin/python3 -m unittest discover -s tests -t .)
       (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
@@ -203,7 +222,40 @@ let
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
+  # The protected resource bootstrap pins this manifest, rather than inferring
+  # an interpreter or package import path from the website's environment.
+  workerResourceClientManifest = pkgs.runCommand "reverie-resource-client-manifest" {
+    nativeBuildInputs = [ pkgs.buildPackages.python3 ];
+  } ''
+    mkdir -p "$out/share/reverie"
+    export REVERIE_RESOURCE_CLIENT_OUTPUT="$out/share/reverie/resource-client.json"
+    ${pkgs.buildPackages.python3}/bin/python3 -I -B <<'PY'
+    import hashlib, json, os
+    from pathlib import Path
+    invocation = "${pkgs.python3}/bin/python3"
+    executable = Path(invocation).resolve(strict=True)
+    entry = Path("${src}/python/reverie/worker.py")
+    assert str(executable).startswith('/nix/store/') and executable.is_file()
+    with executable.open('rb') as stream:
+        assert stream.read(4) == b'\x7fELF', 'The private client requires a native Python ELF'
+    assert entry.resolve(strict=True) == entry and entry.is_file()
+    value = {
+        'version': 1,
+        'purpose': 'resource-replacement-client-v1',
+        'pythonInvocation': invocation,
+        'pythonExecutable': str(executable),
+        'entry': str(entry),
+        'entrySHA256': hashlib.sha256(entry.read_bytes()).hexdigest(),
+        'argvPrefix': [invocation, '-I', '-B', str(entry), 'client'],
+    }
+    Path(os.environ['REVERIE_RESOURCE_CLIENT_OUTPUT']).write_text(json.dumps(value, indent=2) + '\n')
+    PY
+  '';
   workerExec = pkgs.writeShellScriptBin "reverie-worker-exec" ''
+    # Protected bootstrap metadata: ${workerResourceClientManifest}/share/reverie/resource-client.json
+    if [ "''${1:-}" = --resource-ref ]; then
+      exec ${pkgs.python3}/bin/python3 -I -B ${src}/python/reverie/worker.py client "$@"
+    fi
     exec ${memory}/bin/python3 -m reverie.worker client "$@"
   '';
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
@@ -287,4 +339,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest; }

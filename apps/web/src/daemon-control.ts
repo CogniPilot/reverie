@@ -54,6 +54,8 @@ export interface WebLaunchOptions {
   goalPrivateConfig?: string;
   /** Explicit tracked service authentication config (purpose registry, principals, nonce store). */
   serviceAuthConfig?: string;
+  /** Explicit source-installed resource actor; absent preserves legacy web startup. */
+  resourceReplacement?: boolean;
 }
 
 export interface StartResult {
@@ -99,6 +101,7 @@ export function buildWebArgs(options: WebLaunchOptions): string[] {
   if (options.multiuser) args.push('--multiuser');
   if (options.goalPrivateConfig !== undefined) args.push('--goal-private-config', options.goalPrivateConfig);
   if (options.serviceAuthConfig !== undefined) args.push('--service-auth-config', options.serviceAuthConfig);
+  if (options.resourceReplacement === true) args.push('--resource-replacement');
   return args;
 }
 

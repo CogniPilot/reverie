@@ -1,5 +1,6 @@
 """Fake owner home and unit manager only; no real engine/service/wake calls."""
 import copy
+import hashlib
 import json
 import os
 import shlex
@@ -162,3 +163,32 @@ class WorkerServiceTests(unittest.TestCase):
         self.service.positive_preflight(check_manager=False)
         self.assertFalse(Path(self.config['scratchRoot']).exists())
         self.assertTrue(Path(self.config['stateRoot']).is_dir())
+
+    def test_resource_manifest_gc_roots_preserve_prior_generations_without_start(self):
+        paths=[]
+        for generation in ('first', 'second'):
+            artifact=self.store/generation/'share/reverie/website-image.json'
+            artifact.parent.mkdir(parents=True);artifact.write_text(generation)
+            with patch('reverie.website_image_provenance.immutable',return_value=artifact):
+                self.service.pin_resource_actor(artifact)
+                self.service.pin_resource_actor(artifact)  # Same generation is idempotent.
+            identity=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            root=self.service.gcroot.parent/'resource-actor'/identity/'root'
+            self.assertEqual(root.resolve(),self.store/generation);paths.append(root)
+        self.assertTrue(all(path.is_symlink()for path in paths))
+        self.assertEqual(len(self.calls),2)
+        self.assertTrue(all(call[0]=='nix-store'for call in self.calls))
+        paths[0].unlink();paths[0].symlink_to(self.store/'second')
+        with patch('reverie.website_image_provenance.immutable',return_value=self.store/'first/share/reverie/website-image.json'):
+            with self.assertRaisesRegex(ValueError,'generation root differs'):
+                self.service.pin_resource_actor(self.store/'first/share/reverie/website-image.json')
+
+    def test_optional_actor_flags_never_implicitly_select_feature_or_partial_transport(self):
+        before=self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError,'both immutable provenance'):
+            self.service.install(resource_actor_provenance=Path('/unselected/provenance'))
+        with self.assertRaisesRegex(ValueError,'selected in the private'):
+            self.service.install(resource_actor_provenance=Path('/unselected/provenance'),
+                                 resource_actor_engine_socket=Path('/synthetic/engine.sock'))
+        self.assertEqual(self.path.read_bytes(),before)
+        self.assertFalse(self.service.unit.exists());self.assertFalse(self.active)

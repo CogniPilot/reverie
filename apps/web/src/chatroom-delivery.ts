@@ -56,9 +56,10 @@ export interface DeliverySession {
   readonly paneDialog?: string | null;
   readonly pid: number | null;
   readonly mode: string;
+  canAcceptChatInput?(): boolean;
   writeViaMux(
     data: string,
-    options?: { opencodeGuard?: boolean; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
+    options?: { opencodeGuard?: boolean; requireEmptyComposer?: boolean; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
   ): Promise<boolean>;
 }
 
@@ -773,7 +774,7 @@ export class ChatroomDelivery {
       this.queues.delete(sessionId);
       return false;
     }
-    if (session.pid === null || session.isWorking || session.paneDialog) return false;
+    if (session.pid === null || session.isWorking || session.paneDialog || session.canAcceptChatInput?.() === false) return false;
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;
@@ -845,6 +846,7 @@ export class ChatroomDelivery {
       attempted = taken;
       const ok = await session.writeViaMux(`${safe}\r`, {
         opencodeGuard: true,
+        requireEmptyComposer: true,
         onOutcome: (outcome) => {
           if (finished || (carried.length && this.activeWrites.get(sessionId) !== writing)) return;
           outcomeSeen = true;

@@ -80,10 +80,27 @@ export interface SessionWriteOptions {
    * `'person'`: the text is a person's (remote wake, an approval's text answer), so a leading "!" is left for them.
    */
   opencodeGuard?: boolean | 'person';
+  /** Automated chat must leave an occupied/unknown Codex composer untouched. */
+  requireEmptyComposer?: boolean;
   /**
-   * Told once how a write that carried Enter ended (session-submit-verifier.ts): `submitted` when the composer was seen without
-   * it, `stranded` when it was still there after the whole schedule, `unverified` when nothing could be read (no composer glyph,
-   * no pane, a newer write). Chat delivery counts a message as seen only on `submitted`.
+   * Idle-only (agent wake): decided by the session at the write itself, and again before the text and before Enter, never
+   * by a caller's earlier look. A working, held, stopped or already-writing session, an unreadable harness composer, or a
+   * draft gets nothing typed and the write returns false.
+   */
+  requireIdle?: boolean;
+  /**
+   * Re-checked right before the text and again before Enter (submit-settle withWriteGate); once it reads false no further
+   * key goes out. The capacity retry passes "not paused", so a plan move taking the composer mid-write fences its Enter.
+   */
+  writeGate?: () => boolean;
+  /** The capacity auto-resume's own write (capacity-stall.ts); only it may type while its earlier text is pending. */
+  capacityRetry?: boolean;
+  /** Told when a gated write's text went in but its Enter was withheld: the text is left unsent in the composer. */
+  onTypedUnsent?: () => void;
+  /**
+   * Told once how a write that carried Enter ended (session-submit-verifier.ts): `submitted` when the composer was seen empty,
+   * `stranded` when it was still there after the whole schedule, `unverified` for unreadable/different content or a newer write.
+   * Chat delivery counts a message as seen only on `submitted`.
    */
   onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void;
 }
@@ -989,6 +1006,11 @@ export interface SessionState {
    * belongs with the part of Ark0N/Codeman#446 that closes exited sessions.
    */
   paneExit?: PaneExit;
+  /** Availability of the non-destructive worker viewer reconnect path. */
+  workerViewerReconnect?: boolean;
+  /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
+  runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
+  runtimeHealthScope?: 'provider' | 'terminal';
 }
 
 /**

@@ -40,6 +40,7 @@ describe('shared office handbook', () => {
     const app = setup();
     const expected = [
       'getting-started',
+      'board',
       'profiles',
       'models',
       'work',
