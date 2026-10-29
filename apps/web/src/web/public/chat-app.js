@@ -2548,6 +2548,17 @@ class ReverieChatApp {
     this._companySection = selectSection;
     const status = this.el('p', 'ca-hint', 'Loading company…');
     status.setAttribute('role', 'status');
+    // The burn rate sits above People but arrives later (its frame loads the board first), so People painted first and were then
+    // pushed down. People wait for the frame's first load, or a few seconds at most, and a reopen starts at the last height.
+    if (this._companyPlansHeight) plans.style.height = `${this._companyPlansHeight}px`;
+    content.hidden = true;
+    let revealTimer = null;
+    const revealPeople = () => {
+      if (!content.hidden) return;
+      this.doc.defaultView.clearTimeout(revealTimer);
+      content.hidden = false;
+    };
+    revealTimer = this.doc.defaultView.setTimeout(revealPeople, 4000);
     let refreshHireOptions = async () => {};
     this._companyResize = event => {
       const frame = plans.querySelector('iframe');
@@ -2559,8 +2570,17 @@ class ReverieChatApp {
           if (employee) void this.openRuntimeSettings(employee);
         });
       }
-      else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height))
-        plans.style.height = `${Math.max(120, Math.min(10000, event.data.height))}px`;
+      else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height)) {
+        this._companyPlansHeight = Math.max(120, Math.min(10000, event.data.height));
+        plans.style.height = `${this._companyPlansHeight}px`;
+      }
+      else if (event.data?.type === 'company-plans-ready') {
+        if (Number.isFinite(event.data.height)) {
+          this._companyPlansHeight = Math.max(120, Math.min(10000, event.data.height));
+          plans.style.height = `${this._companyPlansHeight}px`;
+        }
+        revealPeople();
+      }
     };
     this.doc.defaultView.addEventListener('message', this._companyResize);
     dlg.append(head, plans, content, status);

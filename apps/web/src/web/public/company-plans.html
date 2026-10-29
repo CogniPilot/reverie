@@ -62,6 +62,14 @@ if (window.frameElement?.classList?.contains('ca-company-plans-frame')) {
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(reportHeight).observe(document.querySelector('.wrap'));
   reportHeight();
 }
+// Once, after the first load settles (data or error): the Company page holds People back until then so they are not painted
+// first and pushed down when the burn rate arrives.
+let plansReadySent = false;
+function reportPlansReady() {
+  if (plansReadySent || !window.frameElement?.classList?.contains('ca-company-plans-frame')) return;
+  plansReadySent = true;
+  parent.postMessage({ type: 'company-plans-ready', height: Math.ceil(document.querySelector('.wrap').getBoundingClientRect().height) }, location.origin);
+}
 const H = 3600e3, D = 24 * H;
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -155,6 +163,8 @@ async function load() {
     failures++;
     banner.hidden = false;
     banner.textContent = (B ? 'Could not refresh Company plans (' : 'Could not load Company plans (') + e.message + '). ' + (B ? 'Showing the last data; ' : '') + 'trying again in a minute.';
+  } finally {
+    reportPlansReady();
   }
 }
 
