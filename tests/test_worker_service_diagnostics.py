@@ -115,7 +115,10 @@ class WorkerServiceDiagnosticsTests(unittest.TestCase):
                         if case.f.broker_generation > 1 and phase == 'POSTSTART_CONTINUITY': raise failure
                         return original_continuity(plan, gate)
                     case.upgrade.broker = broker; case.upgrade._unchanged = continuity
-                    if phase == 'POSTSTART_LISTENERS': case.upgrade.tools.ready_socket.side_effect = failure
+                    if phase == 'POSTSTART_LISTENERS':
+                        # Primary readiness now precedes full broker observation;
+                        # this control targets the subsequent listener bracket.
+                        case.upgrade.tools.ready_socket.side_effect = [None, failure]
                     output, errors = io.StringIO(), io.StringIO()
                     args = ['--config', str(case.service.config_path), '--diagnostic', 'apply-transport-upgrade',
                             '--operation', str(case.operation), '--plan-sha256', sha]

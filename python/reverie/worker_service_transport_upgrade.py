@@ -17,7 +17,7 @@ import math
 
 from . import worker_resource_reservations as R
 from .worker_host_job import require_idle
-from .worker_service_upgrade import GPUUpgrade, need, digest, encoded, private, stamp, exclusive, directory_lock
+from .worker_service_upgrade import GPUUpgrade, need, digest, encoded, private, stamp, exclusive, directory_lock, unit_record
 from .worker import load_config
 from .worker_resources import policy_digest
 from .worker_storage import read_metadata, storage_paths, validate_storage
@@ -46,6 +46,30 @@ def _owned_birth(pid):
     fields = raw.rsplit(b')', 1)[1].split()
     need(fields[0] not in (b'Z', b'X'), 'Interpreter probe process ended')
     return int(fields[19])
+
+
+def _startup_identity(pid):
+    """Readable manager-selected identity before the final wrapper exec.
+
+    This is not program qualification or an adopted process handle. The same
+    PID/birth must own the fixed socket before full root/ns/exe/argv inspection.
+    """
+    need(type(pid) is int and 1 < pid < 2147483648, 'Running broker generation required')
+    proc = Path('/proc') / str(pid)
+    def birth():
+        with (proc / 'stat').open('rb') as stream: raw = stream.read(8193)
+        need(len(raw) <= 8192, 'Broker startup process metadata exceeds bound')
+        fields = raw.rsplit(b')', 1)[1].split()
+        need(len(fields) >= 20 and fields[0] not in (b'Z', b'X'), 'Running broker generation required')
+        return int(fields[19])
+    first = birth()
+    with (proc / 'status').open('rb') as stream: raw = stream.read(16385)
+    need(len(raw) <= 16384, 'Broker startup process metadata exceeds bound')
+    rows = [line.split()[1:] for line in raw.splitlines() if line.startswith(b'Uid:')]
+    need(len(rows) == 1 and rows[0] == [str(os.getuid()).encode()] * 4,
+         'Owner broker identity required')
+    need(birth() == first, 'Broker startup process changed')
+    return {'pid': pid, 'startTick': first, 'uid': os.getuid()}
 
 
 @contextmanager
@@ -107,6 +131,57 @@ class TransportUpgrade:
 
     def _time(self):
         need(time.monotonic() < self.deadline, 'Transport upgrade deadline exhausted')
+
+    def _startup_manager(self, unit):
+        from .worker_service import UNIT
+        from .worker_image_switch import MANAGER_FIELDS, _loaded_program
+        links = {str(path): stamp(path) for path in (self.service.unit, self.service.gcroot)}
+        need(unit_record(self.service, self.service.unit.resolve(strict=True)) == unit and
+             self.service.gcroot.resolve(strict=True) == Path(unit['root']),
+             'Actual manager unit differs from selected immutable generation')
+        names = (*MANAGER_FIELDS, 'ControlGroup')
+        result = self.tools.run(['systemctl', '--user', 'show', UNIT, '--all', '--no-pager',
+                                 '--property=' + ','.join(names)])
+        need(type(result.stdout) is str and len(result.stdout.encode()) <= 65536,
+             'Actual manager unit differs from selected immutable generation')
+        fields = {}
+        for line in result.stdout.splitlines():
+            name, separator, value = line.partition('=')
+            need(separator and name in names and name not in fields,
+                 'Actual manager unit differs from selected immutable generation')
+            fields[name] = value
+        need(set(fields) == set(names) and fields['Id'] == UNIT and fields['LoadState'] == 'loaded' and
+             fields['ActiveState'] == 'active' and fields['SubState'] == 'running' and
+             fields['ControlPID'] == '0' and fields['Job'] in ('', '0') and
+             fields['FragmentPath'] in (str(self.service.unit), unit['path']) and
+             fields['DropInPaths'] == '' and fields['NeedDaemonReload'] == 'no' and
+             fields['MainPID'].isascii() and fields['MainPID'].isdigit() and
+             1 < int(fields['MainPID']) < 2147483648 and
+             1 <= len(fields['ControlGroup']) <= 4096,
+             'Actual manager unit differs from selected immutable generation')
+        programs = {name: _loaded_program(fields.pop(name), unit['entries'][name]['path'])
+                    for name in ('ExecStartPre', 'ExecStart')}
+        identity = _startup_identity(int(fields['MainPID']))
+        need(all(stamp(Path(path)) == expected for path, expected in links.items()),
+             'Actual manager unit differs from selected immutable generation')
+        self._time()
+        return {'properties': fields, 'programs': programs, 'identity': identity}
+
+    def started_broker(self, unit, config, previous):
+        # Type=simple may become active before Bash/env/Python finish execing.
+        # A same-PID listener is readiness, never a substitute for program proof.
+        first = self._startup_manager(unit)
+        identity = first['identity']
+        need((identity['pid'], identity['startTick']) != (previous['pid'], previous['startTick']),
+             'New broker process required')
+        self.tools.ready_socket(Path(config['socket']), identity['pid'])
+        need(_startup_identity(identity['pid']) == identity, 'Broker startup process changed')
+        current = self.broker(unit)
+        need((current['process']['pid'], current['process']['startTick']) ==
+             (identity['pid'], identity['startTick']) and self._startup_manager(unit) == first,
+             'Broker startup process changed')
+        self._time()
+        return current
 
     def _interpreter(self, declared):
         """Fixed isolated metadata probe; never a broker/config/engine entry.
@@ -486,7 +561,7 @@ class TransportUpgrade:
             self._terminal(plan, gate, links)
             self.tools.manager('start'); self.tools.manager('is-active')
             with _stage('POSTSTART_BROKER'):
-                current = self.broker(plan['generation']['newUnit'])
+                current = self.started_broker(plan['generation']['newUnit'], config, plan['broker']['process'])
                 need(current['process'] != plan['broker']['process'], 'New broker process required')
             with _stage('POSTSTART_LISTENERS'):
                 self.tools.ready_socket(Path(config['socket']), current['process']['pid'])

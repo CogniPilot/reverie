@@ -34,6 +34,15 @@ class TransportUpgradeTests(unittest.TestCase):
         self.enterContext(patch.object(self.upgrade, 'broker', side_effect=lambda unit: f.manager_state(active=True)))
         self.enterContext(patch.object(self.upgrade.tools, 'manager_state', side_effect=f.manager_state))
         self.enterContext(patch.object(self.upgrade.tools, 'ready_socket', return_value=None))
+        # This composition already models manager/kernel ports; startup-specific
+        # real manager/socket/exec ordering is exercised separately below.
+        def startup_manager(unit):
+            process = f.manager_state(active=True)['process']
+            return {'identity': {**process, 'uid': os.getuid()}}
+        self.enterContext(patch.object(self.upgrade, '_startup_manager', side_effect=startup_manager))
+        native_startup = T._startup_identity
+        self.enterContext(patch.object(T, '_startup_identity', side_effect=lambda pid:
+            {**f.process(pid), 'uid': os.getuid()} if pid == 500 else native_startup(pid)))
         def broker_leaf(current):
             T.need(f.process(current['process']['pid']) == current['process'], 'New broker process/program changed')
         self.enterContext(patch.object(self.upgrade, 'broker_leaf', side_effect=broker_leaf))
@@ -438,6 +447,9 @@ class PackagedTransportProgram(unittest.TestCase):
             if not active:return {'properties':{'MainPID':'0'}}
             return {'properties':{'MainPID':str(selected[0].pid)},'process':self.native_process(selected[0].pid)}
         upgrade.tools.manager_state=manager_state
+        upgrade._startup_manager=lambda unit: {'identity': {
+            'pid': selected[0].pid, 'startTick': self.native_process(selected[0].pid)['startTick'],
+            'uid': os.getuid()}}
         def records():
             value=generation()
             for key,wrapper in [('unit',LEGACY_WRAPPER if f.broker_generation==1 else ISOLATED_WRAPPER),
@@ -595,3 +607,143 @@ class InterpreterExecWindow(unittest.TestCase):
             self.assertEqual(unlisted.stat().st_uid, 65534)
             with self.assertRaisesRegex(ValueError, 'Immutable broker program'):
                 T._immutable(unlisted)
+
+
+def startup_manager_text(service, unit, pid, names):
+    from reverie.worker_service import UNIT
+    def loaded(path):
+        return ('{ path='+path+' ; argv[]='+path+' --config ${REVERIE_WORKER_CONFIG}'
+                ' ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0 }')
+    values={'Id':UNIT,'LoadState':'loaded','ActiveState':'active','SubState':'running',
+        'MainPID':str(pid),'ControlPID':'0','Job':'','FragmentPath':str(service.unit),
+        'DropInPaths':'','NeedDaemonReload':'no','ControlGroup':'/owned-controlled-unit',
+        **{key:loaded(unit['entries'][key]['path']) for key in('ExecStartPre','ExecStart')}}
+    return values, '\n'.join(name+'='+values[name] for name in names)+'\n'
+
+
+class StartupManagerMetadata(unittest.TestCase):
+    """Real registered files/own minimal proc identity; manager records controlled."""
+    def setUp(self):
+        f=fixture.GPUServiceUpgradeTests();f.setUp();self.addCleanup(f.doCleanups)
+        self.f=f;self.unit=U.unit_record(f.service,f.service.unit.resolve())
+        self.upgrade=T.TransportUpgrade(f.service,f.operation);self.edits={}
+        def read(args,*,deadline=None):
+            names=args[-1].removeprefix('--property=').split(',')
+            values,_=startup_manager_text(f.service,self.unit,os.getpid(),names);values.update(self.edits)
+            return subprocess.CompletedProcess(args,0,'\n'.join(n+'='+values[n]for n in names)+'\n','')
+        f.service.run=read
+    def test_basic_observation_does_not_require_root_namespace_or_program_yet(self):
+        from reverie import worker_gpu_preflight as P
+        with patch.object(P,'_process',side_effect=AssertionError('too early full process read')):
+            value=self.upgrade._startup_manager(self.unit)
+        self.assertEqual(value['identity']['pid'],os.getpid())
+        self.assertEqual(value['identity']['uid'],os.getuid())
+    def test_loaded_unit_reload_dropins_and_invocation_drift_refuse(self):
+        for edits in ({'NeedDaemonReload':'yes'},{'DropInPaths':'/foreign.conf'},
+                      {'FragmentPath':'/foreign.service'},{'LoadState':'not-found'},
+                      {'ExecStart':startup_manager_text(self.f.service,self.unit,os.getpid(),['ExecStart'])[0]['ExecStart'].replace(' --config',' --unreviewed --config')},
+                      {'ExecStartPre':startup_manager_text(self.f.service,self.unit,os.getpid(),['ExecStartPre'])[0]['ExecStartPre'].replace('ignore_errors=no','ignore_errors=yes')}):
+            with self.subTest(edits=edits),self.assertRaises(ValueError):
+                self.edits=edits;self.upgrade._startup_manager(self.unit)
+    def test_invalid_or_foreign_pid_refuses(self):
+        for pid in ('0','1','-2','2147483648','not-a-pid'):
+            with self.subTest(pid=pid),self.assertRaises(ValueError):
+                self.edits={'MainPID':pid};self.upgrade._startup_manager(self.unit)
+    def test_changed_pid_birth_between_socket_and_full_proof_refuses(self):
+        original=T._startup_identity;calls=[]
+        def changed(pid):
+            value=original(pid);calls.append(pid)
+            return {**value,'startTick':value['startTick']+1}if len(calls)==2 else value
+        with patch.object(T,'_startup_identity',side_effect=changed), \
+             patch.object(self.upgrade.tools,'ready_socket'), \
+             patch.object(self.upgrade,'broker',side_effect=AssertionError('not reached')), \
+             self.assertRaisesRegex(ValueError,'startup process changed'):
+            self.upgrade.started_broker(self.unit,{'socket':'/unused'}, {'pid':1,'startTick':1})
+    def test_same_previous_incarnation_refuses_before_socket(self):
+        old=T._startup_identity(os.getpid())
+        with patch.object(self.upgrade.tools,'ready_socket',side_effect=AssertionError('not reached')), \
+             self.assertRaisesRegex(ValueError,'New broker process required'):
+            self.upgrade.started_broker(self.unit,{'socket':'/unused'},old)
+
+
+@unittest.skipUnless(INTERPRETER_READY_WRAPPER,'Pinned inert Nix exec-window fixture required')
+class ActualStartupReadiness(unittest.TestCase):
+    """Real owned exec/permissions/UDS/ELF/argv; only systemd metadata is modeled."""
+    def setUp(self):
+        import tempfile,time
+        from reverie.worker_service import WorkerService
+        self.temp=tempfile.TemporaryDirectory(prefix='tstart-');self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name).resolve();self.config=self.root/'config.json';self.socket=self.root/'primary.sock'
+        self.config.write_text(json.dumps({'socket':str(self.socket)}));self.config.chmod(0o600)
+        self.fixture=Path(INTERPRETER_READY_WRAPPER).resolve(strict=True);self.package=self.fixture.parent.parent
+        self.wrapper=self.package/'bin/reverie-worker-broker';self.source=self.package/'python/reverie/worker.py'
+        self.unit_path=self.package/'share/systemd/user/reverie-worker-broker.service'
+        self.bare=Path('/proc/self/exe').resolve(strict=True)
+        selected={self.fixture,self.wrapper,self.source,self.unit_path,self.package/'bin/reverie-worker-service-check',self.bare}
+        if os.environ.get('NIX_BUILD_TOP')and Path('/').stat().st_uid==Path('/nix/store').stat().st_uid==65534:
+            from types import SimpleNamespace
+            original=Path.stat
+            def mapped(path,*args,**kwargs):
+                value=original(path,*args,**kwargs)
+                return SimpleNamespace(**{**{k:getattr(value,k)for k in dir(value)if k.startswith('st_')},'st_uid':0})if path in selected and value.st_uid==65534 else value
+            self.enterContext(patch.object(Path,'stat',mapped))
+        self.service=WorkerService(self.config,home=self.root,run=self.manager)
+        self.service.unit.parent.mkdir(parents=True);self.service.gcroot.parent.mkdir(parents=True)
+        self.service.unit.symlink_to(self.unit_path);self.service.gcroot.symlink_to(self.package)
+        self.upgrade=T.TransportUpgrade(self.service,self.root);self.unit=U.unit_record(self.service,self.unit_path)
+        self.original_popen=subprocess.Popen;self.children=[];self.main=None;self.pre_ready=[];self.addCleanup(self.settle)
+    def settle(self):
+        for child in self.children:
+            if child.poll()is None:child.kill()
+            child.wait(timeout=3)
+            for stream in(child.stdin,child.stdout,child.stderr):
+                if stream is not None and not stream.closed:stream.close()
+    def stopped(self,child):
+        import signal,time
+        end=time.monotonic()+3
+        while time.monotonic()<end:
+            value=os.waitid(os.P_PID,child.pid,os.WSTOPPED|os.WNOHANG|os.WNOWAIT)
+            if value is not None:break
+            time.sleep(.001)
+        else:self.fail('owned public fixture did not stop')
+        self.assertEqual(value.si_status,signal.SIGSTOP)
+    def manager(self,args,*,deadline=None):
+        names=args[-1].removeprefix('--property=').split(',')
+        _,raw=startup_manager_text(self.service,self.unit,self.main.pid,names)
+        return subprocess.CompletedProcess(args,0,raw,'')
+    def start(self):
+        self.main=self.original_popen([str(self.wrapper),'--config',str(self.config)],stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,env={'LANG':'C.UTF-8','PATH':'/nonexistent'})
+        self.children.append(self.main);self.stopped(self.main)
+        with self.assertRaises(PermissionError)as denied:self.upgrade.broker(self.unit)
+        self.assertEqual(denied.exception.errno,13);self.pre_ready.append(denied.exception.filename)
+    def probe_popen(self,args,**kwargs):
+        import signal
+        child=self.original_popen(args,**kwargs);self.children.append(child);self.stopped(child)
+        child.send_signal(signal.SIGCONT);return child
+    def test_actual_exec_window_socket_then_full_program_same_birth(self):
+        import signal
+        self.start();birth=T._startup_identity(self.main.pid)['startTick'];original=self.upgrade.tools.ready_socket
+        def ready(path,pid):
+            self.assertEqual(pid,self.main.pid);self.main.send_signal(signal.SIGCONT);return original(path,pid)
+        with patch.object(self.upgrade.tools,'ready_socket',side_effect=ready), \
+             patch.object(T.subprocess,'Popen',side_effect=self.probe_popen):
+            result=self.upgrade.started_broker(self.unit,{'socket':str(self.socket)},{'pid':1,'startTick':1})
+        self.assertEqual(result['process']['pid'],self.main.pid);self.assertEqual(result['process']['startTick'],birth)
+        self.assertEqual(result['program']['wrapperKind'],'isolated');self.assertEqual(result['program']['exe'],str(self.bare))
+        self.main.stdin.write(b'x');self.main.stdin.flush();self.main.stdin.close();self.assertEqual(self.main.wait(timeout=3),0)
+        self.assertTrue(all(child.poll()is not None for child in self.children))
+    def test_wrong_existing_socket_peer_refuses_before_full_program(self):
+        import socket
+        self.start()
+        with socket.socket(socket.AF_UNIX)as wrong:
+            wrong.bind(str(self.socket));self.socket.chmod(0o600);wrong.listen(1)
+            with patch.object(self.upgrade,'broker',side_effect=AssertionError('no full proof')), \
+                 self.assertRaisesRegex(ValueError,'not the selected new broker'):
+                self.upgrade.started_broker(self.unit,{'socket':str(self.socket)},{'pid':1,'startTick':1})
+    def test_no_socket_deadline_never_qualifies_or_restarts(self):
+        import time
+        self.start();self.upgrade.deadline=self.upgrade.tools.deadline=time.monotonic()+1
+        with patch.object(self.upgrade,'broker',side_effect=AssertionError('no full proof')),self.assertRaisesRegex(ValueError,'readiness deadline'):
+            self.upgrade.started_broker(self.unit,{'socket':str(self.socket)},{'pid':1,'startTick':1})
+        self.assertEqual(len(self.children),1)
