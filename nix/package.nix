@@ -123,6 +123,13 @@ let
       npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
       npm test -- test/submit-settle.test.ts test/session-submit-verifier.test.ts \
         test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts
+      # Keep the input ownership and newly supported reply/media regressions in artifact checks.
+      npm test -- test/capacity-stall.test.ts test/capacity-hold-control.test.ts test/late-verifier-hold-control.test.ts \
+        test/pending-writer-control.test.ts test/verifier-gate-cleared.test.ts test/wake-claude-invariant-control.test.ts \
+        test/wake-idle-boundary.test.ts test/wake-idle-invariant-control.test.ts test/wake-idle-race-witness.test.ts \
+        test/write-gate-property.test.ts test/write-gate-unsent.test.ts test/tmux-manager.test.ts \
+        test/cli-agent.test.ts test/routes/session-input-delivery.test.ts test/chatroom-archived-reply.test.ts \
+        test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
       # memoryPackage's Python discovery never depends on the console output.
       PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
         OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
@@ -148,8 +155,12 @@ let
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
   };
   interpreterReadyFixture = import ./interpreter-ready-fixture.nix { inherit pkgs src; };
+  # Explicit noncircular ABI fixture: PATH may select the bare interpreter in
+  # buildPythonPackage checks even while this environment runs the suite.
+  pythonCheckEnvironment = pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ]);
   memoryPackage = pkgs.python3Packages.buildPythonPackage {
     NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER = "${interpreterReadyFixture}/bin/python3";
+    NIX_REVERIE_TEST_PYTHON_ENV_WRAPPER = "${pythonCheckEnvironment}/bin/python3";
     pname = "reverie-memory";
     version = "0.1.0";
     inherit src;
@@ -159,7 +170,7 @@ let
     nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
-      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ])}/bin/python3 -m unittest discover -s tests -t .)
+      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pythonCheckEnvironment}/bin/python3 -m unittest discover -s tests -t .)
       (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };

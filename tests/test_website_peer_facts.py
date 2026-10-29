@@ -18,13 +18,14 @@ from unittest.mock import patch
 
 from reverie import website_peer_facts as F
 from reverie.owner_terminal_channel import Program
+from tests.test_owner_terminal_python_abi import python_environment_invocation
 
 
 class WebsiteFactTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR'));self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name).resolve();self.executable=Path(sys.executable).resolve()
-        self.invocation=Path(sys.executable)
+        self.root=Path(self.temp.name).resolve();self.invocation=python_environment_invocation()
+        self.executable=self.invocation.resolve(strict=True)
         self.guest=self.root/'image-copy';shutil.copyfile(self.executable,self.guest);self.guest.chmod(0o444)
         self.expected={'sha256':hashlib.sha256(self.executable.read_bytes()).hexdigest(),'bytes':self.executable.stat().st_size}
         self.item={'Id':'a'*64,'Image':'sha256:'+'b'*64,'State':{'Running':True,'Pid':4242},

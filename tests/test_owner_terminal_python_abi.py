@@ -15,9 +15,14 @@ from reverie import owner_terminal_channel as C
 PROBE = "import sys;print('H_ABI_READY',flush=True);sys.stdin.buffer.read(1)"
 
 
+def python_environment_invocation():
+    """Package checks bind a real withPackages fixture independently of PATH."""
+    return Path(os.environ.get('NIX_REVERIE_TEST_PYTHON_ENV_WRAPPER', shutil.which('python3')))
+
+
 class PythonABI(unittest.TestCase):
     def setUp(self):
-        self.invocation = Path(shutil.which('python3'))
+        self.invocation = python_environment_invocation()
         self.bare = Path('/proc/self/exe').resolve(strict=True)
         self.children = []
         self.addCleanup(self.settle)
@@ -41,8 +46,8 @@ class PythonABI(unittest.TestCase):
             for stream in (child.stdin, child.stdout, child.stderr):
                 if stream is not None and not stream.closed: stream.close()
 
-    def child(self, flags=('-I','-B')):
-        argv = [str(self.invocation), *flags, '-c', PROBE]
+    def child(self, flags=('-I','-B'), *, invocation=None):
+        argv = [str(self.invocation if invocation is None else invocation), *flags, '-c', PROBE]
         child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  env={'LANG':'C.UTF-8'})
         self.children.append(child)
@@ -56,6 +61,11 @@ class PythonABI(unittest.TestCase):
     def test_declared_environment_qualifies_actual_bare_interpreter(self):
         N.qualify_python(str(self.invocation), str(self.bare))
         child, argv = self.child()
+        C.Program(str(self.bare), argv).matches(C.read_proc(child.pid))
+
+    def test_bare_interpreter_identity_still_qualifies_actual_owned_child(self):
+        N.qualify_python(str(self.bare), str(self.bare))
+        child, argv = self.child(invocation=self.bare)
         C.Program(str(self.bare), argv).matches(C.read_proc(child.pid))
 
     def test_original_resolved_wrapper_is_not_the_kernel_executable(self):

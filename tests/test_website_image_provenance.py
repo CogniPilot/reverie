@@ -12,6 +12,7 @@ import unittest
 import sys
 from unittest.mock import patch
 from reverie import website_image_provenance as P
+from tests.test_owner_terminal_python_abi import python_environment_invocation
 
 
 class ArchiveProvenanceTests(unittest.TestCase):
@@ -128,9 +129,8 @@ class ArchiveProvenanceTests(unittest.TestCase):
         self.assertNotIn('ownerApproved',actual)
 
     def test_wrapped_python_graph_requires_both_declared_wrapper_and_real_elf(self):
-        import shutil
         path,console,node,value=self.startup()
-        invocation=str(Path(shutil.which('python3')))
+        invocation=str(python_environment_invocation())
         wrapper=str(Path(invocation).resolve(strict=True))
         bare=str(Path('/proc/self/exe').resolve(strict=True))
         self.assertNotEqual(wrapper,bare)
