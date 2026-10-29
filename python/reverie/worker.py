@@ -747,6 +747,8 @@ class Broker:
         self.storage_lease_lock = threading.RLock()
         self.storage_leases = {}
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
+        from reverie.worker_chat_images import WorkerChatImages
+        self.chat_images = WorkerChatImages(self)
         from reverie.worker_command_telemetry import CommandTelemetry
         self.command_telemetry = CommandTelemetry(config, self.run_engine)
         from reverie.worker_resource_reservations import ReservationGate, configured
@@ -1599,6 +1601,10 @@ class Broker:
             if peer[1] != self.config['uid']:
                 raise ValueError('Worker peer identity is not authorized')
             kind, raw = receive_frame(connection)
+            if kind == b'M':
+                result = self.chat_images.dispatch(raw)
+                send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
+                return
             if kind == b'Y':
                 from reverie.human_terminal_protocol import decode
                 if decode(raw) != {'version':1,'purpose':'host-worker-resume-v1','kind':'register'} or self.host_resume is None:
@@ -2223,6 +2229,8 @@ class Broker:
             # Constructors and client finalizers publish before the final owned
             # client sweep. Still-active handlers/supervisor remain fatal.
             settle_owned_clients(self, deadline)
+            if getattr(self, 'chat_images', None) is not None and not self.chat_images.close():
+                self.cleanup_uncertain.add('CHAT_IMAGE_CLEANUP_UNCONFIRMED')
             if self.handlers or self.active:
                 self.cleanup_uncertain.add('HANDLER_ACTIVE')
             if not remaining(deadline):

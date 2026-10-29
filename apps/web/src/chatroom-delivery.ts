@@ -1,3 +1,4 @@
+import { isChatRaster } from './chat-image-paths.js';
 /**
  * @fileoverview Chatroom delivery: puts chat messages into member panes.
  *
@@ -59,7 +60,7 @@ export interface DeliverySession {
   canAcceptChatInput?(): boolean;
   writeViaMux(
     data: string,
-    options?: { opencodeGuard?: boolean; requireEmptyComposer?: boolean; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
+    options?: { opencodeGuard?: boolean; requireIdle?: boolean; requireEmptyComposer?: boolean; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
   ): Promise<boolean>;
 }
 
@@ -79,6 +80,8 @@ export interface DeliveryDeps {
   forceWake?: (sessionId: string, roomId: string, messageId: string) => boolean;
   allowFragment?: (sessionId: string, roomId: string, messageId?: string) => boolean;
   now?: () => number;
+  prepareMessage?: (sessionId: string, roomId: string, messageId: string) => Promise<string>;
+  messageVisible?: (sessionId: string, roomId: string, messageId: string) => boolean;
   /** A message line was typed into this session's pane, for each room it was about (not a briefing, not a held message). */
   onWoken?: (sessionId: string, roomId: string, at: number) => void;
   /**
@@ -103,6 +106,7 @@ interface Pending {
   brief?: boolean;
   /** The chat message this fragment renders, so a deleted message can be withdrawn before it is typed. */
   messageId?: string;
+  localImages?: boolean;
   /**
    * Read, not woken for: a message the member is not addressed by. It is held and travels in the line of the next message that
    * does wake the member, so the member still sees everything, in order, without a billed turn per message.
@@ -197,7 +201,8 @@ export function renderForRecipient(
   room: ChatRoom,
   message: ChatMessage,
   recipientId: string,
-  nameOf: (id: string) => string
+  nameOf: (id: string) => string,
+  imagePaths: ReadonlyMap<string, string> = new Map()
 ): string {
   const from = senderLabel(message.from);
   const sender = message.from.kind === 'agent' ? message.from.sessionId : undefined;
@@ -209,7 +214,10 @@ export function renderForRecipient(
   else if (message.to.length === 1 && message.to[0] === recipientId) to = 'you';
   else to = describeRecipients(message, nameOf);
   // Attachments reach an agent as absolute paths it can read, still on the one line.
-  const files = (message.attachments ?? []).map((a) => ` [attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`).join('');
+  const files = (message.attachments ?? []).map((a) => isChatRaster(a)
+    ? imagePaths.has(a.id) ? ` [attached: ${quoteForPane(imagePaths.get(a.id)!, 400)}]`
+      : ` [attached image: ${quoteForPane(a.name, 200)} (local image unavailable; re-read to request a fresh path)]`
+    : ` [attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`).join('');
   // An attachment-only message says so in Reverie's own words, outside any quote (the sender wrote nothing).
   const text = message.poll
     ? quoteForPane(pollSummary(message))
@@ -495,6 +503,8 @@ export class ChatroomDelivery {
   private persistenceFailed = false;
   private inspectionHolds = new Map<string, Map<string, DeliveredMessage>>();
   /** Reads racing pane IO stay durable until both the write and its submit verifier have settled. */
+  /** Batch awaiting image I/O: reads, deletion and room removal still withdraw its identities. */
+  private preparing = new Map<string, Pending[]>();
   private activeWrites = new Map<string, {
     messages: DeliveredMessage[];
     reads: Map<string, Set<string>>;
@@ -549,6 +559,7 @@ export class ChatroomDelivery {
     this.lastDelivered.clear();
     this.inspectionHolds.clear();
     this.activeWrites.clear();
+    for (const batch of this.preparing.values()) batch.splice(0);
   }
 
   inspectionFor(sessionId: string): DeliveredMessage[] {
@@ -579,6 +590,8 @@ export class ChatroomDelivery {
     this.durable((store) => store.acknowledge(sessionId, roomId, immediate));
     this.releaseInspection(sessionId, immediate.map((messageId) => ({ roomId, messageId })));
     const read = new Set(messageIds);
+    const preparing = this.preparing.get(sessionId);
+    if (preparing) preparing.splice(0, preparing.length, ...preparing.filter(p => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
     const queue = this.queues.get(sessionId);
     if (queue) this.queues.set(sessionId, queue.filter((p) => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
   }
@@ -589,6 +602,7 @@ export class ChatroomDelivery {
     this.inspectionHolds.delete(sessionId);
     this.activeWrites.delete(sessionId);
     this.queues.delete(sessionId);
+    this.preparing.get(sessionId)?.splice(0);
     this.lastDelivered.delete(sessionId);
     this.lastRooms.delete(sessionId);
     this.omitted.delete(sessionId);
@@ -609,7 +623,7 @@ export class ChatroomDelivery {
     sessionId: string,
     room: { id: string; name: string; kind?: 'dm'; dm?: string[] },
     text: string | (() => string),
-    options: { brief?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
+    options: { brief?: boolean; localImages?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
   ): void {
     if (this.deps.allowFragment?.(sessionId, room.id, options.messageId) === false) {
       if (options.deliveryId) this.durable((store) => store.remove([options.deliveryId!]));
@@ -627,7 +641,7 @@ export class ChatroomDelivery {
       id: deliveryId, sessionId, roomId: room.id, messageId: options.messageId!,
       passive: !!options.passive, at, state: 'queued',
     }));
-    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, brief: options.brief, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
+    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, localImages: options.localImages, brief: options.brief, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
     const candidates = queue.slice();
     if (options.passive) {
       // Older read-later fragments go first, so a quiet member never loses a wake-up message to a pile of them.
@@ -675,6 +689,8 @@ export class ChatroomDelivery {
   /** Withdraw a message's fragments that have not been typed into a pane yet (a delete cannot unsend the rest). */
   dropMessage(roomId: string, messageId: string): void {
     this.durable((store) => store.forget(undefined, roomId, messageId));
+    for (const batch of this.preparing.values()) batch.splice(0, batch.length,
+      ...batch.filter(p => !(p.roomId === roomId && p.messageId === messageId)));
     for (const id of this.inspectionHolds.keys()) this.releaseInspection(id, [{ roomId, messageId }]);
     for (const [id, writing] of this.activeWrites) {
       writing.messages = writing.messages.filter((m) => !(m.roomId === roomId && m.messageId === messageId));
@@ -690,6 +706,8 @@ export class ChatroomDelivery {
 
   dropRoom(roomId: string, sessionId?: string): void {
     this.durable((store) => store.forget(sessionId, roomId));
+    for (const [id, batch] of this.preparing) if (!sessionId || id === sessionId)
+      batch.splice(0, batch.length, ...batch.filter(p => p.roomId !== roomId));
     for (const [id, held] of this.inspectionHolds) {
       if (!sessionId || sessionId === id) this.releaseInspection(id, [...held.values()].filter((p) => p.roomId === roomId));
     }
@@ -719,6 +737,7 @@ export class ChatroomDelivery {
     for (const id of recipients) {
       this.enqueue(id, room, renderForRecipient(room, message, id, nameOf), {
         messageId: message.id,
+        localImages: message.attachments?.some(isChatRaster),
         durable: true,
         ...(noReply ? { noReply: true } : {}),
         ...(awake && !awake.has(id) && !this.deps.forceWake?.(id, room.id, message.id) ? { passive: true } : {}),
@@ -808,13 +827,36 @@ export class ChatroomDelivery {
     }
     this.inFlight.add(sessionId);
     this.lastDelivered.set(sessionId, now);
+    this.preparing.set(sessionId, batch);
+    const originalPid = session.pid;
     let attempted = 0;
     let submitted = false;
     let finishWrite = () => {};
     let ioDone = false;
     let writeOk = false;
     try {
-      const { line, taken } = buildDeliveryBatch(batch);
+      const prepared = new Map<Pending, string>();
+      let imageRequests = 0;
+      for (const item of batch.slice(0, buildDeliveryBatch(batch).taken)) {
+        if (!['codex', 'claude'].includes(session.mode) || !item.localImages || !item.messageId || !this.deps.prepareMessage || imageRequests++ >= 4) continue;
+        const text = await this.deps.prepareMessage(sessionId, item.roomId, item.messageId);
+        if (batch.includes(item)) prepared.set(item, text);
+      }
+      const rejected = batch.filter(item => item.messageId && this.deps.messageVisible?.(sessionId, item.roomId, item.messageId) === false);
+      this.discard(rejected);
+      batch.splice(0, batch.length, ...batch.filter(item => !rejected.includes(item)));
+      if (!batch.length) return false;
+      // Image HTTP can yield to a read, room removal, plan move or another turn.
+      // No pane attempt or uncertainty barrier exists yet, so a held batch stays queued.
+      if (this.promptPauses.has(sessionId) || this.deps.getSession(sessionId) !== session || session.pid !== originalPid ||
+          session.isWorking || session.paneDialog || session.canAcceptChatInput?.() === false) {
+        this.requeue(sessionId, batch);
+        return false;
+      }
+      this.preparing.delete(sessionId);
+      // Fresh paths are ephemeral: overflow/requeued fragments keep their original renderer.
+      const rendered = batch.map(item => prepared.has(item) ? { ...item, text: prepared.get(item)! } : item);
+      const { line, taken } = buildDeliveryBatch(rendered);
       // Whatever the line could not hold waits for the next delivery; nothing is dropped. A last guard strips every control
       // character (DEL is Backspace in a terminal input box) so no builder can type an editing key.
       // eslint-disable-next-line no-control-regex
@@ -847,6 +889,7 @@ export class ChatroomDelivery {
       const ok = await session.writeViaMux(`${safe}\r`, {
         opencodeGuard: true,
         requireEmptyComposer: true,
+        ...(prepared.size ? { requireIdle: true } : {}),
         onOutcome: (outcome) => {
           if (finished || (carried.length && this.activeWrites.get(sessionId) !== writing)) return;
           outcomeSeen = true;
@@ -897,6 +940,7 @@ export class ChatroomDelivery {
       } else if (!this.persistenceFailed) this.requeue(sessionId, batch);
       return false;
     } finally {
+      this.preparing.delete(sessionId);
       ioDone = true;
       try { finishWrite(); }
       finally { this.inFlight.delete(sessionId); }

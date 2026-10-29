@@ -1,3 +1,4 @@
+import { isChatRaster, localImageFiles } from './chat-image-paths.js';
 /**
  * @fileoverview `reverie agent …` — session-to-session verbs for the agent running
  * inside a Reverie session, in every CLI mode.
@@ -994,7 +995,7 @@ interface ChatMessageRow {
   from: { kind: string; name: string; sessionId?: string };
   to: 'all' | string[];
   text: string;
-  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number }>;
+  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number; localPath?: string; localImageStatus?: 'ready' | 'unavailable' }>;
   /** Set when the user deleted the message (its text is then empty). */
   deleted?: { at: number };
   /** A poll: `text` is its question. */
@@ -1128,7 +1129,9 @@ export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], r
             roomId && UUID_RE.test(roomId) && UUID_RE.test(file.id)
               ? ` /api/v1/chatrooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(file.id)}`
               : '';
-          return ` [attached: ${quoteForPane(file.name, 200)}${link}]`;
+          return file.localPath
+            ? ` [attached: ${quoteForPane(file.localPath, 400)}]`
+            : ` [attached: ${quoteForPane(file.name, 200)}${file.localImageStatus === 'unavailable' ? ' (local image unavailable; re-read to request a fresh path)' : link}]`;
         })
         .join('');
   const marks = `${m.edited && !m.deleted ? ' (edited)' : ''}${m.pinned && !m.deleted ? ' [pinned]' : ''}`;
@@ -1498,6 +1501,37 @@ export function guessContentType(path: string): string {
   return types[ext] ?? 'application/octet-stream';
 }
 
+/** Default reads request bounded local image copies; failure never advertises a server path as readable. */
+async function withLocalImages(deps: AgentDeps, roomId: string, messages: ChatMessageRow[]): Promise<ChatMessageRow[]> {
+  let requests = 0;
+  const result: ChatMessageRow[] = [];
+  for (const original of messages) {
+    const message = { ...original, attachments: original.attachments?.map(file => ({ ...file })) };
+    const images = message.deleted ? [] : (message.attachments ?? []).filter(isChatRaster);
+    if (images.length) {
+      for (const image of images) {
+        image.path = '';
+        delete image.localPath;
+        image.localImageStatus = 'unavailable';
+      }
+      if (requests++ < 4) {
+        try {
+          const response = await deps.request(deps.ctx, { method: 'POST',
+            path: `/api/v1/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(message.id)}/image-paths`, body: {} });
+          const files = response.json?.success ? localImageFiles(response.json.data, images.slice(0, 4).map(file => file.id)) : [];
+          for (const file of files) {
+            const image = images.find(image => image.id === file.fileId)!;
+            image.path = image.localPath = file.path;
+            image.localImageStatus = 'ready';
+          }
+        } catch { /* A readable message remains usable when its local copy is unavailable. */ }
+      }
+    }
+    result.push(message);
+  }
+  return result;
+}
+
 /** `agent chat read` — recent history. */
 export async function agentChatRead(deps: AgentDeps, options: { room?: string; limit: number; message?: string; acknowledge?: boolean }): Promise<number> {
   if (options.acknowledge && !options.message) return fail(deps, '--acknowledge requires --message');
@@ -1509,6 +1543,7 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
     if (!exact.json?.success) return fail(deps, describeFailure(exact));
     const data = exact.json.data as { message?: ChatMessageRow; readToken?: string; timeZone?: string } | undefined;
     if (data?.message?.id !== options.message || typeof data.readToken !== 'string') return fail(deps, 'Unrecognized exact-message response; nothing acknowledged');
+    data.message = (await withLocalImages(deps, target.room.id, [data.message]))[0];
     // Explicit acknowledgement follows receipt of this exact response, never a guessed timestamp or text match.
     if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id, data.timeZone));
     if (options.acknowledge) {
@@ -1529,11 +1564,12 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
   });
   if (!res.json?.success) return fail(deps, describeFailure(res));
   const data = (res.json.data ?? {}) as { messages?: ChatMessageRow[]; members?: ChatMemberRow[]; timeZone?: string };
+  data.messages = await withLocalImages(deps, target.room.id, data.messages ?? []);
   if (deps.json) {
     emitJson(deps, data);
     return EXIT.ok;
   }
-  const messages = data.messages ?? [];
+  const messages = data.messages;
   if (messages.length === 0) deps.io.out(palette.muted('(no messages yet)'));
   for (const m of messages) deps.io.out(formatChatMessage(m, data.members ?? [], target.room.id, data.timeZone));
   return EXIT.ok;
