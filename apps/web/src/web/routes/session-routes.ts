@@ -2216,7 +2216,7 @@ export function registerSessionRoutes(
           );
         }
       } else {
-        const outcome = await remoteWake.handleInput(session, inputStr);
+        const outcome = await remoteWake.handleInput(session, inputStr, { agentInput: agentCaller });
         // The registry holds the bytes and flushes them in order once the pane is
         // reattached. The client's ACK is this 200 — a tagged retry is deduped
         // (`shouldApplyInput` above already consumed the seq), so nothing is lost.

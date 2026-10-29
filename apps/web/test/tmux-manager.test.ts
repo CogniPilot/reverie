@@ -286,6 +286,8 @@ describe('TmuxManager (unit)', () => {
       expect(await manager.sendInput('gated', 'wake', { stillIdle: () => true })).toBe(false);
       // OpenCode's own typer follows a write gate key by key (typeIntoOpencode), so a gated OpenCode text + Enter goes on.
       expect((await gated('wake\r', { opencode: true })).result).toBe(true);
+      expect((await gated('\r', { opencode: true })).result).toBe(true); // OpenCode's bare Enter (a verifier's) follows the gate too
+      expect(await manager.sendInput('gated', '\r', { opencode: true, stillIdle: () => true })).toBe(false);
       // Text + Enter goes on to the (test-mode) transport; an ungated write is not affected.
       expect((await gated('wake\r')).result).toBe(true);
       expect(await manager.sendInput('gated', '\r')).toBe(true);

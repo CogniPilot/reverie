@@ -5257,8 +5257,16 @@ export class Session extends EventEmitter {
           return false;
         }
         const enterId = this._beginMuxWrite();
-        try { return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined); }
-        finally { this._endMuxWrite(enterId); }
+        try {
+          // OpenCode's Enter is its own key sequence (settle, footer reads, maybe Escape) with awaits before the key: it goes
+          // under the write's gate, which its typer re-checks at the key itself. This Enter's own id is not "another write"
+          // to that gate. Other harnesses' Enter is one key sent with no await after the check above.
+          if (gate && this.mode === 'opencode') {
+            const own = () => { this._muxWriteIds.delete(enterId); try { return gate(); } finally { this._muxWriteIds.add(enterId); } };
+            return (await withWriteGate(own, () => this._mux!.sendInput(this.id, '\r', { opencode: true }))).result;
+          }
+          return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined);
+        } finally { this._endMuxWrite(enterId); }
       },
       // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
       // Only claude, codex, pi, opencode, omp and gemini declare a promptGlyph; the other modes would fall back

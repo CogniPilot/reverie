@@ -4887,7 +4887,7 @@ class ReverieChatApp {
     }
   }
 
-  /** Highlight `@name` / `@everyone` in a rendered message as plain text, not a link (text nodes only, never code or links; an address like a@b is left alone). */
+  /** Mark `@name` / `@everyone` in a rendered message as plain highlighted text, not a link (text nodes only, never code or links; an address like a@b is left alone). */
   decorateMentions(el) {
     const names = [...new Set(['everyone', ...(this.room?.members || []).map(m => m.name), ...this.channelHumans().map(p => p.name)].filter(Boolean))];
     names.sort((a, b) => b.length - a.length);

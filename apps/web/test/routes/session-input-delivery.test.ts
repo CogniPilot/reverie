@@ -204,7 +204,8 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
       headers: { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload: { input: LONG_PROMPT },
     });
-    expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true, opencodeGuard: true });
+    // An agent's write also answers to a plan move's hold at the write itself (agentInput, plan-move-input-hold.test.ts).
+    expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, expect.objectContaining({ fromUser: true, opencodeGuard: true, agentInput: true }));
     await post({ input: LONG_PROMPT });
     expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true });
   });
@@ -220,7 +221,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
       headers: { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload: { input: text },
     });
-    expect(direct).toHaveBeenLastCalledWith(text.replace('!', '\uFF01'), { fromUser: true });
+    expect(direct).toHaveBeenLastCalledWith(text.replace('!', '\uFF01'), expect.objectContaining({ fromUser: true, agentInput: true }));
     await post({ input: text });
     expect(direct).toHaveBeenLastCalledWith(text, { fromUser: true });
     // a Claude pane keeps its ! for everyone
@@ -231,7 +232,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
       headers: { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload: { input: text },
     });
-    expect(direct).toHaveBeenLastCalledWith(text, { fromUser: true });
+    expect(direct).toHaveBeenLastCalledWith(text, expect.objectContaining({ fromUser: true, agentInput: true }));
   });
 
   it('answers only once the mux write is done, so the next frame cannot overtake it', async () => {

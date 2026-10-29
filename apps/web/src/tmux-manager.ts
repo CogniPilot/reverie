@@ -3795,8 +3795,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // Enter (typeAndSubmit, or typeIntoOpencode, re-checks before each key); any other shape would go out ungated, so it is
     // refused before any transport, test mode included. OpenCode's typer follows the write's gate but has no idle check, so an
     // idle-only write (stillIdle) is still refused there.
+    // OpenCode's bare Enter (a submit verifier's later Enter) goes through the same gated typer, so it may be gated too.
+    const gatedOpencodeEnter = !!options.opencode && !options.stillIdle && input.includes('\r');
     if ((options.stillIdle || writeGateActive()) &&
-      ((options.opencode && options.stillIdle) || !input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))) {
+      ((options.opencode && options.stillIdle) || (!gatedOpencodeEnter && (!input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))))) {
       return false;
     }
 
