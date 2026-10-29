@@ -14,7 +14,8 @@ from .owner_terminal_channel import need
 
 PURPOSE = 'host-worker-resume-program-v1'
 MAX_FILES = 65536
-MAX_BYTES = 1024**3
+# Complete console output plus its fixed executable; no runtime subset omission.
+MAX_BYTES = 2 * 1024**3
 
 
 def signature(value):
@@ -64,7 +65,9 @@ def build(console, node, *, input_validator=None):
          console.is_relative_to('/nix/store') and console.is_dir(), 'RESUME_CONSOLE_OUTPUT')
     invocation = str(node); validate=immutable if input_validator is None else input_validator
     executable = validate(node.resolve(strict=True))
-    files, links, directories, total = {}, {}, [], 0
+    node_fact = file_fact(executable)
+    files, links, directories, total = {}, {}, [], node_fact['bytes']
+    need(total <= MAX_BYTES, 'RESUME_PROGRAM_TOTAL')
     pending = [console]
     while pending:
         directory = pending.pop(); info = directory.lstat()
@@ -85,7 +88,7 @@ def build(console, node, *, input_validator=None):
                 fact = file_fact(path); total += fact['bytes']
                 need(total <= MAX_BYTES, 'RESUME_PROGRAM_TOTAL')
                 files[str(path)] = fact
-    files[str(executable)] = file_fact(executable)
+    files[str(executable)] = node_fact
     entry = str(console / 'lib/reverie/dist/index.js')
     need(entry in files and str(console / 'lib/reverie/dist/host-worker-resume.js') in files and
          str(console/'lib/reverie/scripts/owner-terminal-start.mjs')in files,

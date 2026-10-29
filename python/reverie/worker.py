@@ -745,7 +745,7 @@ class Broker:
             from reverie.browser_job_requests import BrowserJobRequests
             self.browser_jobs = BrowserJobRequests(self,config['browserJobPolicy'])
 
-    def resource_admission(self, sid=None, *, protected_start=None):
+    def resource_admission(self, sid=None, *, protected_start=None, deadline=None):
         if self.resource_reservations is None:
             if protected_start is not None:
                 raise ValueError('Protected resource admission is unavailable')
@@ -754,6 +754,8 @@ class Broker:
             if configured(self.config):
                 raise ValueError('Resource reservation control requires reconciliation')
             return nullcontext()
+        if deadline is not None:
+            return self.resource_reservations.admission(sid,protected_start=protected_start,deadline=deadline)
         return self.resource_reservations.admission(sid,protected_start=protected_start)
 
     def _release_resource_admission(self, guard):
@@ -975,6 +977,19 @@ class Broker:
                 guard.__exit__(None,None,None);raise
             self.storage_leases[session_id]=(guard,paths)
             return paths,True
+
+    def _launch_wait_binding(self, session_id):
+        """Current host-selected identity/recipe, never a caller's replacement intent."""
+        company=read_metadata(Path(self.config['companyFile']),self.config['uid'])
+        employees=company.get('employees')
+        if not isinstance(employees,list) or any(not isinstance(row,dict) for row in employees):
+            raise ValueError('Current employee launch binding is unavailable')
+        rows=[row for row in employees if row.get('sessionId')==session_id]
+        if len(rows)>1:
+            raise ValueError('Current employee launch binding is ambiguous')
+        fields=('id','owner','sessionId','sessionGeneration','desiredRunning','onVacation',
+                'bindingMigration','runtimeRecipe','permissions')
+        return json.dumps({key:rows[0].get(key) for key in fields},sort_keys=True) if rows else None
 
     def admit_cold_temporary(self, paths, temporary_keys):
         """Fresh complete engine census; callers already hold this EID lease.
@@ -1646,18 +1661,40 @@ class Broker:
             pending_guard.__enter__()
             resource_guard = pending_guard
             generation = self.generation
-            # Wait outside the broker mutex: a source plan-move laptop must
-            # finish stopping before its successor can acquire the same home.
+            wait_binding = self._launch_wait_binding(session_id) if protected_start is None else None
+            wait_config = json.dumps(self.config,sort_keys=True) if protected_start is None else None
+            waited = False
+            def wait_current():
+                current=load_config(self.config_file) if self.config_file else self.config
+                if (generation!=self.generation or self.stopping.is_set() or self.draining.is_set() or
+                        json.dumps(self.config,sort_keys=True)!=wait_config or
+                        json.dumps(current,sort_keys=True)!=wait_config or
+                        self._launch_wait_binding(session_id)!=wait_binding):
+                    raise RuntimeError('Laptop launch changed while waiting for previous data')
+            # Never wait for the old EID lease while retaining common resource
+            # admission: its canonical supervisor stop needs that same lock.
+            # Failed claims own no storage, so release admission, let stop settle,
+            # then reacquire and revalidate before claiming/creation admission.
             storage_deadline=time.monotonic()+10
             while True:
                 if self.stopping.is_set() or not self.allowed(session_id):
                     raise ValueError('This expert is stopped or on vacation')
+                if waited:wait_current()
                 try:
                     paths,storage_claimed=self.claim_storage(session_id);break
                 except BlockingIOError:
+                    if protected_start is None:
+                        guard=resource_guard;resource_guard=None
+                        self._release_resource_admission(guard)
                     if time.monotonic()>=storage_deadline:raise RuntimeError('Previous employee laptop has not released its data')
                     self.stopping.wait(.1)
+                    if protected_start is None:
+                        if time.monotonic()>=storage_deadline:raise RuntimeError('Previous employee laptop has not released its data')
+                        waited=True;wait_current()
+                        pending_guard=self.resource_admission(session_id,deadline=storage_deadline)
+                        pending_guard.__enter__();resource_guard=pending_guard
             with self.lock:
+                if waited:wait_current()
                 if generation != self.generation or self.stopping.is_set() or self.draining.is_set() or session_id in self.active:
                     raise ValueError('A worker for this session is already attached')
                 if not self.allowed(session_id):

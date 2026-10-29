@@ -322,3 +322,44 @@ class FixedEndpoint(unittest.TestCase):
             elif change=='missing':bad['files']={}
             else:bad['programs'][3][-1]='--arbitrary'
             with self.assertRaisesRegex(ValueError,'FIXED_WEBSITE_ARGV'):require_programs(bad)
+
+
+class ProgramAggregateBudget(unittest.TestCase):
+    """Real small readonly Nix inputs; no graph can register as a website.
+
+    jq is deliberately not a console: reaching MATCHING_CONSOLE proves the
+    complete measured byte budget passed without authorizing unrelated code.
+    No mocked file sizes, path custody or hashes and no large allocation.
+    """
+    def setUp(self):
+        import stat
+        from reverie import worker_resume_program as Q
+        from reverie.website_image_provenance import nix_build_input
+        self.Q = Q
+        selected = shutil.which('jq')
+        self.assertIsNotNone(selected, 'The declared flake jq is required')
+        self.console = Path(selected).resolve(strict=True).parent.parent
+        self.executable = Path('/proc/self/exe').resolve(strict=True)
+        self.console_bytes = sum(p.lstat().st_size for p in self.console.rglob('*')
+                                 if stat.S_ISREG(p.lstat().st_mode))
+        self.executable_bytes = self.executable.stat().st_size
+        self.total = self.console_bytes + self.executable_bytes
+        self.validator = lambda path: nix_build_input(path, 256 << 20)
+
+    def collect(self):
+        return self.Q.build(self.console, self.executable, input_validator=self.validator)
+
+    def test_exact_measured_console_plus_executable_budget_reaches_identity_guard(self):
+        with patch.object(self.Q, 'MAX_BYTES', self.total), \
+             self.assertRaisesRegex(ValueError, 'RESUME_MATCHING_CONSOLE_REQUIRED'):
+            self.collect()
+
+    def test_one_byte_below_measured_total_refuses_before_identity_guard(self):
+        with patch.object(self.Q, 'MAX_BYTES', self.total - 1), \
+             self.assertRaisesRegex(ValueError, 'RESUME_PROGRAM_TOTAL'):
+            self.collect()
+
+    def test_executable_alone_crosses_otherwise_fitting_console_budget(self):
+        with patch.object(self.Q, 'MAX_BYTES', self.console_bytes), \
+             self.assertRaisesRegex(ValueError, 'RESUME_PROGRAM_TOTAL'):
+            self.collect()

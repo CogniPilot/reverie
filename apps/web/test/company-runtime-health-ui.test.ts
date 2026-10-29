@@ -4,13 +4,13 @@ import {createHarness,member,room} from './helpers/chat-app-harness.mjs';
 const SID='11111111-1111-4111-8111-111111111111';
 const opened:any[]=[];
 afterEach(()=>{for(const h of opened.splice(0))h.dom.window.close();vi.restoreAllMocks();});
-async function fixture({health='dead',scope='provider',off=false,vacation=false,owner=true}={}){
+async function fixture({health='dead',scope='provider',off=false,vacation=false,owner=true,working=true}={}){
  const employee={id:'expert',sessionId:SID,name:'Alex',available:true,desiredRunning:!off,onVacation:vacation,runtimeHealth:health,runtimeHealthScope:scope};
- const session={id:SID,name:'Alex',mode:'codex',pid:123,status:'busy',isWorking:true,runtimeHealth:health,runtimeHealthScope:scope,
+ const session={id:SID,name:'Alex',mode:'codex',pid:123,status:working?'busy':'idle',isWorking:working,runtimeHealth:health,runtimeHealthScope:scope,
   ...(['dead','disconnected'].includes(health)?{paneExit:{status:137}}:{})};
  const company={canManage:owner,employees:[employee],settings:{}};
- const h=await createHarness({company,sessions:[session],rooms:[room('r1','Office',[member(SID,'Alex',{working:true})])]});opened.push(h);
- h.app.sessions.set(SID,session);h.app._mobileOverviewState=()=> 'working';h.shell.company=company;
+ const h=await createHarness({company,sessions:[session],rooms:[room('r1','Office',[member(SID,'Alex',{working})])]});opened.push(h);
+ h.app.sessions.set(SID,session);h.app._mobileOverviewState=()=> working?'working':'idle';h.shell.company=company;
  h.shell.humanSelf={role:owner?'owner':'basic'};h.shell.phoneStatus={self:owner?'owner':'human',canSetOwn:owner};
  const original=h.app._chatApi.bind(h.app),posts:any[]=[];
  h.app._chatApi=async(path:string,options?:any)=>{
@@ -54,7 +54,28 @@ it('does not call a worker transport exit provider death or claim that an unknow
  expect(badge.title).toContain('not been confirmed');expect(badge.classList.contains('is-dead')).toBe(false);
  session.runtimeHealth='unknown';delete(session as any).paneExit;employee.runtimeHealth='unknown';
  h.shell.syncSessionPresence(SID);await h.flush();
- expect(badge.textContent).toBe('Health unknown');expect(h.document.querySelector('.ca-member').getAttribute('aria-label')).toContain('health unknown');
+ expect(badge.textContent).toBe('Connected');expect(badge.title).toContain('Agent health has not been confirmed');
+ expect(h.document.querySelector('.ca-member').classList.contains('is-state-working')).toBe(true);
+});
+
+it.each([true,false])('keeps known transport presence and existing activity when provider health is unknown (working=%s)',async working=>{
+ const{h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal',working});await h.shell.openCompany();
+ const card=h.document.querySelector('[data-employee-id="expert"]');
+ const badge=card.querySelector('.ca-company-state');
+ expect(badge.textContent).toBe('Connected');expect(badge.title).toContain('Agent health has not been confirmed');
+ expect(h.shell.presenceOf(member(SID,'Alex',{working}))).toBe(working?'working':'idle');
+ expect(h.document.querySelector('.ca-member').classList.contains(`is-state-${working?'working':'idle'}`)).toBe(true);
+ expect(card.textContent).not.toContain('Health unknown');expect(card.querySelector('.ca-dead-pane-restart')).toBeNull();
+ expect(employee.runtimeHealth).toBe('unknown');expect(session.runtimeHealth).toBe('unknown');expect(posts).toHaveLength(0);
+});
+
+it('retains the unknown diagnostic when neither session nor member nor company reports transport presence',async()=>{
+ const{h,employee}=await fixture({health:'unknown'});
+ delete (employee as any).available;h.app.sessions.delete(SID);
+ const state=h.shell.employeeHealth(employee);
+ expect(state.state).toBe('unknown');expect(state.label).toBe('Health unknown');
+ expect(state.detail).toContain('not been confirmed');
+ await h.shell.openCompany();expect(h.document.querySelector('.ca-company-state').textContent).toBe('Health unknown');
 });
 
 it.each([{off:true},{vacation:true}])('keeps explicit stopped/vacation intent grey and cannot restart implicitly (%j)',async choice=>{

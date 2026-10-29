@@ -151,3 +151,20 @@ worker's outside exit is `disconnected`/`terminal`. Missing evidence is `unknown
 never proof of healthy work. Transport-only exits do not automatically mark an
 employee OFF through the clean provider-exit sweep. These fields are observations,
 not owner intent or a permission to restart.
+
+## Plan-move storage handoff
+
+A normal successor J request cannot create or reserve capacity until it owns
+the employee's existing storage lease. If the detached source still owns that
+lease, the successor releases common resource admission before waiting. This
+lets the existing supervisor consume the durable source-stop request and finish
+the canonical laptop stop. The successor then reacquires admission and checks
+the current employee binding, generation, account/runtime recipe, owner intent,
+broker generation and configuration before claiming storage or creating anything.
+The original ten-second storage wait is not renewed.
+
+An unknown source stop keeps its storage and capacity fences. An uncertain
+admission release is not retried. Protected resource launches retain their
+one-shot admission and never enter this ordinary-J retry path. This changes no
+launch protocol or stop authority; reconnect and native readiness remain separate
+from provider replacement and completion.
