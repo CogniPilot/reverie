@@ -265,6 +265,18 @@ describe('agent wake', () => {
     expect(deps.calls[1]).toMatchObject({ method: 'POST', path: `/api/v1/sessions/${OTHER}/input`, body: { input: `${WAKE_PROMPT}\r`, ifIdle: true } });
   });
 
+  it('reports a server-refused wake (turn just started, or a draft) as not woken, never "accepted"', async () => {
+    const draft = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: false })]);
+    expect(await agentWake(draft, { id: OTHER })).toBe(EXIT.refused);
+    expect(draft.err.join('')).toMatch(/not woken: .* busy or has a draft/);
+    expect(draft.out.join('')).not.toMatch(/accepted|delivered to/);
+    const busy = fakeDeps([
+      ok([{ id: OTHER, name: 'Sam', status: 'idle' }]),
+      { status: 409, json: { success: false, error: 'Session is working; nothing was typed', errorCode: 'SESSION_BUSY' }, text: '' },
+    ]);
+    expect(await agentWake(busy, { id: OTHER })).toBe(EXIT.refused);
+  });
+
   it('leaves a working or unknown-state session alone and never wakes itself', async () => {
     for (const status of ['busy', undefined]) {
       const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status }])]);

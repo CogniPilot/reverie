@@ -2343,7 +2343,9 @@ export function registerSessionRoutes(
       }
     }
 
-    if (!waitPromise) return {};
+    // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
+    // just started, or a draft in the composer) must not read as accepted.
+    if (!waitPromise) return ifIdle ? { delivered } : {};
 
     try {
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse

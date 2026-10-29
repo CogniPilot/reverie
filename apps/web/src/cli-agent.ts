@@ -709,11 +709,16 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
     body,
     timeoutMs: (options.timeoutMs ?? 60_000) + 10_000,
   });
-  if (!res.json?.success) return fail(deps, describeFailure(res));
+  // An idle-only send refused because the session is working is a refusal, not an error.
+  if (!res.json?.success) return fail(deps, describeFailure(res), options.ifIdle && res.status === 409 ? EXIT.refused : EXIT.error);
   const data = res.json.data as
     | { delivered?: boolean; duplicate?: boolean; buffered?: boolean; dropped?: boolean; workerDead?: boolean; wait?: WaitResult }
     | undefined;
   if (deps.json) emitJson(deps, data ?? {});
+  if (options.ifIdle && data?.delivered === false && !data.duplicate) {
+    if (!deps.json) deps.io.err(palette.err(`${GLYPH.fail} not woken: ${target.id} is busy or has a draft in its composer — nothing was typed`));
+    return EXIT.refused;
+  }
   // Fire-and-forget to a remote session whose host is asleep (wake-on-LAN): the server
   // holds the chunk and types it once the pane is back (`buffered`), or the chunk was
   // over the wake buffer's cap and is gone (`dropped`). The seq is spent either way,

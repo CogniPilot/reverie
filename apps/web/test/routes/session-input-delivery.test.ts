@@ -326,6 +326,7 @@ describe('POST /api/sessions/:id/input ifIdle (agent wake)', () => {
     const raw = vi.spyOn(session, 'write');
     const res = await post({ input: 'wake\r', useMux: true, clientId: 'w2', seq: 1, ifIdle: true });
     expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual({ delivered: false }); // not an empty "accepted" body
     expect(mux).toHaveBeenCalledWith('wake\r', expect.objectContaining({ requireEmptyComposer: true }));
     expect(raw).not.toHaveBeenCalled();
     expect(session.shouldApplyInput('w2', 1)).toBe(true); // refused write leaves the seq retryable
