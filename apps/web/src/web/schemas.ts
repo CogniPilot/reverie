@@ -2384,6 +2384,8 @@ export const ChatroomReadSchema = z.object({ at: z.number().finite().nonnegative
 
 /** A direct message with one agent session. */
 export const ChatroomDmSchema = z.object({ sessionId: ChatSessionIdSchema }).strict();
+/** No client-selected viewer, cutoff or deletion option. */
+export const ChatroomClearHistorySchema = z.object({}).strict();
 
 /** Where an ordinary room sits in the channel list; `''` clears one. */
 export const ChatroomPlacementSchema = z
