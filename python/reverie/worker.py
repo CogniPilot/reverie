@@ -55,7 +55,7 @@ if __package__:
     from .worker_storage_labels import hostname as employee_hostname
     from .goal_assertion import goal_forward_headers
     from .goal_bootstrap import GoalBrokerBootstrap
-    from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, wait_poll
+    from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -100,7 +100,7 @@ else:
         sys.path.insert(0, _package_root)
     from reverie.goal_assertion import goal_forward_headers
     from reverie.goal_bootstrap import GoalBrokerBootstrap
-    from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, wait_poll
+    from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
 
 MAX_FRAME = 256 * 1024
 SHARED_WORKSPACE = Path('/reverie_workspace')
@@ -2209,11 +2209,6 @@ class Broker:
                         if current is office: self.offices.pop(sid, None)
             for token in tuple(self.viewers):
                 self._reap_viewer(token)
-            for token, child in tuple(self.owned_clients.items()):
-                if child is not None and wait_poll(child, deadline, self.stopping):
-                    self.owned_clients.pop(token, None)
-                else:
-                    self.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
             if supervisor_started:
                 supervisor.join(min(5., remaining(deadline)))
                 if supervisor.is_alive():
@@ -2225,6 +2220,9 @@ class Broker:
             for handler in tuple(self.handlers.values()):
                 if handler is not threading.current_thread():
                     handler.join(remaining(deadline))
+            # Constructors and client finalizers publish before the final owned
+            # client sweep. Still-active handlers/supervisor remain fatal.
+            settle_owned_clients(self, deadline)
             if self.handlers or self.active:
                 self.cleanup_uncertain.add('HANDLER_ACTIVE')
             if not remaining(deadline):

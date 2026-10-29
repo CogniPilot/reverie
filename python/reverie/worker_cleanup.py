@@ -4,6 +4,7 @@ import selectors
 import signal
 import subprocess
 import time
+import threading
 
 UNIT_STOP_SECONDS = 35
 RETURN_MARGIN_SECONDS = 1
@@ -108,6 +109,88 @@ def reap_viewer(child, stop, uncertain):
         return False
 
 
+# The command timeout remains unknown to its caller. Terminal cleanup may only
+# settle the separate owned-client fact through the exact retained Popen record.
+_CLIENT_STATE_LOCK = threading.Lock()
+
+
+def _client_state_acquire(owner, deadline):
+    left = remaining(deadline, owner.stopping)
+    held = (_CLIENT_STATE_LOCK.acquire(timeout=left) if left else
+            _CLIENT_STATE_LOCK.acquire(blocking=False))
+    if not held:
+        # Monotonic opaque fact, published before the marker. Never reconcile a
+        # bookkeeping operation that could not obtain its original budget.
+        owner._engine_client_uncertainty_opaque = True
+        owner.cleanup_uncertain.update({'LOCK_UNAVAILABLE', 'ENGINE_CLIENT_UNREAPED'})
+    return held
+
+
+def _client_unreaped(owner, token, child, deadline):
+    if not _client_state_acquire(owner, deadline):
+        return
+    try:
+        state = getattr(owner, '_engine_client_uncertainty', None)
+        if state is None:
+            state = {'clients': {}, 'opaque': 'ENGINE_CLIENT_UNREAPED' in owner.cleanup_uncertain}
+            owner._engine_client_uncertainty = state
+        state['clients'][token] = child
+        owner.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
+    finally:
+        _CLIENT_STATE_LOCK.release()
+
+
+def settle_owned_clients(owner, deadline):
+    """Final shutdown proof for exact owned clients, under the existing budget.
+
+    No command retry, signal, fresh grace or arbitrary PID lookup. A pending
+    constructor is still owned; wait for its publication/removal only until the
+    shared deadline. Untracked diagnostics and every other cleanup code remain.
+    """
+    missing = object()
+    for token in tuple(owner.owned_clients):
+        child = owner.owned_clients.get(token, missing)
+        while child is None and remaining(deadline, owner.stopping):
+            time.sleep(min(POLL_SECONDS, remaining(deadline, owner.stopping)))
+            child = owner.owned_clients.get(token, missing)
+        if child is missing:
+            continue
+        if child is not None and wait_poll(child, deadline, owner.stopping):
+            if owner.owned_clients.get(token) is child:
+                owner.owned_clients.pop(token, None)
+        else:
+            _client_unreaped(owner, token, child, deadline)
+    if not _client_state_acquire(owner, deadline):
+        return
+    try:
+        state = getattr(owner, '_engine_client_uncertainty', None)
+        if state is None:
+            return
+        for token, child in tuple(state['clients'].items()):
+            current = owner.owned_clients.get(token, missing)
+            if child is None:
+                if current is missing:
+                    # run_client removed its placeholder only after failed
+                    # construction or actual child reaping.
+                    state['clients'].pop(token)
+                    continue
+                child = current
+            if child is not None and child.poll() is not None:
+                state['clients'].pop(token)
+                if current is child:
+                    owner.owned_clients.pop(token, None)
+        if (not state['clients'] and not owner.owned_clients and not state['opaque'] and
+                not getattr(owner, '_engine_client_uncertainty_opaque', False)):
+            owner.cleanup_uncertain.discard('ENGINE_CLIENT_UNREAPED')
+            # A contending producer cannot take this lock to publish its failure.
+            # Recheck the monotonic opaque flag after discard so a late failed
+            # acquisition can never lose its separately published marker.
+            if getattr(owner, '_engine_client_uncertainty_opaque', False):
+                owner.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
+    finally:
+        _CLIENT_STATE_LOCK.release()
+
+
 def run_client(command, *, timeout, owner, limit=ENGINE_OUTPUT_BYTES, stderr=True):
     """Exact argv, bounded two-pipe output, nonblocking reads and explicit reap.
 
@@ -163,10 +246,10 @@ def run_client(command, *, timeout, owner, limit=ENGINE_OUTPUT_BYTES, stderr=Tru
                     except ProcessLookupError:
                         pass
                     except OSError:
-                        owner.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
+                        _client_unreaped(owner, token, child, deadline)
                     # An exhausted deadline gets WNOHANG, not a fresh grace.
                     if not wait_poll(child, deadline, owner.stopping):
-                        owner.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
+                        _client_unreaped(owner, token, child, deadline)
                 if child.poll() is not None:
                     owner.owned_clients.pop(token, None)
             else:
