@@ -4235,6 +4235,9 @@ Object.assign(ReverieApp.prototype, {
         } catch {
           refuse('Preview requires UTF-8 text. Download to open it.');
         }
+        // An SVG is shown as a picture, not its markup. It goes through an <img> from a blob URL, where a browser runs no
+        // script and loads nothing external, so the file cannot act on the page.
+        if (ext === 'svg' && /<svg[\s>]/i.test(content)) mediaType = 'image/svg+xml';
       }
       return {
         kind: room ? 'room-attachment' : 'workspace',
