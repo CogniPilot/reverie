@@ -4857,20 +4857,20 @@ Object.assign(ReverieApp.prototype, {
     }
     // SVG renders as an image, but file-raw deliberately serves SVG as an
     // untrusted octet-stream attachment (XSS hardening), so a direct
-    // <img src=file-raw> would break. Fetch the bytes and render via a
-    // same-origin blob typed image/svg+xml — <img> never executes scripts in
-    // the referenced SVG, so this is safe while still rendering the graphic.
+    // <img src=file-raw> would break. Fetch the bytes and render from a data:
+    // URL: <img> never executes scripts in the SVG, and unlike a same-origin
+    // blob: URL a data: URL cannot be opened as a top-level page, so "Open
+    // image in new tab" cannot run them on this origin either.
     if (ext === 'svg') {
       footerEl.textContent = 'SVG';
       try {
         const res = await fetch(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}`);
         if (!res.ok) throw new Error('Failed to load image');
-        const svgText = await res.text();
+        const bytes = new Uint8Array(await res.arrayBuffer());
         if (stale()) return;
-        const blobUrl = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml' }));
-        bodyEl.innerHTML = `<img src="${blobUrl}" alt="${escapeHtml(filePath)}">`;
-        const img = bodyEl.querySelector('img');
-        if (img) img.onload = () => URL.revokeObjectURL(blobUrl);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        bodyEl.innerHTML = `<img src="data:image/svg+xml;base64,${btoa(binary)}" alt="${escapeHtml(filePath)}">`;
       } catch (err) {
         if (stale()) return;
         bodyEl.innerHTML = `<div class="binary-message">Error: ${escapeHtml(err.message)}</div>`;
