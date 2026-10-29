@@ -87,6 +87,8 @@ export interface CompanyResearchBackend {
 }
 
 interface CompanySession {
+  runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
+  runtimeHealthScope?: 'provider' | 'terminal';
   id: string;
   owner?: string;
   name: string;
@@ -178,13 +180,14 @@ export class CompanyService {
   prepareRuntimeRestart(sessionId: string, owner: string | undefined): RuntimeRestartIntent | undefined {
     const original = this.store.snapshot().employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
     if (!original) return undefined;
-    if (original.onVacation || this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId))
+    if (original.onVacation || original.bindingMigration || this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId))
       throw new CompanyError('This expert changed or is already restarting', 409);
     const transaction = { cancelled: false, closed: false };
     this.runtimeRestarts.set(sessionId, transaction);
     let claimed = false;
     const matches = (employee: CompanyEmployee | undefined): employee is CompanyEmployee => !!employee && employee.id === original.id &&
-      employee.sessionId === sessionId && sameOwner(employee.owner, owner) && !employee.onVacation;
+      employee.sessionId === sessionId && employee.sessionGeneration === original.sessionGeneration &&
+      sameOwner(employee.owner, owner) && !employee.onVacation && !employee.bindingMigration;
     const current = () => !transaction.cancelled && !transaction.closed &&
       this.runtimeRestarts.get(sessionId) === transaction;
     return {
@@ -242,7 +245,11 @@ export class CompanyService {
     const employees = state.employees.filter((e) => sameOwner(e.owner, owner));
     const ids = new Set(employees.map((e) => e.id));
     return {
-      employees: employees.map((e) => ({ ...e, available: !!this.deps.getSession(e.sessionId) })),
+      employees: employees.map((e) => {
+        const session = this.deps.getSession(e.sessionId);
+        return { ...e, available: !!session, runtimeHealth: session?.runtimeHealth ?? 'unknown',
+          runtimeHealthScope: session?.runtimeHealthScope ?? 'provider' };
+      }),
       settings: state.settings.find((s) => sameOwner(s.owner, owner)) ?? CompanySettingsSchema.parse({ owner }),
       cycles: state.cycles.filter((c) => sameOwner(c.owner, owner)),
       memories: state.memories.filter((m) => ids.has(m.employeeId)),

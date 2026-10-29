@@ -438,6 +438,12 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-root .chatroom-dot--waiting { background: var(--yellow); }
 .ca-root .chatroom-dot--needs, .ca-root .chatroom-dot--error { background: var(--red); }
 .ca-root .chatroom-dot--gone { background: var(--text-muted); }
+.ca-root .chatroom-dot--unknown { background: var(--text-muted); }
+.ca-root .chatroom-dot--dead, .ca-root .chatroom-dot--disconnected { background: var(--red); animation: none; box-shadow: none; }
+.ca-root .ca-member.is-state-dead, .ca-root .ca-member.is-state-disconnected { opacity: 1; }
+.ca-root .ca-member.is-state-dead .ca-member-sub, .ca-root .ca-member.is-state-disconnected .ca-member-sub { color: var(--red); font-weight: 600; }
+.ca-root .ca-runtime-health.is-dead, .ca-root .ca-runtime-health.is-disconnected { color: var(--red); font-weight: 600; }
+.ca-root .ca-dm-state.is-dead, .ca-root .ca-dm-state.is-disconnected { color: var(--red); }
 .ca-root .ca-member.is-state-needs .ca-member-sub, .ca-root .ca-member.is-state-error .ca-member-sub { color: var(--red); }
 .ca-root .ca-member.is-state-waiting .ca-member-sub { color: var(--yellow); }
 .ca-root .ca-dm-state { flex: none; font-size: 11px; color: var(--text-dim); }
@@ -1587,6 +1593,13 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-company-map .ca-company-parent, .ca-company-map .ca-company-reporting[hidden] { display: none; }
 .ca-company-map .ca-company-person .ca-company-state { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; overflow: hidden; font-size: 0; border-radius: 50%; background: var(--text-dim); }
 .ca-company-map .ca-company-person .ca-company-state.is-connected { background: var(--green, #4fbf86); }
+.ca-company .ca-company-person:is(.is-health-dead, .is-health-disconnected) { border-color: var(--red); }
+.ca-company .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected) { color: var(--red); font-weight: 700; }
+.ca-company-map .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected) {
+  position: static; grid-column: 1 / -1; width: auto; height: auto; overflow: visible;
+  font-size: 11px; line-height: 1.4; border-radius: 0; background: transparent;
+}
+.ca-company-person .ca-dead-pane-restart { grid-column: 1 / -1; min-height: 32px; }
 .ca-company-map-tools { padding: 2px 0 5px; }
 .ca-company-map-tools .ca-btn { padding: 2px 7px; min-height: 26px; }
 .ca-company .ca-company-head { padding: 4px 12px; gap: 6px; }

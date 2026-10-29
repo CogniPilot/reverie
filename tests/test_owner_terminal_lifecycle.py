@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import fcntl
 import json
 import os
+import select
 from pathlib import Path
 import socket
 import subprocess
@@ -222,13 +223,27 @@ class GenerationFlow(unittest.TestCase):
     def prepare(self):return self.initial.prepare_created(self.fd,self.cid,self.spec,self.spec_sha)
 
     def clean_receipt(self,result,*,alive=False):
-        child=subprocess.Popen([sys.executable,'-I','-B','-c','import sys;sys.stdin.buffer.read(1)'],stdin=subprocess.PIPE)
-        process=C.read_proc(child.pid)
-        if not alive:
-            child.stdin.write(b'q');child.stdin.flush();child.wait(timeout=5);child.stdin.close()
-        else:
-            self.addCleanup(child.stdin.close)
-            self.addCleanup(lambda:child.wait(timeout=5)if child.poll()is not None else(child.terminate(),child.wait(timeout=5)))
+        child=subprocess.Popen([sys.executable,'-I','-B','-c',
+            'import sys;print("READY",flush=True);sys.stdin.buffer.read(1)'],
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        def cleanup():
+            try:
+                if child.poll() is None:child.terminate()
+                child.wait(timeout=5)
+            finally:
+                child.stdin.close();child.stdout.close()
+        self.addCleanup(cleanup)
+        try:
+            # Popen's exec acknowledgement is not application readiness. Capture
+            # process identity only once the owned child is waiting for input.
+            self.assertTrue(select.select([child.stdout],[],[],5)[0],'Child readiness timeout')
+            self.assertEqual(child.stdout.readline(),b'READY\n')
+            process=C.read_proc(child.pid)
+            if not alive:
+                child.stdin.write(b'q');child.stdin.flush();child.wait(timeout=5)
+        except BaseException:
+            cleanup()
+            raise
         group=self.root/'cgroup';group.mkdir(exist_ok=True);leaf=group/'own.service';leaf.mkdir(exist_ok=True)
         self.write(leaf/'cgroup.events',b'populated 0\nfrozen 0\n')
         info=leaf.stat();parent=group.stat()
@@ -243,6 +258,29 @@ class GenerationFlow(unittest.TestCase):
             'policySHA256':result['policySHA256'],'process':process,'websiteBindingDigest':'f'*64,
             'shutdown':'REQUESTED','settlements':{}}))
         return child
+
+    def test_clean_receipt_refuses_bad_readiness_before_identity_and_reaps_owned_child(self):
+        first=self.prepare();popen=subprocess.Popen;children=[]
+        def failed_start(argv,**kwargs):
+            argv=list(argv);argv[-1]='import sys;print("NOT_READY",flush=True);sys.stdin.buffer.read(1)'
+            child=popen(argv,**kwargs);children.append(child);return child
+        try:
+            with patch.object(subprocess,'Popen',side_effect=failed_start), \
+                 patch.object(C,'read_proc',side_effect=AssertionError('Unexpected identity capture')) as identity:
+                with self.assertRaises(AssertionError):self.clean_receipt(first)
+                identity.assert_not_called()
+            self.assertEqual(len(children),1)
+            self.assertIsNotNone(children[0].poll())
+            self.assertTrue(children[0].stdin.closed)
+            self.assertTrue(children[0].stdout.closed)
+        finally:
+            # This also reaps the deliberately broken predecessor in the
+            # regression control, even if its missing readiness fence fails.
+            for child in children:
+                if child.poll() is None:child.terminate()
+                child.wait(timeout=5)
+                if child.stdin is not None:child.stdin.close()
+                if child.stdout is not None:child.stdout.close()
 
     def test_cold_prepare_then_actual_old_process_settlement_allows_fresh_same_CID_generation(self):
         first=self.prepare();selected,policy,_=self.initial.current()

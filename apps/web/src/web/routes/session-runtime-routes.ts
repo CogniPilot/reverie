@@ -59,6 +59,40 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (employee.onVacation) return reply.code(409).send({ success: false, error: 'Return this expert from vacation before restarting' });
     const session = ctx.sessions.get(employee.sessionId) ?? loadSession?.(employee.sessionId, req);
     if (!session) return reply.code(409).send({ success: false, error: 'No saved runtime recipe is available for this expert. Restore their runtime settings before restarting.' });
+    // Preserve saved recipe/account/thread. Normal broker J decides whether
+    // to reattach a live provider or stop/settle/recreate its dead inner pane.
+    if (session.hasDeadPane?.()) {
+      if (employee.desiredRunning === false)
+        return reply.code(409).send({ success: false, error: 'Enter the office before restarting this expert' });
+      if (recovery.forceRestart && recovery.confirmSessionId !== session.id)
+        return reply.code(409).send({ success: false, error: 'Confirm this current expert session before recovery' });
+      if (runtimeSwitches.has(session.id) || session.runningTaskCount > 0)
+        return reply.code(409).send({ success: false, error: 'Wait for running tasks or an existing restart to finish' });
+      runtimeSwitches.add(session.id);
+      let intent: RuntimeRestartIntent | undefined;
+      try {
+        intent = company?.prepareRuntimeRestart(session.id, ownerFor(req));
+        if (!intent) return reply.code(409).send({ success: false, error: 'Current expert binding is unavailable' });
+        const expectedRuntime = JSON.stringify(runtimeView(session));
+        const current = () => !!intent?.current() && ctx.sessions.get(session.id) === session &&
+          JSON.stringify(runtimeView(session)) === expectedRuntime;
+        await intent.claim();
+        if (!current() || !await session.restartDeadCli(current))
+          return reply.code(409).send({ success: false, error: 'Recovery was not confirmed; the expert changed, stopped or its pane is already live' });
+        if (!current()) return reply.code(409).send({ success: false, error: 'This expert changed or stopped during recovery' });
+        ctx.persistSessionStateNow(session);
+        await onRuntimeSaved?.(session);
+        if (!current()) return reply.code(409).send({ success: false, error: 'This expert changed or stopped during recovery' });
+        const state = ctx.getSessionStateWithRespawn?.(session);
+        if (state !== undefined) ctx.broadcast?.(SseEvent.SessionUpdated, { session: state });
+        return { success: true, data: { employee: company?.view(ownerFor(req)).employees.find(e => e.id === employee.id),
+          sessionId: session.id, recovery: 'normal-launch-requested' } };
+      } catch (error) {
+        if (error instanceof CompanyError) return reply.code(error.status).send({ success: false, error: error.message });
+        // No automatic second launch, rollback restart, lease break or provider signal.
+        return reply.code(409).send({ success: false, error: 'Recovery outcome is unconfirmed. Reconnect to inspect this expert before another action.' });
+      } finally { intent?.finish(); runtimeSwitches.delete(session.id); }
+    }
     const runtime = runtimeView(session);
     if (!runtime.source) return reply.code(409).send({ success: false, error: 'Choose a plan or local model profile in runtime settings before restarting' });
     const headers: Record<string, string> = {};

@@ -68,7 +68,7 @@ function harness() {
         (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!
       ),
   };
-  const methods = runInNewContext(`${source}; ({openPlanMove, renderPlanMembers, planRequestStatus, showPlanMoveProgress, showPlanRequestProgress, forcePlanMove})`, context);
+  const methods = runInNewContext(`${source}; ({openPlanMove, renderPlanMembers, planRequestStatus, showPlanMoveProgress, showPlanRequestProgress, forcePlanMove, openPlanMoveHistory})`, context);
   const dialog = dom.window.document.querySelector('dialog')!;
   return { dom, context, methods, fetch, dialog };
 }
@@ -316,5 +316,52 @@ describe('plan move create and preview dialog ownership', () => {
     expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/requests/approved-request/cancel')).toHaveLength(1);
     expect(h.dialog.open).toBe(true);
     expect(h.dialog.innerHTML).toBe(currentHTML);
+  });
+});
+
+describe('held plan move recovery navigation', () => {
+  const reply = (data: unknown) => ({ok: true, status: 200, json: async () => ({success: true, data})});
+  it('shows the canonical move rather than its same-id request and adopts only on explicit action', async () => {
+    const h = harness();
+    const move = {id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',oldSession:'old',newSession:'new',toAccount:'second',sourceCleanupVerified:true};
+    h.fetch.mockImplementation(async (path:string) => reply(path.endsWith('/requests/recent')
+      ? [{id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',newSession:'new'}]
+      : path.endsWith('/moves/recent') ? [move] : {...move,phase:'completed'}));
+    await h.methods.openPlanMoveHistory('alex');
+    expect(h.dialog.querySelectorAll('[data-moves] button')).toHaveLength(1);
+    h.dialog.querySelector<HTMLButtonElement>('[data-moves] button')!.click();
+    const adopt=h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
+    expect(adopt.hidden).toBe(false);expect(adopt.disabled).toBe(false);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve'))).toBe(false);
+    adopt.click();
+    await vi.waitFor(()=>expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve'))).toBe(true));
+    const sent=h.fetch.mock.calls.find(([path])=>path.endsWith('/resolve'))!;
+    expect(JSON.parse(sent[1]!.body)).toEqual({action:'adopt-existing',oldSession:'old',newSession:'new',toAccount:'second'});
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/force')||path.endsWith('/cancel'))).toBe(false);
+  });
+  it('links a rejected new request to employee-filtered history without retrying or mutating the journal', async () => {
+    const h=harness();await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'
+      ? {ok:false,status:409,json:async()=>({success:false,error:'This employee already has a move in progress or requiring recovery'})}
+      : reply(path.endsWith('/moves/recent') ? [{id:'other',employeeId:'someone-else',name:'Other',phase:'recovery-required'},{id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required'}] : []));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.err')!.textContent).toContain('Inspect existing moves'));
+    h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-moves]')!.textContent).toContain('Alex'));
+    expect(h.dialog.querySelector('[data-moves]')!.textContent).not.toContain('Other');
+    expect(h.fetch.mock.calls.filter(([path])=>path==='/api/plans/requests')).toHaveLength(1);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/force')||path.endsWith('/resolve')||path.endsWith('/cancel'))).toBe(false);
+  });
+  it.each([
+    {newSession:'new',sourceCleanupVerified:false,explanation:'Source cleanup was not durably verified',hidden:false},
+    {newSession:undefined,sourceCleanupVerified:false,explanation:'No destination session was recorded',hidden:true},
+    {newSession:'new',sourceCleanupVerified:true,resourceIntent:{operationId:'resource'},explanation:'protected native recovery',hidden:true},
+  ])('explains unavailable recovery without creating an unlock action (%j)', record=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,{id:'held',phase:'recovery-required',...record},'Alex');
+    expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).toContain(record.explanation);
+    const adopt=h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
+    expect(adopt.hidden).toBe(record.hidden);
+    if(!record.hidden)expect(adopt.disabled).toBe(true);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve')||path.endsWith('/force')||path.endsWith('/cancel')||path==='/api/plans/requests')).toBe(false);
   });
 });

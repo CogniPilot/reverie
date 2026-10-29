@@ -479,6 +479,23 @@ class InterpreterExecWindow(unittest.TestCase):
         from reverie import worker_gpu_preflight as P
         self.native = P._process
         self.wrapper = Path(INTERPRETER_READY_WRAPPER).resolve(strict=True)
+        # Actual Nix user namespaces expose root-owned store inputs as 65534.
+        # Model ONLY the two fixed inert input files' host UID for this fixture;
+        # keep the native guard and all procfs/permission/program facts real.
+        self.bare_python = Path('/proc/self/exe').resolve(strict=True)
+        self.mapped_inputs = bool(os.environ.get('NIX_BUILD_TOP') and
+            Path('/').stat().st_uid == Path('/nix/store').stat().st_uid == 65534)
+        if self.mapped_inputs:
+            from types import SimpleNamespace
+            original_stat = Path.stat
+            selected = {self.wrapper, self.bare_python}
+            def input_stat(path, *args, **kwargs):
+                info = original_stat(path, *args, **kwargs)
+                if path in selected and info.st_uid == 65534:
+                    return SimpleNamespace(**{**{key: getattr(info, key) for key in dir(info)
+                        if key.startswith('st_')}, 'st_uid': 0})
+                return info
+            self.enterContext(patch.object(Path, 'stat', input_stat))
         self.probe = T.IsolatedInterpreterObserver(time.monotonic() + 5)
         self.original_popen = subprocess.Popen
         self.children = []; self.before = []; self.after = []; self.mutation = None
@@ -560,3 +577,21 @@ class InterpreterExecWindow(unittest.TestCase):
         self.assertEqual(len(self.children), 1)
         if self.children[0].poll() is None:
             self.assertIs(self.probe._probe_child, self.children[0])
+
+    def test_fixture_uid_model_does_not_qualify_source_or_unlisted_store_inputs(self):
+        # Real mode/inode/size/time and all procfs observations remain unchanged.
+        for path in (self.wrapper, self.bare_python):
+            actual = os.stat(path); observed = path.stat()
+            for field in ('st_dev', 'st_ino', 'st_mode', 'st_gid', 'st_nlink',
+                          'st_size', 'st_mtime_ns', 'st_ctime_ns'):
+                self.assertEqual(getattr(observed, field), getattr(actual, field))
+        with self.assertRaisesRegex(ValueError, 'Immutable broker program'):
+            T._immutable(Path(__file__))
+        # A third genuine read-only Nix input is NOT blanket UID-normalized.
+        unlisted = Path(os.__file__).resolve(strict=True)
+        self.assertNotIn(unlisted, (self.wrapper, self.bare_python))
+        self.assertEqual(unlisted.stat().st_uid, os.stat(unlisted).st_uid)
+        if self.mapped_inputs:
+            self.assertEqual(unlisted.stat().st_uid, 65534)
+            with self.assertRaisesRegex(ValueError, 'Immutable broker program'):
+                T._immutable(unlisted)

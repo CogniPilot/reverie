@@ -1546,6 +1546,8 @@ class Broker:
         admitted = False
         started = False
         existing_running = False
+        dead_inner = None
+        viewer_container_id = None
         exit_file = None
         nix_guard = None
         storage_claimed = False
@@ -1683,6 +1685,9 @@ class Broker:
                     if labels.get('reverie.worker') != self.config['deployment'] or labels.get('reverie.session') != session_id:
                         raise ValueError('Existing container is not owned by this deployment')
                     owned = True
+                    candidate_id = old.get('Id')
+                    if isinstance(candidate_id,str) and re.fullmatch('[0-9a-f]{64}',candidate_id):
+                        viewer_container_id = candidate_id
                     if old['State']['Running']:
                         existing_running = True
                         policy = args[args.index('reverie.worker-config='+digest)+2].split('=', 1)[1]
@@ -1691,7 +1696,19 @@ class Broker:
                         metadata = json.loads(metadata_path.read_text())
                         exit_file = home/'.reverie-launch'/metadata['exit']
                         if not exit_file.exists():
-                            reuse = True
+                            # A wrapper can die before publishing its exit file.
+                            # Reattach a live pane; canonical J alone replaces
+                            # a confirmed dead one under storage/admission locks.
+                            pane = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead}'), optional=True)
+                            if pane.returncode or pane.stdout.strip() not in ('0', '1'):
+                                raise RuntimeError('Existing laptop pane state is unavailable; no replacement was started')
+                            reuse = pane.stdout.strip() == '0'
+                            if not reuse:
+                                from reverie.worker_resource_reservations import _pid
+                                pid = old['State']['Pid']
+                                if type(pid) is not int or pid <= 0:
+                                    raise RuntimeError('Existing laptop process identity is unavailable')
+                                dead_inner = {'id': old['Id'], 'pid': pid, 'start': _pid(pid)}
                 if request.get('attachOnly') and not reuse:
                     raise ValueError('The existing laptop is unavailable; reconnect never starts a replacement')
                 if request.get('attachOnly'):
@@ -1712,7 +1729,13 @@ class Broker:
                     self.check_creation_budget(session_id,resources)
                 admitted = True
                 if previous.returncode==0 and not reuse:
-                    if paths.kind=='employee':self.stop(name,retain_storage=True)
+                    if dead_inner is not None:
+                        pane = self.run_engine(tmux_exec_args(dead_inner['id'], 'display-message', '-p', '-t', 'office', '#{pane_dead}'), optional=True)
+                        if pane.returncode or pane.stdout.strip() != '1':
+                            raise RuntimeError('Existing laptop pane changed; reconnect before restarting')
+                        self.stop(name,retain_storage=paths.kind=='employee',expected_id=dead_inner['id'],
+                                  expected_process={'pid':dead_inner['pid'],'start':dead_inner['start']})
+                    elif paths.kind=='employee':self.stop(name,retain_storage=True)
                     else:self.stop(name)
                 if not reuse:
                     record_storage_binding(self.config,paths)
@@ -1775,7 +1798,11 @@ class Broker:
                     if not storage_start_allowed(self.config,paths):
                         raise RuntimeError('Current employee running intent changed before creation')
                     self.command_telemetry.check_create_args(args)
+                    viewer_container_id = None
                     creation = self.run_engine(args)
+                    candidate_id = creation.stdout.strip()
+                    if re.fullmatch('[0-9a-f]{64}',candidate_id):
+                        viewer_container_id = candidate_id
                     if _resource_launch is not None:
                         from reverie.worker_resource_native import record_created
                         record_created(self, _resource_launch, creation)
@@ -1880,6 +1907,23 @@ class Broker:
                     if time.monotonic() - last_check >= 2:
                         if not self.allowed(session_id):
                             break
+                        if not completed and viewer_container_id is not None:
+                            # A remain-on-exit inner pane keeps its attach client
+                            # alive even when the wrapper died before its receipt.
+                            # End only this viewer on POSITIVE dead evidence; the
+                            # current laptop and its data lease remain for an
+                            # explicit owner recovery through normal J.
+                            try:
+                                pane = self.run_engine(tmux_exec_args(viewer_container_id, 'display-message', '-p', '-t', 'office', '#{pane_dead}'),
+                                    optional=True, deadline=time.monotonic()+2)
+                            except (OSError,RuntimeError,subprocess.TimeoutExpired):
+                                pane = None
+                            if pane is not None and pane.returncode==0 and pane.stdout.strip()=='1':
+                                # The native query can block while the normal
+                                # wrapper publishes its completion. Preserve the
+                                # existing receipt/X path when it appeared.
+                                if exit_file is None or not exit_file.is_file():
+                                    raise RuntimeError('Laptop terminal pane exited without a completion receipt; use owner Restart to recover')
                         last_check = time.monotonic()
         except (EOFError, BrokenPipeError, ConnectionError):
             pass

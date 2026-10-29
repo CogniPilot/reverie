@@ -148,6 +148,8 @@ export interface RespawnPaneOptions {
   mode: SessionMode;
   /** Refuse if the pane is running at respawn time; never kill a process that won a recovery race. */
   onlyIfDead?: boolean;
+  /** Internal current-owner/binding guard, checked after awaited preparation. */
+  stillCurrent?: () => boolean;
   /** Session display name (tab name). */
   name?: string;
   /**

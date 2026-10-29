@@ -3780,6 +3780,8 @@ export class WebServer extends EventEmitter {
       if (!this.sessions.has(key.slice(0, key.lastIndexOf(':')))) this.cleanExitCloseAttempts.delete(key);
     }
     for (const session of [...this.sessions.values()]) {
+      // A worker's outer pane proves transport loss, never a clean provider exit.
+      if (session.runtimeHealthScope === 'terminal') continue;
       const muxName = session.muxName;
       if (!muxName) continue;
       const close = shouldCloseCleanlyExitedSession({

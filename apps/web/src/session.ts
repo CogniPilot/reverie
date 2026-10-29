@@ -692,6 +692,7 @@ export class Session extends EventEmitter {
    * rendered as "alive".
    */
   private _paneExit: PaneExit | null = null;
+  private readonly _workerBacked = Boolean(process.env.REVERIE_WORKER_SOCKET);
   /**
    * How many starts, attaches or relaunches are running for this session's
    * pane. While one is, a dead-pane reading may describe a pane that is being
@@ -1381,6 +1382,23 @@ export class Session extends EventEmitter {
   /** What Reverie last observed of this pane's agent, or undefined for UNKNOWN. */
   get paneExit(): PaneExit | undefined {
     return this._paneExit ?? undefined;
+  }
+
+  /** A worker pane observes terminal transport, not the provider inside its laptop. */
+  get runtimeHealthScope(): 'provider' | 'terminal' {
+    return this._workerBacked || this._remote || this._docker ? 'terminal' : 'provider';
+  }
+
+  get runtimeHealth(): 'healthy' | 'dead' | 'disconnected' | 'unknown' {
+    if (!this._paneExit) return 'unknown';
+    return this.runtimeHealthScope === 'terminal' ? 'disconnected' : 'dead';
+  }
+
+  /** Fresh positive evidence only; unknown observations cannot authorize recovery. */
+  hasDeadPane(): boolean {
+    return this.paneExitApplies && !this.paneLifecycleInFlight && !this._closing &&
+      !!this._mux && !!this._muxSession && this._mux.muxSessionExists(this._muxSession.muxName) &&
+      this._mux.isPaneDead(this._muxSession.muxName);
   }
 
   /**
@@ -2245,6 +2263,8 @@ export class Session extends EventEmitter {
       // it rides the existing `session:updated` broadcast and lands in state.json
       // through the same persist. `status` and `pid` above stay untouched by it.
       paneExit: this._paneExit ?? undefined,
+      runtimeHealth: this.runtimeHealth,
+      runtimeHealthScope: this.runtimeHealthScope,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
       lastSubmitAt: this._lastSubmitAt || undefined,
       // Only a chain the CLI's own hooks vouched for is persisted, and only when
@@ -2571,7 +2591,14 @@ export class Session extends EventEmitter {
     return this._withPaneLifecycle(() => this._doRestartCli());
   }
 
-  private async _doRestartCli(onlyIfDead = false): Promise<boolean> {
+  /** Explicit owner recovery; tmux atomically refuses a pane that became live. */
+  async restartDeadCli(stillCurrent: () => boolean): Promise<boolean> {
+    if (!stillCurrent() || !this.hasDeadPane()) return false;
+    return this._withPaneLifecycle(() => this._doRestartCli(true, stillCurrent, true));
+  }
+
+  private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
+    explicitRecovery = false): Promise<boolean> {
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     const mux = this._mux;
 
@@ -2588,13 +2615,15 @@ export class Session extends EventEmitter {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
     const options = await this._buildRespawnPaneOptionsWithResumePin();
-    if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
+    if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
     this._beginClaudeConversationSelection();
-    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
+    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent } : options);
     if (!newPid) {
       console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
       return false;
     }
+    if (!stillCurrent()) return false;
+    if (explicitRecovery) this._respawnBlocked = false;
     this._pendingEnvUnsets.clear();
     // A relaunch in the same pane, so any exit observed of the previous command
     // is history. Without this the caller's persist-and-broadcast writes the old

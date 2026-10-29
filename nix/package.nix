@@ -81,7 +81,7 @@ let
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
         test/employee-gpu-access.test.ts test/employee-gpu-ui.test.ts test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
         test/session-health-provider.test.ts test/session-health-provider-routes.test.ts test/health-canonical-reader.test.ts \
-        test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
+        test/session-runtime.test.ts test/owner-dead-pane-recovery.test.ts test/company-runtime-health-ui.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
         test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts \
         test/chatroom-digest.test.ts test/chatroom-notice-state.test.ts test/chatroom-notice-history.test.ts test/chatroom-notice-cli.test.ts test/chat-db.test.ts test/chat-message-search.test.ts \

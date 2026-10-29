@@ -2657,6 +2657,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
         : workerLaunchCommand(localFullCmd, workingDir, sessionId);
 
+    if (options.stillCurrent && !options.stillCurrent()) return null;
     try {
       // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.
       this._configureCliEnv(
@@ -2673,6 +2674,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
+      if (options.stillCurrent && !options.stillCurrent()) return null;
       await execAsync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {
