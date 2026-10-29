@@ -16,6 +16,11 @@ export const HANDBOOK_PAGES = [
     summary: 'Edit roles, working style, appearance and reporting relationships.',
   },
   {
+    slug: 'board',
+    title: 'Board tasks and decisions',
+    summary: 'Find planned work, report task progress, answer check-ins and record owner decisions.',
+  },
+  {
     slug: 'recovery',
     title: 'Recover a stuck expert',
     summary: 'Diagnose a dead session, check permission, recover and verify readiness.',
@@ -167,7 +172,7 @@ article{overflow-wrap:anywhere}
 article h1{margin-top:0;font-size:1.8rem;line-height:1.3}
 article h2{margin-top:1.8em;font-size:1.25rem}
 li{margin:8px 0}
-pre{overflow:auto;padding:16px;background:#8882}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;padding:16px;background:#8882}
 code{font-size:.9em}
 .cards{display:grid;gap:16px}
 .card{border:1px solid #8885;border-radius:10px;padding:16px}

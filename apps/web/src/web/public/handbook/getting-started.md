@@ -18,6 +18,8 @@ The gear beside your name opens a quick Office menu for Company, Board, Handbook
 
 Use [Profiles and reporting lines](/handbook/profiles) to tune the role, [Models and plans](/handbook/models) to change its runtime, and [Work and scratch](/handbook/work) to share files. Enable [Optional chat plugins](/handbook/plugins) only when useful.
 
+For a longer task, use [Board tasks and decisions](/handbook/board): identify the assigned card, agree on a checkpoint, then ask for the result and its evidence. Check the card's reason when work is blocked. A chat acknowledgement or completed source patch can still leave review or installation pending. The Board's Help link opens the workflow guide without replacing your office view.
+
 If an existing expert stops responding, follow [Recover a stuck expert](/handbook/recovery) before restarting the website. Installation, host mounts and image rollout remain operator tasks; the repository README and `docs/setup.md` describe those procedures.
 
 ## Bots and routines
