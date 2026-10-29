@@ -147,3 +147,24 @@ it('opens a GPU usage graph from the GPU meter', async () => {
     await browser.close();
   }
 });
+
+it('keeps the chat composer on screen when a phone keyboard takes half the height', async () => {
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
+    await open(page);
+    await page.waitForSelector('.chatroom-composer .chatroom-input');
+    await page.locator('.chatroom-composer .chatroom-input').focus();
+    // An on-screen keyboard with interactive-widget=resizes-content shrinks the viewport like this.
+    await page.setViewportSize({ width: 390, height: 400 });
+    await page.waitForTimeout(250);
+    const g = await page.evaluate(() => {
+      const r = document.querySelector('.chatroom-composer')!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, vh: window.visualViewport!.height + window.visualViewport!.offsetTop };
+    });
+    expect(g.top).toBeGreaterThanOrEqual(0);
+    expect(g.bottom).toBeLessThanOrEqual(g.vh + 1);
+  } finally {
+    await browser.close();
+  }
+});
