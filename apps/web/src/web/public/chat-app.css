@@ -357,12 +357,14 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-root .chatroom-tray,
 .ca-root .chatroom-suggest { flex: 1 0 100%; width: auto; }
 .ca-root .chatroom-composer-row { display: contents; }
+/* The text box never shrinks below a readable width: when the bar is too narrow (voice selector, attachments, a thin
+   window) the tools wrap onto their own line instead of crushing the box to one letter per line (James 10-29). */
 .ca-root .chatroom-input {
   order: 1;
-  flex: 1 1 0;
+  flex: 1 1 12em;
   box-sizing: border-box;
   width: auto;
-  min-width: 0;
+  min-width: min(100%, 12em);
   height: 32px;
   min-height: 32px;
   max-height: 40vh;
@@ -384,7 +386,7 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-root .chatroom-mic:hover { background: var(--ca-hover); }
 .ca-root .chatroom-to { display: none; }
 .ca-root .chatroom-mic { order: 4; }
-.ca-root .chatroom-handsfree { order: 4; height: 32px; }
+.ca-root .chatroom-handsfree { order: 4; height: 32px; max-width: 10em; text-overflow: ellipsis; }
 .ca-root .chatroom-send { order: 5; flex: none; height: 32px; padding: 0 14px; border-radius: 6px; }
 
 /* ── member list ── */
