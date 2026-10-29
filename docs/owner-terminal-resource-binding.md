@@ -1,4 +1,4 @@
-# Human terminal and resource replacement compatibility
+# Laptop terminal and resource replacement compatibility
 
 A newly prepared H generation uses installation policy version 2 when the
 canonical resource reservation control is configured. The owner still selects

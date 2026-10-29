@@ -1,4 +1,4 @@
-# Optional protected human terminal
+# Optional protected laptop terminal
 
 This is a separate owner terminal inside a selected laptop. It does not send
 keystrokes to the employee's provider session. Organizational titles do not

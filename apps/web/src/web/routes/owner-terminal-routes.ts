@@ -39,7 +39,7 @@ export function registerOwnerTerminalRoutes(app: FastifyInstance,
     if (!visibleEmployee(request, id)) return reply.code(404).send({success: false, error: 'Unknown employee'});
     if (!runtime) return reply.code(503).send({success: false, error: 'Owner terminal is not installed for this website'});
     for (const [key, record] of issued) if (Date.now() >= record.expires) issued.delete(key);
-    if (active || issued.size >= 4) return reply.code(409).send({success: false, error: 'Close the current human terminal first'});
+    if (active || issued.size >= 4) return reply.code(409).send({success: false, error: 'Close the current laptop terminal first'});
     let completed = false;
     const cancelled = () => { if (!completed && !reply.raw.writableFinished) runtime.bridge.close(); };
     reply.raw.once('close', cancelled);

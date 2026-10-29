@@ -93,7 +93,7 @@ their actual acceptance checks.
 ## Website runtime selection
 
 The owner deployment file accepts `websiteRuntime`: `default` (ordinary website),
-`resource` (resource replacement), `terminal` (protected human terminals), or
+`resource` (resource replacement), `terminal` (protected laptop terminals), or
 `resource-terminal` (both). Omission keeps the ordinary deployment unchanged.
 Every optional runtime requires `protectedWebsite: true` and its separate native
 installation. The start/update tools build only the corresponding fixed flake
