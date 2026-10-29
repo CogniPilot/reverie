@@ -2549,7 +2549,11 @@ class ReverieChatApp {
     this._companyChartResize = () => { if (fitMode) fit(fitMode === 'company'); };
     this.doc.defaultView.addEventListener('resize', this._companyChartResize);
     apply(1);
-    this.doc.defaultView.requestAnimationFrame?.(() => { if (viewport.isConnected) fit(true); });
+    // People can still be hidden here (waiting for the burn rate above them), with no width to fit to: fit once it has one.
+    const fitOnce = () => { if (!viewport.isConnected || !viewport.clientWidth) return false; fit(true); return true; };
+    const Observer = this.doc.defaultView?.ResizeObserver;
+    if (Observer) { const shown = new Observer(() => { if (fitOnce() || !viewport.isConnected) shown.disconnect(); }); shown.observe(viewport); }
+    else this.doc.defaultView.requestAnimationFrame?.(fitOnce);
     return box;
   }
 
