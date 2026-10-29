@@ -991,6 +991,8 @@ export interface SessionState {
    * belongs with the part of Ark0N/Codeman#446 that closes exited sessions.
    */
   paneExit?: PaneExit;
+  /** Availability of the non-destructive worker viewer reconnect path. */
+  workerViewerReconnect?: boolean;
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';

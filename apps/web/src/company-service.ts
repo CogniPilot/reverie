@@ -89,6 +89,7 @@ export interface CompanyResearchBackend {
 interface CompanySession {
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';
+  workerViewerReconnect?: boolean;
   id: string;
   owner?: string;
   name: string;
@@ -248,7 +249,7 @@ export class CompanyService {
       employees: employees.map((e) => {
         const session = this.deps.getSession(e.sessionId);
         return { ...e, available: !!session, runtimeHealth: session?.runtimeHealth ?? 'unknown',
-          runtimeHealthScope: session?.runtimeHealthScope ?? 'provider' };
+          runtimeHealthScope: session?.runtimeHealthScope ?? 'provider', workerViewerReconnect: session?.workerViewerReconnect === true };
       }),
       settings: state.settings.find((s) => sameOwner(s.owner, owner)) ?? CompanySettingsSchema.parse({ owner }),
       cycles: state.cycles.filter((c) => sameOwner(c.owner, owner)),

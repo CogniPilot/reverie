@@ -5457,16 +5457,44 @@ class ReverieChatApp {
       if (wanted && !restart) card.append(this.button('ca-btn is-danger ca-dead-pane-restart', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, controls.onSaved), { text: 'Restart' }));
       else if (!wanted) restart?.remove();
       const reconnect = card.querySelector('.ca-reconnect-viewer');
-      if (health.viewerOnly && !reconnect) card.append(this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect view' }));
-      else if (!health.viewerOnly) reconnect?.remove();
+      const canReconnect = health.viewerOnly || (controls?.manage && this.canReconnectEmployee(employee));
+      if (canReconnect && !reconnect) card.append(this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+      else if (!canReconnect) reconnect?.remove();
     }
   }
 
-  reconnectEmployeeViewer(employee) {
+  canReconnectEmployee(employee) {
+    const session = this.app.sessions?.get?.(employee?.sessionId);
+    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation &&
+      Number.isInteger(employee?.sessionGeneration) &&
+      (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
+      this.employeeHealth(employee).state === 'disconnected';
+  }
+
+  async reconnectEmployeeViewer(employee) {
     const health = this.employeeHealth(employee);
-    if (!health.viewerOnly || this.app.activeSessionId !== employee.sessionId) return;
-    this.app._connectWs?.(employee.sessionId);
-    void this.app._onSessionNeedsRefresh?.({ id: employee.sessionId });
+    if (health.viewerOnly) {
+      if (this.app.activeSessionId !== employee.sessionId) return;
+      this.app._connectWs?.(employee.sessionId);
+      void this.app._onSessionNeedsRefresh?.({ id: employee.sessionId });
+      return;
+    }
+    if (!this.canReconnectEmployee(employee)) return;
+    this._reconnectingEmployees ||= new Set();
+    if (this._reconnectingEmployees.has(employee.id)) return;
+    this._reconnectingEmployees.add(employee.id);
+    try {
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/reconnect`, {
+        method: 'POST', body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
+      });
+      if (!result.ok || result.data?.state !== 'viewer-connected') {
+        this.toast(result.error || 'Connection not confirmed. Check this expert’s status before trying again.', 'error');
+        return;
+      }
+      // The canonical state event, not this acknowledgement, clears the red status.
+      this.toast(`Terminal reconnected for ${employee.name}.`, 'info');
+    } catch { this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error'); }
+    finally { this._reconnectingEmployees.delete(employee.id); }
   }
 
   /** Redraw what shows a member's state (the member list and the direct-message dots), at most once a frame. */
@@ -6085,7 +6113,15 @@ class ReverieChatApp {
       for (const section of caMemberSections(room.members, humans, member => this.presenceOf(member))) {
         const h = this.el('h3', 'ca-members-head', `${section.label} — ${section.members.length}`);
         box.append(h);
-        for (const m of section.members) box.append(people.has(m) ? this.humanMemberRow(m) : this.memberRow(m));
+        for (const m of section.members) {
+          const row = people.has(m) ? this.humanMemberRow(m) : this.memberRow(m);
+          const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+          if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
+            const group = this.el('div', 'ca-member-with-actions');
+            group.append(row, this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+            box.append(group);
+          } else box.append(row);
+        }
       }
       if (!caIsDm(room)) box.append(this.addMemberRow());
     });

@@ -1016,6 +1016,23 @@ process.exit(result.status === null ? 1 : result.status);`);
       } finally { nonTestManager.destroy(); }
     });
 
+    it.each([false, true])('emits workerAttachOnly=%s in the actual canonical respawn command only for this call', async workerAttachOnly => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/fixture/worker.sock');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const nonTestManager = new NonTestTmuxManager();
+      nonTestManager.registerSession({ sessionId: 'viewer1234', muxName: 'reverie-abcd1234', pid: 1000,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true });
+      try {
+        expect(await nonTestManager.respawnPane({ sessionId: 'viewer1234', workingDir: '/tmp', mode: 'shell',
+          onlyIfDead: true, workerAttachOnly })).toBe(4242);
+        const { exec: currentExec } = await import('node:child_process');
+        const command = String(vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0]);
+        expect(command).toContain('reverie-worker-exec');
+        expect(command.includes('--attach-only')).toBe(workerAttachOnly);
+        expect(command).not.toMatch(/respawn-pane\s+-k\b/);
+      } finally { nonTestManager.destroy(); }
+    });
+
     it('returns failure without retrying forcefully when tmux refuses a pane that became live', async () => {
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const nonTestManager = new NonTestTmuxManager();

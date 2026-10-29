@@ -10,6 +10,7 @@ import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
+import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
@@ -459,6 +460,7 @@ export class WebServer extends EventEmitter {
   private companyWake!: CompanyWake;
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
+  private workerViewerReconnect?: WorkerViewerReconnect;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -2168,6 +2170,18 @@ export class WebServer extends EventEmitter {
       recoveryPending: (record) => planMoveStore.recoveryPending(record),
       recoveryConfirmed: (record) => planMoveStore.recoveryConfirmed(record),
     });
+    this.workerViewerReconnect = new WorkerViewerReconnect({
+      company: this.companyService,
+      session: id => this.sessions.get(id),
+      ready: () => this.companyWakeReady,
+      moveGuard: id => planMoves.viewerReconnectGuard(id),
+      pause: id => this.chatroomService.delivery.pauseForMigration(id),
+      publish: session => {
+        this._persistSessionStateNow(session);
+        this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+      },
+    });
+    registerWorkerViewerReconnect(this.app, this.workerViewerReconnect, verifiedOwner);
     const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(
         {
@@ -3742,6 +3756,7 @@ export class WebServer extends EventEmitter {
       this.broadcastSessionStateDebounced(session.id);
     }
     this.closeCleanlyExitedSessions();
+    void this.workerViewerReconnect?.tick().catch(() => undefined);
   }
 
   /**
@@ -5238,6 +5253,7 @@ export class WebServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.companyWakeReady = false;
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });

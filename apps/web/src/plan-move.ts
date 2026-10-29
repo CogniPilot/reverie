@@ -175,6 +175,12 @@ export class PlanMoves {
       : { ...record };
   }
 
+  /** Read-only flight guard shared with non-destructive viewer reconnection. */
+  async viewerReconnectGuard(employeeId: string): Promise<() => boolean> {
+    await this.init();
+    return () => !this.locked.has(employeeId);
+  }
+
   async get(id: string, owner?: string): Promise<PlanMoveRecord | undefined> {
     await this.init();
     const record = this.records.get(id);

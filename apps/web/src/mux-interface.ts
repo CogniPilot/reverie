@@ -141,6 +141,8 @@ export interface CreateSessionOptions {
 
 /** Options for respawning a dead pane. */
 export interface RespawnPaneOptions {
+  /** Reconnect an existing worker viewer only; the broker refuses any cold start. */
+  workerAttachOnly?: boolean;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
   sessionId: string;
@@ -385,6 +387,8 @@ export interface TerminalMultiplexer extends EventEmitter {
 
   /** Check if the pane in a session is dead (command exited but remain-on-exit keeps it alive) */
   isPaneDead(muxName: string): boolean;
+  /** Positive exact-pane readback; unreadable must never count as connected. */
+  readPaneLiveness?(muxName: string): Promise<import('./signal-target.js').PaneLiveness>;
 
   /**
    * What the last pane read saw of this session's agent, or `undefined` for

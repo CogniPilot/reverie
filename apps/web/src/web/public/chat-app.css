@@ -1652,3 +1652,8 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-head .ca-head-search { width: auto; padding: 0 10px; gap: 8px; border: 1px solid var(--ca-line); border-radius: 5px; font-size: 12px; }
 .ca-search-excerpt mark { background: color-mix(in srgb, var(--accent, #5b8def) 30%, transparent); color: inherit; }
 @media (max-width: 1000px) { .ca-head-search .ca-search-label { display: none; } .ca-head .ca-head-search { width: 36px; padding: 0; } }
+
+/* A viewer repair is separate from the destructive session restart action. */
+.ca-member-with-actions { display: flex; align-items: center; gap: 4px; }
+.ca-member-with-actions > .ca-member { flex: 1; min-width: 0; }
+.ca-member-with-actions > .ca-reconnect-viewer { flex: none; padding: 4px 7px; font-size: 12px; }

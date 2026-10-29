@@ -27,7 +27,7 @@ import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
 import { pastesInsteadOfKeys, typeAndSubmit, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
-import { isSameProcess, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
+import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
 import { execSync, exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { workerLaunchCommand } from './worker-execution.js';
@@ -2562,6 +2562,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Check if the pane in a tmux session is dead (command exited but remain-on-exit keeps it).
    * Returns true if the session exists but the pane's command has exited.
    */
+  async readPaneLiveness(muxName: string) {
+    if (!isValidMuxName(muxName)) return { state: 'unreadable' as const };
+    return parseLivePane(await this.listPanesAsync(), muxName);
+  }
+
   isPaneDead(muxName: string): boolean {
     if (IS_TEST_MODE) return false;
     if (!isValidMuxName(muxName)) return false;
@@ -2655,7 +2660,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
       : remote
         ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
-        : workerLaunchCommand(localFullCmd, workingDir, sessionId);
+        : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
 
     if (options.stillCurrent && !options.stillCurrent()) return null;
     try {

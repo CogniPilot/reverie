@@ -155,3 +155,45 @@ it.each([
  expect(card.querySelector('.ca-company-state').textContent).toBe(label);
  expect(card.querySelector('.ca-dead-pane-restart')).not.toBeNull();expect(posts).toHaveLength(0);
 });
+
+it('offers a neutral owner Reconnect beside destructive Restart and sends only the current binding once',async()=>{
+ const{h,employee,session,posts}=await fixture({health:'disconnected',scope:'terminal'});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ let finish!:(value:any)=>void;const reconnects:any[]=[];const original=h.app._chatApi.bind(h.app);
+ h.app._chatApi=async(path:string,options:any)=>{
+  if(path.endsWith('/reconnect')){reconnects.push({path,...options});return new Promise(resolve=>{finish=resolve;});}
+  return original(path,options);
+ };
+ h.shell.renderMembers();await h.shell.openCompany();
+ const button=h.document.querySelector('.ca-company-person .ca-reconnect-viewer');
+ expect(button).not.toBeNull();expect(button.classList.contains('is-danger')).toBe(false);
+ expect(h.document.querySelector('.ca-member-with-actions .ca-reconnect-viewer')).not.toBeNull();
+ expect(h.document.querySelector('.ca-company-person .ca-dead-pane-restart').classList.contains('is-danger')).toBe(true);
+ button.click();button.click();await h.flush();
+ expect(reconnects).toEqual([{path:'/api/company/employees/expert/reconnect',method:'POST',body:{sessionId:SID,sessionGeneration:2}}]);
+ expect(posts).toHaveLength(0);expect(employee.desiredRunning).toBe(true);
+ finish({ok:true,data:{state:'viewer-connected'}});await h.flush();
+ // An HTTP acknowledgement cannot manufacture the canonical reconnect observation.
+ expect(h.document.querySelector('.ca-company-state').textContent).toBe('Disconnected');
+ expect(h.app.toasts.some((t:any)=>t.text==='Terminal reconnected for Alex.')).toBe(true);
+});
+
+it.each([{off:true},{vacation:true},{owner:false}])('offers no worker reconnect that could bypass %j',async choice=>{
+ const{h,employee,session,posts}=await fixture({health:'disconnected',scope:'terminal',...choice});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ h.shell.renderMembers();await h.shell.openCompany();
+ expect(h.document.querySelector('.ca-reconnect-viewer')).toBeNull();expect(posts).toHaveLength(0);
+});
+
+it('keeps an unknown reconnect acknowledgement red and does not automatically resend',async()=>{
+ const{h,employee,session}=await fixture({health:'disconnected',scope:'terminal'});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ const original=h.app._chatApi.bind(h.app);let calls=0;
+ h.app._chatApi=async(path:string,options:any)=>{
+  if(path.endsWith('/reconnect')){calls++;return{ok:false};}return original(path,options);
+ };
+ await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-reconnect-viewer').click();await h.flush(80);
+ expect(calls).toBe(1);expect(h.document.querySelector('.ca-company-state').textContent).toBe('Disconnected');
+ expect(h.app.toasts.at(-1).text).toContain('Connection not confirmed');
+ expect(h.app.toasts.some((t:any)=>t.text.includes('Terminal reconnected'))).toBe(false);
+});

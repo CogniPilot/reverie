@@ -692,6 +692,9 @@ export class Session extends EventEmitter {
    * rendered as "alive".
    */
   private _paneExit: PaneExit | null = null;
+  private _viewerInputHeld = false;
+  private _viewerClientLost = false;
+  private _muxWritesInFlight = 0;
   private readonly _workerBacked = Boolean(process.env.REVERIE_WORKER_SOCKET);
   /**
    * How many starts, attaches or relaunches are running for this session's
@@ -1390,7 +1393,7 @@ export class Session extends EventEmitter {
   }
 
   get runtimeHealth(): 'healthy' | 'dead' | 'disconnected' | 'unknown' {
-    if (!this._paneExit) return 'unknown';
+    if (!this._paneExit && !this._viewerClientLost) return 'unknown';
     return this.runtimeHealthScope === 'terminal' ? 'disconnected' : 'dead';
   }
 
@@ -1461,6 +1464,8 @@ export class Session extends EventEmitter {
    * Ark0N/Codeman#446 review; both now persist on their success path.
    */
   private clearPaneExitForNewPane(): void {
+    this._viewerInputHeld = false;
+    this._viewerClientLost = false;
     this.setPaneExit(undefined);
     if (this._muxSession) this._mux?.clearPaneExit?.(this._muxSession.muxName);
   }
@@ -1474,6 +1479,8 @@ export class Session extends EventEmitter {
    * free to report the raw pane reading its own remote-reconnect watcher needs.
    */
   setPaneExit(next: PaneExit | undefined): boolean {
+    // A repaired outer command has not yet proved a usable viewer.
+    if (this._viewerInputHeld && next === undefined) return false;
     const resolved = this.paneExitApplies ? (next ?? null) : null;
     const prev = this._paneExit;
     if (prev === resolved) return false;
@@ -2265,6 +2272,7 @@ export class Session extends EventEmitter {
       paneExit: this._paneExit ?? undefined,
       runtimeHealth: this.runtimeHealth,
       runtimeHealthScope: this.runtimeHealthScope,
+      workerViewerReconnect: this.workerViewerReconnect,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
       lastSubmitAt: this._lastSubmitAt || undefined,
       // Only a chain the CLI's own hooks vouched for is persisted, and only when
@@ -2486,6 +2494,14 @@ export class Session extends EventEmitter {
       // No extra sleep — createSession() already waits for tmux readiness
     }
 
+    this._attachExistingMuxClient(options.spawnErrLabel);
+
+    return { isRestored, respawnedResumeId, respawnedDeadPane };
+  }
+
+  /** Attach only to the already selected local mux; never creates or respawns its command. */
+  private _attachExistingMuxClient(spawnErrLabel: string): void {
+    const mux = this._mux!;
     // Integration tests need a live input/output transport without attaching to
     // the host's tmux server or agent CLI. Production still uses the real mux.
     if (!IS_TEST_MODE) {
@@ -2517,12 +2533,11 @@ export class Session extends EventEmitter {
       );
       this._notePtySpawnGeometry(ptyCols, ptyRows);
     } catch (spawnErr) {
-      console.error(`[Session] Failed to spawn PTY for ${options.spawnErrLabel}:`, spawnErr);
+      console.error(`[Session] Failed to spawn PTY for ${spawnErrLabel}:`, spawnErr);
       this.emit('error', `Failed to attach to mux session: ${spawnErr}`);
       throw spawnErr;
     }
 
-    return { isRestored, respawnedResumeId, respawnedDeadPane };
   }
 
   /**
@@ -2589,6 +2604,59 @@ export class Session extends EventEmitter {
    */
   async restartCli(): Promise<boolean> {
     return this._withPaneLifecycle(() => this._doRestartCli());
+  }
+
+  /** An attach-only viewer is available only for a local isolated worker pane. */
+  get workerViewerReconnect(): boolean {
+    return this._workerBacked && !this._isStopped && this.paneExitApplies && !!this._mux?.readPaneLiveness;
+  }
+
+  /** Repair only the disposable viewer. Never run provider setup, hooks or normal J. */
+  async reconnectWorkerViewer(stillCurrent: () => boolean): Promise<boolean> {
+    if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
+    if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
+    return this._withPaneLifecycle(async () => {
+      const mux = this._mux!, name = this._muxSession!.muxName;
+      const options = this._buildRespawnPaneOptions();
+      const mark = getCli(this.mode)?.capabilities.composerReadyMark;
+      if ((!mark && getCli(this.mode)?.capabilities.workDetect) || !stillCurrent() || this._closing) return false;
+      this._viewerInputHeld = true;
+      // Previous unknown submissions belong to the old viewer; never retry their Enter here.
+      this._submitVerifier?.cancel();
+      this._submitVerifier = null;
+      const before = await mux.readPaneLiveness!(name);
+      if (!stillCurrent()) return false;
+      // A previous attempt may already have attached but not reached readiness.
+      const pid = before.state === 'live' ? before.pid : before.state === 'dead'
+        ? await mux.respawnPane({ ...options, workerAttachOnly: true, onlyIfDead: true, stillCurrent }) : null;
+      if (!pid || !stillCurrent()) return false;
+      if (!this.ptyProcess) {
+        this._attachExistingMuxClient('worker viewer reconnect');
+        this._bindInteractivePty(false);
+      }
+      const client = this.ptyProcess;
+      if (!client || this._pid === null) return false;
+      const deadline = performance.now() + 10_000;
+      do {
+        if (!stillCurrent() || this._closing) return false;
+        const pane = await mux.readPaneLiveness!(name);
+        if (!stillCurrent() || pane.state !== 'live' || pane.pid !== pid) return false;
+        const text = mux.capturePaneText?.(name);
+        const working = !!text && !!getCli(this.mode)?.capabilities.workDetect?.workingLine &&
+          this._workingLinePattern().test(text);
+        if (working || (mark ? text?.includes(mark) : !!text?.trim())) {
+          const final = await mux.readPaneLiveness!(name);
+          if (!stillCurrent() || final.state !== 'live' || final.pid !== pid || this.ptyProcess !== client || this._pid === null) return false;
+          if (working) this._markWorking();
+          this.clearPaneExitForNewPane();
+          this._armPaneSettle(true);
+          this.emit('needsRefresh');
+          return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      } while (performance.now() < deadline);
+      return false;
+    });
   }
 
   /** Explicit owner recovery; tmux atomically refuses a pane that became live. */
@@ -3321,11 +3389,18 @@ export class Session extends EventEmitter {
         this.id;
     }
 
-    this._pid = this.ptyProcess.pid;
-    console.log('[Session] Interactive PTY spawned with PID:', this._pid);
-    this.fullAccessCheck = this._scheduleFullAccessCheck(this._muxSession?.pid);
+    this._bindInteractivePty();
+  }
 
-    this.ptyProcess.onData((rawData: string) => {
+  /** Normal interactive client listeners, also used for non-destructive viewer repair. */
+  private _bindInteractivePty(checkFullAccess = true): void {
+    const client = this.ptyProcess!;
+    this._pid = client.pid;
+    console.log('[Session] Interactive PTY spawned with PID:', this._pid);
+    if (checkFullAccess) this.fullAccessCheck = this._scheduleFullAccessCheck(this._muxSession?.pid);
+
+    client.onData((rawData: string) => {
+      if (this.ptyProcess !== client) return;
       // Filter out focus escape sequences and Ctrl+L (form feed)
       const data = rawData.replace(FOCUS_ESCAPE_FILTER, '').replace(CTRL_L_PATTERN, ''); // Remove Ctrl+L
       if (!data) return; // Skip if only filtered sequences
@@ -3376,7 +3451,9 @@ export class Session extends EventEmitter {
       }
     });
 
-    this.ptyProcess.onExit(({ exitCode }) => {
+    client.onExit(({ exitCode }) => {
+      if (this.ptyProcess !== client) return;
+      if (this._workerBacked && this._muxSession && !this._isStopped) this._viewerClientLost = true;
       console.log('[Session] Interactive PTY exited with code:', exitCode);
       // COD-118: record the exit in the circuit breaker BEFORE status bookkeeping.
       // A clean (0) exit resets the counter; rapid non-zero repeats trip it.
@@ -3467,6 +3544,7 @@ export class Session extends EventEmitter {
    * a two-marker match (isTrustDialogScreen), and an attempt cap.
    */
   private _maybeAcceptTrustDialog(): void {
+    if (this._viewerInputHeld) return;
     if (this._trustDialogAccepted) return;
     const now = Date.now();
     if (now - this._interactiveStartedAt > TRUST_DIALOG_WINDOW_MS) {
@@ -4256,6 +4334,10 @@ export class Session extends EventEmitter {
     options?: { model?: string; onProgress?: (info: { tokens?: number; status?: string }) => void }
   ): Promise<{ result: string; cost: number }> {
     return new Promise((resolve, reject) => {
+      if (this._viewerInputHeld || this.paneLifecycleInFlight) {
+        reject(new Error('The terminal viewer is reconnecting'));
+        return;
+      }
       if (this.ptyProcess) {
         reject(new Error('Session already has a running process'));
         return;
@@ -4784,6 +4866,7 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
+    if (this._viewerInputHeld) return false;
     const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
     if (!this.ptyProcess) return false;
@@ -4931,12 +5014,14 @@ export class Session extends EventEmitter {
    * ```
    */
   canAcceptChatInput(): boolean {
+    if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
     if (this.mode !== 'codex') return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
     return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
+    if (this._viewerInputHeld) return false;
     const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
     if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
@@ -4947,12 +5032,15 @@ export class Session extends EventEmitter {
     if (this._mux && this._muxSession) {
       const muxOptions = { ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
         ...(options.requireEmptyComposer ? { requireEmptyComposer: true } : {}) };
-      const sent = await this._mux.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
-      if (sent) {
-        this._emitSubmittedPrompt(this._trackSubmit(data, options));
-        this._verifySubmitted(data, options.onOutcome, fromEmptyComposer);
-      }
-      return sent;
+      this._muxWritesInFlight++;
+      try {
+        const sent = await this._mux.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
+        if (sent) {
+          this._emitSubmittedPrompt(this._trackSubmit(data, options));
+          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer);
+        }
+        return sent;
+      } finally { this._muxWritesInFlight--; }
     }
     // Fallback to PTY write
     if (this.ptyProcess) {
@@ -4998,7 +5086,12 @@ export class Session extends EventEmitter {
           ? null
           : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
-      sendEnter: () => this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined),
+      sendEnter: async () => {
+        if (this._viewerInputHeld) return false;
+        this._muxWritesInFlight++;
+        try { return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined); }
+        finally { this._muxWritesInFlight--; }
+      },
       // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
       // Only claude, codex, pi, opencode, omp and gemini declare a promptGlyph; the other modes would fall back
       // to claude's `❯`, which is ALSO starship's default shell prompt (and pure's, and
