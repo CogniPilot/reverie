@@ -828,7 +828,7 @@ export function registerChatroomRoutes(
         }
       }
       service.appointCoordinator(id, target);
-      return { success: true, data: service.view(room, { limit: 0 }) };
+      return { success: true, data: ownedView(req, room, { limit: 0 }) };
     } catch (err) {
       return sendError(reply, err);
     }

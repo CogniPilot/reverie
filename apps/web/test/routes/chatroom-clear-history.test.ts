@@ -173,6 +173,42 @@ for (const database of [true, false])
   });
 
 describe('owner view boundary', () => {
+  it('keeps cleared owner metadata on an admitted coordinator reset while channel-only mutations still refuse DMs', async () => {
+    const f = await fixture();
+    await f.clear();
+    const resetCoordinator = () => f.app.inject({
+      method: 'POST', url: f.url + '/coordinator', cookies: f.cookies, payload: { sessionId: null },
+    });
+    const cleared = await resetCoordinator();
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().data).toMatchObject({
+      messages: [], messageCount: 0, unread: 0, mentions: 0,
+      canClearHistory: true, historyAfter: f.old.at,
+    });
+    f.setClock(2000);
+    const next = f.service.post(f.dm.id, { kind: 'agent', sessionId: A, name: 'alpha' }, 'NEW-VISIBLE-MESSAGE');
+    const after = await resetCoordinator();
+    expect(after.statusCode).toBe(200);
+    expect(after.json().data).toMatchObject({
+      messages: [], messageCount: 1, unread: 1, canClearHistory: true, historyAfter: f.old.at,
+    });
+    expect(f.service.room(f.dm.id)!.messages.map(message => message.id)).toEqual([f.old.id, next.id]);
+    const agent = await f.get('/messages', { cookies: {}, headers: { 'x-reverie-parent-session': A } });
+    expect(agent.json().data.messages.map((message: any) => message.id)).toEqual([f.old.id, next.id]);
+    expect(agent.json().data.historyAfter).toBeUndefined();
+    for (const [suffix, payload] of [
+      ['/placement', { workspace: 'test' }], ['/archive', { archived: true }],
+      ['/visibility', { visibility: 'public' }], ['/wake', { mode: 'all' }],
+    ] as const) {
+      const refused = await f.app.inject({ method: 'PUT', url: f.url + suffix, cookies: f.cookies, payload });
+      expect(refused.statusCode, suffix).toBe(409);
+      expect(refused.json().success).toBe(false);
+    }
+    expect((await f.app.inject({ method: 'POST', url: f.url + '/join', cookies: f.cookies, payload: {} })).statusCode).toBe(403);
+    expect((await f.app.inject({ method: 'POST', url: f.url + '/join', headers: { 'x-reverie-parent-session': A }, payload: {} })).statusCode).toBe(404);
+    expect((await f.app.inject({ method: 'POST', url: f.url + '/coordinator', cookies: f.cookies, payload: { sessionId: A } })).statusCode).toBe(400);
+    expect((await f.app.inject({ method: 'POST', url: f.url + '/coordinator', headers: { 'x-reverie-parent-session': A }, payload: { sessionId: null } })).statusCode).toBe(403);
+  });
   it('clears through the actual owner route from the real UI and updates another device without deleting the agent history', async () => {
     const f = await fixture();
     const pages: any[] = [];
