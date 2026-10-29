@@ -128,6 +128,8 @@ let
         test/pending-writer-control.test.ts test/verifier-gate-cleared.test.ts test/wake-claude-invariant-control.test.ts \
         test/wake-idle-boundary.test.ts test/wake-idle-invariant-control.test.ts test/wake-idle-race-witness.test.ts \
         test/write-gate-property.test.ts test/write-gate-unsent.test.ts test/tmux-manager.test.ts \
+        test/late-hold-control.test.ts test/opencode-late-hold-control.test.ts test/opencode-paste-hold-control.test.ts \
+        test/codex-paste-hold.test.ts test/plan-move-input-hold.test.ts test/opencode-shell-mode.test.ts \
         test/cli-agent.test.ts test/routes/session-input-delivery.test.ts test/chatroom-archived-reply.test.ts \
         test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
       # memoryPackage's Python discovery never depends on the console output.
