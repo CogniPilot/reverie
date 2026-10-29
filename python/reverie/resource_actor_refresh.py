@@ -6,10 +6,12 @@ import re
 import socket
 import stat
 import struct
+import time
 
 from .goal_private import private_entry
 from .owner_terminal_channel import Program, read_proc
 from .website_image_provenance import immutable
+from .worker_service_transport_upgrade import IsolatedInterpreterObserver, _immutable as interpreter_file
 
 
 def _generation_root(service, target):
@@ -69,8 +71,6 @@ def _registered_program(service, invocation, entry):
         raise ValueError('Existing registered broker unit required')
     installed = service.unit.resolve(strict=True)
     _generation_root(service, installed)
-    if installed == target:
-        return invocation, entry, target
     from .worker_service import STORE_ROOT
     from .worker_service_upgrade import unit_record
     immutable(installed, 8192)
@@ -90,7 +90,8 @@ def _registered_program(service, invocation, entry):
     previous_invocation, previous_entry = map(Path, match.groups())
     immutable(previous_invocation.resolve(strict=True), 256 * 1024**2)
     immutable(previous_entry, 16 * 1024**2)
-    if _python_graph(previous_entry) != _python_graph(entry):
+    if ((installed == target and previous_entry != entry) or
+            (installed != target and _python_graph(previous_entry) != _python_graph(entry))):
         raise ValueError('Registered broker Python inputs differ; coordinated upgrade required')
     return previous_invocation, previous_entry, installed
 
@@ -107,13 +108,23 @@ class RegisteredTransport:
         invocation = Path(os.environ.get('REVERIE_WORKER_SERVICE_PYTHON', ''))
         entry = Path(os.environ.get('REVERIE_WORKER_SERVICE_ENTRY', ''))
         # Interpreter invocation may be a Nix-owned symlink to its immutable ELF.
-        executable = immutable(invocation.resolve(strict=True), 256 * 1024**2)
+        immutable(invocation.resolve(strict=True), 256 * 1024**2)
         entry = immutable(entry, 16 * 1024**2)
         if not invocation.is_absolute() or not str(invocation).startswith('/nix/store/'):
             raise ValueError('Fixed packaged broker invocation required')
+        expected_invocation = invocation
         invocation, entry, self.target = _registered_program(service, invocation, entry)
-        executable = immutable(invocation.resolve(strict=True), 256 * 1024**2)
-        self.program = Program(str(executable), (str(invocation), '-I', '-B', str(entry),
+        # A makeBinaryWrapper is an ELF program, not necessarily a symlink to
+        # the interpreter the kernel ultimately runs. Observe both the fixed
+        # current tool and the actual registered wrapper's declared invocation.
+        self.interpreter_observer = IsolatedInterpreterObserver(time.monotonic() + 15)
+        expected = self.interpreter_observer.observe(expected_invocation)
+        self.interpreter = (expected if invocation == expected_invocation else
+                            self.interpreter_observer.observe(invocation))
+        if (self.interpreter['executable'] != expected['executable'] or
+                self.interpreter['exeIdentity'] != expected['exeIdentity']):
+            raise ValueError('Registered broker interpreter ABI differs; coordinated upgrade required')
+        self.program = Program(self.interpreter['executable'], (self.interpreter['argv0'], '-I', '-B', str(entry),
                                                 'broker', '--config', str(service.config_path)))
         self.selection = self.observe()
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -154,6 +165,13 @@ class RegisteredTransport:
                 Path(fields['FragmentPath']).resolve(strict=True) != self.target or
                 not fields['MainPID'].isdecimal() or int(fields['MainPID']) <= 1):
             raise ValueError('Unmodified running registered broker required')
+        invocation = Path(self.interpreter['declared'])
+        actual = interpreter_file(invocation, executable=True)
+        if (actual['canonical'] != self.interpreter['invocation'] or
+                actual['signature'] != self.interpreter['identitySignature'] or
+                actual['sha256'] != self.interpreter['sha256'] or
+                actual['identity'] != self.interpreter['identity']):
+            raise ValueError('Registered declared interpreter changed')
         pid = int(fields['MainPID']); process = read_proc(pid)
         self.program.matches(process)
         path = Path(self.config['socket'])

@@ -10,6 +10,11 @@ from pathlib import Path
 import socket
 import sys
 import threading
+import hashlib
+import time
+import json
+import subprocess
+import selectors
 import unittest
 from unittest.mock import patch
 
@@ -32,19 +37,25 @@ class RegisteredTransportTests(unittest.TestCase):
         for path in (old, wrapper, check, python, current_python, old_entry, current_entry):
             path.parent.mkdir(parents=True, exist_ok=True)
         for path in (python, current_python):
+            if path.exists():path.chmod(0o755)
             path.write_bytes(b'\x7fELFcontrolled-test-input');path.chmod(0o555)
         for entry in (old_entry, current_entry):
+            if entry.exists():entry.chmod(0o644)
             entry.write_text('# synthetic immutable broker\n');entry.chmod(0o444)
             dependency=entry.with_name('helper.py')
+            if dependency.exists():dependency.chmod(0o644)
             dependency.write_text('# synthetic immutable dependency\n');dependency.chmod(0o444)
         (old_entry.parents[2]/'website.js').write_text('old website')
         (current_entry.parents[2]/'website.js').write_text('new website')
+        if wrapper.exists():wrapper.chmod(0o755)
         wrapper.write_text('#!'+str(f.store)+'/bash/bin/bash\n'
             'set -o errexit\nset -o nounset\nset -o pipefail\n\n'
             'export PATH="'+str(python.parent)+':$PATH"\n\n'
             'exec '+str(python)+' -I -B '+str(old_entry)+' broker "$@"\n')
         wrapper.chmod(0o555)
+        if check.exists():check.chmod(0o755)
         check.write_text('#!/bin/sh\nexit 0\n');check.chmod(0o555)
+        if old.exists():old.chmod(0o644)
         old.write_text(TEMPLATE.format(check=check,broker=wrapper));old.chmod(0o444)
         f.service.unit.unlink();f.service.unit.symlink_to(old)
         f.service.gcroot.unlink();f.service.gcroot.symlink_to(f.service.store_root(old))
@@ -64,6 +75,7 @@ class RegisteredTransportTests(unittest.TestCase):
         try:
             control=f.root/'refresh-control';control.mkdir(mode=0o700)
             f.config['socket']=str(control/'broker.sock');f.write_config();f.service.install()
+            _,_,declared,entry,_,_,controlled=self.registered_generation(f)
             props={'MainPID':str(os.getpid()),'FragmentPath':str(f.service.unit),
                    'DropInPaths':'','ActiveState':'active','SubState':'running'}
             manager=f.service.manager
@@ -86,8 +98,22 @@ class RegisteredTransportTests(unittest.TestCase):
                 except BaseException as error:errors.append(type(error).__name__)
             thread=threading.Thread(target=serve);thread.start()
             env={'REVERIE_WORKER_SERVICE_PYTHON':sys.executable,
-                 'REVERIE_WORKER_SERVICE_ENTRY':str(f.target)}
-            with patch.dict(os.environ,env),patch.object(M,'immutable',side_effect=lambda p,_:Path(p)),\
+                 'REVERIE_WORKER_SERVICE_ENTRY':str(entry)}
+            def interpreter_file(path,**kwargs):
+                path=controlled(Path(path).resolve(),2*1024**2);info=path.stat()
+                from reverie.worker_service_transport_upgrade import _signature
+                return {'canonical':str(path),'signature':_signature(path),'identity':[info.st_dev,info.st_ino],
+                        'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+            def observe(_observer,path):
+                fact=interpreter_file(path);actual=Path(sys.executable).resolve();info=actual.stat()
+                return {'declared':str(path),'invocation':fact['canonical'],'sha256':fact['sha256'],
+                    'identity':fact['identity'],'identitySignature':fact['signature'],
+                    'executable':str(actual),'exeIdentity':[info.st_dev,info.st_ino],'argv0':str(path)}
+            # These fixtures model immutable-file custody/program facts only.
+            # Actual emitted-wrapper/kernel/UDS coverage is a separate control.
+            with patch.dict(os.environ,env),patch.object(M,'immutable',side_effect=controlled),\
+                 patch.object(M,'interpreter_file',side_effect=interpreter_file),\
+                 patch.object(M.IsolatedInterpreterObserver,'observe',new=observe),\
                  patch.object(M.Program,'matches')as program:
                 yield f,props,program,received
         finally:
@@ -188,6 +214,140 @@ class RegisteredTransportTests(unittest.TestCase):
                 path.write_text(text);path.chmod(0o444)
             with patch.object(M,'immutable',side_effect=controlled),self.assertRaisesRegex(ValueError,'Python inputs differ'):
                 M._registered_program(f.service,python,current)
+
+    def test_same_target_still_uses_the_actual_unit_declared_interpreter(self):
+        with self.fixture()as(f,_props,_program,_received):
+            installed=f.service.unit.resolve();entry=f.store/'old-source/python/reverie/worker.py'
+            with patch.object(f.service,'target_unit',return_value=installed):
+                proof=M.RegisteredTransport(f.service,copy.deepcopy(f.config))
+                try:
+                    self.assertEqual(proof.program.argv[0],str(f.store/'old-python/bin/python3'))
+                    self.assertEqual(proof.program.argv[3],str(entry))
+                    self.assertEqual(proof.program.executable,str(Path(sys.executable).resolve()))
+                    proof.guard()
+                finally:proof.close()
+
+    def test_declared_interpreter_change_after_admission_refuses(self):
+        with self.fixture()as(f,_props,_program,_received):
+            proof=M.RegisteredTransport(f.service,copy.deepcopy(f.config))
+            try:
+                declared=Path(proof.interpreter['declared']);declared.chmod(0o755)
+                declared.write_bytes(b'\x7fELFchanged-controlled-file');declared.chmod(0o555)
+                with self.assertRaisesRegex(ValueError,'declared interpreter changed'):proof.guard()
+            finally:proof.close()
+
+    def test_different_interpreter_elf_is_not_authorized_by_an_immutable_name(self):
+        with self.fixture()as(f,_props,_program,_received):
+            original=M.IsolatedInterpreterObserver.observe
+            def wrong(observer,path):
+                fact=original(observer,path)
+                if str(path).endswith('/old-python/bin/python3'):fact={**fact,'exeIdentity':[0,1]}
+                return fact
+            with patch.object(M.IsolatedInterpreterObserver,'observe',side_effect=wrong,autospec=True),\
+                 self.assertRaisesRegex(ValueError,'interpreter ABI differs'):
+                M.RegisteredTransport(f.service,copy.deepcopy(f.config))
+
+
+class InterpreterObservation(unittest.TestCase):
+    def setUp(self):
+        # Native admission is not run inside a Nix builder. Model only the
+        # namespace-mapped owner of these two fixed read-only code artifacts;
+        # every inode/mode/hash and actual probe PID/argv/ELF remains real.
+        mapped=Path('/').stat().st_uid
+        if os.environ.get('NIX_BUILD_TOP') and mapped==65534:
+            original=Path.stat
+            files={Path(sys.executable).resolve(),Path('/proc/self/exe').resolve()}
+            def selected(path,*args,**kwargs):
+                value=original(path,*args,**kwargs)
+                if path in files and value.st_uid==mapped:
+                    fields=list(value);fields[4]=0;return os.stat_result(fields)
+                return value
+            self.enterContext(patch.object(Path,'stat',selected))
+
+    def test_fixed_observer_qualifies_actual_python_and_settles_its_child(self):
+        observer=M.IsolatedInterpreterObserver(time.monotonic()+10)
+        actual=observer.observe(Path(sys.executable))
+        self.assertEqual(actual['executable'],str(Path('/proc/self/exe').resolve()))
+        self.assertEqual(actual['argv0'],str(Path(sys.executable)))
+        self.assertIsNone(observer._probe_child)
+        self.assertNotIn(observer,observer._unsettled)
+
+    def test_observer_refuses_expired_nonfinite_and_bool_deadlines(self):
+        for deadline in (time.monotonic()-1,float('inf'),float('nan'),True):
+            with self.subTest(deadline=deadline),self.assertRaises(ValueError):M.IsolatedInterpreterObserver(deadline)
+
+
+@unittest.skipUnless(os.environ.get('NIX_REVERIE_TEST_REFRESH_FIXTURE'),
+                     'Pinned public emitted-wrapper/UDS fixture required')
+class PackagedRefreshTransport(unittest.TestCase):
+    """Real immutable wrapper, actual ELF/argv/SO_PEERCRED; manager metadata only is controlled."""
+    def check_generation(self, *, compatible_source):
+        from reverie import worker_service as S
+        facts=json.loads(Path(os.environ['NIX_REVERIE_TEST_REFRESH_FIXTURE']).read_bytes())
+        selected=facts['fixtures'][0 if compatible_source else 1];current=facts['fixtures'][1]
+        for item in facts['fixtures']:
+            for key in ('entry','wrapper','unit'):
+                self.assertEqual(hashlib.sha256(Path(item[key]).read_bytes()).hexdigest(),item[key+'SHA256'])
+        original=Path(facts['originalWrapper']['path']).read_text()
+        self.assertEqual(Path(selected['wrapper']).read_text(),original.replace(
+            facts['originalSourceLiteral'],selected['entry']))
+        f=F.WorkerServiceTests();f.setUp();child=None;proof=None
+        try:
+            control=f.root/'refresh-peer';control.mkdir(mode=0o700)
+            f.config['socket']=str(control/'broker.sock');f.write_config()
+            f.service.unit.parent.mkdir(parents=True,exist_ok=True)
+            f.service.unit.symlink_to(selected['unit'])
+            f.service.environment.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+            f.service.environment.write_text(S.environment_selection(f.path));f.service.environment.chmod(0o600)
+            f.service.gcroot.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+            f.service.gcroot.symlink_to(str(Path(selected['unit']).parents[3]))
+            child=subprocess.Popen([selected['wrapper'],'--config',str(f.path)],
+                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                env={'LANG':'C.UTF-8','PATH':'/nonexistent'})
+            with selectors.DefaultSelector()as ready:
+                ready.register(child.stdout,selectors.EVENT_READ)
+                self.assertTrue(ready.select(5),'Owned inert UDS READY unavailable')
+                self.assertEqual(child.stdout.readline(),b'REFRESH_ABI_READY\n')
+            props={'MainPID':str(child.pid),'FragmentPath':str(f.service.unit),
+                   'DropInPaths':'','ActiveState':'active','SubState':'running'}
+            def manager(*args,**kwargs):
+                self.assertEqual(args[:2],('show',S.UNIT))
+                return subprocess.CompletedProcess(args,0,'\n'.join(k+'='+v for k,v in props.items()),'')
+            env={'REVERIE_WORKER_SERVICE_PYTHON':facts['expectedInterpreter'],
+                 'REVERIE_WORKER_SERVICE_ENTRY':current['entry']}
+            with patch.object(S,'STORE_ROOT',Path('/nix/store')),\
+                 patch.object(f.service,'target_unit',return_value=Path(current['unit'])),\
+                 patch.object(f.service,'manager',side_effect=manager),patch.dict(os.environ,env):
+                proof=M.RegisteredTransport(f.service,copy.deepcopy(f.config))
+                self.assertEqual(proof.credentials,(child.pid,os.getuid(),os.getgid()))
+                self.assertEqual(proof.program.executable,str((Path('/proc')/str(child.pid)/'exe').resolve()))
+                self.assertEqual(proof.program.argv,(facts['declaredInterpreter'],'-I','-B',selected['entry'],
+                                                   'broker','--config',str(f.path)))
+                self.assertNotEqual(Path(facts['declaredInterpreter']).resolve(),Path(proof.program.executable))
+                actual=(Path('/proc')/str(child.pid)/'cmdline').read_bytes()
+                self.assertEqual(actual,b'\0'.join(word.encode()for word in proof.program.argv)+b'\0')
+                proof.guard();proof.finalize();self.assertIsNone(proof.socket)
+            self.assertEqual(child.wait(timeout=5),0)
+            self.assertEqual(child.stdout.read(),b'REFRESH_PEER_CLOSED_WITHOUT_FRAME\n')
+            self.assertEqual(child.stderr.read(),b'')
+            self.assertFalse(any(call[0]=='docker'for call in f.calls))
+        finally:
+            if proof:proof.close()
+            if child is not None:
+                if child.poll() is None:
+                    try:child.stdin.write(b'x');child.stdin.flush()
+                    except BrokenPipeError:pass
+                    try:child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
+                for stream in (child.stdin,child.stdout,child.stderr):stream.close()
+                self.assertIsNotNone(child.poll())
+            f.doCleanups()
+
+    def test_actual_emitted_same_target_wrapper_and_kernel_peer_are_qualified(self):
+        self.check_generation(compatible_source=False)
+
+    def test_actual_emitted_compatible_registered_source_and_kernel_peer_are_qualified(self):
+        self.check_generation(compatible_source=True)
 
 
 if __name__=='__main__':unittest.main()

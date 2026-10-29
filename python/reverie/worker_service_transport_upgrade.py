@@ -12,6 +12,7 @@ import re
 import time
 import selectors
 import subprocess
+import math
 
 from . import worker_resource_reservations as R
 from .worker_host_job import require_idle
@@ -473,3 +474,31 @@ class TransportUpgrade:
             self._time()
             os.rename(self.operation / 'DONE.next.json', self.operation / 'DONE.json')
             return result
+
+
+class IsolatedInterpreterObserver:
+    """Read-only fixed T731 probe, without migration/service/effect authority.
+
+    Keep an unresolved actual child reachable even when constructor admission
+    fails. This class has no GPUUpgrade, operation, manager or engine port.
+    """
+    _unsettled = set()
+
+    def __init__(self, deadline):
+        need(type(deadline) in (int, float) and math.isfinite(deadline) and
+             time.monotonic() < deadline, 'Interpreter probe deadline exhausted')
+        self.deadline = deadline
+        self._probe_child = None
+
+    def _time(self):
+        need(time.monotonic() < self.deadline, 'Interpreter probe deadline exhausted')
+
+    def observe(self, declared):
+        self._unsettled.add(self)
+        try:
+            # The shared method reads only this observer's deadline/child state.
+            # Its command, framing, kernel proof and cleanup are byte-identical
+            # to the accepted transport-only producer.
+            return TransportUpgrade._interpreter(self, declared)
+        finally:
+            if self._probe_child is None:self._unsettled.discard(self)
