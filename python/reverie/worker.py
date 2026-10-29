@@ -735,6 +735,11 @@ class Broker:
         if config.get('resourceActorConfig') is not None:
             from reverie.worker_resource_actor import ResourceActorService
             self.resource_actor = ResourceActorService(self)
+        self.host_resume = None
+        resume_program = Path(__file__).resolve().with_name('worker-resume-program.json')
+        if resume_program.exists():
+            from reverie.worker_resume import HostWorkerResume
+            self.host_resume = HostWorkerResume(self, resume_program)
         self.browser_jobs = None
         if config.get('browserJobPolicy') is not None:
             from reverie.browser_job_requests import BrowserJobRequests
@@ -1557,6 +1562,12 @@ class Broker:
             if peer[1] != self.config['uid']:
                 raise ValueError('Worker peer identity is not authorized')
             kind, raw = receive_frame(connection)
+            if kind == b'Y':
+                from reverie.human_terminal_protocol import decode
+                if decode(raw) != {'version':1,'purpose':'host-worker-resume-v1','kind':'register'} or self.host_resume is None:
+                    raise ValueError('Native host recovery registration is unavailable')
+                self.host_resume.register(connection,peer)
+                return
             if kind == b'Q':
                 from reverie.worker_resource_actor import ResourceActorService
                 if json.loads(raw)!={'purpose':'resource-replacement-v1','version':1} or type(self.resource_actor) is not ResourceActorService:
@@ -1577,6 +1588,16 @@ class Broker:
                 return
             if kind == b'C':
                 control = json.loads(raw)
+                from reverie.worker_resume import ACTIONS as resume_actions
+                if isinstance(control,dict) and control.get('action')=='worker-resume-channel':
+                    from reverie.human_terminal_protocol import decode
+                    if self.host_resume is None:raise ValueError('Native host recovery is unavailable')
+                    if decode(raw)!={'action':'worker-resume-channel'}:raise ValueError('Closed native host channel required')
+                    result=self.host_resume.accept_owner(connection,peer)
+                    send_frame(connection,b'J',json.dumps(result,allow_nan=False).encode())
+                    return
+                if isinstance(control,dict) and control.get('action') in resume_actions:
+                    raise ValueError('Native host recovery requires its fixed owner channel')
                 if isinstance(control, dict) and control.get('action') in ('gpu-access-status', 'gpu-access-request'):
                     # C is owner-local only; OfficeAPI never forwards these verbs.
                     # No UID/title/owner flag supplied in JSON is an approval.

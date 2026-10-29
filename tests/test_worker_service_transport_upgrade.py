@@ -462,3 +462,101 @@ class PackagedTransportProgram(unittest.TestCase):
         self.assertTrue((case.operation/'DONE.json').exists())
         case.unchanged()
         self.assertFalse(any(c[0]=='docker'for c in f.commands))
+
+
+INTERPRETER_READY_WRAPPER = os.environ.get('NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER')
+
+
+@unittest.skipUnless(INTERPRETER_READY_WRAPPER, 'Pinned inert Nix exec-window fixture required')
+class InterpreterExecWindow(unittest.TestCase):
+    """Actual dumpability/exec, procfs, birth, ELF, argv and child settlement.
+
+    Only Popen scheduling/owned fixture argv is controlled. No fake permission
+    exception/process metadata, service, engine or provider is involved.
+    """
+    def setUp(self):
+        import time
+        from reverie import worker_gpu_preflight as P
+        self.native = P._process
+        self.wrapper = Path(INTERPRETER_READY_WRAPPER).resolve(strict=True)
+        self.probe = T.IsolatedInterpreterObserver(time.monotonic() + 5)
+        self.original_popen = subprocess.Popen
+        self.children = []; self.before = []; self.after = []; self.mutation = None
+        self.addCleanup(self.settle)
+
+    def settle(self):
+        for child in self.children:
+            if child.poll() is None: child.kill()
+            child.wait(timeout=3)
+            for stream in (child.stdin, child.stdout, child.stderr):
+                if stream is not None and not stream.closed: stream.close()
+        self.assertTrue(all(child.returncode is not None for child in self.children))
+
+    def controlled_popen(self, args, **kwargs):
+        import signal, time
+        selected = list(args)
+        if self.mutation == 'argv': selected[1:1] = ['-X', 'utf8']
+        if self.mutation == 'schema': selected[-1] = selected[-1].replace("'version':1", "'version':2")
+        if self.mutation == 'post-ready-permission':
+            selected[-1] = selected[-1].replace('print(json.dumps',
+                "import ctypes;assert ctypes.CDLL(None).prctl(4,0,0,0,0)==0;print(json.dumps")
+        if self.mutation == 'eof': selected[-1] = 'pass'
+        if self.mutation == 'timeout': selected[-1] = 'import time;time.sleep(20)'
+        child = self.original_popen(selected, **kwargs); self.children.append(child)
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
+            stopped = os.waitid(os.P_PID, child.pid, os.WSTOPPED | os.WNOHANG | os.WNOWAIT)
+            if stopped is not None: break
+            time.sleep(.001)
+        else: self.fail('Owned immutable fixture did not stop')
+        self.assertEqual((stopped.si_code, stopped.si_status), (os.CLD_STOPPED, signal.SIGSTOP))
+        raw = (Path('/proc') / str(child.pid) / 'stat').read_bytes()
+        birth = int(raw.rsplit(b')', 1)[1].split()[19])
+        with self.assertRaises(PermissionError) as denied: self.native(child.pid)
+        self.assertEqual(denied.exception.errno, 13)
+        self.before.append((child.pid, birth))
+        child.send_signal(signal.SIGCONT)
+        return child
+
+    def observe(self):
+        from reverie import worker_gpu_preflight as P
+        def actual(pid):
+            value = self.native(pid); self.after.append(value); return value
+        with patch.object(T.subprocess, 'Popen', side_effect=self.controlled_popen), \
+             patch.object(P, '_process', side_effect=actual):
+            return self.probe.observe(self.wrapper)
+
+    def test_real_pre_ready_denial_then_same_birth_full_program_proof(self):
+        value = self.observe()
+        self.assertEqual(value['argv0'], str(self.wrapper))
+        self.assertEqual(value['executable'], str(Path('/proc/self/exe').resolve(strict=True)))
+        self.assertGreaterEqual(len(self.after), 2)
+        self.assertTrue(all((p['pid'], p['startTick']) == self.before[0] for p in self.after))
+        self.assertIsNone(self.probe._probe_child)
+        self.assertTrue(all(c.returncode == 0 for c in self.children))
+
+    def test_real_post_ready_permission_denial_is_not_a_fallback(self):
+        self.mutation = 'post-ready-permission'
+        with self.assertRaises(PermissionError): self.observe()
+        self.assertEqual(len(self.children), 1)
+
+    def test_extra_actual_interpreter_argument_refuses(self):
+        self.mutation = 'argv'
+        with self.assertRaisesRegex(ValueError, 'process changed'): self.observe()
+
+    def test_wrong_fixed_ready_schema_refuses(self):
+        self.mutation = 'schema'
+        with self.assertRaisesRegex(ValueError, 'schema refused'): self.observe()
+
+    def test_actual_early_exit_never_qualifies_or_restarts(self):
+        self.mutation = 'eof'
+        with self.assertRaisesRegex(ValueError, 'unavailable'): self.observe()
+        self.assertEqual(len(self.children), 1)
+
+    def test_actual_no_ready_deadline_retains_any_unsettled_owned_child(self):
+        import time
+        self.mutation = 'timeout'; self.probe.deadline = time.monotonic() + .7
+        with self.assertRaises(ValueError): self.observe()
+        self.assertEqual(len(self.children), 1)
+        if self.children[0].poll() is None:
+            self.assertIs(self.probe._probe_child, self.children[0])

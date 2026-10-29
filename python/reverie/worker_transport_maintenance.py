@@ -90,7 +90,7 @@ def verify_sources(source,pins):
 
 
 def helper_diagnostic(raw):
-    from .worker_service import _DIAGNOSTIC_REASONS
+    from .worker_service import _DIAGNOSTIC_REASONS, _TRANSPORT_DIAGNOSTIC_STAGES
     categories={'OBSERVATION_TIMEOUT','PATH_UNAVAILABLE','PATH_PERMISSION','EXCLUSIVE_PATH_EXISTS',
                 'PATH_ALIAS','ATOMIC_FILESYSTEM_MISMATCH','IO_UNCONFIRMED','GUARD_CHECK_FAILED','OPERATION_UNCONFIRMED'}
     reasons=_DIAGNOSTIC_REASONS|{'Unlisted exception details withheld.',
@@ -98,7 +98,11 @@ def helper_diagnostic(raw):
     for line in raw.decode('utf8',errors='replace').splitlines()[-4:]:
         try:value=json.loads(line)
         except (ValueError,TypeError):continue
-        if type(value)is dict and set(value)=={'category','reason'} and type(value['category'])is str and type(value['reason'])is str and value['category']in categories and value['reason']in reasons:return value
+        if (type(value)is dict and set(value) in ({'category','reason'},{'category','reason','stage'}) and
+                type(value['category'])is str and type(value['reason'])is str and
+                value['category']in categories and value['reason']in reasons and
+                ('stage' not in value or (type(value['stage'])is str and value['stage'] in _TRANSPORT_DIAGNOSTIC_STAGES))):
+            return value
     return None
 
 

@@ -4,6 +4,7 @@ Only the packaged launcher's immutable target unit changes. Every canonical
 configuration/store byte remains owned by its existing authority. A consumed
 attempt is never retried or automatically rolled back after an uncertain effect.
 """
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,31 @@ INTERPRETER_PROBE = ("import json,sys;from pathlib import Path;"
     "'argv0':Path('/proc/self/cmdline').read_bytes().split(bytes([0]))[0].decode()}),flush=True);"
     "sys.stdin.buffer.read(1)")
 NIX = r'/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._?=-]+'
+
+
+def _owned_birth(pid):
+    """Readable own-child birth anchor across a trusted wrapper's second exec.
+
+    Popen retains this PID until reap. Root/namespace/executable access belongs
+    after the fixed probe READY, when the wrapper has entered its final program.
+    """
+    with (Path('/proc') / str(pid) / 'stat').open('rb') as stream:
+        raw = stream.read(8193)
+    need(len(raw) <= 8192, 'Interpreter probe process metadata exceeds bound')
+    fields = raw.rsplit(b')', 1)[1].split()
+    need(fields[0] not in (b'Z', b'X'), 'Interpreter probe process ended')
+    return int(fields[19])
+
+
+@contextmanager
+def _stage(name):
+    """Annotate existing failures with fixed operator-local phase names only."""
+    try:
+        yield
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        if not hasattr(error, '_reverie_transport_stage'):
+            error._reverie_transport_stage = name
+        raise
 
 
 def _signature(path):
@@ -103,7 +129,7 @@ class TransportUpgrade:
             self._probe_child = child
             streams = [child.stdin, child.stdout, child.stderr]
             from .worker_gpu_preflight import _process
-            initial = _process(child.pid)
+            birth = _owned_birth(child.pid)
             output = bytearray()
             with selectors.DefaultSelector() as selected:
                 os.set_blocking(child.stdout.fileno(),False)
@@ -125,6 +151,11 @@ class TransportUpgrade:
                  and value['version']==1 and type(value['version'])is int
                  and value['implementation']=='cpython' and type(value['isolated'])is int and value['isolated']==1
                  and value['bytecode'] is False,'Interpreter probe schema refused')
+            # READY comes from the final fixed Python program. Retain the
+            # original owned PID/birth; no new process is adopted or retried.
+            need(child.poll() is None, 'Interpreter probe unavailable')
+            initial = _process(child.pid)
+            need(initial['startTick'] == birth, 'Interpreter probe process changed')
             proc=Path('/proc')/str(child.pid)
             exe=(proc/'exe').resolve(strict=True); executable=_immutable(exe,executable=True)
             argv=_argv(proc)
@@ -454,22 +485,28 @@ class TransportUpgrade:
             exclusive(self.operation / 'BROKER-START-INTENT.json', encoded({'unit': plan['generation']['newUnit']}))
             self._terminal(plan, gate, links)
             self.tools.manager('start'); self.tools.manager('is-active')
-            current = self.broker(plan['generation']['newUnit'])
-            need(current['process'] != plan['broker']['process'], 'New broker process required')
-            self.tools.ready_socket(Path(config['socket']), current['process']['pid'])
-            for sid in plan['native']['runningSessions']:
-                self.tools.ready_socket(Path(config['apiSocketRoot']) / sid / 'office.sock', current['process']['pid'])
-            with gate.admission(deadline=self.deadline):
-                self._unchanged(plan, gate)
-                need(self.service.unit.resolve() == Path(plan['generation']['newUnit']['path']) and
-                     self.service.gcroot.resolve() == Path(plan['generation']['newUnit']['root']) and
-                     self.broker(plan['generation']['newUnit']) == current, 'New broker generation readback changed')
+            with _stage('POSTSTART_BROKER'):
+                current = self.broker(plan['generation']['newUnit'])
+                need(current['process'] != plan['broker']['process'], 'New broker process required')
+            with _stage('POSTSTART_LISTENERS'):
+                self.tools.ready_socket(Path(config['socket']), current['process']['pid'])
+                for sid in plan['native']['runningSessions']:
+                    self.tools.ready_socket(Path(config['apiSocketRoot']) / sid / 'office.sock', current['process']['pid'])
+            with _stage('POSTSTART_ADMISSION'), gate.admission(deadline=self.deadline):
+                with _stage('POSTSTART_CONTINUITY'):
+                    self._unchanged(plan, gate)
+                with _stage('POSTSTART_BROKER_READBACK'):
+                    need(self.service.unit.resolve() == Path(plan['generation']['newUnit']['path']) and
+                         self.service.gcroot.resolve() == Path(plan['generation']['newUnit']['root']) and
+                         self.broker(plan['generation']['newUnit']) == current, 'New broker generation readback changed')
                 result = {'state': 'TRANSPORT_REPLACED', 'configUnchanged': True, 'workerEffects': False,
                           'noWakeCommand': True, 'broker': current}
-                exclusive(self.operation / 'DONE.next.json', encoded(result))
-                done_stamp = stamp(self.operation / 'DONE.next.json')
+                with _stage('POSTSTART_RESULT_WRITE'):
+                    exclusive(self.operation / 'DONE.next.json', encoded(result))
+                    done_stamp = stamp(self.operation / 'DONE.next.json')
             # No descriptor/native finalizer follows the last static check.
-            self._terminal(plan, gate, links, current)
+            with _stage('POSTSTART_TERMINAL'):
+                self._terminal(plan, gate, links, current)
             need(stamp(self.operation / 'DONE.next.json') == done_stamp, 'Completion receipt changed')
             self._time()
             os.rename(self.operation / 'DONE.next.json', self.operation / 'DONE.json')

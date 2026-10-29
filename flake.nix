@@ -132,11 +132,30 @@
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
           };
+          workerResumeProgram = import ./nix/worker-resume-program.nix {
+            inherit pkgs; src = source; inherit (packages) console;
+          };
+          workerBrokerSource = pkgs.runCommand "reverie-worker-broker-source" {
+            nativeBuildInputs = [ pkgs.python3 ];
+          } ''
+            mkdir -p "$out"
+            cp -R ${source}/python "$out/python"
+            chmod u+w "$out/python/reverie"
+            cp ${self.packages.${system}.workerResumeProgram}/share/reverie/worker-resume-program.json \
+              "$out/python/reverie/worker-resume-program.json"
+            python3 - "$out/python" <<'PY'
+            import pathlib,sys
+            root=pathlib.Path(sys.argv[1]);files=[p for p in root.rglob('*') if p.is_file()]
+            assert not any(p.is_symlink() for p in root.rglob('*'))
+            assert len(files)<=4096 and sum(p.stat().st_size for p in files)<=64*1024**2
+            assert all(p.stat().st_size<=16*1024**2 for p in files)
+            PY
+          '';
           workerBroker = pkgs.writeShellApplication {
             name = "reverie-worker-broker";
             # Fixed GPU CDI YAML parser; retain the protected isolated entry.
             runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client ];
-            text = ''exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -I -B ${source}/python/reverie/worker.py broker "$@"'';
+            text = ''exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -I -B ${self.packages.${system}.workerBrokerSource}/python/reverie/worker.py broker "$@"'';
           };
           employeeLaptopMigrate = pkgs.writeShellApplication {
             name = "reverie-employee-laptop-migrate";
@@ -209,8 +228,18 @@
             text = ''
               export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
               export REVERIE_WORKER_SERVICE_PYTHON=${pkgs.python3}/bin/python3
-              export REVERIE_WORKER_SERVICE_ENTRY=${source}/python/reverie/worker.py
+              export REVERIE_WORKER_SERVICE_ENTRY=${self.packages.${system}.workerBrokerSource}/python/reverie/worker.py
               exec python3 -I -B ${source}/python/reverie/worker_service.py "$@"
+            '';
+          };
+          workerResumeClient = pkgs.writeShellApplication {
+            name = "reverie-worker-resume";
+            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.systemd ];
+            text = ''
+              export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
+              export REVERIE_WORKER_SERVICE_PYTHON=${pkgs.python3}/bin/python3
+              export REVERIE_WORKER_SERVICE_ENTRY=${self.packages.${system}.workerBrokerSource}/python/reverie/worker.py
+              exec python3 -I -B ${self.packages.${system}.workerBrokerSource}/python/reverie/worker_resume_client.py "$@"
             '';
           };
           resourceActorImage = import ./nix/image.nix {
@@ -353,6 +382,7 @@
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
+        worker-resume = { type = "app"; program = "${self.packages.${system}.workerResumeClient}/bin/reverie-worker-resume"; meta.description = "Preview and consume a fixed host-owner batch through normal saved employee recovery"; };
         resource-actor-enable = { type = "app"; program = "${self.packages.${system}.resourceActorBootstrap}/bin/reverie-resource-actor-enable"; meta.description = "Explicit pristine existing-domain actor-key enablement; no installation or service start"; };
         resource-actor-install = { type = "app"; program = "${self.packages.${system}.resourceActorInstaller}/bin/reverie-resource-actor-install"; meta.description = "Explicit inactive resource-actor installation using the matching immutable website image"; };
         resource-actor-refresh = { type = "app"; program = "${self.packages.${system}.resourceActorRefresh}/bin/reverie-resource-actor-refresh"; meta.description = "Explicit facts rebind for a registered running broker, without employee restart or owner approval"; };

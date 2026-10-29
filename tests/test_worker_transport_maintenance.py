@@ -288,6 +288,20 @@ class SourceAndDiagnostic(unittest.TestCase):
   self.assertEqual(M.helper_diagnostic(b'generic failure\n'+json.dumps(safe).encode()),safe)
   self.assertIsNone(M.helper_diagnostic(json.dumps({'category':'GUARD_CHECK_FAILED','reason':'secret/private/provider/body'}).encode()))
   self.assertIsNone(M.helper_diagnostic(json.dumps({**safe,'body':'private'}).encode()))
+
+ def test_actual_service_stage_diagnostic_survives_the_controller_boundary(self):
+  from reverie.worker_service import _diagnostic
+  for stage in ('POSTSTART_BROKER','POSTSTART_LISTENERS','POSTSTART_ADMISSION',
+                'POSTSTART_CONTINUITY','POSTSTART_BROKER_READBACK',
+                'POSTSTART_RESULT_WRITE','POSTSTART_TERMINAL'):
+   with self.subTest(stage=stage):
+    error=PermissionError(13,'private exception content')
+    error._reverie_transport_stage=stage
+    produced=_diagnostic(error)
+    self.assertEqual(M.helper_diagnostic(json.dumps(produced).encode()),produced)
+    self.assertNotIn('private',json.dumps(produced))
+    self.assertIsNone(M.helper_diagnostic(json.dumps({**produced,'stage':'/private/path'}).encode()))
+    self.assertIsNone(M.helper_diagnostic(json.dumps({**produced,'body':'private'}).encode()))
  def test_partial_helper_spawn_is_unknown_not_settled(self):
   h=M.OwnedHelper(['controlled'],time.monotonic()+1,Path('/'))
   with patch.object(M.subprocess,'Popen',side_effect=OSError('controlled spawn boundary')):

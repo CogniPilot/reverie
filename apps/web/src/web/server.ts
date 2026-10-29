@@ -91,6 +91,7 @@ import { execSync } from 'node:child_process';
 import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
 import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
+import { HostResumeHandler, HostWorkerResumeStream } from '../host-worker-resume.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
 import { planMoveHarness } from '../plan-move-launch.js';
 import {
@@ -456,6 +457,7 @@ export class WebServer extends EventEmitter {
   private chatBackup: ChatBackupScheduler | undefined;
   private companyService!: CompanyService;
   private companyWake!: CompanyWake;
+  private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
   private cronPort!: CronPort;
   private planService!: PlanService;
@@ -4051,6 +4053,15 @@ export class WebServer extends EventEmitter {
       }
       await this.finalizeRestoredState(restored);
       this.companyWakeReady = restored;
+      this.hostResumeStream = new HostWorkerResumeStream(process.env.REVERIE_WORKER_SOCKET,
+        new HostResumeHandler({
+          company: () => ({ employees: this.companyService.registeredEmployees() }),
+          saved: id => this.store.getSession(id),
+          live: id => { const session=this.sessions.get(id);
+            return !!session && session.pid!==null && !session.paneExit && session.status!=='stopped'; },
+          wake: (id,stillCurrent) => this.companyWake.wakeOne(id,{stillCurrent}),
+        }));
+      this.hostResumeStream.start();
       await this.autoRestorePinnedAfterRestart();
 
       // Instance-scoped reaper: after restore, `docker rm -f` managed containers of
@@ -5225,6 +5236,7 @@ export class WebServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });
     await this.accountLogins?.stopAll().catch(() => {});

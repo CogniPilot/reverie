@@ -251,3 +251,18 @@ the build it rechecks the current configuration, mounts and limits before stop.
 The existing isolated-worker refusal remains: paired broker/website or protected
 bootstrap changes still require their separate reviewed update workflow. Do not
 remove security settings or temporary mounts to bypass a refusal.
+
+
+The isolated interpreter qualifier anchors its own unreaped child's birth before
+waiting for the fixed metadata READY. It reads the complete root, namespaces,
+executable and argv only after READY, preserving all declared-file pins and the
+absolute deadline. A transient pre-READY wrapper exec is not a new process or
+permission fallback; a permission failure after READY still refuses qualification.
+The Nix Python checks exercise this with an inert immutable C wrapper and actual
+owned child procfs permissions, including failure and cleanup schedules.
+
+For future explicit transport calls, `--diagnostic` also reports an allowlisted
+`POSTSTART_*` stage on post-start failures. It never prints paths, command output
+or exception text. Nonzero status, retained attempts, unknown outcomes and no
+automatic rollback/retry are unchanged. These diagnostics cannot identify the
+historical cause of an earlier attempt that did not record its stage.

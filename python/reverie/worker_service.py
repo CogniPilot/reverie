@@ -464,6 +464,13 @@ _DIAGNOSTIC_REASONS = frozenset({
 })
 
 
+_TRANSPORT_DIAGNOSTIC_STAGES = frozenset({
+    'POSTSTART_BROKER', 'POSTSTART_LISTENERS', 'POSTSTART_ADMISSION',
+    'POSTSTART_CONTINUITY', 'POSTSTART_BROKER_READBACK',
+    'POSTSTART_RESULT_WRITE', 'POSTSTART_TERMINAL',
+})
+
+
 def _diagnostic(error):
     """A bounded category/allowlisted reason, never exception serialization."""
     reason = 'Unlisted exception details withheld.'
@@ -480,7 +487,11 @@ def _diagnostic(error):
         category = 'GUARD_CHECK_FAILED'
     else:
         category = 'OPERATION_UNCONFIRMED'
-    return {'category': category, 'reason': reason}
+    result = {'category': category, 'reason': reason}
+    stage = getattr(error, '_reverie_transport_stage', None)
+    if type(stage) is str and stage in _TRANSPORT_DIAGNOSTIC_STAGES:
+        result['stage'] = stage
+    return result
 
 
 def main(argv=None):

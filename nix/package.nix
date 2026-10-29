@@ -44,7 +44,7 @@ let
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
         test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
-        test/service-installer.test.ts test/company-wake.test.ts \
+        test/service-installer.test.ts test/company-wake.test.ts test/host-worker-resume.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
         test/goal-lifecycle.test.ts test/goal-lifecycle-transactions.test.ts test/goal-api-auth.test.ts \
         test/goal-response-privacy.test.ts test/goal-successor-independent.test.ts \
@@ -147,7 +147,9 @@ let
     '';
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
   };
+  interpreterReadyFixture = import ./interpreter-ready-fixture.nix { inherit pkgs src; };
   memoryPackage = pkgs.python3Packages.buildPythonPackage {
+    NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER = "${interpreterReadyFixture}/bin/python3";
     pname = "reverie-memory";
     version = "0.1.0";
     inherit src;
