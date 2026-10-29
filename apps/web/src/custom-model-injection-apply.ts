@@ -21,8 +21,17 @@ import {
   type CustomModelEndpoint,
 } from './custom-model-injection.js';
 
-/** Where a session's isolated `configDir`-kind files live: never the user's real CLI config path. */
+/**
+ * Where a session's isolated `configDir`-kind files live: never the user's real CLI config path.
+ *
+ * On an isolated laptop (`REVERIE_WORKER_SOCKET`) the CLI runs in its own container, and the
+ * broker mounts console-written CLI state into it ONLY for a `CLAUDE_CONFIG_DIR`/`CODEX_HOME`
+ * under `<data>/accounts` (`account_mounts` in python/reverie/worker.py); anything else refuses
+ * the whole launch, so claude on a local model could never start there. The dot-prefixed folder
+ * can never collide with a subscription profile's `accounts/<id>`, whose ids start [a-z0-9].
+ */
 export function customModelConfigDir(sessionId: string): string {
+  if (process.env.REVERIE_WORKER_SOCKET) return dataPath('accounts', '.custom-models', sessionId);
   return join(dataPath('custom-model-configs'), sessionId);
 }
 
@@ -70,6 +79,9 @@ function realClaudeConfigDir(): string {
  * failing the whole custom-model apply over a nice-to-have.
  */
 function linkSharedProjectsDir(isolatedDir: string): void {
+  // A laptop sees only the mounted account directory, so the link would dangle and claude
+  // could not write its transcripts. Its own `projects` sits at the same path on both sides.
+  if (process.env.REVERIE_WORKER_SOCKET) return;
   const link = join(isolatedDir, 'projects');
   if (existsSync(link)) return; // already linked (idempotent re-apply) or real dir wrote one
   try {

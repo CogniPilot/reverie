@@ -161,7 +161,9 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         const host = hosts.find((h) => h.id === endpointId)!;
         // Config-directory injection rewrites files before restart and cannot safely roll back in place.
         if (entry.capabilities.customModelInjection.kind === 'configDir') return fail(400, 'This harness needs a separate session to change local model profiles safely');
-        const applied = applyCustomModelInjection(entry, host, resolved.customModel.modelId, session.id, undefined, session.workingDir);
+        // The discovered window drives claude's CLAUDE_CODE_MAX_CONTEXT_TOKENS, as on quick-start.
+        const contextLength = host.modelContextLengths?.[resolved.customModel.modelId];
+        const applied = applyCustomModelInjection(entry, host, resolved.customModel.modelId, session.id, contextLength, session.workingDir);
         if (!applied) return fail(400, 'This harness cannot use the selected local profile');
         configDir = applied.configDir; env = applied.envOverrides;
         custom = { ...resolved.customModel, label: host.label, envKeys: applied.envKeys, configDir, launchModel: applied.launchModel };
