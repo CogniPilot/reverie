@@ -98,3 +98,39 @@ it('never exposes restart to an ordinary viewer even when a pane is dead',async(
  const{h,posts}=await fixture({owner:false});await h.shell.openCompany();
  expect(h.document.querySelector('.ca-dead-pane-restart')).toBeNull();expect(posts).toHaveLength(0);
 });
+
+
+it.each([
+ {health:'unknown',missingSession:false},
+ {health:'unknown',missingSession:true},
+ {health:undefined,missingSession:true},
+])('keeps unavailable, unconfirmed employees grey and editable (%j)',async({health,missingSession})=>{
+ const{h,employee,session,posts}=await fixture({health:'unknown'});
+ employee.available=false;
+ if(health===undefined){delete (employee as any).runtimeHealth;delete (session as any).runtimeHealth;}
+ if(missingSession)h.app.sessions.delete(SID);
+ await h.shell.openCompany();
+ const card=h.document.querySelector('[data-employee-id="expert"]');
+ expect(card.classList.contains('is-offline')).toBe(true);
+ expect(card.classList.contains('is-health-dead')).toBe(false);
+ expect(card.classList.contains('is-health-disconnected')).toBe(false);
+ expect(card.querySelector('.ca-company-state').textContent).toBe('Offline');
+ expect(card.querySelector('.ca-company-state').title).toContain('health has not been confirmed');
+ expect(card.querySelector('.ca-dead-pane-restart')).toBeNull();
+ card.querySelector('[aria-label="Edit profile for Alex"]').click();await h.flush();
+ expect(h.document.querySelector('.ca-expert-profile').getAttribute('aria-label')).toBe('Edit profile: Alex');
+ expect(employee.desiredRunning).toBe(true);expect(employee.onVacation).toBe(false);expect(posts).toHaveLength(0);
+});
+
+it.each([
+ {health:'dead',scope:'provider',label:'Dead pane'},
+ {health:'disconnected',scope:'terminal',label:'Disconnected'},
+])('keeps confirmed failure red even when the employee is unavailable (%j)',async({health,scope,label})=>{
+ const{h,employee,posts}=await fixture({health,scope});employee.available=false;
+ await h.shell.openCompany();
+ const card=h.document.querySelector('[data-employee-id="expert"]');
+ expect(card.classList.contains('is-offline')).toBe(false);
+ expect(card.classList.contains(`is-health-${health}`)).toBe(true);
+ expect(card.querySelector('.ca-company-state').textContent).toBe(label);
+ expect(card.querySelector('.ca-dead-pane-restart')).not.toBeNull();expect(posts).toHaveLength(0);
+});

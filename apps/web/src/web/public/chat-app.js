@@ -522,10 +522,10 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     return { state: 'disconnected', label: 'Disconnected', detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.' };
   if (viewerDisconnected)
     return { state: 'disconnected', label: 'Viewer disconnected', detail: health === 'healthy' && scope === 'provider' ? 'The agent is running; reconnect its terminal viewer without restarting the agent.' : 'The terminal viewer is disconnected. This does not establish that the agent has stopped.', viewerOnly: health === 'healthy' && scope === 'provider' };
+  if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
+    return { state: 'gone', label: 'Offline', detail: 'No connected session is available. Agent health has not been confirmed.' };
   if (health === 'unknown')
     return { state: 'unknown', label: 'Health unknown', detail: 'Current agent health has not been confirmed.' };
-  if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
-    return { state: 'disconnected', label: 'Disconnected', detail: 'The connection is unavailable. Agent health is not confirmed.' };
   if (employee?.available === true || member?.alive === true || (typeof session?.pid === 'number' && session.pid > 0))
     return { state: 'idle', label: 'Connected', detail: 'The session is connected. This is not a guarantee that its agent is ready.' };
   return { state: 'unknown', label: 'Health unknown', detail: 'Current agent health has not been confirmed.' };
