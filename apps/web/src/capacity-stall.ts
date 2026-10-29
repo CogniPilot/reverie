@@ -96,6 +96,8 @@ export class CapacityRetry {
       if (released) return;
       released = true;
       this.pauses--;
+      // A try skipped while paused is not lost: the last release looks at the screen again.
+      if (this.pauses === 0) this.check();
     };
   }
 

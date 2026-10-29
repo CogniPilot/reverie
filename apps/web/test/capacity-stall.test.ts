@@ -102,8 +102,7 @@ describe('CapacityRetry', () => {
     const late = retry.pause(); // a move starts after scheduling: the try is skipped, not spent
     await vi.advanceTimersByTimeAsync(1_000);
     expect(state.sent).toEqual([]);
-    late();
-    retry.check();
+    late(); // releasing re-arms by itself, without waiting for another turn end
     await vi.advanceTimersByTimeAsync(1_000);
     expect(state.sent).toEqual([CAPACITY_RETRY_PROMPT]);
     retry.destroy();
