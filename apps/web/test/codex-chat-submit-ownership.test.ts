@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { composerIsEmpty, placeholderHoldsPrompt, promptStillInComposer, SubmitVerifier } from '../src/session-submit-verifier.js';
-import { submitAndConfirm, typeAndSubmit } from '../src/submit-settle.js';
+import { composerBody, composerIsEmpty, placeholderHoldsPrompt, promptStillInComposer, SubmitVerifier } from '../src/session-submit-verifier.js';
+import { CODEX_KEY_BURST_MAX_CHARS, pastesInsteadOfKeys, submitAndConfirm, typeAndSubmit } from '../src/submit-settle.js';
 import { ChatroomDelivery } from '../src/chatroom-delivery.js';
 import { Session } from '../src/session.js';
 
@@ -125,5 +125,52 @@ describe('complete Codex composer ownership', () => {
     expect(await delivery.flush('s')).toBe(false); expect(writes).toHaveLength(1);
     finish?.('unverified'); expect(await delivery.flush('s')).toBe(false); expect(submitted).not.toHaveBeenCalled();
     delivery.stop();
+  });
+});
+
+describe('Codex panes on any model and long deliveries', () => {
+  // Footers measured on codex-cli 0.163.0 with a custom provider; synthetic paths only.
+  it('reads the composer under a non-GPT model footer, at rest and mid-turn', () => {
+    for (const footer of ['  mock-model default · /owned/fixture', '  qwen3-coder:30b default · ~/owned/fixture',
+      '  Qwen/Qwen3-Coder high · /owned/fixture · ⠼']) {
+      expect(composerIsEmpty(`› \n\n${footer}\n  ← for agents · ? for shortcuts`, '›')).toBe(true);
+      expect(composerIsEmpty(`› [Pasted Content ${PROMPT.length} chars]\n\n${footer}`, '›')).toBe(false);
+      expect(promptStillInComposer(`› [Pasted Content ${PROMPT.length} chars]\n\n${footer}`, PROMPT, '›', true)).toBe(true);
+    }
+  });
+  it('still refuses two footer-shaped rows', () => {
+    expect(composerIsEmpty('›\n  notes · /owned/one\n  mock-model default · /owned/fixture', '›')).toBe(false);
+  });
+  it('pastes only long, control-free text into Codex panes', () => {
+    expect(pastesInsteadOfKeys('codex', 'x'.repeat(CODEX_KEY_BURST_MAX_CHARS))).toBe(false);
+    expect(pastesInsteadOfKeys('codex', 'x'.repeat(CODEX_KEY_BURST_MAX_CHARS + 1))).toBe(true);
+    expect(pastesInsteadOfKeys('codex', `${'x'.repeat(2000)}\u001b[201~tail`)).toBe(false);
+    expect(pastesInsteadOfKeys('claude', 'x'.repeat(3000))).toBe(false);
+  });
+});
+
+describe('Codex composer as captured with SGR codes (codex-cli 0.163.0)', () => {
+  // Escape sequences as `capture-pane -p -e` returned them; synthetic text only.
+  const ESC = '\u001b';
+  const GLYPH = `${ESC}[1m›${ESC}[0m`;
+  const FOOT = `  ${ESC}[38;2;246;226;183mmock-model default${ESC}[39m · ${ESC}[38;2;171;223;167m/owned/fixture${ESC}[39m`;
+  const placeholder = (hint: string) => `${GLYPH} ${ESC}[2m${hint}${ESC}[0m`;
+  it('reads a dim placeholder as an empty composer, and typed or pasted text as content', () => {
+    for (const hint of ['Ask Codex to do anything', 'Find and fix a bug in @filename']) {
+      expect(composerIsEmpty(`${placeholder(hint)}\n\n${FOOT}`, '›')).toBe(true);
+    }
+    expect(composerIsEmpty(`${GLYPH} real text\n\n${FOOT}`, '›')).toBe(false);
+    expect(composerIsEmpty(`${GLYPH} ${ESC}[38;5;6m[Pasted Content 2900 chars]${ESC}[39m\n\n${FOOT}`, '›')).toBe(false);
+    // Without the codes the placeholder is indistinguishable from text, so a plain capture never reads as empty.
+    expect(composerIsEmpty(`› Ask Codex to do anything\n\n${FOOT}`, '›')).toBe(false);
+  });
+  it('reads the composer under a message steered into a running turn', () => {
+    const echo = (text: string) => `${ESC}[1;2m› ${ESC}[0m${text}`;
+    const working = `${ESC}[1m•${ESC}[0m ${ESC}[2mWorking${ESC}[0m ${ESC}[2m(3s • ${ESC}[0;1mesc${ESC}[0;2m to interrupt)${ESC}[0m`;
+    const screen = `${echo('busy turn')}\n\n${echo('steered delivery')}\n\n${working}\n\n${placeholder('Ask Codex to do anything')}\n\n${FOOT}`;
+    expect(composerIsEmpty(screen, '›')).toBe(true);
+    expect(promptStillInComposer(screen, 'steered delivery', '›')).toBe(false);
+    // A literal glyph row straight under the composer is still refused.
+    expect(composerBody(`${echo('busy turn')}\n\n${working}\n${GLYPH} draft\n› literal\n\n${FOOT}`, '›')).toBeUndefined();
   });
 });

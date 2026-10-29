@@ -49,27 +49,41 @@ const PASTE_SLACK_CHARS = 4;
 /** After the last Enter of the schedule, how long to wait before the final look. */
 const FINAL_LOOK_MS = 2_000;
 
+/**
+ * Codex draws an empty composer as `› ` and a dim placeholder (`Ask Codex to do anything` or one of its other hints). A plain
+ * capture cannot tell that from typed text, so composer reads keep the pane's SGR codes (capturePaneText `escapes`) and a dim
+ * run straight after the glyph is dropped. Typed text and paste chips are never dim (measured on codex-cli 0.163.0, 2026-10-29).
+ */
+// eslint-disable-next-line no-control-regex
+const CODEX_DIM_PLACEHOLDER = /^((?:\x1b\[[0-9;]*m)*›(?:\x1b\[[0-9;]*m)* ?)\x1b\[2m[^\x1b\n]*\x1b\[(?:0|22)?m/gmu;
+
 /** The complete last composer, including wrapped text, ending before the CLI's chrome. */
 export function composerBody(screen: string, glyph: string): string | undefined {
   if (!glyph || screen.length > 1_048_576) return undefined;
-  const lines = stripAnsi(screen).split('\n');
-  const codexFooter = /^(?:GPT|gpt)-\d[\w.-]*(?:\s+[\w()-]+)?\s+·\s+(?:\/|~\/)/u;
+  const lines = stripAnsi(glyph === '›' ? screen.replace(CODEX_DIM_PLACEHOLDER, '$1') : screen).split('\n');
+  // Any model name, as the registry's codex modelDetect reads it: `GPT-6.1-Sol high · /…`, but also a custom provider's
+  // `qwen3-coder:30b default · /…`. A GPT-only pattern never found a footer there, so such a composer never read as empty
+  // and chat to the session waited forever.
+  const codexFooter = /^[A-Za-z0-9][\w.:/@+-]{0,79}(?:\s+[\w()-]+)?\s+·\s+(?:\/|~\/)/u;
   const footers = glyph === '›' ? lines.flatMap((line, i) => codexFooter.test(line.trim()) ? [i] : []) : [];
   // Codex draft rows may contain blanks, rulers, box drawing and literal glyphs. Only
   // its actual model/path footer bounds the composer; absent/ambiguous chrome refuses.
   if (glyph === '›' && footers.length !== 1) return undefined;
   const end = glyph === '›' ? footers[0] : lines.length;
   let last = -1;
+  let previous = -1;
   for (let i = 0; i < end; i++) {
     // Codex's real prompt is at column zero. An indented literal glyph is draft content.
     if ((glyph === '›' ? lines[i] : lines[i].trimStart()).startsWith(glyph)) {
-      if (glyph === '›' && last >= 0 && !lines.slice(last + 1, i).some(line =>
-        /^[•●✻]/u.test(line)
-        )) return undefined;
+      previous = last;
       last = i;
     }
   }
   if (last < 0) return undefined;
+  // A column-zero glyph straight under another with no transcript bullet between may be a literal glyph inside a draft: refuse.
+  // Only the last pair counts. Higher up, two user rows in a row are plain history: a message steered into a running turn is
+  // echoed right under the one that started it (codex-cli 0.163.0), and refusing there left every mid-turn delivery unverified.
+  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻]/u.test(line))) return undefined;
   const body = [lines[last].trimStart().slice(glyph.length).trimStart()];
   for (const line of lines.slice(last + 1, end)) {
     const text = line.trim();

@@ -25,6 +25,21 @@ export const SETTLE_MS_PER_CHAR = 0.5;
 export const SETTLE_MAX_MS = 2_000;
 /** How often the pane is read while a long paste settles; two equal reads in a row mean it stopped changing. */
 export const SETTLE_POLL_MS = 50;
+/**
+ * The longest text Codex takes reliably as a burst of keys. Measured on codex-cli 0.163.0 (2026-10-29, real pane, mock model):
+ * up to 1000 characters one Enter submits; past 1024 its paste-burst detector shows a `[Pasted Content 1024 chars]` chip and
+ * holds the rest of the burst unseen until more keys arrive, so the first Enters only release held text, the composer never
+ * represents the whole prompt, the verifier cannot claim it and the delivery strands in the composer (the junk owners found in
+ * debug terminals). A bracketed paste of the same text is one chip that a single Enter submits, idle or mid-turn.
+ */
+export const CODEX_KEY_BURST_MAX_CHARS = 1000;
+
+/** Does this text go to a pane of `mode` as a bracketed paste rather than keys? Text with control characters is always typed. */
+export function pastesInsteadOfKeys(mode: string, text: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return mode === 'codex' && text.length > CODEX_KEY_BURST_MAX_CHARS && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
+}
+
 /** After Enter, the pane is read this often, up to the window, for signs that a turn started. */
 export const CONFIRM_POLL_MS = 100;
 export const CONFIRM_WINDOW_MS = 1_000;

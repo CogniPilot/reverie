@@ -435,5 +435,6 @@ export interface TerminalMultiplexer extends EventEmitter {
    * currently rendering, never to replay it into an xterm. Returns null when the
    * pane cannot be read.
    */
-  capturePaneText?(muxName: string, paneTarget?: string): string | null;
+  /** `escapes` keeps SGR codes (`capture-pane -e`), for readers that must see styling such as Codex's dim placeholder. */
+  capturePaneText?(muxName: string, paneTarget?: string, options?: { escapes?: boolean }): string | null;
 }

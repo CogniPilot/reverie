@@ -24,7 +24,7 @@ import { cliConfigContent } from './cli-config-content.js';
 
 import { randomBytes } from 'node:crypto';
 import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
-import { typeAndSubmit, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { pastesInsteadOfKeys, typeAndSubmit, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
@@ -3841,10 +3841,17 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         // single tmux invocation (via \;) causes Ink to interpret Enter as a newline
         // character in the input buffer rather than as form submission.
         // A long burst is read as a paste: Enter must wait for it to settle or it lands inside it (src/submit-settle.ts).
+        // Codex holds part of a long key burst back, so long text goes to it as a real bracketed paste (pastesInsteadOfKeys).
         const io = {
           ...this.submitIo(session.muxName),
-          typeText: (text: string) =>
-            execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS }),
+          typeText: (text: string) => {
+            if (!pastesInsteadOfKeys(session.mode, text)) {
+              return execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
+            }
+            const buffer = `reverie-${randomBytes(6).toString('hex')}`;
+            return execAsync(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS })
+              .then(() => execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS }));
+          },
         };
         const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer);
         if (outcome === 'not-written') return false;
@@ -3871,7 +3878,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   private submitIo(muxName: string): SubmitSettleIo {
     return {
       sendEnter: () => execAsync(`${this.tmux()} send-keys -t "${muxName}" Enter`, { timeout: EXEC_TIMEOUT_MS }),
-      capture: () => this.capturePaneText(muxName),
+      // With escapes: the composer checks must see Codex's dim placeholder as styling, not text (session-submit-verifier.ts).
+      capture: () => this.capturePaneText(muxName, undefined, { escapes: true }),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       log: (m) => console.log(m),
     };
@@ -4064,12 +4072,12 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * terminal. Returns null in tests (no tmux) so callers fall back to their
    * stream heuristics rather than reading an empty screen as "not working".
    */
-  capturePaneText(muxName: string, paneTarget?: string): string | null {
+  capturePaneText(muxName: string, paneTarget?: string, options: { escapes?: boolean } = {}): string | null {
     if (IS_TEST_MODE) return null;
     const target = resolveTmuxPaneTarget(muxName, paneTarget);
     if (!target) return null;
     try {
-      return execSync(`${this.tmux()} capture-pane -p -t ${shellescape(target)}`, {
+      return execSync(`${this.tmux()} capture-pane -p${options.escapes ? ' -e' : ''} -t ${shellescape(target)}`, {
         encoding: 'utf-8',
         timeout: EXEC_TIMEOUT_MS,
       });

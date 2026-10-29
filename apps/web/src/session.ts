@@ -4933,7 +4933,7 @@ export class Session extends EventEmitter {
   canAcceptChatInput(): boolean {
     if (this.mode !== 'codex') return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
-    return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName), glyph);
+    return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
@@ -4996,7 +4996,7 @@ export class Session extends EventEmitter {
       capture: () =>
         this._isStopped || !this._mux || !this._muxSession
           ? null
-          : this._mux.capturePaneText?.(this._muxSession.muxName),
+          : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
       sendEnter: () => this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined),
       // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
