@@ -2139,8 +2139,13 @@ export function registerSessionRoutes(
 
   app.post('/api/sessions/:id/input', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const { input, useMux, seq, clientId, wait, waitTimeout } = parseBody(SessionInputWithLimitSchema, req.body);
+    const { input, useMux, seq, clientId, wait, waitTimeout, ifIdle } = parseBody(SessionInputWithLimitSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
+    // Checked here, before the dedup seq is spent, and again by the empty-composer write below: the CLI's own idle check
+    // is only a pre-check, and a turn can start between the two.
+    if (ifIdle && session.isWorking) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
+    }
 
     const inputStr = String(input);
     if (inputStr.length > MAX_INPUT_LENGTH) {
@@ -2289,6 +2294,11 @@ export function registerSessionRoutes(
     if (duplicate) {
       // Redelivery of an already-applied input: skip the write, but still honor the
       // wait, since the caller's question ("tell me when this settles") is unanswered.
+    } else if (ifIdle) {
+      // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
+      // just started a turn or holds a draft gets nothing typed.
+      delivered = await session.writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true }).catch(() => false);
+      if (!delivered) undoOnFailure();
     } else if ((useMux || autoMux) && waitPromise) {
       // The response is already staying open for the wait, so the tmux write can be
       // awaited here. This is the ONE path where a writeViaMux failure is observable.

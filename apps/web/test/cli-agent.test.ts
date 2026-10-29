@@ -262,7 +262,7 @@ describe('agent wake', () => {
     const deps = fakeDeps([ok([{ id: OTHER, name: 'Sam', status: 'idle' }]), ok({ delivered: true })]);
     expect(await agentWake(deps, { id: OTHER })).toBe(EXIT.ok);
     expect(deps.calls[0]).toMatchObject({ method: 'GET', path: '/api/v1/sessions' });
-    expect(deps.calls[1]).toMatchObject({ method: 'POST', path: `/api/v1/sessions/${OTHER}/input`, body: { input: `${WAKE_PROMPT}\r` } });
+    expect(deps.calls[1]).toMatchObject({ method: 'POST', path: `/api/v1/sessions/${OTHER}/input`, body: { input: `${WAKE_PROMPT}\r`, ifIdle: true } });
   });
 
   it('leaves a working or unknown-state session alone and never wakes itself', async () => {

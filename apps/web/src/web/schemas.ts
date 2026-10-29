@@ -1715,6 +1715,9 @@ export const SessionInputWithLimitSchema = z.object({
   // actually got. A `.max()` here would turn the same documented clamp into a 400 for
   // large-enough guesses, which is the one behaviour an agent cannot predict.
   waitTimeout: z.number().int().positive().nullish(),
+  // `agent wake`: type only into a session that is idle at the moment of writing, with an empty composer, and never fall
+  // back to a raw write. A working session is refused with SESSION_BUSY and nothing is typed.
+  ifIdle: z.boolean().nullish(),
 });
 
 /**

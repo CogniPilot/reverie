@@ -168,7 +168,7 @@ export function inputRefusal(text: string): string | undefined {
  */
 export function buildSendBody(
   text: string,
-  options: { enter: boolean; clientId: string; seq: number; wait?: string | true; waitTimeout?: number }
+  options: { enter: boolean; clientId: string; seq: number; wait?: string | true; waitTimeout?: number; ifIdle?: boolean }
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     input: options.enter ? `${text}\r` : text,
@@ -178,6 +178,7 @@ export function buildSendBody(
   };
   if (options.wait !== undefined) body.wait = options.wait;
   if (options.waitTimeout !== undefined) body.waitTimeout = options.waitTimeout;
+  if (options.ifIdle) body.ifIdle = true;
   return body;
 }
 
@@ -681,6 +682,8 @@ export interface SendOptions {
   timeoutMs?: number;
   clientId?: string;
   seq?: number;
+  /** Server-side idle-only write (`agent wake`): refused while the session works, never typed over a draft. */
+  ifIdle?: boolean;
 }
 
 /** `agent send` — printable text plus `\r`, exactly-once, optionally blocking on end of turn. */
@@ -698,6 +701,7 @@ export async function agentSend(deps: AgentDeps, options: SendOptions): Promise<
     seq: options.seq ?? (deps.now ?? Date.now)(),
     wait: options.wait,
     waitTimeout: options.wait !== undefined ? options.timeoutMs : undefined,
+    ifIdle: options.ifIdle,
   });
   const res = await deps.request(deps.ctx, {
     method: 'POST',
@@ -764,7 +768,8 @@ export const WAKE_PROMPT =
 /**
  * `agent wake` — type the standard resume prompt into an idle colleague's composer (James 10-19: an agent should be
  * able to wake a sleeping agent with one command). It goes through the same input route as `send`, so the server decides who
- * may type where; a session that is working is left alone rather than interrupted mid-turn.
+ * may type where. A session that is working is left alone: the CLI checks first, and the server checks again at write time
+ * (`ifIdle`), types only into an empty composer and never falls back to a raw write.
  */
 export async function agentWake(deps: AgentDeps, options: { id: string }): Promise<number> {
   if (isSelfSession(deps.ctx.selfId, options.id)) {
@@ -779,7 +784,7 @@ export async function agentWake(deps: AgentDeps, options: { id: string }): Promi
   if (row.status !== 'idle') {
     return fail(deps, `not waking ${row.name ?? target.id}: it is ${row.status ?? 'in an unknown state'}, not idle`, EXIT.refused);
   }
-  return agentSend(deps, { id: target.id, text: WAKE_PROMPT, enter: true });
+  return agentSend(deps, { id: target.id, text: WAKE_PROMPT, enter: true, ifIdle: true });
 }
 
 function describeWait(wait: WaitResult): string {
