@@ -987,6 +987,22 @@ function caDiskBytes(value) {
  * { key, label, value (a percentage), title, level } where level is ok, warn (>= 70) or high (>= 90). The GPU is
  * left out when the host publishes no fresh reading.
  */
+/** GPU readings kept for the history graph: one per 5 s poll, an hour at most. */
+const CA_GPU_HISTORY_MAX = 720;
+
+/**
+ * The GPU utilization history as an SVG polyline (0..width by 0..height, 100% at the top) with its average and peak, or
+ * null with fewer than two readings. Gaps are not invented: readings are placed by their own times.
+ */
+function caGpuHistoryShape(samples, width, height) {
+  const valid = (Array.isArray(samples) ? samples : []).filter(s => s && Number.isFinite(s.t) && Number.isFinite(s.u) && s.u >= 0 && s.u <= 100);
+  if (valid.length < 2) return null;
+  const t0 = valid[0].t, span = Math.max(1, valid[valid.length - 1].t - t0);
+  const points = valid.map(s => `${((s.t - t0) / span * width).toFixed(1)},${(height - s.u / 100 * height).toFixed(1)}`).join(' ');
+  const avg = Math.round(valid.reduce((n, s) => n + s.u, 0) / valid.length);
+  return { points, avg, peak: Math.max(...valid.map(s => s.u)), minutes: Math.round(span / 60000), count: valid.length };
+}
+
 function caStatsView(stats) {
   const out = [];
   const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : Number.NaN);
@@ -1301,6 +1317,12 @@ class ReverieChatApp {
       // A small file read on the server; an older server without the route simply shows no GPU.
       const gpu = await this.app._chatApi('/api/system/gpu');
       this.stats = { ...this.stats, gpu: gpu.ok ? gpu.data : undefined };
+      // The GPU history graph (James 10-27) draws from these readings, kept while this page is open.
+      const u = gpu.ok && gpu.data?.available ? Number(gpu.data.utilization) : NaN;
+      if (Number.isFinite(u)) {
+        this.gpuHistory = [...(this.gpuHistory || []), { t: Date.now(), u }].slice(-CA_GPU_HISTORY_MAX);
+        this.doc.querySelector('.ca-gpu-dialog')?.dispatchEvent(new this.doc.defaultView.Event('reverie:gpu'));
+      }
       this.renderStats();
     };
     this.stopStats();
@@ -1321,11 +1343,15 @@ class ReverieChatApp {
       box.replaceChildren();
       box.hidden = !view.length;
       for (const item of view) {
-        const chip = this.el(item.key === 'disk' ? 'button' : 'span', `ca-stat is-${item.level}`);
+        const clickable = item.key === 'disk' || item.key === 'gpu';
+        const chip = this.el(clickable ? 'button' : 'span', `ca-stat is-${item.level}`);
         chip.title = item.title;
         if (item.key === 'disk') {
           chip.type = 'button'; chip.dataset.stat = 'disk';
           chip.addEventListener('click', () => this.openDiskDetails(item.filesystems));
+        } else if (item.key === 'gpu') {
+          chip.type = 'button'; chip.dataset.stat = 'gpu';
+          chip.addEventListener('click', () => this.openGpuHistory());
         } else chip.setAttribute('role', 'img');
         chip.setAttribute('aria-label', item.title);
         const bar = this.el('span', 'ca-stat-bar');
@@ -1354,6 +1380,41 @@ class ReverieChatApp {
     dialog.append(list, close);
     dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
     dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="disk"]')?.focus(); });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+  }
+
+  /** GPU utilization over the readings this page has taken (every 5 s, up to an hour), redrawn as new ones arrive. */
+  openGpuHistory() {
+    this.doc.querySelector('.ca-gpu-dialog')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-gpu-dialog'); dialog.setAttribute('aria-label', 'GPU usage history');
+    const note = this.el('p', 'ca-dialog-note');
+    const ns = 'http://www.w3.org/2000/svg', W = 320, H = 120;
+    const svg = this.doc.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-gpu-graph'); svg.setAttribute('role', 'img');
+    const draw = () => {
+      const shape = caGpuHistoryShape(this.gpuHistory, W, H);
+      svg.replaceChildren();
+      for (const y of [0, H / 2, H]) {
+        const grid = this.doc.createElementNS(ns, 'line');
+        grid.setAttribute('x1', '0'); grid.setAttribute('x2', String(W)); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
+        grid.setAttribute('class', 'ca-gpu-grid'); svg.append(grid);
+      }
+      if (!shape) {
+        note.textContent = 'Collecting GPU readings every 5 seconds; the graph appears after the next one.';
+        svg.setAttribute('aria-label', 'No GPU history yet');
+        return;
+      }
+      const line = this.doc.createElementNS(ns, 'polyline');
+      line.setAttribute('points', shape.points); line.setAttribute('class', 'ca-gpu-line'); svg.append(line);
+      note.textContent = `Last ${shape.minutes || '<1'} min while this page was open: average ${shape.avg}%, peak ${shape.peak}%. Top line is 100%.`;
+      svg.setAttribute('aria-label', `GPU utilization over ${shape.count} readings, average ${shape.avg}%, peak ${shape.peak}%`);
+    };
+    draw();
+    dialog.addEventListener('reverie:gpu', draw);
+    const close = this.button('ca-btn', 'Close GPU history', () => dialog.close(), { text: 'Close' });
+    dialog.append(this.el('h2', '', 'GPU usage'), svg, note, close);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="gpu"]')?.focus(); });
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
   }
 

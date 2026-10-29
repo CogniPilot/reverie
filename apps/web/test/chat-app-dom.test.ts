@@ -2785,6 +2785,24 @@ describe('CPU / memory / GPU readout', () => {
     h.shell.stopStats();
   });
 
+  it('opens a GPU usage history from the GPU meter and redraws it as readings arrive', async () => {
+    const h = await createHarness({ sessions, rooms: rs() });
+    h.shell.stopStats();
+    h.server.gpu = { available: true, utilization: 20, memoryUsedMb: 1024, memoryTotalMb: 8192 };
+    h.shell.startStats();
+    await settle(120);
+    const chip = h.document.querySelector('.ca-stats [data-stat="gpu"]') as HTMLButtonElement;
+    expect(chip.tagName).toBe('BUTTON');
+    chip.click();
+    const dialog = h.document.querySelector('.ca-gpu-dialog') as HTMLDialogElement;
+    expect(dialog.textContent).toContain('Collecting GPU readings');
+    h.shell.gpuHistory = [{ t: 0, u: 20 }, { t: 60_000, u: 80 }];
+    dialog.dispatchEvent(new h.window.Event('reverie:gpu'));
+    expect(dialog.querySelector('polyline')?.getAttribute('points')).toBe('0.0,96.0 320.0,24.0');
+    expect(dialog.textContent).toContain('average 50%, peak 80%');
+    h.shell.stopStats();
+  });
+
   it('hides the readout when the server cannot say, and polls again every few seconds', async () => {
     const h = await createHarness({ sessions, rooms: rs() });
     h.shell.stopStats();

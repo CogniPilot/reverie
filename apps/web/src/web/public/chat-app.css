@@ -1666,3 +1666,7 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-member-with-actions { display: flex; align-items: center; gap: 4px; }
 .ca-member-with-actions > .ca-member { flex: 1; min-width: 0; }
 .ca-member-with-actions > .ca-reconnect-viewer { flex: none; padding: 4px 7px; font-size: 12px; }
+/* GPU usage history (opened from the GPU meter). */
+.ca-gpu-dialog .ca-gpu-graph { display: block; width: min(480px, 100%); height: auto; margin: 8px 0; background: var(--ca-side-bg); border-radius: 6px; }
+.ca-gpu-dialog .ca-gpu-grid { stroke: var(--ca-line); stroke-width: 1; }
+.ca-gpu-dialog .ca-gpu-line { fill: none; stroke: var(--accent, #5865f2); stroke-width: 2; vector-effect: non-scaling-stroke; }

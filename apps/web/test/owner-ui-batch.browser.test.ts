@@ -120,3 +120,30 @@ it('shows an MP4 attachment as an inline player, and falls back to the card when
     await browser.close();
   }
 });
+
+it('opens a GPU usage graph from the GPU meter', async () => {
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await open(page);
+    await page.evaluate(() => {
+      const shell = (window as any).reverieChat;
+      shell.stats = { cpu: 4, memory: { percent: 26 }, gpu: { available: true, utilization: 40 } };
+      const t = Date.now();
+      shell.gpuHistory = Array.from({ length: 30 }, (_, i) => ({ t: t - (30 - i) * 5000, u: 20 + (i % 10) * 6 }));
+      shell.renderStats();
+    });
+    await page.locator('.ca-stats [data-stat="gpu"]').click();
+    const g = await page.evaluate(() => {
+      const d = document.querySelector('.ca-gpu-dialog') as HTMLDialogElement;
+      const line = d.querySelector('polyline')!.getBoundingClientRect();
+      return { open: d.open, width: line.width, height: line.height, note: d.querySelector('.ca-dialog-note')!.textContent };
+    });
+    expect(g.open).toBe(true);
+    expect(g.width).toBeGreaterThan(200);
+    expect(g.height).toBeGreaterThan(20);
+    expect(g.note).toContain('peak 74%');
+  } finally {
+    await browser.close();
+  }
+});

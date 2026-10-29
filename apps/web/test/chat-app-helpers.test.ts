@@ -890,3 +890,15 @@ describe('the owner\'s channel order', () => {
   });
 });
 
+describe('caGpuHistoryShape', () => {
+  const shape = fn<(s: unknown, w: number, h: number) => { points: string; avg: number; peak: number; minutes: number; count: number } | null>('caGpuHistoryShape');
+  it('needs two valid readings and ignores impossible ones', () => {
+    expect(shape([], 100, 50)).toBeNull();
+    expect(shape([{ t: 0, u: 50 }, { t: 1, u: 120 }, { t: 2, u: NaN }], 100, 50)).toBeNull();
+  });
+  it('places readings by their own times with 100% at the top', () => {
+    const r = shape([{ t: 0, u: 0 }, { t: 30_000, u: 100 }, { t: 120_000, u: 50 }], 100, 50)!;
+    expect(r.points).toBe('0.0,50.0 25.0,0.0 100.0,25.0');
+    expect([r.avg, r.peak, r.minutes, r.count]).toEqual([50, 100, 2, 3]);
+  });
+});
