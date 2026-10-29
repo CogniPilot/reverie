@@ -17,6 +17,7 @@ import { ChatDbError } from '../../chat-db.js';
  * - `POST   /api/chatrooms`                             create `{name, members?, coordinatorSessionId?}` (user, or a coordinator)
  * - `GET    /api/chatrooms/:id[?since=&limit=]`         room view (members + synopses + messages)
  * - `POST   /api/chatrooms/:id/read`                    move the user's read cursor `{at?}`
+ * - `POST   /api/chatrooms/:id/clear-history`           hide existing DM history for this owner, without deleting messages
  * - `PUT    /api/chatrooms/:id`                         rename `{name}`
  * - `DELETE /api/chatrooms/:id`                         delete
  * - `POST   /api/chatrooms/:id/members`                 add `{sessionId, goal?, role?}`
@@ -87,6 +88,7 @@ import {
   ChatroomArchiveSchema,
   ChatroomCreateSchema,
   ChatroomDmSchema,
+  ChatroomClearHistorySchema,
   ChatroomMemberAddSchema,
   ChatroomMessageSchema,
   ChatroomPlacementSchema,
@@ -266,10 +268,35 @@ export function registerChatroomRoutes(
    * Unread counts belong to the room's owner. In multi-user mode an admin lists every user's rooms,
    * but cannot clear their unread (the read call is a no-op for them), so those rooms report none.
    */
-  const ownedView = (req: FastifyRequest, room: ChatRoom, options: { since?: number; limit?: number }) => {
-    const view = service.view(room, options);
-    const human = host.human?.(req), cursor = human && host.readAt?.(human.id, room.id);
-    if (human && cursor !== undefined) return { ...view, userReadAt: cursor, ...unreadFor({ ...room, userReadAt: cursor }, [human.name], human.id) };
+  const ownsHistoryView = (req: FastifyRequest, room: ChatRoom): boolean =>
+    verifiedOwner(req) &&
+    !caller(req) &&
+    req.headers['x-reverie-parent-session'] === undefined &&
+    req.headers['x-reverie-service-token'] === undefined &&
+    room.owner === ownerFor(req) &&
+    isDm(room) &&
+    room.dm.includes('user');
+  const historyViewer = (req: FastifyRequest): string => host.human?.(req)?.id ?? 'owner';
+  const ownedView = (req: FastifyRequest, room: ChatRoom, options: { since?: number; limit?: number } = {}) => {
+    const view = ownsHistoryView(req, room)
+      ? service.ownerView(room, historyViewer(req), options)
+      : service.view(room, options);
+    const human = host.human?.(req),
+      cursor = human && host.readAt?.(human.id, room.id);
+    if (human && cursor !== undefined)
+      return {
+        ...view,
+        userReadAt: cursor,
+        ...unreadFor(
+          {
+            ...room,
+            messages: room.messages.filter((message) => message.at > (view.historyAfter ?? -1)),
+            userReadAt: cursor,
+          },
+          [human.name],
+          human.id
+        ),
+      };
     if (isMultiUserMode() && room.owner !== getAuthUser(req).username) return { ...view, unread: 0, mentions: 0 };
     return view;
   };
@@ -366,7 +393,7 @@ export function registerChatroomRoutes(
     const body = parseBody(ChatroomDmSchema, req.body);
     try {
       const sessionId = joinableSession(req, { owner: ownerFor(req) }, body.sessionId);
-      return { success: true, data: service.view(service.openDm(sessionId, ownerFor(req))) };
+      return { success: true, data: ownedView(req, service.openDm(sessionId, ownerFor(req))) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -607,7 +634,7 @@ export function registerChatroomRoutes(
         if (sessionId !== coordinator) service.addMember(room.id, sessionId, { ...options, ...addedBy });
       }
       if (coordinator) service.addMember(room.id, coordinator, { ...members.get(coordinator), role: 'coordinator', ...addedBy });
-      return { success: true, data: service.view(room) };
+      return { success: true, data: ownedView(req, room) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -662,6 +689,27 @@ export function registerChatroomRoutes(
     }
   });
 
+  app.post('/api/chatrooms/:id/clear-history', async (req, reply) => {
+    if (
+      !verifiedOwner(req) ||
+      caller(req) ||
+      req.headers['x-reverie-parent-session'] !== undefined ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
+      return forbid(reply, 'Only the owner clears their own DM view');
+    const body = ChatroomClearHistorySchema.safeParse(req.body ?? {});
+    if (!body.success)
+      return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected an empty body'));
+    try {
+      const room = roomOrFail(req, (req.params as { id: string }).id);
+      if (!ownsHistoryView(req, room)) return forbid(reply, 'Only your own direct-message view can be cleared');
+      await service.clearOwnerHistory(room.id, historyViewer(req));
+      return { success: true, data: ownedView(req, room) };
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
   // The user's read cursor. Persisted with the room, so it follows the owner across reloads
   // and devices. Agents never move it, and in multi-user mode only the room's own owner does
   // (an admin looking at someone else's room must not mark it read for them).
@@ -691,7 +739,7 @@ export function registerChatroomRoutes(
     const body = parseBody(ChatroomUpdateSchema, req.body);
     try {
       roomOrFail(req, id);
-      return { success: true, data: service.view(service.updateRoom(id, body), { limit: 0 }) };
+      return { success: true, data: ownedView(req, service.updateRoom(id, body), { limit: 0 }) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -738,7 +786,7 @@ export function registerChatroomRoutes(
         postOnly: body.postOnly,
         ...(self ? { addedBy: self } : {}),
       });
-      return { success: true, data: { member, room: service.view(room, { limit: 0 }) } };
+      return { success: true, data: { member, room: ownedView(req, room, { limit: 0 }) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -760,7 +808,7 @@ export function registerChatroomRoutes(
         }
       }
       if (!service.removeMember(id, sessionId)) throw new ChatroomError('Not a member of this room', 'NOT_FOUND');
-      return { success: true, data: { room: service.view(room, { limit: 0 }) } };
+      return { success: true, data: { room: ownedView(req, room, { limit: 0 }) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -891,8 +939,9 @@ export function registerChatroomRoutes(
   app.get('/api/chatrooms/:id/pins', async (req, reply) => {
     const { id } = req.params as { id: string };
     try {
-      roomOrFail(req, id);
-      return { success: true, data: { pins: service.pinned(id) } };
+      const room = roomOrFail(req, id);
+      const after = ownsHistoryView(req, room) ? service.ownerHistoryAfter(room, historyViewer(req)) : -1;
+      return { success: true, data: { pins: service.pinned(id).filter(message => message.at > after) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1272,7 +1321,7 @@ export function registerChatroomRoutes(
     const q = req.query as { since?: string; limit?: string };
     try {
       const room = roomOrFail(req, id);
-      const view = service.view(room, { since: parseNumber(q.since), limit: parseNumber(q.limit) ?? 50 });
+      const view = ownedView(req, room, { since: parseNumber(q.since), limit: parseNumber(q.limit) ?? 50 });
       // An agent that reads the room has seen what it was given: its seen-marker moves to the newest message returned.
       const self = caller(req);
       if (self && room.members.some((m) => m.sessionId === self)) service.acknowledgeAgentRead(self, room.id, view.messages);

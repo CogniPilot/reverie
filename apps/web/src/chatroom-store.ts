@@ -210,6 +210,8 @@ export interface ChatRoom {
   overrides?: RoomOverride[];
   /** The user's read cursor (ms): messages after it are unread. */
   userReadAt?: number;
+  /** Per authenticated owner identity: hide messages through this timestamp in that owner's DM view only. */
+  ownerHistoryAfter?: Record<string, number>;
   /** Multi-user owner; undefined in single-user mode. */
   owner?: string;
   createdAt: number;

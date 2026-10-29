@@ -586,7 +586,7 @@ Object.assign(ReverieApp.prototype, {
       this.showToast?.(`Chat: ${res.error}`, 'error');
       return;
     }
-    this._chatRooms = res.data.rooms || [];
+    this._chatRooms = (res.data.rooms || []).map(room => this._chatFilterHistory(room));
     this._chatSelf = res.data.self || null;
     // What the server can do (unread counts, direct messages): the conversation shell shows only that.
     this._chatFeatures = res.data.features || {};
@@ -624,7 +624,8 @@ Object.assign(ReverieApp.prototype, {
     // The latest switch wins: an answer for a room the reader has since left must not bring them back to it.
     const seq = quiet ? this._chatLoadSeq : (this._chatLoadSeq = (this._chatLoadSeq || 0) + 1);
     // Coming back to a room: draw what was last seen at once, then bring it up to date behind it.
-    const cached = switching && !quiet ? this._chatCache?.get(id) : undefined;
+    // An owner's DM must revalidate before displaying a cached view: another device may have cleared it.
+    const cached = switching && !quiet && !this._chatRooms?.find(room => room.id === id)?.canClearHistory ? this._chatCache?.get(id) : undefined;
     if (cached) {
       this._chatEmotes = this._chatEmoteCache?.get(id) || [];
       await this._applyChatRoom(id, cached, { quiet: false, switched: true });
@@ -641,8 +642,9 @@ Object.assign(ReverieApp.prototype, {
     }
     if (quiet && this._chatCreating) return false;
     if (seq !== this._chatLoadSeq || (quiet && this._chatRoomId !== id)) return false;
+    res.data = this._chatFilterHistory(res.data);
     // Older messages the reader already scrolled back to stay; the fresh window only replaces the tail.
-    const held = this._chatRoomId === id ? this._chatRoom?.messages || [] : [];
+    const held = (this._chatRoomId === id ? this._chatRoom?.messages || [] : []).filter(message => message.at > (res.data.historyAfter ?? -1));
     const fresh = res.data.messages || [];
     // They stay only if the fresh window holds the last message proved complete (`_chatSyncedFrom`): everything held
     // up to it has no gap, so joining at the first held message the window also holds leaves none. A join at any other
@@ -676,6 +678,14 @@ Object.assign(ReverieApp.prototype, {
 
   /** `synced`: the fresh room tail this data was built from, which moves the proved-complete point (`_chatSyncedFrom`). */
   async _applyChatRoom(id, data, { quiet, switched, synced = null, redraw = false }) {
+    data = this._chatFilterHistory(data);
+    if (synced) synced = synced.filter(message => message.at > (data.historyAfter ?? -1));
+    if (data.canClearHistory && (data.historyAfter ?? -1) > (this._chatRoomId === id ? this._chatRoom?.historyAfter ?? -1 : -1)) {
+      this._readAloud?.clear();
+      if (this._chatApp?.replyTo?.roomId === id) this._chatApp.cancelReplySilently();
+      const pins = this._chatApp?.doc.querySelector('.ca-dialog.ca-pins');
+      if (pins?.dataset.roomId === id) { pins.close(); pins.remove(); }
+    }
     // A message gone from the loaded window (deleted) needs the feed redrawn, which a quiet refresh skips.
     const before = this._chatRoom?.messages || [];
     const now = data.messages || [];
@@ -686,7 +696,7 @@ Object.assign(ReverieApp.prototype, {
     // A message gone, deleted or restored (another tab did it) redraws the feed; so does one the live stream missed.
     const removed =
       !switched &&
-      (before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
+      (before.some((m) => m.at <= (data.historyAfter ?? -1)) || before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
         now.some((m) => wasDeleted.has(m.id) && wasDeleted.get(m.id) !== !!m.deleted) ||
         now.some((m) => !known.has(m.id)));
     // What another room's read-aloud queued is not said here.
@@ -733,6 +743,12 @@ Object.assign(ReverieApp.prototype, {
     try {
       const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?limit=${have + CHAT_OPEN_LIMIT}`);
       if (!res.ok || this._chatRoomId !== id) return;
+      res.data = this._chatFilterHistory(res.data);
+      // A clear on another device also changes this room's projection and count.
+      if ((res.data.historyAfter ?? -1) > (room.historyAfter ?? -1)) {
+        await this._applyChatRoom(id, res.data, { quiet: true, switched: false, redraw: true, synced: res.data.messages || [] });
+        return;
+      }
       const feed = this._chatEls.feed;
       const fromBottom = feed.scrollHeight - feed.scrollTop;
       // Only the messages grow; the member list and synopses already on screen are left alone.
@@ -1730,6 +1746,12 @@ Object.assign(ReverieApp.prototype, {
       const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?since=${since}&limit=${limit}`);
       if (!current()) return false;
       if (!res.ok || !Array.isArray(res.data?.messages)) return this._chatRecoveryFail(id, res.ok ? 'unrecognised answer' : res.error);
+      res.data = this._chatFilterHistory(res.data);
+      // A cleared anchor is intentionally no longer visible. Rebase on this owner's new start, rather than retain it
+      // behind a recovery warning or join the visible tail to messages the owner cleared on another device.
+      if ((res.data.historyAfter ?? -1) > (room.historyAfter ?? -1)) {
+        return this._applyChatRoom(id, res.data, { quiet: true, switched: false, redraw: true, synced: res.data.messages });
+      }
       const fresh = res.data.messages;
       // The page is the newest `limit`. It joins the proved history if it holds the anchor (by id), or, from the
       // empty start, if it holds fewer than asked for (then it is the whole room). A full page that does neither:
@@ -1842,7 +1864,53 @@ Object.assign(ReverieApp.prototype, {
 
   // ─── SSE ────────────────────────────────────────────────────────────────
 
+  _chatHistoryKey(room) {
+    return JSON.stringify([room.historyViewerId || this._chatApp?.humanSelf?.id || 'owner', room.id]);
+  },
+
+  /** Monotonic server-owned view preferences also fence older in-flight HTTP answers and SSE echoes. */
+  _chatFilterHistory(room) {
+    if (!room?.canClearHistory) return room;
+    this._chatHistoryAfter ||= new Map();
+    const key = this._chatHistoryKey(room);
+    const after = Math.max(this._chatHistoryAfter.get(key) ?? -1, room.historyAfter ?? -1);
+    this._chatHistoryAfter.set(key, after);
+    const filtered = { ...room, historyAfter: after };
+    if (room.messages) filtered.messages = room.messages.filter(message => message.at > after);
+    if (room.lastMessage && room.lastMessage.at <= after) filtered.lastMessage = null;
+    if ((room.lastMessageAt || 0) <= after) { filtered.lastMessageAt = undefined; filtered.unread = 0; filtered.mentions = 0; filtered.messageCount = 0; }
+    return filtered;
+  },
+
+  _chatHistoryChanged(data) {
+    if (data?.action !== 'history-cleared') return;
+    const room = this._chatRooms?.find(room => room.id === data.roomId);
+    if (data.viewerId !== (room?.historyViewerId || this._chatApp?.humanSelf?.id || 'owner')) return;
+    if (!room?.canClearHistory || !Number.isSafeInteger(data.historyAfter) || data.historyAfter < -1) return;
+    const key = this._chatHistoryKey(room);
+    const after = Math.max(this._chatHistoryAfter?.get(key) ?? -1, data.historyAfter);
+    (this._chatHistoryAfter ||= new Map()).set(key, after);
+    this._chatLoadSeq = (this._chatLoadSeq || 0) + 1;
+    this._chatCache?.delete(room.id);
+    this._chatSynced?.delete(room.id);
+    Object.assign(room, this._chatFilterHistory(room));
+    const pins = this._chatApp?.doc.querySelector('.ca-dialog.ca-pins');
+    if (pins?.dataset.roomId === room.id) { pins.close(); pins.remove(); }
+    if (this._chatRoomId === room.id && this._chatRoom) {
+      this._chatRoom = this._chatFilterHistory(this._chatRoom);
+      this._readAloud?.clear();
+      this._chatApp?.cancelReplySilently?.();
+      this._renderChatFeed?.({ keepScroll: true });
+    }
+  },
+
+  _chatMessageHidden(data) {
+    const room = this._chatRooms?.find(room => room.id === data?.roomId);
+    return !!room?.canClearHistory && data.message?.at <= Math.max(room.historyAfter ?? -1, this._chatHistoryAfter?.get(this._chatHistoryKey(room)) ?? -1);
+  },
+
   _onChatroomMessage(data) {
+    if (this._chatMessageHidden(data)) return;
     // Car mode (car-mode.js) speaks the voice member's answers; read-aloud (voice-chat.js)
     // the replies to the user from everyone else.
     this._carModeOnMessage?.(data);
@@ -1854,6 +1922,7 @@ Object.assign(ReverieApp.prototype, {
   /** Put a message into the open feed (once: a known id is skipped). The live echo and the send answer both come here. */
   _chatShowMessage(data) {
     if (!data?.message) return;
+    if (this._chatMessageHidden(data)) return;
     // The conversation shell (chat-app.js) owns the feed and the counts once it is running.
     if (this._chatApp?.handleMessage(data)) return;
     if (this.isChatroomOpen() && data.roomId === this._chatRoomId && this._chatRoom) {
@@ -1878,6 +1947,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   _onChatroomChanged(data) {
+    this._chatHistoryChanged(data);
     if (this._chatApp?.handleChanged(data)) return;
     if (!this.isChatroomOpen()) return;
     clearTimeout(this._chatChangedTimer);

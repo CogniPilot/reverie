@@ -179,6 +179,10 @@ export interface ChatRoomView {
   unread: number;
   /** Of those, the ones addressed to the user (`--to user`); in a direct message with the user, all of them. */
   mentions: number;
+  /** Only an authenticated owner's own DM projection carries these fields. */
+  canClearHistory?: true;
+  historyAfter?: number;
+  historyViewerId?: string;
 }
 
 const PERSIST_DEBOUNCE_MS = 500;
@@ -1230,6 +1234,68 @@ export class ChatroomService {
   }
 
   // ─── Mutations ────────────────────────────────────────────────────────────
+
+  /** A view preference, never a deletion or an agent read/delivery cursor. */
+  ownerHistoryAfter(room: ChatRoom, viewerId: string): number {
+    const value = Object.hasOwn(room.ownerHistoryAfter ?? {}, viewerId) ? room.ownerHistoryAfter![viewerId] : -1;
+    return Number.isSafeInteger(value) && value >= -1 ? value : -1;
+  }
+
+  ownerView(room: ChatRoom, viewerId: string, options: { since?: number; limit?: number } = {}): ChatRoomView {
+    if (!isDm(room) || !room.dm.includes(USER_RECIPIENT)) return this.view(room, options);
+    const after = this.ownerHistoryAfter(room, viewerId);
+    const visible = room.messages.filter((message) => message.at > after);
+    const view = this.view({ ...room, messages: visible }, { ...options, since: Math.max(options.since ?? -1, after) });
+    // view() reads the store for its tail, while counts come from the supplied room.
+    return {
+      ...view,
+      messages: view.messages.filter((message) => message.at > after),
+      canClearHistory: true,
+      historyAfter: after,
+      historyViewerId: viewerId,
+    };
+  }
+
+  /** Commit the preference before acknowledging it or asking another device to refresh. */
+  async clearOwnerHistory(roomId: string, viewerId: string): Promise<ChatRoom> {
+    const commit = async () => {
+      const room = this.store.get(roomId);
+      if (!room || !isDm(room) || !room.dm.includes(USER_RECIPIENT))
+        throw new ChatroomError('Only your direct-message history can be cleared', 'INVALID_INPUT');
+      const before = room.ownerHistoryAfter;
+      const after = Math.max(this.ownerHistoryAfter(room, viewerId), room.messages.at(-1)?.at ?? -1);
+      room.ownerHistoryAfter = { ...before, [viewerId]: after };
+      try {
+        if (this.db) this.syncDatabase(roomId);
+        else await saveChatrooms(this.deps.file, this.store.toJSON());
+      } catch (error) {
+        // The database path also restores committed room state. JSON has no transaction adapter.
+        if (!this.db) {
+          if (before === undefined) delete room.ownerHistoryAfter;
+          else room.ownerHistoryAfter = before;
+        }
+        throw error instanceof ChatroomError
+          ? error
+          : new ChatroomError('History could not be cleared. Try again.', 'UNAVAILABLE');
+      }
+      this.deps.broadcast(ChatroomChanged, {
+        owner: room.owner ?? '@single',
+        roomId,
+        action: 'history-cleared',
+        viewerId,
+        historyAfter: after,
+      });
+      return room;
+    };
+    if (this.db) return commit();
+    // Serialize the legacy JSON write with its existing saves; propagate this write's failure to the caller.
+    const saved = this.persistChain.then(commit);
+    this.persistChain = saved.then(
+      () => {},
+      () => {}
+    );
+    return saved;
+  }
 
   createRoom(name: string, owner: string | undefined): ChatRoom {
     const room = this.store.create(name, owner, this.now());

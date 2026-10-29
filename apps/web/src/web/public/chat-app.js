@@ -4489,6 +4489,7 @@ class ReverieChatApp {
   async openPinsDialog(roomId) {
     this.doc.querySelector('.ca-dialog.ca-pins')?.remove();
     const dlg = this.el('dialog', 'ca-dialog ca-pins');
+    dlg.dataset.roomId = roomId;
     dlg.setAttribute('aria-label', 'Pinned messages');
     const head = this.el('div', 'ca-invite-head');
     head.append(this.el('h2', '', 'Pinned messages'), this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
@@ -8421,6 +8422,7 @@ class ReverieChatApp {
       out.push({ sep: true });
       out.push({ label: 'Invite agents', run: () => this.openInviteDialog(room.id) });
     }
+    if (dm && room.canClearHistory) out.push({ label: 'Clear history…', run: () => this.clearDmHistory(room.id) });
     if (dm) out.push({ label: 'Close DM', run: () => this.closeDm(room.id) });
     const { mute, levels } = this.notifyEntries(room);
     out.push({ sep: true }, mute, { label: 'Notification settings', sub: levels });
@@ -8986,7 +8988,7 @@ class ReverieChatApp {
     const messages = this.room?.messages || [];
     this._readMarkAt = this.serverFeatures.unread ? Number(this.room?.userReadAt) || 0 : 0;
     if (!messages.length) {
-      feed.append(this.el('p', 'ca-feed-empty', this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
+      feed.append(this.el('p', 'ca-feed-empty', this.room?.historyAfter >= 0 ? 'History cleared from your view. New messages will appear here.' : this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
     }
     for (const item of caFeedItems(messages, this._readMarkAt)) feed.append(this.feedNode(item));
     this.app._chatPendingDraw?.();
@@ -9031,6 +9033,7 @@ class ReverieChatApp {
   /** A new message. Returns true when handled, so the floating-panel code does not run. */
   handleMessage(data) {
     if (!this.built) return false;
+    if (this.app._chatMessageHidden(data)) return true;
     const room = this.rooms.find((r) => r.id === data.roomId);
     // Something new arrives in a closed direct message: it comes back.
     if (room && caIsDm(room) && data.message?.from?.kind !== 'user') this.reopenDm(room.id);
@@ -9073,6 +9076,34 @@ class ReverieChatApp {
     this.app._renderChatBadge?.();
   }
 
+  /** Hide this owner's existing history, while retaining the conversation and its stored messages. */
+  clearDmHistory(roomId) {
+    const room = this.rooms.find(room => room.id === roomId);
+    if (!room?.canClearHistory || !caIsDm(room)) return;
+    const dlg = this.el('dialog', 'ca-dialog');
+    dlg.setAttribute('aria-label', 'Clear direct-message history');
+    dlg.append(this.el('h2', '', 'Clear history?'), this.el('p', 'ca-dialog-note',
+      'Hide all messages currently in this direct message from your view on every device. Stored messages and agent memory stay intact. New messages will still appear.'));
+    const cancel = this.button('ca-btn', 'Cancel', () => dlg.close(), { text: 'Cancel' });
+    const clear = this.button('ca-btn is-danger', 'Clear history', async () => {
+      if (clear.disabled) return;
+      clear.disabled = true;
+      const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/clear-history`, { method: 'POST', body: {} });
+      clear.disabled = false;
+      if (!res.ok) return this.toast(`History could not be cleared: ${res.error}`, 'error');
+      this.app._chatHistoryChanged({ action: 'history-cleared', roomId, viewerId: this.humanSelf?.id || 'owner', historyAfter: res.data.historyAfter });
+      if (this.roomId === roomId) await this.app._applyChatRoom(roomId, res.data, { quiet: true, switched: false, redraw: true });
+      dlg.close();
+      await this.refreshRooms({ keepRoom: true });
+      this.toast('History cleared from your view on every device', 'info');
+    }, { text: 'Clear history' });
+    dlg.append(cancel, clear);
+    dlg.addEventListener('close', () => dlg.remove());
+    this.doc.body.append(dlg);
+    dlg.showModal();
+    cancel.focus();
+  }
+
   /** A room changed (created, renamed, members, archived, read elsewhere). */
   handleChanged(data) {
     if (!this.built) return false;
@@ -9099,7 +9130,7 @@ class ReverieChatApp {
   async refreshRooms({ attempt = 0, reloadCurrent = false, keepRoom = false } = {}) {
     const res = await this.app._chatApi('/api/chatrooms');
     if (!res.ok) return;
-    this.app._chatRooms = res.data.rooms || [];
+    this.app._chatRooms = (res.data.rooms || []).map(room => this.app._chatFilterHistory(room));
     this.app._chatFeatures = res.data.features || this.app._chatFeatures;
     this.app._chatOwnerNames = Array.isArray(res.data.ownerNames) ? res.data.ownerNames : this.app._chatOwnerNames;
     this.app._chatRetired = Array.isArray(res.data.retired) ? res.data.retired : this.app._chatRetired;
