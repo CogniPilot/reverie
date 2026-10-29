@@ -4887,7 +4887,7 @@ class ReverieChatApp {
     }
   }
 
-  /** Mark `@name` / `@everyone` in a rendered message (text nodes only, never code or links; an address like a@b is left alone). */
+  /** Highlight `@name` / `@everyone` in a rendered message as plain text, not a link (text nodes only, never code or links; an address like a@b is left alone). */
   decorateMentions(el) {
     const names = [...new Set(['everyone', ...(this.room?.members || []).map(m => m.name), ...this.channelHumans().map(p => p.name)].filter(Boolean))];
     names.sort((a, b) => b.length - a.length);
@@ -4904,46 +4904,13 @@ class ReverieChatApp {
       let last = 0;
       for (const m of text.matchAll(re)) {
         const at = m.index + m[1].length;
-        parts.push(text.slice(last, at), this.mentionReference(m[2]));
+        parts.push(text.slice(last, at), this.el('span', 'ca-mention-tag', m[2]));
         last = at + m[2].length;
       }
       if (!parts.length) continue;
       parts.push(text.slice(last));
       node.replaceWith(...parts.filter((p) => p !== ''));
     }
-  }
-
-  /** References carry no authority: resolve current room membership again on every action. */
-  mentionReference(text) {
-    const name = text.slice(1).toLowerCase(), roomId = this.roomId;
-    const matches = () => [...(this.room?.members || []).map(member => ({ member })),
-      ...this.channelHumans().map(human => ({ human }))]
-      .filter(value => String((value.member || value.human).name).toLowerCase() === name);
-    const initial = matches();
-    if (name === 'everyone' || initial.length !== 1) return this.el('span', 'ca-mention-tag', text);
-    const identity = initial[0].member?.sessionId || initial[0].human?.id;
-    const kind = initial[0].member ? 'member' : 'human';
-    const current = () => {
-      const found = this.roomId === roomId ? matches() : [];
-      return found.length === 1 && (found[0][kind]?.sessionId || found[0][kind]?.id) === identity ? found[0][kind] : null;
-    };
-    const button = this.el('button', 'ca-mention-tag ca-chat-reference', text); button.type = 'button';
-    button.title = kind === 'member' ? `View ${text.slice(1)} profile` : `Mention ${text.slice(1)}`;
-    button.addEventListener('click', event => {
-      event.stopPropagation(); const person = current();
-      if (!person) return;
-      if (kind === 'member') this.openProfile(person, button);
-      else this.mentionHuman(person.id);
-    });
-    if (kind === 'member') {
-      const menu = event => {
-        event.preventDefault(); event.stopPropagation(); const person = current();
-        if (person) this.openMemberMenu(person, button, event.type === 'contextmenu' ? { x: event.clientX, y: event.clientY } : button);
-      };
-      button.addEventListener('contextmenu', menu);
-      button.addEventListener('keydown', event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) menu(event); });
-    }
-    return button;
   }
 
   /** Only known, unambiguous channel names and canonical assignment IDs become read-only links. */
