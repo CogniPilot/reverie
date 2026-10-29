@@ -1,3 +1,4 @@
+import { materializeChatImages, isChatRaster, type ImagePathResult } from './chat-image-paths.js';
 import { buildChatDigest } from './chatroom-digest.js';
 /**
  * @fileoverview Chatroom service: store + persistence + pane delivery + SSE.
@@ -263,6 +264,17 @@ export class ChatroomService {
     this.seen = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-last-seen.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
+      prepareMessage: async (sessionId, roomId, messageId) => {
+        const paths = await this.agentImagePaths(sessionId, roomId, messageId);
+        const room = this.store.require(roomId);
+        const message = this.exactVisibleMessage(sessionId, roomId, messageId);
+        return renderForRecipient(this.withReplyContext(room, message.replyTo), message, sessionId, this.nameOf,
+          new Map(paths.status === 'ready' ? paths.files.map(file => [file.fileId, file.path]) : []));
+      },
+      messageVisible: (sessionId, roomId, messageId) => {
+        try { this.exactVisibleMessage(sessionId, roomId, messageId); return true; }
+        catch { return false; }
+      },
       forceWake: (sessionId, roomId, messageId) => this.phoneForcesWake(sessionId, roomId, messageId),
       allowFragment: (sessionId, roomId, messageId) => this.alertAllows(sessionId, roomId, messageId),
       now: deps.now,
@@ -619,6 +631,23 @@ export class ChatroomService {
     return structuredClone(this.messageIdentity(room, message));
   }
 
+  /** Fresh scoped bytes, never a path saved with a message or pending delivery. */
+  async agentImagePaths(sessionId: string, roomId: string, messageId: string): Promise<ImagePathResult> {
+    const message = this.exactVisibleMessage(sessionId, roomId, messageId);
+    const session = this.deps.getSession(sessionId)!;
+    const pid = session.pid;
+    const employee = this.deps.employeeOf?.(sessionId);
+    const selected = (message.attachments ?? []).filter(isChatRaster).slice(0, 4);
+    if (!selected.length) return { status: 'unavailable' };
+    const before = JSON.stringify(message);
+    const result = await materializeChatImages({ sessionId, roomId, messageId, fileIds: selected.map(file => file.id) });
+    const current = this.deps.getSession(sessionId);
+    if (current !== session || current?.pid !== pid || this.deps.employeeOf?.(sessionId) !== employee ||
+        JSON.stringify(this.exactVisibleMessage(sessionId, roomId, messageId)) !== before)
+      throw new ChatroomError('Message or session changed; read again', 'CONFLICT');
+    return result;
+  }
+
   exactAgentRead(sessionId: string, roomId: string, messageId: string): { message: ChatMessage; readToken: string } {
     const message = this.exactVisibleMessage(sessionId, roomId, messageId);
     for (const [token, receipt] of this.exactReadReceipts) if (receipt.until <= this.now()) this.exactReadReceipts.delete(token);
@@ -831,7 +860,7 @@ export class ChatroomService {
       const recipients = messageRecipients(room, message);
       const awake = wakeRecipients(deliveryRoom, message, recipients, this.nameOf);
       this.delivery.enqueue(entry.sessionId, room, renderForRecipient(deliveryRoom, message, entry.sessionId, this.nameOf), {
-        deliveryId: entry.id, messageId: entry.messageId, at: entry.at,
+        deliveryId: entry.id, messageId: entry.messageId, at: entry.at, localImages: message.attachments?.some(isChatRaster),
         passive: entry.passive || !awake.has(entry.sessionId),
       });
     }

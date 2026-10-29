@@ -1303,6 +1303,19 @@ export function registerChatroomRoutes(
     } catch (error) { return sendError(reply, error); }
   });
 
+  // A separate purpose avoids recursion: the broker reauthorizes through the ordinary exact GET and files API.
+  app.post('/api/chatrooms/:id/messages/:messageId/image-paths', async (req, reply) => {
+    const { id, messageId } = req.params as { id: string; messageId: string };
+    try {
+      roomOrFail(req, id);
+      const self = caller(req);
+      if (!self) return forbid(reply, 'An agent session is required');
+      if (req.body != null && (typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length))
+        return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'No materialization arguments accepted'));
+      return { success: true, data: await service.agentImagePaths(self, id, messageId) };
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.post('/api/chatrooms/:id/messages/:messageId/read-ack', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {
