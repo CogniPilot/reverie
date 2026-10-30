@@ -250,6 +250,8 @@ import { isBoardCoordinator } from '../board-permissions.js';
 import { PublicationCredentialVault } from '../publication-credentials.js';
 import { registerPublicationRoutes } from './routes/publication-routes.js';
 import { registerEmployeeContextRoutes } from './routes/employee-context-routes.js';
+import { registerEmployeeJournalRoutes } from './routes/employee-journal-routes.js';
+import { EmployeeJournalStore } from '../employee-journal.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
@@ -1721,6 +1723,16 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
+    });
+    // Opened on first use, in its own file beside the chat database.
+    let employeeJournal: EmployeeJournalStore | undefined;
+    this.app.addHook('onClose', async () => employeeJournal?.close());
+    registerEmployeeJournalRoutes(this.app, ctx, {
+      verifiedOwner,
+      agentSession: currentAgentSession,
+      company: owner => this.companyService.view(owner),
+      journal: () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db'))),
+      visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
     registerCompanyRoutes(

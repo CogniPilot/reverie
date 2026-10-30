@@ -647,6 +647,11 @@ export class ChatroomService {
     return structuredClone(this.messageIdentity(room, message));
   }
 
+  /** The exact message as this live member session can read it now (employee journal source and turn checks). */
+  agentVisibleMessage(sessionId: string, roomId: string, messageId: string): ChatMessage {
+    return this.exactVisibleMessage(sessionId, roomId, messageId);
+  }
+
   /** Fresh scoped bytes, never a path saved with a message or pending delivery. */
   async agentImagePaths(sessionId: string, roomId: string, messageId: string): Promise<ImagePathResult> {
     const message = this.exactVisibleMessage(sessionId, roomId, messageId);
