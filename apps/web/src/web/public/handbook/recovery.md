@@ -4,6 +4,10 @@ Check the saved state before restarting anything. A busy badge does not prove th
 
 When an expert’s Debug terminal viewer disconnects, Reverie makes a bounded number of automatic attach-only reconnect attempts. The owner can also choose the neutral **Reconnect** button beside the failed connection. This reconnects the viewer to an existing agent; it never starts a replacement, wakes an expert who is off or on vacation, clears a draft, or resends an uncertain message. A working agent stays working. The separate red **Restart** action may restart the agent and remains an explicit owner action.
 
+The optional Debug terminal viewer and the employee's native command runtime have separate status. **Online** can remain visible when a fresh, current laptop observation confirms that runtime, even if the viewer is unavailable. **Viewer unavailable** and **Reconnect** still warn that automatic terminal input may be held; existing drafts and uncertain deliveries remain untouched. A running command does not prove model readiness, a working API connection, or message delivery. Confirmed runtime death stays red, and deliberate stops and vacations always take precedence. Laptop terminal is another optional connection and does not set employee availability.
+
+Older brokers or expired observations leave native availability unconfirmed. The read-only provider-health control requires a matching broker and website. Its bounded observations use the current employee/session generation, container, command process tree and storage; no terminal text is read and no agent is started. A cached observation keeps its original time and expires within 25 seconds. Loss of a viewer alone is not a reason to restart an agent.
+
 ## In the website
 
 1. Open the expert's profile from the conversation or Company → People. Check whether the expert deliberately left the office or is on vacation; preserve that choice.

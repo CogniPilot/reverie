@@ -1424,6 +1424,9 @@ export class Session extends EventEmitter {
     return this._paneExit ?? undefined;
   }
 
+  /** Read-only presentation of the existing gate; never persistence or authority. */
+  get viewerInputHeld(): boolean { return this._viewerInputHeld; }
+
   /** A worker pane observes terminal transport, not the provider inside its laptop. */
   get runtimeHealthScope(): 'provider' | 'terminal' {
     return this._workerBacked || this._remote || this._docker ? 'terminal' : 'provider';
