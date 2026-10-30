@@ -1,8 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ChatroomService } from '../../src/chatroom-service.js';
+import { LastSeenStore } from '../../src/chatroom-last-seen.js';
 import type { ChatMessage, ChatRoom } from '../../src/chatroom-store.js';
 import { registerChatTurnSummary } from '../../src/web/routes/chat-turn-summary.js';
 import { createRouteTestHarness } from './_route-test-utils.js';
@@ -596,13 +597,85 @@ it('digest continues from the agent\'s own cursor: FYIs once, owner requests eve
     expect((await get()).fyi).toEqual([]); // --all did not move it back
     const later = f.emit({ text: 'status: deploy queued' });
     updatedAt = clock() + 60_000;
-    const third = await get('?since=' + encodeURIComponent(second.cursor));
+    const post = async (since: unknown) => f.app.inject({ method: 'POST', url: '/api/chatrooms/digest', headers, payload: { since } });
+    const third = (await post(second.cursor)).json().data;
     expect(third.fyi).toEqual([{ roomId: f.room.id, count: 1, messageIds: [later.id] }]);
     expect(third.cards.map((c: { card: string }) => c.card)).toEqual(['i-0000000a', 'i-0000000b']);
     expect((await get()).fyi).toEqual([{ roomId: f.room.id, count: 1, messageIds: [later.id] }]); // the token moved nothing
-    for (const bad of ['?since=nope', '?since=d1.e30', '?since=all&target=x'])
+    for (const bad of ['?since=nope', '?since=' + encodeURIComponent(second.cursor), '?since=all&target=x'])
       expect((await f.app.inject({ url: '/api/chatrooms/digest' + bad, headers })).statusCode).toBe(400);
+    for (const bad of ['nope', 'd1.e30', 'all', 7]) expect((await post(bad)).statusCode).toBe(400);
+    expect((await f.app.inject({ method: 'POST', url: '/api/chatrooms/digest', headers: {}, payload: { since: second.cursor } })).statusCode).toBe(403);
     expect(f.service.turnSummary(A).messages.some(m => m.messageId === owner.id && m.attention?.disposition === 'pending')).toBe(true);
+  } finally {
+    await f.app.close();
+  }
+});
+
+it('digest cursor review fixes: same-millisecond messages and cards, bound after change selection, and flush on stop', async () => {
+  const f = await fixture('alice');
+  try {
+    const deps = (f.service as unknown as { deps: Record<string, unknown> }).deps;
+    const clock = deps.now as () => number;
+    const get = async (query = '') => (await f.app.inject({ url: '/api/chatrooms/digest' + query, headers })).json().data;
+    // A newer message in the same millisecond moves the cursor, so it is reported once.
+    const t = clock() + 10_000;
+    f.emit({ id: 'same-a', at: t, text: 'status: a' });
+    expect((await get()).fyi[0].messageIds).toEqual(['same-a']);
+    f.emit({ id: 'same-b', at: t, text: 'status: b' });
+    expect((await get()).fyi[0].messageIds).toEqual(['same-b']);
+    expect((await get()).fyi).toEqual([]);
+    // 200 old completed cards of mine come first; the one card that changed is still listed and not skipped.
+    const old = clock() - 100 * 3_600_000;
+    let issues = [
+      ...Array.from({ length: 200 }, (_, i) => ({ id: `i-${i.toString(16).padStart(8, '0')}`, title: 'old', status: 'done', owner: 'employee-' + A, updatedAt: old })),
+      { id: 'i-0000ffff', title: 'new', status: 'doing', owner: 'employee-' + A, updatedAt: clock() - 1000 },
+    ];
+    deps.boardIssues = () => issues;
+    expect((await get('?since=all')).cards.map((c: { card: string }) => c.card)).toEqual(['i-0000ffff']);
+    expect((await get()).cards.map((c: { card: string }) => c.card)).toEqual(['i-0000ffff']);
+    expect((await get()).cards).toEqual([]);
+    // The same card changes again within the millisecond already covered: the new version is shown once.
+    issues = issues.map((i) => (i.id === 'i-0000ffff' ? { ...i, status: 'blocked' } : i));
+    expect((await get()).cards.map((c: { card: string; status: string }) => [c.card, c.status])).toEqual([['i-0000ffff', 'blocked']]);
+    expect((await get()).cards).toEqual([]);
+    // More than one digest's worth of changes: the rest come in the next digest.
+    issues = Array.from({ length: 205 }, (_, i) => ({ id: `i-${(0x1000 + i).toString(16).padStart(8, '0')}`, title: 'busy', status: 'doing', owner: 'employee-' + A, updatedAt: clock() + i }));
+    const firstBatch = await get();
+    expect(firstBatch.cardsAfter).toBe(5);
+    expect(firstBatch.text).toContain('5 more changed cards after these');
+    const rest = await get();
+    expect(rest.cards.length).toBe(5);
+    expect(rest.cardsAfter).toBe(0);
+    // An awaited stop writes the cursor file at once.
+    await f.service.stop();
+    const reloaded = new LastSeenStore(join(dirname(deps.file as string), 'chat-digest-cursor.json'));
+    await reloaded.load();
+    expect(reloaded.get('employee-' + A, f.room.id)).toEqual({ messageId: 'same-b', at: t });
+  } finally {
+    await f.app.close();
+  }
+});
+
+it('a cursor at the Board maximum travels in the POST body over real HTTP and leaves the stored cursor alone', async () => {
+  const f = await fixture('alice');
+  try {
+    const deps = (f.service as unknown as { deps: Record<string, unknown> }).deps;
+    const t = (deps.now as () => number)() - 1000;
+    deps.boardIssues = () => Array.from({ length: 2000 }, (_, i) => ({
+      id: 'i-' + i.toString(16).padStart(8, '0'), title: 'card', status: 'doing', owner: 'employee-' + A, updatedAt: t,
+    }));
+    let cursor = '';
+    for (let i = 0; i < 10; i++) cursor = f.service.actionableDigest(A).cursor;
+    expect(cursor.length).toBeGreaterThan(40_000); // longer than an HTTP request line or header allows
+    const stored = f.service.digestCursors.get('employee-' + A, '\0board');
+    const address = await f.app.listen({ host: '127.0.0.1', port: 0 });
+    const response = await fetch(address + '/api/chatrooms/digest', {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ since: cursor }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.cards).toEqual([]);
+    expect(f.service.digestCursors.get('employee-' + A, '\0board')).toEqual(stored);
   } finally {
     await f.app.close();
   }

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { agentChatSummary, agentChatDigest, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 function client(data: unknown, success = true) {
   const out: string[] = [],
@@ -42,15 +45,22 @@ describe('fresh read-only digest client', () => {
 describe('digest cursor options', () => {
   const now = Date.UTC(2026, 9, 28, 4);
   const data = { version: 2, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
-  it('sends since=all for --all and the exact token for --since, and refuses both together', async () => {
+  it('sends since=all for --all, POSTs the exact cursor for --since (also from @FILE), and refuses both together', async () => {
     const c = client(data);
     c.deps.now = () => now;
     expect(await agentChatDigest(c.deps, { all: true })).toBe(0);
     expect(await agentChatDigest(c.deps, { since: 'd1.abc' })).toBe(0);
-    expect(c.calls.map((call) => call.query)).toEqual([{ since: 'all' }, { since: 'd1.abc' }]);
+    const file = join(mkdtempSync(join(tmpdir(), 'digest-cursor-')), 'cursor.txt');
+    writeFileSync(file, 'd1.' + 'x'.repeat(200_000) + '\n');
+    expect(await agentChatDigest(c.deps, { since: '@' + file })).toBe(0);
+    expect(c.calls.map(({ method, query, body }) => [method, query, body && String(body.since).length])).toEqual([
+      ['GET', { since: 'all' }, undefined], ['POST', undefined, 6], ['POST', undefined, 200_003],
+    ]);
+    expect(await agentChatDigest(c.deps, { since: '@' + file + '.missing' })).not.toBe(0);
+    c.calls.splice(1);
     expect(await agentChatDigest(c.deps, { all: true, since: 'd1.abc' })).not.toBe(0);
     expect(await agentChatDigest(c.deps, { since: '' })).not.toBe(0);
-    expect(c.calls).toHaveLength(2);
+    expect(c.calls).toHaveLength(1); // refused before any request
   });
 });
 describe('read-only summary client', () => {

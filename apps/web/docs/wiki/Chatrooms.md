@@ -258,8 +258,8 @@ them with `reverie agent chat pending`.
 The digest continues from the agent's own digest cursor, kept per employee, and moves it to
 what it covered. Repeating it with nothing new repeats no FYI and no Board change, while
 owner requests and actions stay listed until handled. `--all` shows everything eligible, and
-`--since <cursor>` starts from a cursor an earlier digest printed; neither moves the stored
-cursor. The digest cursor is not a read marker: it never reads, acknowledges, handles,
+`--since <cursor>` starts from a cursor an earlier digest printed (`--since @FILE` reads a
+long one from a file); neither moves the stored cursor. The digest cursor is not a read marker: it never reads, acknowledges, handles,
 resends or completes anything.
 
 When the agent wrote to the owner after an owner request, before the owner wrote again, the
@@ -268,9 +268,10 @@ until the agent replies or resolves it with `reverie agent chat handle`. A recor
 replacement is shown as `supersededBy`.
 
 `--json` includes the source version hashes, exact source links, per-room counts, FYI message
-ids, the cursor and history coverage. The endpoint is `GET /api/chatrooms/digest`, and it
-takes only `since` (`all`, or a cursor). Existing membership, owner and phone filters apply on
-every request. A bounded or recent-only history result leaves older requests unresolved.
+ids, the cursor and history coverage. The endpoint is `GET /api/chatrooms/digest`, which takes
+only `since=all`. An explicit cursor is sent as `POST /api/chatrooms/digest` with
+`{"since": cursor}`, since a cursor covering many rooms and cards is too long for a URL.
+Existing membership, owner and phone filters apply on every request. A bounded or recent-only history result leaves older requests unresolved.
 The digest revision identifies this view for comparison; it is not handling proof or an
 exactly-once hook receipt. The per-turn summary hook shows the same three message kinds as
 counts when they fit its budget.

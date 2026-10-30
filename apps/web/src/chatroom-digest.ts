@@ -14,7 +14,9 @@ export interface DigestMark {
 /** What a digest covered: each room's newest message and the Board time. FYIs at or before it are not repeated. */
 export interface DigestCursor {
   rooms: Record<string, DigestMark>;
+  /** The newest Board card time covered (the cards' own clock), and each card's latest status seen at that millisecond (`id|status`, one per card). */
   boardAt?: number;
+  boardIds?: string[];
 }
 export interface DigestRoomScan {
   roomId: string;
@@ -40,7 +42,10 @@ export interface DigestInput {
   rooms: DigestRoomScan[];
   /** `${roomId}\0${messageId}` of an owner request -> this agent's later message to the owner before the owner wrote again. */
   possibleAnswers?: ReadonlyMap<string, string>;
+  /** Changed cards, oldest first, already bounded by the service. */
   cards?: DigestCard[];
+  /** Changed cards after the bound; the next digest continues with them. */
+  cardsAfter?: number;
   since?: DigestCursor;
   /** This digest moves the agent's stored digest cursor (the default `agent chat digest`). */
   movesCursor?: boolean;
@@ -48,7 +53,12 @@ export interface DigestInput {
 
 /** Owner requests older than this are counted per room, not listed (`agent chat pending` pages them). */
 export const OWNER_WINDOW_MS = 72 * 60 * 60 * 1000;
-const LIMIT = { owner: 6, action: 6, blocker: 6, fyiRooms: 20, roomLines: 12, rooms: 1000, candidates: 50000, cards: 200 };
+/**
+ * Changed cards passed to one digest. The cards remembered at one millisecond (boardIds, one latest status per card)
+ * are bounded by the Board's own card limit instead, so a carried-over batch at a shared millisecond is not replayed.
+ */
+export const DIGEST_CARD_LIMIT = 200;
+const LIMIT = { owner: 6, action: 6, blocker: 6, fyiRooms: 20, roomLines: 12, rooms: 1000, candidates: 50000, cards: DIGEST_CARD_LIMIT, boardIds: 2000 };
 const BUDGET = 12000;
 
 const clean = (value: string, limit: number) =>
@@ -65,9 +75,42 @@ const href = (roomId: string, messageId: string) =>
 const covered = (at: number, id: string, mark: DigestMark | undefined) =>
   !!mark && (at < mark.at || (at === mark.at && id.localeCompare(mark.id) <= 0));
 
+/** A card's version at one millisecond: its latest status. Card ids and statuses contain no `|`. */
+const cardKey = (card: Pick<DigestCard, 'id' | 'status'>) => `${card.id}|${card.status}`;
+const seenAtBoard = new WeakMap<DigestCursor, Map<string, string>>();
+/** Card id -> latest status seen at the cursor millisecond; one entry per card, so A->B->A is still a change. */
+function boardSeen(since: DigestCursor): Map<string, string> {
+  let seen = seenAtBoard.get(since);
+  if (!seen) {
+    seen = new Map();
+    for (const key of since.boardIds ?? []) {
+      const bar = key.indexOf('|');
+      if (bar > 0) seen.set(key.slice(0, bar), key.slice(bar + 1));
+    }
+    seenAtBoard.set(since, seen);
+  }
+  return seen;
+}
+
+/**
+ * Whether a card changed after the cursor: a later card time, or a version not seen at the cursor's own millisecond.
+ * Without a Board cursor, the last 72 hours.
+ */
+export function boardChanged(card: Pick<DigestCard, 'id' | 'status' | 'updatedAt'>, since: DigestCursor | undefined, generatedAt: number): boolean {
+  if (!safeTime(card.updatedAt)) return false;
+  if (since?.boardAt === undefined) return card.updatedAt > generatedAt - OWNER_WINDOW_MS;
+  return card.updatedAt > since.boardAt || (card.updatedAt === since.boardAt && boardSeen(since).get(card.id) !== card.status);
+}
+
+/**
+ * Longest cursor token accepted: 1000 rooms and 2000 Board cards fit. Such a cursor is too long for a URL (HTTP header
+ * limit) or a command-line argument, so an explicit cursor travels in a request body (and the CLI can read it from a file).
+ */
+export const DIGEST_CURSOR_MAX = 400_000;
+
 export function encodeDigestCursor(cursor: DigestCursor): string {
   const rooms = Object.entries(cursor.rooms).map(([roomId, m]) => [roomId, m.at, m.id]);
-  return 'd1.' + Buffer.from(JSON.stringify({ r: rooms, b: cursor.boardAt ?? null })).toString('base64url');
+  return 'd1.' + Buffer.from(JSON.stringify({ r: rooms, b: cursor.boardAt ?? null, bi: cursor.boardIds ?? [] })).toString('base64url');
 }
 
 /** A cursor token from an earlier digest. Throws on anything malformed; it only ever hides FYIs and Board changes. */
@@ -75,22 +118,23 @@ export function decodeDigestCursor(token: string): DigestCursor {
   const fail = () => {
     throw new Error('Digest cursor not recognised; use the cursor printed by agent chat digest');
   };
-  if (typeof token !== 'string' || token.length > 100_000 || !/^d1\.[A-Za-z0-9_-]+$/.test(token)) fail();
+  if (typeof token !== 'string' || token.length > DIGEST_CURSOR_MAX || !/^d1\.[A-Za-z0-9_-]+$/.test(token)) fail();
   let raw: unknown;
   try {
     raw = JSON.parse(Buffer.from(token.slice(3), 'base64url').toString('utf8'));
   } catch {
     fail();
   }
-  const { r, b } = (raw ?? {}) as { r?: unknown; b?: unknown };
-  if (!Array.isArray(r) || r.length > LIMIT.rooms || (b !== null && !safeTime(b))) fail();
+  const { r, b, bi = [] } = (raw ?? {}) as { r?: unknown; b?: unknown; bi?: unknown };
+  if (!Array.isArray(r) || r.length > LIMIT.rooms || (b !== null && !safeTime(b)) || !Array.isArray(bi) || bi.length > LIMIT.boardIds ||
+      bi.some((k) => typeof k !== 'string' || !k || k.length > 300 || /[\p{Cc}\p{Cf}]/u.test(k))) fail();
   const rooms: Record<string, DigestMark> = {};
   for (const entry of r as unknown[]) {
     if (!Array.isArray(entry) || entry.length !== 3 || !plainId(entry[0]) || !safeTime(entry[1]) || !plainId(entry[2])) fail();
     const [roomId, at, id] = entry as [string, number, string];
     rooms[roomId] = { at, id };
   }
-  return { rooms, ...(b !== null ? { boardAt: b as number } : {}) };
+  return { rooms, ...(b !== null ? { boardAt: b as number, boardIds: bi as string[] } : {}) };
 }
 
 export function buildChatDigest(input: DigestInput, generatedAt: number, timeZone: string) {
@@ -168,10 +212,10 @@ export function buildChatDigest(input: DigestInput, generatedAt: number, timeZon
       fyi.set(m.roomId, list);
     }
   }
-  const boardFrom = since?.boardAt ?? generatedAt - OWNER_WINDOW_MS;
   const changed = cards
-    .filter((card) => plainId(card.id) && safeTime(card.updatedAt) && card.updatedAt > boardFrom)
+    .filter((card) => plainId(card.id) && boardChanged(card, since, generatedAt))
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+  const cardsAfter = Number.isSafeInteger(input.cardsAfter) && (input.cardsAfter as number) > 0 ? (input.cardsAfter as number) : 0;
 
   const chatItem = (kind: 'owner' | 'action', m: TurnSummaryCandidate, rank: number) => {
     const answer = kind === 'owner' ? input.possibleAnswers?.get(`${m.roomId}\0${m.messageId}`) : undefined;
@@ -226,8 +270,22 @@ export function buildChatDigest(input: DigestInput, generatedAt: number, timeZon
     );
   };
 
-  // The cursor covers every examined room up to its newest message, and the Board up to now.
-  const cursor: DigestCursor = { rooms: {}, boardAt: generatedAt };
+  // The cursor covers every examined room up to its newest message, and the Board up to the newest card listed here.
+  const cursor: DigestCursor = { rooms: {} };
+  let boardAt = since?.boardAt;
+  let latest = new Map(since ? boardSeen(since) : []);
+  for (const card of [...changed].sort((a, b) => a.updatedAt - b.updatedAt)) {
+    if (boardAt === undefined || card.updatedAt > boardAt) {
+      boardAt = card.updatedAt;
+      latest = new Map();
+    }
+    if (card.updatedAt === boardAt) latest.set(card.id, card.status);
+  }
+  if (boardAt !== undefined) {
+    cursor.boardAt = boardAt;
+    // One entry per card: bounded by the Board's own card limit.
+    cursor.boardIds = [...latest].map(([id, status]) => cardKey({ id, status })).slice(0, LIMIT.boardIds);
+  }
   for (const r of rooms) if (r.newest && plainId(r.newest.id) && safeTime(r.newest.at)) cursor.rooms[r.roomId] = r.newest;
   for (const [roomId, mark] of Object.entries(since?.rooms ?? {}))
     if (!cursor.rooms[roomId] || covered(cursor.rooms[roomId].at, cursor.rooms[roomId].id, mark)) cursor.rooms[roomId] = mark;
@@ -273,6 +331,7 @@ export function buildChatDigest(input: DigestInput, generatedAt: number, timeZon
       `Changed Board cards, yours or named by yours (${changed.length}):`,
       ...cardItems.map((item) => JSON.stringify(item)),
       ...(changed.length > shown.blocker ? [`${changed.length - shown.blocker} more not shown.`] : []),
+      ...(cardsAfter ? [`${cardsAfter} more changed cards after these; the next digest continues with them.`] : []),
       `FYI (${[...fyi.values()].reduce((n, l) => n + l.length, 0)} in ${fyiRooms.length} rooms):`,
       ...fyiRooms.slice(0, shown.fyi).map(([roomId, list]) => fyiLine(roomId, list)),
       ...(fyiRooms.length > shown.fyi ? [`${fyiRooms.length - shown.fyi} more rooms with FYIs not shown.`] : []),
@@ -301,6 +360,7 @@ export function buildChatDigest(input: DigestInput, generatedAt: number, timeZon
     counts: Object.fromEntries(counts),
     items: [...out.ownerItems, ...out.actionItems],
     cards: out.cardItems,
+    cardsAfter,
     fyi: fyiRooms.map(([roomId, list]) => ({ roomId, count: list.length, messageIds: list.slice(0, 50).map((m) => m.messageId) })),
     since: since ?? null,
   };

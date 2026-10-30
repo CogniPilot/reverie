@@ -37,6 +37,8 @@ import { agentCredentialStatus } from './cli-agent-credential-status.js';
 import { agentContext, agentContextReceipt } from './cli-agent-context.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import https from 'node:https';
+import { readFileSync } from 'node:fs';
+import { DIGEST_CURSOR_MAX } from './chatroom-digest.js';
 import { StringDecoder } from 'node:string_decoder';
 import { MAX_MESSAGE_CHARS } from './chatroom-store.js';
 import { saveChatAttachment, chatAttachmentDestinationRefusal } from './cli-chat-attachment.js';
@@ -457,10 +459,20 @@ export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Pro
  */
 export async function agentChatDigest(deps: AgentDeps, options: { all?: boolean; since?: string } = {}): Promise<number> {
   if (options.all && options.since !== undefined) return fail(deps, 'Use --all or --since, not both');
-  const since = options.all ? 'all' : options.since;
-  if (since !== undefined && (!since || since.length > 100_000)) return fail(deps, 'Use --since with a cursor printed by an earlier digest');
-  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000,
-    ...(since !== undefined ? { query: { since } } : {}) });
+  let since = options.since;
+  // A cursor can be longer than a command-line argument; --since @FILE reads it from a file (e.g. saved from --json).
+  if (since?.startsWith('@')) {
+    try {
+      since = readFileSync(since.slice(1), 'utf8').trim();
+    } catch {
+      return fail(deps, 'Could not read the cursor file');
+    }
+  }
+  if (since !== undefined && (!since || since.length > DIGEST_CURSOR_MAX)) return fail(deps, 'Use --since with a cursor printed by an earlier digest');
+  // An explicit cursor goes in the body: a long one does not fit in a URL.
+  const result = await deps.request(deps.ctx, since !== undefined
+    ? { method: 'POST', path: '/api/chatrooms/digest', body: { since }, timeoutMs: 2000 }
+    : { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000, ...(options.all ? { query: { since: 'all' } } : {}) });
   const data = result.json?.data as { version?: unknown; generatedAt?: unknown; text?: unknown; revision?: unknown } | undefined;
   const age = (deps.now?.() ?? Date.now()) - Number(data?.generatedAt);
   if (!result.json?.success || data?.version !== 2 || typeof data.text !== 'string' || data.text.length > 12000 ||
@@ -2778,7 +2790,7 @@ export function registerAgentCommands(program: Command): Command {
     .description('One bounded cross-room delta since your last digest: owner requests, actions for you and changed Board cards first, FYIs batched; no read or handling acknowledgement')
     .option('--json', 'Machine-readable snapshot')
     .option('--all', 'Everything currently eligible; your digest cursor is not moved')
-    .option('--since <cursor>', 'From a cursor printed by an earlier digest; your digest cursor is not moved')
+    .option('--since <cursor>', 'From a cursor printed by an earlier digest (or @FILE holding one); your digest cursor is not moved')
     .action((options: { json?: boolean; all?: boolean; since?: string }) =>
       run(Boolean(options.json), (deps) => agentChatDigest(deps, { all: options.all, since: options.since })));
 

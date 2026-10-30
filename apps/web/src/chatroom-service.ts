@@ -1,6 +1,6 @@
 import { materializeChatImages, isChatRaster, type ImagePathResult } from './chat-image-paths.js';
 import {viewerHealth,type ProviderHealth} from './worker-provider-health.js';
-import { buildChatDigest, decodeDigestCursor, type DigestCard, type DigestCursor, type DigestRoomScan } from './chatroom-digest.js';
+import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, type DigestCard, type DigestCursor, type DigestRoomScan } from './chatroom-digest.js';
 /**
  * @fileoverview Chatroom service: store + persistence + pane delivery + SSE.
  *
@@ -383,26 +383,47 @@ export class ChatroomService {
         const mark = this.digestCursors.get(key, room.id);
         if (mark) rooms[room.id] = { at: mark.at, id: mark.messageId };
       }
-      const boardAt = this.digestCursors.get(key, BOARD_CURSOR)?.at;
-      if (Object.keys(rooms).length || boardAt !== undefined) from = { rooms, ...(boardAt !== undefined ? { boardAt } : {}) };
+      const board = this.digestCursors.get(key, BOARD_CURSOR);
+      let boardIds: string[] = [];
+      try {
+        const parsed: unknown = board ? JSON.parse(board.messageId) : [];
+        if (Array.isArray(parsed)) boardIds = parsed.filter((k): k is string => typeof k === 'string');
+      } catch { /* an unreadable stored set only repeats that millisecond's cards */ }
+      if (Object.keys(rooms).length || board) from = { rooms, ...(board ? { boardAt: board.at, boardIds } : {}) };
     }
     const scan: DigestScan = { candidates: [], rooms: [], possibleAnswers: new Map() };
     const summary = this.turnSummary(sessionId, undefined, undefined, scan);
     const now = this.deps.now?.() ?? Date.now();
+    // Changed cards are selected before the bound, oldest first: the cursor stops at the last one shown, so the
+    // next digest continues with the rest instead of skipping them.
+    const changed = employeeId
+      ? this.digestCards(session.owner, employeeId)
+        .filter((card) => boardChanged(card, from, now))
+        .sort((a, b) => a.updatedAt - b.updatedAt || a.id.localeCompare(b.id))
+      : [];
     const digest = buildChatDigest({
       phoneMode: summary.phoneMode,
       historyCoverage: summary.historyCoverage ?? { state: 'recent-only', rooms: [] },
       candidates: scan.candidates,
       rooms: scan.rooms,
       possibleAnswers: scan.possibleAnswers,
-      cards: employeeId ? this.digestCards(session.owner, employeeId) : [],
+      cards: changed.slice(0, DIGEST_CARD_LIMIT),
+      cardsAfter: Math.max(0, changed.length - DIGEST_CARD_LIMIT),
       since: from,
       movesCursor: since === undefined,
     }, now, this.deps.timeZone?.(session.owner) ?? 'UTC');
     if (since === undefined) {
-      for (const [roomId, mark] of Object.entries(decodeDigestCursor(digest.cursor).rooms))
-        this.digestCursors.advance(key, roomId, { messageId: mark.id, at: mark.at });
-      this.digestCursors.advance(key, BOARD_CURSOR, { messageId: 'board', at: now });
+      const covered = decodeDigestCursor(digest.cursor);
+      // Room order is (time, id): a newer message in the same millisecond still moves the cursor.
+      for (const [roomId, mark] of Object.entries(covered.rooms))
+        this.digestCursors.advanceWhen(key, roomId, { messageId: mark.id, at: mark.at }, (current) =>
+          !current || mark.at > current.at || (mark.at === current.at && mark.id.localeCompare(current.messageId) > 0));
+      // The Board cursor is the newest card time covered plus the card versions seen at that millisecond.
+      if (covered.boardAt !== undefined) {
+        const board = { messageId: JSON.stringify(covered.boardIds ?? []), at: covered.boardAt };
+        this.digestCursors.advanceWhen(key, BOARD_CURSOR, board, (current) =>
+          !current || board.at > current.at || (board.at === current.at && board.messageId !== current.messageId));
+      }
     }
     return digest;
   }
@@ -421,7 +442,7 @@ export class ChatroomService {
         if (named && !cards.has(ref) && named.owner !== employeeId) cards.set(ref, { ...named, mine: false, via: issue.id });
       }
     }
-    return [...cards.values()].slice(0, 200);
+    return [...cards.values()];
   }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
@@ -909,6 +930,7 @@ export class ChatroomService {
     this.owedReplies.clear();
     this.delivery.stop();
     await this.seen.flush();
+    await this.digestCursors.flush();
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = undefined;
