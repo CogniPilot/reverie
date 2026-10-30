@@ -60,6 +60,27 @@ class NaturalAdminTaskTests(unittest.TestCase):
         self.assertIn('no authorized', admin_task.invoke({'tool_calls': [call]}, None))
         start.assert_not_called()
 
+    def test_cancel_tool_stops_only_this_harness_task_with_the_requesters_identity(self):
+        manager = Mock();manager.control.return_value = 'Task workspace cancelled.'
+        message = {'id': 'stop-message', 'from': OWNER, 'text': 'stop that'}
+        callback = admin_task.callback(self.config(), manager, {}, 'office', [], message)
+        call = {'type': 'function', 'id': 'call_1', 'function': {'name': admin_task.CANCEL_TOOL_NAME, 'arguments': '{}'}}
+        self.assertEqual(admin_task.invoke({'tool_calls': [call]}, callback), 'Task workspace cancelled.')
+        room, sent = manager.control.call_args.args[1], manager.control.call_args.args[3]
+        self.assertEqual((room, sent['id'], sent['from'], sent['text']), ('office', 'stop-message', OWNER, '/code-cancel workspace'))
+        self.assertNotIn('canonical_source', manager.control.call_args.kwargs)
+
+    def test_cancel_tool_refuses_arguments_parallel_calls_and_unbound_senders(self):
+        start = Mock()
+        cancel = {'type': 'function', 'id': 'one', 'function': {'name': admin_task.CANCEL_TOOL_NAME, 'arguments': json.dumps({'brief': 'x'})}}
+        self.assertIn('invalid structured', admin_task.invoke({'tool_calls': [cancel]}, start))
+        cancel['function']['arguments'] = '{}'
+        run = {'type': 'function', 'id': 'two', 'function': {'name': admin_task.TOOL_NAME, 'arguments': json.dumps({'brief': 'x'})}}
+        self.assertIn('one workspace task', admin_task.invoke({'tool_calls': [cancel, run]}, start))
+        self.assertIn('no authorized', admin_task.invoke({'tool_calls': [cancel]}, None))
+        start.assert_not_called();start.cancel.assert_not_called()
+        self.assertIn('cancel_workspace_task', admin_task.RULE)
+
     def test_normal_chat_offers_real_task_tool_and_returns_observed_queue_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = cfg_for(directory);cfg['_admin_start_task'] = Mock(return_value='Task workspace queued; not complete')
