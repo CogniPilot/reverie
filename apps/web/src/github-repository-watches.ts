@@ -85,6 +85,7 @@ export interface GithubRepositoryWatchDeps {
 const own = <T>(record: Record<string, T>, key: string): T | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 const emptyScan = (): ScanState => ({ issueSeen: {}, issuePrimed: false, ciSeen: {}, ciPrimed: false, openRuns: {} });
+const SCAN_BUDGET_MS = 60_000;
 const need = (ok: unknown, code: string) => {
   if (!ok) throw new GithubWatchError(code);
 };
@@ -563,7 +564,7 @@ export class GithubRepositoryWatches {
         if (credential) await credential.revalidate();
         validate();
         need(path === '' || /^\/(?:issues\?|actions\/runs(?:\?|\/\d+$))/.test(path), 'FIXED_GITHUB_PATH_REQUIRED');
-        const remaining = 20000 - (performance.now() - began);
+        const remaining = SCAN_BUDGET_MS - (performance.now() - began);
         need(remaining > 0, 'SCAN_TIMEOUT');
         const headers: Record<string, string> = {
           Accept: 'application/vnd.github+json',
@@ -573,12 +574,16 @@ export class GithubRepositoryWatches {
           ...(x.scan.pageCache?.[path] ? { 'If-None-Match': x.scan.pageCache[path]!.etag } : {}),
         };
         const url = `https://api.github.com/repos/${encodeURIComponent(x.config.owner)}/${encodeURIComponent(x.config.repo)}${path}`;
-        const reply = await (this.deps.fetch ?? request)(
-          url,
-          headers,
-          AbortSignal.timeout(Math.max(1, Math.floor(remaining)))
-        );
+        const signal = AbortSignal.timeout(Math.max(1, Math.floor(remaining)));
+        let reply: Reply;
+        try {
+          reply = await (this.deps.fetch ?? request)(url, headers, signal);
+        } catch (error) {
+          if (signal.aborted) throw new GithubWatchError('SCAN_TIMEOUT');
+          throw error;
+        }
         validate();
+        need(!signal.aborted, 'SCAN_TIMEOUT');
         totalBytes += Buffer.byteLength(JSON.stringify(reply.body ?? null));
         need(totalBytes <= 64 * 1024 * 1024, 'SCAN_BYTE_BOUND');
         if (
@@ -603,7 +608,7 @@ export class GithubRepositoryWatches {
             body: prior!.body,
             headers: {
               get: (k) =>
-                k === 'link' ? (prior!.next ? '<fixed>; rel=\"next\"' : null) : k === 'etag' ? prior!.etag : null,
+                k === 'link' ? (prior!.next ? '<fixed>; rel="next"' : null) : k === 'etag' ? prior!.etag : null,
             },
           };
         }
@@ -612,7 +617,7 @@ export class GithubRepositoryWatches {
             etag = reply.headers.get('etag');
           if (etag) {
             need(etag.length <= 300 && !/[\r\n]/.test(etag), 'INVALID_ETAG');
-            pageCache[path] = { etag, body, next: !!reply.headers.get('link')?.includes('rel=\"next\"') };
+            pageCache[path] = { etag, body, next: !!reply.headers.get('link')?.includes('rel="next"') };
           }
           return { ...reply, body };
         }
@@ -639,6 +644,8 @@ export class GithubRepositoryWatches {
       need(text.length <= 5000, 'CHANGE_BATCH_BOUND');
       await this.store.update((s) => {
         this.current(id, generation);
+        // Include final parsing, credential revalidation and time waiting for the state writer.
+        need(performance.now() - began < SCAN_BUDGET_MS, 'SCAN_TIMEOUT');
         const a = s.slots[id]!;
         a.failures = 0;
         delete a.lastError;

@@ -1,4 +1,5 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import { performance } from 'node:perf_hooks';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +12,7 @@ import type { ChatRoom, ChatMessage } from '../src/chatroom-store.js';
 import type { Reply, WatchConfig } from '../src/github-repository-watch-source.js';
 const dirs: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
 });
 const stamp = (t: number) => new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -427,3 +429,189 @@ it('revalidates the selected credential repository grant before each later HTTP 
   expect(f.service.status().watches[0]!.status.lastError).toBe('CREDENTIAL_REPOSITORY_REQUIRED');
   expect(f.messages).toHaveLength(0);
 });
+
+it('completes all seven CI pages and their consistency fence after 20 seconds within one 60-second budget', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  f.advance();
+  let elapsed = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+  const timeout = vi.spyOn(AbortSignal, 'timeout');
+  const rows = Array.from({ length: 697 }, (_, i) => f.run(i + 1, 1, i === 696 ? 'failure' : 'success'));
+  const paths: URL[] = [];
+  f.setFetch(async (url) => {
+    elapsed += 4000;
+    const path = new URL(url);
+    paths.push(path);
+    if (path.pathname.endsWith('/issues')) return reply([f.issue()]);
+    if (path.pathname.endsWith('/actions/runs')) {
+      const page = Number(path.searchParams.get('page') ?? 1);
+      return reply(
+        { total_count: rows.length, workflow_runs: rows.slice((page - 1) * 100, page * 100) },
+        page < 7 ? { link: '<fixed>; rel="next"' } : {}
+      );
+    }
+    return reply({ full_name: 'owner/repo', private: false });
+  });
+  await f.service.tick();
+  expect(elapsed).toBe(40000);
+  expect(timeout.mock.calls.map(([ms]) => ms)).toEqual(Array.from({ length: 10 }, (_, i) => 60000 - i * 4000));
+  const runPages = paths.filter((p) => p.pathname.endsWith('/actions/runs'));
+  expect(runPages.map((p) => p.searchParams.get('page') ?? '1')).toEqual(['1', '2', '3', '4', '5', '6', '7', '1']);
+  expect(new Set(runPages.map((p) => p.searchParams.get('created')))).toEqual(
+    new Set([stamp(f.now() - 31 * 86400000) + '..' + stamp(f.now())])
+  );
+  const slot = f.service.store.snapshot().slots.repo!;
+  expect(Object.keys(slot.scan.ciSeen)).toHaveLength(697);
+  expect(slot.scan.issueCursor).toBe(stamp(f.now()));
+  expect(slot.lastSuccessAt).toBe(f.now());
+  expect(slot.lastError).toBeUndefined();
+  expect(f.messages).toHaveLength(1);
+  expect(f.messages[0]!.text).toContain('/actions/runs/697');
+});
+
+it('holds all scan, success and delivery progress when the final response returns beyond the shared deadline', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  const before = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  let elapsed = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+  f.setFetch(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/issues')) return reply([f.issue()]);
+    if (path.endsWith('/actions/runs')) {
+      // A delayed event loop or non-cooperating fetch may return before its abort timer runs.
+      elapsed = 60001;
+      return reply({ total_count: 1, workflow_runs: [f.run()] });
+    }
+    return reply({ full_name: 'owner/repo', private: false });
+  });
+  await f.service.tick();
+  const after = f.service.store.snapshot().slots.repo!;
+  expect(after.lastError).toBe('SCAN_TIMEOUT');
+  expect(after.scan).toEqual(before.scan);
+  expect(after.lastSuccessAt).toBe(before.lastSuccessAt);
+  expect(after.baselineAt).toBe(before.baselineAt);
+  expect(after.ciCreatedSince).toBe(before.ciCreatedSince);
+  expect(after.pending).toBeUndefined();
+  expect(after.posts).toEqual(before.posts);
+  expect(after.failures).toBe(1);
+  expect(after.nextPollAt).toBeGreaterThan(f.now());
+  expect(f.messages).toHaveLength(0);
+});
+
+it('classifies an actual abort of its own remaining-deadline signal as SCAN_TIMEOUT', async () => {
+  const f = await fixture();
+  await f.configure();
+  let elapsed = 0,
+    calls = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+  const timeout = vi.spyOn(AbortSignal, 'timeout');
+  f.setFetch(async (_url, _headers, signal) => {
+    if (++calls === 1) {
+      elapsed = 59999;
+      return reply({ full_name: 'owner/repo', private: false });
+    }
+    return new Promise<Reply>((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  });
+  await f.service.tick();
+  expect(calls).toBe(2);
+  expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([60000, 1]);
+  expect(timeout.mock.results[1]!.value.aborted).toBe(true);
+  expect(f.service.status().watches[0]!.status.lastError).toBe('SCAN_TIMEOUT');
+  expect(f.service.status().watches[0]!.status.lastSuccessAt).toBeNull();
+  expect(f.messages).toHaveLength(0);
+});
+
+it('holds progress when final credential revalidation consumes the remaining scan budget', async () => {
+  const f = await fixture();
+  const token = await f.vault.create(
+    undefined,
+    { name: 'read', token: 'fixture-secret', repositories: ['owner/repo'] },
+    () => {}
+  );
+  await f.configure([{ ...f.cfg, credentialId: token.id }]);
+  await f.service.tick();
+  const before = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  let elapsed = 0,
+    fetchedLastPage = false;
+  vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+  const metadata = f.vault.metadata.bind(f.vault);
+  f.vault.metadata = async (owner) => {
+    const result = await metadata(owner);
+    if (fetchedLastPage) elapsed = 60001;
+    return result;
+  };
+  f.setFetch(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/issues')) return reply([f.issue()]);
+    if (path.endsWith('/actions/runs')) {
+      fetchedLastPage = true;
+      return reply({ total_count: 1, workflow_runs: [f.run()] });
+    }
+    return reply({ full_name: 'owner/repo', private: false });
+  });
+  await f.service.tick();
+  const after = f.service.store.snapshot().slots.repo!;
+  expect(after.lastError).toBe('SCAN_TIMEOUT');
+  expect(after.scan).toEqual(before.scan);
+  expect(after.lastSuccessAt).toBe(before.lastSuccessAt);
+  expect(after.pending).toBeUndefined();
+  expect(after.posts).toEqual(before.posts);
+  expect(f.messages).toHaveLength(0);
+});
+
+it('keeps unrelated fetch failures generic even when their error name claims a timeout', async () => {
+  const f = await fixture();
+  await f.configure();
+  f.setFetch(async (_url, _headers, signal) => {
+    expect(signal.aborted).toBe(false);
+    throw new DOMException('Unrelated transport failure', 'TimeoutError');
+  });
+  await f.service.tick();
+  expect(f.service.status().watches[0]!.status.lastError).toBe('GITHUB_UNAVAILABLE');
+  expect(f.service.status().watches[0]!.status.lastSuccessAt).toBeNull();
+  expect(f.messages).toHaveLength(0);
+});
+
+it.each(['configuration', 'credential'] as const)(
+  'rechecks %s authority after a page takes 40 seconds',
+  async (change) => {
+    const f = await fixture();
+    const token = await f.vault.create(
+      undefined,
+      { name: 'read', token: 'fixture-secret', repositories: ['owner/repo'] },
+      () => {}
+    );
+    const cfg = { ...f.cfg, visibility: 'private' as const, credentialId: token.id };
+    await f.configure([cfg]);
+    const before = f.service.store.snapshot().slots.repo!.scan;
+    const bytes = Buffer.from('fixture-secret');
+    f.vault.material = async () => bytes;
+    let elapsed = 0,
+      calls = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    f.setFetch(async (_url, headers) => {
+      calls++;
+      expect(headers.Authorization).toBe('Bearer fixture-secret');
+      elapsed = 40000;
+      if (change === 'configuration') await f.configure([{ ...cfg, enabled: false }]);
+      else await f.vault.update(undefined, token.id, { repositories: [] }, () => {});
+      return reply({ full_name: 'owner/repo', private: true });
+    });
+    await f.service.tick();
+    const slot = f.service.store.snapshot().slots.repo!;
+    expect(calls).toBe(1);
+    expect(slot.scan).toEqual(before);
+    expect(slot.lastSuccessAt).toBeUndefined();
+    expect(slot.lastError).toBe(change === 'credential' ? 'CREDENTIAL_REPOSITORY_REQUIRED' : undefined);
+    expect(bytes.every((n) => n === 0)).toBe(true);
+    expect(f.messages).toHaveLength(0);
+  }
+);
