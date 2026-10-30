@@ -12,13 +12,13 @@ const avatars = Array.from({ length: 50 }, (_, index) => {
   return { id, name: `Avatar ${index + 1}`, src: `/assets/avatars/${id}.png` };
 });
 const photo = 'data:image/png;base64,iVBORw0KGgo=';
-it('offers the original 50 and 50 new default avatars, excluding the retired people set while refusing out-of-pack IDs and mismatched sources', async () => {
+it('offers the original 50 and 50 new default avatars as small previews, excluding the withheld people set while refusing out-of-pack IDs and mismatched sources', async () => {
   const { h, fetch, mount, button } = await fixture({ random: false });
-  const expanded = JSON.parse(readFileSync(new URL('../src/web/public/assets/avatars/pack-manifest.json', import.meta.url), 'utf8')).avatars;
-  expect(expanded).toHaveLength(100);
+  const manifest = JSON.parse(readFileSync(new URL('../src/web/public/assets/avatars/pack-manifest.json', import.meta.url), 'utf8'));
+  const expanded = manifest.avatars;
+  expect(expanded).toHaveLength(151);
   fetch.mockImplementation(async (url: string) => url === '/assets/avatars/pack-manifest.json'
-    ? { ok: true, json: async () => ({ avatars: [...expanded,
-      { id: 'pack-101', name: 'Sly Jester', src: '/assets/avatars/pack-101.png' },
+    ? { ok: true, json: async () => ({ withheld: manifest.withheld, avatars: [...expanded,
       { id: 'pack-152', name: 'Outside pack', src: '/assets/avatars/pack-152.png' },
       { id: 'pack-51', name: 'Wrong source', src: 'https://outside.test/private.png' },
       { id: '../private', name: 'Traversal', src: '/assets/avatars/../private.png' },
@@ -31,7 +31,10 @@ it('offers the original 50 and 50 new default avatars, excluding the retired peo
   expect(dialog.textContent).not.toContain('Outside pack');
   expect(dialog.textContent).not.toContain('Wrong source');
   expect(dialog.querySelector('[aria-label="Use Sly Jester"]')).toBeNull();
-  expect(expanded.some((avatar: any) => Number(avatar.id.slice(5)) >= 51 && Number(avatar.id.slice(5)) <= 101)).toBe(false);
+  expect(dialog.querySelector('[aria-label="Use Star Navigator"]')).toBeNull();
+  const previews = [...dialog.querySelectorAll('.ca-expert-portraits img')].map(image => image.getAttribute('src'));
+  expect(previews).toHaveLength(100);
+  expect(previews.every(src => /^\/assets\/avatars\/thumbs\/pack-[0-9]{2,3}\.webp\?v=[a-f0-9]{64}$/.test(src!))).toBe(true);
   const last = dialog.querySelector('[aria-label="Use Merry Dragon"]') as HTMLButtonElement;
   last.click(); await h.flush();
   expect(fetch.mock.calls.some(call => call[0] === '/assets/avatars/pack-151.png')).toBe(true);
