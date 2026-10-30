@@ -1737,16 +1737,10 @@ class ReverieChatApp {
     const mutedBadge = this.el('span', 'ca-muted-badge', 'Muted');
     mutedBadge.hidden = true;
     mutedBadge.title = 'Channel notifications are muted';
-    // On or off; who is read ("Replies to me" or "Everyone") is chosen in the channel menu.
-    const speakBtn = this.button('ca-icon-btn ca-head-speak', 'Enable spoken replies in this room', () => {
-      this.app._setSpeakReplies?.(this.roomId, this.app._speakRepliesIn?.(this.roomId) ? 'off' : 'mine');
-      this.renderHeader();
-    }, { text: '🔊' });
     const moreBtn = this.button('ca-icon-btn ca-head-more', 'More actions', () => this.openHeaderMenu(moreBtn), { text: '⋯' });
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
-    speakBtn.hidden = true;
-    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, searchBtn, membersBtn, moreBtn);
+    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, pinsBtn, searchBtn, membersBtn, moreBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1764,7 +1758,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, searchBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
+      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, searchBtn, phoneBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -3857,6 +3851,7 @@ class ReverieChatApp {
     }
     to.hidden = true;
     to.value = '';
+    this.installVoice(els);
     // The send button shows once there is something to send (always on a touch screen, which has no Enter key).
     const sync = () => send.classList.toggle('has-text', input.value.trim() !== '' || (this.app._chatPending?.length ?? 0) > 0);
     input.addEventListener('input', sync);
@@ -3866,6 +3861,158 @@ class ReverieChatApp {
       input.placeholder = this.composerPlaceholder();
     };
     this.syncComposer();
+  }
+
+  /**
+   * Voice in one place: a labelled button beside Send shows what is happening (off, listening, speaking) and opens a
+   * panel with Talk (the existing push-to-talk), Listening mode, Spoken replies, Car mode and Stop. The same stored
+   * preferences and permissions are used; capture continues through the existing Talk and Listening mode handlers.
+   */
+  installVoice(els) {
+    const { send, mic } = els;
+    const voice = this.button('ca-voice-btn', 'Voice', () => (this.els.voicePanel ? this.closeVoicePanel() : this.openVoicePanel()), { text: 'Voice' });
+    voice.prepend(this.el('span', 'ca-voice-dot'));
+    voice.setAttribute('aria-haspopup', 'dialog');
+    voice.setAttribute('aria-expanded', 'false');
+    send.before(voice);
+    // Talk lives in the panel; between openings the mic keeps its bindings in a hidden holder.
+    const home = this.el('span', 'ca-voice-home');
+    home.hidden = true;
+    if (mic) home.append(mic);
+    // The room's hands-free mode select (hands-free.js) is a voice control too: it joins the panel with Talk.
+    if (this.app._hfButton) home.append(this.app._hfButton);
+    send.after(home);
+    this.els.voiceBtn = voice;
+    this.els.voiceHome = home;
+    const win = this.doc.defaultView;
+    if (!this._voiceTick && win?.setInterval) this._voiceTick = win.setInterval(() => this.syncVoice(), 500);
+    this.syncVoice();
+  }
+
+  /** What voice is doing now: the microphone is capturing, read-aloud is speaking, or nothing. */
+  voiceState() {
+    if (this.app._chatRecording || this.app._hfStream || this.app._chatDictation) return 'listening';
+    if (this.app._readAloud?.current) return 'speaking';
+    return 'off';
+  }
+
+  syncVoice() {
+    const voice = this.els.voiceBtn;
+    if (!voice) return;
+    const room = this.room;
+    voice.hidden = !room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
+    if (voice.hidden) this.closeVoicePanel();
+    const state = this.voiceState();
+    const label = { off: 'Off', listening: 'Listening', speaking: 'Speaking' }[state];
+    voice.dataset.state = state;
+    voice.setAttribute('aria-label', `Voice: ${label}`);
+    voice.title = `Voice: ${label}`;
+    let panel = this.els.voicePanel;
+    if (!panel) return;
+    // The panel belongs to the room it was opened in: another room closes it, and a change in that room's voice
+    // members rebuilds it, so no control acts on a room the panel is not showing.
+    if (panel.dataset.roomId !== room?.id) return this.closeVoicePanel();
+    if (panel.dataset.speaks !== String(caSpeaks(room))) {
+      this.openVoicePanel({ focus: false });
+      return;
+    }
+    panel.querySelector('.ca-voice-state').textContent = { off: 'Off', listening: 'Listening…', speaking: 'Speaking…' }[state];
+    panel.querySelector('.ca-voice-stop').hidden = state === 'off';
+    const mode = this.app._speakRepliesMode?.(room?.id) || 'off';
+    for (const b of panel.querySelectorAll('[data-speak-mode]')) b.setAttribute('aria-pressed', String(b.dataset.speakMode === mode));
+    const talk = panel.querySelector('.ca-voice-talk');
+    if (talk) talk.hidden = !this.app._chatEls?.mic || this.app._chatEls.mic.hidden;
+    const listen = panel.querySelector('.ca-voice-listen');
+    if (listen) listen.hidden = !this.app._hfButton || this.app._hfButton.hidden;
+  }
+
+  stopVoice() {
+    if (this.app._chatRecording || this.app._chatDictation) this.app._stopChatRecording?.();
+    // Hands-free would reopen its microphone on the next tick, so Stop chooses Off through its own control.
+    const hf = this.app._hfButton;
+    // A pending open counts too: choosing Off invalidates it, so a stream that arrives later is released.
+    if ((this.app._hfStream || this.app._hfOpening) && hf && [...hf.options].some(o => o.value === 'off')) {
+      hf.value = 'off';
+      hf.dispatchEvent(new this.doc.defaultView.Event('change', { bubbles: true }));
+    }
+    this.app._readAloud?.clear?.();
+    this.syncVoice();
+  }
+
+  openVoicePanel({ focus = true } = {}) {
+    const room = this.room;
+    if (!room || this.els.voiceBtn?.hidden) return;
+    this.closeMenus();
+    this.closeVoicePanel();
+    const panel = this.el('div', 'ca-voice-panel');
+    panel.dataset.roomId = room.id;
+    panel.dataset.speaks = String(caSpeaks(room));
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Voice');
+    const head = this.el('div', 'ca-voice-head');
+    const state = this.el('span', 'ca-voice-state');
+    state.setAttribute('role', 'status');
+    const stop = this.button('ca-btn ca-voice-stop', 'Stop listening or speaking', () => this.stopVoice(), { text: 'Stop' });
+    head.append(this.el('strong', '', 'Voice'), state, stop);
+    panel.append(head);
+    // Talk: the same push-to-talk, offered exactly where it was before (a voice member, not phone dictation).
+    const mic = this.app._chatEls?.mic;
+    if (mic) {
+      const talk = this.el('div', 'ca-voice-talk');
+      talk.append(this.el('span', 'ca-voice-label', 'Talk'), mic, this.el('span', 'ca-hint', 'Hold to talk, or tap to start and tap again to send.'));
+      panel.append(talk);
+    }
+    const hf = this.app._hfButton;
+    if (hf) {
+      const listen = this.el('label', 'ca-voice-listen');
+      listen.append(this.el('span', 'ca-voice-label', 'Listening mode'), hf);
+      panel.append(listen);
+    }
+    if (this.app._speakRepliesMode && this.app._setSpeakReplies) {
+      const replies = this.el('div', 'ca-voice-replies');
+      replies.setAttribute('role', 'group');
+      replies.setAttribute('aria-label', 'Spoken replies');
+      replies.append(this.el('span', 'ca-voice-label', 'Spoken replies'));
+      const choices = this.el('div', 'ca-voice-choices');
+      for (const [mode, label, said] of CA_READ_ALOUD_MODES) {
+        const b = this.button('ca-btn', `Spoken replies: ${label}`, () => {
+          if (this.room?.id !== room.id) return this.closeVoicePanel();
+          this.app._setSpeakReplies(room.id, mode);
+          this.toast(said, 'info');
+          this.syncVoice();
+        }, { text: label });
+        b.dataset.speakMode = mode;
+        choices.append(b);
+      }
+      replies.append(choices);
+      panel.append(replies);
+    }
+    if (caSpeaks(room) && this.app.openCarMode)
+      panel.append(this.button('ca-btn ca-voice-car', 'Car mode', () => { this.closeVoicePanel(); this.app.openCarMode(); }, { text: 'Car mode' }));
+    else panel.append(this.el('p', 'ca-hint', 'Car mode and Talk need a voice member in this channel.'));
+    this.app._chatEls.composer.append(panel);
+    this.els.voicePanel = panel;
+    this.els.voiceBtn.setAttribute('aria-expanded', 'true');
+    this._voiceDismiss = (ev) => { if (!panel.contains(ev.target) && !this.els.voiceBtn.contains(ev.target)) this.closeVoicePanel(); };
+    this._voiceKey = (ev) => { if (ev.key === 'Escape') { this.closeVoicePanel(); this.els.voiceBtn.focus(); } };
+    this.doc.addEventListener('pointerdown', this._voiceDismiss, true);
+    this.doc.addEventListener('keydown', this._voiceKey, true);
+    this.syncVoice();
+    if (focus) panel.querySelector('button:not([hidden])')?.focus();
+  }
+
+  closeVoicePanel() {
+    const panel = this.els.voicePanel;
+    if (!panel) return;
+    const mic = this.app._chatEls?.mic;
+    if (mic && this.els.voiceHome) this.els.voiceHome.append(mic);
+    if (this.app._hfButton && this.els.voiceHome) this.els.voiceHome.append(this.app._hfButton);
+    panel.remove();
+    this.els.voicePanel = null;
+    this.els.voiceBtn?.setAttribute('aria-expanded', 'false');
+    this._voiceDismiss && this.doc.removeEventListener('pointerdown', this._voiceDismiss, true);
+    this._voiceKey && this.doc.removeEventListener('keydown', this._voiceKey, true);
+    this._voiceDismiss = this._voiceKey = null;
   }
 
   /* ── replies ── */
@@ -6148,20 +6295,7 @@ class ReverieChatApp {
     if (!this.serverFeatures.search || this.embed || this.embassy?.selected) this.closeMessageSearch(false);
     const voiceControls = !!room && caSpeaks(room) && !this.embed && !this.embassy?.selected && !this.app._chatCreating;
     this.els.head?.classList.toggle('has-voice-controls', voiceControls);
-    if (this.els.speakBtn) {
-      // Read aloud is any room's choice (opt-in per room); car mode needs a voice member.
-      this.els.speakBtn.hidden = !room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
-      const mode = this.app._speakRepliesMode?.(room?.id) || 'off';
-      this.els.speakBtn.setAttribute('aria-pressed', String(mode !== 'off'));
-      this.els.speakBtn.dataset.mode = mode;
-      // The hover text says what a click does.
-      const label =
-        mode === 'off'
-          ? 'Enable spoken replies in this room'
-          : `Disable spoken replies in this room (now: ${mode === 'all' ? 'everyone' : 'replies to you'})`;
-      this.els.speakBtn.setAttribute('aria-label', label);
-      this.els.speakBtn.title = label;
-    }
+    this.syncVoice?.();
     headTitle.replaceChildren();
     headTopic.textContent = '';
     this.els.mutedBadge.hidden = true;
