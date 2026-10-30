@@ -2462,9 +2462,14 @@ export const ChatroomMessageSchema = z
     replyTo: z.string().uuid().optional(),
     /** Refuse rather than post as the user when the caller's agent session does not resolve. */
     requireAgent: z.boolean().optional(),
+    /** Opt-in crossing guard: refuse (409) instead of posting when someone else has posted after this message id. */
+    ifNoNewerThan: z.string().uuid().optional(),
+    /** Opt-in crossing guard against the caller's own last-seen mark in this room (agents only). */
+    ifLatest: z.literal(true).optional(),
   })
   .strict()
   .refine((v) => v.text.trim() !== '' || (v.attachments?.length ?? 0) > 0, 'Write something or attach a file')
+  .refine((v) => !(v.ifNoNewerThan && v.ifLatest), 'Use ifNoNewerThan or ifLatest, not both')
   .refine((v) => !v.spoken || v.text.trim() !== '', 'A spoken message needs a nonempty transcript');
 
 export const ChatroomPollSchema = z
