@@ -73,7 +73,7 @@ function isReactionEmoji(raw: string): boolean {
   );
 }
 import type { ChatroomService } from '../../chatroom-service.js';
-import { newerUnread, postWarnings } from '../../chatroom-warnings.js';
+import { messagesSince, newerUnread, postWarnings } from '../../chatroom-warnings.js';
 import type { SessionPort } from '../ports/session-port.js';
 import {
   canAccessOwned,
@@ -1382,6 +1382,34 @@ export function registerChatroomRoutes(
           text = rollCommand(text, from.name);
         } catch (e) {
           throw new ChatroomError((e as Error).message, 'INVALID_INPUT');
+        }
+      }
+      // Opt-in crossing guard. It runs after the route's last await, in the same tick as the post, so nothing can land
+      // between this check and the stored message. Without the fields the post behaves exactly as before.
+      if (body.ifNoNewerThan || body.ifLatest) {
+        const cursor = body.ifLatest ? (self ? service.lastSeen(self, id)?.messageId : undefined) : body.ifNoNewerThan;
+        if (!cursor) {
+          return reply.code(409).send({ success: false, errorCode: 'CHAT_NO_READ_MARK',
+            error: 'No read position in this room yet; read it, then post again' });
+        }
+        // One identity per writer: an agent by its session, a person by account (the owner when no humanId is set).
+        const writer = (f: ChatSender) => f.kind === 'agent' ? `agent:${f.sessionId}`
+          : f.kind === 'user' || f.kind === 'human' ? `person:${f.humanId ?? 'owner'}` : undefined;
+        const poster = writer(from);
+        const own = (by: ChatSender) => poster !== undefined && writer(by) === poster;
+        // The owner's cleared DM history stays cleared: hidden messages are neither a cursor nor listed. Agents keep all of it.
+        const all = service.room(id)?.messages ?? [];
+        const after = ownsHistoryView(req, room) ? service.ownerHistoryAfter(room, historyViewer(req)) : -1;
+        const newer = messagesSince(after < 0 ? all : all.filter((m) => m.at > after), cursor, own);
+        if (!newer || newer.length) {
+          const shown = (newer ?? []).slice(-5);
+          return reply.code(409).send({
+            success: false,
+            errorCode: 'CHAT_NEWER_MESSAGES',
+            error: newer ? `${newer.length} newer message${newer.length === 1 ? '' : 's'} arrived since you read; read them, then post again`
+              : 'That message is not in this room\'s recent history; read the room, then post again',
+            data: { newer: shown, more: (newer?.length ?? 0) > shown.length },
+          });
         }
       }
       const message = service.post(id, from, text, to, {

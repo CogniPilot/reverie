@@ -729,6 +729,16 @@ describe('option parsing', () => {
       'HTTP 403 Forbidden: host not allowed'
     );
   });
+
+  it('describeFailure never prints [object Object] and keeps a framework message', () => {
+    const nested = { status: 503, text: '', json: { success: false, errorCode: 'UNAVAILABLE', error: { message: 'chat store is restarting' } } } as unknown as ApiResponse;
+    expect(describeFailure(nested)).toBe('UNAVAILABLE: chat store is restarting (HTTP 503)');
+    const framework = { status: 503, text: '', json: { statusCode: 503, error: 'Service Unavailable', message: 'Server is shutting down' } } as unknown as ApiResponse;
+    expect(describeFailure(framework)).toBe('ERROR: Service Unavailable: Server is shutting down (HTTP 503)');
+    const opaque = { status: 500, text: '', json: { success: false, error: { code: 7 } } } as unknown as ApiResponse;
+    expect(describeFailure(opaque)).toBe('ERROR: {"code":7} (HTTP 500)');
+    for (const response of [nested, framework, opaque]) expect(describeFailure(response)).not.toContain('[object Object]');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
 const SESSION = '0000002d-0035-4000-8000-000000000047';
@@ -17,12 +17,28 @@ describe('compact header secondary actions', () => {
       harness.shell.toggleDrawer(null);
       more.click();
       const labels = [...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].map(item => item.textContent);
-      expect(labels).toEqual(['Add people to A long channel name for a narrow phone', 'Pinned messages', 'Install app and notifications', 'Notification settings']);
+      // Channel notification settings left the header with its bell button; they are in the channel menu.
+      expect(labels).toEqual(['Add people to A long channel name for a narrow phone', 'Pinned messages', 'Install app and notifications']);
       expect(labels).not.toContain('Show member list');
     } finally { harness.dom.window.close(); }
   });
 
-  it('runs the original invite and pin actions and anchors notifications to the visible More button', async () => {
+  it('keeps the install launcher out of the persistent header; the phone More menu still opens it', async () => {
+    for (const narrow of [false, true]) {
+      const harness = await createHarness({ rooms: fixtures(), narrow });
+      try {
+        expect(harness.document.querySelector('.ca-head .ca-head-phone')).toBeNull();
+        const open = vi.fn();
+        (harness.window as any).ReverieMobile = { open };
+        (harness.document.querySelector('.ca-head-more') as HTMLButtonElement).click();
+        const item = [...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].find(button => button.textContent === 'Install app and notifications') as HTMLButtonElement;
+        item.click();
+        expect(open).toHaveBeenCalledTimes(1);
+      } finally { harness.dom.window.close(); }
+    }
+  });
+
+  it('runs the original invite and pin actions and returns focus to the visible More button', async () => {
     const harness = await createHarness({ rooms: fixtures(), narrow: true });
     try {
       let invited = 0, pinned = 0;
@@ -37,8 +53,8 @@ describe('compact header secondary actions', () => {
       choose('Add people to A long channel name for a narrow phone');
       choose('Pinned messages');
       expect(invited).toBe(1); expect(pinned).toBe(1);
-      choose('Notification settings');
-      expect(harness.document.querySelector('[role="menu"][aria-label="Notification settings"]')).not.toBeNull();
+      more.click();
+      expect(harness.document.querySelector('.ca-head-menu')).not.toBeNull();
       harness.document.dispatchEvent(new harness.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       expect(harness.document.activeElement).toBe(more);
     } finally { harness.dom.window.close(); }
@@ -55,6 +71,18 @@ describe('compact header secondary actions', () => {
       harness.shell.renderHeader();
       more.click();
       expect([...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].map(item => item.textContent)).toEqual(['Install app and notifications']);
+    } finally { harness.dom.window.close(); }
+  });
+});
+
+describe('shared chat plugins', () => {
+  it('are not offered in the header More menu; Company settings is their one place', async () => {
+    const harness = await createHarness({ rooms: fixtures(), narrow: true });
+    try {
+      (harness.window as any).ReverieChatPlugins = { openSettings: async () => { throw new Error('Owner sign-in required'); } };
+      (harness.document.querySelector('.ca-head-more') as HTMLButtonElement).click();
+      const labels = [...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].map(item => item.textContent);
+      expect(labels).not.toContain('Chat plugins');
     } finally { harness.dom.window.close(); }
   });
 });

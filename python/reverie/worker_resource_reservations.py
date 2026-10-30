@@ -562,15 +562,24 @@ class ReservationGate:
             self._mutex.release()
 
     @contextmanager
-    def admission(self, sid=None, *, protected_start=None, deadline=None):
+    def admission(self, sid=None, *, protected_start=None, deadline=None, entry_deadline=None):
         # Global flock -> broker mutex -> journal flock is the only lock order.
         # No interactive viewer retains this lock after canonical launch settles.
-        with self._admission_mutex(deadline):
+        # A storage-lease waiter bounds re-entry, not later Nix preparation or
+        # provider startup. Explicit operation deadlines still span the body
+        # and finalizer, including protected one-shot starts.
+        bounds = [value for value in (deadline, entry_deadline) if value is not None]
+        for value in bounds:
+            need(type(value) in (int, float) and math.isfinite(value) and
+                 0 < value - time.monotonic() <= 3600,
+                 'RESERVATION_ADMISSION_DEADLINE')
+        entered_by = min(bounds) if bounds else None
+        with self._admission_mutex(entered_by):
             need(not getattr(self._local, 'depth', 0), 'RESERVATION_REENTRANT_ADMISSION')
             fd = os.open(self.root / 'admission.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self.native._local.deadline = deadline
+                self.native._local.deadline = entered_by
                 self._local.fd, self._local.depth = fd, 1
                 self._local.terminal_claim = None
                 self._local.completion_inspection = None
@@ -586,6 +595,9 @@ class ReservationGate:
                     self._local.start_boundary=_StartBoundary(protected_start)
                 if sid is not None:
                     self.check_launch(sid)
+                if entered_by is not None:
+                    need(time.monotonic() < entered_by, 'RESERVATION_ADMISSION_DEADLINE')
+                self.native._local.deadline = deadline
                 yield
                 claim = self._local.terminal_claim
                 boundary = self._local.preparation_boundary

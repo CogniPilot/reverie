@@ -609,7 +609,7 @@ it('keeps the existing dirty-edit confirmation before a read-only backdrop close
   overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
   expect(overlay.classList.contains('visible')).toBe(false);
 });
-it('plays MP4/WebM attachments inline and falls back to the preview card when the file is not a playable video', () => {
+it('plays MP4/QuickTime/WebM attachments inline and falls back to the preview card when the file is not a playable video', () => {
   const f = fixture();
   const mediaContext = vm.createContext({ ReverieApp: class {}, URL });
   vm.runInContext(file('chat-media.js'), mediaContext);
@@ -626,15 +626,18 @@ it('plays MP4/WebM attachments inline and falls back to the preview card when th
     roomId: 'room-a',
     attachments: [
       { id: 'clip', name: 'lap.mp4', type: 'video/mp4', size: 10 },
-      { id: 'other', name: 'lap.mov', type: 'video/quicktime', size: 10 },
+      { id: 'phone', name: 'lap.mov', type: 'video/quicktime', size: 10 },
+      { id: 'other', name: 'lap.avi', type: 'video/x-msvideo', size: 10 },
     ],
   });
-  const video = wrap.querySelector('video') as HTMLVideoElement;
+  const [video, phone] = [...wrap.querySelectorAll('video')] as HTMLVideoElement[];
+  expect(phone.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/phone'); // iPhone .mov plays in place too
   expect(video.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/clip');
   expect(video.controls).toBe(true);
   expect(video.preload).toBe('metadata');
-  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(1); // the .mov stays a card
+  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(1); // the .avi stays a card
   video.dispatchEvent(new f.dom.window.Event('error'));
+  phone.dispatchEvent(new f.dom.window.Event('error')); // e.g. HEVC the browser cannot decode
   expect(wrap.querySelector('video')).toBeNull();
-  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(2);
+  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(3);
 });

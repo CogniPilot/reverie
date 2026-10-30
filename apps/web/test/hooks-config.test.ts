@@ -375,6 +375,32 @@ describe('writeHooksConfig', () => {
     expect(serialized).not.toContain('REVERIE_BACKGROUND_REWAKE_V1');
   });
 
+  it('reports a context compaction start (PreCompact) and end (SessionStart compact), stdout discarded', () => {
+    const hooks = generateHooksConfig().hooks as Record<string, Array<{ matcher?: string; hooks: Array<{ command: string }> }>>;
+    const start = hooks.PreCompact[0].hooks[0].command;
+    expect(start).toContain('compact_started');
+    expect(start).toContain('-o /dev/null');
+    const end = hooks.SessionStart.find((entry) => entry.matcher === 'compact')!.hooks[0].command;
+    expect(end).toContain('compact_finished');
+    expect(end).toContain('-o /dev/null');
+  });
+
+  it('heals a hooks block written before compaction reporting existed, once', async () => {
+    const claudeDir = join(testDir, '.claude');
+    const settingsPath = join(claudeDir, 'settings.local.json');
+    mkdirSync(claudeDir, { recursive: true });
+    const oldHooks = generateHooksConfig().hooks as Record<string, unknown[]>;
+    delete oldHooks.PreCompact;
+    oldHooks.SessionStart = oldHooks.SessionStart.slice(0, 1);
+    writeFileSync(settingsPath, JSON.stringify({ hooks: oldHooks }, null, 2));
+    await refreshStaleReverieHooks(testDir);
+    const healed = readFileSync(settingsPath, 'utf-8');
+    expect(healed).toContain('compact_started');
+    expect(healed).toContain('compact_finished');
+    await refreshStaleReverieHooks(testDir);
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(healed); // current hooks are not rewritten again
+  });
+
   it('heals a hooks block written before UserPromptSubmit existed', async () => {
     const claudeDir = join(testDir, '.claude');
     const settingsPath = join(claudeDir, 'settings.local.json');

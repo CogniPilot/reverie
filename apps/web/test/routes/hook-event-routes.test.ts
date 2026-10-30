@@ -98,6 +98,22 @@ describe('hook-event-routes', () => {
       );
     });
 
+    it('shows compacting only on the harness report and clears it on the end report, a stop or a prompt', async () => {
+      const post = (event: string) => harness.app.inject({ method: 'POST', url: '/api/hook-event',
+        payload: { event, sessionId: harness.ctx._sessionId, data: null } });
+      const session = harness.ctx.sessions.get(harness.ctx._sessionId) as unknown as { compactingSince: number | null; mode: string };
+      session.mode = 'claude';
+      expect((await post('compact_started')).statusCode).toBe(200);
+      expect(session.compactingSince).toEqual(expect.any(Number));
+      expect(harness.ctx.persistSessionState).toHaveBeenCalled();
+      for (const end of ['compact_finished', 'stop', 'prompt_submitted']) {
+        await post('compact_started'); expect(session.compactingSince).not.toBeNull();
+        await post(end); expect(session.compactingSince).toBeNull();
+      }
+      session.mode = 'shell'; // no hooks for this mode: a forged report changes nothing
+      await post('compact_started'); expect(session.compactingSince).toBeNull();
+    });
+
     it('sends push notifications for hook events', async () => {
       const res = await harness.app.inject({
         method: 'POST',

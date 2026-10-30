@@ -139,7 +139,7 @@ it('keeps identical display names in separate message groups and displays the hu
   const heads = h.document.querySelectorAll('.ca-msg.is-head');
   expect(heads).toHaveLength(2);
   expect(heads[0].querySelector('.ca-tag')!.textContent).toBe('Owner');
-  expect(heads[1].querySelector('.ca-tag')!.textContent).toBe('Limited');
+  expect(heads[1].querySelector('.ca-tag')!.textContent).toBe('Guest');
 });
 
 it('returns from the embedded People page only for its own same-origin back message', async () => {

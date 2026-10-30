@@ -64,7 +64,11 @@ export interface PlanRequestPort {
     write(value: { requestId: string; sessionId: string; nonce: string }): Promise<string>;
     remove(sessionId: string, id: string): Promise<void>;
   };
-  notify(record: PlanRequestView, file: string, allowed: () => boolean): Promise<void>;
+  /**
+   * Deliver the request. `expiredUnseen` is evaluated the moment delivery stops waiting: it is true only when the request
+   * ended by running out of time while still pending, authorized and bound, never for a cancellation or lost authority.
+   */
+  notify(record: PlanRequestView, file: string, allowed: () => boolean, expiredUnseen?: () => boolean): Promise<void>;
   audit(entry: Record<string, unknown>): Promise<void>;
   now?(): number;
 }
@@ -80,6 +84,9 @@ const view = (record: PlanRequestRecord): PlanRequestView => {
 export class PlanMoveRequests {
   private records = new Map<string, PlanRequestRecord>();
   private executions = new Map<string, PlanRequestExecution>();
+  /** Which issue of a request is current; unlike executions it survives revoke, so an earlier delivery stays retired. */
+  private issues = new Map<string, number>();
+  private issued = 0;
   private initialized?: Promise<void>;
   private chain: Promise<unknown> = Promise.resolve();
   constructor(private readonly port: PlanRequestPort) {}
@@ -179,6 +186,8 @@ export class PlanMoveRequests {
     });
   }
   private async issue(record: PlanRequestRecord, execution: PlanRequestExecution): Promise<void> {
+    const generation = ++this.issued;
+    this.issues.set(record.id, generation);
     const nonce = randomBytes(32).toString('hex');
     record.nonceHash = hash(nonce);
     record.phase = 'pending';
@@ -198,8 +207,17 @@ export class PlanMoveRequests {
         execution.authorized() &&
         this.port.binding(record.employeeId, record.owner) === record.sessionId &&
         this.now() < record.expiresAt;
+      // Why delivery ended, decided from the request's own state rather than a later clock: everything still valid
+      // except the deadline. 'expired' is set only by the deadline; cancellation, a session change and lost owner
+      // authority each fail one of the other checks.
+      const expiredUnseen = () =>
+        this.issues.get(record.id) === generation &&
+        (record.phase === 'expired' || (record.phase === 'pending' && this.executions.get(record.id) === execution)) &&
+        execution.authorized() &&
+        this.port.binding(record.employeeId, record.owner) === record.sessionId &&
+        this.now() >= record.expiresAt;
       void this.port
-        .notify(view(record), file, allowed)
+        .notify(view(record), file, allowed, expiredUnseen)
         .then(
           () =>
             this.serial(async () => {
@@ -267,6 +285,7 @@ export class PlanMoveRequests {
         const old = [...this.records.values()].find((record) => !active(record.phase));
         if (!old) throw new PlanMoveError('Resolve pending requests before creating more');
         this.records.delete(old.id);
+        this.issues.delete(old.id);
       }
       const record: PlanRequestRecord = {
         ...input,

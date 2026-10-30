@@ -5,9 +5,9 @@ import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
 export type PowerAction = 'stop-laptops' | 'shutdown' | 'restart-website';
-export async function laptopPower(action: PowerAction | 'status', caller?: string): Promise<Record<string, unknown>> {
+export async function laptopPower(action: PowerAction | 'status' | 'provider-health', caller?: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const args = ['--control', action, ...(caller ? ['--caller-session', caller] : [])];
-  const { stdout } = await execute('reverie-worker-exec', args, { timeout: 120_000, maxBuffer: 64 * 1024 });
+  const { stdout } = await execute('reverie-worker-exec', args, { timeout: action === 'provider-health' ? 25_000 : 120_000, maxBuffer: 64 * 1024, ...(signal ? { signal } : {}) });
   return JSON.parse(stdout);
 }
 

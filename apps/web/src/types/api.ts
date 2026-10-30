@@ -114,6 +114,9 @@ export type HookEventType =
   // LIVE conversation id, reported by the CLI process itself, so it survives a
   // `/clear` without any cwd/timestamp correlation.
   | 'prompt_submitted'
+  // Claude Code's PreCompact (a context compaction is starting) and SessionStart with source "compact" (it ended).
+  | 'compact_started'
+  | 'compact_finished'
   // No Claude Code hook behind this one: it is the DeepSeek status bridge's
   // "a turn STARTED" report (see deepseek-status-shim.ts). Keep in step with
   // HookEventSchema in web/schemas.ts.

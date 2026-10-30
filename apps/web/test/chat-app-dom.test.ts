@@ -1612,6 +1612,23 @@ describe('create channel', () => {
     ]);
   });
 
+  it('names members by their employee display name, keeping the session name beside it', async () => {
+    const company = { employees: [{ id: 'e-alpha', name: 'Alex Rivera', sessionId: A }], settings: {}, canManage: true };
+    const h = await createHarness({ sessions: S, rooms: rs(), company });
+    (h.document.querySelector('.ca-cat-add') as HTMLElement).click();
+    const dlg = h.document.querySelector('.ca-create') as HTMLDialogElement;
+    expect([...dlg.querySelectorAll('.ca-create-member .ca-name')].map((e) => e.textContent)).toEqual(['Alex Rivera', 'bravo']);
+    const subs = [...dlg.querySelectorAll('.ca-create-member .ca-invite-sub')].map((e) => e.textContent);
+    expect(subs[0]).toContain('alpha');
+    expect(subs[1]).not.toContain('bravo');
+    for (const box of dlg.querySelectorAll('.ca-create-member input')) {
+      (box as HTMLInputElement).checked = true;
+      box.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+    }
+    const coord = dlg.querySelector('select') as HTMLSelectElement;
+    expect([...coord.options].map((o) => o.textContent)).toEqual(['No admin (I direct them)', 'Alex Rivera', 'bravo']);
+  });
+
   it('creates a text channel with members and a coordinator, placed in its category', async () => {
     const h = await createHarness({ sessions: S, rooms: rs() });
     (h.document.querySelector('.ca-cat-add') as HTMLElement).click();
@@ -4246,7 +4263,7 @@ describe('the Board entry', () => {
 
 
 describe('visible mobile voice controls', () => {
-  it('shows labelled header actions only in a voice room and toggles read aloud', async () => {
+  it('puts voice in one labelled Voice control beside Send: spoken replies, Car mode only with a voice member, no header speaker', async () => {
     const rooms = fixtureRooms();
     rooms[0].members[0].voice = true;
     const h = await createHarness({ sessions, rooms });
@@ -4264,37 +4281,160 @@ describe('visible mobile voice controls', () => {
       },
     });
     h.shell.renderHeader();
-    const speak = h.document.querySelector('.ca-head-speak') as HTMLButtonElement;
+    expect(h.document.querySelector('.ca-head-speak')).toBeNull();
     expect(h.document.querySelector('.ca-head-car')).toBeNull();
-    expect(speak.hidden).toBe(false);
-    expect(speak.title).toBe('Enable spoken replies in this room');
-    speak.click();
-    expect([...modes]).toEqual([[rooms[0].id, 'mine']]); // only this room, starting at "Replies to me"
-    expect(speak.getAttribute('aria-pressed')).toBe('true');
-    expect(speak.title).toBe('Disable spoken replies in this room (now: replies to you)');
-    expect(speak.getAttribute('aria-label')).toBe('Disable spoken replies in this room (now: replies to you)');
-    modes.set(rooms[0].id, 'all');
-    h.shell.renderHeader();
-    expect(speak.title).toBe('Disable spoken replies in this room (now: everyone)');
-    speak.click();
+    const voice = h.document.querySelector('.ca-voice-btn') as HTMLButtonElement;
+    expect(voice.hidden).toBe(false);
+    expect(voice.textContent).toBe('Voice');
+    expect(voice.nextElementSibling?.classList.contains('chatroom-send') || voice.parentElement!.querySelector('.chatroom-send')).toBeTruthy();
+    expect(voice.getAttribute('aria-label')).toBe('Voice: Off');
+    voice.click();
+    const panel = h.document.querySelector('.ca-voice-panel')!;
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(voice.getAttribute('aria-expanded')).toBe('true');
+    const choice = (label: string) => panel.querySelector(`[aria-label="Spoken replies: ${label}"]`) as HTMLButtonElement;
+    expect(choice('Off').getAttribute('aria-pressed')).toBe('true');
+    choice('Replies to me').click();
+    expect([...modes]).toEqual([[rooms[0].id, 'mine']]); // only this room
+    expect(choice('Replies to me').getAttribute('aria-pressed')).toBe('true');
+    choice('Everyone').click();
+    expect(modes.get(rooms[0].id)).toBe('all');
+    choice('Off').click();
     expect(modes.size).toBe(0);
-    expect(speak.title).toBe('Enable spoken replies in this room');
-    expect(cars).toBe(0); // Voice replaces the competing Car header button.
-    // The channel menu chooses who is read: Off, Replies to me, Everyone.
+    (panel.querySelector('.ca-voice-car') as HTMLButtonElement).click();
+    expect(cars).toBe(1);
+    expect(h.document.querySelector('.ca-voice-panel')).toBeNull();
+    // The channel menu still offers the same read-aloud settings.
     const menu = h.shell.channelEntries(rooms[0]).find((e: { label?: string }) => e.label === 'Read aloud');
     expect(menu.sub.map((e: { label: string; checked: boolean }) => [e.label, e.checked])).toEqual([
       ['Off', true],
       ['Replies to me', false],
       ['Everyone', false],
     ]);
-    menu.sub[2].run();
-    expect(modes.get(rooms[0].id)).toBe('all');
-    expect(speak.title).toBe('Disable spoken replies in this room (now: everyone)');
-    modes.clear();
-    // Read aloud is any room's choice; car mode needs a voice member.
+    // Read aloud is any room's choice; Car mode needs a voice member.
     await h.shell.selectRoom('r3');
-    expect(speak.hidden).toBe(false);
-    expect(h.document.querySelector('.ca-head-car')).toBeNull();
+    expect(voice.hidden).toBe(false);
+    voice.click();
+    expect(h.document.querySelector('.ca-voice-panel .ca-voice-car')).toBeNull();
+    expect(h.document.querySelector('.ca-voice-panel [aria-label="Spoken replies: Everyone"]')).not.toBeNull();
+    h.document.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(h.document.querySelector('.ca-voice-panel')).toBeNull();
+  });
+
+  it('shows what voice is doing and stops it: listening ends capture, speaking ends playback', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    let stopped = 0, cleared = 0;
+    Object.assign(h.app, { _speakRepliesMode: () => 'off', _setSpeakReplies: () => {}, _stopChatRecording: () => { stopped++; h.app._chatRecording = false; } });
+    const voice = h.document.querySelector('.ca-voice-btn') as HTMLButtonElement;
+    voice.click();
+    const panel = h.document.querySelector('.ca-voice-panel')!;
+    const stop = panel.querySelector('.ca-voice-stop') as HTMLButtonElement;
+    expect(panel.querySelector('.ca-voice-state')!.textContent).toBe('Off');
+    expect(stop.hidden).toBe(true);
+    h.app._chatRecording = true;
+    h.shell.syncVoice();
+    expect(voice.dataset.state).toBe('listening');
+    expect(voice.getAttribute('aria-label')).toBe('Voice: Listening');
+    expect(panel.querySelector('.ca-voice-state')!.textContent).toBe('Listening…');
+    stop.click();
+    expect(stopped).toBe(1);
+    h.app._readAloud = { current: {}, clear() { cleared++; this.current = null; } };
+    h.shell.syncVoice();
+    expect(voice.dataset.state).toBe('speaking');
+    expect(stop.hidden).toBe(false);
+    stop.click();
+    expect(cleared).toBe(1);
+    expect(voice.dataset.state).toBe('off');
+  });
+
+  it('moves the existing push-to-talk into the panel and back, keeping its bindings', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    const mic = h.app._chatEls.mic as HTMLButtonElement;
+    mic.hidden = false;
+    let pressed = 0;
+    mic.addEventListener('click', () => pressed++);
+    expect(mic.closest('.ca-voice-home')).not.toBeNull();
+    (h.document.querySelector('.ca-voice-btn') as HTMLButtonElement).click();
+    const talk = h.document.querySelector('.ca-voice-panel .ca-voice-talk') as HTMLElement;
+    expect(talk.contains(mic)).toBe(true);
+    h.shell.syncVoice();
+    expect(talk.hidden).toBe(false);
+    mic.click();
+    expect(pressed).toBe(1);
+    h.shell.closeVoicePanel();
+    expect(mic.closest('.ca-voice-home')).not.toBeNull();
+    mic.hidden = true;
+    (h.document.querySelector('.ca-voice-btn') as HTMLButtonElement).click();
+    h.shell.syncVoice();
+    expect((h.document.querySelector('.ca-voice-panel .ca-voice-talk') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('belongs to the room it was opened in: another room closes it, a voice-member change rebuilds it', async () => {
+    const rooms = fixtureRooms();
+    rooms[0].members[0].voice = true;
+    const h = await createHarness({ sessions, rooms });
+    const calls: string[][] = [];
+    Object.assign(h.app, {
+      _speakRepliesMode: () => 'off',
+      _setSpeakReplies: (id: string, mode: string) => calls.push([id, mode]),
+      openCarMode: () => {},
+    });
+    const voice = h.document.querySelector('.ca-voice-btn') as HTMLButtonElement;
+    voice.click();
+    const first = h.document.querySelector('.ca-voice-panel')!;
+    const mine = first.querySelector('[data-speak-mode="mine"]') as HTMLButtonElement;
+    expect(first.querySelector('.ca-voice-car')).not.toBeNull();
+    await h.shell.selectRoom('r3');
+    expect(h.document.querySelector('.ca-voice-panel')).toBeNull();
+    expect(voice.getAttribute('aria-expanded')).toBe('false');
+    mine.click(); // a control kept from the old panel changes nothing
+    expect(calls).toEqual([]);
+    await h.shell.selectRoom(rooms[0].id);
+    voice.click();
+    const before = h.document.querySelector('.ca-voice-panel')!;
+    expect(before.querySelector('.ca-voice-car')).not.toBeNull();
+    h.shell.room.members[0].voice = false;
+    h.shell.renderHeader();
+    const rebuilt = h.document.querySelector('.ca-voice-panel')!;
+    expect(rebuilt).not.toBe(before);
+    expect(rebuilt.querySelector('.ca-voice-car')).toBeNull();
+    (rebuilt.querySelector('[data-speak-mode="mine"]') as HTMLButtonElement).click();
+    expect(calls).toEqual([[rooms[0].id, 'mine']]);
+  });
+
+  it('Stop also cancels a hands-free microphone that is still opening, and releases it when it arrives', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    h.window.eval(readFileSync(resolve(import.meta.dirname, '../src/web/public/hands-free.js'), 'utf8'));
+    Object.assign(h.app, { _speakRepliesMode: () => 'off', _setSpeakReplies: () => {}, _hfGesture: () => {}, _hfTick: () => {}, _diag: () => {} });
+    h.app._buildHandsFree(h.app._chatEls.mic);
+    const select = h.app._hfButton as HTMLSelectElement;
+    select.replaceChildren();
+    for (const value of ['off', 'panel']) {
+      const option = h.document.createElement('option');
+      option.value = value;
+      select.append(option);
+    }
+    select.value = 'panel';
+    h.app._setRoomVoiceMode('panel');
+    h.app._hfOff = () => (h.app._roomVoiceMode() === 'off' ? 'off' : '');
+    let arrive!: (stream: unknown) => void;
+    const asked = new Promise((r) => (arrive = r));
+    Object.defineProperty(h.window.navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => asked } });
+    const track = { stop: vi.fn() };
+    h.window.AudioContext = class {
+      state = 'running';
+      createAnalyser() { return { fftSize: 1024 }; }
+      createMediaStreamSource() { return { connect() {} }; }
+    };
+    h.app._readAloud = { current: {}, clear() { this.current = null; } };
+    const opening = h.app._hfOpen();
+    expect(h.app._hfOpening).toBe(true);
+    h.shell.stopVoice();
+    expect(select.value).toBe('off');
+    arrive({ getTracks: () => [track] });
+    await opening;
+    expect(h.app._hfStream ?? null).toBeNull();
+    expect(track.stop).toHaveBeenCalledOnce();
   });
 });
 

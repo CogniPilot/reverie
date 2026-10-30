@@ -1,3 +1,4 @@
+import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
 import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
@@ -12,6 +13,7 @@ import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopPower, registerLaptopPowerRoutes, stopLaptopAgent } from './routes/laptop-power-routes.js';
+import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
 import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
@@ -249,6 +251,8 @@ import { isBoardCoordinator } from '../board-permissions.js';
 import { PublicationCredentialVault } from '../publication-credentials.js';
 import { registerPublicationRoutes } from './routes/publication-routes.js';
 import { registerEmployeeContextRoutes } from './routes/employee-context-routes.js';
+import { registerEmployeeJournalRoutes } from './routes/employee-journal-routes.js';
+import { EmployeeJournalStore } from '../employee-journal.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
@@ -461,6 +465,7 @@ export class WebServer extends EventEmitter {
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
   private workerViewerReconnect?: WorkerViewerReconnect;
+  private workerProviderHealth?: WorkerProviderHealth;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -1457,6 +1462,8 @@ export class WebServer extends EventEmitter {
       deferDeliveryRecovery: true,
       files: chatroomFiles,
       getSession: (id) => this.sessions.get(id),
+      providerHealth: (id, owner) => this.workerProviderHealth?.read(id, { owner }),
+      workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       broadcast: (event, data) => this.broadcast(event, data),
       // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
@@ -1502,6 +1509,13 @@ export class WebServer extends EventEmitter {
     this.chatBackup.start();
     const companyStore = new CompanyStore(canonicalCompanyFile);
     await companyStore.init();
+    registerCommandFailureRoutes(this.app, {
+      verifiedOwner,
+      employees: () => {
+        const snapshot = companyStore.snapshot();
+        return [...snapshot.employees, ...snapshot.retired].map(({ id, owner }) => ({ id, owner }));
+      },
+    });
     registerHealthMetadataProviderRoutes(this.app, {
       authorized: (req, id) =>
         verifiedOwner(req) && !!this.sessions.get(id) && this.sessions.get(id)!.owner === ownerFor(req),
@@ -1526,6 +1540,8 @@ export class WebServer extends EventEmitter {
       goalAuthentication: goalBoundary.authentication,
       servicePurposes: serviceConfig?.purposes,
       getSession: (id) => this.sessions.get(id),
+      providerHealth: (employee) => this.workerProviderHealth?.read(employee),
+      workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       runtimeRecipeOf: (id) => {
         const session = this.sessions.get(id);
         return session ? expertRuntimeRecipe(session) : undefined;
@@ -1577,6 +1593,17 @@ export class WebServer extends EventEmitter {
         }
         this.persistSessionState(session);
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+      },
+    });
+    this.workerProviderHealth = new WorkerProviderHealth({
+      employees: () => this.companyService.registeredEmployees(),
+      query: signal => laptopPower('provider-health', undefined, signal),
+      changed: () => {
+        this.cachedSessionsList = null;
+        for (const session of this.sessions.values())
+          this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+        for (const owner of new Set(this.companyService.registeredEmployees().map(e => e.owner)))
+          this.broadcast(SseEvent.ChatroomChanged, { owner: owner ?? '@single', roomId: '', action: 'profile' });
       },
     });
     goalBoundary.attach(this.companyService, {
@@ -1704,6 +1731,16 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
+    });
+    // Opened on first use, in its own file beside the chat database.
+    let employeeJournal: EmployeeJournalStore | undefined;
+    this.app.addHook('onClose', async () => employeeJournal?.close());
+    registerEmployeeJournalRoutes(this.app, ctx, {
+      verifiedOwner,
+      agentSession: currentAgentSession,
+      company: owner => this.companyService.view(owner),
+      journal: () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db'))),
+      visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
     registerCompanyRoutes(
@@ -2247,7 +2284,12 @@ export class WebServer extends EventEmitter {
         write: value => planRequestCapabilities.write(value),
         remove: (sessionId, requestId) => planRequestCapabilities.remove(sessionId, requestId),
       },
-      notify: (record, _file, allowed) => deliverPlanRequest(record, this.chatroomService, allowed),
+      notify: (record, _file, allowed, expiredUnseen) => deliverPlanRequest(record, this.chatroomService, allowed, undefined, {
+        expiredUnseen,
+        // Multi-user alerts reach every admin, so an expired request is reported only where one owner holds the plans.
+        ownerAlert: (text) => isMultiUserMode() ? undefined
+          : sendOwnerAlert(this.pushStore, text, { multiUser: false, title: 'Plan move expired', timeoutMs: 5000 }),
+      }),
       audit: entry => this.chatroomService.auditEntry(entry),
     });
     registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
@@ -3452,6 +3494,8 @@ export class WebServer extends EventEmitter {
     const controller = this.respawnControllers.get(session.id);
     return {
       ...session.toLightDetailedState(),
+      providerHealth: this.workerProviderHealth?.read(session.id, { owner: session.owner }),
+      viewerHealth: viewerHealth(session),
       respawnEnabled: controller?.getConfig()?.enabled ?? false,
       respawnConfig: controller?.getConfig() ?? null,
       respawn: controller?.getStatus() ?? null,
@@ -4221,6 +4265,10 @@ export class WebServer extends EventEmitter {
     if (!this.testMode) {
       this.embassyGuestClient.start();
       this.embassyPairing.start();
+      if (process.env.REVERIE_WORKER_SOCKET) {
+        void this.workerProviderHealth?.refresh();
+        this.cleanup.setInterval(() => void this.workerProviderHealth?.refresh(), 5_000, { description: 'Read-only native command health' });
+      }
       const tickCompany = () =>
         this.companyService
           .tick()
@@ -5254,6 +5302,7 @@ export class WebServer extends EventEmitter {
 
   async stop(): Promise<void> {
     this.companyWakeReady = false;
+    this.workerProviderHealth?.close();
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });

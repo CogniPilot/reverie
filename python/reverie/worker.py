@@ -767,7 +767,7 @@ class Broker:
             from reverie.browser_job_requests import BrowserJobRequests
             self.browser_jobs = BrowserJobRequests(self,config['browserJobPolicy'])
 
-    def resource_admission(self, sid=None, *, protected_start=None, deadline=None):
+    def resource_admission(self, sid=None, *, protected_start=None, deadline=None, entry_deadline=None):
         if self.resource_reservations is None:
             if protected_start is not None:
                 raise ValueError('Protected resource admission is unavailable')
@@ -776,8 +776,9 @@ class Broker:
             if configured(self.config):
                 raise ValueError('Resource reservation control requires reconciliation')
             return nullcontext()
-        if deadline is not None:
-            return self.resource_reservations.admission(sid,protected_start=protected_start,deadline=deadline)
+        if deadline is not None or entry_deadline is not None:
+            return self.resource_reservations.admission(sid,protected_start=protected_start,
+                                                       deadline=deadline,entry_deadline=entry_deadline)
         return self.resource_reservations.admission(sid,protected_start=protected_start)
 
     def _release_resource_admission(self, guard):
@@ -1527,6 +1528,19 @@ class Broker:
         if action == 'status':
             with self.lock:
                 return {'runningLaptops': len(self.laptops), 'runningSessionIds': self.running_sessions(), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
+        if action == 'provider-health':
+            empty = {'version': 1, 'purpose': 'worker-provider-health-v1', 'providers': []}
+            # Observations never queue behind a lifecycle mutation or shutdown.
+            if self.stopping.is_set() or not self.lock.acquire(blocking=False):
+                return {'providerHealth': empty}
+            try:
+                if not hasattr(self, '_provider_health_observer'):
+                    from .worker_provider_health import ProviderHealthObserver
+                    self._provider_health_observer = ProviderHealthObserver(self)
+                observer = self._provider_health_observer
+            finally:
+                self.lock.release()
+            return {'providerHealth': observer.read()}
         if action not in ['stop-laptops', 'shutdown', 'restart-website']:
             raise ValueError('Unknown office power action')
         if action in ['stop-laptops', 'shutdown']:
@@ -1662,6 +1676,22 @@ class Broker:
                 result = self.goals.project(projection, peer)
                 send_frame(connection, b'J', json.dumps(result).encode())
                 return
+            if kind == b'T':
+                # This socket is console/host-only and is never a laptop mount.
+                # Browser owner checks remain mandatory in the separate API.
+                try:
+                    from reverie.command_failure_reports import report_request, build_report
+                    employees = report_request(raw)
+                    if not self.command_telemetry.report_lock.acquire(blocking=False):
+                        raise ValueError('TELEMETRY_REPORT_UNAVAILABLE')
+                    try:
+                        result = build_report(self.command_telemetry, employees)
+                    finally:
+                        self.command_telemetry.report_lock.release()
+                except Exception:
+                    raise ValueError('TELEMETRY_REPORT_REFUSED') from None
+                send_frame(connection, b'J', json.dumps(result, separators=(',', ':')).encode())
+                return
             if kind == b'C':
                 control = json.loads(raw)
                 from reverie.worker_resume import ACTIONS as resume_actions
@@ -1696,6 +1726,8 @@ class Broker:
                         raise ValueError('Invalid stop-agent request')
                     send_frame(connection, b'J', json.dumps(self.stop_agent(control['sessionId'])).encode())
                     return
+                if isinstance(control, dict) and control.get('action') == 'provider-health' and set(control) != {'action'}:
+                    raise ValueError('Closed read-only provider health request required')
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
                     raise ValueError('Invalid office power request')
                 result = self.control(control['action'], control.get('caller'))
@@ -1765,7 +1797,7 @@ class Broker:
                     if protected_start is None:
                         if time.monotonic()>=storage_deadline:raise RuntimeError('Previous employee laptop has not released its data')
                         waited=True;wait_current()
-                        pending_guard=self.resource_admission(session_id,deadline=storage_deadline)
+                        pending_guard=self.resource_admission(session_id,entry_deadline=storage_deadline)
                         pending_guard.__enter__();resource_guard=pending_guard
             with self.lock:
                 if waited:wait_current()
@@ -2302,6 +2334,13 @@ def client(args):
     info = Path(path).lstat()
     if not stat.S_ISSOCK(info.st_mode) or info.st_mode & 0o077:
         raise ValueError('Worker socket is unavailable or not private')
+    if (getattr(args, 'command_failure_report', False) and
+            any((getattr(args, 'goal_custody', False), args.control, args.caller_session,
+                 args.attach_only, args.session_id, args.cwd, args.command,
+                 getattr(args, 'resource_ref', None) is not None))):
+        raise ValueError('TELEMETRY_REPORT_REFUSED')
+    if getattr(args, 'employee_id', None) and not getattr(args, 'command_failure_report', False):
+        raise ValueError('TELEMETRY_REPORT_REFUSED')
     resource_ref=getattr(args,'resource_ref',None)
     if resource_ref is not None:
         if (not SESSION.fullmatch(resource_ref) or args.attach_only or args.control or
@@ -2310,6 +2349,20 @@ def client(args):
     if getattr(args, 'goal_custody', False):
         from reverie.goal_custody_client import project
         return project(args)
+    if getattr(args, 'command_failure_report', False):
+        from reverie.command_failure_reports import selected_employees, decode_report
+        employees = selected_employees(args.employee_id or [])
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(3)
+            connection.connect(path)
+            send_frame(connection, b'T', json.dumps({'v': 1, 'action': 'command-failures',
+                                                   'employee_ids': employees}).encode())
+            kind, payload = receive_frame(connection)
+            if kind != b'J':
+                raise ValueError('TELEMETRY_REPORT_UNAVAILABLE')
+            value = decode_report(payload, employees)
+            print(json.dumps(value, separators=(',', ':')))
+        return 0
     if args.control:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(120)
@@ -2408,8 +2461,10 @@ def main():
     serve = commands.add_parser('broker')
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
-    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources', 'stop-agent'])
+    execute.add_argument('--control', choices=['status', 'provider-health', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources', 'stop-agent'])
     execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
+    execute.add_argument('--command-failure-report', action='store_true', help='Closed host/server-only failure metadata report')
+    execute.add_argument('--employee-id', action='append')
     execute.add_argument('--caller-session')
     execute.add_argument('--attach-only', action='store_true')
     execute.add_argument('--resource-ref', help='Server-private registered resource launch reference')
