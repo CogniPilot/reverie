@@ -18,6 +18,9 @@ let
   baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ]
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare ]
+      # Laptops build Rust (the autoenv cargo/rustc shims pass through to these);
+      # the server image does not, and the toolchain closure is about 2.4 GB.
+      ++ [ pkgs.rustc pkgs.cargo ]
       ++ import ./worker-base-tools.nix { inherit pkgs; })
     ++ pkgs.lib.optional (rootlessDocker != null) idmap
     ++ pkgs.lib.optional (browserRuntime != null) browserRuntime
