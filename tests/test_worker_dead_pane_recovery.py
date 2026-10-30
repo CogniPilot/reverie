@@ -36,7 +36,10 @@ class DeadPaneRecovery(unittest.TestCase):
   self.enterContext(patch('reverie.worker.pty.openpty',side_effect=RuntimeError('controlled viewer boundary')))
   self.addCleanup(lambda:[self.broker.release_storage(s)for s in list(self.broker.storage_leases)])
  def save(self):
-  path=Path(self.config['companyFile']);path.write_text(json.dumps(self.company));path.chmod(0o600)
+  path=Path(self.config['companyFile']);temporary=path.with_name(path.name+'.next')
+  # Concurrent launch observers must see a complete old or new company snapshot.
+  temporary.write_text(json.dumps(self.company));temporary.chmod(0o600)
+  os.replace(temporary,path)
  def run_request(self,attach=False):
   client,server=socket.socketpair();client.settimeout(2)
   try:
