@@ -13,6 +13,7 @@ import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
+import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
 import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
@@ -1506,6 +1507,13 @@ export class WebServer extends EventEmitter {
     this.chatBackup.start();
     const companyStore = new CompanyStore(canonicalCompanyFile);
     await companyStore.init();
+    registerCommandFailureRoutes(this.app, {
+      verifiedOwner,
+      employees: () => {
+        const snapshot = companyStore.snapshot();
+        return [...snapshot.employees, ...snapshot.retired].map(({ id, owner }) => ({ id, owner }));
+      },
+    });
     registerHealthMetadataProviderRoutes(this.app, {
       authorized: (req, id) =>
         verifiedOwner(req) && !!this.sessions.get(id) && this.sessions.get(id)!.owner === ownerFor(req),

@@ -1169,6 +1169,7 @@ const CA_PAGES = {
   bots: { label: 'Bots', icon: 'gear', path: '/bots' },
   people: { label: 'Accounts', icon: 'members', path: '/people' },
   previews: { label: 'Laptop previews', icon: 'folder', path: '/previews' },
+  failures: { label: 'Command failures', icon: 'book', path: '/command-failures', nav: false },
   company: { label: 'Company', icon: 'org', path: null, nav: false },
   'company-plans': { label: 'Company plans', icon: 'gauge', path: null, nav: false },
   'company-people': { label: 'Company people', icon: 'members', path: null, nav: false },
@@ -3564,12 +3565,12 @@ class ReverieChatApp {
   }
 
   configureCompanyToolsBack(frame) {
-    if (!['handbook', 'workspace', 'bots', 'people', 'previews'].includes(this.embed)) return;
+    if (!['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].includes(this.embed)) return;
     // These are our same-origin pages. Preserve standalone behavior outside the shell.
     try {
       if (frame.contentWindow.location.origin !== this.doc.defaultView.location.origin) return;
       for (const link of frame.contentDocument.querySelectorAll('a')) {
-        if (link.textContent.trim() !== 'Back to chat') continue;
+        if (link.textContent.trim() !== 'Back to chat' && !(this.embed === 'failures' && link.hasAttribute('data-company-tools-back'))) continue;
         link.textContent = 'Back to Company / tools'; link.setAttribute('href', '#company');
         link.removeAttribute('target');
         link.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); void this.returnToCompanyTools(); }, { capture: true });
@@ -3582,7 +3583,7 @@ class ReverieChatApp {
       if (!await this.verifyOfficeOwner()) return this.toast('Sign in as the owner to use company tools.', 'error');
     } catch { return this.toast('Could not verify company access.', 'error'); }
     if (!anchor.isConnected) return;
-    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }));
+    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }));
     entries.push({ sep: true }, ...this.officeToolEntries(), { sep: true },
       { label: 'Terminal settings', run: () => this.app.openAppSettings?.() },
       { label: 'Office overview', run: () => this.openPage('office') });
@@ -3634,7 +3635,7 @@ class ReverieChatApp {
     // own explicit confirmation and the existing authenticated host workflow.
     void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
       if (!root.isConnected || this.embed !== 'office' || this.app._chatSelf || !company.ok || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) return;
-      for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews']) {
+      for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews', 'failures']) {
         const page = CA_PAGES[kind];
         const link = this.button(`ca-btn ca-office-link${kind === 'company' ? ' ca-company-nav' : ''}`, page.label, () => this.openPage(kind));
         link.dataset.key = `page:${kind}`;
@@ -3696,7 +3697,7 @@ class ReverieChatApp {
     } else {
     if (!frame) { frame = this.el('iframe', 'ca-page-frame'); panel.replaceChildren(frame); }
     frame.title = page.label;
-    let framePath = ['workspace', 'bots', 'previews'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
+    let framePath = ['workspace', 'bots', 'previews', 'failures'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
     if (kind === 'previews') {
       const location = this.doc.defaultView.location;
       const query = new URLSearchParams(location.search);
@@ -3722,7 +3723,7 @@ class ReverieChatApp {
     }
     }
     panel.querySelector('.ca-tool-page-head')?.remove();
-    if (['handbook', 'workspace', 'bots', 'people', 'previews'].includes(kind)) {
+    if (['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].includes(kind)) {
       const back = this.el('header', 'ca-tool-page-head');
       back.append(this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), { icon: 'back', text: 'Back to Company / tools' }));
       panel.prepend(back);
