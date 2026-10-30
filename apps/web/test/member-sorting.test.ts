@@ -33,8 +33,11 @@ it('interleaves accounts and experts in the same role/presence sections and name
   const h = await fixture();
   expect(sections(h)).toEqual({ 'Admin — 2': ['James', 'Otto'], 'Online — 3': ['Alex', 'Mira', 'Tim'], 'Offline — 2': ['Ada', 'Nova'] });
   expect(h.document.querySelector('.ca-members')!.textContent).not.toContain('People —');
-  expect(h.document.querySelector('[data-human-id="owner"]')!.textContent).toContain('You · Owner');
-  expect(h.document.querySelector('[data-human-id="nova"]')!.getAttribute('aria-label')).toBe('Nova, Limited, offline');
+  expect(h.document.querySelector('[data-human-id="owner"] .ca-tag')!.textContent).toBe('Owner');
+  expect(h.document.querySelector('[data-human-id="owner"] .ca-member-sub')!.textContent).toBe('You');
+  expect(h.document.querySelector('[data-human-id="nova"] .ca-tag')!.textContent).toBe('Guest');
+  expect(h.document.querySelector('[data-human-id="nova"] .ca-member-sub')).toBeNull();
+  expect(h.document.querySelector('[data-human-id="nova"]')!.getAttribute('aria-label')).toBe('Nova, Guest, offline');
   expect(h.document.querySelector('[data-key="member:otto"]')!.textContent).toContain('Admin');
   expect(h.document.querySelector('[data-key="member:tim"]')!.getAttribute('aria-label')).toContain('working');
 });

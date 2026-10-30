@@ -37,7 +37,7 @@ it('offers an authorized human with their own avatar and completes the name with
   const input = type(h, 'Hello @No');
   expect(names(h)).toEqual(['Nova']);
   expect(h.document.querySelector('.ca-mention-item img')!.getAttribute('src')).toBe(nova.avatar);
-  expect(h.document.querySelector('.ca-mention-sub')!.textContent).toBe('Person · Limited');
+  expect(h.document.querySelector('.ca-mention-sub')!.textContent).toBe('Person · Guest');
   expect(h.shell.mention.items[0]).toMatchObject({ kind: 'human', human: { id: nova.id } });
   expect(h.shell.mention.items[0].member).toBeUndefined();
   expect(h.shell.mention.items[0].human.sessionId).toBeUndefined();
