@@ -854,6 +854,8 @@ export interface SessionState {
   autoClearThreshold?: number;
   /** Auto-compact enabled */
   autoCompactEnabled?: boolean;
+  /** When the harness reported a context compaction starting (its own hook), while it is still compacting. */
+  compactingSince?: number;
   /** Auto-compact token threshold */
   autoCompactThreshold?: number;
   /** Auto-compact prompt */

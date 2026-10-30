@@ -6693,9 +6693,11 @@ class ReverieApp {
 
         // Update status indicator
         const statusEl = tab.querySelector('.tab-status');
-        if (statusEl && !statusEl.classList.contains(status)) {
-          statusEl.className = `tab-status ${status}`;
+        const dot = this.tabDotStatus(session);
+        if (statusEl && !statusEl.classList.contains(dot)) {
+          statusEl.className = `tab-status ${dot}`;
         }
+        if (statusEl) statusEl.title = dot === 'compacting' ? 'Compacting context…' : '';
 
         // The exited-agent badge (Ark0N/Codeman#446). A session going from live
         // to exited changes no tab count, so the full rebuild below never runs
@@ -7041,7 +7043,7 @@ class ReverieApp {
       // See the note in the incremental path: a web tab owns the active highlight
       // while one is open, even though activeSessionId stays set.
       const isActive = id === this.activeSessionId && !this.activeWebviewId;
-      const status = session.status || 'idle';
+      const dot = this.tabDotStatus(session);
       const name = this.getSessionName(session);
       const mode = session.mode || 'claude';
       const color = session.color || 'default';
@@ -7107,7 +7109,7 @@ class ReverieApp {
       rowHtml.set(id, `<div class="session-tab ${isActive ? 'active' : ''}${alertClass}${richClass}${paneExitBadge ? ' tab-agent-exited' : ''}${loadState ? ' tab-loading' : ''}${this.hasTabDetachOverride(id) ? ' tab-show-detach' : ''}${this._tileGrid?.has(id) ? ' in-tiles' : ''}"${richData}${railOrderStyle} data-id="${id}" data-color="${color}" ${loadState ? `data-load-phase="${escapeHtml(loadState.phase)}"` : ''} onclick="app.handleSessionTabClick(event, ${escapeHtml(JSON.stringify(id))})" oncontextmenu="event.preventDefault(); app.startInlineRename(${escapeHtml(JSON.stringify(id))})" tabindex="0" role="tab" aria-selected="${isActive ? 'true' : 'false'}" aria-busy="${loadState ? 'true' : 'false'}" aria-label="${escapeHtml(paneExitAriaLabel(name, paneExitBadge))}" data-aria-source="${escapeHtml(paneExitAriaLabel(name, paneExitBadge))}" ${tabTooltip ? `title="${escapeHtml(tabTooltip)}"` : ''}>
           ${_tabIdx < 9 ? '<span class="tab-number">' + (_tabIdx + 1) + '</span>' : ''}
           ${loadState ? '<span class="tab-load-spinner" aria-hidden="true"></span>' : ''}
-          <span class="tab-status ${status}" aria-hidden="true"></span>
+          <span class="tab-status ${dot}"${dot === 'compacting' ? ' title="Compacting context…"' : ''} aria-hidden="true"></span>
           <span class="tab-info">
             <span class="tab-name-row">
               ${tabModeHtml}
@@ -7981,7 +7983,8 @@ class ReverieApp {
         if (ref.kind === 'session') {
           const session = this.sessions.get(ref.id);
           name = this.getSessionName(session);
-          statusHtml = `<span class="tab-status ${escapeHtml(session.status || 'idle')}" aria-hidden="true"></span>`;
+          const dot = this.tabDotStatus(session);
+          statusHtml = `<span class="tab-status ${escapeHtml(dot)}"${dot === 'compacting' ? ' title="Compacting context…"' : ''} aria-hidden="true"></span>`;
           const alert = this.tabAlerts?.get(ref.id);
           alertClass = alert === 'action' ? ' tab-alert-action' : alert === 'idle' ? ' tab-alert-idle' : '';
         } else {
@@ -8896,6 +8899,12 @@ class ReverieApp {
       this._shortIdCache.set(id, short);
     }
     return short;
+  }
+
+  /** The tab dot: 'compacting' (yellow) while the harness reports a context compaction, else the session status. */
+  tabDotStatus(session) {
+    const status = session?.status || 'idle';
+    return session?.compactingSince && status !== 'stopped' ? 'compacting' : status;
   }
 
   getSessionName(session) {
