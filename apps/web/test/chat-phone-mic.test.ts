@@ -19,14 +19,18 @@ function fixture(userAgent: string, mobile?: boolean, width = 390) {
   return { app, mic, car };
 }
 describe('phone composer mic policy', () => {
-  it.each([390, 915])('hides Android dictation while preserving Car mode at width %i', width => {
+  // Since 10-22 a phone gets the same mic as a desktop: browser dictation, or a spoken turn to a voice member.
+  // Only "no route" hides it; Car mode is a separate action this never touches.
+  it.each([390, 915])('offers Android dictation and spoken turns while leaving Car mode alone at width %i', width => {
     const { app, mic, car } = fixture('Mozilla/5.0 (Linux; Android 10; K) Chrome/155 Mobile', true, width);
-    app._syncChatMic(); expect(mic.hidden).toBe(true); expect(car.hidden).toBe(false);
-    app._chatMicRoute = () => 'turn'; app._syncChatMic(); expect(mic.hidden).toBe(true); expect(car.hidden).toBe(false);
+    app._syncChatMic(); expect(mic.hidden).toBe(false); expect(car.hidden).toBe(false);
+    app._chatMicRoute = () => 'turn'; app._syncChatMic(); expect(mic.hidden).toBe(false); expect(car.hidden).toBe(false);
+    app._chatMicRoute = () => null; app._syncChatMic(); expect(mic.hidden).toBe(true); expect(car.hidden).toBe(false);
   });
-  it('recognizes iPhone without client hints', () => {
+  it('treats an iPhone without client hints the same way', () => {
     const { app, mic, car } = fixture('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');
-    app._syncChatMic(); expect(mic.hidden).toBe(true); expect(car.hidden).toBe(false);
+    app._syncChatMic(); expect(mic.hidden).toBe(false); expect(car.hidden).toBe(false);
+    app._chatMicRoute = () => null; app._syncChatMic(); expect(mic.hidden).toBe(true);
   });
   it('keeps desktop dictation even in a narrow window', () => {
     const { app, mic, car } = fixture('Mozilla/5.0 (X11; Linux x86_64) Chrome/155', false, 390);
