@@ -44,7 +44,7 @@ describe('employee journal store', () => {
     message('m-t3', 'Remember this: records carry exact UTC times.', 400);
     expect(refusal(() => store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t3', draft: draft({
       sources: [{ roomId: ROOM, id: 'm-source', quote: 'not in the message' }, { ref: 'commit 0123abcd' }] }) }, read)).status).toBe(400);
-    for (const bad of [[{ ref: '' }], [{ ref: 'x'.repeat(257) }], [{ ref: 'a\u0007b' }], [{ ref: 'r' }, { ref: 'r' }], [{ ref: 'r', quote: 'q' }]])
+    for (const bad of [[{ ref: '' }], [{ ref: 'x'.repeat(257) }], [{ ref: 'a\u0007b' }], [{ ref: 'commit \u202Eabc' }], [{ ref: 'zero\u200Bwidth' }], [{ ref: 'r' }, { ref: 'r' }], [{ ref: 'r', quote: 'q' }]])
       expect(() => validateDraft(draft({ sources: bad }))).toThrow();
     // In a project, a reference is the author's own text: another employee sees it, unverified, and project search finds it.
     message('m-t4', 'Remember this: the release plan.', 500);

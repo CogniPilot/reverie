@@ -102,7 +102,7 @@ export function validateDraft(value: unknown): JournalDraft {
   for (const source of sources) {
     if (source && typeof source === 'object' && Object.keys(source).join() === 'ref') {
       const { ref } = source as Record<string, unknown>;
-      if (!text(ref, JOURNAL_QUOTE_BYTES) || /[\p{Cc}]/u.test(ref as string) || seen.has(`ref:${ref}`)) throw invalid('bounded distinct source reference required');
+      if (!text(ref, JOURNAL_QUOTE_BYTES) || /[\p{Cc}\p{Cf}]/u.test(ref as string) || seen.has(`ref:${ref}`)) throw invalid('bounded distinct source reference required');
       seen.add(`ref:${ref}`);
       continue;
     }
