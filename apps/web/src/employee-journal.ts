@@ -59,7 +59,7 @@ export interface JournalMessage { id: string; roomId: string; at: number; text: 
 export type ReadVisibleMessage = (roomId: string, messageId: string) => JournalMessage | undefined;
 export type JournalGateName = 'fields' | 'turn_readable' | 'read_only' | 'reason' | 'source_window' | 'source_quote' | 'links' | 'commit';
 export interface JournalGate { gate: JournalGateName; outcome: 'pass' | 'fail' | 'not_evaluated'; detail?: string }
-export interface JournalSourceCheck extends JournalSource { status: 'checked' | 'unverified'; detail: string }
+export interface JournalSourceCheck extends JournalSource { status: 'checked' | 'unverified'; detail: string; quoteWithheld?: true }
 export interface JournalEntryView {
   entryId: number; turnId: string; roomId: string; committedAt: string; text: string; tags: string[];
   annotations?: JournalAnnotations; supersededBy: number[]; sources: JournalSourceCheck[]; interpretation: string;
@@ -143,6 +143,14 @@ export function checkSources(sources: readonly JournalSource[], read: ReadVisibl
   });
 }
 
+/**
+ * Another employee's project entry may cite a room the reader cannot read. Its stored quote is then the author's copy of
+ * text the reader has no access to, so only quotes the reader's own check confirms are shown; the author sees every quote.
+ */
+export const withholdUnreadableQuotes = (checks: JournalSourceCheck[]): JournalSourceCheck[] =>
+  checks.map(check => check.status === 'checked' ? check
+    : { ...check, quote: '', quoteWithheld: true, detail: `${check.detail}; the author's quote is withheld because you cannot confirm it` });
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS journal_entries (
   id INTEGER PRIMARY KEY, owner TEXT NOT NULL, employee_id TEXT NOT NULL, room_id TEXT NOT NULL,
@@ -150,6 +158,7 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   UNIQUE(owner, employee_id, turn_id));
 CREATE INDEX IF NOT EXISTS journal_entries_employee ON journal_entries(owner, employee_id, id);
 CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts USING fts5(text);
+CREATE VIRTUAL TABLE IF NOT EXISTS journal_project_fts USING fts5(text);
 CREATE TABLE IF NOT EXISTS journal_links (
   entry_id INTEGER NOT NULL, target_id INTEGER NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('supersedes', 'related')),
   PRIMARY KEY(entry_id, target_id, kind));
@@ -181,6 +190,10 @@ export class EmployeeJournalStore {
       if (!db.prepare('PRAGMA table_info(journal_entries)').all().some(column => column.name === 'project'))
         db.exec('ALTER TABLE journal_entries ADD COLUMN project TEXT');
       db.exec('CREATE INDEX IF NOT EXISTS journal_entries_project ON journal_entries(owner, project, id)');
+      // Project search has its own index without the quotes (see projectIndexText); fill it for entries saved before it.
+      const indexed = db.prepare('INSERT INTO journal_project_fts(rowid, text) VALUES (?, ?)');
+      for (const row of db.prepare('SELECT id, payload FROM journal_entries WHERE project IS NOT NULL AND id NOT IN (SELECT rowid FROM journal_project_fts)').all())
+        indexed.run(Number(row.id), projectIndexText((JSON.parse(String(row.payload)) as { draft: JournalDraft }).draft));
     } catch (err) {
       db.close();
       throw err;
@@ -278,6 +291,7 @@ export class EmployeeJournalStore {
           .run(owner, employeeId, input.roomId, input.turnId, now, hash, encoded, input.project ?? null);
         const entryId = Number(row.lastInsertRowid);
         this.db.prepare('INSERT INTO journal_fts(rowid, text) VALUES (?, ?)').run(entryId, indexText(draft));
+        if (input.project !== undefined) this.db.prepare('INSERT INTO journal_project_fts(rowid, text) VALUES (?, ?)').run(entryId, projectIndexText(draft));
         const link = this.db.prepare('INSERT INTO journal_links(entry_id, target_id, kind) VALUES (?, ?, ?)');
         for (const target of supersedes) link.run(entryId, target, 'supersedes');
         for (const target of related) link.run(entryId, target, 'related');
@@ -304,12 +318,13 @@ export class EmployeeJournalStore {
     this.transaction(() => this.insertAttempt(owner, employeeId, turnId, at, outcome, gates));
   }
 
-  private view(row: Record<string, unknown>, read?: ReadVisibleMessage): JournalEntryView {
+  private view(row: Record<string, unknown>, read?: ReadVisibleMessage, readerId?: string): JournalEntryView {
     const payload = JSON.parse(String(row.payload)) as { draft: JournalDraft };
     const id = Number(row.id);
     const supersededBy = this.db.prepare("SELECT entry_id FROM journal_links WHERE target_id = ? AND kind = 'supersedes' ORDER BY entry_id").all(id).map(link => Number(link.entry_id));
-    const sources = read ? checkSources(payload.draft.sources, read)
+    const checked = read ? checkSources(payload.draft.sources, read)
       : payload.draft.sources.map(source => ({ ...source, status: 'unverified' as const, detail: 'not re-checked in this view' }));
+    const sources = readerId !== undefined && readerId !== String(row.employee_id) ? withholdUnreadableQuotes(checked) : checked;
     return { entryId: id, turnId: String(row.turn_id), roomId: String(row.room_id), committedAt: iso(Number(row.committed_ms)),
       text: payload.draft.text, tags: payload.draft.tags, ...(payload.draft.annotations ? { annotations: payload.draft.annotations } : {}),
       ...(row.project ? { project: String(row.project), authorEmployeeId: String(row.employee_id) } : {}),
@@ -319,7 +334,8 @@ export class EmployeeJournalStore {
   /** Top two full-text matches in this employee's own journal; sources are re-checked now. */
   /**
    * Without a project: this employee's own entries. With one: that project's entries from every employee of the owner.
-   * Sources are re-checked as the caller can see them now, so another room's quote may read as unverified.
+   * Sources are re-checked as the caller can see them now, so another room's quote may read as unverified; another
+   * author's quote that the caller cannot confirm is withheld.
    */
   recall(owner: string, employeeId: string, query: string, read: ReadVisibleMessage, roomId?: string, project?: string): JournalEntryView[] {
     if (typeof query !== 'string' || query.trim().length < 1 || query.length > 300) throw invalid('bounded query required');
@@ -327,15 +343,15 @@ export class EmployeeJournalStore {
     if (project !== undefined && !journalProject(project)) throw invalid('project id');
     const expression = ftsExpression(query);
     if (!expression) return [];
-    const scope = project === undefined ? 'j.employee_id = ?' : 'j.project = ?';
-    const rows = this.db.prepare(`SELECT j.* FROM journal_fts f JOIN journal_entries j ON j.id = f.rowid
-      WHERE journal_fts MATCH ? AND j.owner = ? AND ${scope} ${roomId ? 'AND j.room_id = ?' : ''}
+    const [scope, fts] = project === undefined ? ['j.employee_id = ?', 'journal_fts'] : ['j.project = ?', 'journal_project_fts'];
+    const rows = this.db.prepare(`SELECT j.* FROM ${fts} f JOIN journal_entries j ON j.id = f.rowid
+      WHERE ${fts} MATCH ? AND j.owner = ? AND ${scope} ${roomId ? 'AND j.room_id = ?' : ''}
       ORDER BY rank, j.id DESC LIMIT ${RECALL_MAX_ENTRIES}`).all(expression, owner, project ?? employeeId, ...(roomId ? [roomId] : []));
     // Bounded in bytes as well as entries: the best match always, then only what still fits.
     const views: JournalEntryView[] = [];
     let used = 0;
     for (const row of rows) {
-      const view = this.view(row, read);
+      const view = this.view(row, read, employeeId);
       const size = Buffer.byteLength(JSON.stringify(view));
       if (views.length && used + size > RECALL_MAX_BYTES) break;
       views.push(view);
@@ -354,7 +370,8 @@ export class EmployeeJournalStore {
     if (expression === '') return { entries: [], more: false };
     const where = ['j.owner = ?', options.project === undefined ? 'j.employee_id = ?' : 'j.project = ?'];
     const params: unknown[] = [owner, options.project ?? employeeId];
-    if (expression) { where.push('j.id IN (SELECT rowid FROM journal_fts WHERE journal_fts MATCH ?)'); params.push(expression); }
+    const fts = options.project === undefined ? 'journal_fts' : 'journal_project_fts';
+    if (expression) { where.push(`j.id IN (SELECT rowid FROM ${fts} WHERE ${fts} MATCH ?)`); params.push(expression); }
     if (options.before !== undefined) { where.push('j.id < ?'); params.push(options.before); }
     if (options.roomId !== undefined) { where.push('j.room_id = ?'); params.push(options.roomId); }
     const rows = this.db.prepare(`SELECT j.id, j.room_id, j.committed_ms, j.payload, j.project, j.employee_id,
@@ -415,6 +432,11 @@ export class EmployeeJournalStore {
 
 function indexText(draft: JournalDraft): string {
   return [draft.text, ...draft.tags, ...draft.sources.map(source => source.quote), ...(draft.annotations?.topics ?? [])].join(' ');
+}
+
+/** Without the quotes: a match on words only the cited message holds would tell a reader outside that room it exists. */
+function projectIndexText(draft: JournalDraft): string {
+  return [draft.text, ...draft.tags, ...(draft.annotations?.topics ?? [])].join(' ');
 }
 
 function ftsExpression(query: string): string {

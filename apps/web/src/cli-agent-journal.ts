@@ -43,7 +43,7 @@ function entryText(entry: JournalEntryView, now: number): string {
     entry.project ? `project ${entry.project}, written by ${entry.authorEmployeeId}` : ''].filter(Boolean).join(' · ');
   const lines = [`#${entry.entryId} ${entry.committedAt} (${elapsed(entry.committedAt, now)}) [${entry.tags.join(', ')}]${meta ? ` ${meta}` : ''}`,
     `  ${entry.text}`,
-    ...entry.sources.map(source => `  source ${source.roomId}/${source.id}: ${source.status} (${source.detail}) "${source.quote}"`),
+    ...entry.sources.map(source => `  source ${source.roomId}/${source.id}: ${source.status} (${source.detail})${source.quoteWithheld ? '' : ` "${source.quote}"`}`),
     `  interpretation: ${entry.interpretation ?? JOURNAL_INTERPRETATION}`];
   if (entry.supersededBy.length) lines.push(`  superseded by ${entry.supersededBy.map(id => `#${id}`).join(', ')}`);
   return lines.join('\n');
