@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { performance } from 'node:perf_hooks';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import fs, { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -501,6 +501,64 @@ it('holds all scan, success and delivery progress when the final response return
   expect(after.failures).toBe(1);
   expect(after.nextPollAt).toBeGreaterThan(f.now());
   expect(f.messages).toHaveLength(0);
+});
+
+it('does not commit scan success or lose events when temporary-file writing consumes the deadline', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  const before = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  f.setIssues([f.issue()]);
+  f.setRuns([f.run()]);
+  let elapsed = 0,
+    expiredDuringWrite = false;
+  vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation((async (path: Parameters<typeof fs.open>[0], ...args: unknown[]) => {
+    const handle = await (open as (...a: unknown[]) => ReturnType<typeof fs.open>)(path, ...args);
+    if (String(path).startsWith(f.service.store.file + '.') && String(path).endsWith('.tmp'))
+      return new Proxy(handle, {
+        get(target, key) {
+          if (key === 'writeFile')
+            return async (data: unknown) => {
+              await target.writeFile(String(data));
+              if (JSON.parse(String(data)).slots.repo.lastSuccessAt === f.now()) {
+                expiredDuringWrite = true;
+                elapsed = 60001;
+              }
+            };
+          const value = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    return handle;
+  }) as typeof fs.open);
+  // The existing state writer latches publication uncertainty; it must not post or publish the staged success.
+  await expect(f.service.tick()).rejects.toThrow('unavailable');
+  expect(expiredDuringWrite).toBe(true);
+  expect(() => f.service.store.snapshot()).toThrow('unavailable');
+  const after = JSON.parse(await readFile(f.service.store.file, 'utf8')).slots.repo;
+  expect(after.scan).toEqual(before.scan);
+  expect(after.lastSuccessAt).toBe(before.lastSuccessAt);
+  expect(after.baselineAt).toBe(before.baselineAt);
+  expect(after.ciCreatedSince).toBe(before.ciCreatedSince);
+  expect(after.pending).toBeUndefined();
+  expect(after.posts).toEqual(before.posts);
+  expect(f.messages).toHaveLength(0);
+  expect((await readdir(f.dir)).some((name) => name.endsWith('.tmp'))).toBe(false);
+
+  vi.restoreAllMocks();
+  const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+  await reopened.init();
+  f.advance();
+  await reopened.tick();
+  expect(f.messages).toHaveLength(1);
+  expect(f.messages[0]!.text).toContain('/issues/1');
+  expect(f.messages[0]!.text).toContain('/actions/runs/1');
+  f.advance();
+  await reopened.tick();
+  expect(f.messages).toHaveLength(1);
 });
 
 it('classifies an actual abort of its own remaining-deadline signal as SCAN_TIMEOUT', async () => {

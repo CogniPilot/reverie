@@ -642,26 +642,28 @@ export class GithubRepositoryWatches {
           result.events.map((e) => e.text).join('\n')
         : '';
       need(text.length <= 5000, 'CHANGE_BATCH_BOUND');
-      await this.store.update((s) => {
-        this.current(id, generation);
-        // Include final parsing, credential revalidation and time waiting for the state writer.
-        need(performance.now() - began < SCAN_BUDGET_MS, 'SCAN_TIMEOUT');
-        const a = s.slots[id]!;
-        a.failures = 0;
-        delete a.lastError;
-        a.lastSuccessAt = this.now();
-        a.baselineAt ??= this.now();
-        a.ciCreatedSince = result.createdSince;
-        if (result.events.length)
-          a.pending = {
-            id: fingerprint([id, generation, result.events]).slice(0, 32),
-            text,
-            generation,
-            next: result.next,
-            phase: 'prepared',
-          };
-        else a.scan = result.next;
-      });
+      await this.store.update(
+        (s) => {
+          this.current(id, generation);
+          const a = s.slots[id]!;
+          a.failures = 0;
+          delete a.lastError;
+          a.lastSuccessAt = this.now();
+          a.baselineAt ??= this.now();
+          a.ciCreatedSince = result.createdSince;
+          if (result.events.length)
+            a.pending = {
+              id: fingerprint([id, generation, result.events]).slice(0, 32),
+              text,
+              generation,
+              next: result.next,
+              phase: 'prepared',
+            };
+          else a.scan = result.next;
+        },
+        // Check at writer admission and after temporary-file write/fsync, immediately before rename.
+        () => need(performance.now() - began < SCAN_BUDGET_MS, 'SCAN_TIMEOUT')
+      );
       await this.deliver(id, generation);
     } catch (error) {
       if (error instanceof GithubWatchError && error.code === 'CONFIG_CHANGED') return;
