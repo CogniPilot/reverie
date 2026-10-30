@@ -803,7 +803,7 @@ export const WAKE_PROMPT =
   'Wake-up check from a colleague: you look idle. Read what needs you (reverie agent chat digest), check your Board cards (reverie board show --mine), then carry on with your current work or say what is blocking you.';
 
 /**
- * `agent wake` — type the standard resume prompt into an idle colleague's composer (James 10-19: an agent should be
+ * `agent wake` — type the standard resume prompt into an idle colleague's composer (an agent should be
  * able to wake a sleeping agent with one command). It goes through the same input route as `send`, so the server decides who
  * may type where. A session that is working is left alone: the CLI checks first, and the server checks again at write time
  * (`ifIdle`), types only into an empty composer and never falls back to a raw write.

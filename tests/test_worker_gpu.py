@@ -32,7 +32,7 @@ class WorkerGPUTests(unittest.TestCase):
                       self.device + ',all', self.device + '\n--privileged', 0, None]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_gpu_grants({self.session: value})
-        for value in [None, [], {self.other.upper(): self.device, '*': self.device}, {'bev': self.device}]:
+        for value in [None, [], {self.other.upper(): self.device, '*': self.device}, {'invalid-session': self.device}]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_gpu_grants(value)
 

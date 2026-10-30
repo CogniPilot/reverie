@@ -51,10 +51,10 @@ class DeclaredTests(unittest.TestCase):
         self.initialize()
         manifest = json.loads((self.fixture.state / 'install.json').read_text())
         self.assertEqual(manifest['files']['lib/reverie_prune.py'],
-                         'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181')
+                         '55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed')
         self.assertEqual(fixtures.H.SOURCE_HASHES, r8_pins)
         self.assertEqual(fixtures.H.SOURCE_HASHES['reverie_prune.py'],
-                         'eee8b1608e1e87117d00b955b6cf6271cea809ab5e0cfd3f77696a05007eb3fb')
+                         '333d8e56f4a7de0347736455df10d06551daac9eef3a491389334a02393df075')
         with self.assertRaisesRegex(ValueError, 'source hash differs'):
             self.fixture.installer.pins()
 

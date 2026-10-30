@@ -47,7 +47,7 @@ describe('company identities and genuine research lifecycle', () => {
     });
   const hire = () =>
     service.hire({
-      name: 'Ada',
+      name: 'Abe',
       icon: '🔭',
       position: 'Research scientist',
       expertise: ['systems'],

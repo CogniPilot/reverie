@@ -313,7 +313,7 @@ describe('pronouns in the room member list', () => {
         id: 'room-aaaa',
         name: 'Lab',
         members: [
-          { sessionId: 'me-session', name: 'Ada', role: 'agent', goal: '', progress: '', pronouns: 'she/her' },
+          { sessionId: 'me-session', name: 'Abe', role: 'agent', goal: '', progress: '', pronouns: 'she/her' },
           { sessionId: 'other-session', name: 'Linus', role: 'agent', goal: '', progress: '' },
         ],
       },
@@ -326,7 +326,7 @@ describe('pronouns in the room member list', () => {
     };
     expect(await agentChatWho(d, { room: 'Lab' })).toBe(0);
     const text = out.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
-    expect(text).toMatch(/"Ada" \(you\).*\n {4}pronouns: "she\/her"/);
+    expect(text).toMatch(/"Abe" \(you\).*\n {4}pronouns: "she\/her"/);
     expect(text.match(/pronouns: /g)).toHaveLength(1);
   });
 });

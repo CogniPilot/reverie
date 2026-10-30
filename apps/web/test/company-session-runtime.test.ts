@@ -95,7 +95,7 @@ describe('real company session adapter with isolated mocked CLI IO', () => {
     harness.capacity = false;
     binding = {
       cycleId: randomUUID(),
-      employeeId: 'ada',
+      employeeId: 'abe',
       sessionId: randomUUID(),
       workingDir: directory,
       owner: 'owner',
@@ -103,9 +103,9 @@ describe('real company session adapter with isolated mocked CLI IO', () => {
       phase: 'launching',
     };
     employee = {
-      id: 'ada',
+      id: 'abe',
       owner: 'owner',
-      name: 'Ada',
+      name: 'Abe',
       icon: '🔭',
       position: 'Scientist',
       expertise: ['systems'],

@@ -88,7 +88,7 @@ const GrantSchema = z
   })
   .strict();
 const SERVICE_GRANT_MAX_MS = 90 * 24 * 3600_000;
-/** Expired grants (and their revocations) are kept this long for audit, then pruned by the next issuance (Rex OREC ADA-3). */
+/** Expired grants (and their revocations) are kept this long for audit, then pruned by the next issuance (OREC retention check). */
 export const SERVICE_GRANT_RETENTION_MS = 7 * 24 * 3600_000;
 const SERVICE_GRANT_LIMIT = 256;
 const ServiceGrantInputSchema = z
@@ -612,7 +612,7 @@ export class GoalLifecycle {
           sessionGeneration: employee.sessionGeneration,
         };
       });
-      // Rex OREC ADA-3: in this same transaction, prune grants expired for longer than the retention period together with
+      // OREC retention check: in this same transaction, prune grants expired for longer than the retention period together with
       // their revocations, so 256 is a cap on live-or-retained grants, never a lifetime limit. A grant still inside
       // retention, revoked or not, keeps its record and its revocation evidence.
       const retained = state.serviceGrants.filter((g) => g.expiresAt + SERVICE_GRANT_RETENTION_MS > at);
@@ -633,7 +633,7 @@ export class GoalLifecycle {
         expiresAt: input.expiresAt,
       };
       state.serviceGrants.push(grant);
-      // Kit AUTH-S1: refuse inside the transaction (nothing is committed) unless every live grant stays revocable.
+      // AUTH-S1: refuse inside the transaction (nothing is committed) unless every live grant stays revocable.
       if (!serviceAuthorityFits(state)) refuse('Service grant storage budget exhausted');
       return grant;
     });

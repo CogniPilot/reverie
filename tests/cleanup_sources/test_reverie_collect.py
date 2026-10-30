@@ -253,7 +253,7 @@ class Tests(unittest.TestCase):
             for line in f:
                 json.loads(line, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
 
-    # ---- Kit r2 recheck: R2-1 (one deadline over read and exit) and R2-2 (first checkpoint before any rollup)
+    # ---- r2 recheck: R2-1 (one deadline over read and exit) and R2-2 (first checkpoint before any rollup)
     def test_run_capped_deadline_covers_reading(self):
         import sys as _s, time as _t
         py = [_s.executable, "-I", "-B", "-c"]
@@ -283,7 +283,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(starts, [T0, T0 + 3600])                       # the first hour is not skipped, each once
 
 
-    # ---- Kit r3 recheck: R3-1 (an unreadable ledger is unavailable, never an empty committed set)
+    # ---- r3 recheck: R3-1 (an unreadable ledger is unavailable, never an empty committed set)
     def test_oversize_or_unreadable_ledger_skips_prune_accounting(self):
         self.e.seed_state()
         self.e.summary("live1", "live", 0, 700)

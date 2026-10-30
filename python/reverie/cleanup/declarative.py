@@ -31,8 +31,8 @@ class DeclaredInstaller(H.Installer):
     Declaration-specific policy/config extensions belong here, not in H.
     """
     source_hashes = {
-        'reverie_prune.py': 'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181',
-        'lease.py': '7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9',
+        'reverie_prune.py': '55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed',
+        'lease.py': '606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa',
     }
 
     def pins(self):

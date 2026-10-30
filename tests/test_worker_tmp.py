@@ -51,7 +51,7 @@ class WorkerTemporaryTests(unittest.TestCase):
 
     def test_public_existing_tmp_or_human_name_or_escape_never_becomes_a_mount(self):
         root = Path(self.config['scratchRoot']); root.mkdir(mode=0o700)
-        for scratch in (root / 'Kit', root / 'employees' / 'Kit', self.root / EMPLOYEE, root / '..' / SID):
+        for scratch in (root / 'Kai', root / 'employees' / 'Kai', self.root / EMPLOYEE, root / '..' / SID):
             with self.subTest(path=scratch), self.assertRaises(ValueError): prepare_temporary(self.config, scratch)
         scratch = root / SID; scratch.mkdir(mode=0o700)
         (scratch / 'tmp').mkdir(mode=0o755)

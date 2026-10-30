@@ -57,7 +57,7 @@ async function compose(verifiedOwner: (req: unknown) => boolean = trustedFixture
   const session = deadPaneSession();
   const rooms = new ChatroomStore();
   service = new CompanyService(store, {
-    getSession: (id) => (id === session.id ? { id, name: 'Ada', owner: undefined } : undefined),
+    getSession: (id) => (id === session.id ? { id, name: 'Abe', owner: undefined } : undefined),
     chatrooms: {
       rooms: () => rooms.list(),
       room: (id) => rooms.get(id),
@@ -65,7 +65,7 @@ async function compose(verifiedOwner: (req: unknown) => boolean = trustedFixture
     },
   } as never);
   await service.hire({
-    name: 'Ada',
+    name: 'Abe',
     icon: '🔭',
     position: 'Engineer',
     expertise: ['systems'],

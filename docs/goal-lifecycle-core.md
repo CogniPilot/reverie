@@ -1,6 +1,6 @@
 # Authenticated durable Goal core, successor r3
 
-This source slice repairs the seven grouped findings and nine counterexamples in the independent r1 review. It retains the canonical CompanyStore and human-facing Goal record. The Tim-base successor now registers the effect-free HTTP command boundary against the single GoalLifecycle owned by CompanyService. Registration is not activation: absent trusted server configuration, authentication, custody and action-permission ports deny all Goal reads and writes, including owner requests. No runtime effect adapters are added. See [the actual server integration](goal-server-integration.md).
+This source slice repairs the seven grouped findings and nine counterexamples in the independent r1 review. It retains the canonical CompanyStore and human-facing Goal record. The integrated successor now registers the effect-free HTTP command boundary against the single GoalLifecycle owned by CompanyService. Registration is not activation: absent trusted server configuration, authentication, custody and action-permission ports deny all Goal reads and writes, including owner requests. No runtime effect adapters are added. See [the actual server integration](goal-server-integration.md).
 
 ## Authentication and custody are mandatory
 

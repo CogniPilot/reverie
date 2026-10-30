@@ -15,7 +15,7 @@ pkgs.runCommand "reverie-cleanup-observations" {
   JSON
   printf '%s  %s\n' \
     '113dba6a1e0094b0431eda05cf1ba3f4f6b0bd29bad151f5cc40d512ff66b113' "$out/libexec/reverie/collector.py" \
-    'e0c74d139680364b8069627d718bd8389a1c42c0e3732538adeb63da7f21b626' "$out/libexec/reverie/receipts.py" \
+    '6681e2e6e6291b3f1ee383c110a39f7d0dd09e1c7b61e07ae2dfe308672646ab' "$out/libexec/reverie/receipts.py" \
     'cf76217a3176ed443b6057b1cfd7b632b4e4b264c9f8e676264d743651d15899' "$out/libexec/reverie/collector_state.py" \
     'cc04f1e1f34719244cea905c6018f8c5e352bad2b739bfcb2ae8ab27ebc9625f' "$out/libexec/reverie/collector_user.py" \
     'e0150804f6dfe9b4b6297f911f80475313f59c677b2a1ffa2f8c59f95c4f1626' "$out/libexec/reverie/collector_history.py" \

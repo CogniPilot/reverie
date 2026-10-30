@@ -435,7 +435,7 @@ describe('page and org panels vs the phone drawers', () => {
 });
 
 describe('composer text box keeps a readable width', () => {
-  // James 10-29: with the voice selector beside it the box shrank to one letter per line; the bar wraps its tools instead.
+  // with the voice selector beside it the box shrank to one letter per line; the bar wraps its tools instead.
   const top = (selector: string, prop: string): string | undefined => {
     let found: string | undefined;
     root.walkRules((r) => {

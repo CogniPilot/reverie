@@ -8,7 +8,7 @@ the employee data. Ad-hoc sessions retain a separate SID namespace and never
 receive a synthetic employee identity. Human names and host labels grant no API
 or filesystem authority.
 
-Human host labels are separate: `~/reverie/laptops/Kit/{home,nix}` is an
+Human host labels are separate: `~/reverie/laptops/Example/{home,nix}` is an
 owner-private symlink label of the canonical UUID directory. Preview with
 `nix run .#employee-laptop-migrate -- labels`; add `--apply` before `labels` to
 publish labels after data migration. Names must be safe single filenames and

@@ -25,7 +25,7 @@ class EmployeeStorageTests(unittest.TestCase):
         self.scratch=self.root/'scratch';self.scratch.mkdir(mode=0o700)
         self.public=self.root/'public';self.public.mkdir()
         self.file=self.root/'company.json'
-        self.employee={'id':EMPLOYEE,'sessionId':OLD,'name':'Kit','owner':'owner-a',
+        self.employee={'id':EMPLOYEE,'sessionId':OLD,'name':'Kai','owner':'owner-a',
                        'desiredRunning':False,'onVacation':True}
         self.company={'employees':[self.employee],'retired':[]}
         self.config={'stateRoot':str(self.state),'scratchRoot':str(self.scratch),
@@ -76,7 +76,7 @@ class EmployeeStorageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'Ambiguous'):storage_paths(self.config,OLD)
 
     def test_name_or_invalid_ids_cannot_select_employee_storage(self):
-        for value in ('Kit','../Kit','/tmp','','AAAAAAAA-2222-4333-8444-555555555555'):
+        for value in ('Kai','../Kai','/tmp','','AAAAAAAA-2222-4333-8444-555555555555'):
             with self.subTest(value=value):
                 self.employee['id']=value;self.write(self.file,self.company)
                 with self.assertRaises(ValueError):storage_paths(self.config,OLD)
@@ -138,7 +138,7 @@ class EmployeeStorageTests(unittest.TestCase):
         self.move()
         with storage_guard(self.config,NEW):prepare_storage(self.config,storage_paths(self.config,NEW))
         self.assertEqual((paths.home/'installed').read_text(),'keep latest home')
-        self.assertFalse((self.state/'Kit').exists())
+        self.assertFalse((self.state/'Kai').exists())
 
     def test_existing_home_and_either_old_nix_source_require_paired_migration(self):
         old=self.state/OLD;old.mkdir(mode=0o700);(old/'home').mkdir(mode=0o700)

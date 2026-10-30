@@ -252,7 +252,7 @@ export function registerBoardCommands(program: Command): Command {
     .addHelpText('after', `
 Examples:
   reverie board show --mine --status doing,todo --json --fields id,title,status,start,end
-  reverie board show --owner Kit --tag slam_web
+  reverie board show --owner Reviewer --tag slam_web
   reverie board show --status blocked --json
 
 Filters run on the server: only matching issues (and only --fields) come back. Values within one

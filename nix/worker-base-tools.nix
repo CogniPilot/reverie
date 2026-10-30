@@ -1,4 +1,4 @@
-# Laptop base-tool layer (roadmap T3, Bev, 2026-10-25). For managed Tim to add to the worker image's PATH.
+# Laptop base-tool layer (roadmap T3), included on the worker image's PATH.
 # Every attribute below was checked to exist at the laptops' pinned nixpkgs a033e66ab94a6bedf2c3d58d93a36319d3cbbbaf.
 # Commands each package provides are in the comments, and probe.sh checks every one of them.
 { pkgs }:

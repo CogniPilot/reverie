@@ -95,7 +95,7 @@ it('requires owner approval and private claim proof; persists, rotates and revok
   await restart.pair('cancel', proof);
   await expect(restart.guestPosts(invite.roomId, rotated.sessionToken, '0')).rejects.toMatchObject({ status: 401 });
 });
-it('renames the hosted room and closing it ends every guest session (James 10-23)', async () => {
+it('renames the hosted room and closing it ends every guest session', async () => {
   const f = await setup();
   await f.builtin.configure('https://embassy.example.com');
   expect((await f.host.status()).room?.name).toBe('Company Embassy');

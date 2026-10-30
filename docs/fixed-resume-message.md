@@ -17,7 +17,7 @@ template are internal constants. The hash identifies text; it is neither a proof
 of authority nor evidence of a persisted attempt. An arbitrary valid tuple can be
 formatted, so no recipient may treat the output as authentication or permission.
 
-This supplies the fixed-message prerequisite in Kit's accepted resume contract.
+This supplies the fixed-message prerequisite in the accepted resume contract.
 The future server verb must itself construct the message from its freshly read
 canonical tuple. It must accept no request-supplied message or template and must
 not route the payload through pane input, capture, paste or interruption APIs.

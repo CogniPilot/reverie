@@ -1,7 +1,7 @@
 """Phase-3 host test kit for reverie-prune (kit r5: maps the janitor's host paths via HOST-RESULT "sandbox") (roadmap T7d / proposal §6.7). Split across the two sides on purpose:
 the LAPTOP side (this script, unprivileged, inside an agent laptop) builds a sandbox in the laptop's own /tmp and keeps
 the live processes running (lease holders, an open file, a cwd, a libc mmap, a running executable, a zombie); the HOST
-side (external Tim, root, host PID namespace) runs the installed prune against that sandbox with --test-root. So the
+side (host operator, root, host PID namespace) runs the installed prune against that sandbox with --test-root. So the
 host's /proc view of container processes, flock and dev/ino across the container boundary, git-as-owner and mount
 crossing are all exercised for real, which no in-laptop run can do.
 
@@ -137,13 +137,13 @@ def main():
     hcfg = rel_config(sb, cfg)
     mount_dir = os.path.join(exp["mount"][0], "mnt")
     rel = work[len("/tmp/"):]
-    host = f"""# Phase-3 host run for this sandbox (Rex kit r4). Do NOT hand-run commands: use the reviewed ROOT runner,
+    host = f"""# Phase-3 host run for this sandbox (kit r4). Do NOT hand-run commands: use the reviewed ROOT runner,
 # p3_host_runner.sh (in the kit packet), which never reads this sandbox's own config or a laptop-chosen library.
 # As root on the host, with the INSTALLED, hash-checked prune and lease lib (never copies from this laptop):
 #   p3_host_runner.sh --host-tmp <host path of this laptop's /tmp, i.e. its B folder + /tmp> --run {rel} \\
 #       --python <pinned python> --prune <installed reverie_prune.py> --prune-sha <its sha256> \\
 #       --lease-lib <installed lease.py> --lease-sha <its sha256> --run-id p3-host-1 --rev r10
-# Add --with-mount ONLY once the prune has mount-identity detection (rex/prune-bind-mount-finding-r1).
+# Add --with-mount ONLY once the prune has mount-identity detection (mount-identity review).
 # The runner writes HOST-RESULT.json and HOST-DONE here; this laptop then checks every expectation (RESULT.md).
 """
     open(os.path.join(work, "HOST-RUN.md"), "w").write(host)

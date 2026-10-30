@@ -4,7 +4,7 @@ import { expect, it } from 'vitest';
 import { chromium, type Page } from 'playwright';
 import { createServer, member, room, message } from './helpers/chat-app-harness.mjs';
 
-// Real-browser checks for the owner UI batch (James 10-27..10-29): the composer box keeps a readable width beside the
+// Real-browser checks for the owner UI batch: the composer box keeps a readable width beside the
 // voice selector, the gear panel is one top rule with Workspace in it, and an MP4 attachment is an inline player.
 const pub = resolve(import.meta.dirname, '../src/web/public');
 const read = (n: string) => readFileSync(resolve(pub, n), 'utf8');
