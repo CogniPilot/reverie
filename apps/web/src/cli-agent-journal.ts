@@ -43,7 +43,8 @@ function entryText(entry: JournalEntryView, now: number): string {
     entry.project ? `project ${entry.project}, written by ${entry.authorEmployeeId}` : ''].filter(Boolean).join(' · ');
   const lines = [`#${entry.entryId} ${entry.committedAt} (${elapsed(entry.committedAt, now)}) [${entry.tags.join(', ')}]${meta ? ` ${meta}` : ''}`,
     `  ${entry.text}`,
-    ...entry.sources.map(source => `  source ${source.roomId}/${source.id}: ${source.status} (${source.detail})${source.quoteWithheld ? '' : ` "${source.quote}"`}`),
+    ...entry.sources.map(source => 'ref' in source ? `  reference: ${source.status} (${source.detail}) ${source.ref}`
+      : `  source ${source.roomId}/${source.id}: ${source.status} (${source.detail})${source.quoteWithheld ? '' : ` "${source.quote}"`}`),
     `  interpretation: ${entry.interpretation ?? JOURNAL_INTERPRETATION}`];
   if (entry.supersededBy.length) lines.push(`  superseded by ${entry.supersededBy.map(id => `#${id}`).join(', ')}`);
   return lines.join('\n');
@@ -54,11 +55,14 @@ export interface JournalSaveOptions {
   topic?: string[]; importance?: string; provenance?: string; supersedes?: number[]; related?: number[]; reason?: string;
   /** Save to a project every employee of the owner can read, instead of your own journal. */
   project?: string;
+  /** Non-chat sources (a commit, report or URL); saved and always shown as unverified. */
+  ref?: string[];
 }
 
 export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOptions): Promise<number> {
-  const ids = options.source ?? []; const quotes = options.quote ?? [];
-  if (!ids.length || ids.length !== quotes.length) return refused(deps, 'Each --source needs one --quote, in the same order.');
+  const ids = options.source ?? []; const quotes = options.quote ?? []; const refs = options.ref ?? [];
+  if (ids.length !== quotes.length) return refused(deps, 'Each --source needs one --quote, in the same order.');
+  if (!ids.length && !refs.length) return refused(deps, 'Give at least one --source with --quote, or a --ref.');
   const annotations = {
     ...(options.topic?.length ? { topics: options.topic } : {}),
     ...(options.importance ? { importance: options.importance } : {}),
@@ -67,7 +71,8 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
     ...(options.related?.length ? { related: options.related } : {}),
     ...(options.reason ? { reason: options.reason } : {}),
   };
-  const draft = { text: options.text, tags: options.tag, sources: ids.map((id, index) => ({ roomId: options.room, id, quote: quotes[index]! })),
+  const draft = { text: options.text, tags: options.tag,
+    sources: [...ids.map((id, index) => ({ roomId: options.room, id, quote: quotes[index]! })), ...refs.map(ref => ({ ref }))],
     ...(Object.keys(annotations).length ? { annotations } : {}) };
   try {
     const result = await call(deps, 'POST', '/api/agent/journal/save', { body: { roomId: options.room, turnId: options.turn, draft,
@@ -167,6 +172,7 @@ export function registerJournalCommands(
     .requiredOption('--tag <kind>', 'decision, promise, correction, preference, identity, relationship, open-question, lesson or personal-reflection (repeat, 1-6)', repeat)
     .option('--source <message-id>', 'A cited message (repeat, 1-4; pair each with --quote)', repeat)
     .option('--quote <text>', 'Exact words from the matching --source, at most 256 bytes', repeat)
+    .option('--ref <text>', 'A non-chat source such as a commit, report or URL, at most 256 bytes; shown as unverified (repeat)', repeat)
     .option('--topic <topic>', 'Shared history, People, Work, Memory and harness, Games and play, Identity or Other (repeat)', repeat)
     .option('--importance <level>', 'notable, important or keystone')
     .option('--provenance <kind>', 'direct, relayed, reconstructed or unknown')
