@@ -155,3 +155,29 @@ it('does not expose owner editing when the caller is not verified', async () => 
   expect(h.document.querySelector('.ca-company-settings .ca-company-settings-form')).toBeNull();
   expect(h.document.querySelector('.ca-company-settings-receipts')).not.toBeNull();
 });
+
+it('offers this device’s app install and notifications to every viewer, even when the company fails to load', async () => {
+  for (const verified of [true, false]) {
+    const { h } = await setup(verified);
+    const open = vi.fn();
+    (h.window as any).ReverieMobile = { open };
+    await h.shell.openCompanySettings();
+    const device = h.document.querySelector('.ca-company-settings .ca-company-device');
+    expect(device?.querySelector('h3')?.textContent).toBe('This device');
+    (device!.querySelector('button') as HTMLButtonElement).click();
+    expect(open).toHaveBeenCalledTimes(1);
+    h.document.querySelector('.ca-company-settings')!.remove();
+  }
+  const { h } = await setup();
+  (h.window as any).ReverieMobile = { open: vi.fn() };
+  h.app._chatApi = vi.fn(async () => ({ ok: false, error: 'Company settings are unavailable.' }));
+  await h.shell.openCompanySettings();
+  expect(h.document.querySelector('.ca-company-settings .ca-company-device button')?.textContent).toBe('Install app and notifications');
+});
+
+it('shows no device section where the phone setup script is not loaded', async () => {
+  const { h } = await setup();
+  delete (h.window as any).ReverieMobile;
+  await h.shell.openCompanySettings();
+  expect(h.document.querySelector('.ca-company-device')).toBeNull();
+});

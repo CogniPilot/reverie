@@ -1732,6 +1732,7 @@ class ReverieChatApp {
     searchBtn.hidden = true;
     searchBtn.setAttribute('aria-expanded', 'false');
     searchBtn.setAttribute('aria-controls', 'ca-message-search');
+    // Device setup lives in Company settings; this detached action only backs the phone header's More menu.
     const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
     const mutedBadge = this.el('span', 'ca-muted-badge', 'Muted');
     mutedBadge.hidden = true;
@@ -1745,7 +1746,7 @@ class ReverieChatApp {
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
     speakBtn.hidden = true;
-    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, searchBtn, phoneBtn, membersBtn, moreBtn);
+    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, searchBtn, membersBtn, moreBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -3163,6 +3164,15 @@ class ReverieChatApp {
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const content = this.el('div', 'ca-company-settings-content');
     dialog.append(head, status, error, content);
+    // Per-device and for everyone who can open this dialog, so it does not wait on (or depend on) the company load.
+    const mobile = this.doc.defaultView?.ReverieMobile;
+    if (mobile) {
+      const device = this.el('section', 'ca-company-device');
+      device.append(this.el('h3', '', 'This device'),
+        this.el('p', 'ca-hint', 'Install Reverie as an app on this phone or computer and turn on its notifications. This applies only to the device you are using.'),
+        this.button('ca-btn', 'Install app and notifications', () => mobile.open(), { text: 'Install app and notifications' }));
+      content.append(device);
+    }
     dialog.addEventListener('close', () => dialog.remove());
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
     try {
