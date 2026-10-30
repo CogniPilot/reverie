@@ -294,6 +294,27 @@ finally:
         self.assertEqual(self.state['_coding']['room:' + source['id']]['reason'], 'cancelled')
         self.assertEqual(FakeRunner.requests, [])
 
+    def test_plain_stop_request_cancels_through_the_admin_tool_instead_of_starting_a_task(self):
+        # A natural "stop" reaches the chat model, not the /code parser. The model must be able to stop the running task;
+        # before the cancel tool its only action was run_workspace_task, which another active task refuses.
+        self.cfg['admin_task'] = 'fixture'
+        FakeArbiter.ready = False
+        source = self.start()
+        self.pump_until(lambda: self.manager.active['pending'] is not None)
+        offered = []
+        def chat_model(config, messages, tools):
+            offered.append([tool['function']['name'] for tool in tools or []])
+            return {'tool_calls': [{'type': 'function', 'id': 'call_1',
+                                    'function': {'name': 'cancel_workspace_task', 'arguments': '{}'}}]}
+        self.chat.add('room', OWNER, 'Stop that, it came from a stale reply.')
+        loop.tick(self.cfg, self.chat, self.state, model=chat_model)
+        self.assertIn('cancel_workspace_task', offered[0])
+        self.assertIsNone(self.manager.active)
+        self.assertEqual(self.state['_coding']['room:' + source['id']]['reason'], 'cancelled')
+        self.assertEqual(len(self.state['_coding']), 1)  # the stop did not become a second task
+        self.assertEqual(self.chat.ours('room')[-1]['text'], 'Task fixture cancelled.')
+        self.assertEqual(FakeRunner.requests, [])
+
     def test_failed_done_post_cannot_repeat_effects(self):
         FakeArbiter.replies = [call(), {'content': 'Done.'}]
         source = self.start()

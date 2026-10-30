@@ -327,3 +327,74 @@ it('rechecks expiry after asynchronous approval preparation, before consuming th
   expect(h.port.moves.begin).not.toHaveBeenCalled();
   expect((await h.service.get('request', 'owner')).phase).toBe('expired');
 });
+
+describe('why delivery of a plan request ended', () => {
+  // notify(record, file, allowed, expiredUnseen): the owner-side reason the delivery uses for its expiry alert.
+  const reason = (h: ReturnType<typeof requestHarness>) =>
+    (vi.mocked(h.port.notify).mock.calls.at(-1) as unknown as [unknown, unknown, () => boolean, () => boolean])[3];
+
+  it('is expiry only when the deadline passed while the request was still pending, authorized and bound', async () => {
+    const h = requestHarness();
+    await h.service.create(h.input, undefined, h.execution);
+    const expired = reason(h);
+    expect(expired()).toBe(false);
+    h.clock(100 + 30 * 60_000);
+    expect(expired()).toBe(true);
+    await h.service.list();
+    expect(h.records()[0].phase).toBe('expired');
+    expect(expired()).toBe(true);
+  });
+
+  it('is never expiry after a cancellation, lost owner authority or a session change, even once the deadline passes', async () => {
+    const cancelled = requestHarness();
+    await cancelled.service.create(cancelled.input, undefined, cancelled.execution);
+    const afterCancel = reason(cancelled);
+    await cancelled.service.cancel('request');
+    cancelled.clock(100 + 30 * 60_000 + 1);
+    expect(afterCancel()).toBe(false);
+
+    const lost = requestHarness();
+    await lost.service.create(lost.input, undefined, lost.execution);
+    const afterLoss = reason(lost);
+    lost.authorize(false);
+    lost.clock(100 + 30 * 60_000 + 1);
+    expect(afterLoss()).toBe(false);
+
+    const moved = requestHarness();
+    await moved.service.create(moved.input, undefined, moved.execution);
+    const afterMove = reason(moved);
+    moved.bind('replacement');
+    moved.clock(100 + 30 * 60_000 + 1);
+    expect(afterMove()).toBe(false);
+  });
+
+  it('after a reauthorize, only the newest delivery can report expiry, even once the new issue expires', async () => {
+    const h = requestHarness();
+    await h.service.create(h.input, undefined, h.execution);
+    const first = reason(h);
+    h.authorize(false);
+    await h.service.list();
+    h.authorize(true);
+    h.clock(1_000);
+    await h.service.reauthorize('request', undefined, { ...h.execution });
+    const second = reason(h);
+    expect(second).not.toBe(first);
+    h.clock(1_000 + 30 * 60_000);
+    await h.service.list();
+    expect(h.records()[0].phase).toBe('expired');
+    expect(second()).toBe(true);
+    expect(first()).toBe(false);
+  });
+
+  it('a reauthorized request retires the earlier delivery’s reason', async () => {
+    const h = requestHarness();
+    await h.service.create(h.input, undefined, h.execution);
+    const first = reason(h);
+    h.authorize(false);
+    await h.service.list();
+    h.authorize(true);
+    await h.service.reauthorize('request', undefined, { ...h.execution });
+    h.clock(100 + 30 * 60_000 + 1);
+    expect(first()).toBe(false);
+  });
+});

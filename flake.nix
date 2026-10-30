@@ -125,6 +125,7 @@
             inherit (packages) reverie console memory runtime;
             worker = true;
           };
+          workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuSupport = import ./nix/worker-gpu-support.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
@@ -435,6 +436,7 @@
           packages = self.packages.${system};
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
+          workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
           codexObserverSource = packages.codexObserver.tests.source;
           codexObserverVendor = packages.codexObserver.tests.vendor;
           collectService = pkgs.runCommand "reverie-collect-service-evaluation" {

@@ -116,41 +116,44 @@ describe('minimal agent terminal in Chromium', () => {
     return server;
   }
 
-  it.each([1280, 390])('keeps voice actions visible and clickable without a long press at %ipx', async (width) => {
+  it.each([
+    [320, 844],
+    [393, 852],
+    [844, 390],
+    [1280, 844],
+  ])('keeps the Voice control and its panel on screen at %ix%i, with Car mode and spoken replies one tap away', async (width, height) => {
     await open(width);
+    await page.setViewportSize({ width, height });
     await page.evaluate(() => {
       const app = (window as any).app;
       const shell = (window as any).reverieChat;
-      let enabled = false;
-      app._voiceSetting = () => enabled;
-      app._setVoiceSetting = (_key: string, value: boolean) => { enabled = value; };
+      const modes = new Map();
+      app._speakRepliesMode = (id: string) => modes.get(id) || 'off';
+      app._setSpeakReplies = (id: string, mode: string) => { if (mode === 'off') modes.delete(id); else modes.set(id, mode); };
       app.openCarMode = () => { (window as any).carOpened = true; };
       shell.room.members[0].voice = true;
       shell.renderHeader();
     });
-    // Its name says what a click does, so it changes on click: find it by class.
-    const speak = page.locator('.ca-head-speak');
-    const car = page.getByRole('button', { name: 'Car mode', exact: true });
-    await expect.poll(() => speak.isVisible()).toBe(true);
-    expect(await car.isVisible()).toBe(true);
-    for (const action of [speak, car]) {
-      const box = (await action.boundingBox())!;
+    expect(await page.locator('.ca-head-speak').count()).toBe(0);
+    const voice = page.getByRole('button', { name: 'Voice: Off', exact: true });
+    await expect.poll(() => voice.isVisible()).toBe(true);
+    const inside = async (selector: string) => {
+      const box = (await page.locator(selector).boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width).toBeLessThanOrEqual(width);
-    }
-    expect(await speak.getAttribute('aria-label')).toBe('Enable spoken replies in this room');
-    await speak.click();
-    expect(await speak.getAttribute('aria-pressed')).toBe('true');
-    expect(await speak.getAttribute('aria-label')).toBe('Disable spoken replies in this room (now: replies to you)');
-    await car.click();
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5);
+      expect(box.y + box.height).toBeLessThanOrEqual(height + 0.5);
+    };
+    await inside('.ca-voice-btn');
+    await voice.click();
+    await inside('.ca-voice-panel');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.getByRole('button', { name: 'Spoken replies: Replies to me', exact: true }).click();
+    expect(await page.getByRole('button', { name: 'Spoken replies: Replies to me', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    await inside('.ca-voice-car');
+    await page.getByRole('button', { name: 'Car mode', exact: true }).click();
     expect(await page.evaluate(() => (window as any).carOpened)).toBe(true);
-    await page.evaluate(() => {
-      const shell = (window as any).reverieChat;
-      shell.room.members[0].voice = false;
-      shell.renderHeader();
-    });
-    expect(await speak.isVisible()).toBe(false);
-    expect(await car.isVisible()).toBe(false);
+    expect(await page.locator('.ca-voice-panel').count()).toBe(0);
   });
 
   it.each([1280, 390])('shows only the chosen terminal and Back to chat at %ipx', async (width) => {

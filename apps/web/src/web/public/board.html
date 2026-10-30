@@ -541,11 +541,15 @@ function milestones() {
 function when(t) { return startOfDay(t) === startOfDay(Date.now()) ? hm(t) : dayLbl(t).split(',')[0]; }
 function lists() {
   const sevc = {high: '--bad', med: '--warn', low: '--plan'};
+  // The bar's colour is not the only cue: it carries its severity as text for screen readers and on hover.
+  const sevl = {high: 'High severity', med: 'Medium severity', low: 'Low severity'};
+  // Own keys only, so a value such as "constructor" falls back instead of reaching an inherited property.
+  const sev = b => (Object.hasOwn(sevl, b.sev) ? b.sev : '');
   const fill = (id, rows, none) => { document.getElementById(id).innerHTML = rows.length ? rows.join('') : `<li><span class="hint">${none}</span></li>`; };
   fill('wins', (B.wins || []).slice().sort((a, b) => b.at - a.at).slice(0, 30).map(w =>
     `<li><span class="t">${when(w.at)}</span><div>${esc(w.text)}<div class="who">${esc(nameOf(w.who))}</div></div></li>`), 'No wins yet');
   fill('blockers', (B.blockers || []).filter(b => !b.clearedAt).map(b =>
-    `<li><span class="sev" style="background:${css(sevc[b.sev] || '--plan')}"></span><div>${esc(b.text)}<div class="who">${esc(nameOf(b.who))} · owner ${esc(nameOf(b.owner))} · since ${when(b.since)}</div></div></li>`), 'No open blockers');
+    `<li><span class="sev" role="img" aria-label="${sevl[sev(b)] || 'Severity not set'}" title="${sevl[sev(b)] || 'Severity not set'}" style="background:${css(sevc[sev(b)] || '--plan')}"></span><div>${esc(b.text)}<div class="who">${esc(nameOf(b.who))} · owner ${esc(nameOf(b.owner))} · since ${when(b.since)}</div></div></li>`), 'No open blockers');
   fill('pins', (B.pins || []).slice(0, 12).map(p =>
     `<li><span class="t">${when(p.at)}</span><div>${esc(String(p.text).slice(0, 240))}<div class="who">${esc(p.room)} · ${esc(p.by)}</div></div></li>`), 'Nothing pinned');
 }

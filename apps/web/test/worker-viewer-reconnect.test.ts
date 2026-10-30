@@ -1,3 +1,4 @@
+import {WorkerProviderHealth} from '../src/worker-provider-health.js';
 import Fastify from 'fastify';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -7,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { Session } from '../src/session.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
+import type { CompanyEmployee } from '../src/company-types.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../src/worker-viewer-reconnect.js';
 import { WebServer } from '../src/web/server.js';
 import { SseEvent } from '../src/web/sse-events.js';
@@ -209,7 +211,7 @@ it.each(['idle','busy'] as const)('carries a real repaired %s Session through pe
   Object.assign(h.app, { renderSessionTabs() {}, updateCost() {}, updateSubagentParentNames() {}, recheckOrphanSubagents() {}, updateConnectionLines() {} });
   const shell = await h.startShell(); await h.flush(120); shell.humanSelf = { role: 'owner' }; shell.phoneStatus = { self: 'owner', canSetOwn: true };
   const memberRow = () => h.document.querySelector(`[data-key="member:${f.session.id}"]`)!;
-  shell.renderMembers(); expect(memberRow().textContent).toContain('Disconnected');
+  shell.renderMembers(); expect(memberRow().textContent).toContain('Viewer unavailable');
   const frames: string[] = []; const reply = { raw: { write: (frame: string) => { frames.push(frame); return true; } } };
   web.sse.addClient(reply, null, false);
   f.deps.publish.mockImplementation(session => {
@@ -258,4 +260,47 @@ it('recognizes a live busy CLI without waiting for an idle-only shortcut footer'
  expect(await pending).toBe('connected');expect(f.mux.sendInput).not.toHaveBeenCalled();
  expect(f.session.status).toBe('busy');expect(f.session.isWorking).toBe(true);
  expect(f.session.runtimeHealth).toBe('unknown');
+});
+
+
+it('carries independent native health through the real server SSE projection and browser handler without releasing a failed viewer hold',async()=>{
+ const f=await fixture();Object.assign(f.session,{_pid:null,ptyProcess:null,_viewerInputHeld:true,_status:'idle'});
+ const web=new WebServer(0,false,true)as any;cleanups.push(()=>web.stop());web.sessions.set(f.session.id,f.session);
+ const frames:string[]=[];web.sse.addClient({raw:{write:(frame:string)=>{frames.push(frame);return true;}}},null,false);
+ const employee=f.company.registeredEmployees()[0];
+ const observedBinding=JSON.parse(JSON.stringify([employee.id,employee.owner,employee.sessionId,employee.sessionGeneration,employee.desiredRunning,employee.onVacation,employee.bindingMigration,employee.runtimeRecipe,employee.permissions]));
+ const row={observedBinding,employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.employee.sessionGeneration,state:'healthy',
+  observedAtEpochMs:Date.now(),reason:'LIVE_NATIVE_COMMAND',proofKind:'live-container',containerId:'a'.repeat(64),initPID:101,initStartTick:202};
+ const health=new WorkerProviderHealth({employees:()=>f.company.registeredEmployees(),query:async()=>({providerHealth:{version:1,purpose:'worker-provider-health-v1',providers:[row]}}),
+  changed:()=>web.broadcast(SseEvent.SessionUpdated,{session:web.getSessionStateWithRespawn(f.session)})});web.workerProviderHealth=health;
+ (f.company as any).deps.providerHealth=(employee:CompanyEmployee)=>health.read(employee);
+ const h=await createHarness({loadShell:false,sessions:[f.session.toState()],company:{canManage:true,...f.company.view()},
+  rooms:[room('r1','Office',[member(f.session.id,'Alex',{alive:false,pendingDeliveries:3})])]});cleanups.push(async()=>h.dom.window.close());
+ const source=readFileSync(resolve(import.meta.dirname,'../src/web/public/app.js'),'utf8');
+ const method=source.slice(source.indexOf('  _onSessionUpdated(data) {'),source.indexOf('  _onSessionDeleted(data) {'));
+ h.window.eval(`window.ReverieApp.prototype._onSessionUpdated = function(data) ${method.slice(method.indexOf('{'))};`);
+ Object.assign(h.app,{renderSessionTabs(){},updateCost(){},updateSubagentParentNames(){},recheckOrphanSubagents(){},updateConnectionLines(){}});
+ const shell=await h.startShell();await h.flush(80);shell.renderMembers();
+ expect(h.document.querySelector('.ca-member').textContent).toContain('Viewer unavailable');
+ h.app._chatEls.input.value='retained unsent draft';web._persistSessionStateNow(f.session);await health.refresh();
+ const frame=frames.find(s=>s.startsWith('event: session:updated\n'))!;expect(frame).toBeDefined();
+ const data=JSON.parse(frame.split('\ndata: ')[1].split('\n\n')[0]);expect(data.session.providerHealth.state).toBe('healthy');
+ expect(data.session.viewerHealth).toBe('disconnected');expect(data.session.paneExit).toEqual({status:1,at:123});
+ h.app._onSessionUpdated(data);await h.flush();
+ const memberRow=h.document.querySelector(`[data-key="member:${f.session.id}"]`)!;
+ expect(memberRow.classList.contains('is-online')).toBe(true);expect(memberRow.querySelector('.ca-viewer-warning')).not.toBeNull();
+ expect(shell.room.members[0].alive).toBe(false);expect(shell.room.members[0].pendingDeliveries).toBe(3);
+ expect(h.app._chatEls.input.value).toBe('retained unsent draft');expect(f.session.canAcceptChatInput()).toBe(false);
+ expect(web.store.getSession(f.session.id).providerHealth).toBeUndefined();expect(f.mux.sendInput).not.toHaveBeenCalled();
+ expect(f.company.view().employees[0].providerHealth?.state).toBe('healthy');
+ // The same production projection must show a confirmed stopped laptop red,
+ // without changing the transport/input state or inventing an init process.
+ frames.length=0;Object.assign(row,{state:'dead',reason:'CONTAINER_STOPPED',proofKind:'stopped-container',observedAtEpochMs:Date.now()+1});
+ delete (row as any).initPID;delete (row as any).initStartTick;
+ await new Promise(resolve=>setTimeout(resolve,5));await health.refresh();
+ const stopped=frames.find(s=>s.startsWith('event: session:updated\n'))!;
+ h.app._onSessionUpdated(JSON.parse(stopped.split('\ndata: ')[1].split('\n\n')[0]));await h.flush();
+ expect(h.document.querySelector('.ca-member').classList.contains('is-state-dead')).toBe(true);
+ expect(f.session.canAcceptChatInput()).toBe(false);expect(shell.room.members[0].alive).toBe(false);
+ expect(h.app._chatEls.input.value).toBe('retained unsent draft');expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
