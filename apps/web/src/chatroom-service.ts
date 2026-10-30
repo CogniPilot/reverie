@@ -1,4 +1,5 @@
 import { materializeChatImages, isChatRaster, type ImagePathResult } from './chat-image-paths.js';
+import {viewerHealth,type ProviderHealth} from './worker-provider-health.js';
 import { buildChatDigest } from './chatroom-digest.js';
 /**
  * @fileoverview Chatroom service: store + persistence + pane delivery + SSE.
@@ -97,6 +98,9 @@ export interface ChatroomServiceDeps {
   pronounsOf?: (sessionId: string) => string | undefined;
   restContextOf?: (sessionId: string) => string | undefined;
   getSession(id: string): ChatSessionLike | undefined;
+  providerHealth?(id: string, owner?: string): ProviderHealth | undefined;
+  /** Fixed server worker transport configuration, never caller authority. */
+  workerViewers?: boolean;
   broadcast(event: string, data: unknown): void;
   now?: () => number;
   /** Attachment store; a deleted room's files are removed with it. */
@@ -132,6 +136,8 @@ export interface ChatMemberView extends ChatMember {
   alertMode?: AlertLease;
   mode?: string;
   alive: boolean;
+  providerHealth?: ProviderHealth;
+  viewerHealth?: 'connected'|'disconnected'|'unknown';
   working: boolean;
   pendingDeliveries: number;
   /** Accent hue (0-359) derived from the session id; the avatar colour. */
@@ -639,6 +645,11 @@ export class ChatroomService {
     if (!message || message.id !== messageId || message.roomId !== roomId) throw new ChatroomError('No such message in this room', 'NOT_FOUND');
     if (message.deleted) throw new ChatroomError('Deleted messages require separate owner resolution', 'CONFLICT');
     return structuredClone(this.messageIdentity(room, message));
+  }
+
+  /** The exact message as this live member session can read it now (employee journal source and turn checks). */
+  agentVisibleMessage(sessionId: string, roomId: string, messageId: string): ChatMessage {
+    return this.exactVisibleMessage(sessionId, roomId, messageId);
   }
 
   /** Fresh scoped bytes, never a path saved with a message or pending delivery. */
@@ -1227,6 +1238,8 @@ export class ChatroomService {
         mode: s?.mode,
         alertMode: this.alertMode(m.sessionId),
         alive: !!s && s.pid !== null,
+        providerHealth: this.deps.providerHealth?.(m.sessionId, room.owner),
+        viewerHealth: viewerHealth(s, this.deps.workerViewers),
         working: !!s?.isWorking,
         pendingDeliveries: this.delivery.pendingFor(m.sessionId),
         hue: accentHue(m.sessionId),

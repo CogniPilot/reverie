@@ -552,7 +552,15 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
 
   return {
     hooks: {
-      SessionStart: [turnSummaryEntry('SessionStart')],
+      SessionStart: [
+        turnSummaryEntry('SessionStart'),
+        // A session (re)started from a compaction: the compaction is over. Silent: SessionStart stdout becomes context.
+        { matcher: 'compact', hooks: [{ type: 'command', command: curlCmdSilent('compact_finished'), timeout: HOOK_TIMEOUT_SECONDS }] },
+      ],
+      // A context compaction (manual /compact or automatic) is starting: shown as Compacting until it ends.
+      PreCompact: [
+        { hooks: [{ type: 'command', command: curlCmdSilent('compact_started'), timeout: HOOK_TIMEOUT_SECONDS }] },
+      ],
       Notification: [
         {
           matcher: 'idle_prompt',
@@ -931,6 +939,8 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // quote-free for the same reason.
     const hasPromptSubmit = hooksJson.includes('prompt_submitted');
     const hasTurnSummary = hooksJson.includes(TURN_SUMMARY_MARKER);
+    // Compaction reporting (PreCompact / SessionStart "compact"); quote-free like the markers above.
+    const hasCompaction = hooksJson.includes('compact_started');
     if (
       !isOurs ||
       (hasSecret &&
@@ -939,6 +949,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
         hasElicitationComplete &&
         hasPromptSubmit &&
         hasTurnSummary &&
+        hasCompaction &&
         !hasTlsFlaglessCurl)
     )
       return;

@@ -10,7 +10,7 @@
 import { FastifyInstance } from 'fastify';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { HookEventSchema, isValidWorkingDir } from '../schemas.js';
-import { sanitizeHookData, parseBody } from '../route-helpers.js';
+import { sanitizeHookData, parseBody, persistAndBroadcastSession } from '../route-helpers.js';
 import { persistDockerCaseClaudeSessionId } from '../../docker-hosts.js';
 import { getDataDir } from '../../config/instance.js';
 import { sessionWaits, hooksAvailableForMode, sessionHookOptions } from '../session-wait-registry.js';
@@ -98,6 +98,11 @@ export function registerHookEventRoutes(
         sessionWaits.notifySignal(sessionId, 'stop');
       } else if (event === 'permission_prompt' || event === 'elicitation_dialog') {
         sessionWaits.notifySignal(sessionId, 'blocked');
+      }
+      // Compacting is shown only on the harness's own report, and cleared by its end report or anything that proves the
+      // turn moved on, so it cannot stick.
+      if (event === 'compact_started' || event === 'compact_finished' || event === 'stop' || event === 'prompt_submitted') {
+        if (waitSession.noteCompaction(event === 'compact_started')) persistAndBroadcastSession(ctx, waitSession);
       }
     }
 

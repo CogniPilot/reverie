@@ -98,6 +98,56 @@ class WorkerServiceTests(unittest.TestCase):
         self.assertTrue(all(c[:2] == ['systemctl', '--user'] for c in self.calls))
         self.assertFalse(self.service.gcroot.exists())
 
+    def test_uninstall_accepts_unit_link_removed_by_disable(self):
+        self.service.install(); before = self.path.read_bytes()
+        selected = self.service.environment.read_bytes(); run = self.service.run
+        self.calls.clear(); self.info = {}
+        def disable_removes_link(args, **kwargs):
+            result = run(args, **kwargs)
+            if args == ['systemctl', '--user', 'disable', '--now', UNIT]:
+                self.service.unit.unlink()
+            return result
+        self.service.run = disable_removes_link
+        self.assertTrue(self.service.action('uninstall')['success'])
+        self.assertFalse(self.service.unit.is_symlink()); self.assertFalse(self.service.gcroot.exists())
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.service.environment.read_bytes(), selected)
+        self.assertIn(['systemctl', '--user', 'daemon-reload'], self.calls)
+        self.assertTrue(all(c[:2] == ['systemctl', '--user'] for c in self.calls))
+
+    def test_uninstall_preserves_replacement_unit_after_disable(self):
+        self.service.install(); run = self.service.run
+        foreign = self.root / 'foreign-unit'; foreign.write_text('foreign generation')
+        def disable_replaces_link(args, **kwargs):
+            result = run(args, **kwargs)
+            if args == ['systemctl', '--user', 'disable', '--now', UNIT]:
+                self.service.unit.unlink(); self.service.unit.symlink_to(foreign)
+            return result
+        self.service.run = disable_replaces_link
+        with self.assertRaises(ValueError): self.service.action('uninstall')
+        self.assertEqual(self.service.unit.resolve(), foreign)
+        self.assertEqual(self.service.gcroot.resolve(), self.store / 'pinned-unit')
+
+    def test_uninstall_does_not_swallow_missing_manager_or_changed_parent(self):
+        self.service.install(); run = self.service.run
+        def missing_manager(args, **kwargs):
+            if args == ['systemctl', '--user', 'disable', '--now', UNIT]:
+                raise FileNotFoundError('owned missing-manager fixture')
+            return run(args, **kwargs)
+        self.service.run = missing_manager
+        with self.assertRaises(FileNotFoundError): self.service.action('uninstall')
+        self.assertEqual(self.service.unit.resolve(), self.target)
+        self.assertEqual(self.service.gcroot.resolve(), self.store / 'pinned-unit')
+        def alias_parent(args, **kwargs):
+            result = run(args, **kwargs)
+            if args == ['systemctl', '--user', 'disable', '--now', UNIT]:
+                parent = self.service.unit.parent; saved = parent.with_name('saved-user')
+                parent.rename(saved); parent.symlink_to(saved, target_is_directory=True)
+            return result
+        self.service.run = alias_parent
+        with self.assertRaises(ValueError): self.service.action('uninstall')
+        self.assertEqual(self.service.gcroot.resolve(), self.store / 'pinned-unit')
+
     def test_start_rechecks_capabilities_and_only_starts_installed_generation(self):
         with self.assertRaises(ValueError): self.service.action('start')
         self.service.install(); self.info['MemoryLimit'] = False

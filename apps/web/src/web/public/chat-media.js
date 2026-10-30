@@ -512,7 +512,7 @@ Object.assign(ReverieApp.prototype, {
         img.onclick = () => this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, img);
         img.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); img.click(); } };
         wrap.append(img);
-      } else if (/^video\/(mp4|webm)$/.test(a.type)) {
+      } else if (/^video\/(mp4|quicktime|webm)$/.test(a.type)) {
         // Movies play in place, Discord-style: the first frame with a play button (James 10-29). The server serves the
         // file inline only when its bytes are that container; anything else fails to load and becomes the download card.
         const video = this._chatEl('video', 'chatroom-video');

@@ -1238,6 +1238,9 @@ export const HookEventSchema = z.object({
     // Claude Code's UserPromptSubmit: a first-hand report of the pane's live
     // conversation id. Keep in step with HookEventType in types/api.ts.
     'prompt_submitted',
+    // Claude Code's PreCompact and SessionStart(source "compact"): a context compaction started / ended.
+    'compact_started',
+    'compact_finished',
     // A turn STARTED. Unlike the others this one has no Claude Code hook behind
     // it: it is reported by the DeepSeek Harness status shim, and exists so a
     // dialog answered in the terminal resolves its Approvals Inbox item at once
@@ -2459,9 +2462,14 @@ export const ChatroomMessageSchema = z
     replyTo: z.string().uuid().optional(),
     /** Refuse rather than post as the user when the caller's agent session does not resolve. */
     requireAgent: z.boolean().optional(),
+    /** Opt-in crossing guard: refuse (409) instead of posting when someone else has posted after this message id. */
+    ifNoNewerThan: z.string().uuid().optional(),
+    /** Opt-in crossing guard against the caller's own last-seen mark in this room (agents only). */
+    ifLatest: z.literal(true).optional(),
   })
   .strict()
   .refine((v) => v.text.trim() !== '' || (v.attachments?.length ?? 0) > 0, 'Write something or attach a file')
+  .refine((v) => !(v.ifNoNewerThan && v.ifLatest), 'Use ifNoNewerThan or ifLatest, not both')
   .refine((v) => !v.spoken || v.text.trim() !== '', 'A spoken message needs a nonempty transcript');
 
 export const ChatroomPollSchema = z

@@ -854,6 +854,8 @@ export interface SessionState {
   autoClearThreshold?: number;
   /** Auto-compact enabled */
   autoCompactEnabled?: boolean;
+  /** When the harness reported a context compaction starting (its own hook), while it is still compacting. */
+  compactingSince?: number;
   /** Auto-compact token threshold */
   autoCompactThreshold?: number;
   /** Auto-compact prompt */
@@ -1020,6 +1022,9 @@ export interface SessionState {
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';
+  /** Non-authorizing fresh native command observation, separate from the viewer. */
+  providerHealth?: import('./provider-health.js').ProviderHealth;
+  viewerHealth?: 'connected' | 'disconnected' | 'unknown';
 }
 
 /**

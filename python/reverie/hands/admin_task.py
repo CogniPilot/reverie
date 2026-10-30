@@ -8,8 +8,16 @@ TOOL = {'type': 'function', 'function': {
     'name': TOOL_NAME,
     'description': 'Actually start the requested coding or office CLI work on your own laptop. Use this for file edits, tests or reverie Board commands instead of promising to run them. The bounded background task reports actual tool/test receipts to the room. This does not grant any new permission.',
     'parameters': {'type': 'object', 'properties': {'brief': {'type': 'string', 'description': 'A concise execution plan for the current authorized request. Preserve the original request and verify results.'}}, 'required': ['brief'], 'additionalProperties': False}}}
+CANCEL_TOOL_NAME = 'cancel_workspace_task'
+CANCEL_TOOL = {'type': 'function', 'function': {
+    'name': CANCEL_TOOL_NAME,
+    'description': 'Stop the workspace task that is running now on your own laptop. Use this when you are asked to stop, '
+                   'cancel or abort the current work. Starting another task never stops one.',
+    'parameters': {'type': 'object', 'properties': {}, 'additionalProperties': False}}}
+TOOLS = [TOOL, CANCEL_TOOL]
 RULE = ('You are the Reverie Admin Harness. For an action request, use run_workspace_task to start real work; '
         'a plain chat answer does not run commands. Never say you edited, tested or filed something unless a tool receipt confirms it. '
+        'To stop, cancel or abort the running work, use cancel_workspace_task; never start a new task to stop one. '
         'A queued task is not completion. For current permissions use reverie agent capabilities; file decision requests with reverie board decision add, not an imagined Burt-only queue.')
 
 def validate(cfg):
@@ -36,11 +44,15 @@ def callback(cfg, manager, state, room, history, message):
         # Preserve the actual authenticated sender, room and source message ID.
         # TaskManager rechecks authorization, current settings, membership, limits and its durable journal.
         return manager.control(state, room, history, {**message, 'text': text}, canonical_source=message)
+    def cancel():
+        # Names only this harness's task. TaskManager rechecks the sender and room, and stops only a task that is running.
+        return manager.control(state, room, history, {**message, 'text': '/code-cancel '+name})
+    start.cancel = cancel
     return start
 
 def invoke(output, start):
     calls = output.get('tool_calls') or []
-    selected = [call for call in calls if isinstance(call, dict) and isinstance(call.get('function'), dict) and call['function'].get('name') == TOOL_NAME]
+    selected = [call for call in calls if isinstance(call, dict) and isinstance(call.get('function'), dict) and call['function'].get('name') in (TOOL_NAME, CANCEL_TOOL_NAME)]
     if not selected:return None
     if start is None:return 'Workspace task refused: this message has no authorized task/room/sender binding.'
     if len(calls) != 1 or len(selected) != 1:return 'Workspace task refused: request one workspace task at a time.'
@@ -50,7 +62,8 @@ def invoke(output, start):
         raw = call['function'].get('arguments')
         if not isinstance(raw, str) or len(raw) > 8192:raise ValueError()
         args = json.loads(raw)
-        if not isinstance(args, dict) or set(args) != {'brief'}:raise ValueError()
+        cancelling = call['function']['name'] == CANCEL_TOOL_NAME
+        if not isinstance(args, dict) or set(args) != (set() if cancelling else {'brief'}):raise ValueError()
     except (ValueError, TypeError):
         return 'Workspace task refused: invalid structured tool arguments. No command ran.'
-    return start(args['brief'])
+    return start.cancel() if cancelling else start(args['brief'])

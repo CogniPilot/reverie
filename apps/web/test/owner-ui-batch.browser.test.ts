@@ -29,7 +29,7 @@ async function open(page: Page) {
     content: `${member.toString()} ${room.toString()} ${message.toString()} ${createServer.toString()}
  window.ReverieUrlSession={sessionIdFromFragment:()=>null};
  const general=room('general','General',[member('a','Sam')]);
- general.messages=[message('m1','general',{kind:'agent',sessionId:'a',name:'Sam'},'lap video',Date.now(),{attachments:[{id:'clip',name:'lap.mp4',type:'video/mp4',size:10}]})];
+ general.messages=[message('m1','general',{kind:'agent',sessionId:'a',name:'Sam'},'lap video',Date.now(),{attachments:[{id:'clip',name:'lap.mp4',type:'video/mp4',size:10},{id:'phone',name:'IMG_0042.MOV',type:'video/quicktime',size:10}]})];
  window.__server=createServer([general]);window.__server.company={canManage:true,settings:{ownerName:'Owner'},employees:[]};
  const prior=window.__server.handle;window.__server.handle=async(path,options={})=>{const ok=data=>({ok:true,status:200,json:async()=>({success:true,data})});if(path.startsWith('/api/embassy'))return ok({connections:[]});if(path==='/api/chatrooms/phone-status')return ok({self:'owner',canSetOwn:true});if(path==='/api/system/stats')return ok({cpu:4,memory:{percent:26},disks:{available:true,filesystems:[{labels:['fixture'],totalBytes:100,availableBytes:10}]}});if(path==='/api/system/gpu')return ok({available:true,utilization:22});return prior(path,options);};
  window.fetch=async()=>({ok:true,json:async()=>({avatars:[]})});${stub}`,
@@ -92,13 +92,14 @@ it('opens the gear panel as one top rule with Company, Board and Workspace', asy
   }
 });
 
-it('shows an MP4 attachment as an inline player, and falls back to the card when it is not a playable video', async () => {
+it('shows an MP4 or QuickTime attachment as an inline player, and falls back to the card when it is not a playable video', async () => {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
   try {
     // Player: the file request stays open (as a real video loads), so nothing errors.
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await open(page);
     await page.route('**/api/chatrooms/general/files/clip', () => {});
+    await page.route('**/api/chatrooms/general/files/phone', () => {});
     await (page.evaluate(() => (window as any).reverieChat.renderFeed?.() ?? (window as any).reverieChat.selectRoom('general')));
     const video = await page.waitForSelector('video.chatroom-video', { state: 'attached', timeout: 5000 }).then(() =>
       page.evaluate(() => {
@@ -110,12 +111,17 @@ it('shows an MP4 attachment as an inline player, and falls back to the card when
     expect(video.preload).toBe('metadata');
     expect(video.src).toContain('/api/chatrooms/general/files/clip');
     expect(video.label).toBe('lap.mp4');
+    // An iPhone clip (QuickTime .mov) gets the same in-place player.
+    const players = await page.evaluate(() =>
+      [...document.querySelectorAll('video.chatroom-video')].map((v) => v.getAttribute('aria-label')));
+    expect(players).toEqual(['lap.mp4', 'IMG_0042.MOV']);
     // Fallback: the fixture server answers with HTML, which the browser cannot play, so the download card replaces it.
     const fallback = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await open(fallback);
     await fallback.waitForSelector('a.chatroom-file', { timeout: 5000 });
     expect(await fallback.locator('video.chatroom-video').count()).toBe(0);
-    expect(await fallback.locator('a.chatroom-file .chatroom-file-name').textContent()).toBe('lap.mp4');
+    await fallback.waitForFunction(() => document.querySelectorAll('a.chatroom-file').length === 2, null, { timeout: 5000 });
+    expect(await fallback.locator('a.chatroom-file .chatroom-file-name').allTextContents()).toEqual(['lap.mp4', 'IMG_0042.MOV']);
   } finally {
     await browser.close();
   }
