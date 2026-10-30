@@ -149,9 +149,11 @@ let
       npm prune --omit=dev --ignore-scripts
       mkdir -p "$out/lib/reverie" "$out/bin"
       cp -r dist node_modules package.json skills scripts packages LICENSE "$out/lib/reverie/"
-      # node-gyp's build metadata references the download cache; it is not needed
-      # to load the compiled PTY module at runtime.
+      # node-gyp's build metadata references the download cache and the Node.js
+      # source tree (the generated Makefile and *.mk files); none of it is needed
+      # to load the compiled PTY module (build/Release/pty.node) at runtime.
       find "$out/lib/reverie/node_modules" -path '*/node-pty/build/config.gypi' -delete
+      find "$out/lib/reverie/node_modules" \( -path '*/node-pty/build/Makefile' -o -path '*/node-pty/*.mk' \) -delete
       makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
         --prefix PATH : ${lib.getBin pkgs.util-linux}/bin \
         --add-flags "$out/lib/reverie/dist/index.js"
@@ -239,7 +241,7 @@ let
     from pathlib import Path
     invocation = "${pkgs.python3}/bin/python3"
     executable = Path(invocation).resolve(strict=True)
-    entry = Path("${src}/python/reverie/worker.py")
+    entry = Path("${workerPythonSource}/python/reverie/worker.py")
     assert str(executable).startswith('/nix/store/') and executable.is_file()
     with executable.open('rb') as stream:
         assert stream.read(4) == b'\x7fELF', 'The private client requires a native Python ELF'
@@ -256,10 +258,17 @@ let
     Path(os.environ['REVERIE_RESOURCE_CLIENT_OUTPUT']).write_text(json.dumps(value, indent=2) + '\n')
     PY
   '';
+  # The resource client runs worker.py by path beside its sibling modules. Ship
+  # only the Python tree: referencing the whole source tree put the checkout
+  # (about 300 MB) into every image that carries the runtime.
+  workerPythonSource = pkgs.runCommand "reverie-worker-python-source" { } ''
+    mkdir -p "$out"
+    cp -R ${src}/python "$out/python"
+  '';
   workerExec = pkgs.writeShellScriptBin "reverie-worker-exec" ''
     # Protected bootstrap metadata: ${workerResourceClientManifest}/share/reverie/resource-client.json
     if [ "''${1:-}" = --resource-ref ]; then
-      exec ${pkgs.python3}/bin/python3 -I -B ${src}/python/reverie/worker.py client "$@"
+      exec ${pkgs.python3}/bin/python3 -I -B ${workerPythonSource}/python/reverie/worker.py client "$@"
     fi
     exec ${memory}/bin/python3 -m reverie.worker client "$@"
   '';
@@ -284,7 +293,7 @@ let
     paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
-      pkgs.rustc pkgs.cargo pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
+      pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
