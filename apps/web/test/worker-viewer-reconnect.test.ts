@@ -212,6 +212,37 @@ it('keeps other eligible seats moving while one viewer remains in capped backoff
   expect(first.mux.respawnPane).toHaveBeenCalledTimes(5);
 });
 
+it('rotates failed viewers when delayed ticks make every backoff eligible', async () => {
+  const first = await fixture(), next = await fixture();
+  first.mux.respawnPane.mockResolvedValue(null as never); next.mux.respawnPane.mockResolvedValue(null as never);
+  const prepare = first.company.prepareWake.bind(first.company);
+  first.deps.company = { registeredEmployees: () => [...first.company.registeredEmployees(), ...next.company.registeredEmployees()],
+    prepareWake: (id: string, sid: string) => id === first.employee.id ? prepare(id, sid) : next.company.prepareWake(id, sid) } as never;
+  first.deps.session = id => id === first.session.id ? first.session : id === next.session.id ? next.session : undefined;
+  for (let n = 0; n < 10; n++) {
+    await first.controller.tick();
+    expect(first.mux.respawnPane.mock.calls.length + next.mux.respawnPane.mock.calls.length).toBe(n + 1);
+    first.advance(60_000);
+  }
+  expect(first.mux.respawnPane).toHaveBeenCalledTimes(5);
+  expect(next.mux.respawnPane).toHaveBeenCalledTimes(5);
+});
+
+it('advances the attempted seat even when asynchronous admission throws', async () => {
+  const first = await fixture(), next = await fixture();
+  first.mux.respawnPane.mockResolvedValue(null as never); next.mux.respawnPane.mockResolvedValue(null as never);
+  const prepare = first.company.prepareWake.bind(first.company);
+  first.deps.company = { registeredEmployees: () => [...first.company.registeredEmployees(), ...next.company.registeredEmployees()],
+    prepareWake: (id: string, sid: string) => id === first.employee.id ? prepare(id, sid) : next.company.prepareWake(id, sid) } as never;
+  first.deps.session = id => id === first.session.id ? first.session : id === next.session.id ? next.session : undefined;
+  first.deps.moveGuard.mockRejectedValueOnce(new Error('Owned admission failure'));
+  await expect(first.controller.tick()).rejects.toThrow('Owned admission failure');
+  expect(first.mux.respawnPane).not.toHaveBeenCalled();
+  first.advance(60_000); await first.controller.tick();
+  expect(next.mux.respawnPane).toHaveBeenCalledOnce();
+  expect(first.mux.respawnPane).not.toHaveBeenCalled();
+});
+
 it.each(['off', 'vacation', 'generation', 'owner', 'recipe', 'move', 'drain', 'migration'] as const)('refuses %s drift during admission before any respawn', async kind => {
   const f = await fixture();
   f.deps.moveGuard.mockImplementationOnce(async () => {

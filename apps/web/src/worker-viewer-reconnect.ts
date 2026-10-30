@@ -25,6 +25,7 @@ export class WorkerViewerReconnect {
   private flights = new Set<string>();
   private attempts = new Map<string, { key: string; count: number; next: number }>();
   private ticking = false;
+  private lastAutomaticEmployeeId?: string;
   constructor(private readonly deps: ViewerReconnectDeps) {}
 
   async reconnect(employeeId: string, expected: { sessionId: string; sessionGeneration: number },
@@ -49,6 +50,8 @@ export class WorkerViewerReconnect {
     const count = previous?.key === key ? previous.count : 0;
     this.attempts.set(employeeId, { key, count: Math.min(count + 1, BACKOFF.length),
       next: now() + BACKOFF[Math.min(count, BACKOFF.length - 1)] });
+    // Advance before asynchronous admission: a throwing attempt still owns its seat.
+    if (automatic) this.lastAutomaticEmployeeId = employeeId;
     let release: (() => void) | undefined;
     let claim: ReturnType<CompanyService['prepareWake']>;
     try {
@@ -79,7 +82,10 @@ export class WorkerViewerReconnect {
     if (this.ticking || !this.deps.ready()) return;
     this.ticking = true;
     try {
-      for (const employee of this.deps.company.registeredEmployees()) {
+      const employees = this.deps.company.registeredEmployees();
+      const previousIndex = employees.findIndex(employee => employee.id === this.lastAutomaticEmployeeId);
+      for (let offset = 1; offset <= employees.length; offset++) {
+        const employee = employees[(previousIndex + offset) % employees.length];
         const session = this.deps.session(employee.sessionId);
         if (session?.runtimeHealth !== 'disconnected') { this.attempts.delete(employee.id); continue; }
         const previous = this.attempts.get(employee.id);
