@@ -15,8 +15,15 @@ let
     runtimeInputs = [ pkgs.nix pkgs.coreutils ];
     text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile (src + "/scripts/reverie-nix-store-prepare"));
   };
+  # dockerTools.caCertificates, but from the runtime's CA bundle rather than the pinned nixpkgs' older one.
+  caCertificates = pkgs.runCommand "ca-certificates" { } ''
+    mkdir -p $out/etc/ssl/certs $out/etc/pki/tls/certs
+    ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-bundle.crt
+    ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-certificates.crt
+    ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/pki/tls/certs/ca-bundle.crt
+  '';
   baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
-    pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ]
+    caCertificates pkgs.sudo pkgs.tini ]
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare ]
       ++ import ./worker-base-tools.nix { inherit pkgs; })
     ++ pkgs.lib.optional (rootlessDocker != null) idmap
