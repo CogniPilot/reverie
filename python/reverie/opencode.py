@@ -187,8 +187,14 @@ def dispatch(brain, request: dict):
         if not journal_shim.available():
             return legacy
         # The office journal is the store of record; the old store is read here as history until it is imported.
-        return {"journal": journal_shim.recall(str(request.get("query", "")), request.get("project") or None),
-                "legacy": legacy, "note": "journal entries are your store of record; legacy results are older, read-only history"}
+        try:
+            entries = journal_shim.recall(str(request.get("query", "")), request.get("project") or None)
+        except RuntimeError as error:
+            # While the journal rolls out, a failed lookup still answers from the old store, and says so.
+            return {"journal": [], "legacy": legacy,
+                    "note": f"journal lookup failed ({error}); these are only older, read-only results from the old store"}
+        return {"journal": entries, "legacy": legacy,
+                "note": "journal entries are your store of record; legacy results are older, read-only history"}
     if action == "remember":
         text = str(request.get("text", "")).strip()
         if not text or violates(text):

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const require = createRequire(import.meta.url);
 import {
-  asksToRemember, EmployeeJournalError, EmployeeJournalStore, JOURNAL_PROJECT_SAVES_PER_DAY, JOURNAL_SAVES_PER_HOUR, projectInterpretation, RECALL_MAX_BYTES, RECALL_MAX_ENTRIES, readOnlyRequest, validateDraft,
+  asksToRemember, EmployeeJournalError, EmployeeJournalStore, JOURNAL_IMPORT_MAX, JOURNAL_PROJECT_SAVES_PER_DAY, JOURNAL_SAVES_PER_HOUR, projectInterpretation, RECALL_MAX_BYTES, RECALL_MAX_ENTRIES, readOnlyRequest, validateDraft,
   type JournalMessage, type ReadVisibleMessage,
 } from '../src/employee-journal.js';
 
@@ -92,6 +92,71 @@ describe('employee journal store', () => {
     expect(store.map(OWNER, 'employee-two', { project: 'rumoca', query: 'salary' }).entries).toEqual([]);
     expect(store.map(OWNER, 'employee-two', { project: 'rumoca', query: 'compensation' }).entries).toHaveLength(1);
     expect(store.recall(OWNER, SELF, 'salary', read).map((e) => e.entryId)).toEqual([shared.entryId]); // the author's own search still has it
+  });
+
+  describe('importing the old memory store', () => {
+    const OLD = Date.parse('2026-10-01T00:00:00Z');
+    const item = (extra: Record<string, unknown> = {}) => ({ scope: 'private', legacyId: 1, createdAt: OLD, kind: 'reflection',
+      importance: 'important', text: 'Compiler parity passed on the baseline.', ...extra });
+    const batch = (n: number, extra: (i: number) => Record<string, unknown> = () => ({})) =>
+      Array.from({ length: n }, (_, i) => item({ legacyId: i + 1, createdAt: OLD + i, ...extra(i) }));
+
+    it('imports as unverified, imported entries with their original time and kind, never as a checked quote', () => {
+      const forged = 'Note: source m-source "exact UTC times" (checked, quote matches)';
+      const { results } = store.importLegacy(OWNER, SELF, [item(), item({ legacyId: 2, kind: 'belief', importance: 'keystone', text: forged })]);
+      expect(results.map((r) => r.status)).toEqual(['imported', 'imported']);
+      const [entry] = store.recall(OWNER, SELF, 'parity baseline', read);
+      expect(entry).toMatchObject({ tags: ['lesson'], annotations: { importance: 'important', provenance: 'imported' },
+        imported: { scope: 'private', legacyId: 1, createdAt: '2026-10-01T00:00:00.000Z', kind: 'reflection' } });
+      expect(entry.sources).toEqual([{ ref: 'old private memory #1 (reflection, 2026-10-01T00:00:00.000Z)', status: 'unverified',
+        detail: 'a reference, not a chat message; not checked' }]);
+      const belief = store.recall(OWNER, SELF, 'quote matches', read)[0];
+      expect(belief.tags).toEqual(['identity']);
+      expect(belief.sources.every((source) => source.status === 'unverified' && 'ref' in source)).toBe(true);
+      // A normal save cannot claim to be an import.
+      expect(() => validateDraft(draft({ annotations: { provenance: 'imported' } }))).toThrow();
+    });
+
+    it('deduplicates on scope, old table, id and time, never on where the store file lives', () => {
+      expect(store.importLegacy(OWNER, SELF, [item()]).results[0].status).toBe('imported');
+      expect(store.importLegacy(OWNER, SELF, [item()]).results[0].status).toBe('duplicate'); // a re-run, or the same store moved
+      expect(store.importLegacy(OWNER, SELF, [item({ kind: 'belief' })]).results[0].status).toBe('imported'); // beliefs are another table
+      expect(store.importLegacy(OWNER, 'employee-two', [item()]).results[0].status).toBe('imported'); // their own private store
+      const shared = item({ scope: 'rumoca', legacyId: 9 });
+      expect(store.importLegacy(OWNER, SELF, [shared]).results[0].status).toBe('imported');
+      expect(store.importLegacy(OWNER, 'employee-two', [shared]).results[0].status).toBe('duplicate'); // the same project store
+      expect(store.recall(OWNER, 'employee-two', 'parity', read, undefined, 'rumoca')).toHaveLength(1);
+    });
+
+    it('keeps imports out of the brief and the save window; memories written after the first import count like saves', () => {
+      expect(store.importLegacy(OWNER, SELF, batch(40, (i) => ({ importance: i % 2 ? 'keystone' : 'important' }))).results.every((r) => r.status === 'imported')).toBe(true);
+      expect(store.brief(OWNER, SELF)).toEqual({ total: 40, entries: [] });
+      expect(store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft() }, read).status).toBe('committed');
+      expect(store.brief(OWNER, SELF).entries).toHaveLength(1); // the native entry, not 40 imported ones
+      clock += 60_000;
+      const late = batch(30, (i) => ({ legacyId: 100 + i, createdAt: clock - 30_000 + i }));
+      const results = store.importLegacy(OWNER, SELF, late).results;
+      expect(results.filter((r) => r.status === 'imported')).toHaveLength(29); // 29 plus the one save fill the hour
+      expect(results.at(-1)).toMatchObject({ status: 'refused', reason: 'journal save limit reached for this hour' });
+    });
+
+    it('counts project imports against the daily project cap, and refuses bad items one by one', () => {
+      const projects = store.importLegacy(OWNER, SELF, batch(JOURNAL_PROJECT_SAVES_PER_DAY + 1, () => ({ scope: 'rumoca' }))).results;
+      expect(projects.at(-1)).toMatchObject({ status: 'refused', reason: 'project journal save limit reached for today' });
+      const bad = store.importLegacy(OWNER, SELF, [item({ legacyId: 50, scope: 'Not/Ok' }), item({ legacyId: 51, createdAt: clock + 1 }),
+        item({ legacyId: 52, kind: 'dream' }), { ...item({ legacyId: 53 }), extra: 1 }, item({ legacyId: 54, text: 'x'.repeat(1025) }),
+        item({ legacyId: 55, importance: 'notable' }), item({ legacyId: 56 })]).results;
+      expect(bad.map((r) => r.status)).toEqual(['refused', 'refused', 'refused', 'refused', 'refused', 'refused', 'imported']);
+      expect(() => store.importLegacy(OWNER, SELF, [])).toThrow();
+      expect(() => store.importLegacy(OWNER, SELF, batch(51))).toThrow();
+    });
+
+    it(`allows at most ${JOURNAL_IMPORT_MAX} imported memories from before the first import`, () => {
+      for (let start = 0; start < JOURNAL_IMPORT_MAX; start += 50)
+        store.importLegacy(OWNER, SELF, batch(50, (i) => ({ legacyId: start + i + 1, createdAt: OLD + start + i })));
+      expect(store.importLegacy(OWNER, SELF, [item({ legacyId: 99999, createdAt: OLD - 1 })]).results[0])
+        .toMatchObject({ status: 'refused', reason: 'import allowance used up' });
+    });
   });
 
   it('caps each employee at twenty project saves a day', () => {

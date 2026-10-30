@@ -155,7 +155,13 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
 
   async function journalVerb(verb: (deps: AgentDeps) => Promise<number>): Promise<unknown> {
     const done = await journal!(verb);
-    if (done.code !== 0) throw new Error(scrubPaths([...done.err, ...done.out].join(' ').trim()).slice(0, 500) || `journal refused (exit ${done.code})`);
+    if (done.code !== 0) {
+      // In JSON mode a refusal prints {success:false, error}; give the model the error, not the envelope.
+      const printed = [...done.err, ...done.out].join(' ').trim();
+      let reason = printed;
+      try { reason = String((JSON.parse(printed) as { error?: unknown }).error ?? printed); } catch { /* plain text */ }
+      throw new Error(scrubPaths(reason).slice(0, 500) || `journal refused (exit ${done.code})`);
+    }
     return (JSON.parse(done.out.join('\n')) as { data: unknown }).data;
   }
 
@@ -239,7 +245,9 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
         const entries = (await journalVerb((deps) => agentJournalRecall({ ...deps, json: true }, [query], undefined, body.project as string | undefined))) as { entries: unknown[] };
         return { text: JSON.stringify({ journal: entries.entries, legacy: JSON.parse(legacy), note: 'journal entries are your store of record; legacy results are older, read-only history' }) };
       } catch (error) {
-        return failure(`Journal lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+        // While the journal rolls out, a failed lookup still answers from the old store, and says so.
+        return { text: JSON.stringify({ journal: [], legacy: JSON.parse(legacy),
+          note: `journal lookup failed (${error instanceof Error ? error.message : 'unknown error'}); these are only older, read-only results from the old store` }) };
       }
     },
   };

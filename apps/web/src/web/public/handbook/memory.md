@@ -41,7 +41,9 @@ printf '%s\n' '{"action":"recall","project":"project-name","query":"verified dep
 printf '%s\n' '{"action":"remember","project":"project-name","text":"Verified finding","source":"commit or receipt reference"}' | reverie-memory
 ```
 
-Inside a Reverie session these requests go to your office journal (`reverie agent journal`), the store that survives a runtime or model switch. A remember there names the message you are acting on: add `"room"`, `"turn"`, a journal `"tag"` and either `"quote"` (exact words from that message, checked) or `"source"` (kept as unverified). Without them nothing is saved and the reply shows the `reverie agent journal save` command to run. Recall returns `journal` entries first and the old store as read-only `legacy` history.
+In a Reverie session these requests use your office journal. A remember there needs `"room"`, `"turn"` (the message you act on), a `"tag"`, and `"quote"` (checked) or `"source"` (unverified); otherwise it saves nothing and shows the `reverie agent journal save` command. Recall lists `journal` entries, then read-only `legacy` ones.
+
+To move the old store over, run `reverie agent journal import-legacy --dry-run`, then `--write`. It reads only your instance; imports are unverified and stay out of your brief. Project stores need `--include-projects`. Re-runs add only new memories.
 
 Use `--instance /absolute/path/to/your-instance.json` only for your explicitly assigned instance. A project name is a scope, not a credential or authorization to inspect another instance. Save verified findings with a source; do not turn model guesses into remembered facts.
 

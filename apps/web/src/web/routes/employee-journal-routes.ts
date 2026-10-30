@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ChatMessage } from '../../chatroom-store.js';
 import type { CompanyEmployee } from '../../company-types.js';
-import { EmployeeJournalError, journalId, journalProject, type EmployeeJournalStore, type ReadVisibleMessage } from '../../employee-journal.js';
+import { EmployeeJournalError, JOURNAL_IMPORT_BATCH, journalId, journalProject, type EmployeeJournalStore, type ReadVisibleMessage } from '../../employee-journal.js';
 import type { OwnerVerifier } from '../../owner-auth/marks.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../route-helpers.js';
@@ -27,6 +27,8 @@ const Recall = z.object({ q: Query, roomId: Id.optional(), project: Project.opti
 const MapQuery = z.object({ q: Query.optional(), roomId: Id.optional(), before: z.coerce.number().int().positive().optional(),
   project: Project.optional() }).strict();
 const Source = z.object({ roomId: Id, messageId: Id }).strict();
+/** Items are checked one by one by the store, so one bad item is reported without failing the batch. */
+const Import = z.object({ items: z.array(z.unknown()).min(1).max(JOURNAL_IMPORT_BATCH) }).strict();
 const OwnerPage = z.object({ before: z.coerce.number().int().positive().optional() }).strict();
 
 const headers = (reply: FastifyReply) => {
@@ -87,6 +89,15 @@ export function registerEmployeeJournalRoutes(
       const body = parse(Save, request.body);
       const self = current(request);
       return { success: true, data: deps.journal().save(self.owner, self.employee.id, body, self.read) };
+    } catch (error) { return failed(reply, error); }
+  });
+  // Old-store memories the caller's own CLI read from its own instance; see EmployeeJournalStore.importLegacy.
+  app.post('/api/agent/journal/import', { ...options, bodyLimit: 128 * 1024 }, async (request, reply) => {
+    headers(reply);
+    try {
+      const body = parse(Import, request.body);
+      const self = current(request);
+      return { success: true, data: deps.journal().importLegacy(self.owner, self.employee.id, body.items) };
     } catch (error) { return failed(reply, error); }
   });
   app.get('/api/agent/journal/recall', options, async (request, reply) => {
