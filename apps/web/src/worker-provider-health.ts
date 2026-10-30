@@ -93,11 +93,17 @@ export class WorkerProviderHealth {
   private monotonic() {
     return (this.deps.monotonic ?? (() => performance.now()))();
   }
-  read(sid: string, expected?: { owner?: string }): ProviderHealth | undefined {
-    const rows = this.deps.employees().filter((e) => e.sessionId === sid);
-    if (this.closed || rows.length !== 1) return;
+  /** Current employee rows come from a synchronous canonical view with unique
+   * session bindings. Reuse that row instead of reloading the company per item.
+   * SID-only callers retain the independent current-registry/owner check.
+   */
+  read(current: CompanyEmployee | string, expected?: { owner?: string }): ProviderHealth | undefined {
+    if (this.closed) return;
+    const rows = typeof current === 'string' ? this.deps.employees().filter((e) => e.sessionId === current) : [current];
+    if (rows.length !== 1) return;
     if (expected && rows[0].owner !== expected.owner) return;
     const employee = rows[0],
+      sid = employee.sessionId,
       entry = this.entries.get(sid),
       age = entry ? this.now() - entry.value.observedAtEpochMs : -1;
     if (
@@ -130,15 +136,13 @@ export class WorkerProviderHealth {
           new Set(rows.map((r) => r.employeeId)).size !== rows.length
         )
           throw Error('Ambiguous native provider health');
+        // One fresh census after the async query, independent of response size.
+        const employees = this.deps.employees();
         for (const row of rows) {
-          const current = this.deps
-            .employees()
-            .filter(
-              (e) =>
-                e.id === row.employeeId &&
-                e.sessionId === row.sessionId &&
-                e.sessionGeneration === row.sessionGeneration
-            );
+          const current = employees.filter(
+            (e) =>
+              e.id === row.employeeId && e.sessionId === row.sessionId && e.sessionGeneration === row.sessionGeneration
+          );
           if (
             current.length !== 1 ||
             before.get(row.sessionId) !== fingerprint(current[0]) ||
