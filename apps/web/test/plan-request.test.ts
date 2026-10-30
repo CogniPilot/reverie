@@ -159,6 +159,28 @@ describe('expert-approved plan requests', () => {
     );
     expect(h.port.moves.begin).toHaveBeenCalledTimes(1);
   });
+  it('keeps a refused start\'s own reason on the failed record and logs any other error without exposing it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const refused = requestHarness();
+      await refused.service.create(refused.input, 'owner', refused.execution);
+      vi.mocked(refused.port.moves.begin).mockRejectedValueOnce(
+        new PlanMoveError('This employee already has a move in progress or requiring recovery'));
+      const record = await refused.service.decide('request', 'source', refused.nonce(), 'approve', 'Handoff', 'owner');
+      expect(record.phase).toBe('failed');
+      expect(record.error).toBe('The approved move could not start. This employee already has a move in progress or ' +
+        'requiring recovery. Inspect the current session before requesting again.');
+
+      const broken = requestHarness();
+      await broken.service.create(broken.input, 'owner', broken.execution);
+      vi.mocked(broken.port.moves.begin).mockRejectedValueOnce(new Error('EACCES /private/internal/path'));
+      const generic = await broken.service.decide('request', 'source', broken.nonce(), 'approve', 'Handoff', 'owner');
+      expect(generic.error).toBe('The approved move could not start. Inspect the current session before requesting again.');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not start'), 'EACCES /private/internal/path');
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it('rejects wrong session, owner, nonce, unsafe handoff, and changed source before any execution', async () => {
     const h = requestHarness();
     await h.service.create(h.input, 'owner', h.execution);
