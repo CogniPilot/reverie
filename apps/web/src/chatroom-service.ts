@@ -345,11 +345,16 @@ export class ChatroomService {
   }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
-  turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } }): TurnSummary {
+  /**
+   * `select`: one visible room's recent window, agent and bot senders only, and every notice still pending before `before`
+   * returned as sourceReferences (for an explicit bulk "handle before"); owner and other human messages are never selected.
+   */
+  turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } },
+    select?: { roomId: string; before: number }): TurnSummary {
     const session = this.deps.getSession(sessionId);
     const mode = this.alertMode(sessionId)?.mode ?? 'ring';
     if (!session || session.pid === null) {
-      if (historyPage) throw new ChatroomError('A live own session is required for notice history', 'NOT_FOUND');
+      if (historyPage || select) throw new ChatroomError('A live own session is required for notice history', 'NOT_FOUND');
       return renderTurnSummary(mode, []);
     }
     const held = new Set(this.delivery.inspectionFor(sessionId).map((m) => `${m.roomId}\0${m.messageId}`));
@@ -374,19 +379,20 @@ export class ChatroomService {
     const budget = { rows: 1000, bytes: 8 * 1024 * 1024 };
     const coverage: NoticeHistoryCoverage = { state: this.db ? 'complete' : 'recent-only', rooms: [] };
     const rooms = this.store.roomsFor(sessionId);
-    if (historyPage) {
-      const room = rooms.find(r => r.id === historyPage.roomId);
+    const scoped = historyPage ?? select;
+    if (scoped) {
+      const room = rooms.find(r => r.id === scoped.roomId);
       if (!room || room.archivedAt || room.owner !== session.owner || (isDm(room) && !room.dm.includes(sessionId)))
         throw new ChatroomError('No visible notice room', 'NOT_FOUND');
-      if (!this.db) throw new ChatroomError('Owner history requires the durable chat database', 'UNAVAILABLE');
+      if (historyPage && !this.db) throw new ChatroomError('Owner history requires the durable chat database', 'UNAVAILABLE');
     }
     for (const room of rooms) {
-      if (historyPage && room.id !== historyPage.roomId) continue;
+      if (scoped && room.id !== scoped.roomId) continue;
       if (room.archivedAt || room.owner !== session.owner || (isDm(room) && !room.dm.includes(sessionId))) continue;
       const name = this.nameOf(sessionId);
       const uniquelyNamed =
         room.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
-      const history = this.db?.noticeHistory(room.id, budget, historyPage?.before);
+      const history = select ? undefined : this.db?.noticeHistory(room.id, budget, historyPage?.before);
       if (history && !history.complete) {
         coverage.state = 'bounded';
         coverage.rooms.push({ roomId: room.id, ...(history.before ? { before: history.before } : {}) });
@@ -411,7 +417,8 @@ export class ChatroomService {
       }
       for (const [index, message] of messages.entries()) {
         if ((!recentIds.has(message.id) && !ownerHistoryIds.has(message.id)) ||
-            (historyPage && (message.from.kind !== 'user' || !isOwnerMark(message.from.mark)))) continue;
+            (historyPage && (message.from.kind !== 'user' || !isOwnerMark(message.from.mark))) ||
+            (select && ((message.from.kind !== 'agent' && message.from.kind !== 'bot') || message.at >= select.before))) continue;
         if (
           message.deleted ||
           message.from.kind === 'system' ||
@@ -467,6 +474,9 @@ export class ChatroomService {
     }
     const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now());
     if (historyPage) summary.sourceReferences = candidates.map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
+    // Only notices that still need attention: one handled but uncertain in delivery is not re-resolved.
+    if (select) summary.sourceReferences = candidates.filter(m => m.attention?.disposition === 'pending')
+      .map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
     return summary;
   }
 

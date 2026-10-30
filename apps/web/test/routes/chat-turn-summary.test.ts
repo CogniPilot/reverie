@@ -492,6 +492,28 @@ it('owner history inspection is exact-caller, strict, read-only, current-access 
   } finally { await f.app.close(); }
 });
 
+it('pending-before lists only the caller\'s agent/bot notices, read-only and exact-caller', async () => {
+  const f = await fixture('alice', true);
+  try {
+    const owner = f.service.post(f.room.id, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, 'owner request', 'all', { deliver: false });
+    const peer = f.service.post(f.room.id, { kind: 'agent', sessionId: B, name: 'Peer' }, 'peer note', 'all', { deliver: false });
+    const url = '/api/chatrooms/notices/pending-before?roomId=' + f.room.id + '&before=' + (peer.at + 1);
+    const ack = vi.spyOn(f.service.delivery, 'acknowledgeRead');
+    const response = await f.app.inject({ url, headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    const ids = response.json().data.sourceReferences.map((r: { messageId: string }) => r.messageId);
+    expect(ids).toContain(peer.id); expect(ids).not.toContain(owner.id);
+    expect(ack).not.toHaveBeenCalled();
+    for (const suffix of ['&actor=' + B, '&before=soon', '&before=99999999999999999'])
+      expect((await f.app.inject({ url: url + suffix, headers })).statusCode).toBe(400);
+    expect((await f.app.inject({ url, headers: {} })).statusCode).toBe(403);
+    expect((await f.app.inject({ url, headers: { ...headers, 'x-reverie-service-token': 'fixture' } })).statusCode).toBe(403);
+    f.room.owner = 'bob';
+    expect((await f.app.inject({ url, headers })).statusCode).toBe(404);
+  } finally { await f.app.close(); }
+});
+
 it('legacy recent-only history is explicit and cannot claim complete durable coverage', async () => {
   const f = await fixture();
   try {

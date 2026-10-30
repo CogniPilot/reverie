@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { agentChatHandle, agentChatPending, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
+import { agentChatHandle, agentChatHandleBefore, agentChatPending, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 
 it.each(['handled', 'superseded'])(
   'explicit CLI %s uses exact reads, checks response identity and never ACKs transport',
@@ -75,4 +75,44 @@ it('CLI pending follows only an explicit paired cursor in a bounded own read and
   expect(await agentChatPending(deps, { room: 'Room', beforeAt: '1000' })).not.toBe(0);
   expect(await agentChatPending(deps, { room: 'Room', beforeAt: '9999999999999999', beforeId: 'source' })).not.toBe(0);
   expect(calls).toEqual([]);
+});
+
+it('bulk handle --before lists own pending agent/bot notices and resolves each with its own exact read', async () => {
+  const calls: RequestOptions[] = [];
+  const outputs: string[] = [];
+  let listRoom = 'room';
+  const deps: AgentDeps = {
+    ctx: { apiUrl: 'http://example.test', selfId: 'own-session' },
+    json: true,
+    now: () => 2_000_000_000_000,
+    io: { out: (s) => outputs.push(s), err: () => {}, exit: () => {} },
+    request: async (_ctx, request) => {
+      calls.push(request);
+      const id = request.path.split('/').pop()!;
+      const data =
+        request.path === '/api/v1/chatrooms'
+          ? { rooms: [{ id: 'room', name: 'Room', members: [] }] }
+          : request.path === '/api/v1/chatrooms/notices/pending-before'
+            ? { sourceReferences: [{ roomId: listRoom, messageId: 'one' }, { roomId: listRoom, messageId: 'two' }] }
+            : request.method === 'POST'
+              ? { source: { roomId: 'room', messageId: (request.body as { messageId: string }).messageId }, attention: { disposition: 'handled' } }
+              : { message: { id }, readToken: 'exact-token-' + id };
+      return { status: 200, text: '', json: { success: true, data } };
+    },
+  };
+  expect(await agentChatHandleBefore(deps, { room: 'Room', before: '2026-10-27T00:00:00Z' })).toBe(0);
+  expect(calls.find((r) => r.path.endsWith('/pending-before'))?.query).toEqual({ roomId: 'room', before: String(Date.parse('2026-10-27T00:00:00Z')) });
+  expect(calls.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([
+    { roomId: 'room', messageId: 'one', readToken: 'exact-token-one', disposition: 'handled' },
+    { roomId: 'room', messageId: 'two', readToken: 'exact-token-two', disposition: 'handled' },
+  ]);
+  expect(JSON.parse(outputs.at(-1)!)).toMatchObject({ roomId: 'room', handled: ['one', 'two'], failed: [] });
+
+  calls.length = 0;
+  expect(await agentChatHandleBefore(deps, { room: 'Room', before: String(2_000_000_000_001) })).not.toBe(0); // future
+  expect(await agentChatHandleBefore(deps, { before: '1700000000000' })).not.toBe(0); // no explicit room
+  expect(await agentChatHandleBefore(deps, { room: 'Room', before: '2026-10-27 00:00' })).not.toBe(0); // no offset
+  listRoom = 'other';
+  expect(await agentChatHandleBefore(deps, { room: 'Room', before: '1700000000000' })).not.toBe(0); // foreign listing
+  expect(calls.some((r) => r.method === 'POST')).toBe(false);
 });

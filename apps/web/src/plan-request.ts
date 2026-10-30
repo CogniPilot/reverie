@@ -429,9 +429,13 @@ export class PlanMoveRequests {
         record.movePhase = move.phase;
         record.newSession = move.newSession;
         await this.save();
-      } catch {
+      } catch (error) {
         record.phase = 'failed';
-        record.error = 'The approved move could not start. Inspect the current session before requesting again.';
+        // A refusal's own text (a lock, a changed account, an existing plan) is written for the expert; anything else
+        // stays generic for them and goes to the log, so the reason is never lost.
+        const reason = error instanceof PlanMoveError ? ` ${error.message.replace(/[.\s]+$/, '')}.` : '';
+        record.error = `The approved move could not start.${reason} Inspect the current session before requesting again.`;
+        console.warn(`[plans] approved move ${record.id} could not start:`, error instanceof Error ? error.message : error);
         await this.save();
       }
       return view(record);
