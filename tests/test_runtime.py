@@ -84,6 +84,57 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(self.runtime.check()["stopped"])
         self.assertFalse(any(method=="POST" for method,_,_ in self.api.calls))
 
+    def test_switch_first_prompt_starts_with_the_employee_memory_brief(self):
+        BRIEF="Your memory: you are Otto, a persistent Reverie employee. Keystone: no AI in branch names."
+        runtime=Runtime(self.path,self.api,cgroup=self.root/"no-cgroup",brief=lambda: BRIEF)
+        runtime.state={"current":"old-id","backend":"local"}
+        result=runtime.start("cloud","Verified handoff")
+        self.assertEqual(result["first_prompt"],BRIEF+" Verified handoff")
+        self.assertTrue(result["memory_brief"])
+        saved=json.loads((self.root/"state.json").read_text())
+        self.assertEqual(saved["handoff"],"Verified handoff")  # the agent's handoff alone
+        self.assertEqual(saved["first_prompt"],BRIEF+" Verified handoff")
+
+    def test_send_command_keeps_journal_text_as_one_argument(self):
+        import shlex
+        BRIEF="Keystone: James's rule $(touch /tmp/pwned) `id` \\ \"quoted\" -- not an option"
+        runtime=Runtime(self.path,self.api,cgroup=self.root/"no-cgroup",brief=lambda: BRIEF)
+        result=runtime.start("cloud","-starts with a dash; it's fine")
+        argv=shlex.split(result["send_command"])
+        self.assertEqual(argv,["reverie","agent","send","candidate-id","--",BRIEF+" -starts with a dash; it's fine"])
+        self.assertEqual(argv[-1],result["first_prompt"])
+        self.assertEqual(json.loads((self.root/"state.json").read_text())["send_command"],result["send_command"])
+
+    def test_switch_without_a_brief_sends_the_handoff_alone(self):
+        result=self.runtime.start("cloud","Verified handoff")  # no agent session here: no brief is fetched
+        self.assertEqual(result["first_prompt"],"Verified handoff")
+        self.assertFalse(result["memory_brief"])
+
+    def test_recovery_after_a_switch_carries_exactly_one_brief(self):
+        BRIEF="Your memory: you are Otto."
+        runtime=Runtime(self.path,self.api,cgroup=self.root/"no-cgroup",brief=lambda: BRIEF)
+        runtime.state={"current":"old-id","backend":"cloud"}
+        runtime.start("cloud","Saved work")
+        runtime.state.update(candidate=None,current="candidate-id")
+        self.api.session={"pid":None,"paneExit":{"status":1}}
+        self.assertEqual(runtime.check(now=1000)["backend"],"local")
+        self.assertEqual(runtime.state["first_prompt"].count(BRIEF),1)
+        self.assertTrue(runtime.state["first_prompt"].startswith(BRIEF+" Saved work"))
+
+    def test_memory_brief_is_the_agents_own_journal_brief_on_one_line(self):
+        from reverie.runtime import memory_brief
+        with patch.dict(os.environ,{},clear=True), patch("reverie.runtime.subprocess.run") as run:
+            self.assertIsNone(memory_brief()); run.assert_not_called()  # outside an agent session: no CLI call
+        done=subprocess.CompletedProcess([],0,json.dumps({"success":True,"data":{"text":"Your memory:\n- keystone one\n- newest two\n"}}),"")
+        with patch.dict(os.environ,{"REVERIE_SESSION_ID":"session-a"}), patch("reverie.runtime.subprocess.run",return_value=done) as run:
+            self.assertEqual(memory_brief(),"Your memory: - keystone one - newest two")
+            self.assertEqual(run.call_args.args[0],["reverie","agent","journal","brief","--json"])
+        for failure in (subprocess.CompletedProcess([],1,"",""), subprocess.CompletedProcess([],0,"not json","")):
+            with patch.dict(os.environ,{"REVERIE_SESSION_ID":"session-a"}), patch("reverie.runtime.subprocess.run",return_value=failure):
+                self.assertIsNone(memory_brief())
+        with patch.dict(os.environ,{"REVERIE_SESSION_ID":"session-a"}), patch("reverie.runtime.subprocess.run",side_effect=subprocess.TimeoutExpired("reverie",15)):
+            self.assertIsNone(memory_brief())
+
     def test_crash_provisions_local_and_budget_blocks_repeated_recovery(self):
         self.runtime.state={"current":"old-id", "backend":"cloud", "handoff":"Saved work"}
         self.api.session={"pid":None,"paneExit":{"status":1}}

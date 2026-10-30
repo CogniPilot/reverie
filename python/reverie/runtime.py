@@ -6,7 +6,9 @@ import base64
 import json
 import os
 import re
+import shlex
 import signal
+import subprocess
 import stat
 import urllib.parse
 from pathlib import Path
@@ -80,6 +82,20 @@ def observed_effort(conversation, projects, tail=512 * 1024):
     return None
 
 
+def memory_brief():
+    """This employee's memory brief from the office journal (`reverie agent journal brief`), on one line, or None.
+
+    Runs as the switching agent itself, so the brief is its own; outside an agent session, or on any failure, there is none
+    and the switch goes ahead with the handoff alone."""
+    if not os.environ.get("REVERIE_SESSION_ID"): return None
+    try:
+        done = subprocess.run(["reverie", "agent", "journal", "brief", "--json"], capture_output=True, text=True, timeout=15)
+        text = json.loads(done.stdout)["data"]["text"] if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError): return None
+    # A composer may submit at a typed newline; the brief goes in as one line, like the handoff it precedes.
+    return " ".join(text.split()) if isinstance(text, str) and text.strip() else None
+
+
 def coordinator_of(room):
     """A room's coordinator, from coordinatorId or a member's role (Reverie derives one from the other)."""
     return room.get("coordinatorId") or next(
@@ -113,8 +129,9 @@ class Reverie:
 
 
 class Runtime:
-    def __init__(self, policy_path, api=None, cgroup=Path("/sys/fs/cgroup")):
+    def __init__(self, policy_path, api=None, cgroup=Path("/sys/fs/cgroup"), brief=memory_brief):
         self.cgroup = Path(cgroup)
+        self.brief = brief
         self.policy_path = Path(policy_path).expanduser().resolve(strict=True)
         self.policy = json.loads(self.policy_path.read_text())
         self.state_path = self.resolve(self.policy["state_file"])
@@ -193,18 +210,26 @@ class Runtime:
                 "sessionName":self.session_name(backend)}
         if mode == "claude": body["model"] = profile["model"]
         else: body["openCodeConfig" if mode == "opencode" else "codexConfig"] = {"model":profile["model"]}
-        self.state.update(handoff=handoff, requested_backend=backend, creation_uncertain=True)
+        # The new session's first prompt starts with the employee's own memory, then the handoff. The handoff is kept alone
+        # in state, so a later recovery that resends it never stacks a second brief.
+        brief = self.brief()
+        first_prompt = brief + " " + handoff if brief else handoff
+        self.state.update(handoff=handoff, first_prompt=first_prompt, requested_backend=backend, creation_uncertain=True)
         self.save()  # Persist BEFORE creating; an ambiguous response must not duplicate agents.
         value = self.api.call("POST", "/api/v1/quick-start", body)
         session = value.get("session", value)
         session_id = (value.get("sessionId") or session.get("id")) if isinstance(session, dict) else None
         if not session_id: raise RuntimeError("Reverie returned no session id; inspect before retrying")
+        # Journal text is free text (an apostrophe, $(...)): the command to send it is shell-quoted here, never by hand.
+        send_command = shlex.join(["reverie", "agent", "send", session_id, "--", first_prompt])
         self.state.update(candidate=session_id, candidate_backend=backend, creation_uncertain=False,
-                          phase="awaiting_verified_handoff", candidate_created_at=time.time(),
+                          phase="awaiting_verified_handoff", candidate_created_at=time.time(), send_command=send_command,
                           candidates_seen=self.state.get("candidates_seen", [])[-19:] + [session_id])
         self.save()
-        return {"session_id":session_id, "backend":backend, "phase":self.state["phase"],
-                "next":"Read its screen; send the saved handoff when its composer is ready. Verify memory and chat membership, then activate."}
+        return {"session_id":session_id, "backend":backend, "phase":self.state["phase"], "first_prompt":first_prompt,
+                "memory_brief":bool(brief), "send_command":send_command,
+                "next":"Read its screen; when its composer is ready, run send_command exactly (it types first_prompt: your memory "
+                       "brief, then the saved handoff). Verify memory and chat membership, then activate."}
 
     def activate(self, session_id):
         if session_id != self.state.get("candidate"): raise ValueError("not the pending candidate")
