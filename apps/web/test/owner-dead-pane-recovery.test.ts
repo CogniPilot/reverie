@@ -180,4 +180,53 @@ describe('verified owner recovery of a wedged laptop agent (stop-agent)',()=>{
   await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
   expect(f.stop).not.toHaveBeenCalled();
  });
+ // The stop is asynchronous: the recovery owns the pane's input from before the request until it resolves.
+ async function pausedStop(){
+  let enter!:()=>void,release!:()=>void;
+  const entered=new Promise<void>(resolve=>{enter=resolve;});const resume=new Promise<void>(resolve=>{release=resolve;});
+  const f=await wedged(async state=>{enter();await resume;state.mux.isPaneDead.mockReturnValue(true);return {stopped:true};});
+  const keys:string[]=[];
+  Object.assign(f.mux,{sendInput:vi.fn(async(_id:string,text:string)=>{keys.push(text);return true;}),capturePaneText:vi.fn(()=>'')});
+  return {...f,entered,release,keys};
+ }
+ it('refuses every input path while the stop is pending, so the stop never kills newly accepted work',async()=>{
+  const f=await pausedStop();
+  const pending=f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  await f.entered;
+  expect(await f.session.writeViaMux('new owner work\r',{fromUser:true})).toBe(false);
+  expect(await f.session.writeViaMux('agent work\r',{agentInput:true})).toBe(false);
+  expect(f.session.write('raw work\r')).toBe(false);
+  expect(f.keys).toEqual([]);
+  f.release();
+  const response=await pending;
+  expect(response.statusCode,response.body).toBe(200);expect(f.recover).toHaveBeenCalledOnce();
+ });
+ it('withholds a deferred verifier Enter from an earlier write while the stop is pending',async()=>{
+  const f=await pausedStop();
+  expect(await f.session.writeViaMux('earlier work\r',{fromUser:true})).toBe(true);
+  const verifier=(f.session as unknown as {_submitVerifier?:{deps:{sendEnter():Promise<boolean>}}})._submitVerifier;
+  expect(verifier).toBeDefined();
+  f.keys.length=0;
+  const pending=f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  await f.entered;
+  expect(await verifier!.deps.sendEnter()).toBe(false);expect(f.keys).toEqual([]);
+  f.release();expect((await pending).statusCode).toBe(200);
+ });
+ it('does not stop the agent while input is still being typed into it',async()=>{
+  const f=await wedged();let finish!:(sent:boolean)=>void;
+  Object.assign(f.mux,{sendInput:vi.fn(()=>new Promise<boolean>(resolve=>{finish=resolve;}))});
+  const typing=f.session.writeViaMux('typing now\r',{fromUser:true});
+  const response=await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  expect(response.statusCode).toBe(409);expect(response.json().error).toContain('being typed');
+  expect(f.stop).not.toHaveBeenCalled();expect(f.recover).not.toHaveBeenCalled();
+  finish(true);await typing;
+ });
+ it('gives input back when the stop fails',async()=>{
+  const f=await wedged(async()=>{throw new Error('broker refused');});
+  const keys:string[]=[];
+  Object.assign(f.mux,{sendInput:vi.fn(async(_id:string,text:string)=>{keys.push(text);return true;})});
+  expect((await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)})).statusCode).toBe(409);
+  expect(await f.session.writeViaMux('after the failed stop\r',{fromUser:true})).toBe(true);
+  expect(keys).toEqual(['after the failed stop\r']);
+ });
 });

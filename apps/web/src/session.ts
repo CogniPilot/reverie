@@ -4908,7 +4908,7 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
-    if (this._viewerInputHeld) return false;
+    if (this._viewerInputHeld || this._recoveryHold) return false;
     // An agent's raw write (a mux failure's fallback, an explicit raw send) is checked here, with no await before the write.
     if (options.agentInput && this._moveHolds > 0) {
       options.onMoveHeld?.();
@@ -5081,6 +5081,27 @@ export class Session extends EventEmitter {
     };
   }
 
+  /** An owner recovery is stopping this agent: no input from anyone (a person's included) reaches the pane until released. */
+  private _recoveryHold = false;
+
+  /**
+   * Take this pane's input before an owner recovery asks the laptop to stop the agent, so the stop cannot kill work
+   * submitted after the owner's check. Refused (undefined) while any write is still being typed; every later write, raw
+   * write and deferred verifier Enter is refused until the returned release runs. No await from the caller's checks to here.
+   */
+  holdInputForRecovery(): (() => void) | undefined {
+    if (this._recoveryHold || this._muxWritesInFlight > 0) return undefined;
+    this._recoveryHold = true;
+    const resume = this._capacityRetry?.pause() ?? (() => {});
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._recoveryHold = false;
+      resume();
+    };
+  }
+
   private _capacityWrites = 0;
   /** The gate of the write the submit verifier is tracking (null: an ungated write); see _verifySubmitted. */
   private _verifierGate: (() => boolean) | null = null;
@@ -5128,7 +5149,7 @@ export class Session extends EventEmitter {
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
-    if (this._viewerInputHeld) return false;
+    if (this._viewerInputHeld || this._recoveryHold) return false;
     // An agent's input is refused here, at the write, not only by the route's earlier look: a plan move can take the composer
     // during any await before it. From here to the first key there is no await.
     if (options.agentInput && this._moveHolds > 0) {
@@ -5247,7 +5268,7 @@ export class Session extends EventEmitter {
           : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
       sendEnter: async () => {
-        if (this._viewerInputHeld) return false;
+        if (this._viewerInputHeld || this._recoveryHold) return false;
         const gate = this._verifierGate;
         if (gate && !gate()) {
           // Closed once (busy, or a plan move took the composer): this write's verification ends here and its text stays unsent.

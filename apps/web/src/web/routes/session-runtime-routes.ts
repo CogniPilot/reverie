@@ -73,6 +73,11 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         return reply.code(409).send({ success: false, error: 'Wait for running tasks, an open dialog or an existing restart to finish' });
       if (session.lastSubmitAt > 0 && Date.now() - session.lastSubmitAt < 120_000)
         return reply.code(409).send({ success: false, error: 'Input reached this expert within two minutes; wait before recovering it' });
+      // The checks above and this hold run with no await between them: from here no input (a person's included) can reach
+      // the agent the owner confirmed as stalled, so the stop below cannot kill newly accepted work. Held until the stop resolves.
+      const releaseInput = session.holdInputForRecovery();
+      if (!releaseInput)
+        return reply.code(409).send({ success: false, error: 'Input is being typed to this expert; wait before recovering it' });
       runtimeSwitches.add(session.id);
       try {
         await stopLaptopAgent(session.id);
@@ -81,7 +86,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         while (!session.hasDeadPane?.() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {
         return reply.code(409).send({ success: false, error: `The laptop agent could not be stopped: ${error instanceof Error ? error.message : 'unknown error'}` });
-      } finally { runtimeSwitches.delete(session.id); }
+      } finally { runtimeSwitches.delete(session.id); releaseInput(); }
       if (!session.hasDeadPane?.())
         return reply.code(409).send({ success: false, error: 'The agent was stopped but its session has not reported the exit yet. Open Restart again in a moment.' });
     }
