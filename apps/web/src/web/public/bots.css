@@ -359,3 +359,42 @@ fieldset {
     padding: 18px;
   }
 }
+.trial {
+  display: grid;
+  gap: 10px;
+}
+.trial h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+.trial pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #10141a;
+  border: 1px solid #333c49;
+  border-radius: 8px;
+  padding: 10px;
+}
+.trial-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.trial-list .ok::marker {
+  content: '✓  ';
+  color: #8be6b8;
+}
+.trial-list .fail::marker {
+  content: '✗  ';
+  color: #ffb1a9;
+}
+.trial dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.trial dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

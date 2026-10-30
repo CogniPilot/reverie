@@ -97,12 +97,14 @@ lists the value inside `data` on success.
 
 | Method | Path | Request body | Response `data` |
 | --- | --- | --- | --- |
+| GET | `/api/v1/cron/active` | None | Verified owner only: `{ jobs: [{ id, name }] }`, the jobs executing now |
 | GET | `/api/v1/cron/jobs` | None | `CronJob[]` |
 | POST | `/api/v1/cron/jobs` | Full job definition below | `{ job: CronJob }` |
 | GET | `/api/v1/cron/jobs/:id` | None | `CronJob` |
 | PUT | `/api/v1/cron/jobs/:id` | Partial job definition | `{ job: CronJob }` |
 | DELETE | `/api/v1/cron/jobs/:id` | None | `{}` |
 | PUT | `/api/v1/cron/jobs/:id/enabled` | `{ enabled: boolean }` | `{ job: CronJob }` |
+| GET | `/api/v1/cron/jobs/:id/preview` | None | `{ preview: CronRunPreview }`; nothing is written, posted or announced |
 | POST | `/api/v1/cron/jobs/:id/run` | None | `{ run: CronJobRun, activeAgents: number }` |
 | GET | `/api/v1/cron/jobs/:id/runs` | None | `CronJobRun[]` |
 | GET | `/api/v1/cron/runs` | None | `CronJobRun[]` |

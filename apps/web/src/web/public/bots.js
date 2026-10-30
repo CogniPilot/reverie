@@ -49,6 +49,8 @@
       if (!response.ok || result?.success === false) {
         const error = new Error(result?.error?.message || result?.error || `Request failed (${response.status})`);
         error.status = response.status;
+        // Only a route that refused before acting marks its answer notRun; any other failure may follow an effect.
+        error.notRun = result?.notRun === true;
         throw error;
       }
       return result?.success === true ? result.data : result;
@@ -377,6 +379,115 @@
     byId('content-dialog').showModal();
     textarea.focus();
   }
+  // Preview, then an explicit Run once: the preview writes and posts nothing; the run is the real thing, shown as it lands.
+  let trial;
+  let trialGeneration = 0;
+  const runLabels = { post: 'Post now', 'dry-run': 'Record a dry run', skip: 'Run once', launch: 'Start session', 'not-previewed': 'Run once' };
+  function list(id, items) {
+    const element = byId(id);
+    element.replaceChildren(...items.map(([text, className]) => node('li', text, className)));
+  }
+  async function openTrial(job) {
+    const id = job.id;
+    // Each opening is its own generation: a late response from an earlier opening never paints this one.
+    const generation = ++trialGeneration;
+    trial = { id, generation, ran: false };
+    const current = () => trial?.generation === generation;
+    byId('trial-title').textContent = 'Preview · ' + (job.name || 'Unnamed routine');
+    byId('trial-summary').textContent = 'Checking what Run once would do…';
+    byId('trial-text').hidden = true;
+    byId('trial-result').hidden = true;
+    byId('trial-error').textContent = byId('trial-note').textContent = '';
+    list('trial-checks', []);
+    list('trial-effects', []);
+    const go = byId('trial-go');
+    go.disabled = true;
+    go.textContent = 'Run once';
+    byId('trial-dialog').showModal();
+    let preview;
+    try {
+      ({ preview } = await api('cron/jobs/' + encodeURIComponent(id) + '/preview'));
+    } catch (error) {
+      if (!current()) return;
+      byId('trial-summary').textContent = 'Preview unavailable.';
+      byId('trial-error').textContent = error.message;
+      return;
+    }
+    if (!current() || !preview) return;
+    const where = preview.roomId ? ' in #' + roomName(preview.roomId) : '';
+    byId('trial-summary').textContent = {
+      post: `Run once would post this as ${preview.sender}${where}:`,
+      'dry-run': `This routine is in dry-run mode: Run once records a dry run and posts nothing. It would post as ${preview.sender}${where}:`,
+      skip: `Run once would post nothing now: ${preview.reason}`,
+      launch: 'Run once would start a session with this prompt:',
+      blocked: 'Run once would fail now' + (preview.reason ? ': ' + preview.reason : '; see the checks.'),
+      'not-previewed': preview.reason,
+    }[preview.outcome] || 'Unknown outcome.';
+    if (typeof preview.text === 'string' && preview.outcome !== 'skip') {
+      byId('trial-text').textContent = preview.text || '(empty)';
+      byId('trial-text').hidden = false;
+    }
+    list('trial-checks', preview.checks.map((c) => [c.label + (c.detail ? ': ' + c.detail : ''), c.ok ? 'ok' : 'fail']));
+    list('trial-effects', preview.effects.map((e) => [e]));
+    byId('trial-note').textContent =
+      'This preview posted nothing and recorded nothing' +
+      (preview.readsSource ? `; it read the data source “${preview.readsSource}”.` : '.');
+    go.textContent = runLabels[preview.outcome] || 'Run once';
+    go.disabled = preview.outcome === 'blocked';
+  }
+  async function runTrial() {
+    if (!trial || trial.ran) return;
+    const { id, generation } = trial;
+    const current = () => trial?.generation === generation;
+    const go = byId('trial-go');
+    trial.ran = true;
+    go.disabled = true;
+    byId('trial-error').textContent = '';
+    byId('trial-summary').textContent = 'Running once…';
+    let data;
+    try {
+      data = await api('cron/jobs/' + encodeURIComponent(id) + '/run', { method: 'POST', body: '{}' });
+    } catch (error) {
+      if (!current()) return;
+      // Only the route's own refusal, made before it acts, means nothing ran. A server error, a lost connection or a
+      // timeout after the request went out leaves the outcome unknown: the run may have happened.
+      if (error.notRun) {
+        byId('trial-summary').textContent = 'Run once was refused; nothing ran.';
+      } else {
+        byId('trial-summary').textContent =
+          'Outcome unknown: Run once was sent but not confirmed, so it may have run. Check Run history before trying again.';
+        await refresh();
+        if (!current()) return;
+      }
+      byId('trial-error').textContent = error.message;
+      return;
+    }
+    if (!current()) return;
+    const run = data?.run;
+    const rows = run
+      ? [
+          ['Status', run.status],
+          ['Started', time(run.startedAt)],
+          ['Finished', run.finishedAt ? time(run.finishedAt) : 'Still running'],
+          ...(run.errorMessage ? [['Log', run.errorMessage]] : []),
+          ['Run', run.id],
+        ]
+      : [['Status', 'Not started: this watcher is already running']];
+    const dl = byId('trial-run');
+    dl.replaceChildren();
+    for (const [term, value] of rows) dl.append(node('dt', term), node('dd', value));
+    if (run?.createdSessionUrl) {
+      const link = node('a', 'Open the session');
+      link.href = run.createdSessionUrl;
+      dl.append(node('dt', 'Session'), node('dd'));
+      dl.lastChild.append(link);
+    }
+    byId('trial-result').hidden = false;
+    byId('trial-summary').textContent =
+      run?.status === 'failed' ? 'Run once failed; see the log.' : 'Run once finished. It also appears in Run history.';
+    go.textContent = 'Done';
+    await refresh();
+  }
   function render() {
     if (!snapshot) return;
     renderWatchers();
@@ -459,6 +570,10 @@
       const edit = node('button', 'Edit content');
       edit.type = 'button';
       edit.addEventListener('click', () => openContent(job));
+      const preview = node('button', 'Preview or run once');
+      preview.type = 'button';
+      preview.addEventListener('click', () => openTrial(job));
+      actions.append(preview);
       const remove = node('button', 'Delete routine');
       remove.type = 'button';
       remove.addEventListener('click', async () => {
@@ -962,6 +1077,10 @@
   });
   for (const button of document.querySelectorAll('[data-close]'))
     button.addEventListener('click', () => byId(button.dataset.close).close());
+  byId('trial-go').addEventListener('click', runTrial);
+  byId('trial-dialog').addEventListener('close', () => {
+    trial = undefined;
+  });
   byId('search').addEventListener('input', render);
   byId('filter').addEventListener('change', render);
   byId('refresh').addEventListener('click', refresh);

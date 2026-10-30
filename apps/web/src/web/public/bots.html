@@ -221,6 +221,27 @@
         </div>
       </form>
     </dialog>
+    <dialog id="trial-dialog" aria-labelledby="trial-title">
+      <div class="trial">
+        <h2 id="trial-title">Preview</h2>
+        <p id="trial-summary" role="status"></p>
+        <pre id="trial-text" hidden></pre>
+        <h3>Checks</h3>
+        <ul id="trial-checks" class="trial-list"></ul>
+        <h3>Run once would</h3>
+        <ul id="trial-effects" class="trial-list"></ul>
+        <p id="trial-note" class="hint"></p>
+        <section id="trial-result" hidden>
+          <h3>Result</h3>
+          <dl id="trial-run"></dl>
+        </section>
+        <p id="trial-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="trial-dialog">Close</button
+          ><button id="trial-go" class="primary" type="button" disabled>Run once</button>
+        </div>
+      </div>
+    </dialog>
     <footer>
       <button id="advanced" type="button">Advanced schedules</button><span id="advanced-hint" class="hint"></span>
     </footer>

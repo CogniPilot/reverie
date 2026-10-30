@@ -18,6 +18,13 @@ The ⏰ **Cron** button in the bottom toolbar is opt-in. Turn it on under
 **Run Now** fires it immediately without touching the schedule, which is the fastest way to
 find out whether the prompt does what you meant.
 
+On the Bots page, **Preview or run once** first shows what a run would do now: the message and
+who sends it, or the session prompt, the checks a run makes (bot, room allowlist, hourly limit,
+data source, working directory) and what it would change. The preview posts nothing, records
+no run and leaves the schedule and change key alone; reading a data source is the one call it
+makes. **Run once** is then an explicit second click, and its result (status, times, log and
+any session link) shows in the same dialog and in Run history.
+
 ## The fields
 
 | Field                    | Notes                                                                                       |

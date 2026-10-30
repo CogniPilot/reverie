@@ -99,12 +99,14 @@ versioned endpoints are:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/api/v1/cron/active` | Verified owner only: jobs executing now, as `{ jobs: [{ id, name }] }` |
 | GET | `/api/v1/cron/jobs` | List jobs |
 | POST | `/api/v1/cron/jobs` | Create a job |
 | GET | `/api/v1/cron/jobs/:id` | Read a job |
 | PUT | `/api/v1/cron/jobs/:id` | Update a job (partial body) |
 | DELETE | `/api/v1/cron/jobs/:id` | Delete a job |
 | PUT | `/api/v1/cron/jobs/:id/enabled` | Enable/disable with `{ enabled: boolean }` |
+| GET | `/api/v1/cron/jobs/:id/preview` | What Run Now would do now; writes, posts and announces nothing |
 | POST | `/api/v1/cron/jobs/:id/run` | Run now, without changing the schedule |
 | GET | `/api/v1/cron/jobs/:id/runs` | Read a job's run history |
 | GET | `/api/v1/cron/runs` | Read all accessible run history |
@@ -113,7 +115,8 @@ versioned endpoints are:
 
 Responses use the envelope above: job lists/history have arrays in `data`, a
 single-job GET has the job itself, create/update/enable have `{ job }`, delete has
-`{}`, and Run Now has `{ run, activeAgents }`. Prompt delivery is asynchronous;
+`{}`, preview has `{ preview }` (outcome, sender, room, text, checks and effects), and Run Now has
+`{ run, activeAgents }`. An agent previews only its own routines. Prompt delivery is asynchronous;
 `session_started` and `prompt_sent` describe launch/delivery, not task success.
 
 The [cron API reference](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/api-reference.md#cron-jobs)
