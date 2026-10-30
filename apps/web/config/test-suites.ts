@@ -25,6 +25,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/file-preview-shell.browser.test.ts',
   'test/handbook.browser.test.ts',
   'test/workspace-files.browser.test.ts',
+  'test/workspace-video-preview.browser.test.ts',
   'test/chat-plugins.browser.test.ts',
   'test/chat-math-plugin.browser.test.ts',
   'test/chat-voice-panel-layout.browser.test.ts',

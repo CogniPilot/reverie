@@ -12,6 +12,7 @@ import { isSensitivePathAt } from './web/sensitive-path.js';
 import { configuredDataDir } from './config/instance.js';
 import { workspaceOperation, WorkspaceOperation, WorkspaceError } from './workspace-operation.js';
 import { verifyWorkspacePublisher, type WorkspacePublisherVerifier } from './workspace-publisher.js';
+import { inlineVideoType, VIDEO_EXTENSION_TYPES } from './video-container.js';
 export { WorkspaceError } from './workspace-operation.js';
 
 export const WORKSPACE_MAX_FILE = 32 * 1024 * 1024;
@@ -286,9 +287,13 @@ export class WorkspaceFiles {
           const head = Buffer.alloc(16);
           await op.io(() => located.handle.read(head, 0, 16, 0));
           const image = imageType(head);
+          // A movie plays where it is clicked, streamed like a download (within the same file limit), never as text.
+          const video = inlineVideoType(VIDEO_EXTENSION_TYPES[extname(located.path).slice(1).toLowerCase()] ?? '', head);
           if (image) {
             if (size > WORKSPACE_MAX_IMAGE) fail(413, 'Image previews are limited to 5 MiB.');
             mime = image;
+          } else if (video) {
+            mime = video;
           } else if (/^%PDF-(?:1\.[0-7]|2\.0)[\r\n ]/.test(head.toString('ascii'))) {
             if (size > WORKSPACE_MAX_PDF) fail(413, 'PDF previews are limited to 16 MiB.');
             mime = 'application/pdf';
