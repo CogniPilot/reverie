@@ -133,10 +133,11 @@ async function watchForTurn(io: SubmitSettleIo, text: string, signals: TurnSigna
 export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals: TurnSignals, label = 'pane', fromEmptyComposer = false, requireOwnership = false, stillIdle?: () => boolean): Promise<SubmitOutcome> {
   const before = io.capture();
   const heldBefore = !!signals.glyph && before !== null && promptStillInComposer(before, text, signals.glyph, fromEmptyComposer) === true;
-  // Enter submits whatever the composer holds. Codex always, and an idle-only write (a wake, a capacity retry) in any harness,
-  // must see exactly its own text there first: a person typing in between would otherwise have their keys sent with it.
-  const checkOwnership = signals.glyph === '›' || (requireOwnership && stillIdle !== undefined);
-  if (requireOwnership && checkOwnership && !heldBefore) return 'unverified';
+  // Enter submits whatever the composer holds. Codex always, and a write that owns the composer (a wake, a capacity retry) in
+  // any harness, must see exactly its own text there first: a person typing in between would otherwise have their keys sent
+  // with it. Refused, the text stays typed but unsent, so nothing may press Enter for it later.
+  const checkOwnership = signals.glyph === '›' || (requireOwnership && ownsComposer(stillIdle));
+  if (requireOwnership && checkOwnership && !heldBefore) return withheld();
   await io.sendEnter();
   let outcome: SubmitOutcome;
   const first = await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer);
@@ -144,19 +145,21 @@ export async function submitAndConfirm(io: SubmitSettleIo, text: string, signals
   else if (first === undefined) outcome = 'unverified';
   else {
     // A user can edit while the confirm window expires. Recheck complete ownership before retry.
-    if (checkOwnership && promptStillInComposer(io.capture() ?? '', text, signals.glyph ?? '', fromEmptyComposer) !== true) return 'unverified';
-    if (!gateOpen(stillIdle)) {
-      // The text is still in the composer and the retry Enter is withheld: unsent, so nothing may press Enter for it later.
-      const store = writeGate.getStore();
-      if (store) store.typedUnsent = true;
-      return 'unverified';
-    }
+    if (checkOwnership && promptStillInComposer(io.capture() ?? '', text, signals.glyph ?? '', fromEmptyComposer) !== true) return withheld();
+    // The text is still in the composer and the retry Enter is withheld: unsent, so nothing may press Enter for it later.
+    if (!gateOpen(stillIdle)) return withheld();
     io.log?.(`${label}: no turn started ${CONFIRM_WINDOW_MS} ms after Enter (${text.length} chars), pressing Enter once more`);
     await io.sendEnter();
     outcome = (await watchForTurn(io, text, signals, heldBefore, fromEmptyComposer)) === true ? 'started-after-retry' : 'not-started';
   }
   io.log?.(`${label}: submit ${outcome} (${text.length} chars)`);
   return outcome;
+}
+
+/** Enter withheld with the text in the composer: a gated write records it as typed but unsent. */
+function withheld(): SubmitOutcome {
+  markTypedUnsent();
+  return 'unverified';
 }
 
 /**
@@ -170,6 +173,13 @@ export async function withWriteGate<T>(gate: () => boolean, write: () => Promise
   const store = { open: gate, typedUnsent: false };
   const result = await writeGate.run(store, write);
   return { result, typedUnsent: store.typedUnsent };
+}
+/**
+ * Whether a write that needs an empty composer also owns it: an idle-only wake (stillIdle) or any write the session runs under
+ * its own gate (a capacity retry). An ordinary chat delivery or a person's send has neither.
+ */
+function ownsComposer(stillIdle?: () => boolean): boolean {
+  return stillIdle !== undefined || writeGateActive();
 }
 /** Whether the current async call is a gated write; any key shape other than a gated text + Enter must refuse it. */
 export function writeGateActive(): boolean {
@@ -198,8 +208,8 @@ export async function typeAndSubmit(
   stillIdle?: () => boolean
 ): Promise<SubmitOutcome> {
   const fromEmptyComposer = !!signals.glyph && composerIsEmpty(io.capture(), signals.glyph);
-  // An idle-only write (stillIdle) needs a provably empty composer whatever the harness, not just Codex's.
-  if (requireEmptyComposer && (signals.glyph === '›' || stillIdle) && !fromEmptyComposer) return 'not-written';
+  // A write that owns the composer (an idle-only wake, a capacity retry) needs a provably empty one whatever the harness.
+  if (requireEmptyComposer && (signals.glyph === '›' || ownsComposer(stillIdle)) && !fromEmptyComposer) return 'not-written';
   // The write's gate is decided here, at the keys: re-checked right before the text and again right before Enter. A closed
   // gate after the text withholds Enter and leaves the text unsent; nothing is cleared or typed again.
   if (!gateOpen(stillIdle)) return 'not-written';
