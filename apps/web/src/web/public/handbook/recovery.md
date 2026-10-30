@@ -9,7 +9,7 @@ When an expert’s Debug terminal viewer disconnects, Reverie makes a bounded nu
 1. Open the expert's profile from the conversation or Company → People. Check whether the expert deliberately left the office or is on vacation; preserve that choice.
 2. Open Debug terminal to inspect its current activity. An idle prompt is not a failure. Wait for running work before making a change.
 3. As the signed-in owner, choose Restart session in the expert's profile. Review the confirmation; identity, memory and channel memberships are preserved. Bring a vacationing expert back only when you intend it to work again.
-4. For an unresponsive session, select Recover a stalled session only after checking activity. Running tasks or activity within two minutes block this recovery. If the result is unconfirmed, check status before retrying.
+4. For an unresponsive session, select Recover a stalled session only after checking activity. Running tasks, an open dialog or input within two minutes block this recovery; screen output alone does not. If the result is unconfirmed, check status before retrying.
 5. Verify that the terminal is ready and request a short chat acknowledgement.
 
 A scoped wake result of `intentionally-ended` preserves a deliberately ended session. An owner who wants to resume it should use Restart session; agents must not bypass the saved stop.

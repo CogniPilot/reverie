@@ -15,12 +15,8 @@ export function restartEligibility(
   const running = session.runningTaskCount > 0;
   return {
     blocked: running || session.isWorking || recentWork || Boolean(session.paneDialog),
-    // Owner confirmation can recover stale work detection, never a running task or recent activity.
-    recoverable:
-      busy &&
-      !running &&
-      !session.paneDialog &&
-      !recent(session.lastSubmitAt, 120_000) &&
-      !recent(session.lastActivityAt, 120_000),
+    // Owner confirmation can recover stale work detection, never a running task, an open dialog or input in the
+    // last two minutes. Raw terminal output is not counted here: a stuck agent keeps redrawing its status line.
+    recoverable: busy && !running && !session.paneDialog && !recent(session.lastSubmitAt, 120_000),
   };
 }
