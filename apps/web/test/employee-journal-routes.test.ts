@@ -65,6 +65,20 @@ describe('employee journal routes', () => {
     sources: [{ roomId: ROOM, id: 'm-source', quote: 'exact UTC times' }] } }) =>
     app.inject({ method: 'POST', url: '/api/agent/journal/save', payload: body, headers: as(sessionId) });
 
+  it('saves to a project and lets another employee recall it with its author, and rejects bad project ids', async () => {
+    const saved = await save(SID, { roomId: ROOM, turnId: 'm-turn', project: 'rumoca', draft: { text: 'Records carry exact UTC times.', tags: ['promise'],
+      sources: [{ roomId: ROOM, id: 'm-source', quote: 'exact UTC times' }] } });
+    expect(saved.statusCode).toBe(200);
+    const recall = await app.inject({ url: '/api/agent/journal/recall?q=UTC&project=rumoca', headers: as(OTHER) });
+    expect(recall.json().data.entries).toMatchObject([{ project: 'rumoca', authorEmployeeId: 'employee-one', text: 'Records carry exact UTC times.' }]);
+    expect(recall.json().data.entries[0].interpretation).toContain('written by employee employee-one');
+    expect((await app.inject({ url: '/api/agent/journal/recall?q=UTC', headers: as(OTHER) })).json().data.entries).toEqual([]);
+    expect((await app.inject({ url: '/api/agent/journal/map?project=rumoca', headers: as(OTHER) })).json().data.entries).toHaveLength(1);
+    for (const url of ['/api/agent/journal/recall?q=UTC&project=Bad', '/api/agent/journal/map?project=a%2Fb'])
+      expect((await app.inject({ url, headers: as(OTHER) })).statusCode).toBe(400);
+    expect((await save(SID, { roomId: ROOM, turnId: 'm-turn', project: 'No Caps', draft: {} })).statusCode).toBe(400);
+  });
+
   it('gives a session its own memory brief, and refuses owner, service, spoofed and parameterized calls', async () => {
     const empty = await app.inject({ url: '/api/agent/memory-brief', headers: as(SID) });
     expect(empty.statusCode).toBe(200);

@@ -39,7 +39,8 @@ async function call(deps: AgentDeps, method: 'GET' | 'POST', path: string, extra
 function entryText(entry: JournalEntryView, now: number): string {
   const meta = [entry.annotations?.topics?.length ? `topics: ${entry.annotations.topics.join(', ')}` : '',
     entry.annotations?.importance ? `importance: ${entry.annotations.importance}` : '',
-    entry.annotations?.provenance ? `provenance: ${entry.annotations.provenance}` : ''].filter(Boolean).join(' · ');
+    entry.annotations?.provenance ? `provenance: ${entry.annotations.provenance}` : '',
+    entry.project ? `project ${entry.project}, written by ${entry.authorEmployeeId}` : ''].filter(Boolean).join(' · ');
   const lines = [`#${entry.entryId} ${entry.committedAt} (${elapsed(entry.committedAt, now)}) [${entry.tags.join(', ')}]${meta ? ` ${meta}` : ''}`,
     `  ${entry.text}`,
     ...entry.sources.map(source => `  source ${source.roomId}/${source.id}: ${source.status} (${source.detail}) "${source.quote}"`),
@@ -51,6 +52,8 @@ function entryText(entry: JournalEntryView, now: number): string {
 export interface JournalSaveOptions {
   room: string; turn: string; text: string; tag: string[]; source?: string[]; quote?: string[];
   topic?: string[]; importance?: string; provenance?: string; supersedes?: number[]; related?: number[]; reason?: string;
+  /** Save to a project every employee of the owner can read, instead of your own journal. */
+  project?: string;
 }
 
 export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOptions): Promise<number> {
@@ -67,7 +70,8 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
   const draft = { text: options.text, tags: options.tag, sources: ids.map((id, index) => ({ roomId: options.room, id, quote: quotes[index]! })),
     ...(Object.keys(annotations).length ? { annotations } : {}) };
   try {
-    const result = await call(deps, 'POST', '/api/agent/journal/save', { body: { roomId: options.room, turnId: options.turn, draft } });
+    const result = await call(deps, 'POST', '/api/agent/journal/save', { body: { roomId: options.room, turnId: options.turn, draft,
+      ...(options.project ? { project: options.project } : {}) } });
     if (!result.ok) return refused(deps, result.error, result.gates);
     const data = result.data as { entryId: number; turnId: string; replayed: boolean; payloadSha256: string };
     if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
@@ -76,9 +80,9 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
   } catch { return refused(deps, 'Journal save outcome unknown; check `reverie agent journal receipt` before retrying.'); }
 }
 
-export async function agentJournalRecall(deps: AgentDeps, words: string[], room?: string): Promise<number> {
+export async function agentJournalRecall(deps: AgentDeps, words: string[], room?: string, project?: string): Promise<number> {
   try {
-    const result = await call(deps, 'GET', '/api/agent/journal/recall', { query: { q: words.join(' '), roomId: room } });
+    const result = await call(deps, 'GET', '/api/agent/journal/recall', { query: { q: words.join(' '), roomId: room, project } });
     if (!result.ok) return refused(deps, result.error);
     const entries = (result.data as { entries: JournalEntryView[] }).entries;
     if (deps.json) deps.io.out(JSON.stringify({ success: true, data: { entries } }));
@@ -87,14 +91,15 @@ export async function agentJournalRecall(deps: AgentDeps, words: string[], room?
   } catch { return refused(deps, 'Journal recall unavailable.'); }
 }
 
-export async function agentJournalMap(deps: AgentDeps, words: string[], options: { room?: string; before?: string }): Promise<number> {
+export async function agentJournalMap(deps: AgentDeps, words: string[], options: { room?: string; before?: string; project?: string }): Promise<number> {
   try {
-    const result = await call(deps, 'GET', '/api/agent/journal/map', { query: { q: words.length ? words.join(' ') : undefined, roomId: options.room, before: options.before } });
+    const result = await call(deps, 'GET', '/api/agent/journal/map', { query: { q: words.length ? words.join(' ') : undefined, roomId: options.room, before: options.before, project: options.project } });
     if (!result.ok) return refused(deps, result.error);
     const data = result.data as { entries: JournalHeader[]; more: boolean };
     if (deps.json) { deps.io.out(JSON.stringify({ success: true, data })); return AGENT_EXIT.ok; }
     const now = (deps.now ?? Date.now)();
     const lines = data.entries.map(entry => `#${entry.entryId} ${entry.committedAt} (${elapsed(entry.committedAt, now)}) ${entry.tags.join(',')}` +
+      `${entry.authorEmployeeId ? ` · by ${entry.authorEmployeeId}` : ''}` +
       `${entry.topics.length ? ` · ${entry.topics.join(', ')}` : ''}${entry.importance ? ` · ${entry.importance}` : ''}${entry.superseded ? ' [superseded]' : ''}`);
     const last = data.entries.at(-1);
     if (data.more && last) lines.push(`more: older entries exist (--before ${last.entryId})`);
@@ -168,14 +173,17 @@ export function registerJournalCommands(
     .option('--supersedes <entry-id>', 'With --tag correction: an earlier entry this corrects (repeat, 1-4)', repeatId)
     .option('--related <entry-id>', 'An earlier related entry (repeat, 1-4)', repeatId)
     .option('--reason <why>', 'Why save now; required unless the turn message asks you to remember something')
+    .option('--project <id>', 'Save to this project (readable by every employee, shown with your name) instead of your own journal')
     .option('--json', 'Machine-readable result and gate record')
     .action((options: JournalSaveOptions & { json?: boolean }) => run(Boolean(options.json), deps => agentJournalSave(deps, options)));
   journal.command('recall <words...>').description('Top two matching entries, with sources re-checked now')
     .option('-r, --room <id>', 'Only entries written while acting in this room')
+    .option('--project <id>', "This project's entries, from every employee, instead of your own")
     .option('--json', 'Machine-readable entries (UTC ISO times)')
-    .action((words: string[], options: { room?: string; json?: boolean }) => run(Boolean(options.json), deps => agentJournalRecall(deps, words, options.room)));
+    .action((words: string[], options: { room?: string; project?: string; json?: boolean }) => run(Boolean(options.json), deps => agentJournalRecall(deps, words, options.room, options.project)));
   journal.command('map [words...]').description('One page of entry headers, newest first')
     .option('-r, --room <id>', 'Only entries written while acting in this room')
+    .option('--project <id>', "This project's entries, from every employee, instead of your own")
     .option('--before <entry-id>', 'Continue below this entry id')
     .option('--json', 'Machine-readable page')
     .action((words: string[] | undefined, options: { room?: string; before?: string; json?: boolean }) =>
