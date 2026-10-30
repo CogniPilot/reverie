@@ -2284,7 +2284,12 @@ export class WebServer extends EventEmitter {
         write: value => planRequestCapabilities.write(value),
         remove: (sessionId, requestId) => planRequestCapabilities.remove(sessionId, requestId),
       },
-      notify: (record, _file, allowed) => deliverPlanRequest(record, this.chatroomService, allowed),
+      notify: (record, _file, allowed, expiredUnseen) => deliverPlanRequest(record, this.chatroomService, allowed, undefined, {
+        expiredUnseen,
+        // Multi-user alerts reach every admin, so an expired request is reported only where one owner holds the plans.
+        ownerAlert: (text) => isMultiUserMode() ? undefined
+          : sendOwnerAlert(this.pushStore, text, { multiUser: false, title: 'Plan move expired', timeoutMs: 5000 }),
+      }),
       audit: entry => this.chatroomService.auditEntry(entry),
     });
     registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
