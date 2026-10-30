@@ -20,6 +20,14 @@ describe('inline chat video', () => {
     expect(inlineVideoType('video/quicktime', bytes([0, 0, 0, 0x14], 'ftyp'))).toBeNull(); // under the 12 sniffed bytes
     expect(inlineVideoType('video/quicktime', bytes([0, 0, 0, 8], 'MOOV', [0, 0, 0, 0]))).toBeNull(); // atom types are exact
   });
+  it('serves M4V as the MP4 container it is, and Ogg only when it opens on an Ogg page', () => {
+    expect(inlineVideoType('video/x-m4v', bytes([0, 0, 0, 0x20], 'ftypM4V '))).toBe('video/mp4');
+    expect(inlineVideoType('video/ogg', bytes('OggS', [0, 2, 0, 0, 0, 0, 0, 0]))).toBe('video/ogg');
+    expect(inlineVideoType('video/x-m4v', bytes('<html><script>'))).toBeNull();
+    expect(inlineVideoType('video/ogg', bytes('oggs', [0, 2, 0, 0]))).toBeNull(); // the capture pattern is exact
+    expect(inlineVideoType('video/ogg', bytes('Ogg'))).toBeNull();
+    expect(inlineVideoType('audio/ogg', bytes('OggS', [0, 2, 0, 0]))).toBeNull(); // only declared video
+  });
   it('keeps mismatched, truncated or other declared types a download', () => {
     expect(inlineVideoType('video/mp4', bytes('<html><script>'))).toBeNull();
     expect(inlineVideoType('video/webm', bytes([0, 0, 0, 0x20], 'ftypisom'))).toBeNull();

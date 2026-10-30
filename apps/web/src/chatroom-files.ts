@@ -9,7 +9,7 @@
  * Emotes: `<data>/chatroom-emotes/<scope>/<name>.<ext>`, scope `global` or a room id,
  * indexed in `<data>/chatroom-emotes/index.json`. Small images only (MAX_EMOTE_BYTES).
  *
- * Only raster images in INLINE_IMAGE_TYPES, and MP4/QuickTime/WebM video whose bytes really are that container (inlineVideoType), are
+ * Only raster images in INLINE_IMAGE_TYPES, and MP4/M4V/QuickTime/WebM/Ogg video whose bytes really are that container (inlineVideoType), are
  * ever served inline; everything else (SVG and HTML included) is served as a download (see the routes). Writes are tmp+rename
  * and every index write is serialized per store.
  */
@@ -84,28 +84,8 @@ export function isInlineImage(type: string): boolean {
   return INLINE_IMAGE_TYPES.has(type.toLowerCase());
 }
 
-/** Top-level atoms a QuickTime file can open on (the same set the session upload check accepts for `.mov`). */
-const QUICKTIME_ATOMS = new Set(['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip']);
-
-/** Bytes a video player needs before it can show a first frame and a play button. */
-export const VIDEO_SNIFF_BYTES = 12;
-
-/**
- * The video type to serve inline for a chat attachment, or null to keep it a download. The uploader declares the type, so
- * it is only trusted when the file starts like that container: an MP4 `ftyp` box, a QuickTime top-level atom (iPhone
- * `.mov` clips open on `ftyp`; older QuickTime files can open on another atom) or the WebM/EBML magic. Movies then play
- * in the chat like Discord's (James 10-29) instead of forcing a download. Whether a QuickTime clip decodes is the
- * browser's: Safari plays iPhone HEVC, other browsers may not, and the chat falls back to the download card.
- */
-export function inlineVideoType(type: string, head: Uint8Array): string | null {
-  const declared = type.toLowerCase();
-  const ascii = (start: number, end: number) => String.fromCharCode(...head.subarray(start, end));
-  if (declared === 'video/mp4' && head.length >= 12 && ascii(4, 8) === 'ftyp') return 'video/mp4';
-  if (declared === 'video/quicktime' && head.length >= 12 && QUICKTIME_ATOMS.has(ascii(4, 8))) return 'video/quicktime';
-  if (declared === 'video/webm' && head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3)
-    return 'video/webm';
-  return null;
-}
+// Inline video (which types, and only when the bytes are that container) is shared with workspace previews.
+export { inlineVideoType, VIDEO_SNIFF_BYTES } from './video-container.js';
 
 async function writeAtomic(path: string, data: Buffer | string): Promise<void> {
   const tmp = `${path}.${randomUUID()}.tmp`;
