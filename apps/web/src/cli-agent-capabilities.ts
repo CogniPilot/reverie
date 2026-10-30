@@ -98,6 +98,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       inspectBoard: 'reverie board show --json',
       plans: 'reverie plans --json',
       refreshRuntime: 'reverie agent plan-move request "<current-account-id>" --restart --id "<stable-id>" --json',
+      wakeEmployee: 'reverie agent wake-employee "<employee-id>" --json',
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
       publicationCredentials: 'reverie agent credentials list --json',

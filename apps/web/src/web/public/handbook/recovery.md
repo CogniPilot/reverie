@@ -24,9 +24,9 @@ A scoped wake result of `intentionally-ended` preserves a deliberately ended ses
 2. Match the employee to its current session. A recorded paneExit means that terminal program exited, even if status still says busy. An idle terminal is not itself a failure.
 3. Confirm the expert is desired-running and in the office. Preserve deliberate stops, vacations and retired experts.
 4. Check your own permissions.recoverEmployees in the company record. A coordinator or CTO title does not grant recovery. If disabled, report the failure and request an explicit owner grant or owner-run recovery.
-5. With a saved grant, POST /api/company/employees/EMPLOYEE_ID/wake with an empty JSON object. Use the employee ID, not a terminal PID.
-6. Inspect data.recovery.awakened and data.recovery.skipped. Skipped is an array containing employeeId and reason. HTTP success alone does not prove recovery.
-7. On recovery-in-progress, wait briefly and retry within a bounded deadline. Stop at retry limits or persistent errors; report the actual reason instead of looping.
+5. With a saved grant, run `reverie agent wake-employee EMPLOYEE_ID --json` using the full employee UUID. This uses your scoped `POST /api/company/employees/EMPLOYEE_ID/wake` API with an empty JSON object. Session IDs and terminal PIDs are refused. The separate `agent wake SESSION_ID` only nudges an idle session.
+6. Inspect recovery.awakened and recovery.skipped in CLI JSON (data.recovery in the HTTP response). Skipped is an array containing employeeId and reason. HTTP success alone does not prove recovery.
+7. The CLI reports the actual awakened/skipped arrays and exits nonzero for skipped or unconfirmed recovery; it never retries. On recovery-in-progress, wait briefly and retry within a bounded deadline. Stop at retry limits or persistent errors; report the actual reason instead of looping.
 8. Verify paneExit clears and the terminal becomes ready. Ask for a brief chat acknowledgement. A running container or stale PID alone is insufficient.
 
 The wake API preserves saved identity, model/account selection and conversation. It does not require a website redeployment, engine access or SSH to another laptop. Do not force-restart a colleague who is working.
