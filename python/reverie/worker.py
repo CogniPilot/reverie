@@ -7,6 +7,16 @@ socket, the engine socket, or the host control directory.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Packaged services execute this file with -I, and migration tools may load it
+# under a spec alias. Both need the same sibling package context as -m imports,
+# including lazy imports and the exact closed helper fast path below.
+if not __package__:
+    _package_root = str(Path(__file__).resolve().parents[1])
+    if _package_root not in sys.path:
+        sys.path.insert(0, _package_root)
+    __package__ = 'reverie'
 # Exact packaged helper operations only. Mixed/unknown flags still enter the
 # ordinary parser and refuse; this branch never loads broker configuration.
 if (__name__ == '__main__' and __package__ and sys.argv[1:] in
@@ -23,7 +33,6 @@ import http.server
 import ipaddress
 import json
 import os
-from pathlib import Path
 import pty
 import re
 import selectors
@@ -42,65 +51,19 @@ import tty
 import uuid
 from urllib.parse import unquote, urlsplit
 
-if __package__:
-    from .worker_gpu import gpu_create_args, validate_gpu_grants, validate_gpu_config
-    from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
-    from .worker_nix import prepare_store, store_guard
-    from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
-    from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
-    from .worker_retained_tmp import prepare_retained, finish_retained, retired_root
-    from .worker_cold_tmp import _mount_location as _retained_mount_location
-    from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
-    from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
-    from .worker_storage_labels import hostname as employee_hostname
-    from .goal_assertion import goal_forward_headers
-    from .goal_bootstrap import GoalBrokerBootstrap
-    from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
-else:
-    # Host migration tools also load this file with spec_from_file_location;
-    # their sys.path need not contain the sibling module's directory.
-    import importlib.util
-    _package_root = str(Path(__file__).resolve().parents[1])
-    if _package_root not in sys.path:
-        sys.path.insert(0, _package_root)
-    from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
-    from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
-    from reverie.worker_storage_labels import hostname as employee_hostname
-    _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
-    _gpu_module = importlib.util.module_from_spec(_gpu_spec)
-    _gpu_spec.loader.exec_module(_gpu_module)
-    gpu_create_args = _gpu_module.gpu_create_args
-    validate_gpu_grants = _gpu_module.validate_gpu_grants
-    validate_gpu_config = _gpu_module.validate_gpu_config
-    _resource_spec = importlib.util.spec_from_file_location('reverie_worker_resources', Path(__file__).with_name('worker_resources.py'))
-    _resource_module = importlib.util.module_from_spec(_resource_spec)
-    _resource_spec.loader.exec_module(_resource_module)
-    effective_config = _resource_module.effective_config
-    policy_digest = _resource_module.policy_digest
-    validate_session_resources = _resource_module.validate_session_resources
-    validate_resource_reload = _resource_module.validate_resource_reload
-    _nix_spec = importlib.util.spec_from_file_location('reverie_worker_nix', Path(__file__).with_name('worker_nix.py'))
-    _nix_module = importlib.util.module_from_spec(_nix_spec)
-    _nix_spec.loader.exec_module(_nix_module)
-    prepare_store = _nix_module.prepare_store
-    store_guard = _nix_module.store_guard
-    _tmp_spec = importlib.util.spec_from_file_location('reverie_worker_tmp', Path(__file__).with_name('worker_tmp.py'))
-    _tmp_module = importlib.util.module_from_spec(_tmp_spec)
-    _tmp_spec.loader.exec_module(_tmp_module)
-    from reverie.worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
-    from reverie.worker_retained_tmp import prepare_retained, finish_retained, retired_root
-    from reverie.worker_cold_tmp import _mount_location as _retained_mount_location
-    prepare_temporary = _tmp_module.prepare_temporary
-    temporary_environment = _tmp_module.temporary_environment
-    write_storage_instructions = _tmp_module.write_storage_instructions
-    workspace_alias = _tmp_module.workspace_alias
-    home_workspace_alias = _tmp_module.home_workspace_alias
-    _package_root = str(Path(__file__).resolve().parents[1])
-    if _package_root not in sys.path:
-        sys.path.insert(0, _package_root)
-    from reverie.goal_assertion import goal_forward_headers
-    from reverie.goal_bootstrap import GoalBrokerBootstrap
-    from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
+from .worker_gpu import gpu_create_args, validate_gpu_grants, validate_gpu_config
+from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
+from .worker_nix import prepare_store, store_guard
+from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
+from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
+from .worker_retained_tmp import prepare_retained, finish_retained, retired_root
+from .worker_cold_tmp import _mount_location as _retained_mount_location
+from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
+from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
+from .worker_storage_labels import hostname as employee_hostname
+from .goal_assertion import goal_forward_headers
+from .goal_bootstrap import GoalBrokerBootstrap
+from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
 
 MAX_FRAME = 256 * 1024
 SHARED_WORKSPACE = Path('/reverie_workspace')
@@ -281,14 +244,8 @@ def validate_config(config):
 
 
 def _lease_peer_module():
-    if __package__:
-        from .cleanup import peer_port
-        return peer_port
-    import importlib.util
-    spec = importlib.util.spec_from_file_location('_reverie_lease_peer', Path(__file__).with_name('cleanup') / 'peer_port.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from .cleanup import peer_port
+    return peer_port
 
 
 def create_args(config, session_id, home, *, scratch=None, storage=None):
