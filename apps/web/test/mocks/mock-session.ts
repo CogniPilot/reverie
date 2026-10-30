@@ -354,6 +354,14 @@ export class MockSession extends EventEmitter {
   autoResumeEnabled: boolean = false;
   autoResumeAt: number | null = null;
   isLimitPaused: boolean = false;
+  /** Mirrors Session: when the harness reported a compaction starting, until it ended. */
+  compactingSince: number | null = null;
+  noteCompaction(active: boolean): boolean {
+    const next = active ? this.compactingSince ?? Date.now() : null;
+    const changed = next !== this.compactingSince;
+    this.compactingSince = next;
+    return changed;
+  }
   setAutoResume = vi.fn((enabled: boolean) => {
     this.autoResumeEnabled = enabled;
     if (!enabled) this.autoResumeAt = null;

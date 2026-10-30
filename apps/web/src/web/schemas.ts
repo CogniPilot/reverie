@@ -1238,6 +1238,9 @@ export const HookEventSchema = z.object({
     // Claude Code's UserPromptSubmit: a first-hand report of the pane's live
     // conversation id. Keep in step with HookEventType in types/api.ts.
     'prompt_submitted',
+    // Claude Code's PreCompact and SessionStart(source "compact"): a context compaction started / ended.
+    'compact_started',
+    'compact_finished',
     // A turn STARTED. Unlike the others this one has no Claude Code hook behind
     // it: it is reported by the DeepSeek Harness status shim, and exists so a
     // dialog answered in the terminal resolves its Approvals Inbox item at once

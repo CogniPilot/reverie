@@ -1918,6 +1918,8 @@ html[data-line-anim="blur"] .connection-line.line-enter {
 }
 
 .session-tab .tab-status.idle { background: var(--green); }
+/* The harness reported a context compaction in progress: idle-style dot, in yellow. */
+.session-tab .tab-status.compacting { background: var(--yellow); }
 .session-tab .tab-status.busy {
   position: relative;
   background: var(--green);
