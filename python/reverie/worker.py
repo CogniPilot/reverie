@@ -767,7 +767,7 @@ class Broker:
             from reverie.browser_job_requests import BrowserJobRequests
             self.browser_jobs = BrowserJobRequests(self,config['browserJobPolicy'])
 
-    def resource_admission(self, sid=None, *, protected_start=None, deadline=None):
+    def resource_admission(self, sid=None, *, protected_start=None, deadline=None, entry_deadline=None):
         if self.resource_reservations is None:
             if protected_start is not None:
                 raise ValueError('Protected resource admission is unavailable')
@@ -776,8 +776,9 @@ class Broker:
             if configured(self.config):
                 raise ValueError('Resource reservation control requires reconciliation')
             return nullcontext()
-        if deadline is not None:
-            return self.resource_reservations.admission(sid,protected_start=protected_start,deadline=deadline)
+        if deadline is not None or entry_deadline is not None:
+            return self.resource_reservations.admission(sid,protected_start=protected_start,
+                                                       deadline=deadline,entry_deadline=entry_deadline)
         return self.resource_reservations.admission(sid,protected_start=protected_start)
 
     def _release_resource_admission(self, guard):
@@ -1726,7 +1727,7 @@ class Broker:
                     if protected_start is None:
                         if time.monotonic()>=storage_deadline:raise RuntimeError('Previous employee laptop has not released its data')
                         waited=True;wait_current()
-                        pending_guard=self.resource_admission(session_id,deadline=storage_deadline)
+                        pending_guard=self.resource_admission(session_id,entry_deadline=storage_deadline)
                         pending_guard.__enter__();resource_guard=pending_guard
             with self.lock:
                 if waited:wait_current()

@@ -131,6 +131,115 @@ class PlanMoveAdmission(unittest.TestCase):
         self.assertIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED',self.broker.cleanup_uncertain)
         self.assertIn(fixture.SID,self.broker.storage_leases);self.assertEqual(self.budget_calls,[])
 
+    def deadline_clock(self):
+        now=[1000.]
+        self.enterContext(patch.object(W.time,'monotonic',side_effect=lambda:now[0]))
+        self.gate.native._deadline=types.MethodType(R.NativeObserver._deadline,self.gate.native)
+        self.gate._guard=lambda:self.gate.native._deadline()
+        return now
+
+    def test_storage_wait_deadline_does_not_expire_later_live_provider_reattachment(self):
+        now=self.deadline_clock()
+        target=self.config['deployment']+'-agent-'+NEW
+        runtime=Path(self.config['stateRoot'])/NEW;runtime.mkdir(mode=0o700)
+        (runtime/'runtime.json').write_text(json.dumps({'exit':'owned.exit'}))
+        live=copy.deepcopy(self.item)
+        live['Name']='/'+target
+        live['Config']['Labels'].update({'reverie.session':NEW,
+            'reverie.worker-policy':W.policy_digest(self.config,NEW)})
+        original_engine=self.broker.run_engine
+        def engine(args,optional=False,**kwargs):
+            if args[0]=='inspect' and args[1]==target:
+                # Slow ordinary startup/reconnect work after successful entry.
+                now[0]+=11
+                return subprocess.CompletedProcess(args,0,json.dumps([live]),'')
+            if args[0]=='exec':
+                return subprocess.CompletedProcess(args,0,'0','')
+            return original_engine(args,optional,**kwargs)
+        self.broker.run_engine=engine
+        def settle(seconds):
+            now[0]+=seconds
+            self.old_running=False
+            self.broker.release_storage(fixture.SID)
+        self.enterContext(patch.object(self.broker.stopping,'wait',side_effect=settle))
+        kind,body=self.send_request()
+        self.assertEqual(kind,b'E');self.assertIn(b'controlled viewer boundary',body)
+        self.assertEqual(self.budget_calls,[]);self.assertEqual(self.engine_stops,[])
+        self.assertNotIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED',self.broker.cleanup_uncertain)
+        self.assertIn(NEW,self.broker.storage_leases)
+
+    def test_entry_deadline_remains_bounded_during_initial_observation(self):
+        now=self.deadline_clock();checks=[]
+        def guard():
+            checks.append(True);now[0]+=11;self.gate.native._deadline()
+        self.gate._guard=guard
+        with self.assertRaisesRegex(ValueError,'RESERVATION_OBSERVATION_DEADLINE'):
+            with self.gate.admission(entry_deadline=now[0]+10):
+                self.fail('An expired entry must not yield')
+        self.assertEqual(checks,[True])
+        self.assertEqual(getattr(self.gate._local,'depth',0),0)
+        self.assertIsNone(self.gate.native._local.deadline)
+
+    def test_storage_wait_deadline_does_not_expire_after_new_provider_start(self):
+        now=self.deadline_clock();effects=[];running=[False]
+        target=self.config['deployment']+'-agent-'+NEW
+        original_engine=self.broker.run_engine
+        def engine(args,optional=False,**kwargs):
+            if args[0]=='inspect' and args[1]==target:
+                item=copy.deepcopy(self.item);item['State']['Running']=running[0]
+                return subprocess.CompletedProcess(args,0 if running[0] else 1,json.dumps([item]),'')
+            if args[0]=='create':
+                effects.append('create')
+                return subprocess.CompletedProcess(args,0,'b'*64,'')
+            if args[0]=='start':
+                effects.append('start');running[0]=True;now[0]+=11
+                return subprocess.CompletedProcess(args,0,'','')
+            if args[0]=='exec' or args[:2]==['network','create']:
+                return subprocess.CompletedProcess(args,0,'','')
+            return original_engine(args,optional,**kwargs)
+        self.broker.run_engine=engine
+        def settle(seconds):
+            now[0]+=seconds;self.old_running=False;self.broker.release_storage(fixture.SID)
+        def budget(*args):
+            self.assertFalse(self.old_running);self.assertIn(NEW,self.broker.storage_leases)
+            self.budget_calls.append(True)
+        self.broker.check_creation_budget=budget
+        self.enterContext(patch.object(self.broker.stopping,'wait',side_effect=settle))
+        self.enterContext(patch.object(W,'prepare_store',return_value=None))
+        kind,body=self.send_request()
+        self.assertEqual(kind,b'E');self.assertIn(b'controlled viewer boundary',body)
+        self.assertEqual(effects,['create','start']);self.assertTrue(running[0])
+        self.assertNotIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED',self.broker.cleanup_uncertain)
+        self.assertIn(NEW,self.broker.storage_leases)
+
+    def test_operation_deadline_still_expires_after_successful_timed_entry(self):
+        now=self.deadline_clock()
+        with self.assertRaisesRegex(ValueError,'RESERVATION_OBSERVATION_DEADLINE'):
+            with self.gate.admission(deadline=now[0]+20,entry_deadline=now[0]+10):
+                now[0]+=21
+
+    def test_entry_deadline_does_not_replace_shorter_operation_deadline(self):
+        now=self.deadline_clock()
+        with self.assertRaisesRegex(ValueError,'RESERVATION_OBSERVATION_DEADLINE'):
+            with self.gate.admission(deadline=now[0]+5,entry_deadline=now[0]+10):
+                now[0]+=6
+
+    def test_entry_deadline_cannot_hide_invalid_operation_deadline(self):
+        now=self.deadline_clock()
+        for invalid in (now[0]-1,now[0]+3601,float('inf'),True):
+            with self.subTest(deadline=invalid),self.assertRaisesRegex(ValueError,'RESERVATION_ADMISSION_DEADLINE'):
+                with self.gate.admission(deadline=invalid,entry_deadline=now[0]+10):
+                    self.fail('Both deadlines must remain valid')
+
+    def test_entry_deadline_expiry_never_suppresses_a_real_finalizer_failure(self):
+        now=self.deadline_clock();guard=self.gate.admission(entry_deadline=now[0]+10)
+        guard.__enter__();now[0]+=11
+        with patch.object(self.gate,'_guard',side_effect=RuntimeError('controlled changed custody')) as finalizer:
+            with self.assertRaisesRegex(RuntimeError,'Resource admission release unconfirmed'):
+                self.broker._release_resource_admission(guard)
+        finalizer.assert_called_once()
+        self.assertIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED',self.broker.cleanup_uncertain)
+
     def change_while_waiting(self,change):
         def mutate():
             with self.broker.resource_admission():change()
