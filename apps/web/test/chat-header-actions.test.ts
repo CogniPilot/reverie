@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
 const SESSION = '0000002d-0035-4000-8000-000000000047';
@@ -20,6 +20,21 @@ describe('compact header secondary actions', () => {
       expect(labels).toEqual(['Add people to A long channel name for a narrow phone', 'Pinned messages', 'Install app and notifications', 'Notification settings']);
       expect(labels).not.toContain('Show member list');
     } finally { harness.dom.window.close(); }
+  });
+
+  it('keeps the install launcher out of the persistent header; the phone More menu still opens it', async () => {
+    for (const narrow of [false, true]) {
+      const harness = await createHarness({ rooms: fixtures(), narrow });
+      try {
+        expect(harness.document.querySelector('.ca-head .ca-head-phone')).toBeNull();
+        const open = vi.fn();
+        (harness.window as any).ReverieMobile = { open };
+        (harness.document.querySelector('.ca-head-more') as HTMLButtonElement).click();
+        const item = [...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].find(button => button.textContent === 'Install app and notifications') as HTMLButtonElement;
+        item.click();
+        expect(open).toHaveBeenCalledTimes(1);
+      } finally { harness.dom.window.close(); }
+    }
   });
 
   it('runs the original invite and pin actions and anchors notifications to the visible More button', async () => {
