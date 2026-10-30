@@ -1,9 +1,11 @@
 import { CompanyError, type CompanyService, type RuntimeRestartIntent } from '../../company-service.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionPort } from '../ports/session-port.js';
 import type { EventPort } from '../ports/event-port.js';
 import { SseEvent } from '../sse-events.js';
+import { clearOwnerStop, ownerStopPending, pendingOwnerStops, recordOwnerStop } from '../../owner-stop-journal.js';
 import type { Session } from '../../session.js';
 import { getCli } from '../../config/cli-registry/registry.js';
 import { selectedSubscription } from '../../subscription-profiles.js';
@@ -48,8 +50,50 @@ export function runtimeView(session: Session) {
 
 export const runtimeSwitches = new Set<string>();
 
+/**
+ * An owner stop's timing. The laptop sends no signal after `dispatchMs` from the request. When the stop's answer is lost,
+ * the website asks the laptop to settle it every `settleRetryMs`; no amount of elapsed time settles it by itself.
+ */
+export interface StopBounds { dispatchMs: number; settleRetryMs: number }
+export const STOP_BOUNDS: StopBounds = { dispatchMs: 25_000, settleRetryMs: 5_000 };
+/** The laptop's owner stop of one agent and the settle of a stop whose answer was lost (laptop-power-routes). */
+/**
+ * Settles an owner stop whose answer was lost: asks the laptop every retryMs until it answers that the stop is fenced (it
+ * never signals from now on) or that it signalled and the exec that did so has exited (it can signal nothing later).
+ * Nothing seen from the website settles it, a dead pane or viewer included: a stop accepted earlier could still run and
+ * signal whatever then holds the pane. Never resolves on elapsed time. It also ends once the stop's record is gone
+ * (another settling of the same stop finished first). The caller then removes the record and gives the input back.
+ */
+export async function settleOwnerStop(laptopStop: LaptopAgentStop, sessionId: string, fence: string, retryMs: number): Promise<void> {
+  while (ownerStopPending(sessionId)) {
+    const answer = await laptopStop.settle(sessionId, fence).catch(() => undefined) as { signalled?: unknown } | undefined;
+    if (typeof answer?.signalled === 'boolean') return;
+    await new Promise((resolve) => setTimeout(resolve, retryMs));
+  }
+}
+
+/**
+ * After a restart: resume settling every recorded owner stop. Each session's input, restarts and pane replacement stay
+ * held (by its record) until the laptop settles the stop, and the record is then removed. Resolves, per record, once its
+ * restart hold is back and settling has begun; the settling itself runs until the laptop answers. session names the
+ * restored session for a record, if any, for the log.
+ */
+export function resumeOwnerStops(laptopStop: LaptopAgentStop, session?: (id: string) => Session | undefined,
+  retryMs = STOP_BOUNDS.settleRetryMs): Promise<void>[] {
+  return pendingOwnerStops().map(async ([id, stop]) => {
+    runtimeSwitches.add(id);
+    console.log(`[owner-stop] holding ${session?.(id) ? 'restored' : 'unrestored'} session ${id.slice(0, 8)} until its stop is settled`);
+    void settleOwnerStop(laptopStop, id, stop.fence, retryMs).finally(() => { clearOwnerStop(id, stop.fence); runtimeSwitches.delete(id); });
+  });
+}
+
+export interface LaptopAgentStop {
+  stop(sessionId: string, notAfter: number, fence: string): Promise<unknown>;
+  settle(sessionId: string, fence: string): Promise<unknown>;
+}
+
 export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session) => Promise<void>,
-  stopLaptopAgent?: (sessionId: string) => Promise<unknown>, deadPaneWaitMs = 15_000) {
+  laptopStop?: LaptopAgentStop, deadPaneWaitMs = 15_000, stopBounds: StopBounds = STOP_BOUNDS) {
   const switching = runtimeSwitches;
   const authorize = (req: FastifyRequest) => req.headers['x-reverie-parent-session'] === undefined && verifiedOwner(req);
   app.post('/api/company/employees/:id/restart', async (req, reply) => {
@@ -64,12 +108,14 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     // broker stops only that agent's in-laptop process group (no exit receipt, so the laptop keeps running) and the
     // dead-pane recovery below relaunches it with the saved recipe and thread. Raw terminal output is not counted as
     // activity here: a stuck agent keeps redrawing its status line.
-    if (!session.hasDeadPane?.() && recovery.forceRestart && stopLaptopAgent && process.env.REVERIE_WORKER_SOCKET) {
+    if (!session.hasDeadPane?.() && recovery.forceRestart && laptopStop && process.env.REVERIE_WORKER_SOCKET) {
       if (employee.desiredRunning === false)
         return reply.code(409).send({ success: false, error: 'Enter the office before restarting this expert' });
       if (recovery.confirmSessionId !== session.id)
         return reply.code(409).send({ success: false, error: 'Confirm this current expert session before recovery' });
-      if (runtimeSwitches.has(session.id) || session.runningTaskCount > 0 || session.paneDialog)
+      // A start, restart or attach in progress may be about to create a process; a stop must not race it (the session refuses
+      // any new process while a stop is recorded, see Session._refuseNewProcessWhileStopHeld).
+      if (runtimeSwitches.has(session.id) || ownerStopPending(session.id) || session.paneLifecycleInFlight || session.runningTaskCount > 0 || session.paneDialog)
         return reply.code(409).send({ success: false, error: 'Wait for running tasks, an open dialog or an existing restart to finish' });
       if (session.lastSubmitAt > 0 && Date.now() - session.lastSubmitAt < 120_000)
         return reply.code(409).send({ success: false, error: 'Input reached this expert within two minutes; wait before recovering it' });
@@ -79,14 +125,38 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       if (!releaseInput)
         return reply.code(409).send({ success: false, error: 'Input is being typed to this expert; wait before recovering it' });
       runtimeSwitches.add(session.id);
+      const notAfter = Date.now() + stopBounds.dispatchMs, fence = randomBytes(16).toString('hex');
+      // Written (fsync'd) before the request, so that a website restart keeps holding this agent's input until the stop is
+      // settled: every Session for this id refuses input while the record exists, and startup resumes settling it.
+      try { recordOwnerStop(session.id, { fence, notAfter }); }
+      catch {
+        runtimeSwitches.delete(session.id); releaseInput();
+        return reply.code(503).send({ success: false, error: 'The stop could not be recorded safely, so nothing was stopped. Try again.' });
+      }
+      const settled = () => { clearOwnerStop(session.id, fence); runtimeSwitches.delete(session.id); releaseInput(); };
+      let outcome: unknown;
       try {
-        await stopLaptopAgent(session.id);
+        outcome = await laptopStop.stop(session.id, notAfter, fence);
+      } catch (error) {
+        // Unknown outcome (timeout, lost connection, a failure after the signal): an engine exec the laptop accepted can
+        // still run, however long ago the client gave up, and would signal whatever then holds the pane. Neither elapsed
+        // time nor a dead pane releases anything: input, restarts and pane respawns stay held until the laptop settles
+        // this stop's fence (it never signals, or its signal has run and exited).
+        void settleOwnerStop(laptopStop, session.id, fence, stopBounds.settleRetryMs).finally(settled);
+        return reply.code(409).send({ success: false, error: `The laptop did not confirm the stop (${error instanceof Error ? error.message : 'unknown error'}). ` +
+          'This expert\'s input, restarts and any new process in its pane stay held until the laptop confirms whether the stop ran; then open Restart again.' });
+      }
+      if ((outcome as { dispatched?: unknown } | null)?.dispatched === false) {
+        // Definitive: the broker sent no signal, so the agent keeps running and its input is given back now.
+        settled();
+        const why = (outcome as { error?: unknown }).error;
+        return reply.code(409).send({ success: false, error: `The laptop agent was not stopped: ${typeof why === 'string' ? why : 'refused'}` });
+      }
+      try {
         // The terminal viewer notices the dead inner pane within its two-second check and the pane here exits.
         const deadline = Date.now() + deadPaneWaitMs;
         while (!session.hasDeadPane?.() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
-      } catch (error) {
-        return reply.code(409).send({ success: false, error: `The laptop agent could not be stopped: ${error instanceof Error ? error.message : 'unknown error'}` });
-      } finally { runtimeSwitches.delete(session.id); releaseInput(); }
+      } finally { settled(); }
       if (!session.hasDeadPane?.())
         return reply.code(409).send({ success: false, error: 'The agent was stopped but its session has not reported the exit yet. Open Restart again in a moment.' });
     }
@@ -97,7 +167,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         return reply.code(409).send({ success: false, error: 'Enter the office before restarting this expert' });
       if (recovery.forceRestart && recovery.confirmSessionId !== session.id)
         return reply.code(409).send({ success: false, error: 'Confirm this current expert session before recovery' });
-      if (runtimeSwitches.has(session.id) || session.runningTaskCount > 0)
+      if (runtimeSwitches.has(session.id) || ownerStopPending(session.id) || session.runningTaskCount > 0)
         return reply.code(409).send({ success: false, error: 'Wait for running tasks or an existing restart to finish' });
       runtimeSwitches.add(session.id);
       let intent: RuntimeRestartIntent | undefined;
