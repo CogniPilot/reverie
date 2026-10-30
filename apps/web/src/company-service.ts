@@ -101,7 +101,7 @@ export interface CompanyServiceDeps {
   /** The ONE deployment-configured service purpose registry (service-auth.json); defaults to RESUME/LEASE only. */
   servicePurposes?: ServicePurposes;
   getSession(id: string): CompanySession | undefined;
-  providerHealth?(id: string, owner?: string): ProviderHealth | undefined;
+  providerHealth?(employee: CompanyEmployee): ProviderHealth | undefined;
   /** Fixed server worker transport configuration, never caller authority. */
   workerViewers?: boolean;
   /** The console keeps this session's record although it is not running (pinned, paused): its profile is never cleaned up. */
@@ -248,13 +248,16 @@ export class CompanyService {
   view(owner?: string) {
     const state = this.store.snapshot();
     const employees = state.employees.filter((e) => sameOwner(e.owner, owner));
+    const sessionCounts = new Map<string, number>();
+    for (const employee of state.employees)
+      sessionCounts.set(employee.sessionId, (sessionCounts.get(employee.sessionId) ?? 0) + 1);
     const ids = new Set(employees.map((e) => e.id));
     return {
       employees: employees.map((e) => {
         const session = this.deps.getSession(e.sessionId);
         return { ...e, available: !!session, runtimeHealth: session?.runtimeHealth ?? 'unknown',
           runtimeHealthScope: session?.runtimeHealthScope ?? (this.deps.workerViewers ? 'terminal' : 'provider'), workerViewerReconnect: session?.workerViewerReconnect === true,
-          providerHealth: this.deps.providerHealth?.(e.sessionId, e.owner), viewerHealth: viewerHealth(session, this.deps.workerViewers) };
+          providerHealth: sessionCounts.get(e.sessionId) === 1 ? this.deps.providerHealth?.(e) : undefined, viewerHealth: viewerHealth(session, this.deps.workerViewers) };
       }),
       settings: state.settings.find((s) => sameOwner(s.owner, owner)) ?? CompanySettingsSchema.parse({ owner }),
       cycles: state.cycles.filter((c) => sameOwner(c.owner, owner)),

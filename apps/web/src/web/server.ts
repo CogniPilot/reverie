@@ -1530,7 +1530,7 @@ export class WebServer extends EventEmitter {
       goalAuthentication: goalBoundary.authentication,
       servicePurposes: serviceConfig?.purposes,
       getSession: (id) => this.sessions.get(id),
-      providerHealth: (id, owner) => this.workerProviderHealth?.read(id, { owner }),
+      providerHealth: (employee) => this.workerProviderHealth?.read(employee),
       workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       runtimeRecipeOf: (id) => {
         const session = this.sessions.get(id);
