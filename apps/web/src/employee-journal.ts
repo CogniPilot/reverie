@@ -22,6 +22,9 @@ export const JOURNAL_SAVES_PER_HOUR = 30;
 export const JOURNAL_ATTEMPTS_PER_HOUR = 120;
 export const JOURNAL_INTERPRETATION = "the agent's own account, not verified";
 const MAP_PAGE = 20;
+/** One recall returns at most this many entries and, past the first, this many bytes of entry JSON. */
+export const RECALL_MAX_ENTRIES = 2;
+export const RECALL_MAX_BYTES = 8 * 1024;
 const HOUR = 3_600_000;
 
 export class EmployeeJournalError extends Error {
@@ -301,8 +304,18 @@ export class EmployeeJournalStore {
     if (!expression) return [];
     const rows = this.db.prepare(`SELECT j.* FROM journal_fts f JOIN journal_entries j ON j.id = f.rowid
       WHERE journal_fts MATCH ? AND j.owner = ? AND j.employee_id = ? ${roomId ? 'AND j.room_id = ?' : ''}
-      ORDER BY rank, j.id DESC LIMIT 2`).all(expression, owner, employeeId, ...(roomId ? [roomId] : []));
-    return rows.map(row => this.view(row, read));
+      ORDER BY rank, j.id DESC LIMIT ${RECALL_MAX_ENTRIES}`).all(expression, owner, employeeId, ...(roomId ? [roomId] : []));
+    // Bounded in bytes as well as entries: the best match always, then only what still fits.
+    const views: JournalEntryView[] = [];
+    let used = 0;
+    for (const row of rows) {
+      const view = this.view(row, read);
+      const size = Buffer.byteLength(JSON.stringify(view));
+      if (views.length && used + size > RECALL_MAX_BYTES) break;
+      views.push(view);
+      used += size;
+    }
+    return views;
   }
 
   /** One page of headers, newest first. `more` marks truncation; it is not a count. */
