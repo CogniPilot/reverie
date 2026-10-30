@@ -70,7 +70,7 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
   };
   const fetch = vi.fn(
     async (url: URL, options: { method?: string; body?: string; headers?: Record<string, string> }) => {
-      if (new URL(url).pathname === '/assets/avatars/pack-manifest.json') return { ok: true, json: async () => ({ avatars: [...Array.from({ length: 50 }, (_, i) => i + 1), ...Array.from({ length: 50 }, (_, i) => i + 102), 101].map((id) => ({ id: `pack-${String(id).padStart(2, '0')}`, name: id === 151 ? 'Merry Dragon' : id === 101 ? 'Sly Jester' : `Avatar ${id}`, src: `/assets/avatars/pack-${String(id).padStart(2, '0')}.png` + (id === 1 ? '?v=' + 'a'.repeat(64) : '') })) }) };
+      if (new URL(url).pathname === '/assets/avatars/pack-manifest.json') return { ok: true, json: async () => ({ withheld: ['pack-101'], avatars: [...Array.from({ length: 50 }, (_, i) => i + 1), ...Array.from({ length: 50 }, (_, i) => i + 102), 101].map((id) => ({ id: `pack-${String(id).padStart(2, '0')}`, name: id === 151 ? 'Merry Dragon' : id === 101 ? 'Sly Jester' : `Avatar ${id}`, src: `/assets/avatars/pack-${String(id).padStart(2, '0')}.png` + (id === 1 ? '?v=' + 'a'.repeat(64) : '') })) }) };
       const path = new URL(url).pathname.slice('/api/'.length);
       if (options.method === 'DELETE') return { ok: true, json: async () => ({ success: true, data: {} }) };
       if (options.method === 'PUT' || options.method === 'POST') {

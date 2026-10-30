@@ -6959,7 +6959,10 @@ class ReverieChatApp {
       request.promise = Promise.race([fetching, deadline]).then(async response => {
         if (!response.ok) throw new Error('Avatar catalog unavailable');
         const manifest = await Promise.race([response.json(), deadline]);
-        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar.id) && typeof avatar.src === 'string' && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` && /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src));
+        // The manifest decides what is offered: every listed pack avatar except its one "withheld" line.
+        const withheld = new Set(Array.isArray(manifest.withheld) ? manifest.withheld : []);
+        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])$/.test(avatar.id) && !withheld.has(avatar.id) && typeof avatar.src === 'string' && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` && /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src))
+          .map(avatar => ({ ...avatar, thumb: typeof avatar.thumb === 'string' && avatar.thumb === `/assets/avatars/thumbs/${avatar.id}.webp${avatar.thumb.slice(avatar.thumb.indexOf('?'))}` && /^\/assets\/avatars\/thumbs\/pack-[0-9]{2,3}\.webp\?v=[a-f0-9]{64}$/.test(avatar.thumb) ? avatar.thumb : avatar.src }));
         if (catalogRequest !== request || !form.isConnected) throw new Error('Avatar catalog cancelled');
         if (!avatars.length) throw new Error('Avatar catalog unavailable');
         catalog = avatars;
@@ -7004,7 +7007,7 @@ class ReverieChatApp {
           for (const avatar of avatars) {
             const button = this.button('ca-btn', `Use ${avatar.name}`, async () => { if (await select(avatar) && dialog.isConnected) dialog.close(); });
             button.title = avatar.name;
-            const image = this.el('img'); image.src = avatar.src; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
+            const image = this.el('img'); image.src = avatar.thumb; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
             button.append(image); gallery.append(button);
           }
         } catch (failure) {
