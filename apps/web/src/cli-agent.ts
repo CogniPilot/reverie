@@ -407,10 +407,27 @@ export const httpRequest: ApiRequest = (ctx, options) => {
   });
 };
 
+/** A server field as one line of text: a nested `{ message }` keeps its words, anything else is bounded JSON, never `[object Object]`. */
+function envelopeText(value: unknown, fallback: string): string {
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (value === undefined || value === null) return fallback;
+  const message = (value as { message?: unknown }).message;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  try {
+    return JSON.stringify(value).slice(0, 200);
+  } catch {
+    return fallback;
+  }
+}
+
 /** One line describing a failed response, for humans. Plain-text guards (401/403/429) have no envelope. */
 export function describeFailure(res: ApiResponse): string {
   if (res.json && !res.json.success) {
-    return `${res.json.errorCode ?? 'ERROR'}: ${res.json.error ?? 'request failed'} (HTTP ${res.status})`;
+    const error = envelopeText(res.json.error, 'request failed');
+    // A framework error body ({ error: 'Service Unavailable', message }) puts the useful words in `message`.
+    const detail = envelopeText((res.json as { message?: unknown }).message, '');
+    const text = detail && detail !== error ? `${error}: ${detail}` : error;
+    return `${envelopeText(res.json.errorCode, 'ERROR')}: ${text} (HTTP ${res.status})`;
   }
   const text = res.text.trim().split('\n')[0] ?? '';
   if (res.status === 401)
