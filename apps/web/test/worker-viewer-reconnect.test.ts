@@ -44,14 +44,16 @@ async function fixture() {
   const employee = await company.hire({ name: 'Alex', icon: 'A', position: 'Engineer', expertise: ['systems'],
     sessionId: session.id, researchEnabled: false } as never);
   await company.setDesiredRunning(session.id, true);
-  let blocked = false, ready = true, clock = 100;
+  let blocked = false, ready = true, healthy = true, clock = 100;
   const release = vi.fn(), pause = vi.fn(() => release), publish = vi.fn();
   const deps = { company, session: (id: string) => id === session.id ? session : undefined,
-    ready: () => ready, moveGuard: vi.fn(async () => () => !blocked), pause, publish, now: () => clock };
+    ready: () => ready, providerHealthy: vi.fn(() => healthy),
+    moveGuard: vi.fn(async () => () => !blocked), pause, publish, now: () => clock };
   const controller = new WorkerViewerReconnect(deps);
   const expected = { sessionId: session.id, sessionGeneration: employee.sessionGeneration };
   return { dir, session, mux, store, company, employee, controller, deps, expected, release,
-    block: () => { blocked = true; }, drain: () => { ready = false; }, advance: () => { clock += 20_000; } };
+    block: () => { blocked = true; }, drain: () => { ready = false; },
+    health: (value: boolean) => { healthy = value; }, advance: (ms = 20_000) => { clock += ms; } };
 }
 
 it('repairs only the saved viewer with an atomic attach-only respawn and fresh live readback', async () => {
@@ -142,13 +144,72 @@ it('waits for an old verifier Enter already in flight before repairing the viewe
   expect(f.mux.sendInput).toHaveBeenCalledOnce(); expect(outcome).toHaveBeenCalledExactlyOnceWith('unverified');
 });
 
-it('limits automatic failures to three spaced attempts while leaving one explicit fallback available', async () => {
+it('continues eligible attach-only failures at a capped minute interval and keeps manual fallback', async () => {
   const f = await fixture(); f.mux.respawnPane.mockResolvedValue(null as never);
-  await f.controller.tick(); await f.controller.tick(); expect(f.mux.respawnPane).toHaveBeenCalledTimes(1);
-  for (let n = 0; n < 5; n++) { f.advance(); await f.controller.tick(); }
-  expect(f.mux.respawnPane).toHaveBeenCalledTimes(3);
+  await f.controller.tick();
+  let calls = 1;
+  for (const delay of [2_000, 5_000, 15_000, 30_000, 60_000, 60_000, 60_000]) {
+    f.advance(delay - 1); await f.controller.tick();
+    expect(f.mux.respawnPane).toHaveBeenCalledTimes(calls);
+    f.advance(1); await f.controller.tick();
+    expect(f.mux.respawnPane).toHaveBeenCalledTimes(++calls);
+  }
+  expect(f.mux.respawnPane.mock.calls.every(([options]) => options.workerAttachOnly && options.onlyIfDead)).toBe(true);
+  f.health(false);
   await f.controller.reconnect(f.employee.id, f.expected, undefined);
-  expect(f.mux.respawnPane).toHaveBeenCalledTimes(4);
+  expect(f.mux.respawnPane).toHaveBeenCalledTimes(calls + 1);
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('does not spend an automatic attempt without fresh native health or after health changes during admission', async () => {
+  const f = await fixture(); f.health(false);
+  await f.controller.tick(); expect(f.mux.respawnPane).not.toHaveBeenCalled();
+  f.health(true);
+  f.deps.moveGuard.mockImplementationOnce(async () => { f.health(false); return () => true; });
+  await f.controller.tick(); expect(f.mux.respawnPane).not.toHaveBeenCalled();
+  expect(f.deps.pause).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
+  f.health(true); f.advance(2_000);
+  await f.controller.tick(); expect(f.mux.respawnPane).toHaveBeenCalledOnce();
+});
+
+it('gates ongoing attempts with the real native cache expiry, binding and dead-state checks', async () => {
+  const f = await fixture(); f.mux.respawnPane.mockResolvedValue(null as never);
+  let epoch = 100_000, mono = 100;
+  const binding = () => { const e = f.company.registeredEmployees()[0]; return JSON.parse(JSON.stringify([
+    e.id,e.owner,e.sessionId,e.sessionGeneration,e.desiredRunning,e.onVacation,e.bindingMigration,e.runtimeRecipe,e.permissions])); };
+  const row = { observedBinding: binding(), employeeId: f.employee.id, sessionId: f.session.id,
+    sessionGeneration: f.employee.sessionGeneration, state: 'healthy', observedAtEpochMs: epoch,
+    reason: 'LIVE_NATIVE_COMMAND', proofKind: 'live-container', containerId: 'a'.repeat(64), initPID: 101, initStartTick: 202 };
+  const native = new WorkerProviderHealth({ employees: () => f.company.registeredEmployees(), now: () => epoch,
+    monotonic: () => mono, changed() {}, query: async () => ({ providerHealth: { version: 1, purpose: 'worker-provider-health-v1', providers: [row] } }) });
+  cleanups.push(async () => native.close());
+  f.deps.providerHealthy = vi.fn(() => native.read(f.company.registeredEmployees()[0])?.state === 'healthy');
+  await f.controller.tick(); expect(f.mux.respawnPane).not.toHaveBeenCalled();
+  await native.refresh(); await f.controller.tick(); expect(f.mux.respawnPane).toHaveBeenCalledOnce();
+  epoch += 25_001; mono += 25_001; f.advance(60_000);
+  await f.controller.tick(); expect(f.mux.respawnPane).toHaveBeenCalledOnce();
+  row.observedAtEpochMs = epoch; await native.refresh(); await f.controller.tick();
+  expect(f.mux.respawnPane).toHaveBeenCalledTimes(2);
+  await f.store.update(s => { s.employees[0].permissions.recoverEmployees = !s.employees[0].permissions.recoverEmployees; });
+  f.advance(60_000); await f.controller.tick(); expect(f.mux.respawnPane).toHaveBeenCalledTimes(2);
+  row.observedBinding = binding(); row.state = 'dead'; row.reason = 'COMMAND_EXITED'; row.observedAtEpochMs = ++epoch;
+  await native.refresh(); await f.controller.tick(); expect(f.mux.respawnPane).toHaveBeenCalledTimes(2);
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('keeps other eligible seats moving while one viewer remains in capped backoff', async () => {
+  const first = await fixture(), next = await fixture(); first.mux.respawnPane.mockResolvedValue(null as never);
+  await first.controller.tick();
+  for (const delay of [2_000, 5_000, 15_000, 30_000]) { first.advance(delay); await first.controller.tick(); }
+  expect(first.mux.respawnPane).toHaveBeenCalledTimes(5);
+  const employees = () => [...first.company.registeredEmployees(), ...next.company.registeredEmployees()];
+  first.deps.company = { registeredEmployees: employees, prepareWake: next.deps.company.prepareWake.bind(next.deps.company) } as never;
+  first.deps.session = id => id === first.session.id ? first.session : id === next.session.id ? next.session : undefined;
+  // The first employee's in-flight wake is held by its original company service.
+  const prepare = first.company.prepareWake.bind(first.company);
+  first.deps.company.prepareWake = (id, sid) => id === first.employee.id ? prepare(id, sid) : next.company.prepareWake(id, sid);
+  await first.controller.tick(); expect(next.mux.respawnPane).toHaveBeenCalledOnce();
+  expect(first.mux.respawnPane).toHaveBeenCalledTimes(5);
 });
 
 it.each(['off', 'vacation', 'generation', 'owner', 'recipe', 'move', 'drain', 'migration'] as const)('refuses %s drift during admission before any respawn', async kind => {
@@ -242,10 +303,10 @@ it('does not starve a later eligible viewer behind a disconnected OFF seat',asyn
  expect(off.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.respawnPane).toHaveBeenCalledOnce();
 });
 
-it('retries a fresh SID generation after the previous binding exhausted automatic attempts',async()=>{
+it('retries a fresh SID generation without inheriting the previous binding backoff',async()=>{
  const f=await fixture(),next=await fixture();f.mux.respawnPane.mockResolvedValue(null as never);
  for(let n=0;n<4;n++){await f.controller.tick();f.advance();}
- expect(f.mux.respawnPane).toHaveBeenCalledTimes(3);
+ expect(f.mux.respawnPane).toHaveBeenCalledTimes(4);
  await f.store.update(s=>{s.employees[0].sessionId=next.session.id;s.employees[0].sessionGeneration++;});
  f.deps.session=(id:string)=>id===next.session.id?next.session:undefined;
  await f.controller.tick();
