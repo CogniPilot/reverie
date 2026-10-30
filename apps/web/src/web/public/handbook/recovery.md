@@ -4,9 +4,9 @@ Check the saved state before restarting anything. A busy badge does not prove th
 
 When an expert’s Debug terminal viewer disconnects, Reverie makes a bounded number of automatic attach-only reconnect attempts. The owner can also choose the neutral **Reconnect** button beside the failed connection. This reconnects the viewer to an existing agent; it never starts a replacement, wakes an expert who is off or on vacation, clears a draft, or resends an uncertain message. A working agent stays working. The separate red **Restart** action may restart the agent and remains an explicit owner action.
 
-The optional Debug terminal viewer and the employee's native command runtime have separate status. **Online** can remain visible when a fresh, current laptop observation confirms that runtime, even if the viewer is unavailable. **Viewer unavailable** and **Reconnect** still warn that automatic terminal input may be held; existing drafts and uncertain deliveries remain untouched. A running command does not prove model readiness, a working API connection, or message delivery. Confirmed runtime death stays red, and deliberate stops and vacations always take precedence. Laptop terminal is another optional connection and does not set employee availability.
+Fresh native laptop evidence can keep an expert **Online** when their optional viewer is unavailable. Viewer failure may hold automatic input; drafts and uncertain deliveries remain untouched. Runtime liveness does not prove model/API readiness or delivery. Confirmed runtime death stays red; owner stops and vacations take precedence.
 
-Older brokers or expired observations leave native availability unconfirmed. The read-only provider-health control requires a matching broker and website. Its bounded observations use the current employee/session generation, container, command process tree and storage; no terminal text is read and no agent is started. A cached observation keeps its original time and expires within 25 seconds. Loss of a viewer alone is not a reason to restart an agent.
+Native observations require matching broker and website versions, expire within 25 seconds, and grant no restart authority. Optional terminal viewers do not set availability.
 
 ## In the website
 
