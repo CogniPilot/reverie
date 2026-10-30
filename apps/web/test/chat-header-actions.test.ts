@@ -73,3 +73,15 @@ describe('compact header secondary actions', () => {
     } finally { harness.dom.window.close(); }
   });
 });
+
+describe('shared chat plugins', () => {
+  it('are not offered in the header More menu; Company settings is their one place', async () => {
+    const harness = await createHarness({ rooms: fixtures(), narrow: true });
+    try {
+      (harness.window as any).ReverieChatPlugins = { openSettings: async () => { throw new Error('Owner sign-in required'); } };
+      (harness.document.querySelector('.ca-head-more') as HTMLButtonElement).click();
+      const labels = [...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].map(item => item.textContent);
+      expect(labels).not.toContain('Chat plugins');
+    } finally { harness.dom.window.close(); }
+  });
+});

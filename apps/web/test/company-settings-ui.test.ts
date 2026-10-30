@@ -149,6 +149,19 @@ it('preserves owner draft values and surfaces server refusal without enabling a 
   expect(calls.some((call) => call.method === 'POST')).toBe(false);
 });
 
+it('keeps shared chat plugins in Company settings for a verified owner only', async () => {
+  for (const verified of [true, false]) {
+    const { h } = await setup(verified);
+    const openSettings = vi.fn(async () => {});
+    (h.window as any).ReverieChatPlugins = { openSettings };
+    await h.shell.openCompanySettings();
+    const button = [...h.document.querySelectorAll('.ca-company-settings button')].find(b => b.textContent === 'Chat plugins') as HTMLButtonElement | undefined;
+    if (verified) { expect(button).toBeDefined(); button!.click(); expect(openSettings).toHaveBeenCalledTimes(1); }
+    else expect(button).toBeUndefined();
+    h.document.querySelector('.ca-company-settings')!.remove();
+  }
+});
+
 it('does not expose owner editing when the caller is not verified', async () => {
   const { h } = await setup(false);
   await h.shell.openCompanySettings();

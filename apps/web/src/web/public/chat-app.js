@@ -6136,8 +6136,7 @@ class ReverieChatApp {
         label: button.getAttribute('aria-label') || button.title,
         run: () => button === bellBtn ? this.openNotifyMenu(anchor) : button.click(),
       }));
-    const plugins = this.doc.defaultView?.ReverieChatPlugins;
-    if (plugins) entries.push({ label: 'Chat plugins', run: () => plugins.openSettings() });
+    // Shared chat plugins (math, code languages) are owner settings: they live in Company settings only.
     this.openMenu(entries, { at: anchor, focus: anchor, right: true, label: 'More actions', className: 'ca-head-menu' });
   }
 
