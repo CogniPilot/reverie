@@ -5677,6 +5677,13 @@ class ReverieChatApp {
     this.openCreateChannelDialog({ ...inSpace, ...(placement || {}) }, title);
   }
 
+  /** The display name of the employee bound to a session, else the session's own name. */
+  sessionDisplayName(session) {
+    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === session.id);
+    const name = typeof employee?.name === 'string' ? employee.name.trim() : '';
+    return name || session.name;
+  }
+
   /** Discord's Create Channel: type (text, or voice with a voice agent), name, category, members. */
   openCreateChannelDialog(place = {}, title) {
     this.doc.querySelector('.ca-dialog.ca-create')?.remove();
@@ -5742,7 +5749,8 @@ class ReverieChatApp {
     catWrap.append(category, catList);
 
     // Members, coordinator, voice agent
-    const sessions = (this.app._chatCandidateSessions?.(new Set()) || []).filter((s) => s.mode !== 'shell');
+    const sessions = (this.app._chatCandidateSessions?.(new Set()) || []).filter((s) => s.mode !== 'shell')
+      .map((s) => ({ ...s, label: this.sessionDisplayName(s) }));
     const membersBox = this.el('div', 'ca-create-members');
     const checks = new Map();
     for (const s of sessions) {
@@ -5752,7 +5760,10 @@ class ReverieChatApp {
       box.value = s.id;
       box.addEventListener('change', syncMembers);
       checks.set(s.id, box);
-      row.append(box, this.app._chatAvatar(s.id, s.name, { size: 'sm' }), this.el('span', 'ca-name', s.name), this.el('span', 'ca-invite-sub', (Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || ''))));
+      const backend = Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || '');
+      // The session name stays visible beside an employee's display name, so two sessions never look alike.
+      const sub = s.label === s.name ? backend : [s.name, backend].filter(Boolean).join(' · ');
+      row.append(box, this.app._chatAvatar(s.id, s.label, { size: 'sm' }), this.el('span', 'ca-name', s.label), this.el('span', 'ca-invite-sub', sub));
       membersBox.append(row);
     }
     if (!sessions.length) membersBox.append(this.el('p', 'ca-hint', 'No agents are open yet. You can invite them later.'));
@@ -5772,7 +5783,7 @@ class ReverieChatApp {
       for (const sel of [coord.sel, voice.sel]) {
         const keep = sel.value;
         sel.replaceChildren(new Option(sel === coord.sel ? 'No admin (I direct them)' : 'Choose the agent that answers you', ''));
-        for (const s of sessions) if (checks.get(s.id)?.checked) sel.append(new Option(s.name, s.id));
+        for (const s of sessions) if (checks.get(s.id)?.checked) sel.append(new Option(s.label, s.id));
         sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
       }
     }

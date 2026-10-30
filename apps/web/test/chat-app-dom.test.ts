@@ -1612,6 +1612,23 @@ describe('create channel', () => {
     ]);
   });
 
+  it('names members by their employee display name, keeping the session name beside it', async () => {
+    const company = { employees: [{ id: 'e-alpha', name: 'Alex Rivera', sessionId: A }], settings: {}, canManage: true };
+    const h = await createHarness({ sessions: S, rooms: rs(), company });
+    (h.document.querySelector('.ca-cat-add') as HTMLElement).click();
+    const dlg = h.document.querySelector('.ca-create') as HTMLDialogElement;
+    expect([...dlg.querySelectorAll('.ca-create-member .ca-name')].map((e) => e.textContent)).toEqual(['Alex Rivera', 'bravo']);
+    const subs = [...dlg.querySelectorAll('.ca-create-member .ca-invite-sub')].map((e) => e.textContent);
+    expect(subs[0]).toContain('alpha');
+    expect(subs[1]).not.toContain('bravo');
+    for (const box of dlg.querySelectorAll('.ca-create-member input')) {
+      (box as HTMLInputElement).checked = true;
+      box.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+    }
+    const coord = dlg.querySelector('select') as HTMLSelectElement;
+    expect([...coord.options].map((o) => o.textContent)).toEqual(['No admin (I direct them)', 'Alex Rivera', 'bravo']);
+  });
+
   it('creates a text channel with members and a coordinator, placed in its category', async () => {
     const h = await createHarness({ sessions: S, rooms: rs() });
     (h.document.querySelector('.ca-cat-add') as HTMLElement).click();
