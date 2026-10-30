@@ -1380,7 +1380,7 @@ const TO_IGNORED_NOTE = '--to is ignored: everyone in a channel reads every mess
 export async function agentChatSayInput(
   deps: AgentDeps,
   words: string[],
-  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string },
+  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string },
   input: AsyncIterable<Buffer | string> = process.stdin
 ): Promise<number> {
   if (options.stdin && words.length)
@@ -1410,6 +1410,8 @@ export async function agentChatSayInput(
     text,
     files: options.file,
     replyTo: options.replyTo,
+    ifLatest: options.ifLatest,
+    ifNoNewerThan: options.ifNoNewerThan,
   });
 }
 
@@ -1423,12 +1425,20 @@ export async function agentChatSay(
     files?: string[];
     /** The id of the message this post answers (a spoken turn waits for exactly this link). */
     replyTo?: string;
+    /** Refuse instead of posting when someone else posted after the last message this session saw here. */
+    ifLatest?: boolean;
+    /** Refuse instead of posting when someone else posted after this message id. */
+    ifNoNewerThan?: string;
     readFile?: (path: string) => Promise<Buffer>;
   }
 ): Promise<number> {
   // Refused before anything is uploaded or posted, so a bad id never turns into an unlinked answer.
   if (options.replyTo !== undefined && !UUID_RE.test(options.replyTo))
     return fail(deps, `refusing: --reply-to needs a message id, got ${JSON.stringify(options.replyTo).slice(0, 80)}`, EXIT.refused);
+  if (options.ifNoNewerThan !== undefined && !UUID_RE.test(options.ifNoNewerThan))
+    return fail(deps, `refusing: --if-no-newer-than needs a message id, got ${JSON.stringify(options.ifNoNewerThan).slice(0, 80)}`, EXIT.refused);
+  if (options.ifLatest && options.ifNoNewerThan !== undefined)
+    return fail(deps, 'refusing: use --if-latest or --if-no-newer-than, not both', EXIT.refused);
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   // Each --file is copied into the room's attachment store first, then the message names them.
@@ -1457,8 +1467,23 @@ export async function agentChatSay(
       text: options.text,
       ...(attachments.length ? { attachments } : {}),
       ...(options.replyTo !== undefined ? { replyTo: options.replyTo } : {}),
+      ...(options.ifLatest ? { ifLatest: true } : {}),
+      ...(options.ifNoNewerThan !== undefined ? { ifNoNewerThan: options.ifNoNewerThan } : {}),
     },
   });
+  // A guarded post that crossed newer messages was not stored: show them, so the next step is to read and decide.
+  if (res.status === 409 && (res.json?.errorCode === 'CHAT_NEWER_MESSAGES' || res.json?.errorCode === 'CHAT_NO_READ_MARK')) {
+    if (deps.json) {
+      deps.io.out(JSON.stringify({ success: false, error: res.json.error, errorCode: res.json.errorCode, data: res.json.data ?? {} }));
+      return EXIT.refused;
+    }
+    const data = res.json.data as { newer?: Array<{ id: string; from: string; excerpt: string }>; more?: boolean } | undefined;
+    deps.io.err(`not posted: ${describeFailure(res)}`);
+    if (data?.more) deps.io.err('  (older ones not shown)');
+    for (const m of data?.newer ?? []) deps.io.err(`  ${m.id.slice(0, 8)} ${JSON.stringify(m.from)}: ${JSON.stringify(m.excerpt)}`);
+    deps.io.err('read them with: reverie agent chat read');
+    return EXIT.refused;
+  }
   if (!res.json?.success) return fail(deps, describeFailure(res));
   if (deps.json) emitJson(deps, res.json.data ?? {});
   else
@@ -2837,8 +2862,10 @@ export function registerAgentCommands(program: Command): Command {
     )
     .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
     .option('--reply-to <id>', 'Answer the message with this id (a spoken turn is read back only when its answer names it)')
+    .option('--if-latest', 'Post only if nobody else has posted since you last read this room; otherwise list the newer messages')
+    .option('--if-no-newer-than <id>', 'Post only if nobody else has posted after this message id')
     .option('--json', 'Machine-readable output')
-    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; json?: boolean }) =>
+    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string; json?: boolean }) =>
       run(Boolean(options.json), (deps) => agentChatSayInput(deps, words, options))
     );
 
