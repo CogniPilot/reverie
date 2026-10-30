@@ -23,6 +23,21 @@ describe('employee journal store', () => {
   });
   afterEach(() => store.close());
 
+  it('briefs keystone entries first, then the newest, without superseded ones, and counts every entry', () => {
+    const turn = (id: string, at: number) => message(id, 'Remember this: records carry exact UTC times.', at);
+    turn('m-t2', 300); turn('m-t3', 400); turn('m-t4', 500);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft({ annotations: { importance: 'notable' } }) }, read);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t2', draft: draft({ text: 'Standing rule: James merges.', tags: ['decision'], annotations: { importance: 'keystone' } }) }, read);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t3', draft: draft({ text: 'Plain note.', tags: ['lesson'] }) }, read);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t4', draft: draft({ text: 'Corrects the first.', tags: ['correction'], annotations: { supersedes: [1] } }) }, read);
+    const brief = store.brief(OWNER, SELF);
+    expect(brief.total).toBe(4);
+    expect(brief.entries.map((e) => [e.entryId, e.importance ?? null])).toEqual([[2, 'keystone'], [4, null], [3, null]]);
+    expect(brief.entries[0]).toMatchObject({ text: 'Standing rule: James merges.', tags: ['decision'] });
+    expect(store.brief(OWNER, SELF, 1).entries.map((e) => e.entryId)).toEqual([2]);
+    expect(store.brief(OWNER, 'employee-two')).toEqual({ total: 0, entries: [] });
+  });
+
   it('keeps the hands journal limits', () => {
     expect(validateDraft(draft()).tags).toEqual(['promise']);
     for (const bad of [

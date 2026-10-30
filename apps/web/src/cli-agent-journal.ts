@@ -3,6 +3,7 @@
  * keyed to its employee id so it survives a backend change. The server derives the employee from the
  * session, applies the turn gates and checks every cited quote; this client only formats.
  */
+import { MEMORY_BRIEF_MAX } from './memory-brief.js';
 import type { Command } from 'commander';
 import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
@@ -127,6 +128,26 @@ export async function agentJournalReceipt(deps: AgentDeps, turnId: string): Prom
   } catch { return refused(deps, 'Journal receipt unavailable.'); }
 }
 
+/**
+ * The memory brief a session starts with. With --hook-event SessionStart it prints the harness hook JSON, its own entry
+ * beside the chat summary so neither crowds the other out of the hook budget; on any failure it prints nothing there.
+ */
+export async function agentJournalBrief(deps: AgentDeps, hookEvent?: string): Promise<number> {
+  if (hookEvent !== undefined && hookEvent !== 'SessionStart') return refused(deps, 'The memory brief is a SessionStart hook only.');
+  try {
+    const result = await call(deps, 'GET', '/api/agent/memory-brief', {});
+    const data = result.ok ? (result.data as { text?: unknown; total?: unknown }) : undefined;
+    if (!data || typeof data.text !== 'string' || data.text.length > MEMORY_BRIEF_MAX)
+      return hookEvent ? AGENT_EXIT.ok : refused(deps, result.ok ? 'Memory brief unavailable.' : result.error);
+    if (hookEvent) deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: data.text } }));
+    else if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
+    else deps.io.out(data.text);
+    return AGENT_EXIT.ok;
+  } catch {
+    return hookEvent ? AGENT_EXIT.ok : refused(deps, 'Memory brief unavailable.');
+  }
+}
+
 export function registerJournalCommands(
   agent: Command,
   run: (json: boolean, verb: (deps: AgentDeps) => Promise<number>) => Promise<void>
@@ -163,6 +184,10 @@ export function registerJournalCommands(
     .requiredOption('-r, --room <id>', 'Room of the message')
     .option('--json', 'Machine-readable message')
     .action((messageId: string, options: { room: string; json?: boolean }) => run(Boolean(options.json), deps => agentJournalSource(deps, options.room, messageId)));
+  journal.command('brief').description('What a new session starts with: who you are, how to use this journal, and your top entries')
+    .option('--hook-event <event>', 'Hook output for SessionStart')
+    .option('--json', 'Machine-readable brief')
+    .action((options: { hookEvent?: string; json?: boolean }) => run(Boolean(options.json), deps => agentJournalBrief(deps, options.hookEvent)));
   journal.command('receipt <turn-id>').description('The saved payload and hash for a turn, and the gates of each recorded attempt')
     .option('--json', 'Machine-readable receipt')
     .action((turnId: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentJournalReceipt(deps, turnId)));

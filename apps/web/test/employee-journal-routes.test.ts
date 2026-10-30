@@ -65,6 +65,29 @@ describe('employee journal routes', () => {
     sources: [{ roomId: ROOM, id: 'm-source', quote: 'exact UTC times' }] } }) =>
     app.inject({ method: 'POST', url: '/api/agent/journal/save', payload: body, headers: as(sessionId) });
 
+  it('gives a session its own memory brief, and refuses owner, service, spoofed and parameterized calls', async () => {
+    const empty = await app.inject({ url: '/api/agent/memory-brief', headers: as(SID) });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.headers['cache-control']).toBe('no-store');
+    expect(empty.json().data).toMatchObject({ total: 0, entries: [] });
+    expect(empty.json().data.text).toContain('you are employee-one, a persistent Reverie employee');
+    expect(empty.json().data.text).toContain('Your journal has no entries yet.');
+    expect((await save()).statusCode).toBe(200);
+    const brief = (await app.inject({ url: '/api/agent/memory-brief', headers: as(SID) })).json().data;
+    expect(brief).toMatchObject({ total: 1, entries: [{ entryId: 1, tags: ['promise'] }] });
+    expect(brief.entries[0].text).toBeUndefined(); // the text is only in the bounded brief
+    expect(brief.text).toContain('Records carry exact UTC times.');
+    // Another employee's session sees only its own (empty) journal.
+    expect((await app.inject({ url: '/api/agent/memory-brief', headers: as(OTHER) })).json().data.total).toBe(0);
+    for (const response of [
+      await app.inject({ url: '/api/agent/memory-brief', cookies: { [OWNER_COOKIE]: ownerToken }, headers: as(SID) }),
+      await app.inject({ url: '/api/agent/memory-brief', headers: { [SERVICE_HEADER]: serviceToken, ...as(SID) } }),
+      await app.inject({ url: '/api/agent/memory-brief', headers: as(SID.slice(0, 16)) }),
+      await app.inject({ url: '/api/agent/memory-brief' }),
+    ]) expect(response.statusCode).toBe(403);
+    expect((await app.inject({ url: '/api/agent/memory-brief?employeeId=employee-two', headers: as(SID) })).statusCode).toBe(400);
+  });
+
   it('writes only to the caller’s own journal and refuses owner, service and spoofed callers', async () => {
     const saved = await save();
     expect(saved.statusCode).toBe(200); expect(saved.json().data).toMatchObject({ entryId: 1, turnId: 'm-turn', replayed: false });

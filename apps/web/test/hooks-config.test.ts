@@ -29,6 +29,7 @@ import {
   applyCodexTurnSummaryHooks,
   generateCodexTurnSummaryHooks,
   generateTurnSummaryScript,
+  generateMemoryBriefScript,
   applyStatusLineConfig,
   ensureReverieHooks,
   ensureStatusLineExporterScript,
@@ -1684,6 +1685,23 @@ describe('per-turn message summary hooks', () => {
     }
   });
 
+  it('starts every session with the memory brief as its own bounded handler, before the summary, in both harnesses', () => {
+    for (const config of [generateHooksConfig(), generateCodexTurnSummaryHooks()]) {
+      const handlers = (config.hooks.SessionStart as Array<{ hooks: Array<{ command: string; timeout: number }> }>).flatMap((e) => e.hooks);
+      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V1'));
+      const summary = handlers.findIndex((h) => h.command.includes('REVERIE_TURN_SUMMARY_V2'));
+      expect(brief).toBeGreaterThanOrEqual(0);
+      expect(brief).toBeLessThan(summary);
+      expect(handlers[brief].timeout).toBe(3);
+      for (const event of ['UserPromptSubmit', 'PostToolUse'])
+        expect(JSON.stringify(config.hooks[event])).not.toContain('REVERIE_MEMORY_BRIEF');
+    }
+    const script = generateMemoryBriefScript();
+    expect(script).toContain("['agent', 'journal', 'brief', '--hook-event', 'SessionStart']");
+    expect(script).toContain('timeout: 2500');
+    expect(script).toContain('text.length > 2000');
+  });
+
   it('bounds the helper and emits only validated context, with no hook-event API envelope', () => {
     const script = generateTurnSummaryScript('PostToolUse');
     expect(script).toContain('timeout: 2500');
@@ -1721,6 +1739,35 @@ describe('per-turn message summary hooks', () => {
     expect(run({ success: true, data: valid })).toBe('');
     expect(run({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: '  ' } })).toBe('');
     expect(run({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'wrong event' } })).toBe('');
+  });
+
+  it('runs the real memory brief helper: shows the brief every session start, and nothing when it fails or is too long', () => {
+    const dir = join(tmpdir(), `reverie-brief-hook-${randomUUID()}`);
+    mkdirSync(dir, { mode: 0o700 });
+    writeFileSync(
+      join(dir, 'reverie'),
+      `#!${process.execPath}\nif(process.argv.slice(2).join(' ')!=='agent journal brief --hook-event SessionStart'||process.env.BRIEF_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:process.env.BRIEF_TEXT}}));\n`,
+      { mode: 0o700 }
+    );
+    const run = (text: string, fail = false) => {
+      const result = spawnSync(process.execPath, ['-e', generateMemoryBriefScript()], {
+        env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(),
+          REVERIE_API_URL: 'http://office', BRIEF_TEXT: text, BRIEF_FAIL: fail ? '1' : '' },
+        encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
+      });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      return result.stdout ? JSON.parse(result.stdout).hookSpecificOutput : undefined;
+    };
+    try {
+      expect(run('Your memory: you are Maple.')).toEqual({ hookEventName: 'SessionStart', additionalContext: 'Your memory: you are Maple.' });
+      expect(run('Your memory: you are Maple.')?.additionalContext).toBe('Your memory: you are Maple.'); // every start, no dedup
+      expect(run('x'.repeat(2001))).toBeUndefined();
+      expect(run('Your memory: you are Maple.', true)).toBeUndefined();
+      expect(run('  ')).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('deduplicates real helper processes, refreshes each prompt, and clears a prior snapshot once', () => {

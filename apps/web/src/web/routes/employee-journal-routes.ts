@@ -1,3 +1,4 @@
+import { renderMemoryBrief } from '../../memory-brief.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ChatMessage } from '../../chatroom-store.js';
@@ -92,6 +93,17 @@ export function registerEmployeeJournalRoutes(
       const query = parse(Recall, request.query);
       const self = current(request);
       return { success: true, data: { entries: deps.journal().recall(self.owner, self.employee.id, query.q, self.read, query.roomId) } };
+    } catch (error) { return failed(reply, error); }
+  });
+  // What a new session starts with (the SessionStart hook prepends it): identity, how to use the journal, top entries.
+  app.get('/api/agent/memory-brief', options, async (request, reply) => {
+    headers(reply);
+    try {
+      parse(z.object({}).strict(), request.query);
+      const self = current(request);
+      const brief = deps.journal().brief(self.owner, self.employee.id);
+      return { success: true, data: { total: brief.total, entries: brief.entries.map(({ text: _text, ...entry }) => entry),
+        text: renderMemoryBrief(self.employee.name, brief) } };
     } catch (error) { return failed(reply, error); }
   });
   app.get('/api/agent/journal/map', options, async (request, reply) => {
