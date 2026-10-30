@@ -13,7 +13,7 @@ import path from 'node:path';
 import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import { sqlite } from './chat-db.js';
-import { JOURNAL_IMPORT_BATCH, JOURNAL_TEXT_BYTES, type JournalImportItem, type JournalImportOutcome } from './employee-journal.js';
+import { JOURNAL_IMPORT_BATCH, JOURNAL_PROJECT_SAVES_PER_DAY, JOURNAL_TEXT_BYTES, type JournalImportItem, type JournalImportOutcome } from './employee-journal.js';
 
 const PROJECT = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const bounds = { maxBytes: 256 * 1024, deadlineMs: 30_000 };
@@ -101,7 +101,8 @@ const summary = (store: LegacyStore) => {
   const keystones = store.items.filter(item => item.importance === 'keystone').length;
   return `${store.scope === 'private' ? 'your own store' : `project ${store.scope}`}: ${store.items.length} to import (${keystones} keystone, ` +
     `${store.items.length - keystones} important), ${store.skipped} left behind (dreams and memories rated under 5)` +
-    (store.included ? '' : '; not imported without --include-projects, because every employee could then read it');
+    (store.included ? (store.scope === 'private' ? '' : `; uses your own ${JOURNAL_PROJECT_SAVES_PER_DAY} project saves a day, so a large store takes several days`)
+      : '; not imported without --include-projects, because every employee could then read it');
 };
 
 export interface ImportLegacyOptions { dryRun?: boolean; write?: boolean; includeProjects?: boolean; instance?: string }

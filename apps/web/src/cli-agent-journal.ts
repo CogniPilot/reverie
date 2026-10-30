@@ -198,7 +198,7 @@ export function registerJournalCommands(
   journal.command('import-legacy').description('Move your old reverie-memory store into this journal, as imported, unverified entries (run --dry-run first)')
     .option('--dry-run', 'Show what would be imported; write nothing')
     .option('--write', 'Import (safe to repeat: memories already imported are skipped)')
-    .option('--include-projects', 'Also import project stores, which every employee can then read')
+    .option('--include-projects', 'Also import project stores, which every employee can then read; they use your own 20 project saves a day')
     .option('--instance <path>', 'Your own instance config (default: REVERIE_INSTANCE_CONFIG)')
     .option('--json', 'Machine-readable result')
     .action((options: ImportLegacyOptions & { json?: boolean }) => run(Boolean(options.json), deps => agentJournalImportLegacy(deps, options)));

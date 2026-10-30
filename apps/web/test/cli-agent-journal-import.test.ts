@@ -91,6 +91,9 @@ describe('journal import-legacy', () => {
   it('write --include-projects adds the project stores', async () => {
     await agentJournalImportLegacy(deps(), { write: true, includeProjects: true, instance });
     expect(requests[0].body.items.filter((i) => i.scope === 'rumoca').map((i) => i.legacyId)).toEqual([7]);
+    out = [];
+    await agentJournalImportLegacy(deps(), { dryRun: true, includeProjects: true, instance });
+    expect(out.join('\n')).toContain('project rumoca: 1 to import (0 keystone, 1 important), 0 left behind (dreams and memories rated under 5); uses your own 20 project saves a day');
   });
 
   it('needs exactly one mode and an instance, and says a failed write is safe to repeat', async () => {
