@@ -274,6 +274,11 @@ describe('current exact recipient/source attention boundary', () => {
       expect(summary.messages.map((m) => m.messageId)).toContain(question.id);
       const open = summary.messages.filter((m) => m.attention?.disposition === 'pending').length;
       expect(summary.text).toContain(`: ${open} need${open === 1 ? 's' : ''} your attention.`);
+      // Agents that answer only after the work leave the room waiting: the summary they see mid-turn asks for an early
+      // one-line acknowledgement, once, right after the count.
+      const cue = 'If replying needs more than a few minutes of work, acknowledge in one line first.';
+      expect(summary.text.split(cue)).toHaveLength(2);
+      expect(summary.text).toContain(`your attention. ${cue} Quoted records`);
     } finally {
       await f.service.stop();
     }
