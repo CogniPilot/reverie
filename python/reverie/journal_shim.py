@@ -23,6 +23,9 @@ from reverie import env_names
 TAGS = ("decision", "promise", "correction", "preference", "identity", "relationship", "open-question", "lesson",
         "personal-reflection")
 TIMEOUT_S = 60
+# Said with every save that could not reach the journal, so the agent does not assume it survives a backend switch.
+LOCAL_ONLY = ("saved to the old local store only, not to your office journal: it will not follow a runtime or model "
+              "switch until import-legacy runs")
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
 

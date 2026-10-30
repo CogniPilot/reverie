@@ -149,6 +149,9 @@ class DispatchThroughJournalTests(unittest.TestCase):
         self.assertFalse(journal_shim.available())
         saved = dispatch(self.brain, {"action": "remember", "text": "A verified note"})
         self.assertEqual(saved["text"], "A verified note")
+        self.assertIn("not to your office journal", saved["note"])  # never mistaken for a journal save
+        project = dispatch(self.brain, {"action": "remember", "text": "Parity passed", "project": "rumoca", "source": "commit 1"})
+        self.assertEqual(project["note"], journal_shim.LOCAL_ONLY)
         self.assertIsInstance(dispatch(self.brain, {"action": "recall", "query": "verified note"}), list)
 
 

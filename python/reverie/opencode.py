@@ -198,12 +198,12 @@ def dispatch(brain, request: dict):
         if request.get("project"):
             memory = ProjectMemory(brain.cfg.data_dir / "projects", request["project"])
             try:
-                return memory.remember(text, str(request.get("source", "")))
+                return {**memory.remember(text, str(request.get("source", ""))), "note": journal_shim.LOCAL_ONLY}
             finally:
                 memory.close()
         if request.get("channel") == "work":
             raise ValueError("work memories require a project and verification source")
-        return brain.store.add_reflection(text, 7, [], "shared", meta={"verified_note": True}).as_dict()
+        return {**brain.store.add_reflection(text, 7, [], "shared", meta={"verified_note": True}).as_dict(), "note": journal_shim.LOCAL_ONLY}
     if action == "plan":
         if "text" in request:
             text = request["text"]
