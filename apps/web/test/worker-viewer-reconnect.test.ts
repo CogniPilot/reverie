@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { Session } from '../src/session.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
+import type { CompanyEmployee } from '../src/company-types.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../src/worker-viewer-reconnect.js';
 import { WebServer } from '../src/web/server.js';
 import { SseEvent } from '../src/web/sse-events.js';
@@ -272,7 +273,7 @@ it('carries independent native health through the real server SSE projection and
   observedAtEpochMs:Date.now(),reason:'LIVE_NATIVE_COMMAND',proofKind:'live-container',containerId:'a'.repeat(64),initPID:101,initStartTick:202};
  const health=new WorkerProviderHealth({employees:()=>f.company.registeredEmployees(),query:async()=>({providerHealth:{version:1,purpose:'worker-provider-health-v1',providers:[row]}}),
   changed:()=>web.broadcast(SseEvent.SessionUpdated,{session:web.getSessionStateWithRespawn(f.session)})});web.workerProviderHealth=health;
- (f.company as any).deps.providerHealth=(id:string,owner?:string)=>health.read(id,{owner});
+ (f.company as any).deps.providerHealth=(employee:CompanyEmployee)=>health.read(employee);
  const h=await createHarness({loadShell:false,sessions:[f.session.toState()],company:{canManage:true,...f.company.view()},
   rooms:[room('r1','Office',[member(f.session.id,'Alex',{alive:false,pendingDeliveries:3})])]});cleanups.push(async()=>h.dom.window.close());
  const source=readFileSync(resolve(import.meta.dirname,'../src/web/public/app.js'),'utf8');

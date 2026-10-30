@@ -86,6 +86,7 @@ let
         test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts \
         test/chatroom-digest.test.ts test/chatroom-notice-state.test.ts test/chatroom-notice-history.test.ts test/chatroom-notice-cli.test.ts test/chat-db.test.ts test/chat-message-search.test.ts \
         test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts test/worker-viewer-reconnect.test.ts test/worker-provider-health.test.ts \
+        test/command-failure-routes.test.ts test/command-failure-ui.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/menu-viewport.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
@@ -265,14 +266,29 @@ let
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
+  # NSS 3.131.1 drops the emSign ECC Root CA - C3, emSign ECC Root CA - G3 and emSign Root CA - C1 roots after the
+  # eMudhra intermediate CA compromise (Python CVE-2026-115557). The pinned nixpkgs carries 3.126; only the bundled
+  # certdata.txt differs, so this is data-only and nothing else is rebuilt against it.
+  cacert = pkgs.cacert.overrideAttrs (old: {
+    version = "3.131.1";
+    src = pkgs.fetchurl {
+      urls = [
+        "https://hg-edge.mozilla.org/projects/nss/raw-file/NSS_3_131_1_RTM/lib/ckfw/builtins/certdata.txt"
+        "https://raw.githubusercontent.com/nss-dev/nss/refs/tags/NSS_3_131_1_RTM/lib/ckfw/builtins/certdata.txt"
+      ];
+      hash = "sha256-PsK00kDcEsdH6vRQBh24SvdXxIO72jAvninOtdcL5RA=";
+    };
+  });
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
     paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.rustc pkgs.cargo pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
-      pkgs.cacert lockTools ] ++ providerLaunchers;
+      cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
+    # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
+    passthru = { inherit cacert; };
   };
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   requestUpdate = pkgs.writeShellApplication {

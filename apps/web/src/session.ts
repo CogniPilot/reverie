@@ -2110,6 +2110,41 @@ export class Session extends EventEmitter {
     return this._autoOps.autoResumeAt;
   }
 
+  /**
+   * When the harness itself reported a context compaction starting (Claude Code's PreCompact hook), until it reports the
+   * end (SessionStart "compact"), the turn ends or a prompt is submitted. Quiet output alone is never compaction evidence.
+   * A start with no end is cleared after COMPACTING_MAX_MS by a timer that emits 'compactingChanged', so a lost end hook
+   * cannot leave the state (or a client's dot) stuck.
+   */
+  private _compactingSince: number | null = null;
+  private _compactingTimer: ReturnType<typeof setTimeout> | null = null;
+
+  get compactingSince(): number | null {
+    return this._compactingSince;
+  }
+
+  static readonly COMPACTING_MAX_MS = 15 * 60_000;
+
+  /** Record a compaction start (true) or end (false); returns whether the visible state changed. */
+  noteCompaction(active: boolean): boolean {
+    const before = this._compactingSince;
+    const next = active ? before ?? Date.now() : null;
+    this._compactingSince = next;
+    if (next === null && this._compactingTimer) {
+      clearTimeout(this._compactingTimer);
+      this._compactingTimer = null;
+    } else if (next !== null && !this._compactingTimer && !this._isStopped) {
+      this._compactingTimer = setTimeout(() => {
+        this._compactingTimer = null;
+        if (this._compactingSince === null) return;
+        this._compactingSince = null;
+        this.emit('compactingChanged');
+      }, Session.COMPACTING_MAX_MS);
+      this._compactingTimer.unref?.();
+    }
+    return next !== before;
+  }
+
   /** True while the session is paused on a Claude usage limit (auto-resume armed). */
   get isLimitPaused(): boolean {
     return this._autoOps.isLimitPaused;
@@ -2259,6 +2294,7 @@ export class Session extends EventEmitter {
       autoClearEnabled: this._autoOps.autoClearEnabled,
       autoClearThreshold: this._autoOps.autoClearThreshold,
       autoCompactEnabled: this._autoOps.autoCompactEnabled,
+      ...(this.compactingSince !== null ? { compactingSince: this.compactingSince } : {}),
       autoCompactThreshold: this._autoOps.autoCompactThreshold,
       autoCompactPrompt: this._autoOps.autoCompactPrompt,
       autoResumeEnabled: this._autoOps.autoResumeEnabled,
@@ -4533,6 +4569,13 @@ export class Session extends EventEmitter {
       clearTimeout(this._trustDialogTimer);
       this._trustDialogTimer = null;
     }
+
+    // A compaction cannot be in progress once the session is torn down
+    if (this._compactingTimer) {
+      clearTimeout(this._compactingTimer);
+      this._compactingTimer = null;
+    }
+    this._compactingSince = null;
 
     // Clear activity timeout to prevent memory leak
     if (this.activityTimeout) {

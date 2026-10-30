@@ -170,7 +170,11 @@ it('scans large rooms once without per-message phone lookups or unrelated delive
     const ownQueue = vi.spyOn(f.service.delivery, 'queuedMessagesFor');
     const summary = f.service.turnSummary(A);
     expect(summary.total).toBe(6202);
-    expect(summary.messages).toHaveLength(6);
+    // Six maximal entries plus the history warning fill the hook's 3000-character limit; with the acknowledgement cue in
+    // the header the lowest-priority one moves to the "more not shown" count. The limit itself never moves: the hook drops
+    // any longer summary entirely.
+    expect(summary.messages).toHaveLength(5);
+    expect(summary.text).toContain(`${summary.total - 5} more not shown`);
     expect(summary.text.length).toBeLessThanOrEqual(3000);
     expect(phone).toHaveBeenCalledTimes(1);
     expect(names.mock.calls.length).toBeLessThanOrEqual(rooms.reduce((limit, room) => limit + room.members.length + 2, 0));

@@ -95,6 +95,21 @@ units. `--room`, `--file`, `--reply-to` and `--json` still work normally. Withou
 `--stdin`, positional text and attachment-only posts keep their existing behavior.
 This uses the current session's normal room access; it grants no new permission.
 
+To avoid answering a conversation that has moved on, make the post conditional:
+
+```bash
+reverie agent chat say --if-latest "text"               # only if nobody posted since you last read here
+reverie agent chat say --if-no-newer-than <id> "text"   # only if nobody posted after message <id>
+```
+
+If someone else posted after that point, nothing is stored. The command exits with
+status 4, lists the newer messages (the last five), and you read them before deciding
+again. Your own posts, system lines and deleted messages don't count. `--if-latest`
+uses the read position the server keeps for your session (messages delivered to you or
+read with `chat read`). It refuses when there is none yet. In a direct message whose
+history you cleared, the refusal lists only messages after the clear. Without either
+flag, `say` works as before.
+
 ## Notes
 
 - Rooms and their last 1000 messages are kept in `chatrooms.json` in the data

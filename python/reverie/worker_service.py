@@ -25,6 +25,14 @@ from .worker import load_config
 
 UNIT = 'reverie-worker-broker.service'
 STORE_ROOT = Path('/nix/store')
+_MANAGER_STAGES = {'stop': 'MANAGER_STOP', 'disable': 'MANAGER_DISABLE', 'daemon-reload': 'MANAGER_RELOAD'}
+
+
+class ManagerOperationError(RuntimeError):
+    """Fixed operation metadata only; never retain command arguments/output."""
+    def __init__(self, stage, returncode):
+        super().__init__('Owner user-service manager operation failed')
+        self.stage, self.returncode = stage, returncode
 
 
 def run_command(args, *, deadline=None):
@@ -59,6 +67,8 @@ class WorkerService:
     def manager(self, *args, required=True):
         result = self.run(['systemctl', '--user', *args])
         if required and result.returncode:
+            if args and args[0] in _MANAGER_STAGES:
+                raise ManagerOperationError(_MANAGER_STAGES[args[0]], result.returncode)
             raise RuntimeError('Owner user-service manager operation failed')
         return result
 
@@ -321,11 +331,33 @@ class WorkerService:
             result = self.manager('is-active', UNIT, required=False)
             return {'installed': self.unit.exists(), 'active': result.returncode == 0, 'unit': UNIT}
         elif action == 'uninstall':
-            if not self.unit.is_symlink() or self.unit.resolve() != self.target_unit():
+            target = self.target_unit()
+            if not self.unit.is_symlink() or self.unit.resolve() != target:
                 raise ValueError('Refusing to remove an unrecognized service generation')
-            self.manager('disable', '--now', UNIT)
-            self.unit.unlink(); self.manager('daemon-reload')
-            if self.gcroot.is_symlink() and self.gcroot.resolve() == self.store_root(self.target_unit()):
+            parent = self.unit.parent.stat()
+            if self.unit.parent.resolve() != self.unit.parent:
+                raise ValueError('Canonical service directory required')
+            # Stop while this external unit link still names the recognized
+            # generation. disable --now can remove/reload it before stopping.
+            self.manager('stop', UNIT)
+            current = self.unit.parent.stat()
+            if (self.unit.parent.resolve() != self.unit.parent or
+                    (parent.st_dev, parent.st_ino) != (current.st_dev, current.st_ino)):
+                raise ValueError('Service directory changed while stopping')
+            if not self.unit.is_symlink() or self.unit.resolve() != target:
+                raise ValueError('Service generation changed while stopping')
+            self.manager('disable', UNIT)
+            current = self.unit.parent.stat()
+            if (self.unit.parent.resolve() != self.unit.parent or
+                    (parent.st_dev, parent.st_ino) != (current.st_dev, current.st_ino)):
+                raise ValueError('Service directory changed while disabling')
+            # systemctl disable may already remove this externally linked unit.
+            if os.path.lexists(self.unit):
+                if not self.unit.is_symlink() or self.unit.resolve() != target:
+                    raise ValueError('Service generation changed while disabling')
+                self.unit.unlink()
+            self.manager('daemon-reload')
+            if self.gcroot.is_symlink() and self.gcroot.resolve() == self.store_root(target):
                 self.gcroot.unlink()
             # Private config, environment, laptop homes/stores and intent remain.
         else: raise ValueError('Unknown fixed service operation')
@@ -491,6 +523,11 @@ def _diagnostic(error):
     stage = getattr(error, '_reverie_transport_stage', None)
     if type(stage) is str and stage in _TRANSPORT_DIAGNOSTIC_STAGES:
         result['stage'] = stage
+    if (type(error) is ManagerOperationError and type(error.stage) is str and
+            error.stage in _MANAGER_STAGES.values() and type(error.returncode) is int and
+            -128 <= error.returncode <= 255 and error.returncode != 0):
+        result.update(reason='Owner user-service manager operation failed',
+                      managerStage=error.stage, returncode=error.returncode)
     return result
 
 

@@ -640,14 +640,17 @@
       if (!response.ok) throw new Error('Avatar pack unavailable.');
       const manifest = await response.json();
       if (!dialog.open) return;
+      // The manifest decides what is offered: every listed pack avatar except its one "withheld" line.
+      const withheld = new Set(Array.isArray(manifest.withheld) ? manifest.withheld : []);
       const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : [])
         .filter(
           (avatar) =>
-            /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar?.id) &&
+            /^pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])$/.test(avatar?.id) &&
+            !withheld.has(avatar.id) &&
             avatarPath(avatar?.src) &&
             avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png`
         )
-        .slice(0, 100);
+        .slice(0, 160);
       byId('bot-avatar-status').textContent = avatars.length ? '' : 'No avatars available.';
       for (const avatar of avatars) {
         const button = node('button');
@@ -655,7 +658,12 @@
         button.setAttribute('aria-label', `Use ${avatar.name}`);
         button.title = avatar.name;
         const image = node('img');
-        image.src = assetUrl(avatar.src);
+        const thumb =
+          typeof avatar.thumb === 'string' &&
+          new RegExp(`^/assets/avatars/thumbs/${avatar.id}\\.webp\\?v=[a-f0-9]{64}$`).test(avatar.thumb)
+            ? avatar.thumb
+            : avatar.src;
+        image.src = assetUrl(thumb);
         image.alt = '';
         image.loading = 'lazy';
         image.width = image.height = 56;

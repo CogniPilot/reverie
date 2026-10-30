@@ -118,6 +118,11 @@ const AGENT_ROUTES = new Set([
   'POST /api/publication/credentials/:id/material',
   'GET /api/agent/context',
   'POST /api/agent/context/receipt',
+  'POST /api/agent/journal/save',
+  'GET /api/agent/journal/recall',
+  'GET /api/agent/journal/map',
+  'GET /api/agent/journal/source',
+  'GET /api/agent/journal/receipt/:turnId',
   ...BOARD_WRITE_ROUTES,
 ]);
 /**

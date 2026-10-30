@@ -58,6 +58,7 @@ import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
 import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
+import { registerJournalCommands } from './cli-agent-journal.js';
 import { goalClientTarget } from './goal-client-target.js';
 
 /** A chat message id, as the server stores it. */
@@ -409,10 +410,27 @@ export const httpRequest: ApiRequest = (ctx, options) => {
   });
 };
 
+/** A server field as one line of text: a nested `{ message }` keeps its words, anything else is bounded JSON, never `[object Object]`. */
+function envelopeText(value: unknown, fallback: string): string {
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (value === undefined || value === null) return fallback;
+  const message = (value as { message?: unknown }).message;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  try {
+    return JSON.stringify(value).slice(0, 200);
+  } catch {
+    return fallback;
+  }
+}
+
 /** One line describing a failed response, for humans. Plain-text guards (401/403/429) have no envelope. */
 export function describeFailure(res: ApiResponse): string {
   if (res.json && !res.json.success) {
-    return `${res.json.errorCode ?? 'ERROR'}: ${res.json.error ?? 'request failed'} (HTTP ${res.status})`;
+    const error = envelopeText(res.json.error, 'request failed');
+    // A framework error body ({ error: 'Service Unavailable', message }) puts the useful words in `message`.
+    const detail = envelopeText((res.json as { message?: unknown }).message, '');
+    const text = detail && detail !== error ? `${error}: ${detail}` : error;
+    return `${envelopeText(res.json.errorCode, 'ERROR')}: ${text} (HTTP ${res.status})`;
   }
   const text = res.text.trim().split('\n')[0] ?? '';
   if (res.status === 401)
@@ -1399,7 +1417,7 @@ const TO_IGNORED_NOTE = '--to is ignored: everyone in a channel reads every mess
 export async function agentChatSayInput(
   deps: AgentDeps,
   words: string[],
-  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string },
+  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string },
   input: AsyncIterable<Buffer | string> = process.stdin
 ): Promise<number> {
   if (options.stdin && words.length)
@@ -1429,6 +1447,8 @@ export async function agentChatSayInput(
     text,
     files: options.file,
     replyTo: options.replyTo,
+    ifLatest: options.ifLatest,
+    ifNoNewerThan: options.ifNoNewerThan,
   });
 }
 
@@ -1442,12 +1462,20 @@ export async function agentChatSay(
     files?: string[];
     /** The id of the message this post answers (a spoken turn waits for exactly this link). */
     replyTo?: string;
+    /** Refuse instead of posting when someone else posted after the last message this session saw here. */
+    ifLatest?: boolean;
+    /** Refuse instead of posting when someone else posted after this message id. */
+    ifNoNewerThan?: string;
     readFile?: (path: string) => Promise<Buffer>;
   }
 ): Promise<number> {
   // Refused before anything is uploaded or posted, so a bad id never turns into an unlinked answer.
   if (options.replyTo !== undefined && !UUID_RE.test(options.replyTo))
     return fail(deps, `refusing: --reply-to needs a message id, got ${JSON.stringify(options.replyTo).slice(0, 80)}`, EXIT.refused);
+  if (options.ifNoNewerThan !== undefined && !UUID_RE.test(options.ifNoNewerThan))
+    return fail(deps, `refusing: --if-no-newer-than needs a message id, got ${JSON.stringify(options.ifNoNewerThan).slice(0, 80)}`, EXIT.refused);
+  if (options.ifLatest && options.ifNoNewerThan !== undefined)
+    return fail(deps, 'refusing: use --if-latest or --if-no-newer-than, not both', EXIT.refused);
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   // Each --file is copied into the room's attachment store first, then the message names them.
@@ -1476,8 +1504,23 @@ export async function agentChatSay(
       text: options.text,
       ...(attachments.length ? { attachments } : {}),
       ...(options.replyTo !== undefined ? { replyTo: options.replyTo } : {}),
+      ...(options.ifLatest ? { ifLatest: true } : {}),
+      ...(options.ifNoNewerThan !== undefined ? { ifNoNewerThan: options.ifNoNewerThan } : {}),
     },
   });
+  // A guarded post that crossed newer messages was not stored: show them, so the next step is to read and decide.
+  if (res.status === 409 && (res.json?.errorCode === 'CHAT_NEWER_MESSAGES' || res.json?.errorCode === 'CHAT_NO_READ_MARK')) {
+    if (deps.json) {
+      deps.io.out(JSON.stringify({ success: false, error: res.json.error, errorCode: res.json.errorCode, data: res.json.data ?? {} }));
+      return EXIT.refused;
+    }
+    const data = res.json.data as { newer?: Array<{ id: string; from: string; excerpt: string }>; more?: boolean } | undefined;
+    deps.io.err(`not posted: ${describeFailure(res)}`);
+    if (data?.more) deps.io.err('  (older ones not shown)');
+    for (const m of data?.newer ?? []) deps.io.err(`  ${m.id.slice(0, 8)} ${JSON.stringify(m.from)}: ${JSON.stringify(m.excerpt)}`);
+    deps.io.err('read them with: reverie agent chat read');
+    return EXIT.refused;
+  }
   if (!res.json?.success) return fail(deps, describeFailure(res));
   if (deps.json) emitJson(deps, res.json.data ?? {});
   else
@@ -2532,6 +2575,7 @@ export function registerAgentCommands(program: Command): Command {
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialStatus));
   credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
+  registerJournalCommands(agent, run);
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
@@ -2859,8 +2903,10 @@ export function registerAgentCommands(program: Command): Command {
     )
     .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
     .option('--reply-to <id>', 'Answer the message with this id (a spoken turn is read back only when its answer names it)')
+    .option('--if-latest', 'Post only if nobody else has posted since you last read this room; otherwise list the newer messages')
+    .option('--if-no-newer-than <id>', 'Post only if nobody else has posted after this message id')
     .option('--json', 'Machine-readable output')
-    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; json?: boolean }) =>
+    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string; json?: boolean }) =>
       run(Boolean(options.json), (deps) => agentChatSayInput(deps, words, options))
     );
 

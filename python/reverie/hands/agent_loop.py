@@ -580,7 +580,7 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fet
     place, then FAIL_LINE. So there are at most search_max_calls + 2 model calls and never a search past the cap.
     `timing`, if given, collects ('model'|'search', seconds, server timings) per step."""
     start_task = cfg.get('_admin_start_task')
-    task_reserve = len(admin_task.RULE) + len(json.dumps(admin_task.TOOL)) if start_task is not None else 0
+    task_reserve = len(admin_task.RULE) + len(json.dumps(admin_task.TOOLS)) if start_task is not None else 0
     summary_reserve = min(SUMMARY_CAP, cfg['prompt_cap_chars'] // 10) if cfg.get('cli') or callable(cfg.get('_turn_summary')) else 0
     managed_reserve = min(20000, cfg['prompt_cap_chars'] // 3) if cfg.get('managed_context') else 0
     reserve = search_reserve(cfg) + task_reserve
@@ -617,14 +617,14 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fet
 
     while True:
         if not searching:
-            out = ask([admin_task.TOOL] if start_task is not None else None)
+            out = ask(admin_task.TOOLS if start_task is not None else None)
             task_reply = admin_task.invoke(out, start_task)
             if task_reply is not None:return task_reply, largest, searches
             break
         if searches >= cfg['search_max_calls']:
             break  # budget spent: finish without tools
         tools = ([SEARCH_TOOL] if cfg.get('search') else []) + ([public_web.TOOL] if cfg.get('web_fetch') else [])
-        out = ask(tools + ([admin_task.TOOL] if start_task is not None else []))
+        out = ask(tools + (admin_task.TOOLS if start_task is not None else []))
         task_reply = admin_task.invoke(out, start_task)
         if task_reply is not None:return task_reply, largest, searches
         calls = out.get('tool_calls') or []

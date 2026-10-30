@@ -2,6 +2,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WorkerProviderHealth, viewerHealth, PROVIDER_HEALTH_MAX_AGE_MS } from '../src/worker-provider-health.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import { ChatroomService } from '../src/chatroom-service.js';
+import { CompanyService } from '../src/company-service.js';
+import { CompanyStore } from '../src/company-store.js';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -52,8 +55,9 @@ function fixture() {
   const query = vi.fn(async () => ({
     providerHealth: { version: 1, purpose: 'worker-provider-health-v1', providers: [row] },
   }));
+  const employees = vi.fn(() => [employee]);
   const health = new WorkerProviderHealth({
-    employees: () => [employee],
+    employees,
     query,
     changed,
     now: () => epoch,
@@ -64,6 +68,7 @@ function fixture() {
     health,
     query,
     changed,
+    employees,
     row,
     setRow: (value: any) => {
       row = value;
@@ -113,6 +118,7 @@ it.each(['owner', 'generation', 'session', 'off', 'vacation', 'move'] as const)(
     if (change === 'vacation') f.employee.onVacation = true;
     if (change === 'move') f.employee.bindingMigration = {} as never;
     expect(f.health.read(SID)).toBeUndefined();
+    expect(f.health.read(f.employee)).toBeUndefined();
   }
 );
 it('refuses a native response after canonical owner changes while its query awaits', async () => {
@@ -241,6 +247,7 @@ it('retains the first monotonic expiry across repeated proof and partial wall-cl
   await f.health.refresh();
   f.advance(5000);
   expect(f.health.read(SID)).toBeUndefined();
+  expect(f.health.read(f.employee)).toBeUndefined();
 });
 it('accepts exact stopped-container proof without inventing an init process', async () => {
   const f = fixture();
@@ -271,4 +278,133 @@ it('retains the original deadline after an unavailable snapshot clears published
   await f.health.refresh();
   f.advance(5000);
   expect(f.health.read(SID)).toBeUndefined();
+  expect(f.health.read(f.employee)).toBeUndefined();
+});
+
+it('reads an already-current employee without another registry load and preserves owner and expiry fences', async () => {
+  const f = fixture();
+  await f.health.refresh();
+  f.employees.mockClear();
+  expect(f.health.read(f.employee)?.state).toBe('healthy');
+  expect(f.health.read(f.employee, { owner: 'foreign' })).toBeUndefined();
+  f.advance(PROVIDER_HEALTH_MAX_AGE_MS + 1);
+  expect(f.health.read(f.employee)).toBeUndefined();
+  expect(f.employees).not.toHaveBeenCalled();
+});
+
+it.each(['runtimeRecipe', 'permissions'] as const)('checks current %s on the direct-row path', async (field) => {
+  const f = fixture();
+  await f.health.refresh();
+  const current = structuredClone(f.employee);
+  if (field === 'runtimeRecipe') current.runtimeRecipe = { cwd: '/changed' } as never;
+  else current.permissions.recoverEmployees = !current.permissions.recoverEmployees;
+  f.employees.mockClear();
+  expect(f.health.read(current)).toBeUndefined();
+  expect(f.employees).not.toHaveBeenCalled();
+});
+
+it('uses one canonical snapshot per N-employee company render and one post-query census per refresh', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'provider-render-'));
+  const store = new CompanyStore(join(directory, 'company.json'));
+  await store.init();
+  const employees = Array.from({ length: 12 }, (_, i) =>
+    EmployeeSchema.parse({
+      id: randomUUID(),
+      sessionId: randomUUID(),
+      sessionGeneration: 1,
+      name: 'Employee ' + i,
+      icon: 'F',
+      position: 'Expert',
+      expertise: ['systems'],
+      createdAt: 1,
+      desiredRunning: true,
+      onVacation: false,
+    })
+  );
+  await store.update((state) => {
+    state.employees = employees;
+  });
+  const nativeRows = employees.map((employee) => ({
+    observedBinding: JSON.parse(
+      JSON.stringify([
+        employee.id,
+        employee.owner,
+        employee.sessionId,
+        employee.sessionGeneration,
+        employee.desiredRunning,
+        employee.onVacation,
+        employee.bindingMigration,
+        employee.runtimeRecipe,
+        employee.permissions,
+      ])
+    ),
+    employeeId: employee.id,
+    sessionId: employee.sessionId,
+    sessionGeneration: employee.sessionGeneration,
+    state: 'healthy',
+    observedAtEpochMs: 10_000,
+    reason: 'LIVE_NATIVE_COMMAND',
+    proofKind: 'live-container',
+    containerId: 'a'.repeat(64),
+    initPID: 100,
+    initStartTick: 200,
+  }));
+  let service!: CompanyService;
+  const census = vi.fn(() => service.registeredEmployees());
+  const health = new WorkerProviderHealth({
+    employees: census,
+    query: async () => ({
+      providerHealth: { version: 1, purpose: 'worker-provider-health-v1', providers: nativeRows },
+    }),
+    changed: () => {},
+    now: () => 10_000,
+    monotonic: () => 100,
+  });
+  const project = vi.fn((employee) => health.read(employee));
+  service = new CompanyService(store, {
+    getSession: () => undefined,
+    providerHealth: project,
+    chatrooms: {} as never,
+    research: {} as never,
+  });
+  const snapshots = vi.spyOn(store, 'snapshot');
+  try {
+    await health.refresh();
+    // Keep the pre-query binding fence and ONE fresh census after the await.
+    expect(census).toHaveBeenCalledTimes(2);
+    expect(snapshots).toHaveBeenCalledTimes(2);
+    census.mockClear();
+    snapshots.mockClear();
+    for (let i = 0; i < 4; i++) {
+      const view = service.view();
+      expect(view.employees).toHaveLength(12);
+      expect(view.employees.every((e) => e.providerHealth?.state === 'healthy')).toBe(true);
+    }
+    expect(project).toHaveBeenCalledTimes(48);
+    expect(snapshots).toHaveBeenCalledTimes(4);
+    expect(census).not.toHaveBeenCalled();
+
+    // Ambiguity across owners must still suppress the direct-row projection.
+    await store.update((state) => {
+      state.employees.push(
+        EmployeeSchema.parse({
+          ...employees[0],
+          id: randomUUID(),
+          owner: 'another-owner',
+          name: 'Ambiguous',
+        })
+      );
+    });
+    snapshots.mockClear();
+    census.mockClear();
+    project.mockClear();
+    expect(service.view().employees.find((e) => e.id === employees[0].id)?.providerHealth).toBeUndefined();
+    expect(service.view('another-owner').employees[0].providerHealth).toBeUndefined();
+    expect(project).toHaveBeenCalledTimes(11);
+    expect(snapshots).toHaveBeenCalledTimes(2);
+    expect(census).not.toHaveBeenCalled();
+  } finally {
+    health.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
