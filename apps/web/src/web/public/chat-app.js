@@ -95,6 +95,11 @@ function caProfileAvatars(company) {
   return out;
 }
 
+/** A person's account badge: the owner, or a limited-access guest account (the access model itself is unchanged). */
+function caHumanBadgeLabel(role) {
+  return role === 'owner' ? 'Owner' : 'Guest';
+}
+
 function caIsDm(room) {
   return !!room && room.kind === 'dm';
 }
@@ -4831,7 +4836,7 @@ class ReverieChatApp {
         } else if (it.kind === 'human') {
           b.append(this.humanAvatar(it.human, 'sm', it.human.online ? 'idle' : 'gone'),
             this.literalText('span', 'ca-mention-name', it.human.name),
-            this.el('span', 'ca-mention-sub', it.human.role === 'owner' ? 'Person · Owner' : 'Person · Limited'));
+            this.el('span', 'ca-mention-sub', `Person · ${caHumanBadgeLabel(it.human.role)}`));
         } else {
           b.append(
             this.app._chatAvatar(it.member.sessionId, it.member.name, { size: 'sm' }),
@@ -6279,10 +6284,12 @@ class ReverieChatApp {
     row.disabled = String(person.name).trim().toLowerCase() === 'everyone';
     row.title = `Mention ${person.name}`;
     row.addEventListener('click', () => this.mentionHuman(person.id));
-    row.setAttribute('aria-label', `${person.name}, ${person.role === 'owner' ? 'Owner' : 'Limited'}, ${person.online ? 'online' : 'offline'}`);
+    row.setAttribute('aria-label', `${person.name}, ${caHumanBadgeLabel(person.role)}, ${person.online ? 'online' : 'offline'}`);
     row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
     const text = this.el('span', 'ca-member-text');
-    text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-member-sub', (person.id === this.humanSelf?.id ? 'You · ' : '') + (person.role === 'owner' ? 'Owner' : 'Limited')));
+    // The account badge sits beside the name like an agent's Admin tag; "You" stays in the subtext.
+    text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(person.role)));
+    if (person.id === this.humanSelf?.id) text.append(this.el('span', 'ca-member-sub', 'You'));
     row.append(text);
     return row;
   }
@@ -9026,7 +9033,7 @@ class ReverieChatApp {
       from.style.setProperty('--chat-hue', String(this.authorHue(m.from, name)));
       if (m.from.sessionId && m.from.sessionId === this.room?.coordinatorId) from.append(this.el('span', 'ca-tag', 'Admin'));
       if (m.from.kind === 'bot') from.append(this.el('span', 'ca-tag ca-tag--bot', 'Bot'));
-      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag', m.from.kind === 'human' ? 'Limited' : 'Owner'));
+      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(m.from.kind === 'human' ? 'limited' : 'owner')));
       const time = this.el('time', 'ca-time', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })));
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
