@@ -21,6 +21,7 @@ from .chat import ChatDaemon
 from .reverie import CHARTER, SAFEGUARDS, Reverie, runtime_permissions, role_charter
 from .floors import violates
 from .project_memory import ProjectMemory
+from . import journal_shim
 from .persona import build_system_prompt
 from .instance import initial_self_for, identity_context, load_instance, primary_agent
 from .context_budget import memory_byte_budget, recent_exchanges
@@ -176,16 +177,24 @@ def dispatch(brain, request: dict):
         if request.get("project"):
             memory = ProjectMemory(brain.cfg.data_dir / "projects", request["project"])
             try:
-                return memory.lookup(str(request.get("query", "")))
+                legacy = memory.lookup(str(request.get("query", "")))
             finally:
                 memory.close()
-        if request.get("channel") == "work":
+        elif request.get("channel") == "work":
             raise ValueError("private recall is unavailable in a shared work channel; select a project")
-        return [m.as_dict() for m in brain.store.retrieve(str(request.get("query", "")), k=8)]
+        else:
+            legacy = [m.as_dict() for m in brain.store.retrieve(str(request.get("query", "")), k=8)]
+        if not journal_shim.available():
+            return legacy
+        # The office journal is the store of record; the old store is read here as history until it is imported.
+        return {"journal": journal_shim.recall(str(request.get("query", "")), request.get("project") or None),
+                "legacy": legacy, "note": "journal entries are your store of record; legacy results are older, read-only history"}
     if action == "remember":
         text = str(request.get("text", "")).strip()
         if not text or violates(text):
             raise ValueError("memory is empty or crossed a hard floor")
+        if journal_shim.available():
+            return journal_shim.remember({**request, "text": text})
         if request.get("project"):
             memory = ProjectMemory(brain.cfg.data_dir / "projects", request["project"])
             try:

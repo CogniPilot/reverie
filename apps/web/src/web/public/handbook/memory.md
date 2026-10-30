@@ -41,6 +41,8 @@ printf '%s\n' '{"action":"recall","project":"project-name","query":"verified dep
 printf '%s\n' '{"action":"remember","project":"project-name","text":"Verified finding","source":"commit or receipt reference"}' | reverie-memory
 ```
 
+Inside a Reverie session these requests go to your office journal (`reverie agent journal`), the store that survives a runtime or model switch. A remember there names the message you are acting on: add `"room"`, `"turn"`, a journal `"tag"` and either `"quote"` (exact words from that message, checked) or `"source"` (kept as unverified). Without them nothing is saved and the reply shows the `reverie agent journal save` command to run. Recall returns `journal` entries first and the old store as read-only `legacy` history.
+
 Use `--instance /absolute/path/to/your-instance.json` only for your explicitly assigned instance. A project name is a scope, not a credential or authorization to inspect another instance. Save verified findings with a source; do not turn model guesses into remembered facts.
 
 For a private conversation, select `"private":true` instead of `"project"`. Never retrieve or copy private memory into a shared work channel or someone else's brief. Private recall is refused when `"channel":"work"`. Do not select another agent's instance to bypass this boundary.
