@@ -1,3 +1,4 @@
+import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
 import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
@@ -461,6 +462,7 @@ export class WebServer extends EventEmitter {
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
   private workerViewerReconnect?: WorkerViewerReconnect;
+  private workerProviderHealth?: WorkerProviderHealth;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -1457,6 +1459,8 @@ export class WebServer extends EventEmitter {
       deferDeliveryRecovery: true,
       files: chatroomFiles,
       getSession: (id) => this.sessions.get(id),
+      providerHealth: (id, owner) => this.workerProviderHealth?.read(id, { owner }),
+      workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       broadcast: (event, data) => this.broadcast(event, data),
       // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
@@ -1526,6 +1530,8 @@ export class WebServer extends EventEmitter {
       goalAuthentication: goalBoundary.authentication,
       servicePurposes: serviceConfig?.purposes,
       getSession: (id) => this.sessions.get(id),
+      providerHealth: (id, owner) => this.workerProviderHealth?.read(id, { owner }),
+      workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       runtimeRecipeOf: (id) => {
         const session = this.sessions.get(id);
         return session ? expertRuntimeRecipe(session) : undefined;
@@ -1577,6 +1583,17 @@ export class WebServer extends EventEmitter {
         }
         this.persistSessionState(session);
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+      },
+    });
+    this.workerProviderHealth = new WorkerProviderHealth({
+      employees: () => this.companyService.registeredEmployees(),
+      query: signal => laptopPower('provider-health', undefined, signal),
+      changed: () => {
+        this.cachedSessionsList = null;
+        for (const session of this.sessions.values())
+          this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+        for (const owner of new Set(this.companyService.registeredEmployees().map(e => e.owner)))
+          this.broadcast(SseEvent.ChatroomChanged, { owner: owner ?? '@single', roomId: '', action: 'profile' });
       },
     });
     goalBoundary.attach(this.companyService, {
@@ -3452,6 +3469,8 @@ export class WebServer extends EventEmitter {
     const controller = this.respawnControllers.get(session.id);
     return {
       ...session.toLightDetailedState(),
+      providerHealth: this.workerProviderHealth?.read(session.id, { owner: session.owner }),
+      viewerHealth: viewerHealth(session),
       respawnEnabled: controller?.getConfig()?.enabled ?? false,
       respawnConfig: controller?.getConfig() ?? null,
       respawn: controller?.getStatus() ?? null,
@@ -4221,6 +4240,10 @@ export class WebServer extends EventEmitter {
     if (!this.testMode) {
       this.embassyGuestClient.start();
       this.embassyPairing.start();
+      if (process.env.REVERIE_WORKER_SOCKET) {
+        void this.workerProviderHealth?.refresh();
+        this.cleanup.setInterval(() => void this.workerProviderHealth?.refresh(), 5_000, { description: 'Read-only native command health' });
+      }
       const tickCompany = () =>
         this.companyService
           .tick()
@@ -5254,6 +5277,7 @@ export class WebServer extends EventEmitter {
 
   async stop(): Promise<void> {
     this.companyWakeReady = false;
+    this.workerProviderHealth?.close();
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });

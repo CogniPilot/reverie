@@ -1495,6 +1495,19 @@ class Broker:
         if action == 'status':
             with self.lock:
                 return {'runningLaptops': len(self.laptops), 'runningSessionIds': self.running_sessions(), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
+        if action == 'provider-health':
+            empty = {'version': 1, 'purpose': 'worker-provider-health-v1', 'providers': []}
+            # Observations never queue behind a lifecycle mutation or shutdown.
+            if self.stopping.is_set() or not self.lock.acquire(blocking=False):
+                return {'providerHealth': empty}
+            try:
+                if not hasattr(self, '_provider_health_observer'):
+                    from .worker_provider_health import ProviderHealthObserver
+                    self._provider_health_observer = ProviderHealthObserver(self)
+                observer = self._provider_health_observer
+            finally:
+                self.lock.release()
+            return {'providerHealth': observer.read()}
         if action not in ['stop-laptops', 'shutdown', 'restart-website']:
             raise ValueError('Unknown office power action')
         if action in ['stop-laptops', 'shutdown']:
@@ -1658,6 +1671,8 @@ class Broker:
                     result = gpu_dispatch(self, gpu_decode(raw))
                     send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
                     return
+                if isinstance(control, dict) and control.get('action') == 'provider-health' and set(control) != {'action'}:
+                    raise ValueError('Closed read-only provider health request required')
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
                     raise ValueError('Invalid office power request')
                 result = self.control(control['action'], control.get('caller'))
@@ -2363,7 +2378,7 @@ def main():
     serve = commands.add_parser('broker')
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
-    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
+    execute.add_argument('--control', choices=['status', 'provider-health', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
     execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
     execute.add_argument('--caller-session')
     execute.add_argument('--attach-only', action='store_true')

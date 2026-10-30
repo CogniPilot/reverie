@@ -1,3 +1,4 @@
+import {viewerHealth,type ProviderHealth} from './worker-provider-health.js';
 import { displayTime } from './display-time.js';
 import { RuntimeRecipeSchema, type RuntimeRecipe } from './expert-runtime-recipe.js';
 import { randomInt, randomUUID } from 'node:crypto';
@@ -100,6 +101,9 @@ export interface CompanyServiceDeps {
   /** The ONE deployment-configured service purpose registry (service-auth.json); defaults to RESUME/LEASE only. */
   servicePurposes?: ServicePurposes;
   getSession(id: string): CompanySession | undefined;
+  providerHealth?(id: string, owner?: string): ProviderHealth | undefined;
+  /** Fixed server worker transport configuration, never caller authority. */
+  workerViewers?: boolean;
   /** The console keeps this session's record although it is not running (pinned, paused): its profile is never cleaned up. */
   keepsRecord?(id: string): boolean;
   /** Stop and detach runtime only; preserve conversation, memories and workspace files. */
@@ -249,7 +253,8 @@ export class CompanyService {
       employees: employees.map((e) => {
         const session = this.deps.getSession(e.sessionId);
         return { ...e, available: !!session, runtimeHealth: session?.runtimeHealth ?? 'unknown',
-          runtimeHealthScope: session?.runtimeHealthScope ?? 'provider', workerViewerReconnect: session?.workerViewerReconnect === true };
+          runtimeHealthScope: session?.runtimeHealthScope ?? (this.deps.workerViewers ? 'terminal' : 'provider'), workerViewerReconnect: session?.workerViewerReconnect === true,
+          providerHealth: this.deps.providerHealth?.(e.sessionId, e.owner), viewerHealth: viewerHealth(session, this.deps.workerViewers) };
       }),
       settings: state.settings.find((s) => sameOwner(s.owner, owner)) ?? CompanySettingsSchema.parse({ owner }),
       cycles: state.cycles.filter((c) => sameOwner(c.owner, owner)),

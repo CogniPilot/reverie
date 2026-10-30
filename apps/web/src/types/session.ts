@@ -1020,6 +1020,9 @@ export interface SessionState {
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';
+  /** Non-authorizing fresh native command observation, separate from the viewer. */
+  providerHealth?: import('./provider-health.js').ProviderHealth;
+  viewerHealth?: 'connected' | 'disconnected' | 'unknown';
 }
 
 /**

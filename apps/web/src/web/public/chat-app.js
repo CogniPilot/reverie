@@ -509,19 +509,63 @@ function caFeedItems(messages, readAt) {
  * rail): needs (a permission or a question is blocking it), error, waiting (idle_prompt: it is done and waits for input), working,
  * idle. A member whose session is gone is gone. `hooks` is the set of pending hook types for the session.
  */
+function caProviderBinding(employee) {
+  return JSON.stringify([employee.id, employee.owner, employee.sessionId, employee.sessionGeneration,
+    employee.desiredRunning, employee.onVacation, employee.bindingMigration, employee.runtimeRecipe, employee.permissions],
+    (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+}
+// Retain the first receipt deadline across repeated snapshots and wall-clock rollback.
+const CA_PROVIDER_RECEIPTS = new Map();
+function caProviderFresh(value, now) {
+  const mono = globalThis.performance?.now?.() ?? now;
+  const prior = CA_PROVIDER_RECEIPTS.get(value.employeeId);
+  if (prior && value.observedAtEpochMs < prior.epoch) return false;
+  if (prior && value.observedAtEpochMs === prior.epoch)
+    return value.binding === prior.binding && mono <= prior.until;
+  if (!prior && CA_PROVIDER_RECEIPTS.size >= 4096) return false;
+  CA_PROVIDER_RECEIPTS.set(value.employeeId, { binding: value.binding, epoch: value.observedAtEpochMs,
+    until: mono + 25000 - (now - value.observedAtEpochMs) });
+  return true;
+}
+function caProviderHealth(employee, session, member) {
+  if (!employee?.id || !Number.isInteger(employee.sessionGeneration) || employee.bindingMigration) return undefined;
+  const sid = employee?.sessionId || session?.id || member?.sessionId;
+  const now = Date.now();
+  return [session?.providerHealth, employee?.providerHealth, member?.providerHealth]
+    .filter(value => value && value.binding === caProviderBinding(employee) && value.sessionId === sid && (!employee?.id || value.employeeId === employee.id) &&
+      (!Number.isInteger(employee?.sessionGeneration) || value.sessionGeneration === employee.sessionGeneration) &&
+      ['healthy', 'dead', 'unknown'].includes(value.state) && Number.isSafeInteger(value.observedAtEpochMs) &&
+      now >= value.observedAtEpochMs && now - value.observedAtEpochMs <= 25000 && caProviderFresh(value, now))
+    .sort((a, b) => b.observedAtEpochMs - a.observedAtEpochMs)[0];
+}
+
 function caEmployeeHealth(employee, session, member, viewerDisconnected = false) {
   if (employee?.onVacation === true || employee?.desiredRunning === false)
     return { state: 'gone', label: employee.onVacation ? 'Out of office' : 'Stopped', detail: 'Stopped by owner choice. Enter the office to start this expert.' };
+  if (employee?.bindingMigration)
+    return { state: 'unknown', label: 'Moving', detail: 'An account or runtime move is in progress. Current agent availability is unconfirmed.' };
   const health = session?.runtimeHealth ?? employee?.runtimeHealth;
   const scope = session?.runtimeHealthScope ?? employee?.runtimeHealthScope;
-  if (health === 'dead' && scope === 'provider') {
+  const provider = caProviderHealth(employee, session, member);
+  if (provider?.state === 'dead' || (health === 'dead' && scope === 'provider')) {
     const exit = typeof session?.paneExit?.signal === 'number' ? ` (signal ${session.paneExit.signal})` : typeof session?.paneExit?.status === 'number' ? ` (exit ${session.paneExit.status})` : '';
-    return { state: 'dead', label: 'Dead pane', detail: `The agent has exited${exit}. Restart the session to resume its saved conversation.` };
+    return { state: 'dead', label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane', detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.` };
   }
-  if (health === 'disconnected' || (health === 'dead' && scope !== 'provider') || session?.paneExit)
+  const serverViewerUnavailable = session?.viewerInputHeld === true || session?.viewerHealth === 'disconnected' || employee?.viewerHealth === 'disconnected' ||
+    member?.viewerHealth === 'disconnected' || (scope === 'terminal' && (health === 'disconnected' || health === 'dead' || session?.paneExit || session?.pid === null));
+  const viewerUnavailable = viewerDisconnected || serverViewerUnavailable;
+  const serverViewerConnected = !serverViewerUnavailable && (session?.viewerHealth === 'connected' ||
+    employee?.viewerHealth === 'connected' || member?.viewerHealth === 'connected' ||
+    (typeof session?.pid === 'number' && session.pid > 0 && !session?.paneExit));
+  if (provider?.state === 'healthy')
+    return { state: 'idle', label: 'Online', detail: 'The current native command runtime was recently confirmed running. Model or API readiness is not implied.',
+      providerConfirmedHealthy: true, viewerUnavailable, viewerOnly: viewerDisconnected && serverViewerConnected };
+  if (viewerUnavailable)
+    return { state: 'viewer-unavailable', label: 'Viewer unavailable', detail: 'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.',
+      viewerUnavailable: true, viewerOnly: viewerDisconnected && serverViewerConnected };
+  if (health === 'disconnected' || session?.paneExit)
     return { state: 'disconnected', label: 'Disconnected', detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.' };
-  if (viewerDisconnected)
-    return { state: 'disconnected', label: 'Viewer disconnected', detail: health === 'healthy' && scope === 'provider' ? 'The agent is running; reconnect its terminal viewer without restarting the agent.' : 'The terminal viewer is disconnected. This does not establish that the agent has stopped.', viewerOnly: health === 'healthy' && scope === 'provider' };
   if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
     return { state: 'gone', label: 'Offline', detail: 'No connected session is available. Agent health has not been confirmed.' };
   if (employee?.available === true || member?.alive === true || (typeof session?.pid === 'number' && session.pid > 0))
@@ -550,6 +594,7 @@ const CA_STATE_LABEL = {
   gone: 'offline',
   dead: 'dead pane; agent exited',
   disconnected: 'disconnected; agent health not confirmed',
+  'viewer-unavailable': 'viewer unavailable; agent availability unconfirmed',
   unknown: 'health unknown',
 };
 
@@ -563,18 +608,21 @@ function caMemberSections(members, humans = [], stateOf) {
   const people = new Set(Array.isArray(humans) ? humans : []);
   const list = [...(Array.isArray(members) ? members : []), ...people];
   const admin = (m) => people.has(m) ? m.role === 'owner' : m.role === 'coordinator';
-  const present = (m) => people.has(m) ? m.online === true : caPresence(m) !== 'offline' &&
-    (!stateOf || !['gone', 'dead', 'disconnected'].includes(stateOf(m)));
+  const unconfirmed = m => !people.has(m) && stateOf?.(m) === 'viewer-unavailable';
+  const present = m => people.has(m) ? m.online === true : stateOf
+    ? !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(stateOf(m)) : caPresence(m) !== 'offline';
   const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
     || String(a.name || '').localeCompare(String(b.name || ''))
     || String(a.sessionId || a.id || '').localeCompare(String(b.sessionId || b.id || ''));
   const coordinator = list.filter(admin).sort(byName);
   const rest = list.filter((m) => !admin(m));
   const online = rest.filter(present).sort(byName);
-  const offline = rest.filter((m) => !present(m)).sort(byName);
+  const unknown = rest.filter(unconfirmed).sort(byName);
+  const offline = rest.filter((m) => !present(m) && !unconfirmed(m)).sort(byName);
   const sections = [];
   if (coordinator.length) sections.push({ key: 'coordinator', label: 'Admin', members: coordinator });
   if (online.length) sections.push({ key: 'online', label: 'Online', members: online });
+  if (unknown.length) sections.push({ key: 'unknown', label: 'Availability unknown', members: unknown });
   if (offline.length) sections.push({ key: 'offline', label: 'Offline', members: offline });
   return sections;
 }
@@ -1086,6 +1134,7 @@ function caWrite(kind, key, value) {
 }
 
 const CA_ICONS = {
+  reconnect: '<path d="M20 7a8 8 0 1 0 1 8M20 3v4h-4"/>',
   reorder: '<path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/>',
   pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
   chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
@@ -1324,6 +1373,7 @@ class ReverieChatApp {
         this.doc.querySelector('.ca-gpu-dialog')?.dispatchEvent(new this.doc.defaultView.Event('reverie:gpu'));
       }
       this.renderStats();
+      this.schedulePresence();
     };
     this.stopStats();
     tick();
@@ -1422,7 +1472,19 @@ class ReverieChatApp {
   async loadOwner() {
     const res = await this.app._chatApi('/api/company');
     if (!res.ok) { this.discardBoardFrame(); return; }
+    const prior = new Map((this.company?.employees || []).map(e => [e.sessionId, caProviderBinding(e)]));
     this.company = res.data;
+    // A delayed session/member event cannot keep native proof from an earlier
+    // owner, recipe or generation after the canonical company binding changes.
+    for (const [sid, binding] of prior) {
+      const current = this.company?.employees?.find(e => e.sessionId === sid);
+      if (current && caProviderBinding(current) === binding) continue;
+      const session = this.app.sessions?.get?.(sid);
+      if (session) delete session.providerHealth;
+      for (const room of [this.room, ...(this.viewRooms || [])])
+        for (const member of room?.members || []) if (member.sessionId === sid) delete member.providerHealth;
+    }
+    this.schedulePresence();
     globalThis.ReverieTime?.setTimeZone(res.data?.settings?.timeZone);
     await this.loadPhoneStatus();
     if (this.canManageOffice()) this.scheduleBoardWarm(); else this.discardBoardFrame();
@@ -5447,7 +5509,12 @@ class ReverieChatApp {
     const hooks = id ? this.app.pendingHooks?.get?.(id) : undefined;
     const employee = this.company?.employees?.find(e => e.sessionId === id);
     const health = this.employeeHealth(employee || { sessionId: id }, member);
-    if ((employee || session?.runtimeHealth || session?.paneExit) && ['dead', 'disconnected', 'gone', 'unknown'].includes(health.state)) return health.state;
+    if (health.providerConfirmedHealthy) {
+      if (hooks && (hooks.has('permission_prompt') || hooks.has('elicitation_dialog'))) return 'needs';
+      if (hooks?.has('idle_prompt')) return 'waiting';
+      return member?.working || session?.status === 'busy' ? 'working' : 'idle';
+    }
+    if ((employee || session?.runtimeHealth || session?.paneExit) && ['dead', 'disconnected', 'viewer-unavailable', 'gone', 'unknown'].includes(health.state)) return health.state;
     if (!member || !member.alive) return 'gone';
     // The terminal UI's own classifier decides, so the chat can never rank a state differently from the tab rail and the phone
     // overview; caMemberState is the same ranking for a page that does not have it.
@@ -5463,7 +5530,11 @@ class ReverieChatApp {
   /** What the state dots show right now, as one string: a redraw is only worth it when this changes. */
   presenceSignature() {
     const people = [...(this.room?.members || []), ...caDmItems(this.viewRooms, this.roomId, this.closedDms, caEmployeeBySession(this.company)).map((i) => i.peer).filter(Boolean)];
-    return people.map((m) => `${m.sessionId}:${this.presenceOf(m)}`).join('|');
+    return people.map((m) => {
+      const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+      const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+      return `${m.sessionId}:${this.presenceOf(m)}:${!!health.viewerUnavailable}:${!!health.viewerOnly}:${!!employee && this.canReconnectEmployee(employee)}`;
+    }).join('|');
   }
 
   syncSessionPresence(id, deleted = false) {
@@ -5483,7 +5554,8 @@ class ReverieChatApp {
     const session = this.app.sessions?.get?.(employee?.sessionId);
     const viewerDisconnected = this.app._wsSessionId === employee?.sessionId &&
       ['disconnected', 'fallback', 'reconnecting'].includes(this.app._wsState);
-    return caEmployeeHealth(employee, session, member, viewerDisconnected);
+    const current = this.company?.employees?.find(e => e.id === employee?.id && e.sessionId === employee?.sessionId);
+    return caEmployeeHealth(current || { sessionId: employee?.sessionId }, session, member, viewerDisconnected);
   }
 
   employeeHealthBadge(employee, className = 'ca-runtime-health') {
@@ -5498,10 +5570,16 @@ class ReverieChatApp {
     const employee = this.company?.employees?.find(e => e.id === record.employee.id) || record.employee;
     const health = this.employeeHealth(employee);
     node.className = `${record.className} is-${health.state}${health.state === 'idle' ? ' is-connected' : ''}`;
-    node.textContent = health.label; node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
+    node.textContent = health.label;
+    if (health.viewerUnavailable && health.state !== 'viewer-unavailable') {
+      const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
+      warning.title = 'The optional terminal viewer is unavailable. Automatic terminal input may wait for Reconnect; uncertain deliveries are not replayed.';
+      node.append(' ', warning);
+    }
+    node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
     node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${health.detail}`);
     const card = node.closest('.ca-company-person');
-    if (card) for (const state of ['dead', 'disconnected', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
+    if (card) for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
     card?.classList.toggle('is-offline', health.state === 'gone');
     if (card) card.title = `${card.dataset.healthTitle} · ${health.detail}`;
     if (card) {
@@ -5512,17 +5590,17 @@ class ReverieChatApp {
       else if (!wanted) restart?.remove();
       const reconnect = card.querySelector('.ca-reconnect-viewer');
       const canReconnect = health.viewerOnly || (controls?.manage && this.canReconnectEmployee(employee));
-      if (canReconnect && !reconnect) card.append(this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+      if (canReconnect && !reconnect) card.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
       else if (!canReconnect) reconnect?.remove();
     }
   }
 
   canReconnectEmployee(employee) {
     const session = this.app.sessions?.get?.(employee?.sessionId);
-    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation &&
+    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation && !employee?.bindingMigration &&
       Number.isInteger(employee?.sessionGeneration) &&
       (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
-      this.employeeHealth(employee).state === 'disconnected';
+      (this.employeeHealth(employee).state === 'disconnected' || this.employeeHealth(employee).viewerUnavailable === true);
   }
 
   async reconnectEmployeeViewer(employee) {
@@ -5545,7 +5623,7 @@ class ReverieChatApp {
         this.toast(result.error || 'Connection not confirmed. Check this expert’s status before trying again.', 'error');
         return;
       }
-      // The canonical state event, not this acknowledgement, clears the red status.
+      // The canonical state event clears the viewer warning and input hold.
       this.toast(`Terminal reconnected for ${employee.name}.`, 'info');
     } catch { this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error'); }
     finally { this._reconnectingEmployees.delete(employee.id); }
@@ -6136,7 +6214,7 @@ class ReverieChatApp {
     if (!button) return;
     const humans = this.channelHumans();
     const members = [...(this.room?.members || []), ...humans];
-    const online = (this.room?.members || []).filter(member => member.alive !== false && !['gone', 'dead', 'disconnected'].includes(this.presenceOf(member))).length + humans.filter(p => p.online).length;
+    const online = (this.room?.members || []).filter(member => !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(this.presenceOf(member))).length + humans.filter(p => p.online).length;
     const compact = !!this.doc.defaultView?.matchMedia?.('(max-width: 899px)')?.matches;
     const expanded = compact ? this.drawer === 'members' : this.membersOpen;
     button.hidden = !this.room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
@@ -6172,7 +6250,7 @@ class ReverieChatApp {
           const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
           if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
             const group = this.el('div', 'ca-member-with-actions');
-            group.append(row, this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+            group.append(row, this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
             box.append(group);
           } else box.append(row);
         }
@@ -6198,8 +6276,8 @@ class ReverieChatApp {
   }
 
   memberRow(m) {
-    const presence = caPresence(m);
     const state = this.presenceOf(m);
+    const presence = state === 'viewer-unavailable' ? 'unknown' : ['gone', 'dead', 'disconnected', 'unknown'].includes(state) ? 'offline' : 'online';
     const b = this.el('button', `ca-member is-${presence} is-state-${state}`);
     b.type = 'button';
     b.dataset.key = `member:${m.sessionId}`;
@@ -6208,7 +6286,7 @@ class ReverieChatApp {
     const pronouns = this.pronounsOf(m);
     b.setAttribute('aria-label', `${m.name}${pronouns ? ` (${pronouns})` : ''}, ${role}, ${CA_STATE_LABEL[state]}`);
     if (pronouns) b.title = `${m.name} (${pronouns})`;
-    if (state === 'dead' || state === 'disconnected') b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
+    if (state === 'dead' || state === 'disconnected' || state === 'viewer-unavailable') b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
     b.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }));
     const text = this.el('span', 'ca-member-text');
     const line = this.el('span', 'ca-member-name', m.name);
@@ -6231,8 +6309,14 @@ class ReverieChatApp {
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
-    const sub = state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
+    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
+    const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+    const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+    if (health.providerConfirmedHealthy && health.viewerUnavailable) {
+      const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
+      warning.title = 'The agent runtime is running. Its optional terminal viewer is unavailable; automatic terminal input may wait for Reconnect.'; text.append(warning);
+    }
     b.append(text);
     b.addEventListener('click', () => this.openProfile(m, b));
     b.addEventListener('contextmenu', (ev) => {
@@ -6515,8 +6599,8 @@ class ReverieChatApp {
       }, { text: 'Edit profile' }));
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.humanSelf?.role === 'owner' && ['dead', 'disconnected'].includes(this.employeeHealth(employee).state) && !this.employeeHealth(employee).viewerOnly)
       actions.append(this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
-    if (employee && this.employeeHealth(employee).viewerOnly)
-      actions.append(this.button('ca-btn', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect view' }));
+    if (employee && (this.employeeHealth(employee).viewerOnly || this.canReconnectEmployee(employee)))
+      actions.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
       actions.append(this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' }));
     card.append(actions, technical);
