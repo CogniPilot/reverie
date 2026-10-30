@@ -20,6 +20,7 @@ const historyQuery = z
     beforeId: z.string().min(1).max(200).optional(),
   })
   .strict();
+const digestQuery = z.object({ since: z.string().min(1).max(100_000).optional() }).strict();
 const pendingBeforeQuery = z.object({ roomId: z.string().min(1).max(200), before: z.string().regex(/^\d{1,16}$/) }).strict();
 
 export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, service: ChatroomService): void {
@@ -42,10 +43,16 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
     if (!self || req.headers['x-reverie-parent-session'] !== self ||
         req.headers['x-reverie-service-token'] !== undefined)
       return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
-    if (Object.keys(req.query as object).length)
-      return reply.code(400).send({ success: false, error: 'Digest takes no target or query parameters' });
+    const parsed = digestQuery.safeParse(req.query);
+    if (!parsed.success)
+      return reply.code(400).send({ success: false, error: 'Digest takes only since (all, or a cursor from an earlier digest)' });
     reply.header('Cache-Control', 'no-store');
-    return { success: true, data: service.actionableDigest(self) };
+    try {
+      return { success: true, data: service.actionableDigest(self, parsed.data.since) };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      return reply.code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503).send({ success: false, error: error.message });
+    }
   });
 
   app.post('/api/chatrooms/notices/resolve', async (req, reply) => {

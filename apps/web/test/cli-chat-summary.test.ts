@@ -17,7 +17,7 @@ function client(data: unknown, success = true) {
 }
 describe('fresh read-only digest client', () => {
   const now = Date.UTC(2026, 9, 28, 4);
-  const data = { version: 1, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
+  const data = { version: 2, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
   it('uses one bounded GET without paging, ACKs or hook output', async () => {
     const c = client(data);
     c.deps.now = () => now;
@@ -29,7 +29,7 @@ describe('fresh read-only digest client', () => {
     expect(JSON.parse(c.out[1])).toEqual(data);
   });
   it.each([undefined, { ...data, generatedAt: now - 30001 }, { ...data, generatedAt: now + 5001 },
-    { ...data, generatedAt: null }, { ...data, text: 'x'.repeat(12001) }, { ...data, revision: 'fake' }])(
+    { ...data, generatedAt: null }, { ...data, text: 'x'.repeat(12001) }, { ...data, revision: 'fake' }, { ...data, version: 1 }])(
     'refuses stale or malformed context without an empty-attention claim: %s', async input => {
       const c = client(input);
       c.deps.now = () => now;
@@ -38,6 +38,20 @@ describe('fresh read-only digest client', () => {
       expect(c.calls).toHaveLength(1);
     }
   );
+});
+describe('digest cursor options', () => {
+  const now = Date.UTC(2026, 9, 28, 4);
+  const data = { version: 2, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
+  it('sends since=all for --all and the exact token for --since, and refuses both together', async () => {
+    const c = client(data);
+    c.deps.now = () => now;
+    expect(await agentChatDigest(c.deps, { all: true })).toBe(0);
+    expect(await agentChatDigest(c.deps, { since: 'd1.abc' })).toBe(0);
+    expect(c.calls.map((call) => call.query)).toEqual([{ since: 'all' }, { since: 'd1.abc' }]);
+    expect(await agentChatDigest(c.deps, { all: true, since: 'd1.abc' })).not.toBe(0);
+    expect(await agentChatDigest(c.deps, { since: '' })).not.toBe(0);
+    expect(c.calls).toHaveLength(2);
+  });
 });
 describe('read-only summary client', () => {
   it('fetches own bounded summary and prints model context without API envelope', async () => {

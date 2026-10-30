@@ -546,7 +546,8 @@ it('digest rechecks exact caller and preserves read, delivery and unresolved own
       expect(data.historyCoverage.state).toBe('recent-only');
     }
     expect(summary).toHaveBeenCalledTimes(2);
-    expect(summary.mock.calls.every(call => call.length === 1)).toBe(true);
+    // Only the producer's own eligibility: no history page or bulk selection.
+    expect(summary.mock.calls.every(call => call[1] === undefined && call[2] === undefined)).toBe(true);
     expect(mark).not.toHaveBeenCalled();
     expect(resolve).not.toHaveBeenCalled();
     expect({ room: JSON.stringify(f.room), seen: f.service.lastSeen(A, f.room.id), delivery: f.service.deliveryStatus(A) }).toEqual(before);
@@ -554,6 +555,55 @@ it('digest rechecks exact caller and preserves read, delivery and unresolved own
     expect((await f.app.inject({ url: '/api/chatrooms/digest', headers })).statusCode).toBe(403);
   } finally {
     vi.restoreAllMocks();
+    await f.app.close();
+  }
+});
+
+it('digest continues from the agent\'s own cursor: FYIs once, owner requests every time, --all and tokens leave it alone', async () => {
+  const f = await fixture('alice');
+  try {
+    const deps = (f.service as unknown as { deps: Record<string, unknown> }).deps;
+    deps.ownerNames = () => ['Owner'];
+    const clock = deps.now as () => number;
+    let updatedAt = clock() - 1000;
+    deps.boardIssues = () => [
+      { id: 'i-0000000a', title: 'Mine, waits on i-0000000b', status: 'blocked', owner: 'employee-' + A, updatedAt },
+      { id: 'i-0000000b', title: 'Theirs', status: 'doing', owner: 'employee-' + B, ownerName: 'Peer', updatedAt },
+      { id: 'i-0000000c', title: 'Unrelated', status: 'doing', owner: 'employee-' + B, updatedAt },
+    ];
+    const owner = f.emit({ from: { kind: 'user', name: 'Owner', mark: 'owner_typed' }, text: '@Reviewer can you check this?' });
+    const answer = f.emit({ from: { kind: 'agent', sessionId: A, name: 'Reviewer' }, text: '@Owner checked, all good' });
+    const note = f.emit({ text: 'status: build is green' });
+    const get = async (query = '') => {
+      const response = await f.app.inject({ url: '/api/chatrooms/digest' + query, headers });
+      expect(response.statusCode).toBe(200);
+      return response.json().data;
+    };
+    const first = await get();
+    expect(first.items.map((i: { class: string; source: { messageId: string } }) => [i.class, i.source.messageId])).toEqual([['owner', owner.id]]);
+    expect(first.items[0]).toMatchObject({ attention: 'pending', possibleAnswer: { messageId: answer.id } });
+    expect(first.fyi).toEqual([{ roomId: f.room.id, count: 1, messageIds: [note.id] }]);
+    expect(first.cards.map((c: { card: string }) => c.card)).toEqual(['i-0000000a', 'i-0000000b']);
+    expect(first.text).toContain('Your digest cursor now covers this digest');
+    const second = await get();
+    expect(second.items.map((i: { source: { messageId: string } }) => i.source.messageId)).toEqual([owner.id]);
+    expect(second.fyi).toEqual([]);
+    expect(second.cards).toEqual([]);
+    expect(second.text).toContain('since your last digest');
+    const all = await get('?since=all');
+    expect(all.fyi).toHaveLength(1);
+    expect(all.text).not.toContain('Your digest cursor now covers');
+    expect((await get()).fyi).toEqual([]); // --all did not move it back
+    const later = f.emit({ text: 'status: deploy queued' });
+    updatedAt = clock() + 60_000;
+    const third = await get('?since=' + encodeURIComponent(second.cursor));
+    expect(third.fyi).toEqual([{ roomId: f.room.id, count: 1, messageIds: [later.id] }]);
+    expect(third.cards.map((c: { card: string }) => c.card)).toEqual(['i-0000000a', 'i-0000000b']);
+    expect((await get()).fyi).toEqual([{ roomId: f.room.id, count: 1, messageIds: [later.id] }]); // the token moved nothing
+    for (const bad of ['?since=nope', '?since=d1.e30', '?since=all&target=x'])
+      expect((await f.app.inject({ url: '/api/chatrooms/digest' + bad, headers })).statusCode).toBe(400);
+    expect(f.service.turnSummary(A).messages.some(m => m.messageId === owner.id && m.attention?.disposition === 'pending')).toBe(true);
+  } finally {
     await f.app.close();
   }
 });

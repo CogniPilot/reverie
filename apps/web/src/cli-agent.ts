@@ -451,12 +451,19 @@ export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Pro
   return 0;
 }
 
-/** Fresh own digest; no hook installation, suppression marker or consumption state. */
-export async function agentChatDigest(deps: AgentDeps): Promise<number> {
-  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000 });
+/**
+ * Fresh own digest; no hook installation, suppression marker or read state. By default it continues from, and moves,
+ * this agent's digest cursor (FYIs already covered are not repeated); --all and --since leave the cursor alone.
+ */
+export async function agentChatDigest(deps: AgentDeps, options: { all?: boolean; since?: string } = {}): Promise<number> {
+  if (options.all && options.since !== undefined) return fail(deps, 'Use --all or --since, not both');
+  const since = options.all ? 'all' : options.since;
+  if (since !== undefined && (!since || since.length > 100_000)) return fail(deps, 'Use --since with a cursor printed by an earlier digest');
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000,
+    ...(since !== undefined ? { query: { since } } : {}) });
   const data = result.json?.data as { version?: unknown; generatedAt?: unknown; text?: unknown; revision?: unknown } | undefined;
   const age = (deps.now?.() ?? Date.now()) - Number(data?.generatedAt);
-  if (!result.json?.success || data?.version !== 1 || typeof data.text !== 'string' || data.text.length > 12000 ||
+  if (!result.json?.success || data?.version !== 2 || typeof data.text !== 'string' || data.text.length > 12000 ||
       typeof data.revision !== 'string' || !/^[a-f0-9]{64}$/.test(data.revision) ||
       typeof data.generatedAt !== 'number' || !Number.isSafeInteger(data.generatedAt) || age < -5000 || age > 30000)
     return fail(deps, 'Fresh actionable digest unavailable; attention and read state are unchanged');
@@ -2768,9 +2775,12 @@ export function registerAgentCommands(program: Command): Command {
 
   chat
     .command('digest')
-    .description('One bounded actionable cross-room delta with source links; no read or handling acknowledgement')
+    .description('One bounded cross-room delta since your last digest: owner requests, actions for you and changed Board cards first, FYIs batched; no read or handling acknowledgement')
     .option('--json', 'Machine-readable snapshot')
-    .action((options: { json?: boolean }) => run(Boolean(options.json), agentChatDigest));
+    .option('--all', 'Everything currently eligible; your digest cursor is not moved')
+    .option('--since <cursor>', 'From a cursor printed by an earlier digest; your digest cursor is not moved')
+    .action((options: { json?: boolean; all?: boolean; since?: string }) =>
+      run(Boolean(options.json), (deps) => agentChatDigest(deps, { all: options.all, since: options.since })));
 
   chat
     .command('summary')
