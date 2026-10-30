@@ -50,6 +50,7 @@ it('re-sorts a human presence update without changing account action or permissi
   input.value = 'Draft';
   const row = h.document.querySelector<HTMLButtonElement>('[data-human-id="nova"]')!;
   row.click();
+  ([...h.document.querySelectorAll('.ca-profile--person .ca-profile-actions button')].find(b => b.textContent === 'Mention') as HTMLButtonElement).click();
   expect(input.value).toBe('Draft @Nova ');
   expect(h.document.querySelector('.ca-member-menu')).toBeNull();
   expect(h.server.calls.filter((c: any) => c.method !== 'GET')).toHaveLength(0);
