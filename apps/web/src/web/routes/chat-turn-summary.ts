@@ -20,6 +20,7 @@ const historyQuery = z
     beforeId: z.string().min(1).max(200).optional(),
   })
   .strict();
+const pendingBeforeQuery = z.object({ roomId: z.string().min(1).max(200), before: z.string().regex(/^\d{1,16}$/) }).strict();
 
 export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, service: ChatroomService): void {
   app.get('/api/chatrooms/turn-summary', async (req, reply) => {
@@ -70,6 +71,29 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
       const code =
         error.code === 'NOT_FOUND' ? 404 : error.code === 'CONFLICT' ? 409 : error.code === 'UNAVAILABLE' ? 503 : 400;
       return reply.code(code).send({ success: false, error: error.message });
+    }
+  });
+
+  // The caller's own notices from agents and bots in one room, still pending before a time: what an explicit bulk
+  // "handle before" resolves one exact read at a time. Owner and other human messages are never listed.
+  app.get('/api/chatrooms/notices/pending-before', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (
+      !self ||
+      req.headers['x-reverie-parent-session'] !== self ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    const parsed = pendingBeforeQuery.safeParse(req.query);
+    if (!parsed.success || !Number.isSafeInteger(Number(parsed.data.before)))
+      return reply.code(400).send({ success: false, error: 'Expected own roomId and before (epoch milliseconds)' });
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const summary = service.turnSummary(self, undefined, { roomId: parsed.data.roomId, before: Number(parsed.data.before) });
+      return { success: true, data: { sourceReferences: summary.sourceReferences ?? [] } };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      return reply.code(error.code === 'NOT_FOUND' ? 404 : 503).send({ success: false, error: error.message });
     }
   });
 

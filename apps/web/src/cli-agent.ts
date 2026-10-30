@@ -1596,6 +1596,38 @@ export async function agentChatPending(deps: AgentDeps, options: { room?: string
 }
 
 /** Explicit own attention resolution; exact reads support intent but never ACK delivery here. */
+/**
+ * Explicit bulk resolution of your own notices from agents and bots in one room posted before a time (epoch ms, or ISO 8601
+ * with Z or an offset). Owner and other human messages are never included. Each is resolved like `handle <id>`: an exact
+ * read, then the same checked resolution; delivery and task state are unchanged.
+ */
+export async function agentChatHandleBefore(deps: AgentDeps, options: { room?: string; before: string }): Promise<number> {
+  const raw = options.before.trim();
+  const before = /^\d{1,16}$/.test(raw) ? Number(raw)
+    : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(raw) ? Date.parse(raw) : NaN;
+  if (!Number.isSafeInteger(before) || before > (deps.now ?? Date.now)())
+    return fail(deps, 'Use --before with a past time: epoch milliseconds, or ISO 8601 with Z or an offset');
+  if (!options.room) return fail(deps, '--before needs an explicit --room');
+  const target = await resolveChatRoom(deps, options.room);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const listing = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/notices/pending-before',
+    query: { roomId: target.room.id, before: String(before) } });
+  const refs = (listing.json?.data as { sourceReferences?: Array<{ roomId?: string; messageId?: string }> } | undefined)?.sourceReferences;
+  if (!listing.json?.success || !Array.isArray(refs) || refs.length > 1000 ||
+      refs.some(ref => ref.roomId !== target.room.id || typeof ref.messageId !== 'string'))
+    return fail(deps, 'Pending notice list not confirmed; nothing was handled');
+  const quiet: AgentDeps = { ...deps, json: true, io: { ...deps.io, out: () => {}, err: () => {} } };
+  const handled: string[] = [], failed: string[] = [];
+  for (const ref of refs) {
+    const code = await agentChatHandle(quiet, { room: target.room.id, message: ref.messageId! });
+    (code === EXIT.ok ? handled : failed).push(ref.messageId!);
+  }
+  if (deps.json) emitJson(deps, { roomId: target.room.id, before, handled, failed });
+  else deps.io.out(`Handled ${handled.length} of ${refs.length} pending agent/bot notices before ${new Date(before).toISOString()}` +
+    (failed.length ? `; ${failed.length} not confirmed: ${failed.join(', ')}` : '') + '. Owner messages are never bulk-handled.');
+  return failed.length ? EXIT.error : EXIT.ok;
+}
+
 export async function agentChatHandle(deps: AgentDeps, options: { room?: string; message: string; supersededBy?: string }): Promise<number> {
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
@@ -2916,13 +2948,20 @@ export function registerAgentCommands(program: Command): Command {
     );
 
   chat
-    .command('handle <message-id>')
-    .description('Resolve your own attention for an exact notice; does not ACK delivery or complete work')
+    .command('handle [message-id]')
+    .description('Resolve your own attention for an exact notice, or with --before every pending agent/bot notice in a room before a time; does not ACK delivery or complete work')
     .option('-r, --room <room>', 'Room id or name')
     .option('--superseded-by <id>', 'Visible replacement message in the same room')
+    .option('--before <time>', 'Bulk: your pending notices from agents and bots in --room before this time (epoch ms or ISO 8601 with offset); never the owner\'s')
     .option('--json', 'Machine-readable output')
-    .action((message: string, options: { room?: string; supersededBy?: string; json?: boolean }) =>
-      run(Boolean(options.json), deps => agentChatHandle(deps, { message, room: options.room, supersededBy: options.supersededBy }))
+    .action((message: string | undefined, options: { room?: string; supersededBy?: string; before?: string; json?: boolean }) =>
+      run(Boolean(options.json), async deps => {
+        if ((message === undefined) === (options.before === undefined) || (options.before !== undefined && options.supersededBy !== undefined))
+          return fail(deps, 'Give either an exact message id or --before <time> (not both, and --superseded-by only with an id)');
+        return options.before !== undefined
+          ? agentChatHandleBefore(deps, { room: options.room, before: options.before })
+          : agentChatHandle(deps, { message: message!, room: options.room, supersededBy: options.supersededBy });
+      })
     );
 
   chat
