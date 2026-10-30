@@ -3,6 +3,7 @@ let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
+  imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
   claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
@@ -24,7 +25,7 @@ let
     ++ pkgs.lib.optionals (chatLanguageTools != null) [ chatLanguageTools.python chatLanguageTools.modelica ];
   nixBase = pkgs.linkFarm "reverie-laptop-base" (pkgs.lib.imap0 (i: path: {
     name = "share/reverie/base/${toString i}"; inherit path;
-  }) (baseContents ++ [ reverie console memory entrypoint ]));
+  }) (baseContents ++ [ reverie console memory entrypoint ] ++ pkgs.lib.optional worker imagePython));
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
@@ -98,7 +99,7 @@ pkgs.dockerTools.buildLayeredImage {
     ln -s ${console}/lib/reverie opt/reverie/console
     mkdir -p opt/reverie/apps
     ln -s ${console}/lib/reverie opt/reverie/apps/web
-    ln -s ${memory} opt/reverie/python
+    ln -s ${imagePython} opt/reverie/python
     ln -s ${entrypoint} usr/local/bin/reverie-start
     ${pkgs.lib.optionalString (worker && claudeInterpreter != null) ''
       mkdir -p .${builtins.dirOf claudeInterpreter}
@@ -107,6 +108,12 @@ pkgs.dockerTools.buildLayeredImage {
       ln -s ${pkgs.stdenv.cc.bintools.dynamicLinker} .${claudeInterpreter}
     ''}
     ${pkgs.lib.optionalString worker ''
+      # Keep the interactive aliases and pytest on the laptop-only interpreter.
+      for command in python python3 ${pkgs.python3.executable} pytest py.test; do
+        test -L "bin/$command"
+        unlink "bin/$command"
+        ln -s ${imagePython}/bin/"$command" "bin/$command"
+      done
       mkdir -p opt/reverie/human/bin
       # Direct image-root files, not links into the laptop's writable /nix.
       cp ${humanToolkit}/opt/reverie/human/bin/{reverie-human-shell,bash} opt/reverie/human/bin/
