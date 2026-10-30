@@ -104,6 +104,16 @@ const ended = (issue: Issue) => issue.status === 'done' || issue.status === 'won
 const attentionId = (id: string) => 'attention-' + createHash('sha256').update(id).digest('hex').slice(0, 24);
 const marker = (entry: Entry) => `[assignment-checkin:${entry.id}]`;
 const safeName = (s: string) => s.replace(/[@\r\n`<>]/g, '').slice(0, 80);
+/** Why an attention item exists, said with the assignee's name: the manager is not the one who was asked. */
+const escalationReason = (entry: Entry) =>
+  entry.response?.status === 'blocked' ? 'reported Blocked on'
+    : entry.response?.status === 'new-eta' ? 'gave a new ETA that is not on the Board yet for'
+      : 'did not answer the status check-in in time for';
+/** Why this reader gets it: the assignee's listed manager, the coordinator standing in for one, or the owner. */
+const escalationRole = (employee: AssignmentEmployee, manager: AssignmentEmployee | undefined) =>
+  !manager ? `no manager is set for ${safeName(employee.name)}`
+    : employee.reportsTo === manager.id ? `you are listed as ${safeName(employee.name)}'s manager`
+      : `you coordinate ${safeName(employee.name)}'s work; no manager is set`;
 // Board reasons stay bounded; the exact explanation remains in its correlated
 // source message, whose current identity/content digest is checked before use.
 const boardReason = (messageId: string, reason: string, prefix = '') => {
@@ -880,7 +890,9 @@ export class AssignmentStatusWatch {
       this.post(
         bot,
         room.id,
-        `Assignment attention ${id} tracks task ${task.id}, check-in ${entry.id}. ${manager ? safeName(manager.name) : 'Owner'}: please review the Board attention item. No work completion was inferred.`,
+        `Assignment attention ${id} tracks task ${task.id}, check-in ${entry.id}. ${manager ? safeName(manager.name) : 'Owner'}: ` +
+          `${safeName(employee.name)} ${escalationReason(entry)} ${task.id} (${escalationRole(employee, manager)}). ` +
+          'Please review the Board attention item. No work completion was inferred.',
         [recipient],
         recent.length
       );

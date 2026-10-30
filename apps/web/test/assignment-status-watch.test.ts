@@ -10,6 +10,7 @@ import type { ChatMessage, ChatRoom } from '../src/chatroom-store.js';
 describe('typed assignment check-ins, real durable Board/ledger', () => {
   let postDelay = 0;
   let timeZone: string | undefined;
+  let coordinator: string | undefined;
   let auditHook: () => Promise<void>;
   let root: string,
     board: BoardStore,
@@ -36,6 +37,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       board,
       employees: () => employees,
       timeZone: () => timeZone,
+      coordinatorId: () => coordinator,
       running: () => true,
       bot: () => ({ id: 'status', name: 'Status', rooms: ['room', 'other'], maxPerHour: 30 }),
       room: (id) => (id === 'room' ? room : id === 'other' ? { ...room, id: 'other', messages: [] } : undefined),
@@ -72,6 +74,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     audits = [];
     postDelay = 0;
     timeZone = undefined;
+    coordinator = undefined;
     auditHook = async () => {};
     employees = [
       {
@@ -372,6 +375,39 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     expect(items[0]!.owner).toBe('manager');
     expect(posts).toHaveLength(2);
     expect(posts[1]!.to).toEqual(['mgr']);
+  });
+  it('names the assignee, why attention opened, and why this reader gets it', async () => {
+    await watch.tick();
+    at += 300001;
+    await watch.tick();
+    expect(posts[1]!.text).toContain(
+      "Manager: Worker did not answer the status check-in in time for task (you are listed as Worker's manager). Please review"
+    );
+  });
+  it('says a Blocked report is why the manager is asked', async () => {
+    await watch.tick();
+    reply('Blocked: waiting for dependency');
+    await watch.tick();
+    expect(posts.some((p) => p.to?.includes('mgr') && p.text.includes('Manager: Worker reported Blocked on task'))).toBe(true);
+  });
+  it('tells the coordinator who stands in for a missing manager that this is why', async () => {
+    delete employees[0]!.reportsTo;
+    coordinator = 'manager';
+    await watch.tick();
+    at += 300001;
+    await watch.tick();
+    const escalation = posts.find((p) => p.text.includes('Assignment attention'));
+    expect(escalation?.to).toEqual(['mgr']);
+    expect(escalation?.text).toContain("Manager: Worker did not answer the status check-in in time for task (you coordinate Worker's work; no manager is set).");
+  });
+  it('tells the owner when the assignee has no manager', async () => {
+    delete employees[0]!.reportsTo;
+    await watch.tick();
+    at += 300001;
+    await watch.tick();
+    const escalation = posts.find((p) => p.text.includes('Assignment attention'));
+    expect(escalation?.to).toEqual(['user']);
+    expect(escalation?.text).toContain('Owner: Worker did not answer the status check-in in time for task (no manager is set for Worker).');
   });
   it('does not leak attention to a manager outside the source room', async () => {
     await watch.tick();
