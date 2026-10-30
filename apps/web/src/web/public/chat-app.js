@@ -6270,8 +6270,18 @@ class ReverieChatApp {
     row.dataset.humanId = person.id;
     row.dataset.key = `human:${person.id}`;
     row.disabled = String(person.name).trim().toLowerCase() === 'everyone';
-    row.title = `Mention ${person.name}`;
-    row.addEventListener('click', () => this.mentionHuman(person.id));
+    // Like an agent row: a click opens the card, the context menu (or its keys) lists the same actions.
+    row.addEventListener('click', () => this.openPersonCard(person, row));
+    row.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const r = row.getBoundingClientRect();
+      this.openPersonMenu(person, row, { x: ev.clientX || r.left, y: ev.clientY || r.bottom });
+    });
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ContextMenu' && !(ev.shiftKey && ev.key === 'F10')) return;
+      ev.preventDefault();
+      this.openPersonMenu(person, row);
+    });
     row.setAttribute('aria-label', `${person.name}, ${caHumanBadgeLabel(person.role)}, ${person.online ? 'online' : 'offline'}`);
     row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
     const text = this.el('span', 'ca-member-text');
@@ -6280,6 +6290,53 @@ class ReverieChatApp {
     if (person.id === this.humanSelf?.id) text.append(this.el('span', 'ca-member-sub', 'You'));
     row.append(text);
     return row;
+  }
+
+  /**
+   * What a person row (Owner or Guest) offers. Every check reads server-provided roles, and every action is a
+   * composer insert, a copy, or navigation to the page that already owns the change.
+   */
+  personActions(person) {
+    const own = !!this.humanSelf?.id && person.id === this.humanSelf.id;
+    const verifiedOwner = this.humanSelf?.role === 'owner' && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
+    const entries = [];
+    if (String(person.name).trim().toLowerCase() !== 'everyone')
+      entries.push({ label: 'Mention', run: () => { this.closeProfile(); this.mentionHuman(person.id); } });
+    entries.push({ label: 'Copy name', run: async () => {
+      try {
+        await this.doc.defaultView.navigator.clipboard.writeText(String(person.name));
+        this.toast('Name copied', 'info');
+      } catch { this.toast('Could not copy the name', 'error'); }
+    } });
+    // The original owner's details live in Company settings; every other account edits its profile on Accounts.
+    if (own) entries.push({ label: 'Edit my profile', run: () => { this.closeProfile(); person.id === 'owner' ? void this.openCompanySettings() : this.openPage('people'); } });
+    else if (verifiedOwner && person.role !== 'owner') entries.push({ label: 'Manage account', run: () => { this.closeProfile(); this.openPage('people'); } });
+    return entries;
+  }
+
+  openPersonMenu(person, anchor, at = anchor) {
+    this.closeProfile();
+    this.openMenu(this.personActions(person), { at, focus: anchor, label: `${person.name} actions`, className: 'ca-member-menu' });
+  }
+
+  openPersonCard(person, anchor) {
+    this.closeMenus();
+    this.closeProfile();
+    const card = this.el('div', 'ca-profile ca-profile--compact ca-profile--person');
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', `${person.name} profile`);
+    const top = this.el('div', 'ca-profile-top');
+    top.append(this.profilePortrait(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'), person.name));
+    const names = this.el('div', 'ca-profile-names');
+    names.append(this.literalText('strong', '', person.name));
+    const own = !!this.humanSelf?.id && person.id === this.humanSelf.id;
+    names.append(this.el('span', 'ca-profile-sub', [caHumanBadgeLabel(person.role), person.online ? 'Online' : 'Offline', own ? 'You' : ''].filter(Boolean).join(' · ')));
+    top.append(names);
+    const actions = this.el('div', 'ca-profile-actions');
+    for (const [i, entry] of this.personActions(person).entries())
+      actions.append(this.button(i === 0 ? 'ca-btn is-primary' : 'ca-btn', entry.label, () => entry.run(), { text: entry.label }));
+    card.append(top, actions);
+    this.presentCard(card, anchor);
   }
 
   memberRow(m) {

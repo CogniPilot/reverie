@@ -82,14 +82,19 @@ it('deduplicates the legacy owner and human records and reserves exactly one eve
   expect(names(h).filter(name => name?.toLowerCase() === '@everyone')).toHaveLength(1);
 });
 
-it('clicking a human member appends a mention, focuses the composer and preserves even a selected draft', async () => {
+it('the person card\'s Mention appends a mention, focuses the composer and preserves even a selected draft', async () => {
   const h = await fixture();
   h.shell.renderMembers();
   const button = h.document.querySelector('[data-human-id="human-nova"]') as HTMLButtonElement;
   expect(button.tagName).toBe('BUTTON');
   const input = type(h, 'Keep this unfinished draft');
   input.setSelectionRange(0, input.value.length);
-  button.click();
+  const mention = () => {
+    button.click(); // Opens the person card, as for an agent row.
+    const action = [...h.document.querySelectorAll('.ca-profile--person .ca-profile-actions button')].find(b => b.textContent === 'Mention') as HTMLButtonElement;
+    action.click();
+  };
+  mention();
   expect(input.value).toBe('Keep this unfinished draft @Nova ');
   expect(h.document.activeElement).toBe(input);
   expect(input.selectionStart).toBe(input.value.length);
@@ -97,7 +102,7 @@ it('clicking a human member appends a mention, focuses the composer and preserve
   expect(h.document.querySelector('.ca-profile')).toBeNull();
   await h.shell.selectRoom('other');
   const otherInput = type(h, 'Another draft');
-  button.click(); // An old DOM reference must not mention someone in a different room.
+  mention(); // An old DOM reference must not mention someone in a different room.
   expect(otherInput.value).toBe('Another draft');
 });
 
