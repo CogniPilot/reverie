@@ -5,7 +5,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentJournalImportLegacy, fitText, legacyDataDir } from '../src/cli-agent-journal-import.js';
-import type { AgentDeps } from '../src/cli-agent.js';
+import { Command } from 'commander';
+import { registerAgentCommands, type AgentDeps } from '../src/cli-agent.js';
+import { JOURNAL_PROJECT_SAVES_PER_DAY } from '../src/employee-journal.js';
 const require = createRequire(import.meta.url);
 
 const OLD = Date.parse('2026-10-01T00:00:00Z') / 1000;
@@ -94,6 +96,15 @@ describe('journal import-legacy', () => {
     out = [];
     await agentJournalImportLegacy(deps(), { dryRun: true, includeProjects: true, instance });
     expect(out.join('\n')).toContain('project rumoca: 1 to import (0 keystone, 1 important), 0 left behind (dreams and memories rated under 5); uses your own 20 project saves a day');
+  });
+
+  it('help states the actual daily project save limit', () => {
+    const program = new Command();
+    registerAgentCommands(program);
+    const agent = program.commands.find((c) => c.name() === 'agent')!;
+    const importLegacy = agent.commands.find((c) => c.name() === 'journal')!.commands.find((c) => c.name() === 'import-legacy')!;
+    expect(importLegacy.helpInformation().replace(/\s+/g, ' '))
+      .toContain(`they use your own ${JOURNAL_PROJECT_SAVES_PER_DAY} project saves a day`);
   });
 
   it('needs exactly one mode and an instance, and says a failed write is safe to repeat', async () => {
