@@ -466,6 +466,8 @@ export class WebServer extends EventEmitter {
   private companyWakeReady = false;
   private workerViewerReconnect?: WorkerViewerReconnect;
   private workerProviderHealth?: WorkerProviderHealth;
+  /** The console Board, once created; the chat digest reads it for an agent's own cards. */
+  private boardStore?: BoardStore;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -1469,6 +1471,14 @@ export class WebServer extends EventEmitter {
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
       timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
+      // An agent's digest lists its own Board cards and the cards they name (created below, after chat).
+      boardIssues: (owner) => {
+        const names = new Map((this.companyService?.view(owner).employees ?? []).map((e) => [e.id, e.name]));
+        return (this.boardStore?.snapshot().issues ?? []).map((issue) => ({
+          id: issue.id, title: issue.title, status: issue.status, owner: issue.owner, reason: issue.reason,
+          ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt,
+        }));
+      },
       // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
       alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000 }),
       // A session retired by a plan switch leaves every tab list (its row carries `retired`); a restore brings it back.
@@ -1812,6 +1822,7 @@ export class WebServer extends EventEmitter {
     // The server's board (one per console): issues, milestones, wins, blockers, decisions, focus. Audited writes.
     const boardStore = new BoardStore(dataPath('board.json'));
     await boardStore.init();
+    this.boardStore = boardStore;
     registerBoardRoutes(this.app, ctx, {
       verifiedOwner,
       store: boardStore,

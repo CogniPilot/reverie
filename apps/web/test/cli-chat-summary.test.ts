@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { agentChatSummary, agentChatDigest, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 function client(data: unknown, success = true) {
   const out: string[] = [],
@@ -17,7 +20,7 @@ function client(data: unknown, success = true) {
 }
 describe('fresh read-only digest client', () => {
   const now = Date.UTC(2026, 9, 28, 4);
-  const data = { version: 1, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
+  const data = { version: 2, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
   it('uses one bounded GET without paging, ACKs or hook output', async () => {
     const c = client(data);
     c.deps.now = () => now;
@@ -29,7 +32,7 @@ describe('fresh read-only digest client', () => {
     expect(JSON.parse(c.out[1])).toEqual(data);
   });
   it.each([undefined, { ...data, generatedAt: now - 30001 }, { ...data, generatedAt: now + 5001 },
-    { ...data, generatedAt: null }, { ...data, text: 'x'.repeat(12001) }, { ...data, revision: 'fake' }])(
+    { ...data, generatedAt: null }, { ...data, text: 'x'.repeat(12001) }, { ...data, revision: 'fake' }, { ...data, version: 1 }])(
     'refuses stale or malformed context without an empty-attention claim: %s', async input => {
       const c = client(input);
       c.deps.now = () => now;
@@ -38,6 +41,27 @@ describe('fresh read-only digest client', () => {
       expect(c.calls).toHaveLength(1);
     }
   );
+});
+describe('digest cursor options', () => {
+  const now = Date.UTC(2026, 9, 28, 4);
+  const data = { version: 2, generatedAt: now, revision: 'a'.repeat(64), text: 'quoted digest' };
+  it('sends since=all for --all, POSTs the exact cursor for --since (also from @FILE), and refuses both together', async () => {
+    const c = client(data);
+    c.deps.now = () => now;
+    expect(await agentChatDigest(c.deps, { all: true })).toBe(0);
+    expect(await agentChatDigest(c.deps, { since: 'd1.abc' })).toBe(0);
+    const file = join(mkdtempSync(join(tmpdir(), 'digest-cursor-')), 'cursor.txt');
+    writeFileSync(file, 'd1.' + 'x'.repeat(200_000) + '\n');
+    expect(await agentChatDigest(c.deps, { since: '@' + file })).toBe(0);
+    expect(c.calls.map(({ method, query, body }) => [method, query, body && String(body.since).length])).toEqual([
+      ['GET', { since: 'all' }, undefined], ['POST', undefined, 6], ['POST', undefined, 200_003],
+    ]);
+    expect(await agentChatDigest(c.deps, { since: '@' + file + '.missing' })).not.toBe(0);
+    c.calls.splice(1);
+    expect(await agentChatDigest(c.deps, { all: true, since: 'd1.abc' })).not.toBe(0);
+    expect(await agentChatDigest(c.deps, { since: '' })).not.toBe(0);
+    expect(c.calls).toHaveLength(1); // refused before any request
+  });
 });
 describe('read-only summary client', () => {
   it('fetches own bounded summary and prints model context without API envelope', async () => {

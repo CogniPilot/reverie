@@ -5,6 +5,7 @@ import type { SessionPort } from '../ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../route-helpers.js';
 import { ChatroomError } from '../../chatroom-store.js';
 import { z } from 'zod';
+import { DIGEST_CURSOR_MAX } from '../../chatroom-digest.js';
 
 const ref = z
   .object({ roomId: z.string().min(1).max(200), messageId: z.string().min(1).max(200), readToken: z.string().uuid() })
@@ -20,6 +21,9 @@ const historyQuery = z
     beforeId: z.string().min(1).max(200).optional(),
   })
   .strict();
+// GET continues from the stored cursor, or shows everything with since=all; an explicit cursor is POSTed (see DIGEST_CURSOR_MAX).
+const digestQuery = z.object({ since: z.literal('all').optional() }).strict();
+const digestBody = z.object({ since: z.string().min(1).max(DIGEST_CURSOR_MAX) }).strict();
 const pendingBeforeQuery = z.object({ roomId: z.string().min(1).max(200), before: z.string().regex(/^\d{1,16}$/) }).strict();
 
 export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, service: ChatroomService): void {
@@ -42,10 +46,34 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
     if (!self || req.headers['x-reverie-parent-session'] !== self ||
         req.headers['x-reverie-service-token'] !== undefined)
       return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
-    if (Object.keys(req.query as object).length)
-      return reply.code(400).send({ success: false, error: 'Digest takes no target or query parameters' });
+    const parsed = digestQuery.safeParse(req.query);
+    if (!parsed.success)
+      return reply.code(400).send({ success: false, error: 'Digest takes only since=all; POST an explicit cursor as {"since": cursor}' });
     reply.header('Cache-Control', 'no-store');
-    return { success: true, data: service.actionableDigest(self) };
+    try {
+      return { success: true, data: service.actionableDigest(self, parsed.data.since) };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      return reply.code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503).send({ success: false, error: error.message });
+    }
+  });
+
+  // The same digest from an explicit cursor; like since=all it never moves the stored cursor.
+  app.post('/api/chatrooms/digest', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (!self || req.headers['x-reverie-parent-session'] !== self ||
+        req.headers['x-reverie-service-token'] !== undefined)
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    const parsed = digestBody.safeParse(req.body);
+    if (Object.keys(req.query as object).length || !parsed.success || parsed.data.since === 'all')
+      return reply.code(400).send({ success: false, error: 'Expected {"since": cursor} from an earlier digest' });
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return { success: true, data: service.actionableDigest(self, parsed.data.since) };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      return reply.code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503).send({ success: false, error: error.message });
+    }
   });
 
   app.post('/api/chatrooms/notices/resolve', async (req, reply) => {

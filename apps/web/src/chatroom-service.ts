@@ -1,6 +1,6 @@
 import { materializeChatImages, isChatRaster, type ImagePathResult } from './chat-image-paths.js';
 import {viewerHealth,type ProviderHealth} from './worker-provider-health.js';
-import { buildChatDigest } from './chatroom-digest.js';
+import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, type DigestCard, type DigestCursor, type DigestRoomScan } from './chatroom-digest.js';
 /**
  * @fileoverview Chatroom service: store + persistence + pane delivery + SSE.
  *
@@ -129,7 +129,20 @@ export interface ChatroomServiceDeps {
   database?: string;
   /** The server calls startDelivery after it has finished restoring all session records. */
   deferDeliveryRecovery?: boolean;
+  /** The owner's Board cards, read only for an agent's own digest (its cards and the cards they name). */
+  boardIssues?: (owner: string | undefined) => ReadonlyArray<{
+    id: string; title: string; status: string; owner?: string; ownerName?: string; reason?: string; updatedAt: number;
+  }>;
 }
+
+/** What turnSummary also collects for the digest: every candidate, each room's newest message and possible answers. */
+interface DigestScan {
+  candidates: TurnSummaryCandidate[];
+  rooms: DigestRoomScan[];
+  possibleAnswers: Map<string, string>;
+}
+
+const BOARD_CURSOR = '\0board';
 
 export interface ChatMemberView extends ChatMember {
   name: string;
@@ -242,6 +255,8 @@ export class ChatroomService {
 
   /** What each agent session has seen of each room (chatroom-last-seen.ts), next to the rooms file. */
   readonly seen: LastSeenStore;
+  /** Each agent's digest cursor (by employee, else session): FYIs it covered are not repeated. Not a read marker. */
+  readonly digestCursors: LastSeenStore;
   private pendingStore: PendingDeliveryStore | undefined;
   private deliveryReady: boolean;
   private deliveryStart: Promise<void> | undefined;
@@ -268,6 +283,7 @@ export class ChatroomService {
     this.deliveryReady = !deps.deferDeliveryRecovery;
     this.archive = new ChatArchive(deps.archiveDir ?? join(dirname(deps.file), 'chat-archive'));
     this.seen = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-last-seen.json') : undefined);
+    this.digestCursors = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-digest-cursor.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
       prepareMessage: async (sessionId, roomId, messageId) => {
@@ -342,12 +358,91 @@ export class ChatroomService {
 
   displayTimeZone(owner?: string): string { return displayTimeZone(this.deps.timeZone?.(owner)); }
 
-  /** One fresh actionable view; producer eligibility, proof and read cursors remain authoritative. */
-  actionableDigest(sessionId: string) {
+  /**
+   * One fresh actionable view; producer eligibility, proof and read cursors remain authoritative.
+   * `since` omitted: continue from this agent's stored digest cursor and move it to what this digest covered.
+   * `since: 'all'`: everything eligible, cursor untouched. A cursor token: from there, cursor untouched.
+   * The cursor only hides FYIs and Board changes already covered; owner requests and actions stay until handled.
+   */
+  actionableDigest(sessionId: string, since?: string) {
     const session = this.deps.getSession(sessionId);
     if (!session || session.pid === null) throw new ChatroomError('A live own session is required', 'NOT_FOUND');
-    return buildChatDigest(this.turnSummary(sessionId), this.deps.now?.() ?? Date.now(),
-      this.deps.timeZone?.(session.owner) ?? 'UTC');
+    let from: DigestCursor | undefined;
+    if (since !== undefined && since !== 'all') {
+      try {
+        from = decodeDigestCursor(since);
+      } catch (error) {
+        throw new ChatroomError((error as Error).message, 'INVALID_INPUT');
+      }
+    }
+    const employeeId = this.deps.employeeOf?.(sessionId);
+    const key = employeeId ?? sessionId;
+    if (since === undefined) {
+      const rooms: Record<string, { at: number; id: string }> = {};
+      for (const room of this.store.roomsFor(sessionId)) {
+        const mark = this.digestCursors.get(key, room.id);
+        if (mark) rooms[room.id] = { at: mark.at, id: mark.messageId };
+      }
+      const board = this.digestCursors.get(key, BOARD_CURSOR);
+      let boardIds: string[] = [];
+      try {
+        const parsed: unknown = board ? JSON.parse(board.messageId) : [];
+        if (Array.isArray(parsed)) boardIds = parsed.filter((k): k is string => typeof k === 'string');
+      } catch { /* an unreadable stored set only repeats that millisecond's cards */ }
+      if (Object.keys(rooms).length || board) from = { rooms, ...(board ? { boardAt: board.at, boardIds } : {}) };
+    }
+    const scan: DigestScan = { candidates: [], rooms: [], possibleAnswers: new Map() };
+    const summary = this.turnSummary(sessionId, undefined, undefined, scan);
+    const now = this.deps.now?.() ?? Date.now();
+    // Changed cards are selected before the bound, oldest first: the cursor stops at the last one shown, so the
+    // next digest continues with the rest instead of skipping them.
+    const changed = employeeId
+      ? this.digestCards(session.owner, employeeId)
+        .filter((card) => boardChanged(card, from, now))
+        .sort((a, b) => a.updatedAt - b.updatedAt || a.id.localeCompare(b.id))
+      : [];
+    const digest = buildChatDigest({
+      phoneMode: summary.phoneMode,
+      historyCoverage: summary.historyCoverage ?? { state: 'recent-only', rooms: [] },
+      candidates: scan.candidates,
+      rooms: scan.rooms,
+      possibleAnswers: scan.possibleAnswers,
+      cards: changed.slice(0, DIGEST_CARD_LIMIT),
+      cardsAfter: Math.max(0, changed.length - DIGEST_CARD_LIMIT),
+      since: from,
+      movesCursor: since === undefined,
+    }, now, this.deps.timeZone?.(session.owner) ?? 'UTC');
+    if (since === undefined) {
+      const covered = decodeDigestCursor(digest.cursor);
+      // Room order is (time, id): a newer message in the same millisecond still moves the cursor.
+      for (const [roomId, mark] of Object.entries(covered.rooms))
+        this.digestCursors.advanceWhen(key, roomId, { messageId: mark.id, at: mark.at }, (current) =>
+          !current || mark.at > current.at || (mark.at === current.at && mark.id.localeCompare(current.messageId) > 0));
+      // The Board cursor is the newest card time covered plus the card versions seen at that millisecond.
+      if (covered.boardAt !== undefined) {
+        const board = { messageId: JSON.stringify(covered.boardIds ?? []), at: covered.boardAt };
+        this.digestCursors.advanceWhen(key, BOARD_CURSOR, board, (current) =>
+          !current || board.at > current.at || (board.at === current.at && board.messageId !== current.messageId));
+      }
+    }
+    return digest;
+  }
+
+  /** This employee's own cards, and the cards its open ones name by id; nothing else on the Board. */
+  private digestCards(owner: string | undefined, employeeId: string): DigestCard[] {
+    const issues = this.deps.boardIssues?.(owner) ?? [];
+    const byId = new Map(issues.map((issue) => [issue.id, issue]));
+    const cards = new Map<string, DigestCard>();
+    for (const issue of issues) {
+      if (issue.owner !== employeeId) continue;
+      cards.set(issue.id, { ...issue, mine: true });
+      if (issue.status === 'done' || issue.status === 'wontdo') continue;
+      for (const [ref] of `${issue.title} ${issue.reason ?? ''}`.matchAll(/\bi-[0-9a-f]{8}\b/g)) {
+        const named = byId.get(ref);
+        if (named && !cards.has(ref) && named.owner !== employeeId) cards.set(ref, { ...named, mine: false, via: issue.id });
+      }
+    }
+    return [...cards.values()];
   }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
@@ -356,7 +451,7 @@ export class ChatroomService {
    * returned as sourceReferences (for an explicit bulk "handle before"); owner and other human messages are never selected.
    */
   turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } },
-    select?: { roomId: string; before: number }): TurnSummary {
+    select?: { roomId: string; before: number }, scan?: DigestScan): TurnSummary {
     const session = this.deps.getSession(sessionId);
     const mode = this.alertMode(sessionId)?.mode ?? 'ring';
     if (!session || session.pid === null) {
@@ -411,6 +506,23 @@ export class ChatroomService {
       }
       const messages = [...merged.values()].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
         .map((m) => messageWithEmployeeIdentity(m, room.owner, identity));
+      if (scan) {
+        const newest = messages.at(-1);
+        scan.rooms.push({ roomId: room.id, room: room.name, ...(newest ? { newest: { at: newest.at, id: newest.id } } : {}) });
+        // A possible answer: this agent's first message to the owner after an owner request, before the owner wrote again.
+        // Only a pointer for the digest; attention stays pending until explicitly resolved.
+        const ownerNames = (this.deps.ownerNames?.(room.owner) ?? []).filter(Boolean);
+        let answer: string | undefined;
+        for (let i = messages.length - 1; i >= 0 && ownerNames.length; i--) {
+          const m = messages[i];
+          if (m.deleted) continue;
+          if (m.from.kind === 'user' && isOwnerMark(m.from.mark)) {
+            if (answer) scan.possibleAnswers.set(`${room.id}\0${m.id}`, answer);
+            answer = undefined;
+          } else if (m.from.kind === 'agent' && (m.from.sessionId === sessionId || (employeeId && m.from.employeeId === employeeId)) &&
+              ownerNames.some((n) => textMentions(m.text, n))) answer = m.id;
+        }
+      }
       const seen = this.seen.get(sessionId, room.id);
       const seenIndex = seen ? messages.findIndex((m) => m.id === seen.messageId) : -1;
       // One indexed scan, including current validated retirement mappings; no name-only inheritance.
@@ -478,6 +590,7 @@ export class ChatroomService {
         });
       }
     }
+    if (scan) scan.candidates.push(...candidates);
     const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now());
     if (historyPage) summary.sourceReferences = candidates.map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
     // Only notices that still need attention: one handled but uncertain in delivery is not re-resolved.
@@ -774,6 +887,7 @@ export class ChatroomService {
     const rooms = this.deps.database ? await this.openDatabase(this.deps.database) : await loadChatrooms(this.deps.file);
     this.store = new ChatroomStore(rooms, (roomId, messageId) => this.historicalMessage(roomId, messageId));
     await this.seen.load();
+    await this.digestCursors.load();
     this.learnNames(rooms);
     if (this.deps.file) {
       try {
@@ -821,6 +935,7 @@ export class ChatroomService {
     this.owedReplies.clear();
     this.delivery.stop();
     await this.seen.flush();
+    await this.digestCursors.flush();
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = undefined;

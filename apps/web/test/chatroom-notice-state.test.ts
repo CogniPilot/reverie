@@ -278,7 +278,10 @@ describe('current exact recipient/source attention boundary', () => {
       // one-line acknowledgement, once, right after the count.
       const cue = 'If replying needs more than a few minutes of work, acknowledge in one line first.';
       expect(summary.text.split(cue)).toHaveLength(2);
-      expect(summary.text).toContain(`your attention. ${cue} Quoted records`);
+      // The per-kind counts, when they fit, belong to the count and come before the cue.
+      expect(summary.text).toMatch(
+        new RegExp(`your attention\\.( \\d+ owner, \\d+ for you, \\d+ FYI\\.)? ${cue.replace(/\./g, '\\.')} Quoted records`)
+      );
     } finally {
       await f.service.stop();
     }

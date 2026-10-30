@@ -65,6 +65,17 @@ export class LastSeenStore {
     return true;
   }
 
+  /**
+   * Move the marker to `mark` when `newer(current)` says so; for orderings other than message time alone (the chat
+   * digest cursor orders by time, then id). Returns whether it moved.
+   */
+  advanceWhen(sessionId: string, roomId: string, mark: SeenMark, newer: (current: SeenMark | undefined) => boolean): boolean {
+    if (!newer(this.get(sessionId, roomId))) return false;
+    this.set(sessionId, roomId, mark);
+    this.schedulePersist();
+    return true;
+  }
+
   /** Forget a session (deleted) or a room (deleted). */
   forget(sessionId?: string, roomId?: string): void {
     if (sessionId && !roomId) this.marks.delete(sessionId);
