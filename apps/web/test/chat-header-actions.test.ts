@@ -17,7 +17,8 @@ describe('compact header secondary actions', () => {
       harness.shell.toggleDrawer(null);
       more.click();
       const labels = [...harness.document.querySelectorAll('.ca-head-menu [role="menuitem"]')].map(item => item.textContent);
-      expect(labels).toEqual(['Add people to A long channel name for a narrow phone', 'Pinned messages', 'Install app and notifications', 'Notification settings']);
+      // Channel notification settings left the header with its bell button; they are in the channel menu.
+      expect(labels).toEqual(['Add people to A long channel name for a narrow phone', 'Pinned messages', 'Install app and notifications']);
       expect(labels).not.toContain('Show member list');
     } finally { harness.dom.window.close(); }
   });
@@ -37,7 +38,7 @@ describe('compact header secondary actions', () => {
     }
   });
 
-  it('runs the original invite and pin actions and anchors notifications to the visible More button', async () => {
+  it('runs the original invite and pin actions and returns focus to the visible More button', async () => {
     const harness = await createHarness({ rooms: fixtures(), narrow: true });
     try {
       let invited = 0, pinned = 0;
@@ -52,8 +53,8 @@ describe('compact header secondary actions', () => {
       choose('Add people to A long channel name for a narrow phone');
       choose('Pinned messages');
       expect(invited).toBe(1); expect(pinned).toBe(1);
-      choose('Notification settings');
-      expect(harness.document.querySelector('[role="menu"][aria-label="Notification settings"]')).not.toBeNull();
+      more.click();
+      expect(harness.document.querySelector('.ca-head-menu')).not.toBeNull();
       harness.document.dispatchEvent(new harness.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       expect(harness.document.activeElement).toBe(more);
     } finally { harness.dom.window.close(); }
