@@ -302,6 +302,22 @@ class SourceAndDiagnostic(unittest.TestCase):
     self.assertNotIn('private',json.dumps(produced))
     self.assertIsNone(M.helper_diagnostic(json.dumps({**produced,'stage':'/private/path'}).encode()))
     self.assertIsNone(M.helper_diagnostic(json.dumps({**produced,'body':'private'}).encode()))
+ def test_actual_manager_diagnostic_survives_only_with_exact_safe_metadata(self):
+  from reverie.worker_service import ManagerOperationError, _diagnostic
+  for manager in ('MANAGER_STOP','MANAGER_DISABLE','MANAGER_RELOAD'):
+   for stage in (None,'POSTSTART_BROKER'):
+    error=ManagerOperationError(manager,5)
+    if stage:error._reverie_transport_stage=stage
+    produced=_diagnostic(error)
+    self.assertEqual(M.helper_diagnostic(json.dumps(produced).encode()),produced)
+    for key,bad in [('category','GUARD_CHECK_FAILED'),('reason','private content'),
+                    ('managerStage','/private/path'),('managerStage',[]),('returncode',True),
+                    ('returncode',0),('returncode',256),('returncode',-129),
+                    ('returncode','5'),('stage','/private/path'),('body','private')]:
+     with self.subTest(manager=manager,stage=stage,key=key,bad=bad):
+      self.assertIsNone(M.helper_diagnostic(json.dumps({**produced,key:bad}).encode()))
+    for key in ('category','reason','managerStage','returncode'):
+     self.assertIsNone(M.helper_diagnostic(json.dumps({k:v for k,v in produced.items() if k!=key}).encode()))
  def test_partial_helper_spawn_is_unknown_not_settled(self):
   h=M.OwnedHelper(['controlled'],time.monotonic()+1,Path('/'))
   with patch.object(M.subprocess,'Popen',side_effect=OSError('controlled spawn boundary')):
