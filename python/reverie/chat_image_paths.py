@@ -291,18 +291,29 @@ class ImagePaths:
             self.fd = -1
             self.close_hook()
 
-    def close(self):
+    def close(self, *, deadline=None):
         if self.fd < 0:
             return
+        if deadline is None:
+            deadline = time.monotonic() + 2.
         # The owner first settles active calls; no cleanup races with a producer.
+        # Use real monotonic time, not the injectable cache-expiration clock.
         with self._claim():
             self.stopped.set()
-            self.thread.join(timeout=2)
+            self.thread.join(timeout=max(0., deadline - time.monotonic()))
             if self.thread.is_alive():
                 raise ImagePathRefused('expiry_unsettled')
-            with self.lock:
+            if not self.lock.acquire(timeout=max(0., deadline - time.monotonic())):
+                raise ImagePathRefused('cleanup_unsettled')
+            try:
                 for entry in tuple(self.entries.values()):
+                    if time.monotonic() >= deadline:
+                        raise ImagePathRefused('cleanup_unsettled')
                     self._remove(entry)
+            finally:
+                self.lock.release()
+            if time.monotonic() >= deadline:
+                raise ImagePathRefused('cleanup_unsettled')
             os.close(self.fd)
             self.fd = -1
             self.close_hook()

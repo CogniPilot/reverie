@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import stat
 import threading
+import time
 
 from .chat_image_paths import ImagePaths, ImagePathRefused, UUID, directory, request
 from .chat_image_reader import OfficeImageReader
@@ -238,13 +239,23 @@ class WorkerChatImages:
         except Exception:
             raise ImagePathRefused('materialization_unavailable') from None
 
-    def close(self):
+    def close(self, *, deadline=None):
+        if deadline is None:
+            deadline = time.monotonic() + 2.
+        # A handler may still own construction after the broker drain expires.
+        # Never refresh the broker's budget, including between cache owners.
+        if not self.lock.acquire(timeout=max(0., deadline - time.monotonic())):
+            return False
         failures = False
-        with self.lock:
+        try:
             for sid, (_, service, _) in tuple(self.caches.items()):
+                if time.monotonic() >= deadline:
+                    return False
                 try:
-                    service.close()
+                    service.close(deadline=deadline)
                     self.caches.pop(sid)
                 except Exception:
                     failures = True
+        finally:
+            self.lock.release()
         return not failures

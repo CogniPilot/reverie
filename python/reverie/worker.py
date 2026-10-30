@@ -2229,7 +2229,7 @@ class Broker:
             # Constructors and client finalizers publish before the final owned
             # client sweep. Still-active handlers/supervisor remain fatal.
             settle_owned_clients(self, deadline)
-            if getattr(self, 'chat_images', None) is not None and not self.chat_images.close():
+            if getattr(self, 'chat_images', None) is not None and not self.chat_images.close(deadline=deadline):
                 self.cleanup_uncertain.add('CHAT_IMAGE_CLEANUP_UNCONFIRMED')
             if self.handlers or self.active:
                 self.cleanup_uncertain.add('HANDLER_ACTIVE')
