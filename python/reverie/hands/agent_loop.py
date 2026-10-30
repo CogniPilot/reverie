@@ -424,6 +424,15 @@ def stamped(stamp, text):
     return f'[{stamp}] {text}' if stamp else text
 
 
+def shown(text, cap):
+    """At most `cap` chars of `text`. A cut is said out loud, with how much is missing, never made silently."""
+    if len(text) <= cap:
+        return text
+    def note(missing): return f' [... {missing} more characters of this message are not shown]'
+    keep = max(0, cap - len(note(len(text))))
+    return text[:keep] + note(len(text) - keep)
+
+
 def request_chars(messages):
     """Text characters of a chat request: each message's text, plus each tool call's id, name and arguments and each
     tool result's call id. Images are not counted (they are bounded by max_images and max_image_bytes)."""
@@ -508,8 +517,15 @@ def build_prompt(cfg, history, msg, room=None, now=None, reserve=0, recalled="")
         system += '\n\n# Your saved notes\n' + memory
     images, notes = load_images(cfg, room, msg) if room is not None else ([], [])
     # Each line carries its time: when the message being answered was sent, and how long ago each earlier one was.
-    wake = stamped(clock(cfg, msg.get('at')), f'{speaker(msg)}: {(msg.get("text") or "")[: cfg["message_cap_chars"]]}') + \
-        (' ' + ' '.join(notes) if notes else '')
+    head = stamped(clock(cfg, msg.get('at')), f'{speaker(msg)}: ')
+    tail = ' ' + ' '.join(notes) if notes else ''
+    # The message being answered may use the whole prompt budget, not just message_cap_chars (a long paste used to lose
+    # its end with no sign); older lines then get what is left. Only a message longer than that is cut, and says so.
+    room_for_text = (cfg['prompt_cap_chars'] - reserve - len(system) - len(ANSWER_LABEL) - len(RECENT_LABEL) - len(evidence) - 1
+                     - len(head) - len(tail))
+    if room_for_text < 0:
+        raise ValueError('fixed prompt and recalled evidence exceed available prompt budget')
+    wake = head + shown(msg.get('text') or '', room_for_text) + tail
     # Each kept line costs len(line) + 1; with the labels and the blank line, system + user is then at most
     # prompt_cap_chars - reserve (JX-N2: the fixed labels are counted too).
     budget = cfg['prompt_cap_chars'] - reserve - len(system) - len(wake) - len(ANSWER_LABEL) - len(RECENT_LABEL) - len(evidence) - 1
@@ -517,7 +533,7 @@ def build_prompt(cfg, history, msg, room=None, now=None, reserve=0, recalled="")
         raise ValueError('fixed prompt and recalled evidence exceed available prompt budget')
     lines = []
     for m in reversed([h for h in history if h.get('id') != msg.get('id') and h.get('at', 0) <= msg.get('at', 0)]):
-        line = stamped(ago(m.get('at'), now), f'{speaker(m)}: {(m.get("text") or "")[: cfg["message_cap_chars"]]}'
+        line = stamped(ago(m.get('at'), now), f'{speaker(m)}: {shown(m.get("text") or "", cfg["message_cap_chars"])}'
                        f'{attachment_note(m)}')
         if len(line) + 1 > budget:
             break  # FIFO: the oldest lines are the ones dropped
@@ -878,7 +894,7 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
             save_json(cfg['state_file'], state)
             room_name = cfg.get('_room_names', {}).get(room, room)
             terminal_event(cfg, 'incoming', room=room_name, sender=speaker(msg),
-                           text=(msg.get('text') or '')[:cfg['message_cap_chars']])
+                           text=shown(msg.get('text') or '', cfg['message_cap_chars']))
             try:
                 timing = []
                 if cfg.get('coding') and coding_chat.control_request(msg):
@@ -964,9 +980,10 @@ def terminal_prompt(cfg, text, history, model=chat_model, search=searxng_search)
     if text.startswith('/'):
         terminal_event(cfg, 'note', text='Unknown terminal command. Use /help.')
         return
+    # Whole, like a room message: the prompt decides what fits and says what it cuts.
     msg = {'id': 'terminal-' + str(time.time_ns()), 'at': time.time() * 1000,
-           'from': {'kind': 'user', 'name': 'You'}, 'text': text[:cfg['message_cap_chars']]}
-    terminal_event(cfg, 'incoming', room='terminal', sender='You', text=msg['text'])
+           'from': {'kind': 'user', 'name': 'You'}, 'text': text}
+    terminal_event(cfg, 'incoming', room='terminal', sender='You', text=shown(text, cfg['message_cap_chars']))
     manager = cfg.get('_coding_manager')
     if manager:
         manager.before_chat()
