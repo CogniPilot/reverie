@@ -598,6 +598,8 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
         applied: true,
         planApplied: false,
         ackAttempted: true,
+        // These historical responses were settled before archive compaction.
+        withdrawn: true,
       },
     };
     await watch.store.update((s) => {
