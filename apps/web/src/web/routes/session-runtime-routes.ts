@@ -48,7 +48,8 @@ export function runtimeView(session: Session) {
 
 export const runtimeSwitches = new Set<string>();
 
-export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session) => Promise<void>) {
+export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session) => Promise<void>,
+  stopLaptopAgent?: (sessionId: string) => Promise<unknown>, deadPaneWaitMs = 15_000) {
   const switching = runtimeSwitches;
   const authorize = (req: FastifyRequest) => req.headers['x-reverie-parent-session'] === undefined && verifiedOwner(req);
   app.post('/api/company/employees/:id/restart', async (req, reply) => {
@@ -59,6 +60,31 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (employee.onVacation) return reply.code(409).send({ success: false, error: 'Return this expert from vacation before restarting' });
     const session = ctx.sessions.get(employee.sessionId) ?? loadSession?.(employee.sessionId, req);
     if (!session) return reply.code(409).send({ success: false, error: 'No saved runtime recipe is available for this expert. Restore their runtime settings before restarting.' });
+    // A wedged agent on an isolated laptop cannot change runtime in place. With the owner's confirmed recovery, the
+    // broker stops only that agent's in-laptop process group (no exit receipt, so the laptop keeps running) and the
+    // dead-pane recovery below relaunches it with the saved recipe and thread. Raw terminal output is not counted as
+    // activity here: a stuck agent keeps redrawing its status line.
+    if (!session.hasDeadPane?.() && recovery.forceRestart && stopLaptopAgent && process.env.REVERIE_WORKER_SOCKET) {
+      if (employee.desiredRunning === false)
+        return reply.code(409).send({ success: false, error: 'Enter the office before restarting this expert' });
+      if (recovery.confirmSessionId !== session.id)
+        return reply.code(409).send({ success: false, error: 'Confirm this current expert session before recovery' });
+      if (runtimeSwitches.has(session.id) || session.runningTaskCount > 0 || session.paneDialog)
+        return reply.code(409).send({ success: false, error: 'Wait for running tasks, an open dialog or an existing restart to finish' });
+      if (session.lastSubmitAt > 0 && Date.now() - session.lastSubmitAt < 120_000)
+        return reply.code(409).send({ success: false, error: 'Input reached this expert within two minutes; wait before recovering it' });
+      runtimeSwitches.add(session.id);
+      try {
+        await stopLaptopAgent(session.id);
+        // The terminal viewer notices the dead inner pane within its two-second check and the pane here exits.
+        const deadline = Date.now() + deadPaneWaitMs;
+        while (!session.hasDeadPane?.() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+      } catch (error) {
+        return reply.code(409).send({ success: false, error: `The laptop agent could not be stopped: ${error instanceof Error ? error.message : 'unknown error'}` });
+      } finally { runtimeSwitches.delete(session.id); }
+      if (!session.hasDeadPane?.())
+        return reply.code(409).send({ success: false, error: 'The agent was stopped but its session has not reported the exit yet. Open Restart again in a moment.' });
+    }
     // Preserve saved recipe/account/thread. Normal broker J decides whether
     // to reattach a live provider or stop/settle/recreate its dead inner pane.
     if (session.hasDeadPane?.()) {

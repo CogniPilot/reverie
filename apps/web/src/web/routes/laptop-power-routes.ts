@@ -11,6 +11,13 @@ export async function laptopPower(action: PowerAction | 'status', caller?: strin
   return JSON.parse(stdout);
 }
 
+/** Stop one laptop's agent: the broker kills its inner pane's process group and leaves a dead pane for recovery. */
+export async function stopLaptopAgent(sessionId: string): Promise<Record<string, unknown>> {
+  const { stdout } = await execute('reverie-worker-exec', ['--control', 'stop-agent', '--session-id', sessionId],
+    { timeout: 30_000, maxBuffer: 64 * 1024 });
+  return JSON.parse(stdout);
+}
+
 export function registerLaptopPowerRoutes(app: FastifyInstance, deps: {
   verifiedOwner?: OwnerVerifier;
   stopIntent: () => Promise<void>;

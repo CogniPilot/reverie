@@ -11,7 +11,7 @@ import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
-import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
+import { laptopPower, registerLaptopPowerRoutes, stopLaptopAgent } from './routes/laptop-power-routes.js';
 import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
@@ -1734,7 +1734,7 @@ export class WebServer extends EventEmitter {
     }, this.companyService, async (session) => {
       await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
       await this.companyService.setDesiredRunning(session.id, true);
-    });
+    }, stopLaptopAgent);
     registerCompanyHireRoutes(this.app, {
       company: this.companyService,
       verifiedOwner,

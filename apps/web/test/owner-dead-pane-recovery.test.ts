@@ -12,7 +12,7 @@ import type {TerminalMultiplexer,MuxSession} from '../src/mux-interface.js';
 
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{vi.unstubAllEnvs();vi.restoreAllMocks();for(const clean of cleanups.splice(0).reverse())await clean();});
-async function setup(){
+async function setup(stop?:(id:string)=>Promise<unknown>,waitMs?:number){
  const dir=await mkdtemp(join(tmpdir(),'dead-pane-owner-'));cleanups.push(()=>rm(dir,{recursive:true,force:true}));
  const mux={isAvailable:()=>true,muxSessionExists:vi.fn(()=>true),isPaneDead:vi.fn(()=>true),
   respawnPane:vi.fn(async()=>42),clearPaneExit:vi.fn()};
@@ -26,7 +26,7 @@ async function setup(){
   chatrooms:{rooms:()=>[]},research:{}}as never);
  const employee=await company.hire({name:'Owned',icon:'🦉',position:'Engineer',expertise:['systems'],sessionId:session.id,researchEnabled:false}as never);
  const ctx={sessions:new Map([[session.id,session]]),persistSessionStateNow:vi.fn(),getSessionStateWithRespawn:(s:Session)=>s.toState(),broadcast:vi.fn()};
- const app=Fastify();registerSessionRuntimeRoutes(app,ctx as never,req=>req.headers.cookie==='fixture-owner=yes',undefined,company);
+ const app=Fastify();registerSessionRuntimeRoutes(app,ctx as never,req=>req.headers.cookie==='fixture-owner=yes',undefined,company,undefined,stop,waitMs);
  await app.ready();cleanups.push(()=>app.close());
  return {app,session,mux,store,company,employee,ctx,url:`/api/company/employees/${employee.id}/restart`};
 }
@@ -123,4 +123,61 @@ describe('verified owner dead-pane recovery',()=>{
   expect(worker.company.view().employees[0].desiredRunning).toBe(true);
  });
 
+});
+
+describe('verified owner recovery of a wedged laptop agent (stop-agent)',()=>{
+ // A live but stuck laptop agent: no task, not working, last input long ago, yet its status line keeps redrawing.
+ async function wedged(stopImpl?:(f:Awaited<ReturnType<typeof setup>>)=>Promise<unknown>,waitMs?:number){
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/run/fixture/broker.sock');
+  let f!:Awaited<ReturnType<typeof setup>>;
+  const stop=vi.fn(async(id:string)=>{expect(id).toBe(f.session.id);return stopImpl?stopImpl(f):(f.mux.isPaneDead.mockReturnValue(true),{stopped:true});});
+  f=await setup(stop,waitMs);f.mux.isPaneDead.mockReturnValue(false);
+  vi.spyOn(f.session,'isBusy').mockReturnValue(true);
+  vi.spyOn(f.session,'lastActivityAt','get').mockReturnValue(Date.now());
+  vi.spyOn(f.session,'lastSubmitAt','get').mockReturnValue(Date.now()-3*3600_000);
+  const recover=vi.spyOn(f.session,'restartDeadCli').mockResolvedValue(true);
+  return {...f,stop,recover};
+ }
+ const confirm=(f:{session:Session})=>({forceRestart:true,confirmSessionId:f.session.id});
+ it('stops only that agent through the broker, then relaunches it through dead-pane recovery',async()=>{
+  const f=await wedged();expect(f.session.hasDeadPane()).toBe(false);
+  const response=await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  expect(response.statusCode,response.body).toBe(200);expect(response.json().data.recovery).toBe('normal-launch-requested');
+  expect(f.stop).toHaveBeenCalledOnce();expect(f.recover).toHaveBeenCalledOnce();
+ });
+ it('never stops an agent without the owner confirming this exact session',async()=>{
+  const f=await wedged();
+  for(const payload of [{},{forceRestart:true},{forceRestart:true,confirmSessionId:'other'}])
+   expect((await f.app.inject({method:'POST',url:f.url,headers,payload})).statusCode).toBe(409);
+  expect((await f.app.inject({method:'POST',url:f.url,payload:confirm(f)})).statusCode).toBe(403);
+  expect(f.stop).not.toHaveBeenCalled();expect(f.recover).not.toHaveBeenCalled();
+ });
+ it.each(['task','dialog','recent-input','off']as const)('refuses before stopping when %s',async kind=>{
+  const f=await wedged();
+  if(kind==='task')vi.spyOn(f.session,'runningTaskCount','get').mockReturnValue(1);
+  if(kind==='dialog')vi.spyOn(f.session,'paneDialog','get').mockReturnValue('permission');
+  if(kind==='recent-input')vi.spyOn(f.session,'lastSubmitAt','get').mockReturnValue(Date.now()-30_000);
+  if(kind==='off')await f.company.setDesiredRunning(f.session.id,false);
+  expect((await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)})).statusCode).toBe(409);
+  expect(f.stop).not.toHaveBeenCalled();expect(f.recover).not.toHaveBeenCalled();
+ });
+ it('reports a broker refusal and lets the owner try again',async()=>{
+  const f=await wedged(async()=>{throw new Error('Laptop pane state is unavailable; nothing was stopped');});
+  const response=await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  expect(response.statusCode).toBe(409);expect(response.json().error).toContain('nothing was stopped');
+  expect(f.recover).not.toHaveBeenCalled();
+  f.stop.mockImplementation(async()=>{f.mux.isPaneDead.mockReturnValue(true);return {stopped:true};});
+  expect((await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)})).statusCode).toBe(200);
+ });
+ it('does not relaunch until the session itself reports the dead pane',async()=>{
+  const f=await wedged(async()=>({stopped:true}),300);
+  const response=await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  expect(response.statusCode).toBe(409);expect(response.json().error).toContain('has not reported the exit');
+  expect(f.recover).not.toHaveBeenCalled();
+ });
+ it('is not used without the host laptop manager',async()=>{
+  const f=await wedged();vi.stubEnv('REVERIE_WORKER_SOCKET','');
+  await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
+  expect(f.stop).not.toHaveBeenCalled();
+ });
 });

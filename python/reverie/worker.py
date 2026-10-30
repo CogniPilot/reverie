@@ -1332,6 +1332,39 @@ class Broker:
         self.offices.update(created)
         self.laptops=recovered
 
+    def stop_agent(self, session_id):
+        """Owner stop of one laptop's agent: kill its inner pane's whole process group (wrapper, provider and relays
+        share it), so no exit receipt is written and the pane reads dead. Normal J then replaces the dead pane on the
+        same laptop, keeping its storage. The laptop itself keeps running. Processes the agent moved into a session of
+        their own (setsid) are outside the group and are not stopped."""
+        if type(session_id) is not str or not SESSION.fullmatch(session_id):
+            raise ValueError('Invalid session')
+        with self.lock:
+            name = self.laptops.get(session_id)
+        if name is None:
+            raise RuntimeError('This expert has no running laptop')
+        def pane():
+            state = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead} #{pane_pid}'), optional=True)
+            fields = state.stdout.split() if state.returncode == 0 else []
+            if len(fields) != 2 or fields[0] not in ('0', '1') or not fields[1].isdigit() or int(fields[1]) <= 1:
+                raise RuntimeError('Laptop pane state is unavailable; nothing was stopped')
+            return fields[0] == '1', int(fields[1])
+        dead, pid = pane()
+        if dead:
+            return {'action': 'stop-agent', 'success': True, 'stopped': False, 'paneDead': True}
+        # As the laptop's own user (the container user), never root: it may signal only its own processes.
+        self.run_engine(['exec', name, '/bin/bash', '-c', 'kill -KILL -- "-$1"', 'stop-agent', str(pid)])
+        deadline = time.monotonic() + 5
+        while True:
+            dead, current = pane()
+            if dead and current == pid:
+                return {'action': 'stop-agent', 'success': True, 'stopped': True, 'paneDead': True}
+            if current != pid:
+                raise RuntimeError('Laptop pane changed during stop; reconnect before restarting')
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Laptop agent did not stop; nothing else was changed')
+            time.sleep(0.1)
+
     def stop_laptops(self):
         # Same admission -> broker -> journal ordering as launch/reload. Never
         # acquire the global allocation lock while holding the broker mutex.
@@ -1657,6 +1690,12 @@ class Broker:
                     result = gpu_dispatch(self, gpu_decode(raw))
                     send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
                     return
+                if isinstance(control, dict) and control.get('action') == 'stop-agent':
+                    # Website owner path only: exactly one session, no maintenance caller.
+                    if set(control) != {'action', 'sessionId'}:
+                        raise ValueError('Invalid stop-agent request')
+                    send_frame(connection, b'J', json.dumps(self.stop_agent(control['sessionId'])).encode())
+                    return
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
                     raise ValueError('Invalid office power request')
                 result = self.control(control['action'], control.get('caller'))
@@ -1930,7 +1969,9 @@ class Broker:
                         finish_retained(self.config, paths, retention_ready,
                                         lambda: self.confirm_retained_temporary(paths, retention_ready, retention_container_id))
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
-                    self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
+                    # remain-on-exit in the same tmux command: a wrapper that dies (or an owner stop-agent)
+                    # leaves a dead pane that canonical J can see and replace, instead of a vanished server.
+                    self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name, ';', 'set-option', '-g', 'remain-on-exit', 'on'))
                     self.run_engine(tmux_exec_args(name, 'set-option', '-g', 'status', 'off'))
                     if _resource_launch is not None:
                         from reverie.worker_resource_native import record_cli_started
@@ -2273,7 +2314,12 @@ def client(args):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(120)
             connection.connect(path)
-            send_frame(connection, b'C', json.dumps({'action': args.control, **({'caller': args.caller_session} if args.caller_session else {})}).encode())
+            if args.control == 'stop-agent':
+                if args.caller_session or not SESSION.fullmatch(args.session_id or '') or args.cwd or args.command:
+                    raise ValueError('stop-agent takes exactly --session-id')
+                send_frame(connection, b'C', json.dumps({'action': 'stop-agent', 'sessionId': args.session_id}).encode())
+            else:
+                send_frame(connection, b'C', json.dumps({'action': args.control, **({'caller': args.caller_session} if args.caller_session else {})}).encode())
             kind, payload = receive_frame(connection)
             if kind != b'J':
                 raise RuntimeError(payload.decode() if kind == b'E' else 'Office power request failed')
@@ -2362,7 +2408,7 @@ def main():
     serve = commands.add_parser('broker')
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
-    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
+    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources', 'stop-agent'])
     execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
     execute.add_argument('--caller-session')
     execute.add_argument('--attach-only', action='store_true')
