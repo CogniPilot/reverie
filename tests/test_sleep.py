@@ -594,7 +594,7 @@ class EmployeeTest(unittest.TestCase):
 
 
 class InstanceEmployeeIdTest(unittest.TestCase):
-    """Regression (card i-27c1acf5): instance files gained employee_id on 10-19 and every agent's tick
+    """Regression: instance files gained employee_id on 10-19 and every agent's tick
     failed with error_ValueError from the instance loader before its store was opened."""
 
     def instance(self, tmp, **extra):
