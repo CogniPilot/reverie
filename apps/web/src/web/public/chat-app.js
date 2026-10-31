@@ -36,6 +36,8 @@ function chatBadgeCount(n) {
 
 /** At or below this window width a profile card is a bottom sheet; the card is this wide (matches `.ca-profile` in the CSS). */
 const CA_SHEET_MAX_WIDTH = 767;
+/** At most this many messages are picked for one group delete. */
+const CA_DELETE_SELECTION_MAX = 100;
 const CA_CARD_WIDTH = 280;
 
 /** Plain words for the reasons an owner's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
@@ -1904,6 +1906,7 @@ class ReverieChatApp {
     input.addEventListener('input', () => this.fitInput());
     this.installMentions();
     this.installReply();
+    this.installDeleteSelection();
     this.installTyping();
     this.installComposerChrome();
     // Scrolling to the newest message is what reads it.
@@ -4395,7 +4398,10 @@ class ReverieChatApp {
     const lead = room?.members.find((x) => x.sessionId === room?.coordinatorId);
     const reportable = lead && m.from.kind === 'agent' && m.from.sessionId !== lead.sessionId && !caIsDm(room);
     if (this.serverFeatures.deletes || reportable) out.push({ sep: true });
-    if (this.serverFeatures.deletes) out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
+    if (this.serverFeatures.deletes) {
+      out.push({ label: this.deleteSelection?.has(m.id) ? 'Unselect' : 'Select for deleting', run: () => this.toggleDeleteSelection(m) });
+      out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
+    }
     if (reportable) out.push({ label: 'Report message', danger: true, run: () => this.openReportDialog(m, lead) });
     return out;
   }
@@ -4891,6 +4897,93 @@ class ReverieChatApp {
     bar.append(label, this.el('span', 'ca-spacer'));
     bar.append(this.button('ca-icon-btn ca-reply-close', 'Cancel reply', () => this.cancelReply(), { text: '\u2715' }));
     this.app._chatEls.feed.querySelector(`[data-msg-id="${CSS.escape(r.id)}"]`)?.classList.add('is-replying');
+  }
+
+  /** Messages picked for a group delete (Ctrl- or Cmd-click, or "Select for deleting"), with a bar over the message box. */
+  installDeleteSelection() {
+    const input = this.app._chatEls.input;
+    const bar = this.el('div', 'ca-select-bar');
+    bar.hidden = true;
+    bar.setAttribute('role', 'region');
+    bar.setAttribute('aria-label', 'Selected messages');
+    this.els.selectBar = bar;
+    input.parentNode.insertBefore(bar, input.parentNode.firstChild);
+    this.deleteSelection = new Set();
+    this.deleteSelectionRoom = null;
+    this.doc.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !this.deleteSelection.size || e.defaultPrevented || this.doc.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      this.clearDeleteSelection();
+    });
+  }
+
+  toggleDeleteSelection(m) {
+    if (this.deleteSelectionRoom !== this.roomId) {
+      this.deleteSelection.clear();
+      this.deleteSelectionRoom = this.roomId;
+    }
+    if (this.deleteSelection.has(m.id)) this.deleteSelection.delete(m.id);
+    else if (this.deleteSelection.size >= CA_DELETE_SELECTION_MAX) return this.toast(`Select at most ${CA_DELETE_SELECTION_MAX} messages at a time.`, 'info');
+    else this.deleteSelection.add(m.id);
+    this.renderSelectBar();
+  }
+
+  clearDeleteSelection() {
+    this.deleteSelection.clear();
+    this.renderSelectBar();
+  }
+
+  /** Marks the picked messages and shows the bar. A pick only lasts in its own room, and only while the message is there. */
+  renderSelectBar() {
+    const bar = this.els.selectBar;
+    if (!bar || !this.deleteSelection) return;
+    if (this.deleteSelectionRoom !== this.roomId) this.deleteSelection.clear();
+    const live = new Set((this.room?.messages || []).filter((x) => !x.deleted).map((x) => x.id));
+    for (const id of [...this.deleteSelection]) if (!live.has(id)) this.deleteSelection.delete(id);
+    for (const node of this.app._chatEls.feed.querySelectorAll('.ca-msg')) {
+      const on = this.deleteSelection.has(node.dataset.msgId);
+      node.classList.toggle('is-delete-selected', on);
+      if (on) node.setAttribute('aria-selected', 'true');
+      else node.removeAttribute('aria-selected');
+    }
+    const n = this.deleteSelection.size;
+    bar.hidden = !n;
+    bar.replaceChildren();
+    if (!n) return;
+    const plural = n === 1 ? 'message' : 'messages';
+    bar.append(this.el('span', 'ca-select-count', `${n} ${plural} selected`), this.el('span', 'ca-spacer'),
+      this.button('ca-btn is-danger', `Delete ${n} selected ${plural}`, () => this.deleteSelected(), { text: 'Delete selected' }),
+      this.button('ca-btn', 'Clear the selection', () => this.clearDeleteSelection(), { text: 'Clear' }));
+  }
+
+  /** One confirmation, then each picked message through the same delete as one at a time: its own permission check and audit record. */
+  async deleteSelected() {
+    const ids = [...this.deleteSelection];
+    if (!ids.length || this._deletingSelection) return;
+    const many = ids.length === 1 ? 'this message' : `these ${ids.length} messages`;
+    if (!this.doc.defaultView?.confirm(`Delete ${many}? They are hidden for everyone in the channel and kept in an audit log, where each can be restored. Agents that already received them still have them.`)) return;
+    this._deletingSelection = true;
+    const roomId = this.roomId;
+    const failed = [];
+    let deleted = 0;
+    try {
+      for (const id of ids) {
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (res.ok) {
+          deleted++;
+          this.deleteSelection.delete(id);
+          if (this.replyTo?.id === id) this.cancelReplySilently();
+        } else failed.push(res.error || 'refused');
+      }
+    } finally { this._deletingSelection = false; }
+    if (this.roomId === roomId) {
+      await this.app._loadChatRoom(roomId, { quiet: true });
+      this.renderAll();
+      this.renderFeed();
+    }
+    // What could not be deleted stays selected, so it can be tried again or cleared.
+    if (failed.length) this.toast(`Deleted ${deleted} of ${ids.length}. ${failed.length} could not be deleted: ${failed[0]}`, 'error');
+    else this.toast(`Deleted ${deleted} ${deleted === 1 ? 'message' : 'messages'}.`, 'info');
   }
 
   async deleteMessage(m) {
@@ -9653,6 +9746,12 @@ class ReverieChatApp {
     el.tabIndex = 0;
     // Right-click, or a long press on a phone, opens the message's actions (a bottom sheet on a phone).
     if (!m.deleted && !m.external) this.wireMessageMenu(el, m);
+    // Ctrl-click (Cmd-click on a Mac) picks the message for a group delete; links, buttons and fields keep their own click.
+    if (!m.deleted && !m.external && this.serverFeatures.deletes) el.addEventListener('click', (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.target?.closest?.('a, button, input, textarea, select, summary, [contenteditable="true"]')) return;
+      ev.preventDefault();
+      this.toggleDeleteSelection(m);
+    });
     el.setAttribute('role', 'article');
     const gutter = this.el('div', 'ca-msg-gutter');
     const name = this.authorOf(m.from);
@@ -9736,6 +9835,7 @@ class ReverieChatApp {
     this.app._chatPendingDraw?.();
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
     this._feedStick = !(keepScroll && !pinned);
+    this.renderSelectBar?.();
     this.markReadSoon();
   }
 
