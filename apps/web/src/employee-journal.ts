@@ -202,6 +202,8 @@ CREATE INDEX IF NOT EXISTS journal_imports_employee ON journal_imports(owner, em
 
 /** Private (the saver's own) unless it names a project; a project entry is readable by every employee of the owner. */
 export interface JournalSaveInput { roomId: string; turnId: string; draft: unknown; project?: string }
+/** One current (not superseded) entry chosen for an employee's brief: its own account, never re-checked here. */
+export interface JournalHighlight { entryId: number; committedAt: string; importance?: string; text: string }
 export interface JournalSaveResult { status: 'committed'; entryId: number; turnId: string; replayed: boolean; payloadSha256: string; gates: JournalGate[]; sources: JournalSourceCheck[] }
 
 export class EmployeeJournalStore {
@@ -454,6 +456,16 @@ export class EmployeeJournalStore {
       used += size;
     }
     return views;
+  }
+
+  /**
+   * The employee's most important current entries, for its room brief: the same choice as the session brief (superseded
+   * and imported entries left out, keystone first, newest first within a level), without tags.
+   */
+  highlights(owner: string, employeeId: string, limit = 5): JournalHighlight[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10) throw invalid('limit must be 1 to 10');
+    return this.brief(owner, employeeId, limit).entries.map(({ entryId, committedAt, importance, text }) =>
+      ({ entryId, committedAt, ...(importance ? { importance } : {}), text }));
   }
 
   /** One page of headers, newest first. `more` marks truncation; it is not a count. */
