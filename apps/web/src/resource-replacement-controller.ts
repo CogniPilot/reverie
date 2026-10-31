@@ -44,6 +44,8 @@ export class ResourceReplacementController {
   readonly #sessions: SessionPort;
   readonly #mux: TerminalMultiplexer;
   readonly #socket: string | undefined;
+  readonly #inflight = new Set<string>();
+  readonly #applying = new Set<string>();
   readonly #previews = new Map<string, Preview>();
   readonly #operations = new Map<string, {owner: string | undefined; runtime: ResourceReplacementRuntime}>();
   constructor(app: FastifyInstance, auth: OwnerAuthService, company: CompanyService, plans: PlanService,
@@ -71,7 +73,8 @@ export class ResourceReplacementController {
   }
   async preview(request: FastifyRequest, employeeId: string, memoryMiB: number): Promise<Readonly<Record<string, unknown>>> {
     UUID.parse(employeeId); Memory.parse(memoryMiB); const context = this.#authority.capturePreview(request, employeeId);
-    need(this.#socket && this.#previews.size < 256);
+    need(this.#socket && this.#previews.size < 256 && !this.#applying.has(employeeId));
+    need((await this.operations(request, employeeId)).every(row => ['completed', 'not-started'].includes(row.phase)));
     const executor = planMoveExecutor(this.#runtime(request, context), context.owner);
     const before = await executor.snapshot(employeeId, context.owner, 'runtime-refresh');
     need(!before.working && before.runtimeDigest && ['claude','codex'].includes(before.mode ?? ''));
@@ -97,9 +100,21 @@ export class ResourceReplacementController {
     const preview = this.#previews.get(previewId); need(preview && !preview.attempted && this.#socket);
     const context = this.#authority.capture(request, preview.approval);
     this.#authority.assertSameSession(preview.context, context);
-    preview.attempted = true; // No silent replay after connection/claim uncertainty.
-    const native = await ResourceNativeClient.open(this.#socket, this.#authority, context);
+    need(!this.#applying.has(preview.approval.employeeId));
+    this.#applying.add(preview.approval.employeeId);
+    preview.attempted = true; // One dispatch attempt even when its reply is lost.
+    const operationId = preview.approval.operationId;
+    let native: ResourceNativeClient | undefined, registered = false, dispatching = false;
+    this.#inflight.add(operationId);
     try {
+      const history = await this.operations(request, preview.approval.employeeId);
+      need(history.every(row => ['completed', 'not-started'].includes(row.phase)));
+      await this.#store.resourceAttemptStart(operationId, preview.approval.employeeId, context.owner,
+        history.filter(row => row.phase === 'completed').map(row => row.id));
+      registered = true;
+      // Handshake, binding and snapshot are effect-free. Persist the next
+      // boundary before begin(), whose durable move precedes every native claim.
+      native = await ResourceNativeClient.open(this.#socket, this.#authority, context);
       const binding = this.#authority.bind(context);
       const resources = new ResourceReplacementRuntime(binding, preview.approval, native,
         preview.publication, this.#sessions, this.#company, this.#store, this.#mux);
@@ -107,6 +122,8 @@ export class ResourceReplacementController {
       const snapshot = await executor.snapshot(preview.approval.employeeId, context.owner, 'runtime-refresh');
       need(JSON.stringify(snapshot) === JSON.stringify(preview.snapshot));
       this.#operations.set(preview.approval.operationId, {owner: context.owner, runtime: resources});
+      await this.#store.resourceAttemptPhase(operationId, context.owner, 'dispatching');
+      dispatching = true;
       return await this.#moves.begin({id: preview.approval.operationId, employeeId: preview.approval.employeeId,
         sessionId: snapshot.sessionId, fromAccount: snapshot.account, toAccount: snapshot.account,
         forceBusy: false, handoff: handoff.trim(), purpose: 'runtime-refresh', runtimeDigest: snapshot.runtimeDigest,
@@ -114,7 +131,30 @@ export class ResourceReplacementController {
           reservationId: preview.approval.reservationId, profileVersion: preview.approval.profileVersion,
           profileDigest: preview.approval.profileDigest, previewDigest: preview.approval.previewDigest}},
         context.owner, executor, binding);
-    } catch (error) {native.close(); throw error;}
+    } catch (error) {
+      native?.close();
+      if (registered && !dispatching) {
+        // A known pre-begin refusal is recoverable, not a permanent unknown.
+        // Failed receipt publication stays unknown; absence never proves this.
+        try {await this.#store.resourceAttemptPhase(operationId, context.owner, 'not-started');} catch { /* retain uncertainty */ }
+      }
+      throw error;
+    } finally {
+      this.#inflight.delete(operationId); this.#applying.delete(preview.approval.employeeId);
+    }
+  }
+  async operations(request: FastifyRequest, employeeId: string): Promise<Array<{id: string; employeeId: string; phase: string}>> {
+    UUID.parse(employeeId);
+    const owner = this.#authority.requestOwner(request);
+    need(this.#company.view(owner).employees.some(row => row.id === employeeId));
+    const records = (await this.#moves.list(owner)).filter(row => row.employeeId === employeeId && row.resourceIntent);
+    const attempts = (await this.#store.resourceAttempts(owner)).filter(row => row.employeeId === employeeId);
+    need(this.#authority.requestOwner(request) === owner);
+    const rows = new Map(records.map(row => [row.id, {id: row.id, employeeId, phase: row.phase as string}]));
+    for (const attempt of attempts) if (!rows.has(attempt.operationId)) rows.set(attempt.operationId,
+      {id: attempt.operationId, employeeId, phase: attempt.phase === 'not-started' ? 'not-started' :
+        attempt.phase === 'preparing' && this.#inflight.has(attempt.operationId) ? 'preparing' : 'unknown'});
+    return [...rows.values()];
   }
   async result(request: FastifyRequest, operationId: string): Promise<unknown> {
     UUID.parse(operationId);
@@ -122,7 +162,15 @@ export class ResourceReplacementController {
     const owner = this.#authority.requestOwner(request);
     const current = this.#operations.get(operationId);
     let record = await this.#moves.get(operationId, owner);
-    need(record?.resourceIntent);
+    if (!record) {
+      const attempts = await this.#store.resourceAttempts(owner);
+      const attempt = attempts.find(row => row.operationId === operationId);
+      need(attempt && this.#authority.requestOwner(request) === owner);
+      return {id: operationId, employeeId: attempt.employeeId,
+        phase: attempt.phase === 'not-started' ? 'not-started' :
+          attempt.phase === 'preparing' && this.#inflight.has(operationId) ? 'preparing' : 'unknown'};
+    }
+    need(record.resourceIntent);
     need(this.#authority.requestOwner(request) === owner && record.owner === owner);
     if (['completed','failed','recovery-required'].includes(record.phase)) current?.runtime.close();
     if (record.phase === 'recovery-required') {
@@ -163,6 +211,11 @@ export function registerResourceReplacementRoutes(app: FastifyInstance, controll
     reply.header('Cache-Control','no-store');
     const body = z.object({previewId: UUID, handoff: z.string().trim().min(1).max(12000)}).strict().parse(request.body);
     return execute(reply, () => controller.apply(request, body.previewId, body.handoff));
+  });
+  app.post('/api/company/resources/operations', async (request, reply) => {
+    reply.header('Cache-Control','no-store');
+    const body = z.object({employeeId: UUID}).strict().parse(request.body);
+    return execute(reply, () => controller.operations(request, body.employeeId));
   });
   app.post('/api/company/resources/result', async (request, reply) => {
     reply.header('Cache-Control','no-store');
