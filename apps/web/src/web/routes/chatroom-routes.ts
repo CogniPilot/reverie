@@ -145,7 +145,7 @@ export function registerChatroomRoutes(
   roles: RolesStore = new RolesStore(''),
   /** A session id to its company employee id, if it has one. */
   employeeOf: (sessionId: string) => string | undefined = () => undefined,
-  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; messageOwner?: (humanId: string | undefined) => boolean; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
+  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; humanNames?: (room: ChatRoom) => readonly string[]; messageOwner?: (humanId: string | undefined) => boolean; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
 ): void {
   /** The session this request speaks as, or undefined for the user. */
   const caller = (req: FastifyRequest): string | undefined =>
@@ -1412,6 +1412,8 @@ export function registerChatroomRoutes(
           });
         }
       }
+      // Resolve fresh permitted names before the post, so a failed metadata read cannot hide a stored message.
+      const humanNames = host.humanNames?.(room) ?? [];
       const message = service.post(id, from, text, to, {
         ...spoken,
         attachments,
@@ -1421,7 +1423,8 @@ export function registerChatroomRoutes(
       const warnings = postWarnings(
         room,
         body.text,
-        room.members.map((m) => service.nameOf(m.sessionId)),
+        // Permitted humans are ordinary mention names, separate from owner authority and pane recipients.
+        [...room.members.map((m) => service.nameOf(m.sessionId)), ...humanNames],
         service.ownerNames(room.owner),
         // Only an agent has a "last seen"; the service knows the newest message that member has seen here.
         self ? newerUnread(room.messages, self, service.lastSeen(self, id), service.ownerNames(room.owner)[0]) : null

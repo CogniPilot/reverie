@@ -6,13 +6,16 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
+import { OfficeAuthService } from '../../src/owner-auth/office.js';
+import { OwnerAuthStore } from '../../src/owner-auth/store.js';
+import { bootstrap } from '../../src/owner-auth/admin.js';
 
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
@@ -24,6 +27,7 @@ describe('post warnings', () => {
   let ctx: MockRouteContext;
   let service: ChatroomService;
   let clock: number;
+  let people: OfficeAuthService;
 
   const panes = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
   const text = (id: string) => panes(id).join('');
@@ -32,9 +36,13 @@ describe('post warnings', () => {
   beforeEach(async () => {
     clock = 1_000_000;
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
+    const owner = new OwnerAuthStore(join(dirname(file), 'owner-auth.json'));
+    await bootstrap(owner, 'fixture-owner', { enforce: true, now: clock });
+    people = new OfficeAuthService({ store: owner, auditFile: join(dirname(file), 'audit.jsonl'), now: () => clock });
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner,
+        undefined, undefined, { humanNames: (room) => people.members(room).map((person) => person.name) });
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -92,6 +100,61 @@ describe('post warnings', () => {
     expect(res.json().data.warnings).toBeUndefined();
   });
 
+  it('accepts an offline permitted limited human mention without changing owner or agent identity', async () => {
+    const id = await room();
+    const { person } = await people.create({ username: 'river-fixture', name: 'River', role: 'limited', rooms: [id] });
+    const ownerNames = service.ownerNames();
+    expect(people.members(service.room(id)!).find((p) => p.id === person.id)?.online).toBe(false);
+    const res = await post(id, '@River please review @alpha', A);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.warnings).toBeUndefined();
+    expect(res.json().data.message.from).toMatchObject({ kind: 'agent', sessionId: A });
+    expect(service.ownerNames()).toEqual(ownerNames);
+    expect(service.ownerNames()).not.toContain('River');
+    expect(service.room(id)!.members.some((m) => m.sessionId === person.id)).toBe(false);
+    expect(ctx.sessions.has(person.id)).toBe(false);
+  });
+
+  it('keeps unknown names distinct from a permitted human', async () => {
+    const id = await room();
+    await people.create({ username: 'river-fixture', name: 'River', role: 'limited', rooms: [id] });
+    const res = await post(id, '@River and @Nobody please review', A);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.warnings.map((w: { names: string[] }) => w.names)).toEqual([['Nobody']]);
+  });
+
+  it('rechecks current room grants and excludes revoked or cross-room human names', async () => {
+    const id = await room('Office'), other = await room('Elsewhere');
+    const { person } = await people.create({ username: 'river-fixture', name: 'River', role: 'limited', rooms: [id] });
+    expect((await post(id, '@River', A)).json().data.warnings).toBeUndefined();
+    expect((await post(other, '@River', A)).json().data.warnings[0].names).toEqual(['River']);
+    await people.update(person.id, { rooms: [other] });
+    expect((await post(id, '@River', A)).json().data.warnings[0].names).toEqual(['River']);
+    expect((await post(other, '@River', A)).json().data.warnings).toBeUndefined();
+    await people.update(person.id, { disabled: true });
+    expect((await post(other, '@River', A)).json().data.warnings[0].names).toEqual(['River']);
+  });
+
+  it('does not recognize human names from another owned room', async () => {
+    const id = await room();
+    await people.create({ username: 'river-fixture', name: 'River', role: 'limited', rooms: [id] });
+    const owned = service.room(id)!;
+    owned.owner = 'another-owner';
+    expect(people.members(owned)).toEqual([]);
+    const res = await post(id, '@River', A);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.warnings[0].names).toEqual(['River']);
+  });
+
+  it('does not store a message when permitted human metadata cannot be read', async () => {
+    const id = await room();
+    const count = service.room(id)!.messages.length;
+    people.members = () => { throw Error('Owned metadata failure'); };
+    const res = await post(id, '@River', A);
+    expect(res.statusCode).toBe(500);
+    expect(service.room(id)!.messages).toHaveLength(count);
+  });
+
   it('tells the writer @all and @here no longer notify anyone, and to use @everyone', async () => {
     const id = await room();
     const res = await post(id, '@all heads up, @HERE too', A);
@@ -110,6 +173,28 @@ describe('post warnings', () => {
     const res = await post(id, '@all and @HERE, please look', A);
     expect(res.statusCode).toBe(200);
     expect(res.json().data.warnings).toBeUndefined();
+  });
+
+  it('deconflicts permitted human All/Here names just like agent member names', async () => {
+    const id = await room();
+    const postAliases = () => post(id, '@all and @HERE, please look', A);
+    const namesBefore = service.ownerNames();
+    expect((await postAliases()).json().data.warnings[0].names).toEqual(['all', 'here']);
+    const all = await people.create({ username: 'human-all', name: 'All', role: 'limited', rooms: [id] });
+    expect((await postAliases()).json().data.warnings[0].names).toEqual(['here']);
+    const here = await people.create({ username: 'human-here', name: 'Here', role: 'limited', rooms: [id] });
+    const human = await postAliases();
+    expect(human.statusCode).toBe(200);
+    expect(human.json().data.warnings).toBeUndefined();
+    await people.update(all.person.id, { rooms: [] });
+    await people.update(here.person.id, { rooms: [] });
+    expect((await postAliases()).json().data.warnings[0].names).toEqual(['all', 'here']);
+    (ctx.sessions.get(C) as unknown as { name: string }).name = 'All';
+    (ctx.sessions.get(B) as unknown as { name: string }).name = 'Here';
+    const agent = await postAliases();
+    expect(agent.statusCode).toBe(200);
+    expect(agent.json().data.warnings).toEqual(human.json().data.warnings);
+    expect(service.ownerNames()).toEqual(namesBefore);
   });
 
   it('warns the owner too, and lists several names in one line', async () => {

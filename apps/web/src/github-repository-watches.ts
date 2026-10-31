@@ -1,7 +1,8 @@
 /** Owner-selected fixed GET watchers; durable reservations and legacy cursor adoption, no model/shell jobs. */
 import { z } from 'zod';
 import { performance } from 'node:perf_hooks';
-import { BotWatchState, BotWatchPostRefused } from './bot-watch-state.js';
+import { createHash } from 'node:crypto';
+import { BotWatchState, BotWatchPostRefused, BOT_WATCH_MAX_STATE_BYTES } from './bot-watch-state.js';
 import { PublicIssueWatch } from './cron/public-issue-watch.js';
 import type { ChatBot } from './chat-bots.js';
 import type { ChatRoom, ChatMessage } from './chatroom-store.js';
@@ -15,8 +16,10 @@ import {
   type WatchConfig,
   type ScanState,
   type Reply,
+  type WatchEvent,
 } from './github-repository-watch-source.js';
 export { GithubWatchConfig };
+const batchSchema = z.object({ id: z.string().length(32), text: z.string().max(5000) }).strict();
 const scanSchema = z
   .object({
     issueCursor: z.string().max(40).optional(),
@@ -52,6 +55,17 @@ const slotSchema = z
         next: scanSchema,
         phase: z.enum(['prepared', 'reserved', 'delivered', 'unknown']),
         messageId: z.string().max(100).optional(),
+        remaining: z.array(batchSchema).max(5999).optional(),
+        configDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        credentialDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        scannedAt: z.number().int().nonnegative().optional(),
+        createdSince: z.number().int().nonnegative().optional(),
       })
       .strict()
       .optional(),
@@ -65,6 +79,12 @@ const stateSchema = z
     slots: z.record(z.string(), slotSchema).refine((x) => Object.keys(x).length <= 32),
   })
   .strict();
+type PreparedCancellation = {
+  kind: 'github-watch-prepared-cancelled';
+  id: string;
+  generation: number;
+  pending: NonNullable<z.infer<typeof slotSchema>['pending']>;
+};
 export const GithubWatchCollectionInput = z
   .object({
     version: z.literal(1),
@@ -89,6 +109,26 @@ const SCAN_BUDGET_MS = 60_000;
 const need = (ok: unknown, code: string) => {
   if (!ok) throw new GithubWatchError(code);
 };
+/** Freeze every observed revision before dispatch; the existing 4MiB store bounds the whole spool. */
+function batches(config: WatchConfig, generation: number, events: WatchEvent[]) {
+  need(events.length <= 6000, 'STATE_CAPACITY');
+  const render = (rows: WatchEvent[]) => {
+    const id = fingerprint([config.id, generation, rows]).slice(0, 32);
+    return { id, text: `[github-watch:${id}] ${config.owner}/${config.repo}\n` + rows.map((e) => e.text).join('\n') };
+  };
+  const result: z.infer<typeof batchSchema>[] = [];
+  let chunk: WatchEvent[] = [];
+  for (const event of events) {
+    const candidate = [...chunk, event];
+    if (chunk.length && (candidate.length > 30 || render(candidate).text.length > 5000)) {
+      result.push(render(chunk));
+      chunk = [event];
+    } else chunk = candidate;
+    need(render(chunk).text.length <= 5000, 'CHANGE_BATCH_BOUND');
+  }
+  if (chunk.length) result.push(render(chunk));
+  return result;
+}
 /** Raw response stays bounded and never reaches error/status logs. Redirects never receive credentials. */
 async function request(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<Reply> {
   const r = await fetch(url, { method: 'GET', headers, signal, redirect: 'error', credentials: 'omit' });
@@ -227,7 +267,7 @@ export class GithubRepositoryWatches {
           lastSuccessAt: x.lastSuccessAt ?? null,
           nextPollAt: x.nextPollAt,
           failures: x.failures,
-          pendingCount: x.pending ? 1 : 0,
+          pendingCount: x.pending ? 1 + (x.pending.remaining?.length ?? 0) : 0,
           lastError: x.lastError ?? null,
           legacyAdopted: x.legacyAdopted,
           ciCoverage: {
@@ -284,12 +324,39 @@ export class GithubRepositoryWatches {
       };
       material = await this.deps.credentials!.material(undefined, c.credentialId, validate);
       await revalidate();
-      return { material, revalidate };
+      return { material, revalidate, binding };
     } catch (error) {
       material?.fill(0);
       if (error instanceof GithubWatchError) throw error;
       throw new GithubWatchError('AUTH_REQUIRED');
     }
+  }
+  private async archiveCancellation(record: PreparedCancellation) {
+    const bytes = Buffer.from(JSON.stringify(record));
+    // Preserve small legacy records exactly; the generic archive's per-call/line cap stays 2MiB.
+    if (Buffer.byteLength(JSON.stringify({ version: 1, record }) + '\n') <= 2 * 1024 * 1024) {
+      await this.store.archive([record]);
+      return;
+    }
+    need(bytes.length <= BOT_WATCH_MAX_STATE_BYTES, 'SPOOL_CAPACITY');
+    const partBytes = 256 * 1024,
+      partCount = Math.ceil(bytes.length / partBytes),
+      recordSHA256 = createHash('sha256').update(bytes).digest('hex');
+    for (let partIndex = 0; partIndex < partCount; partIndex++)
+      await this.store.archive([
+        {
+          kind: 'github-watch-prepared-cancelled-fragment',
+          version: 1,
+          id: record.id,
+          generation: record.generation,
+          recordSHA256,
+          recordBytes: bytes.length,
+          partIndex,
+          partCount,
+          payload: bytes.subarray(partIndex * partBytes, (partIndex + 1) * partBytes).toString('base64'),
+        },
+      ]);
+    // Init validates framing only. A partial frame group never replaces the original primary pending record.
   }
   async configure(raw: unknown, validate: () => void = () => {}) {
     const check = () => {
@@ -366,7 +433,7 @@ export class GithubRepositoryWatches {
           lastSuccessAt: legacyState.lastSuccessAt,
           posts: legacyState.posts,
         };
-      const cancelled: unknown[] = [];
+      const cancelled: PreparedCancellation[] = [];
       for (const [id, x] of Object.entries(priorSlots)) {
         const c = input.watches.find((c) => c.id === id);
         if (fingerprint(c) !== fingerprint(x.config) && x.pending) {
@@ -389,8 +456,8 @@ export class GithubRepositoryWatches {
           revision: input.expectedRevision,
           watches: input.watches,
         },
-        ...cancelled,
       ]);
+      for (const record of cancelled) await this.archiveCancellation(record);
       check();
       await this.store.update((s) => {
         check();
@@ -480,6 +547,25 @@ export class GithubRepositoryWatches {
     const bot = this.deps.bot(x.config.botId)!,
       room = this.deps.room(x.config.roomId)!;
     need(p.generation === generation, 'DELIVERY_UNCONFIRMED');
+    const authority = async () => {
+      const fresh = this.current(id, generation);
+      need(!p!.configDigest || p!.configDigest === fingerprint(fresh.config), 'CONFIG_CHANGED');
+      if (!fresh.config.credentialId) need(fresh.config.visibility === 'public', 'AUTH_REQUIRED');
+      else {
+        const metadata = await this.deps.credentials?.metadata(undefined);
+        this.current(id, generation);
+        const selected = metadata?.find((m) => m.id === fresh.config.credentialId);
+        need(
+          selected?.repositories.some(
+            (r) => r.toLowerCase() === `${fresh.config.owner}/${fresh.config.repo}`.toLowerCase()
+          ),
+          'CREDENTIAL_REPOSITORY_REQUIRED'
+        );
+        need(!p!.credentialDigest || fingerprint(selected) === p!.credentialDigest, 'CREDENTIAL_CHANGED');
+      }
+      this.current(id, generation);
+    };
+    await authority();
     if (p.phase === 'reserved' || p.phase === 'unknown') {
       const matches = room.messages.filter(
         (m) => m.from.kind === 'bot' && m.from.botId === bot.id && m.text === p!.text && !m.deleted
@@ -508,10 +594,13 @@ export class GithubRepositoryWatches {
         a.posts = [...recent, this.now()];
         a.pending!.phase = 'reserved';
       });
+      let postAttempted = false;
       try {
+        await authority();
         const fresh = this.current(id, generation),
           currentBot = this.deps.bot(fresh.config.botId)!;
         this.validateRoom(fresh.config);
+        postAttempted = true;
         const message = this.deps.post(currentBot, fresh.config.roomId, p.text, recent.length);
         await this.store.update((s) => {
           this.current(id, generation);
@@ -522,8 +611,9 @@ export class GithubRepositoryWatches {
         await this.store.update((s) => {
           const a = s.slots[id]!;
           if (a.generation === generation && a.pending)
-            a.pending.phase = error instanceof BotWatchPostRefused ? 'prepared' : 'unknown';
+            a.pending.phase = !postAttempted || error instanceof BotWatchPostRefused ? 'prepared' : 'unknown';
         });
+        if (!postAttempted) throw error;
         return;
       }
     }
@@ -532,8 +622,22 @@ export class GithubRepositoryWatches {
       await this.store.update((s) => {
         this.current(id, generation);
         const a = s.slots[id]!;
-        a.scan = a.pending!.next;
-        delete a.pending;
+        const pending = a.pending!,
+          following = pending.remaining?.shift();
+        if (following) {
+          Object.assign(pending, following, { phase: 'prepared' });
+          delete pending.messageId;
+        } else {
+          a.scan = pending.next;
+          if (pending.scannedAt !== undefined) {
+            a.lastSuccessAt = pending.scannedAt;
+            a.baselineAt ??= pending.scannedAt;
+            a.ciCreatedSince = pending.createdSince;
+            a.failures = 0;
+            delete a.lastError;
+          }
+          delete a.pending;
+        }
       });
   }
   private async poll(id: string, generation: number) {
@@ -637,32 +741,39 @@ export class GithubRepositoryWatches {
       result.next.pageCache = pageCache;
       if (credential) await credential.revalidate();
       validate();
-      const text = result.events.length
-        ? `[github-watch:${fingerprint([id, generation, result.events]).slice(0, 32)}] ${x.config.owner}/${x.config.repo}\n` +
-          result.events.map((e) => e.text).join('\n')
-        : '';
-      need(text.length <= 5000, 'CHANGE_BATCH_BOUND');
+      const notices = batches(x.config, generation, result.events),
+        scannedAt = this.now();
       await this.store.update(
         (s) => {
           this.current(id, generation);
           const a = s.slots[id]!;
-          a.failures = 0;
-          delete a.lastError;
-          a.lastSuccessAt = this.now();
-          a.baselineAt ??= this.now();
-          a.ciCreatedSince = result.createdSince;
-          if (result.events.length)
+          if (notices.length)
             a.pending = {
-              id: fingerprint([id, generation, result.events]).slice(0, 32),
-              text,
+              ...notices[0]!,
+              remaining: notices.slice(1),
               generation,
+              configDigest: fingerprint(x.config),
+              ...(credential ? { credentialDigest: credential.binding } : {}),
+              scannedAt,
+              createdSince: result.createdSince,
               next: result.next,
               phase: 'prepared',
             };
-          else a.scan = result.next;
+          else {
+            a.failures = 0;
+            delete a.lastError;
+            a.lastSuccessAt = scannedAt;
+            a.baselineAt ??= scannedAt;
+            a.ciCreatedSince = result.createdSince;
+            a.scan = result.next;
+          }
+          need(Buffer.byteLength(JSON.stringify(s)) <= BOT_WATCH_MAX_STATE_BYTES, 'SPOOL_CAPACITY');
         },
         // Check at writer admission and after temporary-file write/fsync, immediately before rename.
-        () => need(performance.now() - began < SCAN_BUDGET_MS, 'SCAN_TIMEOUT')
+        () => {
+          validate();
+          need(performance.now() - began < SCAN_BUDGET_MS, 'SCAN_TIMEOUT');
+        }
       );
       await this.deliver(id, generation);
     } catch (error) {

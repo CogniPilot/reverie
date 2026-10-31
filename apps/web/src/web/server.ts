@@ -12,7 +12,7 @@ import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
-import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
+import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
 import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
@@ -255,7 +255,7 @@ import { registerEmployeeContextRoutes } from './routes/employee-context-routes.
 import { registerEmployeeJournalRoutes } from './routes/employee-journal-routes.js';
 import { EmployeeJournalStore } from '../employee-journal.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
-import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
+import { registerSessionRuntimeRoutes, resumeOwnerStops } from './routes/session-runtime-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
 import { registerHealthMetadataProviderRoutes } from './routes/session-health-provider-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
@@ -1791,7 +1791,7 @@ export class WebServer extends EventEmitter {
     }, this.companyService, async (session) => {
       await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
       await this.companyService.setDesiredRunning(session.id, true);
-    });
+    }, laptopAgentStop);
     registerCompanyHireRoutes(this.app, {
       company: this.companyService,
       verifiedOwner,
@@ -1926,7 +1926,7 @@ export class WebServer extends EventEmitter {
       (sessionId) =>
         this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
           ?.id,
-      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
+      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), humanNames: room => ownerAuth.members(room).map(person => person.name), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
     );
     registerBrowserJobEvidence(this.app, { sessions: ctx, chat: this.chatroomService, company: companyStore, currentOwner: id => ownerAuth.isMessageOwner(id), policy: { service: ownerAuth, ctx } });
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
@@ -4121,6 +4121,9 @@ export class WebServer extends EventEmitter {
     // CRITICAL: Skip in test mode to prevent tests from picking up user sessions
     if (!this.testMode) {
       const restored = await this.restoreMuxSessions();
+      // Owner stops the previous process left unsettled: input to those agents is already refused (owner-stop-journal).
+      // Settle each one so the input can be given back.
+      if (process.env.REVERIE_WORKER_SOCKET) resumeOwnerStops(laptopAgentStop);
       if (restored && process.env.REVERIE_WORKER_SOCKET) {
         try {
           const result = await reattachLaptops({

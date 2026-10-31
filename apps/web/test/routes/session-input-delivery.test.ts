@@ -18,17 +18,19 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Session } from '../../src/session.js';
+import { agentSend, EXIT, type AgentDeps } from '../../src/cli-agent.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../../src/types.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import { isPlainPromptInput } from '../../src/web/route-helpers.js';
-import { registerSessionRoutes } from '../../src/web/routes/session-routes.js';
+import { registerSessionRoutes, _resetPaneLivenessState } from '../../src/web/routes/session-routes.js';
+import { sessionWaits } from '../../src/web/session-wait-registry.js';
 import { createMockRouteContext, type MockRouteContext } from '../mocks/index.js';
 
-async function createEnvelopeHarness(): Promise<{ app: FastifyInstance; ctx: MockRouteContext }> {
+async function createEnvelopeHarness(options: Parameters<typeof registerSessionRoutes>[2] = {}): Promise<{ app: FastifyInstance; ctx: MockRouteContext }> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
+  registerSessionRoutes(app, ctx as never, { ...options, verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api')) return done(null, payload);
@@ -331,5 +333,298 @@ describe('POST /api/sessions/:id/input ifIdle (agent wake)', () => {
     expect(mux).toHaveBeenCalledWith('wake\r', expect.objectContaining({ requireEmptyComposer: true }));
     expect(raw).not.toHaveBeenCalled();
     expect(session.shouldApplyInput('w2', 1)).toBe(true); // refused write leaves the seq retryable
+  });
+});
+
+describe('terminal viewer delivery never establishes native worker death', () => {
+  let harness: Awaited<ReturnType<typeof createEnvelopeHarness>>;
+  beforeEach(async () => { harness = await createEnvelopeHarness(); });
+  afterEach(async () => {
+    sessionWaits.cancelAll('test-session-1');
+    _resetPaneLivenessState();
+    await harness.app.close();
+  });
+  const post = (extra: Record<string, unknown> = {}) => harness.app.inject({
+    method: 'POST', url: '/api/sessions/test-session-1/input',
+    headers: { 'x-reverie-parent-session': '00000004-0004-4000-8000-000000000004' },
+    payload: { input: 'test\r', clientId: 'viewer-client', seq: 1, wait: true, waitTimeout: 1, ...extra },
+  });
+  const terminal = () => Object.assign(harness.ctx.sessions.get('test-session-1')!, {
+    runtimeHealthScope: 'terminal', viewerInputHeld: false,
+  });
+
+  it('ACKs a lost buffered-wake response without buffering or typing the same seq again', async () => {
+    await harness.app.close();
+    const wake = { hasWakeTarget: vi.fn(async () => true), handleInput: vi.fn(async () => 'buffered') };
+    harness = await createEnvelopeHarness({ remoteWake: wake as never });
+    const session = terminal();
+    const mux = vi.spyOn(session, 'writeViaMux'), raw = vi.spyOn(session, 'write');
+    expect((await post({ wait: false })).json().data).toEqual({ buffered: true });
+    const lostResponseRetry = await post({ wait: false });
+    expect(lostResponseRetry.statusCode).toBe(200);
+    expect(lostResponseRetry.json().success).toBe(true);
+    expect(wake.handleInput).toHaveBeenCalledTimes(1);
+    expect(mux).not.toHaveBeenCalled();
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+  });
+
+  it('a real terminal Session reports a late idle-only refusal as busy before typing and lets its seq retry', async () => {
+    await harness.app.close();
+    let session!: Session;
+    let first = true;
+    const wake = { hasWakeTarget: vi.fn(async () => {
+      if (first) {
+        first = false;
+        Object.assign(session, { _isWorking: true, _status: 'busy' });
+      }
+      return false;
+    }) };
+    harness = await createEnvelopeHarness({ remoteWake: wake as never });
+    const mux = {
+      capturePaneText: () => '›\n  gpt-6.1-sol high · /owned/fixture\n? for shortcuts',
+      sendInput: vi.fn(async () => true),
+    };
+    session = new Session({ id: 'test-session-1', workingDir: process.env.HOME!, mode: 'codex', useMux: true,
+      mux: mux as never, muxSession: { muxName: 'reverie-owned-idle', sessionId: 'test-session-1', pid: 42 } as never });
+    Object.assign(session, { _workerBacked: true, _pid: 42 });
+    harness.ctx.sessions.set(session.id, session as never);
+    Object.assign(harness.ctx.mux, { isPaneDead: () => false });
+    try {
+      const refused = await post({ ifIdle: true });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().errorCode).toBe(ApiErrorCode.SESSION_BUSY);
+      expect(refused.json().error).toMatch(/busy.*nothing was typed/i);
+      expect(mux.sendInput).not.toHaveBeenCalled();
+      expect(session.lastInputSeq('viewer-client')).toBe(0);
+      Object.assign(session, { _isWorking: false, _status: 'idle' });
+      const retry = await post({ ifIdle: true });
+      expect(retry.json().data.delivered).toBe(true);
+      expect(mux.sendInput).toHaveBeenCalledOnce();
+      expect(session.lastInputSeq('viewer-client')).toBe(1);
+    } finally {
+      Object.assign(session, { ptyProcess: null, _muxSession: null, _mux: null, _pid: null });
+      await session.stop(false);
+    }
+  });
+
+  it.each(['dead-pane', 'held-input', 'missing-client'])('refuses %s before any write and keeps the seq retryable', async (cause) => {
+    const session = terminal();
+    Object.assign(harness.ctx.mux, { isPaneDead: () => cause === 'dead-pane' });
+    if (cause === 'held-input') session.viewerInputHeld = true;
+    if (cause === 'missing-client') session.pid = null;
+    const mux = vi.spyOn(session, 'writeViaMux'), raw = vi.spyOn(session, 'write');
+    const res = await post();
+    expect(res.statusCode).toBe(409);
+    expect(res.json().errorCode).toBe(ApiErrorCode.SESSION_BUSY);
+    expect(res.json().error).toMatch(/viewer unavailable.*nothing was typed/i);
+    expect(res.json().error).not.toMatch(/worker.*(?:dead|running)|restart/i);
+    expect(mux).not.toHaveBeenCalled();
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(true);
+  });
+
+  it('does not type during a stale-dead observation; after repair the same seq types only once', async () => {
+    const session = terminal();
+    let dead = true;
+    Object.assign(harness.ctx.mux, { isPaneDead: () => dead });
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async () => { dead = false; return true; });
+    expect((await post()).statusCode).toBe(409);
+    expect(mux).not.toHaveBeenCalled();
+    dead = false;
+    _resetPaneLivenessState();
+    expect((await post()).json().data.delivered).toBe(true);
+    expect((await post()).json().data.duplicate).toBe(true);
+    expect(mux).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an uncertain attempted seq, never raw-falls-back or calls its duplicate applied', async () => {
+    const session = terminal();
+    Object.assign(harness.ctx.mux, { isPaneDead: () => false });
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async () => {
+      session.writeBuffer.push('partial text without confirmed Enter');
+      return false;
+    });
+    const raw = vi.spyOn(session, 'write');
+    const first = await post();
+    expect(first.json().success).toBe(false);
+    expect(first.json().error).toMatch(/unconfirmed/i);
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+    for (const wait of [true, false]) {
+      const retry = await post({ wait });
+      expect(retry.json().success).toBe(false);
+      expect(retry.json().error).toMatch(/unconfirmed/i);
+    }
+    expect(mux).toHaveBeenCalledTimes(1);
+    expect(session.writeBuffer).toEqual(['partial text without confirmed Enter']);
+  });
+
+  it('an in-flight duplicate cannot report applied before the original write settles', async () => {
+    const session = terminal();
+    Object.assign(harness.ctx.mux, { isPaneDead: () => false });
+    let finish!: (ok: boolean) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(() => {
+      entered();
+      return new Promise<boolean>((resolve) => { finish = resolve; });
+    });
+    const pending = post().then((res) => res);
+    await started;
+    const duplicate = await post();
+    expect(duplicate.json().success).toBe(false);
+    expect(duplicate.json().error).toMatch(/unconfirmed/i);
+    finish(true);
+    expect((await pending).json().data.delivered).toBe(true);
+    expect((await post()).json().data.duplicate).toBe(true);
+    expect(mux).toHaveBeenCalledTimes(1);
+  });
+
+  it('a fire-and-forget mux failure never replays through the raw fallback', async () => {
+    const session = terminal();
+    const mux = vi.spyOn(session, 'writeViaMux').mockResolvedValue(false);
+    const raw = vi.spyOn(session, 'write');
+    await post({ wait: false, useMux: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(raw).not.toHaveBeenCalled();
+    expect((await post({ wait: false })).json().error).toMatch(/unconfirmed/i);
+    expect(mux).toHaveBeenCalledTimes(1);
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+  });
+
+  it('an awaited non-waiting failure reports uncertainty and keeps its seq spent', async () => {
+    const session = terminal();
+    vi.spyOn(session, 'writeViaMux').mockRejectedValue(new Error('transport closed after possible text'));
+    const raw = vi.spyOn(session, 'write');
+    const res = await post({ wait: false });
+    expect(res.json().success).toBe(false);
+    expect(res.json().error).toMatch(/unconfirmed/i);
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+    expect(raw).not.toHaveBeenCalled();
+  });
+
+  it('a known successful older input stays distinct from a later uncertain input', async () => {
+    const session = terminal();
+    const mux = vi.spyOn(session, 'writeViaMux').mockResolvedValueOnce(true).mockResolvedValue(false);
+    expect((await post()).json().data.delivered).toBe(true);
+    expect((await post({ seq: 2 })).json().error).toMatch(/unconfirmed/i);
+    expect((await post()).json().data.duplicate).toBe(true);
+    expect((await post({ seq: 2 })).json().error).toMatch(/unconfirmed/i);
+    expect(mux).toHaveBeenCalledTimes(2);
+  });
+
+  it('never upgrades a duplicate with missing or evicted receipt knowledge to applied', async () => {
+    const session = terminal();
+    session.shouldApplyInput('viewer-client', 1); // Another input path owns this seq; this route has no delivery proof.
+    expect((await post({ wait: false })).json().error).toMatch(/unconfirmed/i);
+    for (let seq = 2; seq <= 258; seq++) await post({ seq, wait: false, useMux: false });
+    expect(session.writeBuffer).toHaveLength(257);
+    expect((await post({ seq: 2, wait: false })).json().error).toMatch(/unconfirmed/i);
+    expect((await post({ seq: 258 })).json().data.duplicate).toBe(true);
+    expect(session.writeBuffer).toHaveLength(257);
+  });
+
+  it('keeps typed-unsent text and its seq without a fallback Enter or duplicate replay', async () => {
+    const session = terminal();
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (_input, options) => {
+      session.writeBuffer.push('unsent draft');
+      (options as { onTypedUnsent?: () => void }).onTypedUnsent?.();
+      return false;
+    });
+    const raw = vi.spyOn(session, 'write');
+    const first = await post();
+    expect(first.statusCode).toBe(409);
+    expect(first.json().data).toMatchObject({ delivered: false, typedUnsent: true });
+    expect(first.json().error).toMatch(/text remains unsent.*Enter was withheld/i);
+    expect((await post()).json().error).toMatch(/text remains unsent.*Enter was withheld/i);
+    expect(session.writeBuffer).toEqual(['unsent draft']);
+    expect(mux).toHaveBeenCalledTimes(1);
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+  });
+
+  it('a direct provider-scope dead pane retains its existing explicit death result', async () => {
+    const session = harness.ctx.sessions.get('test-session-1')!;
+    Object.assign(session, { runtimeHealthScope: 'provider' });
+    Object.assign(harness.ctx.mux, { isPaneDead: () => true });
+    const res = await post();
+    expect(res.json().success).toBe(true);
+    expect(res.json().data).toMatchObject({ workerDead: true, delivered: false });
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(true);
+  });
+
+  it('completion interrupted by a viewer exit does not describe the native provider as exited', async () => {
+    const session = terminal();
+    Object.assign(harness.ctx.mux, { isPaneDead: () => false });
+    vi.spyOn(session, 'writeViaMux').mockImplementation(async () => {
+      sessionWaits.notifySignal(session.id, 'exit');
+      return true;
+    });
+    const res = await post();
+    expect(res.json().success).toBe(false);
+    expect(res.json().error).toMatch(/completion.*unconfirmed/i);
+    expect(res.json().error).not.toMatch(/restart|worker.*dead/i);
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+  });
+
+  it('the existing CLI consumes actual viewer refusal envelopes without its dead-worker/restart branch', async () => {
+    const session = terminal();
+    session.viewerInputHeld = true;
+    const errors: string[] = [];
+    const deps: AgentDeps = {
+      ctx: { apiUrl: 'http://unused.invalid', selfId: '00000004-0004-4000-8000-000000000004' },
+      io: { out: () => {}, err: (message) => errors.push(message) },
+      request: async (_ctx, options) => {
+        const response = await harness.app.inject({
+          method: options.method, url: options.path.replace('/api/v1/', '/api/'),
+          headers: { 'x-reverie-parent-session': '00000004-0004-4000-8000-000000000004' },
+          ...(options.body ? { payload: options.body } : {}),
+        });
+        return { status: response.statusCode, json: response.json(), text: response.body };
+      },
+    };
+    expect(await agentSend(deps, { id: session.id, text: 'fixture', enter: true, wait: true })).toBe(EXIT.error);
+    expect(await agentSend(deps, { id: session.id, text: 'fixture', enter: true, wait: true, ifIdle: true })).toBe(EXIT.refused);
+    expect(errors.join('\n')).toMatch(/viewer unavailable/i);
+    expect(errors.join('\n')).not.toMatch(/no live worker|pane exited|restart/i);
+    expect(session.writeBuffer).toEqual([]);
+  });
+
+  it.each([false, true])('the actual CLI preserves known Enter-withheld refusal (ifIdle=%s)', async (ifIdle) => {
+    const session = terminal();
+    let withheld = 0;
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (_input, options) => {
+      const callback = (options as { onTypedUnsent?: () => void }).onTypedUnsent;
+      expect(callback).toBeTypeOf('function');
+      session.writeBuffer.push('known unsent text');
+      callback!();
+      withheld++;
+      return false;
+    });
+    const raw = vi.spyOn(session, 'write');
+    const errors: string[] = [];
+    const deps: AgentDeps = {
+      ctx: { apiUrl: 'http://unused.invalid', selfId: '00000004-0004-4000-8000-000000000004' },
+      io: { out: () => {}, err: (message) => errors.push(message) },
+      request: async (_ctx, options) => {
+        const response = await harness.app.inject({
+          method: options.method, url: options.path.replace('/api/v1/', '/api/'),
+          headers: { 'x-reverie-parent-session': '00000004-0004-4000-8000-000000000004' },
+          ...(options.body ? { payload: options.body } : {}),
+        });
+        return { status: response.statusCode, json: response.json(), text: response.body };
+      },
+    };
+    const options = { id: session.id, text: 'fixture', enter: true, wait: true as const, ifIdle, clientId: 'typed-cli', seq: 7 };
+    expect(await agentSend(deps, options)).toBe(ifIdle ? EXIT.refused : EXIT.error);
+    expect(errors.join('\n')).toMatch(/text remains unsent.*Enter was withheld/i);
+    expect(errors.join('\n')).not.toMatch(/no live worker|pane exited|restart/i);
+    expect(await agentSend(deps, options)).toBe(ifIdle ? EXIT.refused : EXIT.error);
+    expect(mux).toHaveBeenCalledTimes(1);
+    expect(withheld).toBe(1);
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.writeBuffer).toEqual(['known unsent text']);
+    expect(session.shouldApplyInput('typed-cli', 7)).toBe(false);
   });
 });

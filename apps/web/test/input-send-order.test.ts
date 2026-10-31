@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-function loadReverieAppClass() {
+function loadReverieAppClass(storage?: Map<string, string>) {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
   const context = vm.createContext({
@@ -37,8 +37,8 @@ function loadReverieAppClass() {
     localStorage: {
       length: 0,
       key: vi.fn(),
-      getItem: vi.fn(),
-      setItem: vi.fn(),
+      getItem: vi.fn((key: string) => storage?.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage?.set(key, value)),
       removeItem: vi.fn(),
     },
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
@@ -66,14 +66,22 @@ type App = {
   _ws: { readyState: number; send: (data: string) => void } | null;
   _wsSessionId: string | null;
   activeSessionId: string | null;
+  _drainSession: (id: string) => void;
+  _loadReliableState: () => void;
+  _persistReliableNow: () => void;
+  _persistReliableState: () => void;
+  _persistReliableTimer?: ReturnType<typeof setTimeout> | null;
+  showToast?: (message: string, kind: string) => void;
+  _clientId: string;
 };
 
-function makeApp(): App {
-  const app = Object.create((ReverieApp as { prototype: object }).prototype) as App & Record<string, unknown>;
+function makeApp(AppClass = ReverieApp): App {
+  const app = Object.create((AppClass as { prototype: object }).prototype) as App & Record<string, unknown>;
   app._clientId = 'c-test';
   app._seqCounters = new Map();
   app._pendingDeliveries = new Map();
   app._postDraining = new Set();
+  app._reliableMaxBytes = 1024 * 1024;
   app._persistReliableState = vi.fn();
   app._persistReliableNow = vi.fn();
   app._updateConnectionIndicator = vi.fn();
@@ -158,6 +166,78 @@ describe('durable input delivery — send ordering', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(app._pendingDeliveries.get('session-1')).toBeUndefined();
+  });
+});
+
+describe('definitive input outcomes never wedge or replay the durable POST queue', () => {
+  it.each([422, 409])('removes definitive %s durably, warns truthfully, then delivers later input once', async (status) => {
+    const storage = new Map<string, string>([['reverie:clientId', 'c-test']]);
+    const AppClass = loadReverieAppClass(storage);
+    const app = makeApp(AppClass);
+    const prototype = AppClass.prototype as unknown as App;
+    app._persistReliableNow = prototype._persistReliableNow;
+    app._persistReliableState = prototype._persistReliableState;
+    const toast = vi.fn();
+    app.showToast = toast;
+    const calls: PostBody[] = [];
+    let completeSecond: (() => void) | undefined;
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as PostBody;
+      calls.push(body);
+      if (body.seq === 1) return new Response(JSON.stringify({
+        success: false, errorCode: status === 422 ? 'OPERATION_FAILED' : 'SESSION_BUSY',
+        error: status === 422 ? 'Input delivery is unconfirmed' : 'Input text remains unsent; Enter was withheld',
+        ...(status === 409 ? { data: { delivered: false, typedUnsent: true } } : {}),
+      }), { status });
+      await new Promise<void>((resolve) => { completeSecond = resolve; });
+      return new Response('{}', { status: 200 });
+    });
+    try {
+      app._sendInputAsync('session-1', 'first\r');
+      app._sendInputAsync('session-1', 'second\r');
+      await waitForCalls(calls, 2);
+      expect(calls.map((body) => body.seq)).toEqual([1, 2]);
+      expect(app._pendingDeliveries.get('session-1')?.map((rec) => rec.data)).toEqual(['second\r']);
+      const saved = JSON.parse(storage.get('reverie:pendingInput')!);
+      expect(saved.pending['session-1'].map((rec: { seq: number }) => rec.seq)).toEqual([2]);
+      const reload = makeApp(AppClass);
+      prototype._loadReliableState.call(reload);
+      expect(reload._clientId).toBe('c-test');
+      expect(reload._pendingDeliveries.get('session-1')?.map((rec) => rec.seq)).toEqual([2]);
+      expect(toast).toHaveBeenCalledOnce();
+      expect(toast.mock.calls[0][0]).toMatch(status === 422 ? /unconfirmed/i : /Enter was withheld/i);
+      expect(toast.mock.calls[0][0]).not.toMatch(/not sent|restart/i);
+      completeSecond?.();
+      for (let round = 0; round < 3; round++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        app._drainSession('session-1');
+      }
+      expect(calls.map((body) => body.seq)).toEqual([1, 2]);
+      expect(app._pendingDeliveries.has('session-1')).toBe(false);
+      const finalReload = makeApp(AppClass);
+      prototype._loadReliableState.call(finalReload);
+      expect(finalReload._pendingDeliveries.has('session-1')).toBe(false);
+    } finally {
+      completeSecond?.();
+      if (app._persistReliableTimer) clearTimeout(app._persistReliableTimer);
+    }
+  });
+
+  it.each([401, 403, 409, 503])('keeps retryable %s queued without discarding later input', async (status) => {
+    const app = makeApp();
+    const calls: PostBody[] = [];
+    app.showToast = vi.fn();
+    global.fetch = vi.fn(async (_url, init) => {
+      calls.push(JSON.parse(String(init?.body)) as PostBody);
+      return new Response(JSON.stringify({ success: false, errorCode: 'SESSION_BUSY', error: 'try later' }), { status });
+    });
+    app._sendInputAsync('session-1', 'first');
+    app._sendInputAsync('session-1', 'second');
+    await waitForCalls(calls, 1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(app._pendingDeliveries.get('session-1')?.map((rec) => rec.data)).toEqual(['first', 'second']);
+    expect(calls.map((body) => body.seq)).toEqual([1]);
+    expect(app.showToast).not.toHaveBeenCalled();
   });
 });
 

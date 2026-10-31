@@ -97,6 +97,8 @@ export interface SessionWriteOptions {
   capacityRetry?: boolean;
   /** Told when a gated write's text went in but its Enter was withheld: the text is left unsent in the composer. */
   onTypedUnsent?: () => void;
+  /** Known idle-only refusal before any text/Enter; a failed transport alone is not this proof. */
+  onIdleRefused?: () => void;
   /**
    * An agent's input (the input route names its calling session). While a plan move owns the composer
    * (Session.pauseCapacityRetry) it gets nothing typed: decided at the write, again before the text and before Enter, and at the
