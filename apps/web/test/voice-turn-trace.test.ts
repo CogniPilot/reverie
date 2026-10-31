@@ -81,3 +81,17 @@ it('keeps dictation and read-aloud out of turn tracing: no id, no header', async
   a._chatAudio.dispatchEvent(new dom.window.Event('playing'));
   expect(trace('audio:playing')[0].turnId).toBeUndefined();
 });
+
+it('stops tagging audio with a turn once other audio plays on the same element, and traces a failed request', async () => {
+  const { a, trace } = setup({ success: true, data: { heard: true, reply: 'Hello.', audioUrl: '/api/voice/audio/r1.wav', messages: [{ id: 'q' }, { id: 'r' }] } });
+  await a._sendChatVoice({ type: 'audio/webm' }, WORKER, 'turn-0123abcd');
+  a._chatAudio.dispatchEvent(new dom.window.Event('playing'));
+  expect(trace('audio:playing').at(-1).turnId).toBe('turn-0123abcd');
+  // Car-mode or read-aloud audio set straight on the shared element, without a turn.
+  a._chatAudio.src = '/api/voice/audio/read-aloud.wav';
+  a._chatAudio.dispatchEvent(new dom.window.Event('playing'));
+  expect(trace('audio:playing').at(-1).turnId).toBeUndefined();
+  context.fetch = () => Promise.reject(new Error('network down'));
+  await a._sendChatVoice({ type: 'audio/webm' }, WORKER, 'turn-4567cdef');
+  expect(trace('voice:turn-failed')).toEqual([expect.objectContaining({ turnId: 'turn-4567cdef', aborted: false })]);
+});

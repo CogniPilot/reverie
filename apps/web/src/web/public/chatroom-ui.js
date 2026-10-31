@@ -263,7 +263,8 @@ Object.assign(ReverieApp.prototype, {
           dur: Number.isFinite(audio.duration) ? Number(audio.duration.toFixed(2)) : null,
           src: String(audio.src).slice(-40),
           err: audio.error ? audio.error.code : undefined,
-          turnId: this._chatAudioTurn || undefined,
+          // Only while this element still plays the turn's own reply: car-mode and read-aloud audio reuse it.
+          turnId: this._chatAudioTurn && audio.src === this._chatAudioTurn.src ? this._chatAudioTurn.id : undefined,
         })
       );
     }
@@ -1323,6 +1324,7 @@ Object.assign(ReverieApp.prototype, {
       if (turnId) this._diag('voice:turn-answered', { turnId, status: res.status, roundTripMs: Math.round(performance.now() - sent),
         messageId: body?.data?.messages?.[0]?.id, answerId: body?.data?.messages?.[1]?.id, timing: body?.data?.timing });
     } catch {
+      if (turnId) this._diag('voice:turn-failed', { turnId, aborted: stop.signal.aborted, roundTripMs: Math.round(performance.now() - sent) });
       if (stop.signal.aborted) {
         this._chatVoiceStatus('');
         if (car()) this._renderCarState?.('paused', `Stopped waiting; ${target.name}'s answer will show in the room`);
@@ -1381,10 +1383,10 @@ Object.assign(ReverieApp.prototype, {
   /** Play a reply; `from` is who is speaking (the car screen shows them). */
   _playChatAudio(url, from = null, turnId = null) {
     this._chatAudioFrom = from;
-    this._chatAudioTurn = turnId;
     this._chatAudioEl();
     const src = this._chatUrl(url);
     this._chatAudio.src = src;
+    this._chatAudioTurn = turnId ? { id: turnId, src: this._chatAudio.src } : null;
     this._chatAudio.play().then(
       () => {
         this._chatAudioUnlocked = true;
@@ -1404,7 +1406,7 @@ Object.assign(ReverieApp.prototype, {
 
   _offerChatAudioRetry(url) {
     const { voiceStatus, mic } = this._chatEls;
-    const from = this._chatAudioFrom, turnId = this._chatAudioTurn;
+    const from = this._chatAudioFrom, turnId = this._chatAudioTurn?.id ?? null;
     this._chatVoiceStatus('');
     voiceStatus.hidden = false;
     voiceStatus.className = 'chatroom-voice-status';
