@@ -1405,6 +1405,11 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .ca-company-tree li { padding:4px 0; font-size:13px; line-height:1.5; }
 .ca-company-hire { margin-top:20px; padding:18px; border:1px solid var(--ca-line); border-radius:10px; background:var(--ca-side-bg,var(--bg-card)); }
 .ca-company-hire[hidden] { display:none; }
+.ca-company-hire-requests { margin:0 0 20px; padding:18px; border:1px solid var(--ca-line); border-radius:10px; background:var(--ca-side-bg,var(--bg-card)); }
+.ca-company-hire-request + .ca-company-hire-request { border-top:1px solid var(--ca-line); margin-top:12px; padding-top:12px; }
+.ca-company-hire-request-facts { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:4px 12px; margin:8px 0; }
+.ca-company-hire-request-facts dt { color:var(--text-muted); }
+.ca-company-hire-request-facts dd { margin:0; overflow-wrap:anywhere; }
 .ca-company-people-heading { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
 .ca-company-people-heading h3 { margin:0; }
 .ca-company-add { width:30px; height:30px; padding:0; border-radius:50%; font-size:22px; line-height:1; }

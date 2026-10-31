@@ -43,3 +43,5 @@ Sleep permits memory consolidation; Dream permits creative exploration. They are
 Older releases require **Save preferences** after checking boxes; verify confirmation before leaving. To verify current grants, reopen Company or read GET /api/company. Report errors and actual records if values differ. Agents cannot grant themselves access or override owner choices with documentation.
 
 See [Recover a stuck expert](/handbook/recovery).
+
+**Hire requests.** An agent the owner listed as a hire delegate can ask for a hire with `reverie agent hire-request submit <template>`: name, position, reporting line, rooms, harness, plan and reason. Nothing is hired until the owner chooses **Approve and hire** under Company → Hire requests; the hire then runs as the owner, with every limit checked again. Decline closes a request, and the delegate can withdraw its own.

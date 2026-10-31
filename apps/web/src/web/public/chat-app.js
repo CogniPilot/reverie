@@ -2896,6 +2896,7 @@ class ReverieChatApp {
         const signIn = this.el('a', 'ca-company-signin', 'Owner sign-in'); signIn.href = '/owner/account';
         content.append(note, signIn); return;
       }
+      void this.companyHireRequests(content, employees, paint);
       const section = this.el('section', 'ca-company-hire');
       section.hidden = true; section.id = 'ca-company-hire';
       const hire = this.button('ca-btn ca-company-add', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) { section.scrollIntoView({ block: 'nearest' }); pages[step].querySelector('input, select, textarea, button')?.focus(); } }, { text: '+' });
@@ -3092,6 +3093,66 @@ class ReverieChatApp {
       if (this.companyPage !== dlg) return;
       this._companyTimer = this.doc.defaultView.setInterval(() => { void this._companyRefresh?.(); }, 60000);
     } catch { if (this.companyPage === dlg) status.textContent = 'Could not load company. Please reopen it to try again.'; }
+  }
+
+  /**
+   * Hire requests a listed delegate made: shown to the verified owner, who approves (the server runs the hire as the owner,
+   * re-checking everything) or declines. Nothing here hires by itself, and nothing retries.
+   */
+  async companyHireRequests(content, employees, repaint) {
+    const result = await this.app._chatApi('/api/experts-hire-requests');
+    const open = result.ok && Array.isArray(result.data?.requests) ? result.data.requests.filter(r => r.status === 'pending' || r.status === 'approving') : [];
+    if (!open.length || !content.isConnected) return;
+    const host = this.el('section', 'ca-company-hire-requests');
+    host.setAttribute('aria-label', 'Hire requests');
+    host.append(this.el('h3', '', `Hire requests (${open.length})`),
+      this.el('p', 'ca-hint', 'A delegate asked for these hires. Nothing is hired until you approve; approval runs the hire as you, with every limit checked again.'));
+    const nameOf = id => employees.find(e => e.id === id)?.name ?? id;
+    for (const request of open) {
+      const f = request.fields || {};
+      const card = this.el('article', 'ca-company-hire-request');
+      card.dataset.requestId = request.id;
+      card.append(this.literalText('h4', '', `${f.name || `From template ${request.templateId}`}${f.position ? ` · ${f.position}` : ''}`));
+      const facts = this.el('dl', 'ca-company-hire-request-facts');
+      for (const [label, value] of [['Template', request.templateId], ['Asked by', request.requestedBy],
+        ['Asked', globalThis.ReverieTime?.format(request.requestedAt) ?? new Date(request.requestedAt).toISOString()],
+        ['Reports to', f.reportsTo ? nameOf(f.reportsTo) : ''], ['Harness', [f.mode, f.model, f.effort].filter(Boolean).join(' · ')],
+        ['Plan', f.accountProfileId || ''], ['Rooms', (f.rooms || []).join(', ')], ['Working directory', f.workingDir],
+        ['Budget stop', f.budgetStop ? `${f.budgetStop.planId} at ${f.budgetStop.weeklyPercent}% weekly` : ''], ['Reason', f.reason]]) {
+        if (!value) continue;
+        facts.append(this.literalText('dt', '', label), this.literalText('dd', '', String(value)));
+      }
+      card.append(facts);
+      const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+      const actions = this.el('div', 'ca-company-actions');
+      const decide = async (verb, button) => {
+        for (const control of actions.querySelectorAll('button')) control.disabled = true;
+        error.textContent = ''; button.textContent = verb === 'approve' ? 'Hiring…' : 'Declining…';
+        let outcome;
+        try { outcome = await this.app._chatApi(`/api/experts-hire-requests/${encodeURIComponent(request.id)}/${verb}`, { method: 'POST', body: {} }); }
+        catch { outcome = { ok: false }; }
+        if (!outcome.ok) {
+          // No answer cannot tell whether the hire ran: say so instead of offering the same click again.
+          error.textContent = outcome.status ? (outcome.error || 'The request could not be decided.')
+            : 'The outcome is unconfirmed. Reopen Company and check the roster before trying again.';
+          button.textContent = verb === 'approve' ? 'Approve and hire' : 'Decline';
+          if (outcome.status) for (const control of actions.querySelectorAll('button')) control.disabled = false;
+          return;
+        }
+        this.toast(verb === 'approve' ? `Hired ${f.name || `an expert from ${request.templateId}`} on ${request.requestedBy}'s request.` : 'Hire request declined.', 'info');
+        await repaint?.();
+      };
+      const approve = this.button('ca-btn is-primary', `Approve and hire for request ${request.id}`, () => decide('approve', approve), { text: 'Approve and hire' });
+      const decline = this.button('ca-btn', `Decline request ${request.id}`, () => decide('decline', decline), { text: 'Decline' });
+      if (request.status === 'approving') {
+        approve.disabled = true;
+        error.textContent = 'An approval of this request did not finish. Check the roster: if the expert is there, decline to close the request.';
+      }
+      actions.append(approve, decline);
+      card.append(actions, error);
+      host.append(card);
+    }
+    content.prepend(host);
   }
 
   companyRecoveryFields(container, data, status) {

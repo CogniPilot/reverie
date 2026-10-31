@@ -44,8 +44,14 @@ import {
   findCredential,
   parseExpertSettings,
   parseExpertTemplate,
+  templateDigest,
   type ExpertHire,
+  type ExpertHireRequest,
   type ExpertStore,
+  type HireRequestFields,
+  HireRequestFieldsSchema,
+  MAX_HIRE_REQUESTS,
+  MAX_PENDING_HIRE_REQUESTS,
   type SessionLaunch,
 } from '../../experts.js';
 
@@ -103,6 +109,7 @@ export interface ExpertRouteDeps {
     position: string;
     expertise: string[];
     sessionId: string;
+    reportsTo?: string;
   }): Promise<{ id: string }>;
   inviteEmployee(employeeId: string, roomId: string, owner: string | undefined): void;
   /** Rollback only: remove an employee record this hire just created. */
@@ -153,6 +160,7 @@ const RetireBodySchema = z
   .strict();
 
 type Actor = { kind: 'owner'; label: string } | { kind: 'delegate'; session: string; label: string };
+type HireOverrides = Pick<HireRequestFields, 'name' | 'position' | 'reportsTo' | 'rooms'>;
 
 const statusCode = (status: number): ApiErrorCode =>
   status === 403
@@ -306,15 +314,13 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
     })
   );
 
-  app.post('/api/experts/:id/hire', async (req, reply) =>
-    run(reply, async () => {
-      requireHiringPrincipal(req);
-      await deps.store.load();
-      return serial(async () => {
-      const actor = hiringActor(req);
-      const body = parseBody(HireBodySchema, req.body);
+  /**
+   * One hire, inside the hire gate. `overrides` (name, position, reporting line, rooms) come only from a delegate's
+   * request the owner approved; a direct hire takes them from the template.
+   */
+  const hireNow = async (req: FastifyRequest, actor: Actor, id: string, body: z.infer<typeof HireBodySchema>,
+    overrides: HireOverrides = {}, requested?: { requestId: string; by: string; templateSha256: string }) => {
       if (findCredential(body.reason)) throw new ExpertError('reason: looks like a credential');
-      const { id } = req.params as { id: string };
       const owner = ownerFor(req);
       let delegatedRoot: string | undefined;
       if (actor.kind === 'delegate') {
@@ -363,6 +369,11 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         const state = deps.store.snapshot();
         const template = state.templates.find((t) => t.id === id);
         if (!template) throw new ExpertError('No such expert template', 404);
+        // An approved request hires exactly the template it named, checked here after the async checks and again below.
+        const bound = (row: typeof template | undefined) => !requested || (!!row && templateDigest(row) === requested.templateSha256);
+        const templateChanged = () =>
+          new ExpertError('The template changed after this hire request was made; decline it and ask for a new one', 409);
+        if (!bound(template)) throw templateChanged();
         const { settings } = state;
         const room = noticeRoom();
         if (!room) throw new ExpertError('No notice room is configured, so hiring is off', 503);
@@ -383,13 +394,20 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             latest.hires.filter(hire => hire.status === 'active').length < latest.settings.maxActive &&
             JSON.stringify(latest.templates.find(row => row.id === id)) === JSON.stringify(template);
         };
+        if (!bound(deps.store.snapshot().templates.find(row => row.id === id))) throw templateChanged();
         if (!authorized()) throw new ExpertError('The delegated hire authorization changed; ask the owner to review it', 403);
 
         const names = new Set(deps.employeeNames(owner).map(name => name.normalize('NFKC').toLowerCase()));
-        let employeeName = template.name;
+        let employeeName = overrides.name ?? template.name;
+        if (overrides.name !== undefined && names.has(employeeName.normalize('NFKC').toLowerCase()))
+          throw new ExpertError(`name: "${flat(employeeName)}" is already used in this company`, 409);
         for (let suffix = 2; names.has(employeeName.normalize('NFKC').toLowerCase()); suffix++) {
           employeeName = `${template.name} ${suffix}`;
         }
+        const rooms = overrides.rooms ?? template.rooms;
+        const missingRoom = overrides.rooms && deps.roomExists ? rooms.find((roomId) => !deps.roomExists!(roomId)) : undefined;
+        if (missingRoom !== undefined) throw new ExpertError(`rooms: no room with id "${flat(missingRoom).slice(0, 100)}"`);
+        const position = overrides.position ?? template.role;
         const sessionId = await deps.createSession(req, {
           workingDir: body.workingDir,
           mode: body.mode ?? template.defaults.mode,
@@ -410,17 +428,19 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             owner,
             name: employeeName,
             icon: template.icon,
-            position: template.role,
+            position,
             expertise: template.expertise.length ? template.expertise.slice(0, 12) : [template.role],
             sessionId,
+            ...(overrides.reportsTo !== undefined ? { reportsTo: overrides.reportsTo } : {}),
           });
           undo.unshift(() => deps.removeEmployee(employee.id));
           // A hire with a budget stop also joins the notice room, where its checkpoint request is sent.
-          const joins = body.budgetStop && !template.rooms.includes(room) ? [...template.rooms, room] : template.rooms;
+          const joins = body.budgetStop && !rooms.includes(room) ? [...rooms, room] : rooms;
           for (const roomId of joins) {
             deps.inviteEmployee(employee.id, roomId, owner);
             undo.unshift(() => deps.leaveRoom(roomId, sessionId));
           }
+          if (!bound(deps.store.snapshot().templates.find(row => row.id === id))) throw templateChanged();
           if (!authorized()) throw new ExpertError('The delegated hire authorization changed before startup', 403);
           try {
             await deps.startSession(sessionId);
@@ -437,6 +457,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             hiredAt: at,
             status: 'active',
             ...(body.budgetStop ? { budgetStop: { ...body.budgetStop } } : {}),
+            ...(requested ? { requestId: requested.requestId } : {}),
           };
           const hireId = record.id;
           await deps.store.update((s) => {
@@ -450,7 +471,8 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           try {
             await deps.postNotice(
               room,
-              `Expert hired: ${template.icon} ${employeeName} (${template.role}) from template "${template.id}" by ${record.by}. ` +
+              `Expert hired: ${template.icon} ${employeeName} (${position}) from template "${template.id}" by ${record.by}` +
+                (requested ? `, approving request ${requested.requestId} from ${requested.by}` : '') + '. ' +
                 `Reason: ${flat(body.reason)}. Session ${sessionId}. ` +
                 (body.budgetStop
                   ? `Budget stop: plan ${body.budgetStop.planId} at ${body.budgetStop.weeklyPercent}% weekly. `
@@ -478,10 +500,157 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           action: 'expert_hire',
           target: template.id,
           ip: req.ip,
-          detail: { template: template.id, sessionId, by: record.by, employeeId: record.employeeId },
+          detail: { template: template.id, sessionId, by: record.by, employeeId: record.employeeId, ...(requested ? { requestId: requested.requestId } : {}) },
         });
         return { hire: record, sessionId, employeeId: record.employeeId };
+  };
+
+  app.post('/api/experts/:id/hire', async (req, reply) =>
+    run(reply, async () => {
+      requireHiringPrincipal(req);
+      await deps.store.load();
+      const { id } = req.params as { id: string };
+      return serial(async () => hireNow(req, hiringActor(req), id, parseBody(HireBodySchema, req.body)));
+    })
+  );
+
+  // Hire requests: a listed delegate asks; only the verified owner's approval hires, through hireNow as the owner, with
+  // every check of a direct owner hire run again at that moment. Direct delegate hiring above is unchanged.
+  const requestOf = (state: { hireRequests: ExpertHireRequest[] }, requestId: string): ExpertHireRequest => {
+    const request = state.hireRequests.find((r) => r.id === requestId);
+    if (!request) throw new ExpertError('No such hire request', 404);
+    return request;
+  };
+  const decided = (request: ExpertHireRequest) => {
+    if (request.status !== 'pending')
+      throw new ExpertError(`This hire request is ${request.status}; only a pending request can be decided`, 409);
+  };
+
+  app.post('/api/experts/:id/hire-requests', async (req, reply) =>
+    run(reply, async () => {
+      requireHiringPrincipal(req);
+      await deps.store.load();
+      const actor = hiringActor(req);
+      if (actor.kind !== 'delegate') throw new ExpertError('The owner hires directly (POST /api/experts/:id/hire)');
+      const fields = parseBody(HireRequestFieldsSchema.strict(), req.body);
+      const hit = findCredential(fields);
+      if (hit) throw new ExpertError(`${hit}: looks like a credential`);
+      const { id } = req.params as { id: string };
+      const missing = fields.rooms && deps.roomExists ? fields.rooms.find((roomId) => !deps.roomExists!(roomId)) : undefined;
+      if (missing !== undefined) throw new ExpertError(`rooms: no room with id "${flat(missing).slice(0, 100)}"`);
+      const request = await deps.store.update((state) => {
+        const template = state.templates.find((t) => t.id === id);
+        if (!template) throw new ExpertError('No such expert template', 404);
+        const open = state.hireRequests.filter((r) => r.requestedBy === actor.label && (r.status === 'pending' || r.status === 'approving'));
+        if (open.length >= MAX_PENDING_HIRE_REQUESTS)
+          throw new ExpertError(`You have ${open.length} hire requests waiting; withdraw one or wait for the owner`, 409);
+        if (state.hireRequests.length >= MAX_HIRE_REQUESTS) throw new ExpertError('Hire request record limit reached', 409);
+        const next: ExpertHireRequest = {
+          id: randomUUID(), templateId: id, templateSha256: templateDigest(template), fields: { ...fields },
+          requestedBy: actor.label, requestedAt: now(), status: 'pending',
+        };
+        state.hireRequests.push(next);
+        return next;
       });
+      await deps.audit({ admin: actor.label, action: 'expert_hire_request', target: id, ip: req.ip, detail: { requestId: request.id } });
+      const room = noticeRoom();
+      if (room) {
+        try {
+          await deps.postNotice(room, `Hire request ${request.id} from ${actor.label}: template "${id}"` +
+            (fields.name ? ` as ${flat(fields.name)}` : '') + `. Reason: ${flat(fields.reason)}. Waiting for the owner's approval in Company.`);
+        } catch (error) {
+          // The request stands either way: nothing is hired until the owner approves it.
+          console.error('[experts] hire request notice failed:', error instanceof Error ? error.message : error);
+        }
+      }
+      return { request };
+    })
+  );
+
+  /** The owner sees every request; a delegate sees its own. */
+  app.get('/api/experts-hire-requests', async (req, reply) =>
+    run(reply, async () => {
+      requireHiringPrincipal(req);
+      await deps.store.load();
+      const actor = hiringActor(req);
+      const all = deps.store.snapshot().hireRequests;
+      return { requests: actor.kind === 'owner' ? all : all.filter((r) => r.requestedBy === actor.label) };
+    })
+  );
+
+  app.post('/api/experts-hire-requests/:requestId/approve', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req, 'approves a hire request');
+      await deps.store.load();
+      const { requestId } = req.params as { requestId: string };
+      return serial(async () => {
+        const state = deps.store.snapshot();
+        const request = requestOf(state, requestId);
+        decided(request);
+        const template = state.templates.find((t) => t.id === request.templateId);
+        if (!template) throw new ExpertError('The template of this request no longer exists; decline it', 409);
+        if (templateDigest(template) !== request.templateSha256)
+          throw new ExpertError('The template changed after this hire request was made; decline it and ask for a new one', 409);
+        // Held while the hire runs: a second approval sees `approving`, and a failed hire puts it back to pending.
+        await deps.store.update((s) => { decided(requestOf(s, requestId)); requestOf(s, requestId).status = 'approving'; });
+        const { name, position, reportsTo, rooms, ...body } = request.fields;
+        let result: Awaited<ReturnType<typeof hireNow>>;
+        try {
+          result = await hireNow(req, { kind: 'owner', label: getAuthUser(req).username || 'owner' }, request.templateId,
+            parseBody(HireBodySchema, body), { name, position, reportsTo, rooms },
+            { requestId, by: request.requestedBy, templateSha256: request.templateSha256 });
+        } catch (error) {
+          await deps.store.update((s) => { requestOf(s, requestId).status = 'pending'; });
+          throw error;
+        }
+        const approved = await deps.store.update((s) => {
+          const r = requestOf(s, requestId);
+          Object.assign(r, { status: 'approved', decidedAt: now(), decidedBy: 'owner', hireId: result.hire.id });
+          return r;
+        });
+        await deps.audit({ admin: getAuthUser(req).username, action: 'expert_hire_request_approve', target: request.templateId, ip: req.ip,
+          detail: { requestId, hireId: result.hire.id, requestedBy: request.requestedBy } });
+        return { request: approved, ...result };
+      });
+    })
+  );
+
+  app.post('/api/experts-hire-requests/:requestId/decline', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req, 'declines a hire request');
+      const note = parseBody(z.object({ note: z.string().trim().max(500).optional() }).strict(), req.body ?? {}).note;
+      if (note && findCredential(note)) throw new ExpertError('note: looks like a credential');
+      const { requestId } = req.params as { requestId: string };
+      const request = await serial(() => deps.store.update((s) => {
+        const r = requestOf(s, requestId);
+        // Inside the hire gate, `approving` can only be left over from an approval that never finished (a restart):
+        // the owner may close it after checking Company. Closing never undoes a hire that did happen.
+        if (r.status !== 'approving') decided(r);
+        Object.assign(r, { status: 'declined', decidedAt: now(), decidedBy: 'owner', ...(note ? { note } : {}) });
+        return r;
+      }));
+      await deps.audit({ admin: getAuthUser(req).username, action: 'expert_hire_request_decline', target: request.templateId, ip: req.ip,
+        detail: { requestId, requestedBy: request.requestedBy } });
+      return { request };
+    })
+  );
+
+  /** The delegate that asked may take back its own pending request. */
+  app.post('/api/experts-hire-requests/:requestId/withdraw', async (req, reply) =>
+    run(reply, async () => {
+      requireHiringPrincipal(req);
+      await deps.store.load();
+      const actor = hiringActor(req);
+      const { requestId } = req.params as { requestId: string };
+      const request = await serial(() => deps.store.update((s) => {
+        const r = requestOf(s, requestId);
+        if (r.requestedBy !== actor.label) throw new ExpertError('Only the delegate that made this request may withdraw it', 403);
+        decided(r);
+        Object.assign(r, { status: 'withdrawn', decidedAt: now(), decidedBy: actor.label });
+        return r;
+      }));
+      await deps.audit({ admin: actor.label, action: 'expert_hire_request_withdraw', target: request.templateId, ip: req.ip, detail: { requestId } });
+      return { request };
     })
   );
 

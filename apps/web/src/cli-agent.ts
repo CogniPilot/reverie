@@ -59,6 +59,7 @@ import { pronounsProblem, pronounsProposal } from './pronouns.js';
 import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
 import { registerJournalCommands } from './cli-agent-journal.js';
+import { registerHireRequestCommands } from './cli-agent-hire-request.js';
 import { goalClientTarget } from './goal-client-target.js';
 
 /** A chat message id, as the server stores it. */
@@ -2576,6 +2577,7 @@ export function registerAgentCommands(program: Command): Command {
   credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
   registerJournalCommands(agent, run);
+  registerHireRequestCommands(agent, run);
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');

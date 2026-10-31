@@ -75,6 +75,7 @@ describe('experts api', () => {
   let sideRoom: string;
   let counter: number;
   let plans: PlanReading[] | Error;
+  let plansGate: Promise<void> | undefined;
   let routes: ExpertRoutes;
   let expertStore: ExpertStore;
   let stopFails: Set<string>;
@@ -130,6 +131,7 @@ describe('experts api', () => {
       noticeRoomFallback: opts.fallbackRoom === null ? undefined : (opts.fallbackRoom ?? noticeRoom),
       roomExists: (roomId) => !!rooms.get(roomId),
       readPlans: async () => {
+        if (plansGate) await plansGate;
         if (plans instanceof Error) throw plans;
         return structuredClone(plans);
       },
@@ -175,6 +177,7 @@ describe('experts api', () => {
     counter = 0;
     clock = Date.parse('2026-10-15T12:00:00Z');
     plans = [{ id: 'plan-a', weeklyPercent: 40, updatedAt: clock }];
+    plansGate = undefined;
     rooms = new ChatroomStore();
     noticeRoom = rooms.create('notices', undefined, clock).id;
     sideRoom = rooms.create('reviews', undefined, clock).id;
@@ -742,11 +745,151 @@ describe('experts api', () => {
     });
   });
 
+  describe('hire requests', () => {
+    const ask = (agent: string | undefined, extra: Record<string, unknown> = {}, id = 'alpha') =>
+      req('POST', `/api/experts/${id}/hire-requests`, { workingDir: dir, reason: 'Need a second parser reviewer', ...extra }, agent);
+    const decide = (requestId: string, verb: 'approve' | 'decline' | 'withdraw', agent?: string, body: unknown = {}) =>
+      req('POST', `/api/experts-hire-requests/${requestId}/${verb}`, body, agent);
+    const employee = (name: string) => company.view().employees.find((e) => e.name === name);
+
+    beforeEach(async () => {
+      await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir, maxHiresPerDay: 3 });
+      await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom] });
+    });
+
+    it('a delegate asks for a full hire; nothing is created until the owner approves', async () => {
+      const asked = await ask(DELEGATE, { name: 'Parsa', position: 'Parser reviewer', rooms: [sideRoom], mode: 'codex' });
+      expect(asked.statusCode).toBe(200);
+      const request = asked.json().data.request;
+      expect(request).toMatchObject({ templateId: 'alpha', status: 'pending', requestedBy: `agent:${DELEGATE}`,
+        fields: { name: 'Parsa', position: 'Parser reviewer', rooms: [sideRoom], mode: 'codex' } });
+      expect(launches).toEqual([]);
+      expect(company.view().employees).toEqual([]);
+      expect(rooms.get(noticeRoom)!.messages.at(-1)!.text).toContain(`Hire request ${request.id} from agent:${DELEGATE}`);
+      expect(audits.at(-1)).toMatchObject({ action: 'expert_hire_request', target: 'alpha', detail: { requestId: request.id } });
+      // The owner sees every request; the delegate its own; an unlisted agent nothing.
+      expect((await req('GET', '/api/experts-hire-requests')).json().data.requests).toHaveLength(1);
+      expect((await req('GET', '/api/experts-hire-requests', undefined, DELEGATE)).json().data.requests).toHaveLength(1);
+      expect((await req('GET', '/api/experts-hire-requests', undefined, OTHER_AGENT)).statusCode).toBe(403);
+      expect((await ask(OTHER_AGENT)).statusCode).toBe(403);
+    });
+
+    it('the owner approves once: the hire runs as the owner with the overrides, and the request records it', async () => {
+      const lead = (await hire('alpha')).json().data.employeeId;
+      const requestId = (await ask(DELEGATE, { name: 'Parsa', position: 'Parser reviewer', reportsTo: lead, mode: 'codex' })).json().data.request.id;
+      expect((await decide(requestId, 'approve', DELEGATE)).statusCode).toBe(403); // never the delegate itself
+      const approved = await decide(requestId, 'approve');
+      expect(approved.statusCode).toBe(200);
+      const data = approved.json().data;
+      expect(data.request).toMatchObject({ status: 'approved', decidedBy: 'owner', hireId: data.hire.id });
+      expect(data.hire).toMatchObject({ by: 'owner', requestId, templateId: 'alpha' });
+      expect(launches.at(-1)).toMatchObject({ name: 'Parsa', mode: 'codex' }); // the owner path allows the requested harness
+      expect(employee('Parsa')).toMatchObject({ position: 'Parser reviewer', reportsTo: lead, sessionId: data.sessionId });
+      expect(rooms.get(sideRoom)!.members.some((m) => m.sessionId === data.sessionId)).toBe(true);
+      expect(rooms.get(noticeRoom)!.messages.at(-1)!.text).toContain(`approving request ${requestId} from agent:${DELEGATE}`);
+      expect(audits.map((a) => a.action).slice(-2)).toEqual(['expert_hire', 'expert_hire_request_approve']);
+      for (const verb of ['approve', 'decline'] as const) expect((await decide(requestId, verb)).statusCode).toBe(409);
+      expect(launches).toHaveLength(2);
+    });
+
+    it('re-runs every check at approval and leaves the request pending when one fails', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir, maxHiresPerDay: 0 });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(409); // today's cap, as for any owner hire
+      await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir, maxHiresPerDay: 3 });
+      activationFails = true;
+      expect((await decide(requestId, 'approve')).statusCode).toBe(503); // a failed start undoes the hire
+      activationFails = false;
+      expect(company.view().employees).toEqual([]);
+      expect((await state()).hireRequests[0]).toMatchObject({ id: requestId, status: 'pending' });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(200);
+    });
+
+    it('refuses a request whose template changed since, an unknown reporting line, or a name already taken', async () => {
+      const changed = (await ask(DELEGATE)).json().data.request.id;
+      clock += 1000;
+      await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom], role: 'Different role' });
+      const refused = await decide(changed, 'approve');
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain('template changed');
+      const nobody = (await ask(DELEGATE, { reportsTo: 'no-such-employee' })).json().data.request.id;
+      expect((await decide(nobody, 'approve')).statusCode).toBe(400);
+      await hire('alpha');
+      const taken = (await ask(DELEGATE, { name: 'Alpha' })).json().data.request.id;
+      expect((await decide(taken, 'approve')).statusCode).toBe(409);
+      expect(company.view().employees.map((e) => e.name)).toEqual(['Alpha']);
+      expect(launches).toHaveLength(2); // the one owner hire, plus the reporting-line attempt that was rolled back
+      expect(stopped).toHaveLength(1);
+    });
+
+    it('declines with a note, lets only the requester withdraw, and caps open requests per delegate', async () => {
+      const one = (await ask(DELEGATE)).json().data.request.id;
+      expect((await decide(one, 'decline', DELEGATE)).statusCode).toBe(403);
+      const declined = await decide(one, 'decline', undefined, { note: 'Not this week' });
+      expect(declined.json().data.request).toMatchObject({ status: 'declined', note: 'Not this week' });
+      const two = (await ask(DELEGATE)).json().data.request.id;
+      await setSettings({ hireDelegates: [DELEGATE, OTHER_AGENT], noticeRoomId: noticeRoom, delegateWorkingRoot: dir });
+      expect((await decide(two, 'withdraw', OTHER_AGENT)).statusCode).toBe(403);
+      expect((await decide(two, 'withdraw', DELEGATE)).json().data.request.status).toBe('withdrawn');
+      for (let i = 0; i < 5; i++) expect((await ask(DELEGATE)).statusCode).toBe(200);
+      expect((await ask(DELEGATE)).statusCode).toBe(409);
+      expect(launches).toEqual([]);
+    });
+
+    it('validates the request itself: owner uses the hire route, unknown rooms, fields and credentials are refused', async () => {
+      expect((await ask(undefined)).statusCode).toBe(400);
+      expect((await ask(DELEGATE, { rooms: ['no-such-room'] })).statusCode).toBe(400);
+      expect((await ask(DELEGATE, { permissions: { recoverEmployees: true } })).statusCode).toBe(400);
+      expect((await ask(DELEGATE, { reason: 'token ghp_' + 'a'.repeat(36) })).statusCode).toBe(400);
+      expect((await ask(DELEGATE, {}, 'nobody')).statusCode).toBe(404);
+      expect((await state()).hireRequests).toEqual([]);
+    });
+
+    it('hires only the exact template the request named: an edit during the approval, even in the same millisecond, refuses it', async () => {
+      // Review control HIRE-REQUEST-TEMPLATE-BINDING1 (1): the template changes while the approval waits on its async plan check.
+      const during = (await ask(DELEGATE, { budgetStop: { planId: 'plan-a', weeklyPercent: 80 } })).json().data.request.id;
+      let release!: () => void;
+      plansGate = new Promise<void>((resolve) => { release = resolve; });
+      const approving = decide(during, 'approve');
+      await new Promise((r) => setTimeout(r, 20));
+      clock += 1000;
+      expect((await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom], defaults: { mode: 'codex' } })).statusCode).toBe(200);
+      release(); plansGate = undefined;
+      const refused = await approving;
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain('template changed');
+      expect(launches).toEqual([]);
+      expect((await state()).hireRequests.find((r: { id: string }) => r.id === during).status).toBe('pending');
+      // (2): the template changes without its timestamp moving, so only its content tells.
+      const same = (await ask(DELEGATE)).json().data.request.id;
+      expect((await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom], defaults: { mode: 'claude' }, role: 'Edited in the same ms' })).statusCode).toBe(200);
+      expect((await decide(same, 'approve')).statusCode).toBe(409);
+      expect(launches).toEqual([]);
+      // A request made against the current template still hires it.
+      const fresh = (await ask(DELEGATE)).json().data.request.id;
+      expect((await decide(fresh, 'approve')).statusCode).toBe(200);
+      expect(launches).toHaveLength(1);
+    });
+
+    it('lets the owner close an approval a restart left unfinished, without hiring', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      await expertStore.update((s) => { s.hireRequests[0].status = 'approving'; });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(409);
+      expect((await decide(requestId, 'decline')).json().data.request.status).toBe('declined');
+      expect(launches).toEqual([]);
+    });
+  });
+
   it('owner policy: reads and hire/retire are open to agents, changes are owner-only', () => {
     expect(classify('GET', '/api/experts', '/api/experts')).toBe('agent');
     expect(classify('GET', '/api/experts/:id', '/api/experts/alpha')).toBe('agent');
     expect(classify('POST', '/api/experts/:id/hire', '/api/experts/alpha/hire')).toBe('agent');
     expect(classify('POST', '/api/experts/:id/retire', '/api/experts/alpha/retire')).toBe('agent');
+    expect(classify('POST', '/api/experts/:id/hire-requests', '/api/experts/alpha/hire-requests')).toBe('agent');
+    expect(classify('GET', '/api/experts-hire-requests', '/api/experts-hire-requests')).toBe('agent');
+    expect(classify('POST', '/api/experts-hire-requests/:requestId/withdraw', '/api/experts-hire-requests/r/withdraw')).toBe('agent');
+    expect(classify('POST', '/api/experts-hire-requests/:requestId/approve', '/api/experts-hire-requests/r/approve')).toBe('owner');
+    expect(classify('POST', '/api/experts-hire-requests/:requestId/decline', '/api/experts-hire-requests/r/decline')).toBe('owner');
     expect(classify('PUT', '/api/experts/:id', '/api/experts/alpha')).toBe('owner');
     expect(classify('DELETE', '/api/experts/:id', '/api/experts/alpha')).toBe('owner');
     expect(classify('PUT', '/api/experts-settings', '/api/experts-settings')).toBe('owner');

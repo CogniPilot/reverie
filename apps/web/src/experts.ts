@@ -11,6 +11,7 @@
  * directive list, so a template can neither set nor remove the runtime's fixed defaults and
  * safeguards. Text that looks like a credential is refused, and the matched text is never echoed.
  */
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
@@ -177,14 +178,63 @@ export const ExpertHireSchema = z.object({
   retiredBy: z.string().optional(),
   retireReason: z.string().optional(),
   budgetStop: BudgetStopSchema.optional(),
+  /** Set when the owner hired by approving a delegate's request. */
+  requestId: z.string().optional(),
 });
 export type ExpertHire = z.infer<typeof ExpertHireSchema>;
+
+/** The binding a hire request holds on its template: every field, so a same-millisecond edit is a different template. */
+export function templateDigest(template: ExpertTemplate): string {
+  return createHash('sha256').update(JSON.stringify(template)).digest('hex');
+}
+
+export const MAX_HIRE_REQUESTS = 500;
+/** Open requests one delegate may have waiting at once. */
+export const MAX_PENDING_HIRE_REQUESTS = 5;
+
+/**
+ * What a delegate asks the owner to hire: the hire body (as the owner would send it, harness and account included)
+ * plus optional identity overrides. Nothing in it takes effect until the owner approves it.
+ */
+export const HireRequestFieldsSchema = z.object({
+  workingDir: z.string().min(1).max(4096).refine((p) => p.startsWith('/'), 'workingDir is an absolute path'),
+  mode: CliModeSchema.optional(),
+  model: ModelIdSchema.optional(),
+  effort: EffortSchema.optional(),
+  accountProfileId: AccountProfileIdSchema.optional(),
+  reason: z.string().trim().min(3).max(500),
+  budgetStop: BudgetStopBodySchema.optional(),
+  name: z.string().trim().min(1).max(100).refine((s) => !/[\p{Cc}\u2028\u2029]/u.test(s), 'A name is one line of text').optional(),
+  position: z.string().trim().min(1).max(100).optional(),
+  reportsTo: z.string().trim().min(1).max(100).optional(),
+  rooms: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+});
+export type HireRequestFields = z.infer<typeof HireRequestFieldsSchema>;
+
+export const ExpertHireRequestSchema = z.object({
+  id: z.string(),
+  templateId: z.string(),
+  /** sha256 of the whole template as it stood at the request; the hire refuses any other template, at every step. */
+  templateSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  fields: HireRequestFieldsSchema,
+  /** 'agent:<session id>'. */
+  requestedBy: z.string(),
+  requestedAt: z.number(),
+  /** `approving` is held while the owner's hire runs, so a second approval cannot start another. */
+  status: z.enum(['pending', 'approving', 'approved', 'declined', 'withdrawn']),
+  decidedAt: z.number().optional(),
+  decidedBy: z.string().optional(),
+  note: z.string().optional(),
+  hireId: z.string().optional(),
+});
+export type ExpertHireRequest = z.infer<typeof ExpertHireRequestSchema>;
 
 export const ExpertStateSchema = z.object({
   version: z.literal(1),
   templates: z.array(ExpertTemplateSchema),
   settings: ExpertSettingsSchema,
   hires: z.array(ExpertHireSchema),
+  hireRequests: z.array(ExpertHireRequestSchema).default([]),
 });
 export type ExpertState = z.infer<typeof ExpertStateSchema>;
 
@@ -219,6 +269,7 @@ const emptyState = (): ExpertState => ({
   templates: [],
   settings: ExpertSettingsSchema.parse({}),
   hires: [],
+  hireRequests: [],
 });
 
 /**
