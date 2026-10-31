@@ -1051,6 +1051,7 @@ describe('replies', () => {
       'Reply',
       'Copy text',
       'Pin message',
+      'Select for deleting',
       'Delete message',
     ]);
   });
@@ -2125,6 +2126,7 @@ describe('phone: message sheet and member-only terminal access', () => {
       'Copy text',
       'Select text',
       'Pin message',
+      'Select for deleting',
       'Delete message',
       'Report message',
     ]);
@@ -3871,9 +3873,9 @@ describe('editing your own messages and pinning', () => {
 
   it('offers Edit only on the user\'s own text messages, and Pin / Unpin on any channel message', async () => {
     const h = await createHarness({ sessions, rooms: rooms() });
-    expect(menu(h, 'm1').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Edit message', 'Pin message', 'Delete message']);
+    expect(menu(h, 'm1').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Edit message', 'Pin message', 'Select for deleting', 'Delete message']);
     h.document.querySelector('.ca-msg-menu')?.remove();
-    expect(menu(h, 'm2').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Pin message', 'Delete message']);
+    expect(menu(h, 'm2').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Pin message', 'Select for deleting', 'Delete message']);
     h.document.querySelector('.ca-msg-menu')?.remove();
     expect(menu(h, 'm4').map((b) => b.textContent)).toContain('Unpin message');
   });

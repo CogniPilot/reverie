@@ -766,6 +766,13 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
   border-bottom: 1px solid var(--ca-line); border-radius: 8px 8px 0 0; background: var(--ca-side-bg); font-size: 13px; color: var(--text-dim);
 }
 .ca-root .ca-reply-bar[hidden] { display: none; }
+.ca-root .ca-select-bar {
+  flex: 1 0 100%; display: flex; align-items: center; gap: 8px; margin: -6px -8px 6px; padding: 6px 12px;
+  border-bottom: 1px solid var(--ca-line); border-radius: 8px 8px 0 0; background: var(--ca-side-bg); font-size: 13px; color: var(--text-dim);
+}
+.ca-root .ca-select-bar[hidden] { display: none; }
+.ca-root .ca-select-count { font-weight: 600; color: var(--text); }
+.ca-root .ca-msg.is-delete-selected { background: color-mix(in srgb, var(--bad, #e5484d) 14%, transparent); box-shadow: inset 3px 0 0 var(--bad, #e5484d); }
 /* "<name> is typing…": one quiet line over the message box, three dots that bounce (still when motion is reduced). */
 .ca-root .ca-typing { display: flex; align-items: center; gap: 8px; min-height: 22px; padding: 2px 16px 4px; font-size: 13px; color: var(--text-dim); }
 .ca-root .ca-typing[hidden] { display: none; }
