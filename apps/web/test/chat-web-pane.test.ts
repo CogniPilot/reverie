@@ -93,16 +93,57 @@ it('on a phone the page covers the chat and Back returns to it without leaving t
   expect(h.window.history.state?.reverieWeb).toBeFalsy();
 });
 
-it('the page policy lets the chat frame https sites and nothing else new', async () => {
+it('only the pages that host the chat may frame https sites; every other page keeps frames to this site', async () => {
   const app = Fastify();
   registerSecurityHeaders(app, true);
-  app.get('/', async () => 'ok');
-  const res = await app.inject({ method: 'GET', url: '/' });
-  await app.close();
-  const csp = String(res.headers['content-security-policy']);
-  expect(csp).toContain("frame-src 'self' https:;");
-  expect(csp).toContain("default-src 'self';");
-  expect(csp).toContain("frame-ancestors 'self'");
-  expect(csp).not.toMatch(/frame-src[^;]*http:/);
+  for (const path of ['/', '/index.html', '/session/:id', '/board.html', '/api/status', '/session/:id/extra']) app.get(path, async () => 'ok');
+  const csp = async (url: string) => String((await app.inject({ method: 'GET', url })).headers['content-security-policy']);
+  for (const url of ['/', '/?room=r1', '/index.html', '/session/abc']) {
+    const policy = await csp(url);
+    expect(policy, url).toContain("frame-src 'self' https:;");
+    expect(policy, url).toContain("default-src 'self';");
+    expect(policy, url).toContain("frame-ancestors 'self'");
+    expect(policy, url).not.toMatch(/frame-src[^;]*http:/);
+  }
+  // Anywhere else frames fall back to default-src 'self', as before the pane existed.
+  for (const url of ['/board.html', '/api/status', '/session/abc/extra']) {
+    const policy = await csp(url);
+    expect(policy, url).not.toContain('frame-src');
+    expect(policy, url).toContain("default-src 'self';");
+  }
+  const res = await app.inject({ method: 'GET', url: '/board.html' });
   expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+  await app.close();
+});
+
+it('a framed site that navigates its frame to a Reverie page is blanked, and another site is left alone', async () => {
+  const { h, link, click, frame } = await setup();
+  const errors: unknown[] = [];
+  h.window.addEventListener('error', (event) => errors.push(event.error));
+  const note = () => h.document.querySelector('.ca-web-note')!.textContent;
+  const opening = note();
+  const loadWith = (location: () => unknown) => {
+    Object.defineProperty(frame(), 'contentWindow', { configurable: true, get: () => ({ get location() { return location(); } }) });
+    frame().dispatchEvent(new h.window.Event('load'));
+  };
+  click(link('https://status.example.com'));
+  // A browser loads about:blank into a new frame first; that readable blank page is not a Reverie page.
+  loadWith(() => ({ href: 'about:blank' }));
+  expect(frame().getAttribute('src')).toBe('https://status.example.com/roadmap?x=1');
+  expect(note()).toBe(opening);
+  // Another site: its address cannot be read, and the read must not throw out of the handler.
+  loadWith(() => { throw new h.window.DOMException('Blocked a frame with origin', 'SecurityError'); });
+  expect(frame().getAttribute('src')).toBe('https://status.example.com/roadmap?x=1');
+  expect(note()).toBe(opening);
+  expect(errors).toEqual([]);
+  // A readable address is this site's own page inside the pane: it is blanked and the new tab offered.
+  loadWith(() => ({ href: 'http://localhost/board' }));
+  expect(frame().getAttribute('src')).toBe('about:blank');
+  expect(note()).toContain('tried to open a Reverie page inside the pane');
+  expect((h.document.querySelector('.ca-web-external') as HTMLAnchorElement).href).toBe('https://status.example.com/roadmap?x=1');
+  // Opening the link again loads it and restores the usual note.
+  delete (frame() as { contentWindow?: unknown }).contentWindow;   // the real frame window again, for teardown
+  click(link('https://status.example.com'));
+  expect(frame().getAttribute('src')).toBe('https://status.example.com/roadmap?x=1');
+  expect(note()).toBe(opening);
 });
