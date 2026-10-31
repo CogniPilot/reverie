@@ -1765,6 +1765,7 @@ export class WebServer extends EventEmitter {
         serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
+        resourceReplacement: this.resourceReplacementEnabled === true,
       }
     );
     registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {

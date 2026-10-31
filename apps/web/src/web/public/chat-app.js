@@ -8103,7 +8103,85 @@ class ReverieChatApp {
       this.employeeGpuFields(management, employee, dialog);
       this.publicationCredentialsFields(management, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
+      if (company.data?.resourceReplacement === true) this.employeeMemoryFields(management, employee, dialog);
     }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });
+  }
+
+  /**
+   * Owner-only laptop memory, through the protected replacement routes (POST /api/company/resources/preview, apply,
+   * result). Preview asks the broker for a draft with the new memory and the limits it keeps; Restart replaces the
+   * laptop with it and hands the agent the note below. Apply is sent once and never retried: an unconfirmed answer
+   * says to check the status first. Shown only when the server reports the routes (resourceReplacement).
+   */
+  employeeMemoryFields(container, employee, dialog) {
+    const host = this.el('section', 'ca-profile-memory');
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    const row = this.el('div', 'ca-company-actions');
+    const label = this.el('label', 'ca-hint', 'Memory (MiB) ');
+    const input = this.el('input', 'ca-field');
+    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '512'; input.required = true;
+    input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`);
+    label.append(input);
+    const draftBox = this.el('div', 'ca-profile-memory-draft');
+    const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
+    let busy = false, operationId = null;
+    const unconfirmed = 'Not confirmed. Check the status before trying again.';
+    const check = this.button('ca-btn', `Check laptop memory change for ${employee.name}`, async () => {
+      if (busy || !operationId) return;
+      busy = true; check.disabled = true;
+      try {
+        const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
+        if (!dialog.isConnected) return;
+        const phase = result.ok ? result.data?.phase : null;
+        status.textContent = !result.ok ? `Status could not be read (${result.status ?? 'network'}). Try again shortly.`
+          : phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
+            : phase === 'failed' ? `The change did not happen: ${result.data?.error || 'the old laptop was kept'}.`
+              : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
+                : `In progress (${phase || 'unknown'}). Check again shortly.`;
+      } finally { busy = false; check.disabled = false; }
+    }, { text: 'Check status' });
+    check.hidden = true;
+    const preview = this.button('ca-btn', `Preview laptop memory for ${employee.name}`, async () => {
+      if (busy || !input.reportValidity()) return;
+      busy = true; preview.disabled = true; draftBox.replaceChildren(); status.textContent = 'Preparing a preview…';
+      try {
+        const memoryMiB = Number(input.value);
+        const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
+        if (!dialog.isConnected) return;
+        if (!result.ok) {
+          status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
+            : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
+              : 'No preview: the laptop may be busy, or this agent cannot be restarted this way. Nothing was changed.';
+          return;
+        }
+        const draft = result.data, r = draft?.resources || {};
+        status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
+        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} processes, ${r.cpus} CPUs. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
+        const note = this.el('textarea', 'ca-field');
+        note.rows = 3; note.maxLength = 12000; note.required = true;
+        note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
+        note.setAttribute('aria-label', `Handoff note for ${employee.name} after the restart`);
+        const apply = this.button('ca-btn is-danger', `Restart ${employee.name} with ${mib(r.memoryMiB)}`, async () => {
+          if (busy || !note.value.trim()) return;
+          const question = `Restart ${employee.name}'s laptop with ${mib(r.memoryMiB)} of memory? Current work is interrupted and resumes from the note.`;
+          if (!await this.confirmCompanyAction(employee.name, question, 'Restart laptop') || !dialog.isConnected) return;
+          busy = true; apply.disabled = true; preview.disabled = true; status.textContent = 'Restarting the laptop…';
+          try {
+            const applied = await this.app._chatApi('/api/company/resources/apply', { method: 'POST', body: { previewId: draft.draftId, handoff: note.value.trim() } });
+            if (!dialog.isConnected) return;
+            // One attempt for this preview: the server refuses a second Apply, so the button stays off either way.
+            operationId = draft.operationId; check.hidden = false;
+            status.textContent = applied.ok ? `Restart started (${applied.data?.phase || 'starting'}). Use Check status to follow it.` : unconfirmed;
+          } finally { busy = false; preview.disabled = false; }
+        }, { text: `Restart with ${mib(r.memoryMiB)}` });
+        draftBox.append(this.el('label', 'ca-hint', 'Note for the agent after the restart'), note, apply);
+      } finally { busy = false; preview.disabled = false; }
+    }, { text: 'Preview' });
+    row.append(label, preview, check);
+    host.append(this.el('h3', '', 'Laptop memory'),
+      this.el('p', 'ca-hint', 'Changes this expert\'s laptop memory by restarting it on a new laptop. Processes, CPUs and the shared pool stay as they are.'),
+      row, draftBox, status);
+    container.append(host);
   }
 
   /** Company marks share the existing upload, preview and workspace-picture persistence. */

@@ -68,6 +68,8 @@ export function registerCompanyRoutes(
     serviceRebind?: ServiceVerifier;
     boardCoordinator?: (sessionId: string) => boolean;
     publicationTokens?: { assertGrantIds(owner: string | undefined, ids: string[]): Promise<void> };
+    /** The protected laptop-memory replacement routes are registered (server started with --resource-replacement). */
+    resourceReplacement?: boolean;
   } = {}
 ): void {
   const verifiedOwner = authority.verifiedOwner ?? NO_OWNER;
@@ -147,7 +149,9 @@ export function registerCompanyRoutes(
     return {
       success: true,
       data: { ...view, employees: view.employees.map(employee =>
-        presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req) },
+        presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req),
+        // Only the verified owner learns that laptop memory can be changed here; the routes recheck the owner themselves.
+        ...(verifiedOwner(req) && authority.resourceReplacement === true ? { resourceReplacement: true } : {}) },
     };
   });
   app.post('/api/company/employees', async (req, reply) =>
