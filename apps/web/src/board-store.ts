@@ -18,7 +18,18 @@ export class BoardError extends Error {
 export class BoardStore {
   private state: BoardState = emptyBoard();
   private chain: Promise<unknown> = Promise.resolve();
+  private listeners: Array<(rev: number) => void> = [];
   constructor(readonly file: string) {}
+
+  /** The revision of the committed board: it moves on every saved write. */
+  get rev(): number {
+    return this.state.rev;
+  }
+
+  /** Call `listener` after every committed write, whoever made it. A listener that throws never undoes the write. */
+  onChange(listener: (rev: number) => void): void {
+    this.listeners.push(listener);
+  }
 
   async init(): Promise<void> {
     try {
@@ -53,6 +64,9 @@ export class BoardStore {
       await options.beforeSave?.(next);
       await writeCompanyStateFile(this.file, JSON.stringify(next));
       this.state = next;
+      for (const listener of this.listeners) {
+        try { listener(next.rev); } catch { /* saved; a listener's reader catches up on its next read */ }
+      }
       return { rev: next.rev, result: structuredClone(result) };
     });
     this.chain = run.catch(() => {});

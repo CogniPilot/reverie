@@ -19,6 +19,7 @@ import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
+import type { Issue } from '../board-types.js';
 import { decisionWritesEnabled } from './decision-config.js';
 import { fullAccessAlertRoom } from '../full-access-default.js';
 import { CompanyService, CompanyError } from '../company-service.js';
@@ -1437,6 +1438,7 @@ export class WebServer extends EventEmitter {
     // in one room; messages reach member panes as single-line prompts.
     const chatroomFiles = new ChatFileStore(getDataDir());
     await chatroomFiles.initializeShared();
+    let boardIssuesCache: { rev: number; issues: Issue[] } | undefined;
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
@@ -1471,12 +1473,16 @@ export class WebServer extends EventEmitter {
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
       timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
-      // An agent's digest lists its own Board cards and the cards they name (created below, after chat).
+      // An agent's digest lists its own Board cards and the cards they name, and room views show each member's 'doing'
+      // cards (the Board store is created below, after chat).
       boardIssues: (owner) => {
         const names = new Map((this.companyService?.view(owner).employees ?? []).map((e) => [e.id, e.name]));
-        return (this.boardStore?.snapshot().issues ?? []).map((issue) => ({
+        // One copy of the Board per revision, not one per room view.
+        const store = this.boardStore;
+        if (store && boardIssuesCache?.rev !== store.rev) boardIssuesCache = { rev: store.rev, issues: store.snapshot().issues };
+        return (boardIssuesCache?.issues ?? []).map((issue) => ({
           id: issue.id, title: issue.title, status: issue.status, owner: issue.owner, reason: issue.reason,
-          ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt,
+          ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt, end: issue.end,
         }));
       },
       // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
@@ -1824,6 +1830,8 @@ export class WebServer extends EventEmitter {
     const boardStore = new BoardStore(dataPath('board.json'));
     await boardStore.init();
     this.boardStore = boardStore;
+    // Room views show each member's 'doing' cards: a saved Board write re-announces the rooms whose cards moved.
+    boardStore.onChange(() => this.chatroomService.noteBoardChanged());
     registerBoardRoutes(this.app, ctx, {
       verifiedOwner,
       store: boardStore,
