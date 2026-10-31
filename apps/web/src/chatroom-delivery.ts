@@ -214,7 +214,8 @@ export function renderForRecipient(
   else if (message.to.length === 1 && message.to[0] === recipientId) to = 'you';
   else to = describeRecipients(message, nameOf);
   // Attachments reach an agent as absolute paths it can read, still on the one line.
-  const files = (message.attachments ?? []).map((a) => isChatRaster(a)
+  // A linked file is the shared-drive file itself (same path in every laptop), so even a picture is named by that path.
+  const files = (message.attachments ?? []).map((a) => a.linked ? ` [linked file: ${quoteForPane(a.path, 400)}]` : isChatRaster(a)
     ? imagePaths.has(a.id) ? ` [attached: ${quoteForPane(imagePaths.get(a.id)!, 400)}]`
       : ` [attached image: ${quoteForPane(a.name, 200)} (local image unavailable; re-read to request a fresh path)]`
     : ` [attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`).join('');

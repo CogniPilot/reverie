@@ -4512,12 +4512,62 @@ class ReverieChatApp {
     this.openMenu(
       [
         { label: 'Upload a File', glyph: '\u2B06', run: () => picker?.click() },
+        { label: 'Link a File', glyph: '\u{1F517}', disabled: !room || !!room.archivedAt, run: () => this.openLinkFileDialog() },
         { label: 'Create Thread', glyph: '\u2630', disabled: true, hint: 'Soon' },
         { label: 'Create Poll', glyph: '\u2261', disabled: !canPoll, run: () => this.openPollDialog() },
         { label: 'Use Apps', glyph: '\u2726', disabled: true, hint: 'Soon' },
       ],
       { at: trigger, focus: trigger, above: true, className: 'ca-plus-menu', label: 'Add to the message' }
     );
+  }
+
+  /**
+   * Link a File: attach a file on the shared drive by its path, without uploading a copy. Everyone in the room opens the
+   * file as it is now; the server refuses a laptop-local path, a symlink or a hidden file.
+   */
+  openLinkFileDialog() {
+    if (!this.room) return;
+    this.doc.querySelector('.ca-dialog.ca-link-dialog')?.remove();
+    const dlg = this.el('dialog', 'ca-dialog ca-link-dialog');
+    dlg.setAttribute('aria-label', 'Link a file');
+    dlg.append(this.el('h2', '', 'Link a file'));
+    const form = this.el('form', 'ca-form');
+    const wrap = this.el('label', 'ca-label');
+    wrap.append(this.el('span', '', 'Path on the shared drive'));
+    const path = this.el('input', 'ca-field');
+    path.required = true;
+    path.maxLength = 4096;
+    path.spellcheck = false;
+    path.autocomplete = 'off';
+    path.placeholder = '/shared/drive/folder/file.pdf';
+    wrap.append(path);
+    const hint = this.el('p', 'ca-hint', 'The file is not copied: everyone in the room opens it as it is now, with no size limit.');
+    const error = this.el('p', 'ca-form-error');
+    error.setAttribute('role', 'alert');
+    const row = this.el('div', 'ca-dialog-actions');
+    const cancel = this.el('button', 'ca-btn', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => dlg.close());
+    const go = this.el('button', 'ca-btn is-primary', 'Link');
+    go.type = 'submit';
+    row.append(cancel, go);
+    form.append(wrap, hint, error, row);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const value = path.value.trim();
+      if (!value.startsWith('/')) return void (error.textContent = 'Use the absolute path of a file on the shared drive.');
+      go.disabled = true;
+      const refused = await this.app._linkChatFile?.(value);
+      go.disabled = false;
+      if (refused) return void (error.textContent = refused);
+      dlg.close();
+      this.els.composerInput()?.focus?.();
+    });
+    dlg.append(form);
+    dlg.addEventListener('close', () => dlg.remove());
+    this.doc.body.append(dlg);
+    dlg.showModal();
+    path.focus();
   }
 
   /**
