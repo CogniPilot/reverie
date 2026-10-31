@@ -38,11 +38,18 @@ let
   }) (baseContents ++ [ reverie console memory entrypoint ] ++ pkgs.lib.optional worker imagePython));
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
+  webArgs = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
+  ownerWebArgs = if ownerTerminalWebsite == null then null else ownerTerminalWebsite.webArgs;
+  # The selected H factory adds only this exact pair to the fixed web command.
+  # Reuse its string-only canonical guest-path validator; no host file is read.
+  serviceAuthWebArgs = builtins.isList ownerWebArgs && builtins.length ownerWebArgs == 7
+    && builtins.elemAt ownerWebArgs 5 == "--service-auth-config"
+    && builtins.isString (builtins.elemAt ownerWebArgs 6)
+    && ownerWebArgs == webArgs ++ [ "--service-auth-config"
+      ((import ./service-auth-config.nix { inherit (pkgs) lib; }) (builtins.elemAt ownerWebArgs 6)) ];
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
-assert ownerTerminalWebsite == null || (!worker && !resourceReplacement && builtins.elem ownerTerminalWebsite.webArgs [
-  [ "web" "--host" "0.0.0.0" "--port" "3000" ]
-  [ "web" "--host" "0.0.0.0" "--port" "3000" "--resource-replacement" ]
-]);
+assert ownerTerminalWebsite == null || (!worker && !resourceReplacement &&
+  (builtins.elem ownerWebArgs [ webArgs (webArgs ++ [ "--resource-replacement" ]) ] || serviceAuthWebArgs));
 assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
   && uid < 2147483648 && gid < 2147483648
   && builtins.isInt rootlessDocker.subuidStart && rootlessDocker.subuidStart > 0
