@@ -233,8 +233,13 @@ export function renderForRecipient(
   // Only a turn the server found the verified owner speaking (owner_spoken, owner-auth/marks.ts) gets this turn's voice
   // context, outside the quote. A body's own `spoken` is a request, never evidence: an unsigned post gets no hint.
   const voice = message.from.kind === 'user' && message.from.mark === 'owner_spoken' ? ` ${SPOKEN_TURN_HINT}` : '';
-  // Spoken turns and addressed voice questions need an answer linked to their identity, outside the quote.
-  const link = (message.from.kind === 'user' && message.spoken) || isAddressedVoiceTurn(room, message, recipientId, nameOf)
+  // An assignment marker names its ledger entry, not the chat message an answer must link to.
+  const assignmentCheckin = !message.deleted && message.from.kind === 'bot'
+    && message.to !== 'all' && message.to.includes(recipientId)
+    && /^\[assignment-checkin:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\] /.test(message.text)
+    && message.text.includes('Reply directly to this message with On track');
+  // Keep the reply command outside the quote, with the actual stored message identity.
+  const link = (message.from.kind === 'user' && message.spoken) || isAddressedVoiceTurn(room, message, recipientId, nameOf) || assignmentCheckin
     ? ` ${answerLinkHint(message.id)}` : '';
   return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${voice}${link}`;
 }
