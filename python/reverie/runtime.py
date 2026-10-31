@@ -202,14 +202,19 @@ class Runtime:
         session = value.get("session", value)
         session_id = (value.get("sessionId") or session.get("id")) if isinstance(session, dict) else None
         if not session_id: raise RuntimeError("Reverie returned no session id; inspect before retrying")
-        # A fresh backend remembers nothing else: the handoff it is sent first also says who it is and where its memory lives.
-        self.state.update(handoff=self.with_memory_brief(handoff))
         self.state.update(candidate=session_id, candidate_backend=backend, creation_uncertain=False,
                           phase="awaiting_verified_handoff", candidate_created_at=time.time(),
                           candidates_seen=self.state.get("candidates_seen", [])[-19:] + [session_id])
         self.save()
-        return {"session_id":session_id, "backend":backend, "phase":self.state["phase"],
-                "next":"Read its screen; send the saved handoff when its composer is ready. Verify memory and chat membership, then activate."}
+        # Only once the candidate is on disk: a fresh backend remembers nothing else, so its first prompt also says who it is
+        # and where its memory lives. The owner's handoff stays plain, so every later start reads the journal afresh.
+        brief = self.memory_brief()
+        first_prompt = brief + " " + handoff if brief else handoff
+        self.state.update(first_prompt=first_prompt)
+        self.save()
+        return {"session_id":session_id, "backend":backend, "phase":self.state["phase"], "first_prompt":first_prompt,
+                "memory_brief":"added" if brief else "unavailable",
+                "next":"Read its screen; send the saved first_prompt when its composer is ready. Verify memory and chat membership, then activate."}
 
     def activate(self, session_id):
         if session_id != self.state.get("candidate"): raise ValueError("not the pending candidate")
@@ -264,22 +269,15 @@ class Runtime:
         current = self.state.get("current")
         known = self.state.get("bindings") or {}
         employees = known.get("employees") if current and known.get("session") == current else None
-        if employees is None and current:
-            try: employees = self.bindings(current)["employees"]
-            except (OSError, ValueError, RuntimeError, KeyError, TypeError): employees = None
-        if not employees or len(employees) != 1: return ""
-        path = "/api/v1/company/employees/" + urllib.parse.quote(str(employees[0]["employee_id"]), safe="") + "/memory-brief"
-        try: value = self.api.call("GET", path)
+        try:
+            if employees is None and current: employees = self.bindings(current)["employees"]
+            if not employees or len(employees) != 1: return ""
+            path = "/api/v1/company/employees/" + urllib.parse.quote(str(employees[0]["employee_id"]), safe="") + "/memory-brief"
+            value = self.api.call("GET", path)
         except (OSError, ValueError, RuntimeError, KeyError, TypeError): return ""
         brief = value.get("brief") if isinstance(value, dict) else None
         if not isinstance(brief, str) or not brief.startswith(MEMORY_BRIEF) or len(brief) > MEMORY_BRIEF_MAX: return ""
         return " ".join(brief.split())
-
-    def with_memory_brief(self, handoff):
-        """The handoff led by the memory block, once; the handoff alone when the block cannot be read."""
-        if handoff.startswith(MEMORY_BRIEF): return handoff
-        brief = self.memory_brief()
-        return brief + " " + handoff if brief else handoff
 
     def bindings(self, session_id):
         """Room memberships and company employees currently bound to session_id."""
