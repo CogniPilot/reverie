@@ -43,7 +43,8 @@ it.each([
   [{ awakened: [], skipped: [] }, 'Alex is already running. Nothing was started.'],
   [{ awakened: [], skipped: [{ employeeId: 'expert', reason: 'intentionally-ended' }] }, 'Alex was not woken: their session was ended on purpose. Use Restart session to resume it.'],
   [{ awakened: [], skipped: [{ employeeId: 'expert', reason: 'disabled-or-retry-limited' }] }, 'Alex was not woken: a restart is running for them, or their wake limit (three in fifteen minutes) is reached.'],
-  [{ awakened: [], skipped: [{ employeeId: 'expert', reason: 'workspace-missing' }] }, 'Alex was not woken: workspace-missing.'],
+  [{ awakened: [], skipped: [{ employeeId: 'expert', reason: 'remote-or-docker' }] }, 'Alex was not woken: they run on another host or in a container, which Wake cannot start. Use Restart session.'],
+  [{ awakened: [], skipped: [{ employeeId: 'expert', reason: 'some-future-reason' }] }, 'Alex was not woken: some-future-reason.'],
 ])('shows the server report as it is: %j', async (recovery, text) => {
   const { h, employee, calls, toasts, reply } = await setup();
   reply({ ok: true, data: { recovery } }); await h.shell.wakeEmployee(employee);

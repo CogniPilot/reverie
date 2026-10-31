@@ -38,7 +38,7 @@ function chatBadgeCount(n) {
 const CA_SHEET_MAX_WIDTH = 767;
 const CA_CARD_WIDTH = 280;
 
-/** Plain words for the reasons an expert's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
+/** Plain words for the reasons an owner's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
 const CA_WAKE_SKIPS = {
   'recovery-in-progress': 'another recovery is running. Check their status when it ends',
   'lifecycle-in-progress': 'a restart or office change is in progress for them',
@@ -49,6 +49,16 @@ const CA_WAKE_SKIPS = {
   'no-owned-session-record': 'there is no saved session to start',
   'not-previously-running': 'they were not running before',
   'wake-failed': 'their agent did not start. Check Runtime settings, or use Restart session',
+  'ineligible': 'their saved session cannot be started this way. Use Restart session',
+  'no-persisted-record': 'there is no saved session to start',
+  'not-running': 'they were not running before. Use Restart session to start them',
+  'agent-exited': 'their agent was ended on purpose. Use Restart session to resume it',
+  'respawn-blocked': 'their agent kept crashing, so it is held. Check Runtime settings, then use Restart session',
+  'remote-or-docker': 'they run on another host or in a container, which Wake cannot start. Use Restart session',
+  'unsupported-mode': 'their harness cannot be resumed this way. Use Restart session',
+  'no-working-dir': 'their working directory is not set. Check Runtime settings',
+  'workspace-missing': 'their working directory is missing. Check Runtime settings',
+  'already-live': 'they are already running',
 };
 
 /** How long a woken member may take to start (be seen busy) before the "is typing" line is dropped, and the longest it ever shows. */
@@ -7275,7 +7285,7 @@ class ReverieChatApp {
   }
 
   /**
-   * Wake: start an expert whose agent is not running, through the same scoped recovery the CLI's agent wake-employee uses.
+   * Wake: start an expert whose agent is not running, through the scoped recovery route POST /api/company/employees/:id/wake.
    * It never interrupts a running agent, and never retries: the server decides (owner, vacation, wake budget) and its
    * awakened/skipped report is shown as it is. An answer that cannot be confirmed says so, so the owner checks first.
    */
