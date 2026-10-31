@@ -338,7 +338,9 @@ class GPUUpgrade:
         return result
 
     def ready_socket(self, path, broker_pid):
-        end = min(self.deadline, time.monotonic() + 10)
+        # Recovery validates every existing seat before binding the broker. All
+        # listeners share the original operation deadline; none gets a new budget.
+        end = self.deadline
         while time.monotonic() < end:
             try:
                 before = stamp(path)
@@ -351,6 +353,7 @@ class GPUUpgrade:
                     pid, uid, _gid = struct.unpack('3i', client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                     need(pid == broker_pid and uid == os.getuid() and stamp(path) == before,
                          'Recovered listener is not the selected new broker process')
+                need(time.monotonic() < end, 'New broker/office listener readiness deadline exhausted')
                 return
             except (FileNotFoundError, ConnectionRefusedError, TimeoutError):
                 time.sleep(min(.1, max(0, end - time.monotonic())))
