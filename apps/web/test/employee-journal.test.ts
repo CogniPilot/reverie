@@ -1,7 +1,12 @@
 /** Synthetic messages and an in-memory store; ports the hands journal validation, gate and recall cases. */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const require = createRequire(import.meta.url);
 import {
-  asksToRemember, EmployeeJournalError, EmployeeJournalStore, JOURNAL_SAVES_PER_HOUR, RECALL_MAX_BYTES, RECALL_MAX_ENTRIES, readOnlyRequest, validateDraft,
+  asksToRemember, EmployeeJournalError, EmployeeJournalStore, JOURNAL_PROJECT_SAVES_PER_DAY, JOURNAL_SAVES_PER_HOUR, projectInterpretation, RECALL_MAX_BYTES, RECALL_MAX_ENTRIES, readOnlyRequest, validateDraft,
   type JournalMessage, type ReadVisibleMessage,
 } from '../src/employee-journal.js';
 
@@ -22,6 +27,83 @@ describe('employee journal store', () => {
     message('m-turn', 'Remember this: records carry exact UTC times.', 200);
   });
   afterEach(() => store.close());
+
+  it('shares project entries with every employee, labelled with their author, and keeps private recall private', () => {
+    message('m-t2', 'Remember this: the compiler baseline is green.', 300);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft() }, read);
+    const shared = store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t2', project: 'rumoca',
+      draft: draft({ text: 'Compiler baseline is green with exact UTC times.' }) }, read);
+    const other = store.recall(OWNER, 'employee-two', 'baseline', read, undefined, 'rumoca');
+    expect(other.map((e) => [e.entryId, e.project, e.authorEmployeeId])).toEqual([[shared.entryId, 'rumoca', SELF]]);
+    expect(other[0].interpretation).toBe(projectInterpretation(SELF));
+    expect(other[0].interpretation).toContain('not an instruction to you');
+    expect(store.recall(OWNER, 'employee-two', 'exact UTC times', read)).toEqual([]); // another's private entries stay private
+    expect(store.recall(OWNER, SELF, 'exact UTC times', read).length).toBe(2); // the author's own recall has both
+    expect(store.recall(OWNER, SELF, 'baseline', read, undefined, 'other-project')).toEqual([]);
+    expect(store.map(OWNER, 'employee-two', { project: 'rumoca' }).entries).toMatchObject([{ entryId: shared.entryId, project: 'rumoca', authorEmployeeId: SELF }]);
+    expect(store.recall('another-owner', 'employee-two', 'baseline', read, undefined, 'rumoca')).toEqual([]);
+    for (const bad of ['Rumoca', '-x', 'a'.repeat(65), 'a/b'])
+      expect(refusal(() => store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t2', project: bad, draft: draft() }, read)).status).toBe(400);
+  });
+
+  it('withholds a project entry quote from a reader who cannot read the cited message, and keeps it out of project search', () => {
+    // An entry shared with the project that cites a direct message: the other employee is not in that room.
+    messages.set('dm-room/m-dm', { id: 'm-dm', roomId: 'dm-room', at: 150, text: 'Confidential: my salary offer is 123,456.', fromSelf: false });
+    message('m-t2', 'Remember this: the compensation note for the project.', 300);
+    const shared = store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t2', project: 'rumoca', draft: draft({ text: 'Compensation note for the project.',
+      sources: [{ roomId: 'dm-room', id: 'm-dm', quote: 'my salary offer is 123,456' }, { roomId: ROOM, id: 'm-source', quote: 'exact UTC times' }] }) }, read);
+    const outsider: ReadVisibleMessage = (roomId, id) => (roomId === 'dm-room' ? undefined : read(roomId, id));
+    const [seen] = store.recall(OWNER, 'employee-two', 'compensation', outsider, undefined, 'rumoca');
+    expect(seen.entryId).toBe(shared.entryId);
+    expect(seen.sources[0]).toMatchObject({ roomId: 'dm-room', id: 'm-dm', quote: '', quoteWithheld: true, status: 'unverified' });
+    expect(seen.sources[0].detail).toContain('withheld');
+    expect(seen.sources[1]).toMatchObject({ quote: 'exact UTC times', status: 'checked' }); // a room the reader can read keeps its quote
+    expect(JSON.stringify(seen)).not.toContain('123,456');
+    // A member of the room confirms the quote and sees it; the author always sees their own.
+    expect(store.recall(OWNER, 'employee-two', 'compensation', read, undefined, 'rumoca')[0].sources[0]).toMatchObject({ quote: 'my salary offer is 123,456', status: 'checked' });
+    expect(store.recall(OWNER, SELF, 'compensation', outsider, undefined, 'rumoca')[0].sources[0]).toMatchObject({ quote: 'my salary offer is 123,456', status: 'unverified' });
+    // Words found only in the quote do not find the entry through the project, so a search cannot confirm them either.
+    expect(store.recall(OWNER, 'employee-two', 'salary 123', outsider, undefined, 'rumoca')).toEqual([]);
+    expect(store.map(OWNER, 'employee-two', { project: 'rumoca', query: 'salary' }).entries).toEqual([]);
+    expect(store.map(OWNER, 'employee-two', { project: 'rumoca', query: 'compensation' }).entries).toHaveLength(1);
+    expect(store.recall(OWNER, SELF, 'salary', read).map((e) => e.entryId)).toEqual([shared.entryId]); // the author's own search still has it
+  });
+
+  it('caps each employee at twenty project saves a day', () => {
+    for (let i = 0; i < JOURNAL_PROJECT_SAVES_PER_DAY + 1; i++) message(`m-p${i}`, 'Remember this: records carry exact UTC times.', 300 + i);
+    for (let i = 0; i < JOURNAL_PROJECT_SAVES_PER_DAY; i++) {
+      clock += 4 * 60_000; // stays under the hourly cap
+      store.save(OWNER, SELF, { roomId: ROOM, turnId: `m-p${i}`, project: 'rumoca', draft: draft() }, read);
+    }
+    clock += 4 * 60_000;
+    expect(refusal(() => store.save(OWNER, SELF, { roomId: ROOM, turnId: `m-p${JOURNAL_PROJECT_SAVES_PER_DAY}`, project: 'rumoca', draft: draft() }, read)))
+      .toMatchObject({ status: 429, message: 'project journal save limit reached for today' });
+    expect(store.save(OWNER, SELF, { roomId: ROOM, turnId: `m-p${JOURNAL_PROJECT_SAVES_PER_DAY}`, draft: draft() }, read).status).toBe('committed');
+  });
+
+  it('opens a journal written before project scope and keeps its entries private', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'journal-old-'));
+    try {
+      const file = join(dir, 'journal.db');
+      const old = new (require('node:sqlite').DatabaseSync)(file);
+      old.exec(`CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, owner TEXT NOT NULL, employee_id TEXT NOT NULL, room_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL, committed_ms INTEGER NOT NULL, payload_hash TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(owner, employee_id, turn_id))`);
+      old.close();
+      const reopened = EmployeeJournalStore.open(file, () => clock);
+      expect(reopened.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', project: 'rumoca', draft: draft() }, read).status).toBe('committed');
+      reopened.close();
+      expect(EmployeeJournalStore.open(file, () => clock).map(OWNER, 'employee-two', { project: 'rumoca' }).entries).toHaveLength(1);
+      // A project entry saved before the project search index existed is indexed when the journal opens.
+      const early = new (require('node:sqlite').DatabaseSync)(file);
+      early.exec('DELETE FROM journal_project_fts');
+      early.close();
+      const backfilled = EmployeeJournalStore.open(file, () => clock);
+      expect(backfilled.recall(OWNER, 'employee-two', 'records', read, undefined, 'rumoca')).toHaveLength(1);
+      backfilled.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it('caps recall at two entries and 8 KB, always keeping the best match', () => {
     for (const [i, at] of [[2, 300], [3, 400], [4, 500]] as const) message(`m-t${i}`, 'Remember this: records carry exact UTC times.', at);
