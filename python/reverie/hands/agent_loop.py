@@ -593,7 +593,7 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fet
         # Optional pending context cannot displace required instructions or the current request.
         messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve, recalled=recalled)
     if start_task is not None:
-        messages[0]['content'] += '\n' + admin_task.RULE
+        messages[0]['content'] += '\n' + admin_task.rule(task_tools)
     searches = largest = 0
     finishing = 0  # finishing calls made (0, 1 or 2)
     searching = bool(cfg.get('search') or cfg.get('web_fetch'))

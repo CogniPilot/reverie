@@ -19,6 +19,15 @@ RULE = ('You are the Reverie Admin Harness. For an action request, use run_works
         'a plain chat answer does not run commands. Never say you edited, tested or filed something unless a tool receipt confirms it. '
         'To stop, cancel or abort the running work, use cancel_workspace_task; never start a new task to stop one. '
         'A queued task is not completion. For current permissions use reverie agent capabilities; file decision requests with reverie board decision add, not an imagined coordinator-only queue.')
+# For a message that did not address this harness only the cancel tool is offered, so the rule never names the start tool.
+CANCEL_RULE = ('You are the Reverie Admin Harness. This message did not ask you directly, so you cannot start work from it: '
+               'answer in chat, and to have work started the person must mention you or reply to you. '
+               'Never say you edited, tested or filed something unless a tool receipt confirms it. '
+               'To stop, cancel or abort the running work, use cancel_workspace_task.')
+
+def rule(tools):
+    """The rule for the tools actually offered: it may name the start tool only when that tool is offered."""
+    return RULE if any((tool.get('function') or {}).get('name') == TOOL_NAME for tool in tools) else CANCEL_RULE
 
 def validate(cfg):
     name = cfg.get('admin_task')

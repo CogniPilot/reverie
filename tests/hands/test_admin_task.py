@@ -125,15 +125,27 @@ class NaturalAdminTaskTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cfg = cfg_for(directory)
             start = Mock(return_value='unused');start.tools = [admin_task.CANCEL_TOOL];cfg['_admin_start_task'] = start
-            seen = []
+            seen = [];prompts = []
             def model(config, messages, tools):
                 seen.append([tool['function']['name'] for tool in tools or []])
+                prompts.append(messages[0]['content'])
                 return {'content': 'Nice roll!'}
             reply, _, _ = loop.answer(cfg, 'office', [], {'id': 'm', 'text': 'Latch ties the rope.', 'from': OWNER}, model, None)
             self.assertEqual(reply, 'Nice roll!')
             self.assertTrue(seen and all(admin_task.TOOL_NAME not in names for names in seen))
             self.assertTrue(any(admin_task.CANCEL_TOOL_NAME in names for names in seen))
+            # The prompt never tells the model to use a tool it was not given.
+            self.assertTrue(prompts and all(admin_task.TOOL_NAME not in prompt for prompt in prompts))
+            self.assertTrue(all(admin_task.CANCEL_RULE in prompt for prompt in prompts))
             start.assert_not_called()
+            # A message that addresses the harness still gets the start tool and the rule that names it.
+            start.tools = admin_task.TOOLS;seen.clear();prompts.clear()
+            loop.answer(cfg, 'office', [], {'id': 'm2', 'text': '@Helper run the tests.', 'from': OWNER}, model, None)
+            self.assertTrue(seen and all(admin_task.TOOL_NAME in names for names in seen))
+            self.assertTrue(prompts and all(admin_task.RULE in prompt for prompt in prompts))
+        # The prompt reserve is sized for RULE, so the cancel-only rule must not be longer.
+        self.assertLessEqual(len(admin_task.CANCEL_RULE), len(admin_task.RULE))
+        self.assertNotIn(admin_task.TOOL_NAME, admin_task.CANCEL_RULE)
 
     def test_office_access_preserves_only_own_loopback_context_when_explicitly_enabled(self):
         cfg = self.config();cfg['self_session_id'] = '11111111-2222-4333-8444-555555555555'
