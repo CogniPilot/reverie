@@ -3327,6 +3327,45 @@ class ReverieChatApp {
     container.append(recovery);
   }
 
+  /**
+   * The company time zone (an IANA name such as America/New_York): chat times, agent briefs, deadlines and plan resets
+   * follow it. Only that one setting is sent, and the page clock switches once the server confirms the saved zone.
+   */
+  companyTimeZoneForm(data, status, error, onSaved) {
+    const form = this.el('form', 'ca-company-time-zone-form');
+    form.append(this.el('h3', '', 'Time zone'));
+    const wrap = this.el('label', 'ca-label');
+    const input = this.el('input', 'ca-field');
+    input.value = data.settings?.timeZone || 'UTC'; input.maxLength = 100; input.required = true;
+    input.placeholder = 'America/New_York'; input.setAttribute('aria-label', 'Company time zone'); input.spellcheck = false;
+    const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+    if (zones.length) {
+      const list = this.el('datalist'); list.id = 'ca-company-time-zones';
+      for (const zone of zones) { const option = this.el('option'); option.value = zone; list.append(option); }
+      input.setAttribute('list', list.id); form.append(list);
+    }
+    wrap.append(this.el('span', 'ca-label-text', 'Company time zone'), input);
+    const save = this.el('button', 'ca-btn is-primary', 'Save time zone'); save.type = 'submit';
+    const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
+    form.append(wrap, this.el('p', 'ca-hint', 'Used for chat times, agent briefs, deadlines and plan resets. Daylight saving changes are automatic.'), actions);
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); if (save.disabled) return;
+      const timeZone = input.value.trim();
+      try { new Intl.DateTimeFormat('en-US', { timeZone }); }
+      catch { error.textContent = `"${timeZone}" is not a time zone this browser knows. Use a name like America/New_York.`; return; }
+      save.disabled = true; error.textContent = ''; status.textContent = '';
+      try {
+        const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { timeZone } });
+        if (!result.ok) throw new Error(result.error || 'The time zone could not be saved.');
+        if (result.data?.settings?.timeZone !== timeZone) throw new Error('Save not confirmed. Reopen Company settings to check the time zone.');
+        globalThis.ReverieTime?.setTimeZone(timeZone);
+        status.textContent = `Company time zone saved: ${timeZone}.`; await onSaved?.();
+      } catch (failure) { error.textContent = failure.message || 'The time zone could not be saved.'; }
+      finally { save.disabled = false; }
+    });
+    return form;
+  }
+
   async openCompanySettings(onSaved) {
     const existing = this.doc.querySelector('.ca-company-settings');
     if (existing) { existing.querySelector('button')?.focus(); return; }
@@ -3390,6 +3429,7 @@ class ReverieChatApp {
           finally { saving = false; save.disabled = false; }
         });
         content.append(form);
+        content.append(this.companyTimeZoneForm(data, status, error, onSaved));
         const coreForm = this.el('form', 'ca-company-core-form');
         const companyCore = this.coreBeliefFields(coreForm, 'Company core beliefs', data.settings?.coreBeliefs || []);
         coreForm.append(this.el('p', 'ca-hint', 'Company blocks come first for every expert; personal additions follow with exact duplicates removed. This is configured text, not proof of a running session’s loaded startup.'));
