@@ -65,7 +65,7 @@ class PhoneComposition(unittest.TestCase):
 
 
 class DirectFileOps(unittest.TestCase):
-    """The packaged broker executes worker.py directly, with no package context."""
+    """The packaged broker establishes its sibling package context on file entry."""
     def script_module(self):
         import importlib.util
         import sys
@@ -76,7 +76,7 @@ class DirectFileOps(unittest.TestCase):
         sys.modules[name] = module
         self.addCleanup(sys.modules.pop, name, None)
         spec.loader.exec_module(module)
-        self.assertFalse(module.__package__)
+        self.assertEqual(module.__package__, 'reverie')
         return module
 
     def test_direct_file_ops_phone_reaches_fixed_callback(self):
