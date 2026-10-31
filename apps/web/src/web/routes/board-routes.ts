@@ -480,6 +480,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         sustainablePctPerHour: row.pace.sustainablePctPerHour,
         at: row.updatedAt,
         banked: row.bankedResets ? { count: row.bankedResets.availableCount, expiresAt: row.bankedResets.earliestExpiresAt } : null,
+        agentBurn: row.agentBurn ?? null,
         points,
       };
     });

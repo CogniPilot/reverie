@@ -228,6 +228,7 @@ function plans() {
       <div class="who">${p.reset ? 'Resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
       <div class="plan-members" data-plan-members="${esc(p.id)}" role="group" aria-label="${esc('People allocated to ' + p.name)}" aria-live="polite"></div>
       <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>weekly used</div>${bankedStat(p)}</div>
+      ${agentBurnBlock(p)}
       <div class="plan-usage-plot"><div class="plan-plot-legend" aria-label="Usage plot legend"><span><i class="weekly-key" style="border-color:${css('--' + risk)}"></i>Weekly usage</span><span><i class="five-hour-key"></i><span class="five-hour-label">5h window</span></span></div><svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg><div class="plan-five-hour-status hint" role="status"></div></div>
       ${planActions(p)}</div>`;
   }).join('') + localPlanCards();
@@ -810,6 +811,19 @@ function closeSignIn() {
   if (dlg.open) dlg.close();
 }
 document.getElementById('addAcct').onclick = openAdd;
+// Realtime rate and per-agent burn from each session's status-line cost (Claude Code plans); see docs/plan-burn-per-agent.md.
+// The conversion from work units (USD of API-equivalent cost) to this plan's weekly percent starts from a provider/tier
+// guess and is learned from the plan's own readings; the band is about one sigma.
+function agentBurnBlock(p) {
+  const a = p.agentBurn;
+  if (!a) return '';
+  const c = a.conversion;
+  const basis = c.basis === 'learned' ? 'learned from this plan' : 'prior guess' + (c.tier ? ' for ' + c.tier : ', tier unknown');
+  const conv = `${num(c.pctPerUsd, 3)} %/work unit (${num(c.low, 3)}–${num(c.high, 3)}, ${basis})`;
+  const rows = a.agents.map(g => `<li data-agent-burn="${esc(g.sessionId)}"><span>${esc(g.name)}</span> <b>${g.pctPerHour == null ? '–' : num(g.pctPerHour, 2) + ' %/h'}</b> <span class="hint">${g.usdPerHour == null ? 'too new to rate' : num(g.usdPerHour, 2) + ' units/h' + (g.share == null ? '' : ', ' + Math.round(g.share * 100) + '%')}</span></li>`).join('');
+  return `<div class="plan-agent-burn" data-plan-agent-burn="${esc(p.id)}"><div><b>${num(a.realtimePerHour, 2)} %/h</b> burn last 30 min <span class="hint">(${num(a.realtimeLow, 2)}–${num(a.realtimeHigh, 2)})</span></div><div class="hint" title="Work unit = USD of API-equivalent cost from each session's status line">${esc(conv)}</div>${rows ? `<ul class="plan-agent-list">${rows}</ul>` : '<div class="hint">No session on this plan reported cost in the last 30 minutes.</div>'}</div>`;
+}
+
 function burnChart(svg, p) {
   const W = 320, Hh = 120, L = 28, R = 8, T = 8, Bm = 18, pts0 = p.points || [];
   // One real 5h snapshot on the same axes; never derive a 5h history or convert quotas.

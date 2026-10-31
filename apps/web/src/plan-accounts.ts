@@ -32,6 +32,7 @@ import type { SubscriptionUsage } from './subscription-usage.js';
 import { getLatestAccountPlanUsage } from './web/plan-usage-latest.js';
 import type { BankedResets } from './usage-telemetry.js';
 import { addSample, planPace, suggestAccount, toMs, type PlanPace, type UsageSample } from './plan-pace.js';
+import { planAgentBurn, type PlanAgentBurn, type PlanCostTracker } from './plan-agent-burn.js';
 
 export interface PlanAccount {
   /** The profile id when there is one, else `acct-<provider>-<name>`. */
@@ -79,6 +80,8 @@ export interface PlanRow {
   bankedResets: BankedResets | null;
   sessions: PlanSession[];
   orchestrator: boolean;
+  /** Each session's share of this plan's burn from its status-line cost, and the realtime rate; null without cost reports. */
+  agentBurn: PlanAgentBurn | null;
 }
 
 export interface GpuStatus {
@@ -266,6 +269,8 @@ export interface PlanServiceDeps {
   /** Session ids that coordinate a chatroom: their accounts are marked as the orchestrator's. */
   coordinatorIds(): string[];
   historyFile: string;
+  /** Per-session status-line cost samples (Claude Code only); without it no per-agent burn is computed. */
+  costs?: PlanCostTracker;
   home?: string;
   now?: () => number;
   gpu?: () => Promise<GpuStatus>;
@@ -375,6 +380,7 @@ export class PlanService {
     );
     const sessionsByAccount = await this.sessionsByAccount(catalogue);
     const coordinators = new Set(this.deps.coordinatorIds());
+    const costs = this.deps.costs ? await this.deps.costs.snapshot() : null;
     let changed = false;
     const accounts = catalogue.map((a, i): PlanRow => {
       let reading = readings[i];
@@ -422,6 +428,16 @@ export class PlanService {
         changed = true;
       }
       const sessions = sessionsByAccount.get(a.id) ?? [];
+      const agentBurn = costs && a.provider === 'anthropic'
+        ? planAgentBurn({
+            provider: a.provider,
+            label: a.label,
+            usage: history[a.id] ?? [],
+            sessions: sessions.map((s) => ({ id: s.id, name: s.name, costs: costs[s.id] ?? [] })),
+            weekReset: toMs(reading.usage?.sevenDay?.resetAt),
+            now,
+          })
+        : null;
       return {
         id: a.id,
         label: a.label,
@@ -448,6 +464,7 @@ export class PlanService {
         bankedResets: reading.usage?.bankedResets ?? null,
         sessions,
         orchestrator: sessions.some((s) => coordinators.has(s.id)),
+        agentBurn,
       };
     });
     if (changed) this.saveHistory();
