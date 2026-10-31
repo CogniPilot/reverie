@@ -84,6 +84,7 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
 .plan-local{border-left:3px solid var(--accent)}
 .plan-local .who,.plan-local .stats b{overflow-wrap:anywhere}
 .plan-members{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:9px 0;min-height:34px}
+.plan-agent-burn{margin:6px 0;font-size:12px}.plan-agent-list{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:2px}.plan-agent-list li{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;min-width:0}
 .plan-member{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--fg);font:600 13px var(--sans);cursor:pointer}
 .plan-member:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .plan-member-pending{filter:grayscale(1);opacity:.55;border-style:dashed;cursor:pointer}

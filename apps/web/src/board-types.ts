@@ -5,6 +5,7 @@
  * Nothing on the board is ever deleted: a blocker or decision is cleared (`clearedAt`), and an issue ends as `done` or
  * `wontdo`. Times are epoch ms; a milestone's `due` is a date in the company time zone.
  */
+import type { PlanAgentBurn } from './plan-agent-burn.js';
 import { z } from 'zod';
 
 export const ISSUE_STATUSES = ['triage', 'todo', 'doing', 'blocked', 'done', 'wontdo'] as const;
@@ -218,6 +219,8 @@ export interface PlanBurn {
   /** Codex banked resets the account holds (count and earliest expiry, epoch ms); null when not read or not Codex. */
   banked: { count: number; expiresAt: number | null } | null;
   points: { t: number; used: number; rate: number | null; proj: number | null }[];
+  /** Per-session burn from status-line cost and the realtime plan rate (Claude Code plans only); null without cost reports. */
+  agentBurn?: PlanAgentBurn | null;
 }
 
 export interface BoardPoll {

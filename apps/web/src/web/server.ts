@@ -339,6 +339,7 @@ import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { PlanService } from '../plan-accounts.js';
+import { PlanCostTracker } from '../plan-agent-burn.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
 import { readFixedPr } from '../cron/fixed-github-watch.js';
 import { registerBotWatches } from '../bot-watches-runtime.js';
@@ -472,6 +473,8 @@ export class WebServer extends EventEmitter {
   private chatBots?: ChatBotRegistry;
   private cronPort!: CronPort;
   private planService!: PlanService;
+  /** Per-session status-line cost samples, for per-agent plan burn. */
+  private readonly planCosts = new PlanCostTracker(dataPath('plan-agent-cost-history.json'));
   private accountLogins: AccountLoginService | null = null;
   /** Fingerprint of the served frontend, sent in `init` so stale tabs can offer a reload. */
   private frontendBuildId = 'unknown';
@@ -1386,7 +1389,7 @@ export class WebServer extends EventEmitter {
     registerReadMyMindRoutes(this.app, ctx);
     registerGitStatusRoutes(this.app, ctx);
     registerAgentProfileRoutes(this.app, ctx, undefined, undefined, verifiedOwner);
-    registerStatusTelemetryRoutes(this.app, ctx);
+    registerStatusTelemetryRoutes(this.app, ctx, this.planCosts);
     registerSubscriptionProfileRoutes(
       this.app,
       this.subscriptionUsageReader,
@@ -2185,6 +2188,7 @@ export class WebServer extends EventEmitter {
           .rooms()
           .flatMap((r) => r.members.filter((m) => m.role === 'coordinator').map((m) => m.sessionId)),
       historyFile: dataPath('plan-usage-history.json'),
+      costs: this.planCosts,
     });
     // One-click sign-in: the provider's login CLI in a hidden pane on its own tmux socket.
     this.accountLogins = new AccountLoginService(
