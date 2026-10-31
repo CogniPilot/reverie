@@ -2229,6 +2229,7 @@ export class WebServer extends EventEmitter {
       company: this.companyService,
       session: id => this.sessions.get(id),
       ready: () => this.companyWakeReady,
+      providerHealthy: employee => this.workerProviderHealth?.read(employee)?.state === 'healthy',
       moveGuard: id => planMoves.viewerReconnectGuard(id),
       pause: id => this.chatroomService.delivery.pauseForMigration(id),
       publish: session => {
