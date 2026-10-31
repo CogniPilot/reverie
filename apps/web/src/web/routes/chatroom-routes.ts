@@ -109,6 +109,7 @@ import {
 } from '../schemas.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { isSensitivePath } from '../sensitive-path.js';
+import { checkLinkedFile, LinkedFileError } from '../../chat-linked-files.js';
 import { NO_OWNER, ownerMark, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import { OWNER_RANK, RolesStore, type Actor, type Permission } from '../../roles.js';
 
@@ -1178,6 +1179,26 @@ export function registerChatroomRoutes(
     });
   });
 
+  // Link a shared-drive file instead of uploading a copy: checked here and again on every read (chat-linked-files.ts).
+  app.post('/api/chatrooms/:id/links', { bodyLimit: 8192 }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const room = roomOrFail(req, id);
+      const who = actor(req, room);
+      if (!who) return forbid(reply, 'Join the room before linking files');
+      const body = z.object({ path: z.string().max(4096) }).strict().safeParse(req.body);
+      if (!body.success) throw new ChatroomError('Send { path } with the file\'s absolute shared-drive path', 'INVALID_INPUT');
+      const checked = await checkLinkedFile(body.data.path);
+      const referenced = new Set(room.messages.flatMap((m) => [...(m.attachments ?? []), ...(m.deleted?.attachments ?? [])].map((a) => a.id)));
+      await files.pruneUnreferenced(id, referenced);
+      const file = await files.addLink(id, { path: checked.path, name: checked.name, size: checked.size, type: checked.type, by: who });
+      return { success: true, data: { file: { id: file.id, name: file.name, size: file.size, type: file.type, linked: true } } };
+    } catch (err) {
+      if (err instanceof LinkedFileError) return reply.code(err.status).send(createErrorResponse(err.status === 404 ? ApiErrorCode.NOT_FOUND : err.status === 403 ? ApiErrorCode.FORBIDDEN : ApiErrorCode.INVALID_INPUT, err.message));
+      return sendError(reply, err);
+    }
+  });
+
   app.get('/api/chatrooms/:id/files/:fileId', async (req, reply) => {
     const { id, fileId } = req.params as { id: string; fileId: string };
     try {
@@ -1192,12 +1213,33 @@ export function registerChatroomRoutes(
       // 404 before any header, and the size and the stream both come from the open file.
       let handle: Awaited<ReturnType<typeof fs.open>>;
       try {
-        const resolvedPath = await fs.realpath(file.path);
+        // A linked file is read live from the shared drive, checked again now: it may have moved or become a symlink.
+        let resolvedPath: string;
+        if (file.link) {
+          try {
+            resolvedPath = (await checkLinkedFile(file.link)).real;
+          } catch (error) {
+            if (error instanceof LinkedFileError && error.status === 403)
+              return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, error.message));
+            throw error;
+          }
+        } else resolvedPath = await fs.realpath(file.path);
         if (isSensitivePath(resolvedPath))
           return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Access to this file is blocked'));
         handle = await fs.open(resolvedPath, 'r');
       } catch {
         throw new ChatroomError('No such file', 'NOT_FOUND');
+      }
+      // The shared drive is writable by agents: a folder on the path can become a symlink between the check and the open.
+      // The open file must still be the file a fresh check finds, or nothing is served.
+      if (file.link) {
+        const opened = await handle.stat();
+        const same = await checkLinkedFile(file.link).then((again) => fs.lstat(again.real)).then(
+          (now) => now.dev === opened.dev && now.ino === opened.ino, () => false);
+        if (!same) {
+          await handle.close();
+          return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'That file changed while it was opened; try again.'));
+        }
       }
       const size = (await handle.stat()).size;
       let inlineType = isInlineImage(file.type) ? file.type : null;
@@ -1213,7 +1255,7 @@ export function registerChatroomRoutes(
         .header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encoded}`)
         .header('X-Content-Type-Options', 'nosniff')
         .header('Content-Security-Policy', "default-src 'none'; sandbox")
-        .header('Cache-Control', 'private, max-age=86400');
+        .header('Cache-Control', file.link ? 'no-store' : 'private, max-age=86400');
       // Streamed and range-aware: a large image opened a few times at once must not be
       // held in memory once per request.
       const range = parseByteRange(req.headers.range, size);
@@ -1373,7 +1415,7 @@ export function registerChatroomRoutes(
       for (const fileId of new Set(body.attachments ?? [])) {
         const file = await files.get(id, fileId);
         if (!file) throw new ChatroomError(`No uploaded file ${fileId} in this room`, 'INVALID_INPUT');
-        attachments.push({ id: file.id, name: file.name, size: file.size, type: file.type, path: file.path });
+        attachments.push({ id: file.id, name: file.name, size: file.size, type: file.type, path: file.path, ...(file.link ? { linked: true as const } : {}) });
       }
       // The user's `/roll ...` becomes a real server-side roll; an agent keeps using the roll tool.
       let text = body.text;

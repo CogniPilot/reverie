@@ -3013,8 +3013,8 @@ describe('the "+" menu and Create Poll', () => {
     expect(plus(h).getAttribute('aria-haspopup')).toBe('menu');
     plus(h).click();
     const items = menuItems(h);
-    expect(items.map(text)).toEqual(['Upload a File', 'Create Thread', 'Create Poll', 'Use Apps']);
-    expect(items.map((b) => b.disabled)).toEqual([false, true, false, true]);
+    expect(items.map(text)).toEqual(['Upload a File', 'Link a File', 'Create Thread', 'Create Poll', 'Use Apps']);
+    expect(items.map((b) => b.disabled)).toEqual([false, false, true, false, true]);
     expect(h.document.querySelector('.ca-plus-menu')!.getAttribute('role')).toBe('menu');
     // Upload a File opens the file chooser the paperclip used to open
     const picker = h.document.querySelector('.chatroom-composer input[type="file"]') as HTMLInputElement;
@@ -3029,7 +3029,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     expect(dlg).not.toBeNull();
     const inputs = () => [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
@@ -3080,7 +3080,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     const inputs = () => [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
     const rec = dlg.querySelector('.ca-poll-rec-pick select') as HTMLSelectElement;
@@ -3116,7 +3116,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     const inputs = [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
     (dlg.querySelector('input.ca-field') as HTMLInputElement).value = 'Ok?';
@@ -3137,7 +3137,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     const inputs = [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
     (dlg.querySelector('input.ca-field') as HTMLInputElement).value = 'Ship?';
