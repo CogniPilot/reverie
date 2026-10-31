@@ -154,6 +154,13 @@ and vacation choices still apply. See [service setup](docs/services.md) for boot
 and login behavior, container controls and platform limits. This setup does not
 require a personal NixOS repository or host rebuild.
 
+After separately authorized laptop maintenance, the host owner can use
+[`worker-resume`](docs/host-worker-resume.md) to restore saved employees without
+an employee login or a browser click. Its `prepare --employee UUID` option
+selects a bounded batch; repeat the option for more seats, or omit it for all
+eligible employees. Use one-seat batches when cold startup could exceed the
+existing shared deadline. Each batch still verifies the complete fleet snapshot.
+
 ## Agent workstations
 
 For a deployment running autonomous agents, use a separate worker container for

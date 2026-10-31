@@ -28,6 +28,7 @@ from .worker_resume_peer import ResumeWebsitePeer, host_peer
 PURPOSE = 'host-worker-resume-v1'
 UUID = re.compile(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\Z')
 SHA = re.compile(r'[a-f0-9]{64}\Z')
+_ALL_EMPLOYEES = object()
 ACTIONS = {'worker-resume-describe','prepare-worker-resume','apply-worker-resume','worker-resume-status'}
 
 
@@ -87,6 +88,18 @@ def cohort(broker):
     R.need(len({r['employeeId'] for r in rows})==len(rows) and len({r['sessionId'] for r in rows})==len(rows),
            'RESUME_DUPLICATE_BINDING')
     return sorted(rows,key=lambda row:row['employeeId'])
+
+
+def employee_selection(snapshot, requested=_ALL_EMPLOYEES):
+    """A bounded host selection; full-cohort fingerprints remain authoritative."""
+    eligible={row['employeeId'] for row in snapshot['cohort']
+              if row['desiredRunning'] and not row['onVacation'] and not row['migrating']}
+    if requested is _ALL_EMPLOYEES:return sorted(eligible)
+    R.need(type(requested) is list and 0<len(requested)<=16 and
+           all(type(eid) is str and UUID.fullmatch(eid) for eid in requested) and
+           len(set(requested))==len(requested),'RESUME_EMPLOYEE_SELECTION')
+    R.need(set(requested)<=eligible,'RESUME_EMPLOYEE_SELECTION_UNAVAILABLE')
+    return sorted(requested)
 
 
 @contextmanager
@@ -335,14 +348,17 @@ class HostWorkerResume:
                             'RESULT_RECORDED_NOT_REPLAYABLE'if recorded else 'UNKNOWN_NOT_REPLAYABLE'if attempt else 'PREPARED',
                     'planDigest':digest(encoded(plan)),'retryAllowed':False}
         if action=='prepare-worker-resume':
-            exact(request,('action','operationId','expectedSnapshotDigest','deploymentPath'))
+            exact(request,('action','operationId','expectedSnapshotDigest','deploymentPath',
+                           *(('employeeIds',) if 'employeeIds' in request else ())))
             R.need(type(request['expectedSnapshotDigest'])is str and SHA.fullmatch(request['expectedSnapshotDigest']),
                    'RESUME_SNAPSHOT_DIGEST')
             with maintenance(self.broker,request['deploymentPath']) as current:
                 snapshot=self.describe(min(end,time.monotonic()+60))
                 R.need(snapshot['snapshotDigest']==request['expectedSnapshotDigest'],'RESUME_SNAPSHOT_CHANGED')
+                selected=employee_selection(snapshot,request['employeeIds']) if 'employeeIds' in request else employee_selection(snapshot)
                 root,path=self._operation(request['operationId'],create=True)
                 plan={'version':1,'purpose':PURPOSE,'operationId':request['operationId'],'snapshot':snapshot,
+                      'employeeIds':selected,
                       'deploymentPath':request['deploymentPath'],'expiresAt':int(time.time())+300,
                       'deploymentParents':current.parents,
                       'operationIdentity':R._identity(path),'namespaceIdentity':R._identity(root)}
@@ -361,9 +377,13 @@ class HostWorkerResume:
                 R.need(type(request['planDigest'])is str and SHA.fullmatch(request['planDigest']) and
                        digest(raw)==request['planDigest'],'RESUME_PLAN_CHANGED')
                 exact(plan,('version','purpose','operationId','snapshot','deploymentPath','expiresAt',
-                            'operationIdentity','namespaceIdentity','deploymentParents'))
+                            'operationIdentity','namespaceIdentity','deploymentParents','employeeIds'))
                 R.need(plan['version']==1 and plan['purpose']==PURPOSE and plan['operationId']==request['operationId'] and
                        type(plan['expiresAt'])is int and time.time()<plan['expiresAt'],'RESUME_PLAN_EXPIRED')
+                R.need(plan['employeeIds']==(employee_selection(plan['snapshot']) if plan['employeeIds']==[] else
+                       employee_selection(plan['snapshot'],plan['employeeIds'])),
+                       'RESUME_EMPLOYEE_SELECTION')
+                selected=set(plan['employeeIds'])
                 end=min(end,time.monotonic()+plan['expiresAt']-time.time())
                 config_path,config_stamp=self._configuration()
                 R.need(R._identity(path)==plan['operationIdentity'] and R._identity(root)==plan['namespaceIdentity'],
@@ -387,7 +407,7 @@ class HostWorkerResume:
                                                      'planDigest':request['planDigest']})
                     results=[]
                     for index,row in enumerate(snapshot['cohort']):
-                        if not row['desiredRunning'] or row['onVacation'] or row['migrating']:continue
+                        if row['employeeId'] not in selected:continue
                         current();R.need(time.monotonic()<end,'RESUME_DEADLINE')
                         R.need(host_peer(credentials,self.broker.config['uid'])==process,'RESUME_HOST_PEER_CHANGED')
                         self._idle()
@@ -409,7 +429,7 @@ class HostWorkerResume:
                     result_stamp=publish(path/'RESULT.json',outcome)
             # All operation/maintenance finalizers run while the unknown fence remains.
             for row in snapshot['cohort']:
-                if row['desiredRunning'] and not row['onVacation'] and not row['migrating']:self._running(row)
+                if row['employeeId'] in selected:self._running(row)
             self._stream().website.final_code(deadline=end)
             company_path=Path(self.broker.config['companyFile']);company_stamp=stamp(company_path)
             R.need(cohort(self.broker)==[{k:v for k,v in item.items()if k!='savedDigest'}for item in snapshot['cohort']],
