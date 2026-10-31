@@ -28,6 +28,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/chat-plugins.browser.test.ts',
   'test/chat-math-plugin.browser.test.ts',
   'test/chat-voice-panel-layout.browser.test.ts',
+  'test/chat-composer-width.browser.test.ts',
   'test/embassy-guest-ui.browser.test.ts',
   'test/embassy-qr.browser.test.ts',
   'test/embassy-pairing.browser.test.ts',
