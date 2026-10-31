@@ -168,29 +168,32 @@ class InitialInstallation:
         before=inventory(self.engine)
         grants=[physical(config[name]) for name in ('stateRoot','companyRoot','scratchRoot','apiSocketRoot')]
         grants += [physical(row['source']) for row in config['mounts']]
-        configured=list(grants)
-        for row in before:
-            for mount in row['Mounts']:
-                if mount.get('Type')=='bind':
-                    grant=physical(mount['Source']);grants.append(grant)
-                    if overlap(grant,self.roots['bootstrapRoot']):
-                        need(grant==self.roots['bootstrapRoot'] and mount.get('Destination')=='/run/reverie-owner-terminal'
-                             and mount.get('RW') is False and not (row.get('Labels') or {}).get('reverie.worker'),
-                             'H_LIFECYCLE_BOOTSTRAP_EXPOSED')
+        from .owner_terminal_bind_sources import bound_mounts
         from .worker_cold_tmp import read_mount_table,refuse_host_mount_aliases
         table=read_mount_table()
-        # Bootstrap is the single explicit RO website grant. All OTHER roots,
-        # the installation, lock and worker config remain outside every bind.
+        # Protect the existing parent of the future unit, including first install
+        # when the leaf is correctly absent. No placeholder changes unit state.
         protected=[self.roots['controlBase'],self.roots['ledgerBase'],self.path,
-                   physical(self.value['workerConfig']),self.lock_path,Path.home()/'.config/systemd/user'/UNIT]
-        for path in protected:
+                   physical(self.value['workerConfig']),self.lock_path,
+                   physical(Path.home()/'.config/systemd/user')]
+        with bound_mounts(self.engine,before) as bindings:
+            for item in bindings:
+                if overlap(item.path,self.roots['bootstrapRoot']):
+                    need(item.path==self.roots['bootstrapRoot'] and item.mount['Source']==str(item.path)
+                         and item.mount.get('Destination')=='/run/reverie-owner-terminal'
+                         and item.mount.get('RW') is False and not (item.row.get('Labels') or {}).get('reverie.worker'),
+                         'H_LIFECYCLE_BOOTSTRAP_EXPOSED')
+            for path in protected:
+                for grant in grants:
+                    need(not overlap(path,grant),'H_LIFECYCLE_CONTROL_EXPOSED')
+                    refuse_host_mount_aliases(path,grant,table)
+                for item in bindings:
+                    need(not overlap(path,item.path),'H_LIFECYCLE_CONTROL_EXPOSED')
+                    item.exclude(path,table)
             for grant in grants:
-                need(not overlap(path,grant),'H_LIFECYCLE_CONTROL_EXPOSED')
-                refuse_host_mount_aliases(path,grant,table)
-        for grant in configured:
-            need(not overlap(self.roots['bootstrapRoot'],grant),'H_LIFECYCLE_BOOTSTRAP_EXPOSED')
-            refuse_host_mount_aliases(self.roots['bootstrapRoot'],grant,table)
-        need(inventory(self.engine)==before and read_mount_table()==table,'H_LIFECYCLE_INVENTORY_CHANGED')
+                need(not overlap(self.roots['bootstrapRoot'],grant),'H_LIFECYCLE_BOOTSTRAP_EXPOSED')
+                refuse_host_mount_aliases(self.roots['bootstrapRoot'],grant,table)
+            need(inventory(self.engine)==before and read_mount_table()==table,'H_LIFECYCLE_INVENTORY_CHANGED')
         self.engine.guard()
         require_disjoint_roots(config,self.roots.values())
         need(private_bytes(self.value['workerConfig'])==selection,'H_LIFECYCLE_WORKER_CONFIG_CHANGED')

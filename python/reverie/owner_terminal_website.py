@@ -182,7 +182,7 @@ def describe_link_facts(initial, standard, container_id):
 
 class TerminalWebsiteProfile:
     """One closed protected profile, never a caller-selected hook or command."""
-    def __init__(self, initial, link_facts):
+    def __init__(self, initial, link_facts, *, old_id=None):
         need(type(initial) is L.InitialInstallation, 'H_WEBSITE_FIXED_INSTALLATION_REQUIRED')
         need(initial.runtime.value['profile'] == 'terminal', 'H_WEBSITE_H_ONLY_REQUIRED')
         self.initial = initial
@@ -227,6 +227,9 @@ class TerminalWebsiteProfile:
         self.provenance = artifact(initial.runtime.value['imageProvenance'])
         self.auth_fds = []; self.auth_held = []; self.auth_old = None; self.auth_candidate = None
         self.auth_closed = False
+        need(old_id is None or type(old_id) is str and re.fullmatch('[a-f0-9]{64}',old_id),
+             'H_WEBSITE_ALIAS_OLD_ID')
+        self.alias_old_id=old_id;self.alias_facts=None;self.alias_held=[]
         command = self.provenance['imageSpec']['Config'].get('Cmd', [])
         self.auth = None
         if any(type(arg) is str and arg.startswith('--service-auth-config') for arg in command):
@@ -238,11 +241,55 @@ class TerminalWebsiteProfile:
                 self.close()
                 raise
         self.operation = None
+        try:self._alias_binding(acquire=True)
+        except BaseException:
+            self.close();raise
 
     def close(self):
-        self.auth_closed = True
+        self.auth_closed = True;failed = False
         try:_close_auth_fds(self.auth_fds)
-        finally:self.auth_held = []
+        except Exception:failed = True
+        self.auth_held = []
+        for item in self.alias_held:
+            try:item.close()
+            except Exception:failed = True
+        self.alias_held=[]
+        need(not failed,'H_WEBSITE_DESCRIPTOR_CLOSE_UNCONFIRMED')
+
+    def _alias_binding(self, *, acquire=False):
+        need(not self.auth_closed,'H_WEBSITE_AUTH_PROOF_CLOSED')
+        if self.alias_old_id is None:return []
+        from .owner_terminal_bind_sources import bound_mounts,inspected_row
+        for held in self.alias_held:held.check_source()
+        old=self.initial.engine.get('/containers/'+self.alias_old_id+'/json')
+        need(old['Id']==self.alias_old_id,'H_WEBSITE_ALIAS_OLD_ID')
+        with bound_mounts(self.initial.engine,[inspected_row(old)]) as bindings:
+            facts=[{'destination':item.mount['Destination'],'source':copy.deepcopy(item.facts)}
+                   for item in bindings if item.facts is not None]
+            facts.sort(key=lambda item:item['destination'])
+            if acquire:
+                need(all(item.process is not None for item in bindings if item.facts is not None),
+                     'H_WEBSITE_ALIAS_LIVE_OLD_REQUIRED')
+                self.alias_facts=facts
+                for item in bindings:
+                    if item.facts is not None:self.alias_held.append(item.retain())
+            else:need(facts==self.alias_facts,'H_WEBSITE_BIND_SOURCE_CHANGED')
+        cid=getattr(self,'created_id',None)
+        if cid is not None:
+            candidate=self.initial.engine.get('/containers/'+cid+'/json')
+            need(candidate['Id']==cid,'H_WEBSITE_CREATED_CID_CHANGED')
+            with bound_mounts(self.initial.engine,[inspected_row(candidate)]) as bindings:
+                actual=[]
+                for item in bindings:
+                    if item.mount['Destination']=='/run/reverie-owner-terminal':
+                        need(item.path==self.initial.roots['bootstrapRoot'] and item.mount['Source']==str(item.path)
+                             and not item.facts['aliased'] and item.mount['RW'] is False,
+                             'H_WEBSITE_BOOTSTRAP_SOURCE_CHANGED')
+                    else:actual.append({'destination':item.mount['Destination'],'source':copy.deepcopy(item.facts)})
+                actual.sort(key=lambda item:item['destination'])
+                need(actual==self.alias_facts,'H_WEBSITE_BIND_SOURCE_CHANGED')
+        for held in self.alias_held:held.check_source()
+        return copy.deepcopy(self.alias_facts)
 
     def _auth_guest(self, item, binding, expected=None, *, retain=False):
         state = item['State']; pid = state.get('Pid')
@@ -327,7 +374,8 @@ class TerminalWebsiteProfile:
                 'rootIdentities': {name: list(identity) for name, identity in self.initial.root_ids.items()},
                 'runtimeManifest': self.initial.runtime.pair,
                 'linkFactsSHA256': hashlib.sha256(encoded(self.links)).hexdigest(),
-                'linkFactsIdentity': list(self.links_identity)}
+                'linkFactsIdentity': list(self.links_identity),
+                'bindSourceAliases': self._alias_binding()}
         if self.auth is not None:
             need(self._auth_binding() == self.auth_binding, 'H_WEBSITE_SERVICE_AUTH_CHANGED')
             result['serviceAuth'] = copy.deepcopy(self.auth_binding)
@@ -347,6 +395,9 @@ class TerminalWebsiteProfile:
         need(plain or fixed, 'H_WEBSITE_OLD_PROGRAM_UNSUPPORTED')
 
     def spec(self, original, old, previous, target, deployment):
+        aliases=any(m.get('Type')=='bind' and Path(m['Source']).resolve(strict=True)!=Path(m['Source'])
+                    for m in old['Mounts'])
+        need(not aliases or self.alias_old_id==old['Id'],'H_WEBSITE_ALIAS_BASELINE_REQUIRED')
         verify_image_spec(self.provenance, target)
         need(deployment.get('websiteRuntime') == 'terminal' and deployment.get('protectedWebsite') is True
              and deployment.get('ownerTerminalConfig') == str(self.initial.path), 'H_WEBSITE_OWNER_SELECTION')
@@ -551,7 +602,7 @@ class TerminalWebsiteProfile:
             current = self.initial.engine.get('/containers/' + candidate_id + '/json')
             need(current.get('Id') == candidate_id, 'H_WEBSITE_CREATED_CID_CHANGED')
             self.auth_candidate = self._auth_guest(current, self.auth_binding['binding'], retain=True)
-            self.input_binding()
+        self.input_binding()
         return result
 
 
@@ -851,7 +902,7 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
             return 0
         state = ledger / 'website-updates';policy = ledger / 'website-schema.json'
         native = _NativeControl(initial, selection, state, policy, standard)
-        profile = TerminalWebsiteProfile(initial, ledger / 'website-links.json')
+        profile = TerminalWebsiteProfile(initial, ledger / 'website-links.json', old_id=native.selection['oldId'])
         stage = standard.WebsiteStage(native, state, initial.deployment_path, policy,
                                       guard=native, ready=native.http_ready, terminal=profile)
         # H/Python/Node/kernel await-ready always precedes the independent
