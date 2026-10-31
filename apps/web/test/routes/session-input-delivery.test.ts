@@ -346,6 +346,7 @@ describe('terminal viewer delivery never establishes native worker death', () =>
   });
   const post = (extra: Record<string, unknown> = {}) => harness.app.inject({
     method: 'POST', url: '/api/sessions/test-session-1/input',
+    headers: { 'x-reverie-parent-session': '00000004-0004-4000-8000-000000000004' },
     payload: { input: 'test\r', clientId: 'viewer-client', seq: 1, wait: true, waitTimeout: 1, ...extra },
   });
   const terminal = () => Object.assign(harness.ctx.sessions.get('test-session-1')!, {
@@ -477,8 +478,11 @@ describe('terminal viewer delivery never establishes native worker death', () =>
       return false;
     });
     const raw = vi.spyOn(session, 'write');
-    expect((await post()).json().error).toMatch(/unconfirmed/i);
-    expect((await post()).json().error).toMatch(/unconfirmed/i);
+    const first = await post();
+    expect(first.statusCode).toBe(409);
+    expect(first.json().data).toMatchObject({ delivered: false, typedUnsent: true });
+    expect(first.json().error).toMatch(/text remains unsent.*Enter was withheld/i);
+    expect((await post()).json().error).toMatch(/text remains unsent.*Enter was withheld/i);
     expect(session.writeBuffer).toEqual(['unsent draft']);
     expect(mux).toHaveBeenCalledTimes(1);
     expect(raw).not.toHaveBeenCalled();
@@ -519,6 +523,7 @@ describe('terminal viewer delivery never establishes native worker death', () =>
       request: async (_ctx, options) => {
         const response = await harness.app.inject({
           method: options.method, url: options.path.replace('/api/v1/', '/api/'),
+          headers: { 'x-reverie-parent-session': '00000004-0004-4000-8000-000000000004' },
           ...(options.body ? { payload: options.body } : {}),
         });
         return { status: response.statusCode, json: response.json(), text: response.body };
@@ -529,5 +534,42 @@ describe('terminal viewer delivery never establishes native worker death', () =>
     expect(errors.join('\n')).toMatch(/viewer unavailable/i);
     expect(errors.join('\n')).not.toMatch(/no live worker|pane exited|restart/i);
     expect(session.writeBuffer).toEqual([]);
+  });
+
+  it.each([false, true])('the actual CLI preserves known Enter-withheld refusal (ifIdle=%s)', async (ifIdle) => {
+    const session = terminal();
+    let withheld = 0;
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (_input, options) => {
+      const callback = (options as { onTypedUnsent?: () => void }).onTypedUnsent;
+      expect(callback).toBeTypeOf('function');
+      session.writeBuffer.push('known unsent text');
+      callback!();
+      withheld++;
+      return false;
+    });
+    const raw = vi.spyOn(session, 'write');
+    const errors: string[] = [];
+    const deps: AgentDeps = {
+      ctx: { apiUrl: 'http://unused.invalid', selfId: '00000004-0004-4000-8000-000000000004' },
+      io: { out: () => {}, err: (message) => errors.push(message) },
+      request: async (_ctx, options) => {
+        const response = await harness.app.inject({
+          method: options.method, url: options.path.replace('/api/v1/', '/api/'),
+          headers: { 'x-reverie-parent-session': '00000004-0004-4000-8000-000000000004' },
+          ...(options.body ? { payload: options.body } : {}),
+        });
+        return { status: response.statusCode, json: response.json(), text: response.body };
+      },
+    };
+    const options = { id: session.id, text: 'fixture', enter: true, wait: true as const, ifIdle, clientId: 'typed-cli', seq: 7 };
+    expect(await agentSend(deps, options)).toBe(ifIdle ? EXIT.refused : EXIT.error);
+    expect(errors.join('\n')).toMatch(/text remains unsent.*Enter was withheld/i);
+    expect(errors.join('\n')).not.toMatch(/no live worker|pane exited|restart/i);
+    expect(await agentSend(deps, options)).toBe(ifIdle ? EXIT.refused : EXIT.error);
+    expect(mux).toHaveBeenCalledTimes(1);
+    expect(withheld).toBe(1);
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.writeBuffer).toEqual(['known unsent text']);
+    expect(session.shouldApplyInput('typed-cli', 7)).toBe(false);
   });
 });

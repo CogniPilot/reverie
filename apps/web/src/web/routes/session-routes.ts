@@ -962,7 +962,7 @@ export function registerSessionRoutes(
   // Delivery knowledge belongs to this Session object, not a reusable SID. Keep
   // a bounded receipt window; an evicted duplicate is unknown, not proof
   // of delivery. Never replay an attempted terminal write to resolve uncertainty.
-  const terminalInputReceipts = new WeakMap<Session, LRUMap<string, 'pending' | 'confirmed' | 'unconfirmed'>>();
+  const terminalInputReceipts = new WeakMap<Session, LRUMap<string, 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent'>>();
   /** Bug 11: an explicit restart by the VERIFIED OWNER records running intent through the same guarded transaction as the
    * runtime route (CompanyService.prepareRuntimeRestart): intent is claimed BEFORE the launch, an owner Stop or vacation
    * that lands mid-start cancels it and wins, a failed start rolls it back. Non-owner callers and every automatic path
@@ -2196,11 +2196,17 @@ export function registerSessionRoutes(
       terminalInputReceipts.set(session, receipts);
     }
     const receiptKey = JSON.stringify([clientId, seq]);
-    const recordReceipt = (state: 'pending' | 'confirmed' | 'unconfirmed') => receipts?.set(receiptKey, state);
+    const recordReceipt = (state: 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent') => receipts?.set(receiptKey, state);
     const unconfirmedInput = () => createErrorResponse(
       ApiErrorCode.OPERATION_FAILED,
       'Input delivery is unconfirmed; it will not be replayed. Check the session before sending anything again.'
     );
+    const typedUnsentInput = () => ({
+      ...createErrorResponse(ApiErrorCode.SESSION_BUSY,
+        'Input text remains unsent in the composer; Enter was withheld. Do not resend the text.'),
+      data: { delivered: false, typedUnsent: true },
+    });
+    if (duplicate && terminalScope && receipts?.get(receiptKey) === 'typed-unsent') return typedUnsentInput();
     if (duplicate && terminalScope && receipts?.get(receiptKey) !== 'confirmed') return unconfirmedInput();
     if (duplicate && !wantsWait) {
       return {};
@@ -2385,8 +2391,9 @@ export function registerSessionRoutes(
       } else if (!ok && !typedUnsent) undoOnFailure();
       if (ok) recordReceipt('confirmed');
     } else if (useMux) {
-      // Fire-and-forget: don't block the HTTP response on a tmux child process.
-      // Fallback to a direct write on failure. Unchanged from before send-and-wait.
+      // Historical fire-and-forget: a 2xx accepts a still-pending write, it does
+      // not confirm delivery. Only local failures may use the raw fallback;
+      // terminal receipts settle asynchronously without replaying input.
       session
         .writeViaMux(inputStr, muxOptions)
         .then((ok) => {
@@ -2394,7 +2401,10 @@ export function registerSessionRoutes(
             recordReceipt('confirmed');
             return;
           }
-          if (typedUnsent) return;
+          if (typedUnsent) {
+            recordReceipt('typed-unsent');
+            return;
+          }
           if (!mayFallBack()) return undoOnFailure();
           console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
           if (!session.write(rawInput, rawOptions)) undoOnFailure();
@@ -2412,7 +2422,7 @@ export function registerSessionRoutes(
       else undoOnFailure();
     }
     if (typedUnsent) {
-      recordReceipt('unconfirmed');
+      recordReceipt('typed-unsent');
       terminalWriteUnconfirmed = terminalScope;
     }
 
@@ -2421,6 +2431,7 @@ export function registerSessionRoutes(
     if (heldByMove && !waitPromise) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
     }
+    if (!waitPromise && terminalScope && typedUnsent) return typedUnsentInput();
     if (!waitPromise && terminalWriteUnconfirmed) return unconfirmedInput();
     if (!waitPromise) return ifIdle || typedUnsent ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
@@ -2446,6 +2457,7 @@ export function registerSessionRoutes(
       if (heldByMove) {
         return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
       }
+      if (terminalScope && typedUnsent) return typedUnsentInput();
       if (terminalScope && !delivered && !duplicate) return unconfirmedInput();
       if (terminalScope && (result.signal === 'exit' || result.ended)) {
         return createErrorResponse(
