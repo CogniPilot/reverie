@@ -16,6 +16,7 @@ const block = runInNewContext(helper + ';agentBurnBlock', { esc, num, Math }) as
 
 const burn = {
   conversion: { pctPerUsd: 0.4567, low: 0.3, high: 0.7, basis: 'learned', tier: null },
+  fit: { maePerHour: 0.42, biasPerHour: -0.1, n: 6 },
   realtimePerHour: 1.37,
   realtimeLow: 0.9,
   realtimeHigh: 2.1,
@@ -31,7 +32,7 @@ it('shows the realtime rate, its band, the learned conversion and one escaped li
   const root = doc.querySelector('[data-plan-agent-burn="acct-1"]')!;
   expect(root.textContent).toContain('1.37 %/h');
   expect(root.textContent).toContain('(0.9–2.1)');
-  expect(root.textContent).toContain('0.457 %/work unit (0.3–0.7, learned from this plan)');
+  expect(root.textContent).toContain('0.457 %/work unit (0.3–0.7, learned from this plan; fit ±0.42 %/h over 6 h)');
   const rows = root.querySelectorAll('li[data-agent-burn]');
   expect(rows).toHaveLength(2);
   expect(rows[0].textContent).toContain('Worker <A>');
@@ -42,9 +43,9 @@ it('shows the realtime rate, its band, the learned conversion and one escaped li
 });
 
 it('names a prior guess and its tier, and says when no session reported cost', () => {
-  const prior = { ...burn, conversion: { ...burn.conversion, basis: 'prior', tier: '20x' }, agents: [] };
+  const prior = { ...burn, fit: null, conversion: { ...burn.conversion, basis: 'prior', tier: '20x' }, agents: [] };
   const doc = new JSDOM(`<div>${block({ id: 'acct-2', agentBurn: prior })}</div>`).window.document;
-  expect(doc.body.textContent).toContain('prior guess for 20x');
+  expect(doc.body.textContent).toContain('prior guess for 20x)');
   expect(doc.body.textContent).toContain('No session on this plan reported cost in the last 30 minutes.');
   const unknown = { ...prior, conversion: { ...prior.conversion, tier: null } };
   expect(new JSDOM(block({ id: 'x', agentBurn: unknown })).window.document.body.textContent).toContain('prior guess, tier unknown');

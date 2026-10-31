@@ -94,6 +94,11 @@ The plan-move confirmation and the Plans page show its result. The page also lis
 
 The estimates are checked against what actually happened, from the stored history, with no new probes:
 
+0. **Fit error, shown now.** Each plan's factor comes with its hourly fit over the same 6 hours, `fit: { maePerHour,
+   biasPerHour, n }`. For every hour, the factor times the reporting sessions' cost is compared with the plan's observed
+   weekly rise. It is in-sample, because the same readings update the factor. A clearly negative bias means the plan
+   rises faster than its reporting sessions explain: there is other usage on the account.
+
 1. **Rate backtest.** For each plan and each sample time `t` over the last 24 hours, predict `weekly(t + 60 min)` from
    `weekly(t)` plus 1 hour times the rate, both for the realtime rate and the 6-hour slope. Compare with the reading
    actually taken then. The Plans API reports the mean absolute error of each (`burnCheck: { realtime, steady, n }`),
@@ -109,7 +114,7 @@ The estimates are checked against what actually happened, from the stored histor
 In this change: per-session cost samples from the status line (`plan-agent-cost-history.json`); the 30-minute agent
 cost rate; the per-plan factor with its provider and tier prior, update from the plan's own readings and band; per-agent
 burn and the realtime plan rate on `/api/plans` rows and the board's plan burn, shown on each Claude plan card; and
-`moveImpact` as a tested pure function.
+`moveImpact` as a tested pure function; and each factor's hourly fit error against the plan's own readings.
 
 Remaining:
 
@@ -117,7 +122,7 @@ Remaining:
 2. The five-hour side: store five-hour percent in the usage samples and add `c5_P`.
 3. Persisting the factor's posterior across windows and restarts. Today each read recomputes it from the kept history.
 4. An explicit tier field on subscription profiles instead of reading the label.
-5. The accuracy report (`burnCheck`) and the per-move check.
+5. The out-of-sample accuracy report (`burnCheck`) and the per-move check. The in-sample hourly fit is already shown.
 6. A work-unit source for Codex sessions (no per-session cost today).
 7. Pooling factors across plans of one tier.
 

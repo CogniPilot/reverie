@@ -819,7 +819,8 @@ function agentBurnBlock(p) {
   if (!a) return '';
   const c = a.conversion;
   const basis = c.basis === 'learned' ? 'learned from this plan' : 'prior guess' + (c.tier ? ' for ' + c.tier : ', tier unknown');
-  const conv = `${num(c.pctPerUsd, 3)} %/work unit (${num(c.low, 3)}–${num(c.high, 3)}, ${basis})`;
+  const fit = a.fit ? `; fit ±${num(a.fit.maePerHour, 2)} %/h over ${a.fit.n} h` : '';
+  const conv = `${num(c.pctPerUsd, 3)} %/work unit (${num(c.low, 3)}–${num(c.high, 3)}, ${basis}${fit})`;
   const rows = a.agents.map(g => `<li data-agent-burn="${esc(g.sessionId)}"><span>${esc(g.name)}</span> <b>${g.pctPerHour == null ? '–' : num(g.pctPerHour, 2) + ' %/h'}</b> <span class="hint">${g.usdPerHour == null ? 'too new to rate' : num(g.usdPerHour, 2) + ' units/h' + (g.share == null ? '' : ', ' + Math.round(g.share * 100) + '%')}</span></li>`).join('');
   return `<div class="plan-agent-burn" data-plan-agent-burn="${esc(p.id)}"><div><b>${num(a.realtimePerHour, 2)} %/h</b> burn last 30 min <span class="hint">(${num(a.realtimeLow, 2)}–${num(a.realtimeHigh, 2)})</span></div><div class="hint" title="Work unit = USD of API-equivalent cost from each session's status line">${esc(conv)}</div>${rows ? `<ul class="plan-agent-list">${rows}</ul>` : '<div class="hint">No session on this plan reported cost in the last 30 minutes.</div>'}</div>`;
 }

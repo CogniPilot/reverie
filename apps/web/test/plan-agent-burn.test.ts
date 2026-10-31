@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   addCostSample,
+  conversionFit,
   costRate,
   costUsed,
   COST_HISTORY_MS,
@@ -112,6 +113,29 @@ describe('conversion from work units to plan percent', () => {
   });
 });
 
+describe('conversion fit against the plan readings', () => {
+  it('is close to zero error when the factor explains the plan rise', () => {
+    const usage = weekly(1.5, NOW - 6 * H, NOW);
+    const costs = [spend(3, NOW - 6 * H, NOW)];
+    const fit = conversionFit(usage, costs, 0.5, NOW, RESET)!;
+    expect(fit.n).toBe(6);
+    expect(Math.abs(fit.biasPerHour)).toBeLessThan(0.3);
+    expect(fit.maePerHour).toBeLessThan(0.6);
+  });
+
+  it('shows a negative bias when the plan rises faster than its reporting sessions explain', () => {
+    // The plan rises 3 points an hour but its reporting sessions only explain 1.5 (other, unreported usage).
+    const fit = conversionFit(weekly(3, NOW - 6 * H, NOW), [spend(3, NOW - 6 * H, NOW)], 0.5, NOW, RESET)!;
+    expect(fit.biasPerHour).toBeLessThan(-1);
+    expect(fit.maePerHour).toBeGreaterThan(1);
+  });
+
+  it('is null without an hour that has two readings', () => {
+    expect(conversionFit([], [], 0.5, NOW, RESET)).toBeNull();
+    expect(conversionFit([{ at: NOW, weekly: 3, resetAt: RESET }], [], 0.5, NOW, RESET)).toBeNull();
+  });
+});
+
 describe('per-agent burn', () => {
   it('splits the plan rate across its sessions by their cost in the last 30 minutes', () => {
     const usage = weekly(2, NOW - 6 * H, NOW);
@@ -135,6 +159,7 @@ describe('per-agent burn', () => {
     expect(burn.realtimeLow).toBeLessThanOrEqual(burn.realtimePerHour);
     expect(burn.realtimeHigh).toBeGreaterThanOrEqual(burn.realtimePerHour);
     expect(burn.agents.reduce((sum, a) => sum + (a.pctPerHour ?? 0), 0)).toBeCloseTo(burn.realtimePerHour, 1);
+    expect(burn.fit?.n).toBe(6);
   });
 });
 

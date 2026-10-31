@@ -189,6 +189,50 @@ export function planConversion(input: {
   };
 }
 
+export interface ConversionFit {
+  /** Mean absolute error of the hourly predicted rise (factor × the sessions' cost) against the observed rise, points/h. */
+  maePerHour: number;
+  /** Mean of predicted minus observed, points/h: negative when the plan rises faster than its reporting sessions explain. */
+  biasPerHour: number;
+  /** Hours compared. */
+  n: number;
+}
+
+/**
+ * How well the factor turns the sessions' cost into the plan's observed weekly rise, hour by hour over the last 6 hours
+ * of this week. In-sample: the same readings also update the factor. Null with no hour that has two readings.
+ */
+export function conversionFit(
+  usage: UsageSample[],
+  sessionCosts: CostSample[][],
+  pctPerUsd: number,
+  now: number,
+  weekReset: number | null
+): ConversionFit | null {
+  const weekStart = weekReset === null ? -Infinity : weekReset - WEEK_MS;
+  const samePeriod = (s: UsageSample) =>
+    weekReset === null || s.resetAt === undefined || !Number.isFinite(s.resetAt) || Math.abs(s.resetAt - weekReset) <= SAME_RESET_MS;
+  const from = Math.max(now - BURN_WINDOW_MS, weekStart);
+  const weekly = usage.filter((s) => s.at >= from && s.at <= now && !s.misattributed && samePeriod(s)).sort((a, b) => a.at - b.at);
+  const errors: number[] = [];
+  const biases: number[] = [];
+  for (let end = now; end - HOUR_MS >= from - 1; end -= HOUR_MS) {
+    const inside = weekly.filter((s) => s.at > end - HOUR_MS && s.at <= end);
+    if (inside.length < 2) continue;
+    const first = inside[0];
+    const last = inside[inside.length - 1];
+    const hours = (last.at - first.at) / HOUR_MS;
+    if (hours < 0.5 || last.weekly < first.weekly) continue;
+    const predicted = (pctPerUsd * sessionCosts.reduce((sum, costs) => sum + costUsed(costs, first.at, last.at), 0)) / hours;
+    const observed = (last.weekly - first.weekly) / hours;
+    errors.push(Math.abs(predicted - observed));
+    biases.push(predicted - observed);
+  }
+  if (!errors.length) return null;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  return { maePerHour: round(mean(errors), 2), biasPerHour: round(mean(biases), 2), n: errors.length };
+}
+
 export interface AgentBurn {
   sessionId: string;
   name: string;
@@ -203,6 +247,8 @@ export interface AgentBurn {
 export interface PlanAgentBurn {
   /** Weekly points per work unit (USD) on this plan, with its band (see `planConversion`). */
   conversion: PlanConversion;
+  /** Hourly fit of factor × session cost against the plan's observed rise (see `conversionFit`). */
+  fit: ConversionFit | null;
   /** The plan's weekly points per hour from its sessions' last 30 minutes, with the conversion's band. */
   realtimePerHour: number;
   realtimeLow: number;
@@ -235,6 +281,7 @@ export function planAgentBurn(input: {
   agents.sort((a, b) => (b.usdPerHour ?? -1) - (a.usdPerHour ?? -1) || a.name.localeCompare(b.name));
   return {
     conversion,
+    fit: conversionFit(input.usage, input.sessions.map((s) => s.costs), pctPerUsd, input.now, input.weekReset),
     realtimePerHour: round(usdPerHour * pctPerUsd, 2),
     realtimeLow: round(usdPerHour * conversion.low, 2),
     realtimeHigh: round(usdPerHour * conversion.high, 2),
