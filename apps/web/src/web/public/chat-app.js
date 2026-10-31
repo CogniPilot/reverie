@@ -1250,6 +1250,25 @@ function caPageFromHash(hash) {
   return Object.hasOwn(CA_PAGES, key) ? key : null;
 }
 
+/**
+ * A message link opens in the pane beside the conversation when it is an https page on another site, so it can be read
+ * side by side with the chat. Anything else, this site's own pages and
+ * plain http included, keeps its new tab. The page runs sandboxed: it can script itself, use forms and open its own new tabs,
+ * but never navigate this page, and it gets no referrer.
+ */
+const CA_WEB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+
+/** The address to show beside the chat for a link, or null when the link keeps its new tab. */
+function caWebPaneUrl(href, origin) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  return url.protocol === 'https:' && url.origin !== origin ? url.href : null;
+}
+
 /* ───────────────────────── the app ───────────────────────── */
 
 class ReverieChatApp {
@@ -1909,6 +1928,7 @@ class ReverieChatApp {
     this.installDeleteSelection();
     this.installTyping();
     this.installComposerChrome();
+    this.installWebPane();
     // Scrolling to the newest message is what reads it.
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
@@ -5568,6 +5588,97 @@ class ReverieChatApp {
       e.preventDefault();
       e.stopPropagation();
       this.closeMentions();
+    }
+  }
+
+  /**
+   * Web links in messages open beside the conversation. A modified or middle click, the link's own right-click or long-press
+   * menu ("Open link in new tab") and the pane's "Open in new tab" still open the page outside Reverie.
+   */
+  installWebPane() {
+    const pane = this.el('aside', 'ca-web');
+    pane.hidden = true;
+    pane.setAttribute('aria-label', 'Web page');
+    const head = this.el('header', 'ca-web-head');
+    const close = this.button('ca-icon-btn ca-web-close', 'Close web page', () => this.closeWebPane(), { icon: 'back' });
+    const host = this.literalText('span', 'ca-web-host');
+    const external = this.el('a', 'ca-btn ca-web-external', 'Open in new tab');
+    external.target = '_blank';
+    external.rel = 'noopener noreferrer';
+    head.append(close, host, this.el('span', 'ca-spacer'), external);
+    const note = this.el('p', 'ca-web-note', 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.');
+    pane.append(head, note);
+    this.els.body.insertBefore(pane, this.els.members);
+    Object.assign(this.els, { web: pane, webHost: host, webExternal: external });
+    const feed = this.app._chatEls.feed;
+    feed.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target?.closest?.('a.chatroom-link[href]');
+      if (!link || !feed.contains(link) || link.classList.contains('ca-workspace-download')) return;
+      const url = caWebPaneUrl(link.href, this.doc.defaultView?.location.origin);
+      if (!url) return;
+      event.preventDefault();
+      this.openWebPane(url);
+    });
+    // On a phone the page covers the conversation, so the system Back button returns to it. That Back is the pane's alone:
+    // the conversation is already showing, so the page handler (registered after this one) must not refocus the composer.
+    this.doc.defaultView?.addEventListener('popstate', (event) => {
+      if (this._webHistory && !this.doc.defaultView.history.state?.reverieWeb) {
+        this._webHistory = false;
+        this.closeWebPane({ history: false });
+        event.stopImmediatePropagation();
+      }
+    });
+  }
+
+  openWebPane(url) {
+    const { web, webHost, webExternal } = this.els;
+    const address = new URL(url);
+    webHost.textContent = address.host;
+    webHost.title = address.href;
+    webExternal.href = address.href;
+    // The frame exists only while a page is open, so a closed pane leaves no empty frame in the page.
+    let frame = web.querySelector('.ca-web-frame');
+    if (!frame) {
+      frame = this.el('iframe', 'ca-web-frame');
+      frame.setAttribute('sandbox', CA_WEB_SANDBOX);
+      frame.referrerPolicy = 'no-referrer';
+      web.append(frame);
+    }
+    frame.title = 'Web page from ' + address.host;
+    if (frame.getAttribute('src') !== address.href) frame.src = address.href;
+    web.hidden = false;
+    this.els.root.classList.add('ca-web-open');
+    const win = this.doc.defaultView;
+    if (win?.matchMedia?.('(max-width: 767px)')?.matches) {
+      this.els.chat.inert = true;
+      if (!this._webHistory) {
+        try {
+          win.history.pushState({ ...(win.history.state || {}), reverieWeb: true }, '');
+          this._webHistory = true;
+        } catch {
+          /* Back is a convenience; the pane's own button closes it */
+        }
+      }
+      web.querySelector('.ca-web-close')?.focus();
+    }
+  }
+
+  /** `history: false` when Back already left the pane's history entry. */
+  closeWebPane({ history = true } = {}) {
+    const { web } = this.els;
+    if (!web || web.hidden) return;
+    web.hidden = true;
+    web.querySelector('.ca-web-frame')?.remove();
+    this.els.root.classList.remove('ca-web-open');
+    if (!this.embed) this.els.chat.inert = false;
+    if (history && this._webHistory) {
+      this._webHistory = false;
+      try {
+        this.doc.defaultView.history.back();
+      } catch {
+        /* nothing to step back over */
+      }
     }
   }
 

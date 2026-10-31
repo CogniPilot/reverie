@@ -26,8 +26,8 @@
  *   plain HTTP (an HTTPS Reverie page cannot embed it: mixed content) or refuses
  *   framing via `X-Frame-Options` / `frame-ancestors`.
  * - `direct`: the iframe points at the target URL itself. Cheaper, but only works
- *   for HTTPS targets that permit framing, and needs the target origin added to
- *   the page CSP's `frame-src`.
+ *   for HTTPS targets that permit framing (the page CSP's `frame-src` allows any
+ *   https origin).
  */
 export type WebviewEmbedMode = 'proxy' | 'direct';
 
