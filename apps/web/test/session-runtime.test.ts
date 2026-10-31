@@ -279,6 +279,25 @@ describe('explicit company restart', () => {
       expect(restart).not.toHaveBeenCalled();
     } finally { await app.close(); }
   });
+  it('tells the owner to leave and re-enter the office for a live isolated laptop, recovery or not', async () => {
+    const app = Fastify(); const session = makeSession();
+    vi.spyOn(session, 'isBusy').mockReturnValue(true);
+    vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
+    const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+    const company = { view: () => ({ employees: [{ id: 'person', name: 'Alex', sessionId: session.id }] }) };
+    const ctx = { sessions: new Map([[session.id, session]]), persistSessionStateNow: vi.fn() };
+    registerSessionRuntimeRoutes(app, ctx as never, () => true, undefined, company as never);
+    vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/owned-fixture/broker.sock');
+    try {
+      for (const payload of [{}, { forceRestart: true, confirmSessionId: session.id }]) {
+        const response = await app.inject({ method: 'POST', url: '/api/company/employees/person/restart', payload });
+        expect(response.statusCode).toBe(409);
+        expect(response.json().error).toBe('Alex’s laptop is running, so Restart cannot replace it in place. To recover them, use Leave office, then Enter office. That stops and starts their laptop and keeps their identity, saved conversation, memory and files.');
+      }
+      expect(restart).not.toHaveBeenCalled();
+      expect(ctx.persistSessionStateNow).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); await app.close(); }
+  });
   it('restarts from a persisted recipe under the same expert/session identity', async () => {
     const app = Fastify();
     const session = makeSession();
