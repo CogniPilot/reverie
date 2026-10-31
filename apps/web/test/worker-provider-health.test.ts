@@ -408,3 +408,173 @@ it('uses one canonical snapshot per N-employee company render and one post-query
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+const emptySnapshot = () => ({
+  providerHealth: { version: 1, purpose: 'worker-provider-health-v1', providers: [] },
+});
+
+it('keeps a still-current fact through valid empty observations without publishing a new observation', async () => {
+  const f = fixture();
+  await f.health.refresh();
+  const original = f.health.read(SID);
+  f.query.mockResolvedValue(emptySnapshot());
+  f.advance(PROVIDER_HEALTH_MAX_AGE_MS - 1);
+  await f.health.refresh();
+  expect(f.health.read(SID)).toEqual(original);
+  expect(f.changed).toHaveBeenCalledOnce();
+  f.advance(2);
+  await f.health.refresh();
+  expect(f.health.read(SID)).toBeUndefined();
+  expect(f.changed).toHaveBeenCalledTimes(2);
+  f.epoch(10_000);
+  await f.health.refresh();
+  expect(f.health.read(SID)).toBeUndefined();
+});
+
+it('cannot renew the monotonic deadline with empty observations during wall-clock rollback', async () => {
+  const f = fixture();
+  await f.health.refresh();
+  f.advance(20_000);
+  f.epoch(20_000);
+  f.query.mockResolvedValue(emptySnapshot());
+  await f.health.refresh();
+  expect(f.health.read(SID)?.observedAtEpochMs).toBe(10_000);
+  f.advance(5_001);
+  await f.health.refresh();
+  expect(f.health.read(SID)).toBeUndefined();
+});
+
+it.each(['owner', 'generation', 'session', 'off', 'vacation', 'move', 'recipe', 'permissions', 'removed'] as const)(
+  'discards an old fact on empty observation after %s and cannot revive it when the old binding returns',
+  async (change) => {
+    const f = fixture();
+    await f.health.refresh();
+    const current = structuredClone(f.employee);
+    if (change === 'owner') current.owner = 'other';
+    if (change === 'generation') current.sessionGeneration++;
+    if (change === 'session') current.sessionId = '33333333-3333-4333-8333-333333333333';
+    if (change === 'off') current.desiredRunning = false;
+    if (change === 'vacation') current.onVacation = true;
+    if (change === 'move') current.bindingMigration = {} as never;
+    if (change === 'recipe') current.runtimeRecipe = { cwd: '/changed' } as never;
+    if (change === 'permissions') current.permissions.recoverEmployees = !current.permissions.recoverEmployees;
+    f.employees.mockReturnValue(change === 'removed' ? [] : [current]);
+    f.query.mockResolvedValue(emptySnapshot());
+    await f.health.refresh();
+    expect(f.health.read(current)).toBeUndefined();
+    f.employees.mockReturnValue([f.employee]);
+    await f.health.refresh();
+    expect(f.health.read(SID)).toBeUndefined();
+  }
+);
+
+it('uses the post-query canonical census before retaining a fact on an empty observation', async () => {
+  const f = fixture();
+  await f.health.refresh();
+  let release!: (value: any) => void;
+  f.query.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      })
+  );
+  const flight = f.health.refresh();
+  f.employee.owner = 'changed';
+  release(emptySnapshot());
+  await flight;
+  expect(f.health.read(SID)).toBeUndefined();
+  f.employee.owner = undefined;
+  f.query.mockResolvedValue(emptySnapshot());
+  await f.health.refresh();
+  expect(f.health.read(SID)).toBeUndefined();
+});
+
+it.each(['unknown', 'dead'] as const)(
+  'does not hide an explicit %s observation behind an earlier healthy fact',
+  async (state) => {
+    const f = fixture();
+    await f.health.refresh();
+    f.advance(1);
+    f.setRow({
+      ...f.row,
+      observedAtEpochMs: 10_001,
+      state,
+      reason: state === 'unknown' ? 'UNCONFIRMED' : 'COMMAND_EXITED',
+    });
+    await f.health.refresh();
+    expect(f.health.read(SID)?.state).toBe(state);
+    f.query.mockResolvedValue(emptySnapshot());
+    await f.health.refresh();
+    expect(f.health.read(SID)?.state).toBe(state);
+  }
+);
+
+it.each(['malformed', 'duplicate', 'missing', 'nonempty-invalid', 'query-error'] as const)(
+  'still clears a prior fact for %s rather than treating it as a valid empty observation',
+  async (kind) => {
+    const f = fixture();
+    await f.health.refresh();
+    if (kind === 'query-error') f.query.mockRejectedValueOnce(Error('unavailable'));
+    else if (kind === 'missing') f.query.mockResolvedValueOnce({ runningSessionIds: [SID] } as any);
+    else
+      f.query.mockResolvedValueOnce({
+        providerHealth: {
+          version: 1,
+          purpose: 'worker-provider-health-v1',
+          providers:
+            kind === 'malformed'
+              ? null
+              : kind === 'duplicate'
+                ? [f.row, f.row]
+                : [{ ...f.row, containerId: undefined }],
+        },
+      } as any);
+    await f.health.refresh();
+    expect(f.health.read(SID)).toBeUndefined();
+    f.query.mockResolvedValue(emptySnapshot());
+    await f.health.refresh();
+    expect(f.health.read(SID)).toBeUndefined();
+  }
+);
+
+it('preserves nonempty partial-snapshot replacement instead of merging omitted old facts', async () => {
+  const f = fixture();
+  const other = {
+    ...structuredClone(f.employee),
+    id: '33333333-3333-4333-8333-333333333333',
+    sessionId: '44444444-4444-4444-8444-444444444444',
+  };
+  const otherRow = {
+    ...f.row,
+    employeeId: other.id,
+    sessionId: other.sessionId,
+    observedBinding: [
+      other.id,
+      other.owner,
+      other.sessionId,
+      other.sessionGeneration,
+      other.desiredRunning,
+      other.onVacation,
+      other.bindingMigration,
+      other.runtimeRecipe,
+      other.permissions,
+    ],
+  };
+  f.employees.mockReturnValue([f.employee, other]);
+  f.query.mockResolvedValueOnce({
+    providerHealth: { version: 1, purpose: 'worker-provider-health-v1', providers: [f.row, otherRow] },
+  });
+  await f.health.refresh();
+  expect(f.health.read(other.sessionId)?.state).toBe('healthy');
+  await f.health.refresh();
+  expect(f.health.read(SID)?.state).toBe('healthy');
+  expect(f.health.read(other.sessionId)).toBeUndefined();
+});
+
+it('does not manufacture a fact or change notification from a valid empty initial observation', async () => {
+  const f = fixture();
+  f.query.mockResolvedValue(emptySnapshot());
+  await f.health.refresh();
+  expect(f.health.read(SID)).toBeUndefined();
+  expect(f.changed).not.toHaveBeenCalled();
+});
