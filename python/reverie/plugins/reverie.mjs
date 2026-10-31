@@ -295,12 +295,21 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
     },
     tool: {
       reverie_memory: tool({
-        description: "Recall this agent's durable memories (dreams are labelled imagination), or save a verified fact/handoff.",
+        description: "Recall this agent's durable memories (dreams are labelled imagination), or save a verified fact/handoff. " +
+          "Inside a Reverie session a save goes to your office journal and names the chat message you are acting on: " +
+          "give its room and message id, a tag, and exact words from it (quote) or another source.",
         args: { action: tool.schema.enum(["recall", "remember"]), text: tool.schema.string(),
           project: tool.schema.string().describe("Project identifier for shared memory; empty for your private store"),
-          source: tool.schema.string().describe("Verification source for project writes; empty for recall") },
-        execute: async ({ action, text, project, source }, context = {}) => JSON.stringify(await bridge({
-          action, query: text, text, project, source, channel: channelOf(queries.get(context.sessionID)) === "work" ? "work" : "private" })),
+          source: tool.schema.string().describe("A non-chat source (commit, report, URL), shown as unverified; empty for recall"),
+          room: tool.schema.string().optional().describe("remember: room id of the message you are acting on"),
+          turn: tool.schema.string().optional().describe("remember: id of the message you are acting on; never guess it"),
+          tag: tool.schema.string().optional().describe("remember: decision, promise, correction, preference, identity, relationship, open-question, lesson or personal-reflection"),
+          quote: tool.schema.string().optional().describe("remember: exact words from that message; the server checks them"),
+          reason: tool.schema.string().optional().describe("remember: why save now, unless the message asks you to remember") },
+        // Room and turn come only from the model's own arguments; this plugin never fills them in.
+        execute: async ({ action, text, project, source, room, turn, tag, quote, reason }, context = {}) => JSON.stringify(await bridge({
+          action, query: text, text, project, source, room, turn, tag, quote, reason,
+          channel: channelOf(queries.get(context.sessionID)) === "work" ? "work" : "private" })),
       }),
       reverie_tools: tool({
         description: "Read/save the reverie plan, list/save developer histories, or compose a bounded worker brief. " +

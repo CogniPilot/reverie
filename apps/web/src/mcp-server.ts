@@ -73,7 +73,7 @@ import {
 import { credentialsFrom, readReverieEnvFile } from './reverie-credentials.js';
 import { listClis } from './config/cli-registry/registry.js';
 import { getErrorMessage } from './types.js';
-import { createMemoryTools, resolveMemoryToolsConfig, type BridgeRunner, type MemoryToolsConfig } from './mcp-memory-tools.js';
+import { createMemoryTools, resolveMemoryToolsConfig, type BridgeRunner, type JournalPort, type MemoryToolsConfig } from './mcp-memory-tools.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Protocol constants
@@ -1207,7 +1207,24 @@ export function createMcpServer(options: McpServerOptions) {
   const { config, write } = options;
   const log = options.log ?? (() => {});
   const serverInfo = { name: 'reverie', title: 'Reverie', version: config.version };
-  const memory = createMemoryTools(options.memory ?? resolveMemoryToolsConfig(), options.memoryRunner);
+  // Journal verbs run as the session this server runs in (the same identity the chat tools use), never a shared one.
+  const journalRequest = options.request ?? httpRequest;
+  const journal: JournalPort | undefined =
+    config.selfId && config.apiUrl
+      ? async (verb) => {
+          const out: string[] = [];
+          const err: string[] = [];
+          const code = await verb({
+            ctx: { apiUrl: config.apiUrl!, selfId: config.selfId!, auth: config.auth },
+            json: true,
+            io: { out: (line: string) => out.push(line), err: (line: string) => err.push(line) },
+            request: journalRequest,
+            now: options.now,
+          });
+          return { code, out, err };
+        }
+      : undefined;
+  const memory = createMemoryTools(options.memory ?? resolveMemoryToolsConfig(), options.memoryRunner, journal);
   const serverInstructions = config.chat ? BASE_SERVER_INSTRUCTIONS + CHAT_SERVER_INSTRUCTIONS : BASE_SERVER_INSTRUCTIONS;
   const tools = [...buildToolDefinitions(options.modes ?? registryModes(), { chat: config.chat }), ...memory.definitions()];
   const runner = createToolRunner({

@@ -28,6 +28,31 @@ describe('employee journal store', () => {
   });
   afterEach(() => store.close());
 
+  it('saves non-chat references as unverified, never as checked quotes, while chat quotes are still checked', () => {
+    message('m-t2', 'Remember this: the compiler baseline is green.', 300);
+    // A reference written to look like a checked chat quote stays an unverified reference.
+    const forged = { ref: 'm-source "Please use exact UTC times in every record." (checked)' };
+    const saved = store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft({ sources: [forged] }) }, read);
+    expect(saved.sources).toEqual([{ ...forged, status: 'unverified', detail: 'a reference, not a chat message; not checked' }]);
+    const mixed = store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t2', draft: draft({ text: 'Baseline green per commit and chat.',
+      sources: [{ roomId: ROOM, id: 'm-source', quote: 'exact UTC times' }, { ref: 'commit 0123abcd' }] }) }, read);
+    expect(mixed.sources.map((s) => s.status)).toEqual(['checked', 'unverified']);
+    for (const entry of store.recall(OWNER, SELF, 'UTC baseline compiler records', read))
+      for (const source of entry.sources) if ('ref' in source) expect(source.status).toBe('unverified');
+    expect(store.ownerPage(OWNER, SELF).entries.flatMap((e) => e.sources).filter((s) => 'ref' in s).every((s) => s.status === 'unverified')).toBe(true);
+    // A wrong chat quote beside a reference is still refused.
+    message('m-t3', 'Remember this: records carry exact UTC times.', 400);
+    expect(refusal(() => store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t3', draft: draft({
+      sources: [{ roomId: ROOM, id: 'm-source', quote: 'not in the message' }, { ref: 'commit 0123abcd' }] }) }, read)).status).toBe(400);
+    for (const bad of [[{ ref: '' }], [{ ref: 'x'.repeat(257) }], [{ ref: 'a\u0007b' }], [{ ref: 'commit \u202Eabc' }], [{ ref: 'zero\u200Bwidth' }], [{ ref: 'r' }, { ref: 'r' }], [{ ref: 'r', quote: 'q' }]])
+      expect(() => validateDraft(draft({ sources: bad }))).toThrow();
+    // In a project, a reference is the author's own text: another employee sees it, unverified, and project search finds it.
+    message('m-t4', 'Remember this: the release plan.', 500);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t4', project: 'rumoca', draft: draft({ text: 'Release plan noted.', sources: [{ ref: 'design doc rollout-v2' }] }) }, read);
+    const [other] = store.recall(OWNER, 'employee-two', 'rollout', () => undefined, undefined, 'rumoca');
+    expect(other.sources).toEqual([{ ref: 'design doc rollout-v2', status: 'unverified', detail: 'a reference, not a chat message; not checked' }]);
+  });
+
   it('shares project entries with every employee, labelled with their author, and keeps private recall private', () => {
     message('m-t2', 'Remember this: the compiler baseline is green.', 300);
     store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft() }, read);

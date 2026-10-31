@@ -48,7 +48,12 @@ export function asksToRemember(text: string): boolean {
   return /\bremember\s+(?:this|that|it|to)\b|\b(?:save|note|journal|log)\s+(?:this|that|it)\b|\bwrite\s+(?:this|that|it)\s+down\b|\b(?:don't|don’t|do\s+not)\s+forget\b|\bkeep\s+(?:this|that|it)\s+in\s+mind\b|\b(?:add|put)\s+(?:this|that|it)\s+(?:to|in)\s+(?:your\s+)?journal\b/i.test(text);
 }
 
-export interface JournalSource { roomId: string; id: string; quote: string }
+/** A chat message and words quoted from it: the server checks the quote. */
+export interface JournalChatSource { roomId: string; id: string; quote: string }
+/** Anything else (a commit, a report, a URL): kept as given and always shown as unverified, never as a checked quote. */
+export interface JournalRefSource { ref: string }
+export type JournalSource = JournalChatSource | JournalRefSource;
+export const isRefSource = (source: JournalSource): source is JournalRefSource => 'ref' in source;
 export interface JournalAnnotations {
   topics?: string[]; importance?: string; provenance?: string; supersedes?: number[]; related?: number[]; reason?: string;
 }
@@ -59,7 +64,7 @@ export interface JournalMessage { id: string; roomId: string; at: number; text: 
 export type ReadVisibleMessage = (roomId: string, messageId: string) => JournalMessage | undefined;
 export type JournalGateName = 'fields' | 'turn_readable' | 'read_only' | 'reason' | 'source_window' | 'source_quote' | 'links' | 'commit';
 export interface JournalGate { gate: JournalGateName; outcome: 'pass' | 'fail' | 'not_evaluated'; detail?: string }
-export interface JournalSourceCheck extends JournalSource { status: 'checked' | 'unverified'; detail: string; quoteWithheld?: true }
+export type JournalSourceCheck = JournalSource & { status: 'checked' | 'unverified'; detail: string; quoteWithheld?: true };
 export interface JournalEntryView {
   entryId: number; turnId: string; roomId: string; committedAt: string; text: string; tags: string[];
   annotations?: JournalAnnotations; supersededBy: number[]; sources: JournalSourceCheck[]; interpretation: string;
@@ -95,6 +100,12 @@ export function validateDraft(value: unknown): JournalDraft {
   if (!Array.isArray(sources) || sources.length < 1 || sources.length > 4) throw invalid('one to four source quotes required');
   const seen = new Set<string>();
   for (const source of sources) {
+    if (source && typeof source === 'object' && Object.keys(source).join() === 'ref') {
+      const { ref } = source as Record<string, unknown>;
+      if (!text(ref, JOURNAL_QUOTE_BYTES) || /[\p{Cc}\p{Cf}]/u.test(ref as string) || seen.has(`ref:${ref}`)) throw invalid('bounded distinct source reference required');
+      seen.add(`ref:${ref}`);
+      continue;
+    }
     if (!source || typeof source !== 'object' || Object.keys(source).sort().join() !== 'id,quote,roomId') throw invalid('source fields');
     const { id, roomId, quote } = source as Record<string, unknown>;
     if (!journalId(id) || !journalId(roomId) || seen.has(`${roomId}/${id}`)) throw invalid('distinct source message ids required');
@@ -135,6 +146,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 /** Check each cited quote against the message as the employee can read it now. */
 export function checkSources(sources: readonly JournalSource[], read: ReadVisibleMessage, notAfter?: number): JournalSourceCheck[] {
   return sources.map(source => {
+    if (isRefSource(source)) return { ...source, status: 'unverified', detail: 'a reference, not a chat message; not checked' };
     const message = read(source.roomId, source.id);
     if (!message) return { ...source, status: 'unverified', detail: 'message unavailable' };
     if (notAfter !== undefined && message.at > notAfter) return { ...source, status: 'unverified', detail: 'message is later than the turn' };
@@ -148,7 +160,7 @@ export function checkSources(sources: readonly JournalSource[], read: ReadVisibl
  * text the reader has no access to, so only quotes the reader's own check confirms are shown; the author sees every quote.
  */
 export const withholdUnreadableQuotes = (checks: JournalSourceCheck[]): JournalSourceCheck[] =>
-  checks.map(check => check.status === 'checked' ? check
+  checks.map(check => check.status === 'checked' || isRefSource(check) ? check
     : { ...check, quote: '', quoteWithheld: true, detail: `${check.detail}; the author's quote is withheld because you cannot confirm it` });
 
 const SCHEMA = `
@@ -252,10 +264,12 @@ export class EmployeeJournalStore {
       return refuse(403, 'save_needs_reason_this_turn', 'JOURNAL_NEEDS_REASON');
     pass();
     const checks = checkSources(draft.sources, read, turn.at);
-    const late = checks.find(check => check.detail !== 'quote matches' && check.detail !== 'quote no longer matches');
+    // The window and quote gates apply to chat sources; a reference is saved as unverified.
+    const chat = checks.filter((check): check is JournalChatSource & { status: 'checked' | 'unverified'; detail: string } => !('ref' in check));
+    const late = chat.find(check => check.detail !== 'quote matches' && check.detail !== 'quote no longer matches');
     if (late) return refuse(403, `source ${late.id}: ${late.detail}`, 'JOURNAL_SOURCE_WINDOW');
     pass();
-    const misquoted = checks.find(check => check.status !== 'checked');
+    const misquoted = chat.find(check => check.status !== 'checked');
     if (misquoted) return refuse(400, `source ${misquoted.id}: quote is not an exact substring of the message`, 'JOURNAL_SOURCE_QUOTE');
     pass();
     const supersedes = draft.annotations?.supersedes ?? [];
@@ -431,12 +445,12 @@ export class EmployeeJournalStore {
 }
 
 function indexText(draft: JournalDraft): string {
-  return [draft.text, ...draft.tags, ...draft.sources.map(source => source.quote), ...(draft.annotations?.topics ?? [])].join(' ');
+  return [draft.text, ...draft.tags, ...draft.sources.map(source => isRefSource(source) ? source.ref : source.quote), ...(draft.annotations?.topics ?? [])].join(' ');
 }
 
 /** Without the quotes: a match on words only the cited message holds would tell a reader outside that room it exists. */
 function projectIndexText(draft: JournalDraft): string {
-  return [draft.text, ...draft.tags, ...(draft.annotations?.topics ?? [])].join(' ');
+  return [draft.text, ...draft.tags, ...draft.sources.filter(isRefSource).map(source => source.ref), ...(draft.annotations?.topics ?? [])].join(' ');
 }
 
 function ftsExpression(query: string): string {

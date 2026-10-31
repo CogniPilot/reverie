@@ -86,16 +86,15 @@ describe('requests', () => {
     expect(JSON.parse(calls[0].input)).toEqual({ action: 'recall', query: 'q', private: true });   // stray keys stripped
   });
 
-  it('saves privately, or to a project only with a verification source', async () => {
-    const { calls, runner } = recorder({ stdout: '{"id":7}' });
-    const tools = createMemoryTools(ON, runner);
-    expect(await tools.run('memory_remember', { text: 'The baseline is 305/566.' })).toEqual({ text: '{"id":7}' });
-    expect(JSON.parse(calls[0].input)).toEqual({ action: 'remember', text: 'The baseline is 305/566.', private: true });
-    const missing = await tools.run('memory_remember', { text: 'x', project: 'p' });
-    expect(missing.isError).toBe(true);
-    expect(calls).toHaveLength(1);                                                       // refused before the bridge
-    await tools.run('memory_remember', { text: 'x', project: 'p', source: 'commit abc123' });
-    expect(JSON.parse(calls[1].input)).toEqual({ action: 'remember', text: 'x', project: 'p', source: 'commit abc123' });
+  it('refuses to remember outside a session, showing the journal command and calling nothing', async () => {
+    const { calls, runner } = recorder();
+    const result = await createMemoryTools(ON, runner).run('memory_remember', {
+      text: "The baseline is 305/566; don't drop it.", room: 'r-1', turn: 'm-1', tag: 'lesson', quote: '305/566', project: 'rumoca' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('not running inside one. Nothing was saved.');
+    expect(result.text).toContain(
+      `run: reverie agent journal save --room r-1 --turn m-1 --text 'The baseline is 305/566; don'\\''t drop it.' --tag lesson --source m-1 --quote 305/566 --project rumoca`);
+    expect(calls).toEqual([]);
   });
 
   it('refuses bad arguments as isError results without calling the bridge', async () => {
@@ -124,15 +123,89 @@ describe('requests', () => {
   });
 
   it('turns a bridge failure into a readable isError result', async () => {
-    const tools = createMemoryTools(ON, recorder({ code: 1, stderr: '{"error": "memory is empty or crossed a hard floor"}' }).runner);
-    const result = await tools.run('memory_remember', { text: 'x' });
+    const tools = createMemoryTools(ON, recorder({ code: 1, stderr: '{"error": "private recall is unavailable in a shared work channel"}' }).runner);
+    const result = await tools.run('memory_recall', { query: 'x' });
     expect(result.isError).toBe(true);
-    expect(result.text).toBe('Memory save failed: memory is empty or crossed a hard floor');
+    expect(result.text).toBe('Memory lookup failed: private recall is unavailable in a shared work channel');
   });
 
   it('answers through tools/call as text content', async () => {
     const { out, send } = server(ON, recorder().runner);
     await send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'memory_recall', arguments: { query: 'q' } } });
     expect(out[0].result).toMatchObject({ content: [{ type: 'text', text: '[{"text":"a memory"}]' }], isError: false });
+  });
+});
+
+describe('inside a Reverie session: the office journal', () => {
+  const MINE = 'sess-mine-0001';
+  function journalServer(bridge: { stdout?: string; stderr?: string; code?: number }, reply: Record<string, unknown>, session: 'mine' | 'none' = 'mine') {
+    const selfId = session === 'mine' ? MINE : undefined;
+    const out: Array<Record<string, unknown>> = [];
+    const requests: Array<{ selfId: string; method?: string; path: string; body?: unknown; query?: unknown }> = [];
+    const { calls, runner } = recorder(bridge);
+    const srv = createMcpServer({
+      config: { ...mcpConfig, apiUrl: 'http://office.test', selfId },
+      write: (m) => out.push(m), modes: ['shell'], memory: ON, memoryRunner: runner,
+      request: async (ctx, options) => {
+        requests.push({ selfId: ctx.selfId, method: options.method, path: options.path, body: options.body, query: options.query });
+        return { status: 200, json: { success: true, data: reply } as never, text: '' };
+      },
+    });
+    const call = async (name: string, args: Record<string, unknown>) => {
+      out.length = 0;
+      await srv.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }));
+      const result = out[0].result as { content: Array<{ text: string }>; isError: boolean };
+      return { text: result.content[0].text, isError: result.isError };
+    };
+    return { call, calls, requests };
+  }
+  const SAVE = { text: 'The baseline is 305/566.', room: 'r-1', turn: 'm-1', tag: 'lesson', quote: '305/566', source: 'commit abc123' };
+
+  it("saves to the calling session's own journal, screened by the hard floors first, with the caller's room and turn", async () => {
+    const s = journalServer({ stdout: '{"floor":""}' }, { entryId: 5, turnId: 'm-1', replayed: false, payloadSha256: 'ab' });
+    const result = await s.call('memory_remember', SAVE);
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.text)).toMatchObject({ entryId: 5, turnId: 'm-1' });
+    expect(s.calls.map((c) => JSON.parse(c.input))).toEqual([{ action: 'screen', text: 'The baseline is 305/566.' }]);
+    expect(s.calls[0].env.REVERIE_SESSION_ID).toBeUndefined(); // the bridge env stays stripped
+    expect(s.requests).toEqual([{ selfId: MINE, method: 'POST', path: '/api/agent/journal/save', query: undefined, body: {
+      roomId: 'r-1', turnId: 'm-1', draft: { text: 'The baseline is 305/566.', tags: ['lesson'],
+        sources: [{ roomId: 'r-1', id: 'm-1', quote: '305/566' }, { ref: 'commit abc123' }] } } }]);
+  });
+
+  it('refuses without a session, and never guesses a missing room or turn', async () => {
+    const outside = journalServer({ stdout: '{"floor":""}' }, {}, 'none');
+    const outsideResult = await outside.call('memory_remember', SAVE);
+    expect(outsideResult.isError).toBe(true);
+    expect(outsideResult.text).toContain('not running inside one. Nothing was saved.');
+    const inside = journalServer({ stdout: '{"floor":""}' }, {});
+    for (const drop of ['turn', 'room', 'tag'] as const) {
+      const { [drop]: _gone, ...rest } = SAVE;
+      const result = await inside.call('memory_remember', rest);
+      expect(result.isError, drop).toBe(true);
+      expect(result.text).toContain('Nothing was saved. To save it to your journal, run: reverie agent journal save');
+    }
+    const noSource = await inside.call('memory_remember', { ...SAVE, quote: undefined, source: undefined });
+    expect(noSource.text).toContain('needs quote or source');
+    for (const s of [outside, inside]) expect([s.calls, s.requests]).toEqual([[], []]);
+  });
+
+  it('saves nothing when a hard floor is crossed or the check did not run', async () => {
+    for (const bridge of [{ stdout: '{"floor":"configured output policy"}' }, { code: 1, stderr: 'boom' }, { stdout: 'not json' }]) {
+      const s = journalServer(bridge, {});
+      const result = await s.call('memory_remember', SAVE);
+      expect(result.isError, JSON.stringify(bridge)).toBe(true);
+      expect(result.text).toMatch(/hard floor|did not run/);
+      expect(s.requests).toEqual([]);
+    }
+  });
+
+  it('recalls from the journal as this session, with the old store as labelled read-only history', async () => {
+    const s = journalServer({ stdout: '[{"text":"an old reflection"}]' }, { entries: [{ entryId: 3, text: 'baseline' }] });
+    const result = await s.call('memory_recall', { query: 'baseline', project: 'rumoca' });
+    expect(JSON.parse(result.text)).toEqual({ journal: [{ entryId: 3, text: 'baseline' }], legacy: [{ text: 'an old reflection' }],
+      note: 'journal entries are your store of record; legacy results are older, read-only history' });
+    expect(s.requests).toEqual([{ selfId: MINE, method: 'GET', path: '/api/agent/journal/recall', body: undefined,
+      query: { q: 'baseline', roomId: undefined, project: 'rumoca' } }]);
   });
 });
