@@ -8792,22 +8792,43 @@ class ReverieChatApp {
     input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`); label.append(input);
     const draftBox = this.el('div', 'ca-profile-memory-draft');
     const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
-    const key = `reverie:laptop-memory:${employee.id}`;
+    const legacyKey = `reverie:laptop-memory:${employee.id}`;
+    let ownerId = null, key = null;
     const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
     const tracked = new Set();
     let busy = false, discovering = true, discoveryFailed = false, storageFailed = false;
+    const currentOwner = async () => {
+      try {
+        const result = await this.app._chatApi('/api/owner/status');
+        const data = result.data, identity = data?.identity;
+        if (!result.ok || data?.configured !== true || data.signedIn !== true || identity?.role !== 'owner'
+          || typeof identity.id !== 'string' || !(identity.id === 'owner' || uuid.test(identity.id))
+          || (ownerId !== null && ownerId !== identity.id)) throw new Error();
+        ownerId = identity.id;
+        key = `reverie:laptop-memory:${ownerId}:${employee.id}`;
+        return true;
+      } catch {
+        discoveryFailed = true;
+        status.textContent = 'The signed-in owner could not be verified or changed. Reopen this profile after signing in; recovery records have been kept.';
+        return false;
+      }
+    };
     const readIds = () => {
       try {
+        // Older records have no attributable owner. Preserve and fence them;
+        // neither a new account nor an empty server listing proves them safe.
+        const legacy = JSON.parse(this.doc.defaultView.localStorage.getItem(legacyKey) || '[]');
+        if (!Array.isArray(legacy) || legacy.length || !key) throw new Error();
         const value = JSON.parse(this.doc.defaultView.localStorage.getItem(key) || '[]');
         if (!Array.isArray(value) || value.length > 100 || value.some(id => typeof id !== 'string' || !uuid.test(id))) throw new Error();
         storageFailed = false; return value;
       } catch { storageFailed = true; return []; }
     };
-    for (const id of readIds()) tracked.add(id);
     const retain = (remove) => {
       // Merge other open profiles/tabs; a late response may remove only its own
       // definitively terminal ID, never a newer unknown request.
       const ids = new Set([...readIds(), ...tracked]);
+      if (storageFailed) return false;
       if (remove) ids.delete(remove);
       try { this.doc.defaultView.localStorage.setItem(key, JSON.stringify([...ids])); return !storageFailed; }
       catch { storageFailed = true; return false; }
@@ -8820,11 +8841,12 @@ class ReverieChatApp {
       check.disabled = busy || discovering;
     };
     const discover = async () => {
-      discovering = true;
-      for (const id of readIds()) tracked.add(id);
-      sync();
+      discovering = true; sync();
       try {
+        if (!await currentOwner()) return;
+        for (const id of readIds()) tracked.add(id);
         const result = await this.app._chatApi('/api/company/resources/operations', { method: 'POST', body: { employeeId: employee.id } });
+        if (!await currentOwner()) return;
         if (!result.ok || !Array.isArray(result.data) || result.data.length > 200 || result.data.some(item =>
           !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string')) throw new Error();
         for (const item of result.data) if (!['completed', 'not-started'].includes(item.phase)) tracked.add(item.id);
@@ -8842,9 +8864,12 @@ class ReverieChatApp {
       if (discoveryFailed || !tracked.size) return;
       busy = true; sync();
       try {
+        if (!await currentOwner()) return;
         for (const operationId of [...tracked]) {
           try {
+            if (!await currentOwner()) return;
             const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
+            if (!await currentOwner()) return;
             const phase = result.ok && result.data?.id === operationId ? result.data.phase : null;
             if (phase === 'completed' || phase === 'not-started') {
               tracked.delete(operationId); retain(operationId);
@@ -8863,9 +8888,10 @@ class ReverieChatApp {
       if (busy || discovering || discoveryFailed || storageFailed || tracked.size || !input.reportValidity()) return;
       busy = true; sync(); draftBox.replaceChildren(); status.textContent = 'Preparing a preview…';
       try {
+        if (!await currentOwner()) return;
         const memoryMiB = Number(input.value);
         const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
-        if (!dialog.isConnected) return;
+        if (!dialog.isConnected || !await currentOwner()) return;
         if (!result.ok) {
           status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
             : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
@@ -8885,9 +8911,12 @@ class ReverieChatApp {
           if (busy || tracked.size || !note.value.trim()) return;
           const question = `Restart ${employee.name}'s laptop with ${mib(r.memoryMiB)} of memory? Current work is interrupted and resumes from the note.`;
           if (!await this.confirmCompanyAction(employee.name, question, 'Restart laptop') || !dialog.isConnected || busy || tracked.size) return;
+          busy = true; sync();
+          if (!await currentOwner()) { busy = false; sync(); return; }
+          if (!dialog.isConnected) { busy = false; sync(); return; }
           // Retain identity BEFORE dispatch/await and even if the profile closes.
           tracked.add(draft.operationId);
-          if (!retain()) { tracked.delete(draft.operationId); status.textContent = 'The recovery record could not be saved. Nothing was dispatched; check status before trying again.'; sync(); return; }
+          if (!retain()) { busy = false; tracked.delete(draft.operationId); status.textContent = 'The recovery record could not be saved. Nothing was dispatched; check status before trying again.'; sync(); return; }
           busy = true; apply.disabled = true; sync(); status.textContent = 'Restarting the laptop…';
           try {
             const applied = await this.app._chatApi('/api/company/resources/apply', { method: 'POST', body: { previewId: draft.draftId, handoff: note.value.trim() } });

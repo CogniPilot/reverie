@@ -23,6 +23,7 @@ import {Session} from '../src/session.js';
 import {expertRuntimeRecipe} from '../src/expert-runtime-recipe.js';
 import {OwnerAuthStore} from '../src/owner-auth/store.js';
 import {OwnerAuthService} from '../src/owner-auth/service.js';
+import {registerOwnerRoutes} from '../src/owner-auth/routes.js';
 import {ResourceNativeClient} from '../src/resource-native-client.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../src/resource-replacement-controller.js';
 import {buildSpawnCommand} from '../src/tmux-manager.js';
@@ -207,14 +208,14 @@ beforeEach(async () => {
   });
   await new Promise<void>(resolve => server.listen(path, resolve)); await chmod(path, 0o600);
   vi.stubEnv('REVERIE_WORKER_SOCKET', path);
-  app = Fastify(); await app.register(cookie);
+  app = Fastify(); await app.register(cookie); registerOwnerRoutes(app, auth, false);
   controller = new ResourceReplacementController(app, auth, company, plans, chat, moves, journal, port, mux, path);
   registerResourceReplacementRoutes(app, controller);
   restartController = async () => {
     controller.close(); await app.close();
     journal = new PlanMoveStore(join(directory, 'plan-moves.json'));
     moves = new PlanMoves({load: () => journal.load(), save: rows => journal.save(rows)} as PlanMovePort);
-    app = Fastify(); await app.register(cookie);
+    app = Fastify(); await app.register(cookie); registerOwnerRoutes(app, auth, false);
     controller = new ResourceReplacementController(app, auth, company, plans, chat, moves, journal, port, mux, path);
     registerResourceReplacementRoutes(app,controller);
   };
@@ -369,6 +370,10 @@ it('the real profile keeps a lost Apply reply fenced and discovers its server re
       if (url === '/api/company') return {ok: true, data};
       if (url === '/api/chatrooms/phone-status') return {ok: true, data: {self: 'owner', canSetOwn: true}};
       if (url === '/api/company/hire-options') return {ok: true, data: {sources: [], harnesses: []}};
+      if (url === '/api/owner/status') {
+        const response = await app.inject({method: 'GET', url, headers: headers()});
+        return {ok: response.statusCode < 400, status: response.statusCode, ...response.json()};
+      }
       if (!url.startsWith('/api/company/resources/')) return previous(url, opts);
       const response = await app.inject({method: 'POST', url, headers: headers(), payload: opts.body});
       if (loseReply && url.endsWith('/apply')) throw new Error('HTTP reply lost AFTER real Apply');
