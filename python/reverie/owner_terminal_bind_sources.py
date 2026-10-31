@@ -14,6 +14,12 @@ from .website_peer_facts import mounts
 from .worker_cold_tmp import read_mount_table, refuse_host_mount_aliases, refuse_mount_aliases
 
 
+def canonical_mount_records(value):
+    """Full validated records; only the outer producer-order array is sorted."""
+    return sorted(mounts(value),key=lambda row:json.dumps(
+        row,sort_keys=True,separators=(',',':'),allow_nan=False))
+
+
 def _identity(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
 
@@ -131,8 +137,7 @@ class BoundMount:
                     for k in ('Type', 'Source', 'Destination', 'RW'))]
         need(len(selected) == 1, 'H_BIND_MOUNT_CHANGED')
         result={k:copy.deepcopy(raw[k]) for k in ('Id','Image','Name','State')}
-        result['Mounts']=sorted(mounts(raw['Mounts']),key=lambda row:json.dumps(
-            row,sort_keys=True,separators=(',',':'),allow_nan=False))
+        result['Mounts']=canonical_mount_records(raw['Mounts'])
         return result
 
     def check_source(self):

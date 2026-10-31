@@ -218,6 +218,48 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         self.enterContext(patch.object(H, 'open_in_root', side_effect=guest))
         self.rebuild()
 
+    def rotate_auth_inspects(self, mutation=None):
+        original=self.initial.engine.get;calls=[0]
+        def get(route):
+            value=original(route)
+            if route=='/containers/'+W.OLD+'/json':
+                calls[0]+=1
+                value['Mounts']=value['Mounts'][calls[0]%len(value['Mounts']):]+value['Mounts'][:calls[0]%len(value['Mounts'])]
+                other=min((m for m in value['Mounts'] if m['Destination']!=self.auth_mount['Destination']),key=lambda m:m['Destination'])
+                other['Future']={'ordered':[1,2]}
+                if mutation and calls[0]%2==0:
+                    if mutation=='inner':other['Future']['ordered'].reverse()
+                    elif mutation=='duplicate':value['Mounts'].append(deepcopy(other))
+                    else:other['Future']['extra']='changed'
+            return value
+        self.initial.engine.get=get
+        return calls
+
+    def test_auth_held_descriptors_survive_outer_mount_permutations(self):
+        self.select_service_auth();calls=self.rotate_auth_inspects();self.rebuild()
+        held=list(self.profile.auth_fds)
+        self.profile.input_binding()
+        self.assertGreaterEqual(calls[0],4)
+        self.assertTrue(all(os.fstat(fd)for fd in held))
+        self.profile.close()
+        for fd in held:
+            with self.assertRaises(OSError):os.fstat(fd)
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_auth_full_unknown_fields_inner_arrays_and_duplicates_still_refuse(self):
+        self.select_service_auth();original=self.initial.engine.get
+        for mutation in ('unknown','inner','duplicate'):
+            self.initial.engine.get=original;self.rotate_auth_inspects(mutation)
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):self.rebuild()
+            self.assertFalse(self.fixture.engine.mutations())
+        self.initial.engine.get=original
+
+    def test_link_description_already_canonicalizes_outer_mount_order(self):
+        self.select_service_auth();self.rotate_auth_inspects()
+        result=H.describe_link_facts(self.initial,W.website._link_codec(),W.OLD)
+        self.assertEqual(result['purpose'],H.LINK_PURPOSE)
+        self.assertFalse(self.fixture.engine.mutations())
+
     def test_selected_service_auth_survives_real_stage_and_readonly_mount(self):
         self.select_service_auth()
         plan = self.approve()

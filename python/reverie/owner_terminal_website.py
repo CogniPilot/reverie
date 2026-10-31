@@ -28,6 +28,7 @@ from .owner_terminal_native import private_bytes, private_document
 from .website_image_provenance import verify_image_spec
 from .website_service_auth import WEB, protected_startup
 from .linux_root_files import open_in_root
+from .owner_terminal_bind_sources import canonical_mount_records
 
 LINK_PURPOSE = 'owner-terminal-console-links-v1'
 UUID = re.compile(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}')
@@ -354,7 +355,8 @@ class TerminalWebsiteProfile:
             actual = [info.st_dev, info.st_ino] if root else _auth_stamp(info)
             need(actual == expected, 'H_WEBSITE_AUTH_HELD_CHANGED')
         again = self.initial.engine.get('/containers/' + cid + '/json')
-        need(all(again.get(k) == old.get(k) for k in ('Id', 'Image', 'Mounts'))
+        need(all(again.get(k) == old.get(k) for k in ('Id', 'Image'))
+             and canonical_mount_records(again['Mounts'])==canonical_mount_records(old['Mounts'])
              and all(again['State'].get(k) == old['State'].get(k)
                      for k in ('Pid', 'Running', 'Paused', 'Restarting', 'Dead', 'StartedAt')),
              'H_WEBSITE_AUTH_INIT_CHANGED')
