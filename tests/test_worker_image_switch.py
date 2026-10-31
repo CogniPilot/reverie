@@ -101,10 +101,15 @@ class StartupFences(_Fixture):
         self.assertFalse(any(args[:3] == ['systemctl', '--user', 'start'] for args in self.calls))
 
     def test_actual_unit_precheck_backend_dispatch_refuses_fence(self):
-        flake = (Path(__file__).parents[1] / 'flake.nix').read_text()
-        self.assertIn('worker_service.py', flake)
-        self.assertRegex(flake, r'worker_service[^\n]*"\$@" check-backend')
-        self.assertIn('ExecStartPre=${self.packages.${system}.workerServiceCheck}', flake)
+        root = Path(__file__).parents[1]
+        flake = (root / 'flake.nix').read_text()
+        self.assertRegex(flake, r'nativeWorkerPackages = import ./nix/native-worker-packages\.nix \{\s*'
+                               r'inherit pkgs; src = source; inherit \(packages\) console;\s*\};')
+        self.assertIn('in packages // nativeWorkerPackages // {', flake)
+        factory = (root / 'nix/native-worker-packages.nix').read_text()
+        self.assertIn('worker_service.py', factory)
+        self.assertRegex(factory, r'worker_service[^\n]*"\$@" check-backend')
+        self.assertIn('ExecStartPre=${workerServiceCheck}', factory)
         self.fence()
         original = S.WorkerService.__init__
         fixture = self
