@@ -164,8 +164,10 @@ export interface ChatAttachment {
   name: string;
   size: number;
   type: string;
-  /** Absolute path of the stored file on this machine. */
+  /** Absolute path of the stored file on this machine; for a linked file, its path on the shared drive. */
   path: string;
+  /** A reference to a shared-drive file, read live, rather than a copy (chat-linked-files.ts). */
+  linked?: true;
 }
 
 /** Poll limits: the question, the options and each option's label. */

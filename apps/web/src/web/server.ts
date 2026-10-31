@@ -14,11 +14,12 @@ import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
-import { employeeRestContext, employeeBriefContext } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
+import type { Issue } from '../board-types.js';
 import { decisionWritesEnabled } from './decision-config.js';
 import { fullAccessAlertRoom } from '../full-access-default.js';
 import { CompanyService, CompanyError } from '../company-service.js';
@@ -468,6 +469,7 @@ export class WebServer extends EventEmitter {
   private workerProviderHealth?: WorkerProviderHealth;
   /** The console Board, once created; the chat digest reads it for an agent's own cards. */
   private boardStore?: BoardStore;
+  private chatBots?: ChatBotRegistry;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -986,6 +988,17 @@ export class WebServer extends EventEmitter {
     return buildHostPolicy(this.host, this.tunnelManager.getUrl());
   }
 
+  /**
+   * A new backend under the same session remembers nothing else: brief it again in each live room it is in, so it hears
+   * who it is and where its memory lives (the briefing carries the journal recall). Returns how many briefs were queued.
+   */
+  private rebriefAfterBackendChange(sessionId: string): number {
+    let briefed = 0;
+    for (const room of this.chatroomService.rooms())
+      if (!room.archivedAt && room.members.some((m) => m.sessionId === sessionId)) briefed += this.chatroomService.rebrief(room.id, sessionId);
+    return briefed;
+  }
+
   private async setupRoutes(): Promise<void> {
     // multipart/form-data: parser is provided by @fastify/multipart (registered
     // below). Its parser is a no-op marker that leaves the body on req.raw, so
@@ -1437,6 +1450,15 @@ export class WebServer extends EventEmitter {
     // in one room; messages reach member panes as single-line prompts.
     const chatroomFiles = new ChatFileStore(getDataDir());
     await chatroomFiles.initializeShared();
+    let boardIssuesCache: { rev: number; issues: Issue[] } | undefined;
+    // The employee journal: opened on first use, in its own file beside the chat database. Briefs read its highlights.
+    let employeeJournal: EmployeeJournalStore | undefined;
+    this.app.addHook('onClose', async () => employeeJournal?.close());
+    const openJournal = () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db')));
+    // A brief without a recall is still a brief: an unreadable journal never blocks delivery, and says so instead of reading as empty.
+    const journalHighlights = (employee: { id: string; owner?: string }): EmployeeMemoryRecall => {
+      try { return openJournal().highlights(employee.owner ?? '', employee.id); } catch { return 'unreadable'; }
+    };
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
@@ -1456,7 +1478,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
+          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1471,12 +1493,16 @@ export class WebServer extends EventEmitter {
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
       timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
-      // An agent's digest lists its own Board cards and the cards they name (created below, after chat).
+      // An agent's digest lists its own Board cards and the cards they name, and room views show each member's 'doing'
+      // cards (the Board store is created below, after chat).
       boardIssues: (owner) => {
         const names = new Map((this.companyService?.view(owner).employees ?? []).map((e) => [e.id, e.name]));
-        return (this.boardStore?.snapshot().issues ?? []).map((issue) => ({
+        // One copy of the Board per revision, not one per room view.
+        const store = this.boardStore;
+        if (store && boardIssuesCache?.rev !== store.rev) boardIssuesCache = { rev: store.rev, issues: store.snapshot().issues };
+        return (boardIssuesCache?.issues ?? []).map((issue) => ({
           id: issue.id, title: issue.title, status: issue.status, owner: issue.owner, reason: issue.reason,
-          ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt,
+          ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt, end: issue.end,
         }));
       },
       // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
@@ -1490,6 +1516,8 @@ export class WebServer extends EventEmitter {
           if (session) this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
         }
       },
+      // A bot's posts show its current picture (the registry is created further down).
+      botOf: (botId) => this.chatBots?.get(botId),
     });
     await this.chatroomService.init();
     this.chatroomService.onMessage((room, message) => {
@@ -1695,6 +1723,7 @@ export class WebServer extends EventEmitter {
           }));
         await deliverRecoveryPrompt(
           session,
+          employeeMemoryContext(employee, journalHighlights(employee)) + ' ' +
           'Crash recovery: you are the owner-selected recovery expert. Continue with your existing memory and conversation. Wake all eligible desired-running experts in organization order; managers may delegate downward. Preserve deliberately stopped, paused and retired experts, skip already-live agents, and report failures. Stable agent IDs identify experts independently of their runtime sessions or models. With an explicit owner-granted recoverEmployees permission, call POST /api/company/employees/:id/wake through the authenticated console API; selection alone grants no permission. If permission is absent, ask the owner. Organization: ' +
             JSON.stringify(roster),
           () => allowed() && this.sessions.get(employee.sessionId) === session
@@ -1742,14 +1771,11 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     });
-    // Opened on first use, in its own file beside the chat database.
-    let employeeJournal: EmployeeJournalStore | undefined;
-    this.app.addHook('onClose', async () => employeeJournal?.close());
     registerEmployeeJournalRoutes(this.app, ctx, {
       verifiedOwner,
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
-      journal: () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db'))),
+      journal: openJournal,
       visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
@@ -1782,6 +1808,7 @@ export class WebServer extends EventEmitter {
     }, this.companyService, async (session) => {
       await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
       await this.companyService.setDesiredRunning(session.id, true);
+      this.rebriefAfterBackendChange(session.id);
     }, laptopAgentStop);
     registerCompanyHireRoutes(this.app, {
       company: this.companyService,
@@ -1824,6 +1851,8 @@ export class WebServer extends EventEmitter {
     const boardStore = new BoardStore(dataPath('board.json'));
     await boardStore.init();
     this.boardStore = boardStore;
+    // Room views show each member's 'doing' cards: a saved Board write re-announces the rooms whose cards moved.
+    boardStore.onChange(() => this.chatroomService.noteBoardChanged());
     registerBoardRoutes(this.app, ctx, {
       verifiedOwner,
       store: boardStore,
@@ -1920,8 +1949,10 @@ export class WebServer extends EventEmitter {
     registerBrowserJobEvidence(this.app, { sessions: ctx, chat: this.chatroomService, company: companyStore, currentOwner: id => ownerAuth.isMessageOwner(id), policy: { service: ownerAuth, ctx } });
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
+    this.chatBots = chatBots;
     registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>
-      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id)
+      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id),
+      (bot) => this.chatroomService.botChanged(bot.id, bot.rooms)
     );
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,

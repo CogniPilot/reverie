@@ -1,5 +1,5 @@
 /**
- * Phone-style alert mode in the member list (prototype of i-bab914de): the server sends
+ * Phone-style alert mode in the member list (a prototype): the server sends
  * `alertMode: {mode, until}` on a room member; the list shows 🔔 ring, 📳 vibrate or 🔕 silent
  * after the name, with the end time in ET. Absent, unknown, endless or expired modes read as
  * ring, so a stale page never shows a member muted. Display only: nothing here sets a mode.

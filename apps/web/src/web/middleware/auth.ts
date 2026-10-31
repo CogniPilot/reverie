@@ -758,9 +758,13 @@ export function registerSecurityHeaders(app: FastifyInstance, https: boolean, ba
   // Risk is minimal — only same-origin scripts (already governed by script-src)
   // can construct blob workers.
   const workerSrc = "; worker-src 'self' blob:";
+  // Web links in chat messages open beside the conversation (chat-app.js installWebPane), so this page may frame any https
+  // site. The frame is sandboxed without top navigation and gets no referrer; a site that refuses framing stays blank and
+  // the pane offers its new tab. Plain http stays out: an https console could not show it anyway (mixed content).
+  const frameSrc = "frame-src 'self' https:";
   const csp =
     `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ` +
-    `img-src 'self' data: blob:; ${connectSrc}; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self'${workerSrc}`;
+    `img-src 'self' data: blob:; ${connectSrc}; font-src 'self' https://cdn.jsdelivr.net; ${frameSrc}; frame-ancestors 'self'${workerSrc}`;
 
   app.addHook('onRequest', (req, reply, done) => {
     reply.header('X-Content-Type-Options', 'nosniff');

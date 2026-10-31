@@ -1051,6 +1051,7 @@ describe('replies', () => {
       'Reply',
       'Copy text',
       'Pin message',
+      'Select for deleting',
       'Delete message',
     ]);
   });
@@ -2125,6 +2126,7 @@ describe('phone: message sheet and member-only terminal access', () => {
       'Copy text',
       'Select text',
       'Pin message',
+      'Select for deleting',
       'Delete message',
       'Report message',
     ]);
@@ -3013,8 +3015,8 @@ describe('the "+" menu and Create Poll', () => {
     expect(plus(h).getAttribute('aria-haspopup')).toBe('menu');
     plus(h).click();
     const items = menuItems(h);
-    expect(items.map(text)).toEqual(['Upload a File', 'Create Thread', 'Create Poll', 'Use Apps']);
-    expect(items.map((b) => b.disabled)).toEqual([false, true, false, true]);
+    expect(items.map(text)).toEqual(['Upload a File', 'Link a File', 'Create Thread', 'Create Poll', 'Use Apps']);
+    expect(items.map((b) => b.disabled)).toEqual([false, false, true, false, true]);
     expect(h.document.querySelector('.ca-plus-menu')!.getAttribute('role')).toBe('menu');
     // Upload a File opens the file chooser the paperclip used to open
     const picker = h.document.querySelector('.chatroom-composer input[type="file"]') as HTMLInputElement;
@@ -3029,7 +3031,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     expect(dlg).not.toBeNull();
     const inputs = () => [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
@@ -3080,7 +3082,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     const inputs = () => [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
     const rec = dlg.querySelector('.ca-poll-rec-pick select') as HTMLSelectElement;
@@ -3116,7 +3118,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     const inputs = [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
     (dlg.querySelector('input.ca-field') as HTMLInputElement).value = 'Ok?';
@@ -3137,7 +3139,7 @@ describe('the "+" menu and Create Poll', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     await settle(120);
     plus(h).click();
-    menuItems(h)[2].click();
+    menuItems(h).find((b) => text(b) === 'Create Poll')!.click();
     const dlg = h.document.querySelector('.ca-poll-dialog') as HTMLElement;
     const inputs = [...dlg.querySelectorAll('.ca-poll-form-row input')] as HTMLInputElement[];
     (dlg.querySelector('input.ca-field') as HTMLInputElement).value = 'Ship?';
@@ -3871,9 +3873,9 @@ describe('editing your own messages and pinning', () => {
 
   it('offers Edit only on the user\'s own text messages, and Pin / Unpin on any channel message', async () => {
     const h = await createHarness({ sessions, rooms: rooms() });
-    expect(menu(h, 'm1').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Edit message', 'Pin message', 'Delete message']);
+    expect(menu(h, 'm1').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Edit message', 'Pin message', 'Select for deleting', 'Delete message']);
     h.document.querySelector('.ca-msg-menu')?.remove();
-    expect(menu(h, 'm2').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Pin message', 'Delete message']);
+    expect(menu(h, 'm2').map((b) => b.textContent)).toEqual(['Reply', 'Copy text', 'Pin message', 'Select for deleting', 'Delete message']);
     h.document.querySelector('.ca-msg-menu')?.remove();
     expect(menu(h, 'm4').map((b) => b.textContent)).toContain('Unpin message');
   });

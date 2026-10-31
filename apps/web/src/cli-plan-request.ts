@@ -3,6 +3,17 @@ import type { AgentDeps } from './cli-agent.js';
 import { randomUUID } from 'node:crypto';
 import { PlanRequestCapabilities, PlanRequestId } from './plan-request-capability.js';
 
+/**
+ * The server's own reason for refusing a plan request, as one bounded line, or ''. Only the error string is shown, never the
+ * response data; request and status bodies carry no credential or handoff (approval keeps its generic message below).
+ */
+export function serverReason(body: unknown): string {
+  const error = (body as { error?: unknown } | undefined)?.error;
+  const raw = typeof error === 'string' ? error : typeof (error as { message?: unknown } | undefined)?.message === 'string' ? (error as { message: string }).message : '';
+  // eslint-disable-next-line no-control-regex -- a server message is shown on one terminal line, without control characters.
+  return raw.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
 /** Request a move through the scoped company API; session creation remains private to the executor. */
 export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: string; employeeId?: string; id?: string; restart?: boolean }): Promise<number> {
   try {
@@ -18,7 +29,11 @@ export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: 
       ...(input.restart ? { purpose: 'runtime-refresh' } : {}),
     } });
     const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
-    if (result.status >= 400 || !body?.success) { deps.io.err('Plan move request refused. Check the destination ID and owner-granted plan permissions.'); return 1; }
+    if (result.status >= 400 || !body?.success) {
+      const reason = serverReason(body);
+      deps.io.err(`Plan move request refused${reason ? `: ${reason}` : ''}. Check the destination ID and owner-granted plan permissions.`);
+      return 1;
+    }
     deps.io.out(deps.json ? JSON.stringify({ success: true, id, phase: body.data?.phase }) : `Plan request ${id}: ${body.data?.phase}. The affected expert must prepare a handoff and approve.`);
     return 0;
   } catch { deps.io.err('Could not confirm the plan request. Check its status before retrying with the same request ID.'); return 1; }
@@ -28,7 +43,11 @@ export async function agentPlanMoveAction(deps: AgentDeps, id: string, action: '
   try {
     const result = await deps.request(deps.ctx, { method: 'POST', path: `/api/plans/agent-requests/${PlanRequestId.parse(id)}/${action}` });
     const body = result.json as { success?: boolean; data?: { phase: string; newSession?: string } };
-    if (result.status >= 400 || !body?.success) throw new Error('Refused');
+    if (result.status >= 400 || !body?.success) {
+      const reason = serverReason(body);
+      deps.io.err(`Plan request ${action} refused${reason ? `: ${reason}` : ''}. Check the request ID and current plan permissions.`);
+      return 1;
+    }
     deps.io.out(deps.json ? JSON.stringify({ success: true, id, ...body.data }) : `Plan request ${id}: ${body.data?.phase}${body.data?.newSession ? ` (${body.data.newSession})` : ''}.`);
     return 0;
   } catch { deps.io.err('Plan request action refused or unavailable. Check the request ID and current plan permissions.'); return 1; }

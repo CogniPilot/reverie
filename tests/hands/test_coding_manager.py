@@ -116,7 +116,7 @@ class ManagerTests(unittest.TestCase):
     def test_natural_task_keeps_original_source_and_dispatches_bounded_runner(self):
         import admin_task
         self.cfg['admin_task'] = 'fixture'
-        source = self.chat.add('room', copy.deepcopy(OWNER), 'Implement and test the requested function.')
+        source = self.chat.add('room', copy.deepcopy(OWNER), '@' + self.cfg['self_name'] + ' Implement and test the requested function.')
         start = admin_task.callback(self.cfg, self.manager, self.state, 'room', [], source)
         self.assertIn('queued', start('Implement the function and run its tests.'))
         self.assertEqual(self.manager.active['source']['text'], source['text'])

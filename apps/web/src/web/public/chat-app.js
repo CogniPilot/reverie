@@ -36,6 +36,8 @@ function chatBadgeCount(n) {
 
 /** At or below this window width a profile card is a bottom sheet; the card is this wide (matches `.ca-profile` in the CSS). */
 const CA_SHEET_MAX_WIDTH = 767;
+/** At most this many messages are picked for one group delete. */
+const CA_DELETE_SELECTION_MAX = 100;
 const CA_CARD_WIDTH = 280;
 
 /** Plain words for the reasons an owner's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
@@ -163,6 +165,14 @@ function caProfilePronouns(company) {
     if (e && typeof e.sessionId === 'string' && e.sessionId && typeof e.pronouns === 'string' && e.pronouns.trim()) out.set(e.sessionId, e.pronouns.trim());
   }
   return out;
+}
+
+/** A member's 'doing' Board cards (`focus`, read from the Board by the server) as one line, or ''. */
+function caFocusLine(m) {
+  const cards = Array.isArray(m?.focus) ? m.focus.filter(c => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+  if (!cards.length) return '';
+  const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
+  return `${cards.map(c => `${c.id} ${c.title}`).join(' · ')}${more}`;
 }
 
 /**
@@ -1240,6 +1250,25 @@ function caPageFromHash(hash) {
   return Object.hasOwn(CA_PAGES, key) ? key : null;
 }
 
+/**
+ * A message link opens in the pane beside the conversation when it is an https page on another site, so it can be read
+ * side by side with the chat. Anything else, this site's own pages and
+ * plain http included, keeps its new tab. The page runs sandboxed: it can script itself, use forms and open its own new tabs,
+ * but never navigate this page, and it gets no referrer.
+ */
+const CA_WEB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+
+/** The address to show beside the chat for a link, or null when the link keeps its new tab. */
+function caWebPaneUrl(href, origin) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  return url.protocol === 'https:' && url.origin !== origin ? url.href : null;
+}
+
 /* ───────────────────────── the app ───────────────────────── */
 
 class ReverieChatApp {
@@ -1896,8 +1925,10 @@ class ReverieChatApp {
     input.addEventListener('input', () => this.fitInput());
     this.installMentions();
     this.installReply();
+    this.installDeleteSelection();
     this.installTyping();
     this.installComposerChrome();
+    this.installWebPane();
     // Scrolling to the newest message is what reads it.
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
@@ -4208,6 +4239,7 @@ class ReverieChatApp {
   }
 
   syncVoice() {
+    this.syncReading();
     const voice = this.els.voiceBtn;
     if (!voice) return;
     const room = this.room;
@@ -4374,6 +4406,8 @@ class ReverieChatApp {
         },
       });
     }
+    const speech = this.readAloudEntry(m);
+    if (speech) out.push(speech);
     if (m.text && sheet) {
       // A touch screen turns selection off on messages (a long press opens this sheet): this turns it on for one.
       out.push({ label: 'Select text', run: () => this.startSelectMode(m.id) });
@@ -4387,9 +4421,52 @@ class ReverieChatApp {
     const lead = room?.members.find((x) => x.sessionId === room?.coordinatorId);
     const reportable = lead && m.from.kind === 'agent' && m.from.sessionId !== lead.sessionId && !caIsDm(room);
     if (this.serverFeatures.deletes || reportable) out.push({ sep: true });
-    if (this.serverFeatures.deletes) out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
+    if (this.serverFeatures.deletes) {
+      out.push({ label: this.deleteSelection?.has(m.id) ? 'Unselect' : 'Select for deleting', run: () => this.toggleDeleteSelection(m) });
+      out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
+    }
     if (reportable) out.push({ label: 'Report message', danger: true, run: () => this.openReportDialog(m, lead) });
     return out;
+  }
+
+  /**
+   * An agent message is read aloud on request ("Read aloud", then "Speak again"), all of it, now, in its author's voice; while
+   * it is being said the entry and the message itself offer Stop. Off where this browser has no speech.
+   */
+  readAloudEntry(m) {
+    const app = this.app;
+    if (m.from.kind !== 'agent' || !m.text || m.deleted || typeof app._readAloudMessage !== 'function' || !this.doc.defaultView?.speechSynthesis) return null;
+    if (app._readAloud?.playingMessageId === m.id) return { label: 'Stop reading', run: () => this.stopReading(m.id) };
+    const roomId = this.roomId;
+    return {
+      label: app._readAloudSpoken?.has(m.id) ? 'Speak again' : 'Read aloud',
+      run: () => {
+        if (!app._readAloudMessage(roomId, m)) this.toast('Could not read this message aloud', 'error');
+        this.syncVoice();
+      },
+    };
+  }
+
+  stopReading(id) {
+    this.app._readAloudStopMessage?.(id);
+    this.syncVoice();
+  }
+
+  /** The message being read aloud shows it, with its own Stop; every other message drops both. */
+  syncReading() {
+    const feed = this.app._chatEls?.feed;
+    if (!feed) return;
+    const id = this.app._readAloud?.playingMessageId || null;
+    for (const el of feed.querySelectorAll('.ca-msg.is-reading')) {
+      if (el.dataset.msgId === id) continue;
+      el.classList.remove('is-reading');
+      el.querySelector('.ca-reading-stop')?.remove();
+    }
+    const el = id ? this.msgEl(id) : null;
+    if (!el || el.querySelector('.ca-reading-stop')) return;
+    el.classList.add('is-reading');
+    const stop = this.button('ca-btn ca-reading-stop', 'Stop reading this message aloud', () => this.stopReading(id), { text: 'Reading aloud · Stop' });
+    (el.querySelector('.ca-msg-body') || el).append(stop);
   }
 
   // Leaves the sheet closed so the native selection handles stay usable; a tap outside the message ends select mode.
@@ -4455,12 +4532,62 @@ class ReverieChatApp {
     this.openMenu(
       [
         { label: 'Upload a File', glyph: '\u2B06', run: () => picker?.click() },
+        { label: 'Link a File', glyph: '\u{1F517}', disabled: !room || !!room.archivedAt, run: () => this.openLinkFileDialog() },
         { label: 'Create Thread', glyph: '\u2630', disabled: true, hint: 'Soon' },
         { label: 'Create Poll', glyph: '\u2261', disabled: !canPoll, run: () => this.openPollDialog() },
         { label: 'Use Apps', glyph: '\u2726', disabled: true, hint: 'Soon' },
       ],
       { at: trigger, focus: trigger, above: true, className: 'ca-plus-menu', label: 'Add to the message' }
     );
+  }
+
+  /**
+   * Link a File: attach a file on the shared drive by its path, without uploading a copy. Everyone in the room opens the
+   * file as it is now; the server refuses a laptop-local path, a symlink or a hidden file.
+   */
+  openLinkFileDialog() {
+    if (!this.room) return;
+    this.doc.querySelector('.ca-dialog.ca-link-dialog')?.remove();
+    const dlg = this.el('dialog', 'ca-dialog ca-link-dialog');
+    dlg.setAttribute('aria-label', 'Link a file');
+    dlg.append(this.el('h2', '', 'Link a file'));
+    const form = this.el('form', 'ca-form');
+    const wrap = this.el('label', 'ca-label');
+    wrap.append(this.el('span', '', 'Path on the shared drive'));
+    const path = this.el('input', 'ca-field');
+    path.required = true;
+    path.maxLength = 4096;
+    path.spellcheck = false;
+    path.autocomplete = 'off';
+    path.placeholder = '/shared/drive/folder/file.pdf';
+    wrap.append(path);
+    const hint = this.el('p', 'ca-hint', 'The file is not copied: everyone in the room opens it as it is now, with no size limit.');
+    const error = this.el('p', 'ca-form-error');
+    error.setAttribute('role', 'alert');
+    const row = this.el('div', 'ca-dialog-actions');
+    const cancel = this.el('button', 'ca-btn', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => dlg.close());
+    const go = this.el('button', 'ca-btn is-primary', 'Link');
+    go.type = 'submit';
+    row.append(cancel, go);
+    form.append(wrap, hint, error, row);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const value = path.value.trim();
+      if (!value.startsWith('/')) return void (error.textContent = 'Use the absolute path of a file on the shared drive.');
+      go.disabled = true;
+      const refused = await this.app._linkChatFile?.(value);
+      go.disabled = false;
+      if (refused) return void (error.textContent = refused);
+      dlg.close();
+      this.els.composerInput()?.focus?.();
+    });
+    dlg.append(form);
+    dlg.addEventListener('close', () => dlg.remove());
+    this.doc.body.append(dlg);
+    dlg.showModal();
+    path.focus();
   }
 
   /**
@@ -4883,6 +5010,93 @@ class ReverieChatApp {
     bar.append(label, this.el('span', 'ca-spacer'));
     bar.append(this.button('ca-icon-btn ca-reply-close', 'Cancel reply', () => this.cancelReply(), { text: '\u2715' }));
     this.app._chatEls.feed.querySelector(`[data-msg-id="${CSS.escape(r.id)}"]`)?.classList.add('is-replying');
+  }
+
+  /** Messages picked for a group delete (Ctrl- or Cmd-click, or "Select for deleting"), with a bar over the message box. */
+  installDeleteSelection() {
+    const input = this.app._chatEls.input;
+    const bar = this.el('div', 'ca-select-bar');
+    bar.hidden = true;
+    bar.setAttribute('role', 'region');
+    bar.setAttribute('aria-label', 'Selected messages');
+    this.els.selectBar = bar;
+    input.parentNode.insertBefore(bar, input.parentNode.firstChild);
+    this.deleteSelection = new Set();
+    this.deleteSelectionRoom = null;
+    this.doc.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !this.deleteSelection.size || e.defaultPrevented || this.doc.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      this.clearDeleteSelection();
+    });
+  }
+
+  toggleDeleteSelection(m) {
+    if (this.deleteSelectionRoom !== this.roomId) {
+      this.deleteSelection.clear();
+      this.deleteSelectionRoom = this.roomId;
+    }
+    if (this.deleteSelection.has(m.id)) this.deleteSelection.delete(m.id);
+    else if (this.deleteSelection.size >= CA_DELETE_SELECTION_MAX) return this.toast(`Select at most ${CA_DELETE_SELECTION_MAX} messages at a time.`, 'info');
+    else this.deleteSelection.add(m.id);
+    this.renderSelectBar();
+  }
+
+  clearDeleteSelection() {
+    this.deleteSelection.clear();
+    this.renderSelectBar();
+  }
+
+  /** Marks the picked messages and shows the bar. A pick only lasts in its own room, and only while the message is there. */
+  renderSelectBar() {
+    const bar = this.els.selectBar;
+    if (!bar || !this.deleteSelection) return;
+    if (this.deleteSelectionRoom !== this.roomId) this.deleteSelection.clear();
+    const live = new Set((this.room?.messages || []).filter((x) => !x.deleted).map((x) => x.id));
+    for (const id of [...this.deleteSelection]) if (!live.has(id)) this.deleteSelection.delete(id);
+    for (const node of this.app._chatEls.feed.querySelectorAll('.ca-msg')) {
+      const on = this.deleteSelection.has(node.dataset.msgId);
+      node.classList.toggle('is-delete-selected', on);
+      if (on) node.setAttribute('aria-selected', 'true');
+      else node.removeAttribute('aria-selected');
+    }
+    const n = this.deleteSelection.size;
+    bar.hidden = !n;
+    bar.replaceChildren();
+    if (!n) return;
+    const plural = n === 1 ? 'message' : 'messages';
+    bar.append(this.el('span', 'ca-select-count', `${n} ${plural} selected`), this.el('span', 'ca-spacer'),
+      this.button('ca-btn is-danger', `Delete ${n} selected ${plural}`, () => this.deleteSelected(), { text: 'Delete selected' }),
+      this.button('ca-btn', 'Clear the selection', () => this.clearDeleteSelection(), { text: 'Clear' }));
+  }
+
+  /** One confirmation, then each picked message through the same delete as one at a time: its own permission check and audit record. */
+  async deleteSelected() {
+    const ids = [...this.deleteSelection];
+    if (!ids.length || this._deletingSelection) return;
+    const many = ids.length === 1 ? 'this message' : `these ${ids.length} messages`;
+    if (!this.doc.defaultView?.confirm(`Delete ${many}? They are hidden for everyone in the channel and kept in an audit log, where each can be restored. Agents that already received them still have them.`)) return;
+    this._deletingSelection = true;
+    const roomId = this.roomId;
+    const failed = [];
+    let deleted = 0;
+    try {
+      for (const id of ids) {
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (res.ok) {
+          deleted++;
+          this.deleteSelection.delete(id);
+          if (this.replyTo?.id === id) this.cancelReplySilently();
+        } else failed.push(res.error || 'refused');
+      }
+    } finally { this._deletingSelection = false; }
+    if (this.roomId === roomId) {
+      await this.app._loadChatRoom(roomId, { quiet: true });
+      this.renderAll();
+      this.renderFeed();
+    }
+    // What could not be deleted stays selected, so it can be tried again or cleared.
+    if (failed.length) this.toast(`Deleted ${deleted} of ${ids.length}. ${failed.length} could not be deleted: ${failed[0]}`, 'error');
+    else this.toast(`Deleted ${deleted} ${deleted === 1 ? 'message' : 'messages'}.`, 'info');
   }
 
   async deleteMessage(m) {
@@ -5374,6 +5588,97 @@ class ReverieChatApp {
       e.preventDefault();
       e.stopPropagation();
       this.closeMentions();
+    }
+  }
+
+  /**
+   * Web links in messages open beside the conversation. A modified or middle click, the link's own right-click or long-press
+   * menu ("Open link in new tab") and the pane's "Open in new tab" still open the page outside Reverie.
+   */
+  installWebPane() {
+    const pane = this.el('aside', 'ca-web');
+    pane.hidden = true;
+    pane.setAttribute('aria-label', 'Web page');
+    const head = this.el('header', 'ca-web-head');
+    const close = this.button('ca-icon-btn ca-web-close', 'Close web page', () => this.closeWebPane(), { icon: 'back' });
+    const host = this.literalText('span', 'ca-web-host');
+    const external = this.el('a', 'ca-btn ca-web-external', 'Open in new tab');
+    external.target = '_blank';
+    external.rel = 'noopener noreferrer';
+    head.append(close, host, this.el('span', 'ca-spacer'), external);
+    const note = this.el('p', 'ca-web-note', 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.');
+    pane.append(head, note);
+    this.els.body.insertBefore(pane, this.els.members);
+    Object.assign(this.els, { web: pane, webHost: host, webExternal: external });
+    const feed = this.app._chatEls.feed;
+    feed.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target?.closest?.('a.chatroom-link[href]');
+      if (!link || !feed.contains(link) || link.classList.contains('ca-workspace-download')) return;
+      const url = caWebPaneUrl(link.href, this.doc.defaultView?.location.origin);
+      if (!url) return;
+      event.preventDefault();
+      this.openWebPane(url);
+    });
+    // On a phone the page covers the conversation, so the system Back button returns to it. That Back is the pane's alone:
+    // the conversation is already showing, so the page handler (registered after this one) must not refocus the composer.
+    this.doc.defaultView?.addEventListener('popstate', (event) => {
+      if (this._webHistory && !this.doc.defaultView.history.state?.reverieWeb) {
+        this._webHistory = false;
+        this.closeWebPane({ history: false });
+        event.stopImmediatePropagation();
+      }
+    });
+  }
+
+  openWebPane(url) {
+    const { web, webHost, webExternal } = this.els;
+    const address = new URL(url);
+    webHost.textContent = address.host;
+    webHost.title = address.href;
+    webExternal.href = address.href;
+    // The frame exists only while a page is open, so a closed pane leaves no empty frame in the page.
+    let frame = web.querySelector('.ca-web-frame');
+    if (!frame) {
+      frame = this.el('iframe', 'ca-web-frame');
+      frame.setAttribute('sandbox', CA_WEB_SANDBOX);
+      frame.referrerPolicy = 'no-referrer';
+      web.append(frame);
+    }
+    frame.title = 'Web page from ' + address.host;
+    if (frame.getAttribute('src') !== address.href) frame.src = address.href;
+    web.hidden = false;
+    this.els.root.classList.add('ca-web-open');
+    const win = this.doc.defaultView;
+    if (win?.matchMedia?.('(max-width: 767px)')?.matches) {
+      this.els.chat.inert = true;
+      if (!this._webHistory) {
+        try {
+          win.history.pushState({ ...(win.history.state || {}), reverieWeb: true }, '');
+          this._webHistory = true;
+        } catch {
+          /* Back is a convenience; the pane's own button closes it */
+        }
+      }
+      web.querySelector('.ca-web-close')?.focus();
+    }
+  }
+
+  /** `history: false` when Back already left the pane's history entry. */
+  closeWebPane({ history = true } = {}) {
+    const { web } = this.els;
+    if (!web || web.hidden) return;
+    web.hidden = true;
+    web.querySelector('.ca-web-frame')?.remove();
+    this.els.root.classList.remove('ca-web-open');
+    if (!this.embed) this.els.chat.inert = false;
+    if (history && this._webHistory) {
+      this._webHistory = false;
+      try {
+        this.doc.defaultView.history.back();
+      } catch {
+        /* nothing to step back over */
+      }
     }
   }
 
@@ -6839,7 +7144,7 @@ class ReverieChatApp {
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
-    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
+    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || (caFocusLine(m) && `${caFocusLine(m)} (from the Board)`);
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
     const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
@@ -7095,6 +7400,7 @@ class ReverieChatApp {
     const facts = caAgentFacts(session);
     for (const [k, v] of facts.headline) kv(k, v, technical);
     kv('Goal', m.goal, technical);
+    kv('Doing', caFocusLine(m), technical);
     kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '', technical);
     if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
     // What the page already knows is shown at once; the runtime's fuller profile replaces it when it arrives.
@@ -9644,6 +9950,12 @@ class ReverieChatApp {
     el.tabIndex = 0;
     // Right-click, or a long press on a phone, opens the message's actions (a bottom sheet on a phone).
     if (!m.deleted && !m.external) this.wireMessageMenu(el, m);
+    // Ctrl-click (Cmd-click on a Mac) picks the message for a group delete; links, buttons and fields keep their own click.
+    if (!m.deleted && !m.external && this.serverFeatures.deletes) el.addEventListener('click', (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.target?.closest?.('a, button, input, textarea, select, summary, [contenteditable="true"]')) return;
+      ev.preventDefault();
+      this.toggleDeleteSelection(m);
+    });
     el.setAttribute('role', 'article');
     const gutter = this.el('div', 'ca-msg-gutter');
     const name = this.authorOf(m.from);
@@ -9727,6 +10039,7 @@ class ReverieChatApp {
     this.app._chatPendingDraw?.();
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
     this._feedStick = !(keepScroll && !pinned);
+    this.renderSelectBar?.();
     this.markReadSoon();
   }
 

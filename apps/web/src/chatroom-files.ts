@@ -9,7 +9,7 @@
  * Emotes: `<data>/chatroom-emotes/<scope>/<name>.<ext>`, scope `global` or a room id,
  * indexed in `<data>/chatroom-emotes/index.json`. Small images only (MAX_EMOTE_BYTES).
  *
- * Only raster images in INLINE_IMAGE_TYPES, and MP4/QuickTime/WebM video whose bytes really are that container (inlineVideoType), are
+ * Only raster images in INLINE_IMAGE_TYPES, and MP4/M4V/QuickTime/WebM/Ogg video whose bytes really are that container (inlineVideoType), are
  * ever served inline; everything else (SVG and HTML included) is served as a download (see the routes). Writes are tmp+rename
  * and every index write is serialized per store.
  */
@@ -43,8 +43,10 @@ export interface ChatFile {
   at: number;
   /** 'user' or the uploading session id. */
   by: string;
-  /** File name on disk inside the room directory. */
+  /** File name on disk inside the room directory; empty for a linked file. */
   stored: string;
+  /** A linked file: its path on the shared drive. Nothing is copied; it never counts against the room and is never removed. */
+  link?: string;
 }
 
 export interface ChatEmote {
@@ -84,28 +86,8 @@ export function isInlineImage(type: string): boolean {
   return INLINE_IMAGE_TYPES.has(type.toLowerCase());
 }
 
-/** Top-level atoms a QuickTime file can open on (the same set the session upload check accepts for `.mov`). */
-const QUICKTIME_ATOMS = new Set(['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip']);
-
-/** Bytes a video player needs before it can show a first frame and a play button. */
-export const VIDEO_SNIFF_BYTES = 12;
-
-/**
- * The video type to serve inline for a chat attachment, or null to keep it a download. The uploader declares the type, so
- * it is only trusted when the file starts like that container: an MP4 `ftyp` box, a QuickTime top-level atom (iPhone
- * `.mov` clips open on `ftyp`; older QuickTime files can open on another atom) or the WebM/EBML magic. Movies then play
- * in the chat like Discord's instead of forcing a download. Whether a QuickTime clip decodes is the
- * browser's: Safari plays iPhone HEVC, other browsers may not, and the chat falls back to the download card.
- */
-export function inlineVideoType(type: string, head: Uint8Array): string | null {
-  const declared = type.toLowerCase();
-  const ascii = (start: number, end: number) => String.fromCharCode(...head.subarray(start, end));
-  if (declared === 'video/mp4' && head.length >= 12 && ascii(4, 8) === 'ftyp') return 'video/mp4';
-  if (declared === 'video/quicktime' && head.length >= 12 && QUICKTIME_ATOMS.has(ascii(4, 8))) return 'video/quicktime';
-  if (declared === 'video/webm' && head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3)
-    return 'video/webm';
-  return null;
-}
+// Inline video (which types, and only when the bytes are that container) is shared with workspace previews.
+export { inlineVideoType, VIDEO_SNIFF_BYTES } from './video-container.js';
 
 async function writeAtomic(path: string, data: Buffer | string): Promise<void> {
   const tmp = `${path}.${randomUUID()}.tmp`;
@@ -194,12 +176,12 @@ export class ChatFileStore {
 
   async get(roomId: string, fileId: string): Promise<(ChatFile & { path: string }) | undefined> {
     const file = (await this.list(roomId)).find((f) => f.id === fileId);
-    return file ? { ...file, path: join(this.roomDir(roomId), file.stored) } : undefined;
+    return file ? { ...file, path: this.pathOf(roomId, file) } : undefined;
   }
 
-  /** Absolute on-disk path of a stored file (what an agent reads). */
-  pathOf(roomId: string, file: Pick<ChatFile, 'stored'>): string {
-    return join(this.roomDir(roomId), file.stored);
+  /** Absolute on-disk path of a stored file (what an agent reads); a linked file's own shared-drive path. */
+  pathOf(roomId: string, file: Pick<ChatFile, 'stored' | 'link'>): string {
+    return file.link ?? join(this.roomDir(roomId), file.stored);
   }
 
   add(roomId: string, input: { name: string; type: string; data: Buffer; by: string }): Promise<ChatFile> {
@@ -210,7 +192,7 @@ export class ChatFileStore {
       }
       const dir = this.roomDir(roomId);
       const index = await this.list(roomId);
-      const used = index.reduce((n, f) => n + f.size, 0);
+      const used = index.reduce((n, f) => n + (f.link ? 0 : f.size), 0);
       if (used + input.data.length > this.maxRoom) {
         throw new ChatFileError('This room has used its 2 GB of attachments; delete the room or older files', 413);
       }
@@ -230,6 +212,28 @@ export class ChatFileStore {
         at: Date.now(),
         by: input.by,
         stored,
+      };
+      index.push(file);
+      await writeAtomic(join(dir, 'index.json'), JSON.stringify(index));
+      return file;
+    });
+  }
+
+  /** Record a reference to a checked shared-drive file (chat-linked-files.ts): no copy, no size limit. */
+  addLink(roomId: string, input: { path: string; name: string; size: number; type: string; by: string }): Promise<ChatFile> {
+    return this.serial(async () => {
+      const dir = this.roomDir(roomId);
+      const index = await this.list(roomId);
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      const file: ChatFile = {
+        id: randomUUID(),
+        name: safeFileName(input.name),
+        size: input.size,
+        type: String(input.type || 'application/octet-stream').toLowerCase().slice(0, 100),
+        at: Date.now(),
+        by: input.by,
+        stored: '',
+        link: input.path,
       };
       index.push(file);
       await writeAtomic(join(dir, 'index.json'), JSON.stringify(index));
@@ -281,7 +285,8 @@ export class ChatFileStore {
       const index = await this.list(roomId);
       const stale = index.filter((f) => !referenced.has(f.id) && now - f.at > graceMs);
       if (!stale.length) return 0;
-      for (const f of stale) await fs.rm(join(dir, f.stored), { force: true });
+      // A linked file is only forgotten: its target belongs to the shared drive, not to the room.
+      for (const f of stale) if (!f.link) await fs.rm(join(dir, f.stored), { force: true });
       const gone = new Set(stale.map((f) => f.id));
       await writeAtomic(join(dir, 'index.json'), JSON.stringify(index.filter((f) => !gone.has(f.id))));
       return stale.length;

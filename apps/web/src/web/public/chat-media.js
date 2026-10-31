@@ -458,6 +458,33 @@ Object.assign(ReverieApp.prototype, {
     }
   },
 
+  /**
+   * Attach a shared-drive file by reference ("Link a File"): nothing is uploaded or copied, and the server refuses a path that
+   * is not on the shared drive. It joins the tray like an upload and is sent the same way. Answers '' or why it was refused.
+   */
+  async _linkChatFile(path) {
+    if (!this._chatRoomId || !path) return 'Choose a room and a file first.';
+    const item = { name: String(path).split('/').pop() || 'file', size: 0, type: '', id: null, state: 'uploading', linked: true };
+    this._chatPending.push(item);
+    this._renderChatTray();
+    try {
+      const res = await fetch(this._chatUrl(`/api/chatrooms/${encodeURIComponent(this._chatRoomId)}/links`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success) throw new Error(body?.error?.message || body?.error || `HTTP ${res.status}`);
+      Object.assign(item, { id: body.data.file.id, name: body.data.file.name, size: body.data.file.size, type: body.data.file.type, state: 'ready' });
+      this._renderChatTray();
+      return '';
+    } catch (err) {
+      this._chatPending.splice(this._chatPending.indexOf(item), 1);
+      this._renderChatTray();
+      return err.message;
+    }
+  },
+
   _renderChatTray() {
     const { tray } = this._chatEls;
     tray.hidden = this._chatPending.length === 0;
@@ -465,12 +492,12 @@ Object.assign(ReverieApp.prototype, {
       ...this._chatPending.map((item, i) => {
         const chip = this._chatEl('span', `chatroom-tray-item chatroom-tray-item--${item.state}`);
         chip.append(
-          this._chatEl('span', '', /^image\//.test(item.type) ? '\u{1F5BC}️' : '\u{1F4C4}'),
+          this._chatEl('span', '', item.linked ? '\u{1F517}' : /^image\//.test(item.type) ? '\u{1F5BC}️' : '\u{1F4C4}'),
           this._chatEl('span', 'chatroom-tray-name', item.name),
           this._chatEl(
             'span',
             'chatroom-tray-size',
-            item.state === 'uploading' ? 'uploading…' : chatFileSize(item.size)
+            item.state === 'uploading' ? (item.linked ? 'linking…' : 'uploading…') : item.linked ? 'linked' : chatFileSize(item.size)
           )
         );
         const x = this._chatEl('button', 'chatroom-link', '×');
@@ -512,7 +539,7 @@ Object.assign(ReverieApp.prototype, {
         img.onclick = () => this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, img);
         img.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); img.click(); } };
         wrap.append(img);
-      } else if (/^video\/(mp4|quicktime|webm)$/.test(a.type)) {
+      } else if (/^video\/(mp4|x-m4v|quicktime|webm|ogg)$/.test(a.type)) {
         // Movies play in place, Discord-style: the first frame with a play button. The server serves the
         // file inline only when its bytes are that container; anything else fails to load and becomes the download card.
         const video = this._chatEl('video', 'chatroom-video');
@@ -525,7 +552,10 @@ Object.assign(ReverieApp.prototype, {
         wrap.append(video);
       } else {
         wrap.append(this._chatFileCard(m, a, url));
+        continue;
       }
+      // A picture or movie that is a linked shared-drive file says so under it, as its card does.
+      if (a.linked) wrap.append(this._chatEl('span', 'chatroom-linked-label', 'Linked file'));
     }
     return wrap;
   },
@@ -540,11 +570,13 @@ Object.assign(ReverieApp.prototype, {
       event.preventDefault();
       void this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, card);
     };
+    // A linked file is read live from the shared drive: its size is whatever the file is now, so it is not shown.
     card.append(
-      this._chatEl('span', 'chatroom-file-icon', '\u{1F4C4}'),
+      this._chatEl('span', 'chatroom-file-icon', a.linked ? '\u{1F517}' : '\u{1F4C4}'),
       this._chatEl('span', 'chatroom-file-name', a.name),
-      this._chatEl('span', 'chatroom-file-size', chatFileSize(a.size))
+      a.linked ? this._chatEl('span', 'chatroom-file-size chatroom-file-linked', 'Linked file') : this._chatEl('span', 'chatroom-file-size', chatFileSize(a.size))
     );
+    if (a.linked) card.title = `Linked file on the shared drive: ${a.path || a.name}`;
     return card;
   },
 

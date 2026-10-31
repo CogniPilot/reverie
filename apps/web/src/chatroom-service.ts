@@ -97,6 +97,8 @@ export interface ChatroomServiceDeps {
   /** The pronouns on a member's employee record (owner-set), shown with the member in every room view. */
   pronounsOf?: (sessionId: string) => string | undefined;
   restContextOf?: (sessionId: string) => string | undefined;
+  /** A bot's current record, by its stable id: its posts show its current picture, not the one they were posted with. */
+  botOf?: (botId: string) => { icon?: string } | undefined;
   getSession(id: string): ChatSessionLike | undefined;
   providerHealth?(id: string, owner?: string): ProviderHealth | undefined;
   /** Fixed server worker transport configuration, never caller authority. */
@@ -129,9 +131,12 @@ export interface ChatroomServiceDeps {
   database?: string;
   /** The server calls startDelivery after it has finished restoring all session records. */
   deferDeliveryRecovery?: boolean;
-  /** The owner's Board cards, read only for an agent's own digest (its cards and the cards they name). */
+  /**
+   * The owner's Board cards, read only for an agent's own digest (its cards and the cards they name) and for the
+   * 'doing' cards each employee member shows in room views.
+   */
   boardIssues?: (owner: string | undefined) => ReadonlyArray<{
-    id: string; title: string; status: string; owner?: string; ownerName?: string; reason?: string; updatedAt: number;
+    id: string; title: string; status: string; owner?: string; ownerName?: string; reason?: string; updatedAt: number; end?: number;
   }>;
 }
 
@@ -157,6 +162,25 @@ export interface ChatMemberView extends ChatMember {
   hue: number;
   /** The member's pronouns, from its employee record; absent when none are set. */
   pronouns?: string;
+  /** Its employee's 'doing' Board cards, earliest end first (at most FOCUS_CARDS); absent when it has none. */
+  focus?: ChatFocusCard[];
+  /** How many more 'doing' cards it has beyond `focus`. */
+  focusMore?: number;
+}
+
+/** One 'doing' Board card shown on a member: read from the Board on every view, never stored on the membership. */
+export interface ChatFocusCard {
+  id: string;
+  title: string;
+  end?: number;
+}
+
+export const FOCUS_CARDS = 3;
+const FOCUS_TITLE_CHARS = 120;
+
+/** A room's member focus as one comparable string ('' when nobody in it is doing a card). */
+function focusSignature(focus: ReadonlyMap<string, Pick<ChatMemberView, 'focus' | 'focusMore'>>): string {
+  return focus.size ? JSON.stringify([...focus].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : '';
 }
 
 /** A session replaced by its successor after a plan switch: out of every room, hidden, and kept only to roll back to (or to forget). */
@@ -268,6 +292,8 @@ export class ChatroomService {
   private owedReplies = new Map<string, OwedReply>();
   /** Last visible delivery-problem notice per session NUL room, so a stuck pane can not flood the feed. */
   private deliveryNotices = new Map<string, number>();
+  /** Per room, the member focus its last view showed (focusSignature), so a Board change re-announces only rooms it moved. */
+  private focusShown = new Map<string, string>();
 
   /** Messages past the per-room cap, archived before they are dropped (chat-archive.ts); with the database, its second record. */
   private readonly archive: ChatArchive;
@@ -547,7 +573,7 @@ export class ChatroomService {
         )
           continue;
         const key = `${room.id}\0${message.id}`;
-        const sourceDigest = noticeDigest(this.messageIdentity(room, message, identity));
+        const sourceDigest = noticeDigest(this.messageIdentity(room, message, identity, false));
         const records = this.notices.forSource(recipient, room.id, message.id);
         const attention = this.noticeAttention(sessionId, room, message, records, ownReplies.get(message.id) ?? [], identity);
         // A notice its recipient already handled stays listed only while its delivery is uncertain (do not resend it); one
@@ -638,7 +664,7 @@ export class ChatroomService {
     records: import('./chatroom-notice-state.js').NoticeRecord[], replies: ChatMessage[],
     identity: ChatIdentityLookup): NoticeAttention {
     if (!this.notices.available) return { disposition: 'pending' };
-    const digest = noticeDigest(this.messageIdentity(room, message, identity));
+    const digest = noticeDigest(this.messageIdentity(room, message, identity, false));
     // Latest proof for the current source version; an invalid replacement never falls back to an old proof.
     const record = records.filter(r => r.source.digest === digest).at(-1);
     if (record) {
@@ -656,7 +682,7 @@ export class ChatroomService {
     if (!message.edited) {
       const reply = replies.find(r => !r.deleted && !r.edited && r.at >= message.at);
       if (reply) return { disposition: 'handled', proof: { kind: 'linked-reply', reply: {
-        roomId: room.id, messageId: reply.id, digest: noticeDigest(this.messageIdentity(room, reply, identity)),
+        roomId: room.id, messageId: reply.id, digest: noticeDigest(this.messageIdentity(room, reply, identity, false)),
       } } };
     }
     return { disposition: 'pending' };
@@ -757,7 +783,8 @@ export class ChatroomService {
       ?? this.historicalMessage(roomId, messageId);
     if (!message || message.id !== messageId || message.roomId !== roomId) throw new ChatroomError('No such message in this room', 'NOT_FOUND');
     if (message.deleted) throw new ChatroomError('Deleted messages require separate owner resolution', 'CONFLICT');
-    return structuredClone(this.messageIdentity(room, message));
+    // Agent reads, receipts and notice digests use the stored sender: a bot's new picture is for people's views only.
+    return structuredClone(this.messageIdentity(room, message, this.depsWithIdentity(), false));
   }
 
   /** The exact message as this live member session can read it now (employee journal source and turn checks). */
@@ -834,11 +861,26 @@ export class ChatroomService {
     return { getSession: (sessionId) => this.deps.getSession(sessionId), employeeOf: this.deps.employeeOf, retired: this.retired };
   }
 
-  private messageIdentity(room: ChatRoom, message: ChatMessage, identity = this.depsWithIdentity()): ChatMessage {
+  private messageIdentity(room: ChatRoom, message: ChatMessage, identity = this.depsWithIdentity(), present = true): ChatMessage {
     const visible = { ...message };
     delete visible.phoneWakes;
-    const view = messageWithEmployeeIdentity(visible, room.owner, identity);
+    let view = messageWithEmployeeIdentity(visible, room.owner, identity);
+    // A bot's posts show its current picture. Notice digests (present = false) keep the stored sender, so a changed
+    // picture never reads as a changed message. A bot that now has no picture keeps the one each post was made with.
+    const bot = present && view.from.kind === 'bot' ? this.deps.botOf?.(view.from.botId) : undefined;
+    if (bot?.icon && view.from.kind === 'bot') view = { ...view, from: { ...view.from, icon: bot.icon } };
     return view.attachments?.length ? { ...view, attachments: view.attachments.map(file => ({ ...file, path: sharedAttachmentPath(room.id, file) })) } : view;
+  }
+
+  /** A bot's picture changed: re-announce the rooms it may have posted in, so open views redraw its earlier posts. */
+  botChanged(botId: string, rooms: readonly string[] = []): number {
+    let announced = 0;
+    for (const room of this.store.list()) {
+      if (!rooms.includes(room.id) && !room.messages.some((m) => m.from.kind === 'bot' && m.from.botId === botId)) continue;
+      this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id });
+      announced++;
+    }
+    return announced;
   }
 
   private get retiredFile(): string {
@@ -1337,6 +1379,8 @@ export class ChatroomService {
   }
 
   view(room: ChatRoom, options: { since?: number; limit?: number } = {}): ChatRoomView {
+    const focus = this.memberFocus(room);
+    this.focusShown.set(room.id, focusSignature(focus));
     const members = room.members.map((m): ChatMemberView => {
       const s = this.deps.getSession(m.sessionId);
       const name = this.nameOf(m.sessionId);
@@ -1359,6 +1403,7 @@ export class ChatroomService {
         pendingDeliveries: this.delivery.pendingFor(m.sessionId),
         hue: accentHue(m.sessionId),
         ...(pronouns ? { pronouns } : {}),
+        ...focus.get(m.sessionId),
       };
     });
     const last = room.messages[room.messages.length - 1];
@@ -1384,6 +1429,53 @@ export class ChatroomService {
       userReadAt: room.userReadAt ?? 0,
       ...userUnread(room, this.ownerNames(room.owner)),
     };
+  }
+
+  /**
+   * The Board changed: each live room whose members' 'doing' cards now differ from what its last view showed is
+   * announced as changed, so open pages fetch it again. Rooms whose members' cards did not move stay quiet.
+   */
+  noteBoardChanged(): void {
+    for (const room of this.store.list()) {
+      if (room.archivedAt) continue;
+      const signature = focusSignature(this.memberFocus(room));
+      if (signature === (this.focusShown.get(room.id) ?? '')) continue;
+      this.focusShown.set(room.id, signature);
+      try { this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id }); } catch { /* refreshed on next read */ }
+    }
+  }
+
+  /**
+   * What each employee member is doing, straight from the owner's Board: its own 'doing' cards, earliest end first,
+   * then by id. Read on every view and never written to the membership, so it follows the Board and cannot overwrite
+   * a goal the agent or owner set. An archived room, or a session with no single employee record, shows nothing.
+   */
+  private memberFocus(room: ChatRoom): Map<string, Pick<ChatMemberView, 'focus' | 'focusMore'>> {
+    const out = new Map<string, Pick<ChatMemberView, 'focus' | 'focusMore'>>();
+    if (room.archivedAt || !this.deps.boardIssues || !this.deps.employeeOf) return out;
+    const sessionOf = new Map<string, string>();
+    for (const m of room.members) {
+      const employeeId = this.deps.employeeOf(m.sessionId);
+      if (employeeId) sessionOf.set(employeeId, m.sessionId);
+    }
+    if (!sessionOf.size) return out;
+    const doing = new Map<string, ChatFocusCard[]>();
+    for (const issue of this.deps.boardIssues(room.owner)) {
+      const sessionId = issue.status === 'doing' && issue.owner ? sessionOf.get(issue.owner) : undefined;
+      if (!sessionId) continue;
+      const chars = Array.from(issue.title);
+      const title = chars.length > FOCUS_TITLE_CHARS ? `${chars.slice(0, FOCUS_TITLE_CHARS - 1).join('')}…` : issue.title;
+      const card: ChatFocusCard = { id: issue.id, title, ...(Number.isFinite(issue.end) ? { end: issue.end } : {}) };
+      doing.set(sessionId, [...(doing.get(sessionId) ?? []), card]);
+    }
+    for (const [sessionId, cards] of doing) {
+      cards.sort((a, b) => (a.end ?? Infinity) - (b.end ?? Infinity) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      out.set(sessionId, {
+        focus: cards.slice(0, FOCUS_CARDS),
+        ...(cards.length > FOCUS_CARDS ? { focusMore: cards.length - FOCUS_CARDS } : {}),
+      });
+    }
+    return out;
   }
 
   /** Resolve recipient tokens (names, prefixes, `user`, `coordinator`, `all`). Throws on an unknown token. */

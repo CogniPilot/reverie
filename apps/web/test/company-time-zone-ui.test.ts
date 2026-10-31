@@ -1,5 +1,5 @@
 /**
- * The company time zone in the chat app's Company settings (card i-3de8c2da). The server setting already existed
+ * The company time zone in the chat app's Company settings. The server setting already existed
  * (CompanySettings.timeZone, an IANA name); only the old console page could edit it. Owners now set it here: only the
  * time zone is sent, an unknown zone is refused before any request, and the page clock follows once the server
  * confirms the saved value.

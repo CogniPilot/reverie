@@ -202,6 +202,30 @@ describe('owner workspace boundary', () => {
     await writeFile(join(fixture.root, 'binary.txt'), Buffer.from([0, 255, 10]));
     expect((await get('binary.txt', true)).statusCode).toBe(415);
   });
+  it('previews a movie as video it plays, only when its bytes are that container, and never as text', async () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from('ftypisom'), Buffer.alloc(4096, 7)]);
+    const ogg = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(4096, 1)]);
+    const cases: Array<[string, Buffer, string]> = [['sim run λ.mp4', mp4, 'video/mp4'], ['clip.M4V', mp4, 'video/mp4'],
+      ['take.webm', Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(64)]), 'video/webm'],
+      ['phone.mov', Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from('ftypqt  '), Buffer.alloc(64)]), 'video/quicktime'],
+      ['flight.ogv', ogg, 'video/ogg']];
+    for (const [name, bytes, type] of cases) {
+      await writeFile(join(fixture.root, name), bytes);
+      const preview = await get(name, true);
+      expect(preview.statusCode, name).toBe(200);
+      expect(preview.headers['content-type'], name).toBe(type);
+      expect(preview.headers['content-disposition'], name).toMatch(/^inline;/);
+      expect(preview.headers['content-security-policy'], name).toContain('sandbox');
+      expect(preview.rawPayload.equals(bytes), name).toBe(true);
+    }
+    // A page or script named like a movie is never served under a playable (or any renderable) type.
+    await writeFile(join(fixture.root, 'trap.mp4'), '<html><script>bad()</script>');
+    expect((await get('trap.mp4', true)).statusCode).toBe(415);
+    await writeFile(join(fixture.root, 'mislabelled.webm'), mp4);
+    expect((await get('mislabelled.webm', true)).statusCode).toBe(415);
+    // A download of the same file is unchanged.
+    expect((await get('sim run λ.mp4')).headers['content-type']).toBe('application/octet-stream');
+  });
   it('preserves exact 25 MiB binary bytes, Unicode and spaces, does not overwrite and removes temporary files', async () => {
     const bytes = Buffer.alloc(25 * 1024 * 1024);
     for (let n = 0; n < bytes.length; n++) bytes[n] = n % 251;

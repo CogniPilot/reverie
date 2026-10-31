@@ -1084,6 +1084,9 @@ interface ChatMemberRow {
   away?: string;
   /** Owner-set, from the member's employee record. */
   pronouns?: string;
+  /** Its own 'doing' Board cards, read from the Board by the server (never stored on the membership). */
+  focus?: Array<{ id: string; title: string; end?: number }>;
+  focusMore?: number;
   alive?: boolean;
   working?: boolean;
   updatedAt?: number;
@@ -1095,7 +1098,7 @@ interface ChatMessageRow {
   from: { kind: string; name: string; sessionId?: string };
   to: 'all' | string[];
   text: string;
-  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number; localPath?: string; localImageStatus?: 'ready' | 'unavailable' }>;
+  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number; linked?: true; localPath?: string; localImageStatus?: 'ready' | 'unavailable' }>;
   /** Set when the user deleted the message (its text is then empty). */
   deleted?: { at: number };
   /** A poll: `text` is its question. */
@@ -1229,6 +1232,8 @@ export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], r
             roomId && UUID_RE.test(roomId) && UUID_RE.test(file.id)
               ? ` /api/v1/chatrooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(file.id)}`
               : '';
+          // A linked file is on the shared drive at the same path in every laptop: that path is the way to read it.
+          if (file.linked && file.path) return ` [linked file: ${quoteForPane(file.path, 400)}]`;
           return file.localPath
             ? ` [attached: ${quoteForPane(file.localPath, 400)}]`
             : ` [attached: ${quoteForPane(file.name, 200)}${file.localImageStatus === 'unavailable' ? ' (local image unavailable; re-read to request a fresh path)' : link}]`;
@@ -1480,7 +1485,7 @@ const TO_IGNORED_NOTE = '--to is ignored: everyone in a channel reads every mess
 export async function agentChatSayInput(
   deps: AgentDeps,
   words: string[],
-  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string },
+  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; linkFile?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string },
   input: AsyncIterable<Buffer | string> = process.stdin
 ): Promise<number> {
   if (options.stdin && words.length)
@@ -1502,13 +1507,14 @@ export async function agentChatSayInput(
     if (text.length > MAX_MESSAGE_CHARS)
       return fail(deps, `refusing: message exceeds ${MAX_MESSAGE_CHARS} characters`, EXIT.refused);
   }
-  if (!text.trim() && (options.stdin || !options.file?.length))
+  if (!text.trim() && (options.stdin || (!options.file?.length && !options.linkFile?.length)))
     return fail(deps, 'refusing: empty message', EXIT.refused);
   return agentChatSay(deps, {
     room: options.room,
     to: options.to,
     text,
     files: options.file,
+    links: options.linkFile,
     replyTo: options.replyTo,
     ifLatest: options.ifLatest,
     ifNoNewerThan: options.ifNoNewerThan,
@@ -1523,6 +1529,8 @@ export async function agentChatSay(
     to?: string;
     text: string;
     files?: string[];
+    /** Shared-drive files to attach as references (no copy); the server refuses anything off the shared drive. */
+    links?: string[];
     /** The id of the message this post answers (a spoken turn waits for exactly this link). */
     replyTo?: string;
     /** Refuse instead of posting when someone else posted after the last message this session saw here. */
@@ -1559,6 +1567,17 @@ export async function agentChatSay(
     });
     if (!up.json?.success) return fail(deps, `${path}: ${describeFailure(up)}`);
     attachments.push((up.json.data as { file: { id: string } }).file.id);
+  }
+  // Each --link-file is recorded as a reference to the shared-drive file itself: nothing is copied or size-limited.
+  for (const link of options.links ?? []) {
+    const path = (await import('node:path')).resolve(link);
+    const res = await deps.request(deps.ctx, {
+      method: 'POST',
+      path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/links`,
+      body: { path },
+    });
+    if (!res.json?.success) return fail(deps, `${path}: ${describeFailure(res)}`);
+    attachments.push((res.json.data as { file: { id: string } }).file.id);
   }
   const res = await deps.request(deps.ctx, {
     method: 'POST',
@@ -1632,7 +1651,8 @@ async function withLocalImages(deps: AgentDeps, roomId: string, messages: ChatMe
   const result: ChatMessageRow[] = [];
   for (const original of messages) {
     const message = { ...original, attachments: original.attachments?.map(file => ({ ...file })) };
-    const images = message.deleted ? [] : (message.attachments ?? []).filter(isChatRaster);
+    // A linked picture is read from the shared drive at its own path; only uploaded copies need a local image.
+    const images = message.deleted ? [] : (message.attachments ?? []).filter((file) => !file.linked && isChatRaster(file));
     if (images.length) {
       for (const image of images) {
         image.path = '';
@@ -1954,7 +1974,14 @@ export async function agentChatWho(deps: AgentDeps, options: { room?: string; na
     // Owner-set pronouns (your own too, so you know how you are referred to): use them when you write about a member.
     if (m.pronouns) deps.io.out(`    pronouns: ${quoteForPane(m.pronouns, 40)}`);
     if (m.away) deps.io.out(`    away: ${quoteForPane(m.away, 500)}`);
-    deps.io.out(`    goal: ${m.goal ? quoteForPane(m.goal, 500) : '-'}`);
+    // A goal the member set itself wins; without one, its first 'doing' Board card stands in, marked as such.
+    const first = m.focus?.[0];
+    const goal = m.goal ? quoteForPane(m.goal, 500) : first ? `${quoteForPane(`${first.id} ${first.title}`, 160)} (from the Board)` : '-';
+    deps.io.out(`    goal: ${goal}`);
+    if (m.focus?.length) {
+      const cards = m.focus.map((c) => quoteForPane(`${c.id} ${c.title}`, 160)).join('; ');
+      deps.io.out(`    doing: ${cards}${m.focusMore ? ` (+${m.focusMore} more)` : ''}`);
+    }
     deps.io.out(`    progress: ${m.progress ? quoteForPane(m.progress, 500) : '-'}`);
   }
   return EXIT.ok;
@@ -2975,12 +3002,17 @@ export function registerAgentCommands(program: Command): Command {
       'Attach a file (repeat for several; copied into the room, max 25 MB each)',
       (v: string, prev: string[] = []) => [...prev, v]
     )
+    .option(
+      '--link-file <path>',
+      'Attach a shared-drive file by reference (repeat for several; not copied, no size limit; only files on the shared drive)',
+      (v: string, prev: string[] = []) => [...prev, v]
+    )
     .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
     .option('--reply-to <id>', 'Answer the message with this id (a spoken turn is read back only when its answer names it)')
     .option('--if-latest', 'Post only if nobody else has posted since you last read this room; otherwise list the newer messages')
     .option('--if-no-newer-than <id>', 'Post only if nobody else has posted after this message id')
     .option('--json', 'Machine-readable output')
-    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string; json?: boolean }) =>
+    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; linkFile?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string; json?: boolean }) =>
       run(Boolean(options.json), (deps) => agentChatSayInput(deps, words, options))
     );
 

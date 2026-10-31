@@ -8,7 +8,9 @@ import type { FastifyInstance } from 'fastify';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { ChatBotError, type ChatBotRegistry } from '../../chat-bots.js';
 
-export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistry, verifiedOwner: OwnerVerifier = NO_OWNER, hasRoutines: (id: string) => boolean = () => false): void {
+export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistry, verifiedOwner: OwnerVerifier = NO_OWNER, hasRoutines: (id: string) => boolean = () => false,
+  /** A saved bot whose picture changed: open rooms redraw its earlier posts. */
+  pictureChanged: (bot: { id: string; rooms: readonly string[] }) => void = () => {}): void {
 
   const fail = (err: unknown) => {
     if (err instanceof ChatBotError) {
@@ -24,7 +26,12 @@ export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistr
     if (!verifiedOwner(req)) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner edits a bot');
     const { id } = req.params as { id: string };
     try {
-      return { success: true, data: { bot: await bots.set(id, req.body) } };
+      const before = bots.get(id)?.icon;
+      const bot = await bots.set(id, req.body);
+      if (bot.icon !== before) {
+        try { pictureChanged(bot); } catch { /* the saved bot stands; views pick the picture up on their next read */ }
+      }
+      return { success: true, data: { bot } };
     } catch (err) {
       return fail(err);
     }

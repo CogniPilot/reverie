@@ -1,5 +1,5 @@
 /**
- * A decision on the Board takes one click (card i-ab506af8). The Board sits in a frame, so the first click into it gives
+ * A decision on the Board takes one click. The Board sits in a frame, so the first click into it gives
  * its window focus; that focus refreshed the board, and the refresh used to make the decisions section inert until the
  * read came back, so the click that caused it landed on an inert button and was dropped. A refresh must not take the
  * choices away: a stale choice is already refused by the server (ifRev).

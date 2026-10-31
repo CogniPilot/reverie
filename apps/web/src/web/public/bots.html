@@ -190,20 +190,25 @@
         ><label>Bot<select name="botId" aria-label="Bot" required></select></label
         ><label>Channel<select name="roomId" aria-label="Channel" required></select></label
         ><label>Message<textarea name="postText" required maxlength="2000" rows="4"></textarea></label
-        ><label
-          >Repeat every (minutes)<input
-            name="intervalMinutes"
-            type="number"
-            min="5"
-            max="525600"
-            value="60"
-            required /></label
+        ><div id="routine-schedule" class="schedule"></div
         ><label class="check"><input type="checkbox" name="enabled" />Enable schedule immediately</label>
         <p class="hint">Saved disabled by default. Saving does not post a message immediately.</p>
         <p id="routine-error" class="error" role="alert"></p>
         <div class="actions">
           <button type="button" data-close="routine-dialog">Cancel</button
           ><button class="primary" type="submit">Save routine</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="schedule-dialog" aria-labelledby="schedule-title">
+      <form id="schedule-form">
+        <h2 id="schedule-title">Edit schedule</h2>
+        <p class="hint">Changes apply from the next run. The content and permissions stay as configured.</p>
+        <div id="edit-schedule" class="schedule"></div>
+        <p id="schedule-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="schedule-dialog">Cancel</button
+          ><button class="primary" type="submit">Save schedule</button>
         </div>
       </form>
     </dialog>

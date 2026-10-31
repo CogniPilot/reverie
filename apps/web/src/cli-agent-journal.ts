@@ -3,7 +3,7 @@
  * keyed to its employee id so it survives a backend change. The server derives the employee from the
  * session, applies the turn gates and checks every cited quote; this client only formats.
  */
-import { MEMORY_BRIEF_MAX } from './memory-brief.js';
+import { MEMORY_BRIEF_MAX, MEMORY_BRIEF_UNREADABLE } from './memory-brief.js';
 import type { Command } from 'commander';
 import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
@@ -33,8 +33,9 @@ const gateLines = (gates: JournalGate[]) => gates.map(gate => `  ${gate.gate}: $
 
 async function call(deps: AgentDeps, method: 'GET' | 'POST', path: string, extra: { query?: Record<string, string | number | undefined>; body?: Record<string, unknown> }) {
   const response = await deps.request(deps.ctx, { method, path, ...extra, bounds });
-  const envelope = response.json as { success?: boolean; data?: unknown; error?: string; gates?: JournalGate[] } | undefined;
-  return { ok: response.status === 200 && envelope?.success === true, data: envelope?.data, error: envelope?.error ?? `journal request failed (${response.status})`, gates: envelope?.gates };
+  const envelope = response.json as { success?: boolean; data?: unknown; error?: string; errorCode?: string; gates?: JournalGate[] } | undefined;
+  return { ok: response.status === 200 && envelope?.success === true, data: envelope?.data, error: envelope?.error ?? `journal request failed (${response.status})`,
+    status: response.status, code: envelope?.errorCode, gates: envelope?.gates };
 }
 
 function entryText(entry: JournalEntryView, now: number): string {
@@ -141,21 +142,29 @@ export async function agentJournalReceipt(deps: AgentDeps, turnId: string): Prom
 
 /**
  * The memory brief a session starts with. With --hook-event SessionStart it prints the harness hook JSON, its own entry
- * beside the chat summary so neither crowds the other out of the hook budget; on any failure it prints nothing there.
+ * beside the chat summary so neither crowds the other out of the hook budget. A session that is no employee's prints
+ * nothing there; for an employee whose brief could not be read, the hook says so, so a silent gap never reads as no memory.
  */
 export async function agentJournalBrief(deps: AgentDeps, hookEvent?: string): Promise<number> {
   if (hookEvent !== undefined && hookEvent !== 'SessionStart') return refused(deps, 'The memory brief is a SessionStart hook only.');
+  const hook = (text: string) => {
+    deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: text } }));
+    return AGENT_EXIT.ok;
+  };
   try {
     const result = await call(deps, 'GET', '/api/agent/memory-brief', {});
     const data = result.ok ? (result.data as { text?: unknown; total?: unknown }) : undefined;
-    if (!data || typeof data.text !== 'string' || data.text.length > MEMORY_BRIEF_MAX)
-      return hookEvent ? AGENT_EXIT.ok : refused(deps, result.ok ? 'Memory brief unavailable.' : result.error);
-    if (hookEvent) deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: data.text } }));
-    else if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
+    if (!data || typeof data.text !== 'string' || data.text.length > MEMORY_BRIEF_MAX) {
+      if (!hookEvent) return refused(deps, result.ok ? 'Memory brief unavailable.' : result.error);
+      // The journal's own refusal of a caller that is no employee (403 JOURNAL_UNAVAILABLE) has no memory to point at.
+      return result.status === 403 && result.code === 'JOURNAL_UNAVAILABLE' ? AGENT_EXIT.ok : hook(MEMORY_BRIEF_UNREADABLE);
+    }
+    if (hookEvent) return hook(data.text);
+    if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
     else deps.io.out(data.text);
     return AGENT_EXIT.ok;
   } catch {
-    return hookEvent ? AGENT_EXIT.ok : refused(deps, 'Memory brief unavailable.');
+    return hookEvent ? hook(MEMORY_BRIEF_UNREADABLE) : refused(deps, 'Memory brief unavailable.');
   }
 }
 

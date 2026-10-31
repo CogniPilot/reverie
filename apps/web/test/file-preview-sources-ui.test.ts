@@ -480,6 +480,25 @@ it('offers explicit unsupported and stale-binding errors with Download, never fa
   expect(g.document.getElementById('filePreviewBody')?.textContent).toContain('binding');
   expect(g.document.querySelector('#filePreviewBody pre,h1')).toBeNull();
 });
+it('plays a movie in a player streamed from the authorized URL instead of refusing it or reading it into memory', async () => {
+  const f = fixture();
+  await f.app.openReadOnlyFilePreview(source('flight sim.mp4'));
+  const video = f.document.querySelector<HTMLVideoElement>('#filePreviewBody video')!;
+  expect(video).not.toBeNull();
+  expect(video.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/file-a');
+  expect(video.controls).toBe(true);
+  expect(f.calls).toHaveLength(0); // never fetched as bytes
+  expect(f.document.querySelector('.file-preview-source-download')).not.toBeNull();
+  video.dispatchEvent(new f.dom.window.Event('error'));
+  expect(f.document.getElementById('filePreviewBody')?.textContent).toContain('not a video this browser can play. Use Download');
+  const movie = { ...metadata, path: 'reports/run.webm', name: 'run.webm', absolutePath: '/drive/reports/run.webm' };
+  const g = fixture(async () => Response.json({ success: true, data: movie }));
+  await g.app.openWorkspaceFilePreview(movie.absolutePath);
+  expect(g.document.querySelector('#filePreviewBody video')?.getAttribute('src')).toBe(
+    `/prefix/api/workspace/file?path=${encodeURIComponent(movie.path)}&binding=${binding}&preview=1`
+  );
+  expect(g.calls.map((call) => call.url)).toEqual([`/prefix/api/workspace/resolve?path=${encodeURIComponent(movie.absolutePath)}`]);
+});
 it('closes on Escape, restores focus and traps Tab inside the active viewer', async () => {
   const f = fixture();
   await f.app.openReadOnlyFilePreview(source(), f.trigger);
