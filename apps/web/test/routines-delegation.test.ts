@@ -193,6 +193,22 @@ describe('launch jobs stay owner-only for every agent (the route-wide stopgap)',
     await app.close();
   });
 
+  it('marks only refusals made before Run once acts as notRun', async () => {
+    const { app, cron } = await setup();
+    const id = (await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: as(CARL), payload: mine })).json().job.id as string;
+    const runNow = vi.spyOn(cron, 'runNow');
+    const other = await app.inject({ method: 'POST', url: `/api/cron/jobs/${id}/run`, headers: as(DANA) });
+    expect([other.statusCode, other.json().notRun]).toEqual([403, true]);
+    const missing = await app.inject({ method: 'POST', url: '/api/cron/jobs/no-such-job/run', headers: as(CARL) });
+    expect([missing.json().success, missing.json().notRun]).toEqual([false, true]);
+    expect(runNow).not.toHaveBeenCalled();
+    // A failure once the run has started is not a refusal: it may have posted.
+    runNow.mockRejectedValueOnce(new Error('post failed after send'));
+    const failed = await app.inject({ method: 'POST', url: `/api/cron/jobs/${id}/run`, headers: as(CARL) });
+    expect([failed.statusCode, failed.json().success, failed.json().notRun]).toEqual([500, false, undefined]);
+    await app.close();
+  });
+
   it('refuses a delegate editing, enabling, running or deleting a stored launch job', async () => {
     const { app, cron } = await setup();
     const stored = cron.createJob(launch as never);

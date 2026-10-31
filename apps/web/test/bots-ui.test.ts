@@ -58,6 +58,27 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
           },
         ]
       : [],
+    'cron/jobs/job1/preview': {
+      success: true,
+      data: {
+        preview: {
+          jobId: 'job1', name: 'Build Watch', action: 'post', generatedAt: 1, outcome: 'post', sender: 'Build Watch', roomId: 'r1',
+          text: 'Build status <img src=x>',
+          checks: [{ label: 'Bot is registered', ok: true }, { label: 'Bot may post in this room now', ok: true }],
+          effects: ['Posts one message as Build Watch in the room.', 'Records the run in history.', 'Does not change the schedule or the next run time.'],
+        },
+      },
+    },
+    'cron/jobs/job2/preview': {
+      success: true,
+      data: {
+        preview: {
+          jobId: 'job2', name: 'Quiet routine', action: 'launch', generatedAt: 1, outcome: 'blocked', text: 'nightly',
+          checks: [{ label: 'Prompt resolves', ok: true }, { label: 'Working directory exists', ok: false, detail: 'ENOENT' }],
+          effects: ['Records a failed run in history.', 'Does not change the schedule or the next run time.'],
+        },
+      },
+    },
     chatrooms: {
       success: true,
       data: {
@@ -79,6 +100,8 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
         if (options.method === 'PUT' && /^cron\/jobs\/[^/]+$/.test(path)) CronJobUpdateSchema.parse(body);
         if (path.startsWith('chat-bots/')) parseBot(body, path.split('/')[1]);
         if (path.endsWith('/enabled')) jobs[0].enabled = body.enabled;
+        if (path.endsWith('/run'))
+          return { ok: true, json: async () => ({ success: true, data: { run: { id: 'run9', cronJobId: 'job1', startedAt: 200, finishedAt: 201, status: 'posted', triggerType: 'manual_run_now', createdSessionUrl: null } } }) };
         return { ok: true, json: async () => ({ success: true, data: {} }) };
       }
       return {
@@ -247,4 +270,127 @@ it('keeps a replacement image revision when saving a bot without changing its gr
   p.get('bot-form').dispatchEvent(new p.w.Event('submit', { cancelable: true, bubbles: true })); await tick();
   const saved = p.fetch.mock.calls.find(([url, options]) => new URL(url).pathname === '/api/chat-bots/build' && options.method === 'PUT')!;
   expect(JSON.parse(saved[1].body!)).toMatchObject({ icon: revised, rooms: ['r1'], maxPerHour: 30 });
+});
+it('previews a routine without writing anything, and runs it once only after the explicit button, showing the result', async () => {
+  const p = fixture();
+  await tick();
+  const open = (name: string) =>
+    [...p.get('routines').querySelectorAll('article')]
+      .find((card) => card.textContent!.includes(name))!
+      .querySelectorAll('button')
+      .forEach((b) => b.textContent === 'Preview or run once' && (b as HTMLButtonElement).click());
+  open('Build status');
+  await tick();
+  expect(p.get('trial-dialog').hasAttribute('open')).toBe(true);
+  expect(p.get('trial-summary').textContent).toBe('Run once would post this as Build Watch in #office:');
+  expect(p.get('trial-text').textContent).toBe('Build status <img src=x>');
+  expect(p.w.document.querySelector('#trial-dialog img')).toBeNull();
+  expect([...p.get('trial-checks').children].map((li) => [li.textContent, li.className])).toEqual([
+    ['Bot is registered', 'ok'], ['Bot may post in this room now', 'ok'],
+  ]);
+  expect(p.get('trial-effects').textContent).toContain('Does not change the schedule');
+  expect(p.get('trial-note').textContent).toBe('This preview posted nothing and recorded nothing.');
+  expect(p.fetch.mock.calls.filter(([, options]) => options?.method)).toEqual([]);
+  const go = p.get('trial-go') as HTMLButtonElement;
+  expect([go.textContent, go.disabled]).toEqual(['Post now', false]);
+  go.click();
+  await tick();
+  go.click();
+  await tick();
+  const writes = p.fetch.mock.calls.filter(([, options]) => options?.method);
+  expect(writes.map(([url, options]) => [new URL(url).pathname, options.method])).toEqual([['/api/cron/jobs/job1/run', 'POST']]);
+  expect(p.get('trial-run').textContent).toContain('Statusposted');
+  expect(p.get('trial-summary').textContent).toBe('Run once finished. It also appears in Run history.');
+  // A run that would fail is explained, and Run once is not offered.
+  (p.get('trial-dialog') as HTMLDialogElement).close();
+  open('Quiet routine');
+  await tick();
+  expect(p.get('trial-summary').textContent).toBe('Run once would fail now; see the checks.');
+  expect(p.get('trial-checks').lastElementChild!.className).toBe('fail');
+  expect(p.get('trial-checks').textContent).toContain('Working directory exists: ENOENT');
+  expect(p.get('trial-result').hidden).toBe(true);
+  expect((p.get('trial-go') as HTMLButtonElement).disabled).toBe(true);
+});
+it('keeps an unknown Run once outcome unknown after a lost connection, and ignores a stale preview from an earlier opening', async () => {
+  const p = fixture();
+  await tick();
+  const open = (name: string) =>
+    [...p.get('routines').querySelectorAll('article')]
+      .find((card) => card.textContent!.includes(name))!
+      .querySelectorAll('button')
+      .forEach((b) => b.textContent === 'Preview or run once' && (b as HTMLButtonElement).click());
+  const original = p.fetch.getMockImplementation()!;
+  // The first opening's preview is slow; the dialog is closed and reopened before it lands.
+  let late!: () => void;
+  p.fetch.mockImplementationOnce((url: URL, options: never) => new Promise((resolve) => { late = () => resolve(original(url, options) as never); }) as never);
+  open('Build status');
+  (p.get('trial-dialog') as HTMLDialogElement).close();
+  open('Build status');
+  await tick();
+  expect(p.get('trial-summary').textContent).toBe('Run once would post this as Build Watch in #office:');
+  p.get('trial-summary').textContent = 'current opening';
+  late();
+  await tick();
+  expect(p.get('trial-summary').textContent).toBe('current opening'); // the late response did not repaint
+  // The request goes out and the connection drops: the run may have happened.
+  p.fetch.mockImplementationOnce(async () => { throw new TypeError('Failed to fetch'); });
+  (p.get('trial-go') as HTMLButtonElement).click();
+  await tick();
+  expect(p.get('trial-summary').textContent).toContain('Outcome unknown');
+  expect(p.get('trial-summary').textContent).toContain('Check Run history before trying again');
+  expect(p.get('trial-summary').textContent).not.toContain('nothing ran');
+  expect((p.get('trial-go') as HTMLButtonElement).disabled).toBe(true);
+});
+it('calls a server error after Run once unknown, a marked refusal nothing ran, and never paints a reopened dialog late', async () => {
+  const p = fixture();
+  await tick();
+  const open = (name: string) =>
+    [...p.get('routines').querySelectorAll('article')]
+      .find((card) => card.textContent!.includes(name))!
+      .querySelectorAll('button')
+      .forEach((b) => b.textContent === 'Preview or run once' && (b as HTMLButtonElement).click());
+  const original = p.fetch.getMockImplementation()!;
+  const reply = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body });
+  const posts = () => p.fetch.mock.calls.filter(([, options]) => options?.method === 'POST').length;
+  // A JSON 500 after the request went out: the run may have happened, so it is not reported as refused.
+  open('Build status');
+  await tick();
+  p.fetch.mockImplementationOnce(async () => reply(500, { success: false, error: 'post failed after send', errorCode: 'OPERATION_FAILED' }) as never);
+  (p.get('trial-go') as HTMLButtonElement).click();
+  await tick();
+  expect(p.get('trial-summary').textContent).toContain('Outcome unknown');
+  expect(p.get('trial-summary').textContent).not.toContain('nothing ran');
+  expect(posts()).toBe(1); // sent once, never retried
+  // The route's own refusal before acting is marked, and only that reads as nothing ran.
+  (p.get('trial-dialog') as HTMLDialogElement).close();
+  open('Build status');
+  await tick();
+  p.fetch.mockImplementationOnce(async () => reply(403, { success: false, error: 'You can only change your own routines', errorCode: 'FORBIDDEN', notRun: true }) as never);
+  (p.get('trial-go') as HTMLButtonElement).click();
+  await tick();
+  expect(p.get('trial-summary').textContent).toBe('Run once was refused; nothing ran.');
+  // An unknown outcome refreshes the page; the dialog is closed and reopened before that refresh lands.
+  (p.get('trial-dialog') as HTMLDialogElement).close();
+  open('Build status');
+  await tick();
+  const held: Array<() => void> = [];
+  let hold = false;
+  p.fetch.mockImplementation(((url: URL, options: never) => {
+    if (!hold || String(url).includes('/preview')) return original(url, options);
+    return new Promise((resolve) => held.push(() => resolve(original(url, options) as never)));
+  }) as never);
+  p.fetch.mockImplementationOnce(async () => { hold = true; throw new TypeError('OLD RUN ERROR'); });
+  (p.get('trial-go') as HTMLButtonElement).click();
+  await tick();
+  expect(held.length).toBeGreaterThan(0); // the refresh is still pending
+  (p.get('trial-dialog') as HTMLDialogElement).close();
+  open('Build status');
+  await tick();
+  expect(p.get('trial-error').textContent).toBe('');
+  hold = false;
+  held.forEach((resume) => resume());
+  await tick();
+  await tick();
+  expect(p.get('trial-error').textContent).toBe('');
+  expect(p.get('trial-summary').textContent).toBe('Run once would post this as Build Watch in #office:');
 });

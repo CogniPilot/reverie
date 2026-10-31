@@ -32,17 +32,20 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
   // retain their employee grant, room membership, authorship and rate boundaries below.
   const refuseAgentCaller = async (req: FastifyRequest, reply: FastifyReply) => {
     if (verifiedOwner(req)) return;
+    // This runs before any handler, so on Run once its refusal also says nothing ran.
+    const refusal = (why: string) => {
+      const body = createErrorResponse(ApiErrorCode.FORBIDDEN, why);
+      return reply.code(403).send(req.routeOptions.url === '/api/cron/jobs/:id/run' ? { ...body, notRun: true } : body);
+    };
     if (req.headers['x-reverie-parent-session'] === undefined || req.headers['x-reverie-service-token'] !== undefined)
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Verified owner or routine delegate required'));
+      return refusal('Verified owner or routine delegate required');
     const body = (req.body ?? {}) as { action?: unknown };
     const id = (req.params as { id?: string } | undefined)?.id;
     const postTraffic = id
       ? ctx.cron.getJob(id)?.action === 'post' && (req.method !== 'PUT' || body.action === undefined || body.action === 'post')
       : req.method === 'POST' && body.action === 'post';
     if (postTraffic) return;
-    return reply
-      .code(403)
-      .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may create, change or run cron jobs'));
+    return refusal('Only the owner may create, change or run cron jobs');
   };
   app.addHook('onRoute', (options) => {
     if (!options.url.startsWith('/api/cron/')) return;
@@ -289,13 +292,35 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
   app.post('/api/cron/jobs/:id/run', async (req) => {
     const { id } = req.params as { id: string };
     const job = ctx.cron.getJob(id);
-    if (!canTouch(req, job)) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
+    // Every refusal here comes before runNow and says so; any other failure leaves the outcome unknown to the caller.
+    const notRun = <T extends object>(body: T) => ({ ...body, notRun: true as const });
+    if (!canTouch(req, job)) return notRun(createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found'));
     if (job.action === 'post') {
-      const refused = await gatePost(req, 'ran', job);
-      if (refused) return refused;
+      try {
+        const refused = await gatePost(req, 'ran', job);
+        if (refused) return notRun(refused);
+      } catch (error) {
+        const refusal = error as { body?: object };
+        if (refusal.body) refusal.body = notRun(refusal.body);
+        throw error;
+      }
     }
     const run = await ctx.cron.runNow(id);
     return { run, activeAgents: ctx.cron.countActiveAgents(job.agentType, job.id) };
+  });
+
+  // ── Preview: what Run once would do now; nothing is written, posted or announced ──
+
+  app.get('/api/cron/jobs/:id/preview', async (req) => {
+    const { id } = req.params as { id: string };
+    const job = ctx.cron.getJob(id);
+    if (!canTouch(req, job)) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
+    // A preview shows the message and source data a run would post, so an agent previews only its own routines.
+    const caller = header(req, 'x-reverie-parent-session');
+    if (caller !== undefined && !isMine(authorOf(caller), job)) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'You can preview only your own routines');
+    const preview = await ctx.cron.preview(id);
+    if (!preview) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
+    return { preview };
   });
 
   // ── Run history ──────────────────────────────────────────────────────────

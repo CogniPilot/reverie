@@ -1961,20 +1961,26 @@ export class WebServer extends EventEmitter {
         }).catch(() => undefined);
       },
     });
+    // The checks an author routine post makes, without posting; a run preview asks the same question.
+    const authorFor = (employeeId: string, roomId: string) => {
+      const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
+      if (!employee) throw new Error('The author is no longer an employee');
+      const room = this.chatroomService.room(roomId);
+      if (!room) throw new Error('The room no longer exists');
+      if (room.archivedAt) throw new Error('This room is archived');
+      if (!room.members.some((m) => m.sessionId === employee.sessionId))
+        throw new Error(`${employee.name} is no longer a member of this room`);
+      return employee;
+    };
     this.cronService.setBotPoster({
       getBot: (id) => chatBots.get(id),
       check: (bot, roomId, recent) => this.chatroomService.checkBotPost(bot, roomId, recent),
       post: (bot, roomId, text, recent) => void this.chatroomService.postAsBot(bot, roomId, text, recent),
       postWatchNotice: (bot, roomId, text, recent, owner) => this.chatroomService.postWatchNotice(bot, roomId, text, recent, owner),
       // An author routine speaks as the employee, found by employee id each time so a restart or rebind changes nothing.
+      canPostAsAuthor: (employeeId, roomId) => void authorFor(employeeId, roomId),
       postAsAuthor: (employeeId, roomId, text) => {
-        const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
-        if (!employee) throw new Error('The author is no longer an employee');
-        const room = this.chatroomService.room(roomId);
-        if (!room) throw new Error('The room no longer exists');
-        if (room.archivedAt) throw new Error('This room is archived');
-        if (!room.members.some((m) => m.sessionId === employee.sessionId))
-          throw new Error(`${employee.name} is no longer a member of this room`);
+        const employee = authorFor(employeeId, roomId);
         this.chatroomService.post(
           roomId,
           { kind: 'agent', sessionId: employee.sessionId, name: employee.name },
@@ -2113,9 +2119,10 @@ export class WebServer extends EventEmitter {
     this.cronService.setPostSources({
       'plans-pace': async () => plansPaceData((await this.planService.plans()).accounts),
       'host-load': hostLoadData,
-      'burn-watch': async () => {
+      'burn-watch': async ({ preview }) => {
         const rows = (await this.planService.plans()).accounts;
-        appendBurnLog(dataPath('burn-hourly.log'), burnLogLines(rows));
+        // The hourly log records real runs; a run preview reads and writes nothing.
+        if (!preview) appendBurnLog(dataPath('burn-hourly.log'), burnLogLines(rows));
         return burnWatchData(rows);
       },
       github: async ({ args, last }) => {
