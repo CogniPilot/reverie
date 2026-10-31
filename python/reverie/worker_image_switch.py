@@ -229,9 +229,14 @@ class WorkerImageSwitch:
         need(config['uid'] == os.getuid() and config['gid'] == os.getgid(), 'WORKER_IMAGE_ORDINARY_OWNER')
         need(R.option(config) is not None, 'WORKER_IMAGE_EXISTING_R_REQUIRED')
         deployment = maintenance['value']
-        need(type(deployment) is dict and deployment.get('version') == 1 and
-             deployment.get('containerName') == config['serverContainer'] and
-             deployment.get('companyRoot') == config['companyRoot'], 'WORKER_IMAGE_DEPLOYMENT_BINDING')
+        from .worker_deployment import company_file
+        from .resource_actor_bootstrap import _parents, _parents_current
+        selected = company_file(config, deployment, 'WORKER_IMAGE_DEPLOYMENT_BINDING')
+        company_parents = _parents([selected])
+        need(all(name not in maintenance['parents'] or maintenance['parents'][name] == identity
+                 for name, identity in company_parents.items()), 'WORKER_IMAGE_DEPLOYMENT_BINDING')
+        maintenance['parents'].update(company_parents)
+        _parents_current(maintenance['parents'])
         need('resourceActorConfig' not in config and not os.path.lexists(
              self.service.home / '.config/systemd/user/reverie-owner-terminal.service'),
              'WORKER_IMAGE_INSTALLED_CONSUMER_REQUIRES_MAINTENANCE')

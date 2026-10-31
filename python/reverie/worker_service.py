@@ -629,4 +629,7 @@ def main(argv=None):
         return 1
 
 
-if __name__ == '__main__': raise SystemExit(main())
+if __name__ == '__main__':
+    # Maintenance modules require the exact canonical WorkerService owner type.
+    from .worker_service import main as canonical_main
+    raise SystemExit(canonical_main())

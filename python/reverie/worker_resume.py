@@ -98,13 +98,12 @@ def maintenance(broker, deployment_path):
     R.need(path.is_absolute() and path.resolve(strict=True)==path and path.name=='deployment.json',
            'RESUME_DEPLOYMENT_PATH')
     raw=private(path);identity=stamp(path);value=strict_json(raw)
-    R.need(type(value) is dict and value.get('version')==1 and
-           value.get('containerName')==broker.config['serverContainer'] and
-           value.get('companyRoot')==broker.config['companyRoot'],'RESUME_DEPLOYMENT_BINDING')
+    from .worker_deployment import company_file
+    selected=company_file(broker.config,value,'RESUME_DEPLOYMENT_BINDING')
     lock=path.parent/'runtime/update-state/update.lock';override=os.environ.get('REVERIE_UPDATE_STATE_DIR')
     R.need(override is None or str(Path(override))==str(lock.parent),'RESUME_MAINTENANCE_OVERRIDE')
     fd,_=R._directory(lock.parent,os.getuid());os.close(fd)
-    parents=_parents([path,lock]);named=lock.lstat();key=(named.st_dev,named.st_ino)
+    parents=_parents([path,lock,selected]);named=lock.lstat();key=(named.st_dev,named.st_ino)
     fd=os.open(lock,os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC)
     def current():
         actual=os.fstat(fd);named=lock.lstat()
@@ -112,6 +111,7 @@ def maintenance(broker, deployment_path):
                actual.st_uid==os.getuid() and actual.st_nlink==1 and
                (actual.st_dev,actual.st_ino)==key==(named.st_dev,named.st_ino),'RESUME_MAINTENANCE_CHANGED')
         _parents_current(parents);R.need(stamp(path)==identity,'RESUME_DEPLOYMENT_CHANGED')
+    current.parents=parents
     try:
         current();fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);current();yield current;current()
     finally:os.close(fd)
@@ -338,12 +338,13 @@ class HostWorkerResume:
             exact(request,('action','operationId','expectedSnapshotDigest','deploymentPath'))
             R.need(type(request['expectedSnapshotDigest'])is str and SHA.fullmatch(request['expectedSnapshotDigest']),
                    'RESUME_SNAPSHOT_DIGEST')
-            with maintenance(self.broker,request['deploymentPath']):
+            with maintenance(self.broker,request['deploymentPath']) as current:
                 snapshot=self.describe(min(end,time.monotonic()+60))
                 R.need(snapshot['snapshotDigest']==request['expectedSnapshotDigest'],'RESUME_SNAPSHOT_CHANGED')
                 root,path=self._operation(request['operationId'],create=True)
                 plan={'version':1,'purpose':PURPOSE,'operationId':request['operationId'],'snapshot':snapshot,
                       'deploymentPath':request['deploymentPath'],'expiresAt':int(time.time())+300,
+                      'deploymentParents':current.parents,
                       'operationIdentity':R._identity(path),'namespaceIdentity':R._identity(root)}
                 plan_stamp=publish(path/'PLAN.json',plan);host_peer(credentials,self.broker.config['uid'])
             self._stream().website.final_code(deadline=end)
@@ -360,7 +361,7 @@ class HostWorkerResume:
                 R.need(type(request['planDigest'])is str and SHA.fullmatch(request['planDigest']) and
                        digest(raw)==request['planDigest'],'RESUME_PLAN_CHANGED')
                 exact(plan,('version','purpose','operationId','snapshot','deploymentPath','expiresAt',
-                            'operationIdentity','namespaceIdentity'))
+                            'operationIdentity','namespaceIdentity','deploymentParents'))
                 R.need(plan['version']==1 and plan['purpose']==PURPOSE and plan['operationId']==request['operationId'] and
                        type(plan['expiresAt'])is int and time.time()<plan['expiresAt'],'RESUME_PLAN_EXPIRED')
                 end=min(end,time.monotonic()+plan['expiresAt']-time.time())
@@ -371,6 +372,7 @@ class HostWorkerResume:
                 parents=_parents([root/'ACTIVE.json',path/'PLAN.json'])
                 R.need(not os.path.lexists(path/'ATTEMPT.json'),'RESUME_NO_REPLAY')
                 with maintenance(self.broker,plan['deploymentPath']) as current:
+                    R.need(current.parents==plan['deploymentParents'],'RESUME_DEPLOYMENT_BINDING')
                     self._idle()
                     snapshot=self.describe(min(end,time.monotonic()+60))
                     R.need(snapshot==plan['snapshot'],'RESUME_SNAPSHOT_CHANGED')
