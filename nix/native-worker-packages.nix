@@ -40,8 +40,7 @@ rec {
     name = "reverie-worker-service-check";
     runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
     text = ''
-      export PYTHONPATH=${src}/python
-      exec python3 -m reverie.worker_service "$@" check-backend
+      exec python3 -I -B ${workerBrokerSource}/python/reverie/worker_service.py "$@" check-backend
     '';
   };
   workerService = pkgs.writeTextDir "share/systemd/user/reverie-worker-broker.service" ''
@@ -69,7 +68,7 @@ rec {
       export REVERIE_WORKER_SERVICE_UNIT=${workerService}/share/systemd/user/reverie-worker-broker.service
       export REVERIE_WORKER_SERVICE_PYTHON=${pkgs.python3}/bin/python3
       export REVERIE_WORKER_SERVICE_ENTRY=${workerBrokerSource}/python/reverie/worker.py
-      exec python3 -I -B ${src}/python/reverie/worker_service.py "$@"
+      exec python3 -I -B ${workerBrokerSource}/python/reverie/worker_service.py "$@"
     '';
   };
   workerResumeClient = pkgs.writeShellApplication {
