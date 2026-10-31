@@ -13,6 +13,10 @@ class StopAgentTests(unittest.TestCase):
         F.WorkerTests.setUp(self)
         self.tmux = shutil.which('tmux')
         self.assertIsNotNone(self.tmux, 'Declared flake tmux is required')
+        # The laptop runs the stop scripts with its own /bin/bash; here they run on the host, from PATH (a nix build
+        # sandbox has no /bin/bash). The exec the broker asks for still names /bin/bash, as asserted below.
+        self.bash = shutil.which('bash')
+        self.assertIsNotNone(self.bash, 'Declared flake bash is required')
         self.socket = self.root / 'inner.sock'
         self.addCleanup(lambda: subprocess.run([self.tmux, '-S', str(self.socket), 'kill-server'], capture_output=True))
         self.receipt = self.root / 'receipt'
@@ -31,7 +35,7 @@ class StopAgentTests(unittest.TestCase):
                 self.assertEqual(args[at + 1:at + 4], ['-u', '-L', 'reverie-laptop'])
                 return subprocess.run([self.tmux, '-S', str(self.socket), *args[at + 4:]], capture_output=True, text=True, timeout=5)
             self.assertEqual(args[1:4], [self.name, '/bin/bash', '-c'])  # no --user/--privileged: the container user
-            return subprocess.run(['/bin/bash', '-c', *args[4:]], capture_output=True, text=True, timeout=5, check=not optional)
+            return subprocess.run([self.bash, '-c', *args[4:]], capture_output=True, text=True, timeout=5, check=not optional)
         self.broker.run_engine = self.engine = engine
 
     def start_inner(self):
@@ -48,7 +52,17 @@ class StopAgentTests(unittest.TestCase):
                                        text=True, timeout=2).strip()
 
     def group(self, pid):
-        return subprocess.run(['ps', '-o', 'pid=', '-g', str(pid)], capture_output=True, text=True).stdout.split()
+        # The members of process group pid, as `ps -g` lists them, read from /proc (the build sandbox has no ps).
+        members = []
+        for entry in Path('/proc').iterdir():
+            if entry.name.isdigit():
+                try:
+                    line = (entry / 'stat').read_text()
+                except OSError:
+                    continue  # exited while listing
+                if int(line[line.rindex(')') + 2:].split()[2]) == pid:  # after "pid (comm)": state, ppid, pgrp
+                    members.append(entry.name)
+        return sorted(members, key=int)
 
     def test_stop_kills_the_whole_pane_group_without_a_receipt_and_leaves_a_dead_pane(self):
         pid = self.start_inner()
@@ -239,12 +253,12 @@ class StopAgentTests(unittest.TestCase):
         fences = Path(self.broker.stop_fence_dir); fences.mkdir(parents=True, exist_ok=True)
         fence = fences / ('reverie-stop-' + '6' * 32)
         fence.write_text('signal 999999\n')
-        claimed = subprocess.Popen(['/bin/bash', '-c', 'sleep 30; true', 'stop-agent', '999999', '', str(fence)])
+        claimed = subprocess.Popen([self.bash, '-c', 'sleep 30; true', 'stop-agent', '999999', '', str(fence)])
         self.addCleanup(lambda: (claimed.poll() is None and claimed.kill(), claimed.wait()))
         time.sleep(0.2)
         with self.assertRaisesRegex(RuntimeError, 'not settled yet'):
             self.broker.settle_stop(SID, '6' * 32)
-        other = subprocess.Popen(['/bin/bash', '-c', 'sleep 30; true', 'stop-agent', '1', '', str(fence) + '-other'])  # another stop
+        other = subprocess.Popen([self.bash, '-c', 'sleep 30; true', 'stop-agent', '1', '', str(fence) + '-other'])  # another stop
         self.addCleanup(lambda: (other.poll() is None and other.kill(), other.wait()))
         claimed.kill(); claimed.wait()
         self.assertEqual(self.broker.settle_stop(SID, '6' * 32)['signalled'], True)
