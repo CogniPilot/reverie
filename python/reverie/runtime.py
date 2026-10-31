@@ -33,6 +33,10 @@ def atomic_write(path, value):
 DISAPPEARANCE = {"deleted":"deleted", "mux_died":"restart", "stale_cleaned":"restart"}
 # Phases the watcher never leaves on its own; `activate` or the owner resets them.
 STOPPED = ("owner_closed", "clean_exit", "missing_needs_owner", "needs_owner", "candidate_failed")
+# Reverie's memory brief for the calling agent (GET /api/agent/memory-brief, memory-brief.ts) starts with this and is bounded
+# server side (MEMORY_BRIEF_MAX there is 1800 characters).
+MEMORY_BRIEF = "Your memory:"
+MEMORY_BRIEF_MAX = 4000
 RECOVERY_NOTE = ("Automatic recovery: do not accept dialogs, and do not rerun interrupted or uncertain jobs;"
                  " review them first.")
 
@@ -203,8 +207,17 @@ class Runtime:
                           phase="awaiting_verified_handoff", candidate_created_at=time.time(),
                           candidates_seen=self.state.get("candidates_seen", [])[-19:] + [session_id])
         self.save()
-        return {"session_id":session_id, "backend":backend, "phase":self.state["phase"],
-                "next":"Read its screen; send the saved handoff when its composer is ready. Verify memory and chat membership, then activate."}
+        # Only once the candidate is on disk: a fresh backend remembers nothing else, so its first prompt starts with the agent's
+        # memory brief. One line, since `reverie agent send` refuses newlines and tabs; the saved handoff keeps its own lines,
+        # and every start reads the brief afresh.
+        brief = self.memory_brief()
+        first_prompt = " ".join((brief + " " + handoff if brief else handoff).split())
+        self.state.update(first_prompt=first_prompt)
+        self.save()
+        return {"session_id":session_id, "backend":backend, "phase":self.state["phase"], "first_prompt":first_prompt,
+                "memory_brief":"added" if brief else "unavailable",
+                "next":"Read its screen; when its composer is ready send first_prompt, then the read-rules prompt (runtime skill)."
+                       " Verify memory and chat membership, then activate."}
 
     def activate(self, session_id):
         if session_id != self.state.get("candidate"): raise ValueError("not the pending candidate")
@@ -253,6 +266,20 @@ class Runtime:
                     and isinstance(entry.get("ts"), (int, float)) and entry["ts"] > since]
         if not decisive: return "unknown"
         return DISAPPEARANCE[max(decisive, key=lambda entry: entry["ts"])["event"]]
+
+    def memory_brief(self):
+        """The replaced agent's own memory brief, or '' when it cannot be read here.
+
+        Reverie answers GET /api/agent/memory-brief for the calling agent only. So the brief is there when an agent switches or
+        reboots itself (this process runs in its session), and not when another session, such as a watcher, starts the
+        replacement: the new session then reads its memory itself, as the runtime skill's second prompt tells it to."""
+        current = self.state.get("current")
+        if not current or os.environ.get("REVERIE_SESSION_ID") != current: return ""
+        try: value = self.api.call("GET", "/api/v1/agent/memory-brief")
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError): return ""
+        text = value.get("text") if isinstance(value, dict) else None
+        if not isinstance(text, str) or not text.startswith(MEMORY_BRIEF) or len(text) > MEMORY_BRIEF_MAX: return ""
+        return text
 
     def bindings(self, session_id):
         """Room memberships and company employees currently bound to session_id."""

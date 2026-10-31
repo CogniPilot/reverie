@@ -127,6 +127,7 @@ const AGENT_ROUTES = new Set([
   'GET /api/agent/journal/map',
   'GET /api/agent/journal/source',
   'GET /api/agent/journal/receipt/:turnId',
+  'GET /api/agent/memory-brief', // the calling agent's own session-start brief; the handler resolves the exact session
   ...BOARD_WRITE_ROUTES,
 ]);
 /**
