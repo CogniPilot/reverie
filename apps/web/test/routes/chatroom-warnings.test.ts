@@ -175,6 +175,28 @@ describe('post warnings', () => {
     expect(res.json().data.warnings).toBeUndefined();
   });
 
+  it('deconflicts permitted human All/Here names just like agent member names', async () => {
+    const id = await room();
+    const postAliases = () => post(id, '@all and @HERE, please look', A);
+    const namesBefore = service.ownerNames();
+    expect((await postAliases()).json().data.warnings[0].names).toEqual(['all', 'here']);
+    const all = await people.create({ username: 'human-all', name: 'All', role: 'limited', rooms: [id] });
+    expect((await postAliases()).json().data.warnings[0].names).toEqual(['here']);
+    const here = await people.create({ username: 'human-here', name: 'Here', role: 'limited', rooms: [id] });
+    const human = await postAliases();
+    expect(human.statusCode).toBe(200);
+    expect(human.json().data.warnings).toBeUndefined();
+    await people.update(all.person.id, { rooms: [] });
+    await people.update(here.person.id, { rooms: [] });
+    expect((await postAliases()).json().data.warnings[0].names).toEqual(['all', 'here']);
+    (ctx.sessions.get(C) as unknown as { name: string }).name = 'All';
+    (ctx.sessions.get(B) as unknown as { name: string }).name = 'Here';
+    const agent = await postAliases();
+    expect(agent.statusCode).toBe(200);
+    expect(agent.json().data.warnings).toEqual(human.json().data.warnings);
+    expect(service.ownerNames()).toEqual(namesBefore);
+  });
+
   it('warns the owner too, and lists several names in one line', async () => {
     const id = await room();
     const res = await post(id, 'ping @linus and @ada');
