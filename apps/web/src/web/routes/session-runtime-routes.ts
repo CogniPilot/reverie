@@ -93,6 +93,11 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         return reply.code(409).send({ success: false, error: 'Recovery outcome is unconfirmed. Reconnect to inspect this expert before another action.' });
       } finally { intent?.finish(); runtimeSwitches.delete(session.id); }
     }
+    // A live isolated laptop is never replaced in place: the runtime route refuses it before any work check, with
+    // or without stalled-session recovery. Leaving and entering the office stops and starts that laptop under the same
+    // identity, so the owner is told that instead of a refusal they cannot act on.
+    if (process.env.REVERIE_WORKER_SOCKET && ctx.sessions.has(session.id))
+      return reply.code(409).send({ success: false, error: `${employee.name || 'This expert'}’s laptop is running, so Restart cannot replace it in place. To recover them, use Leave office, then Enter office. That stops and starts their laptop and keeps their identity, saved conversation, memory and files.` });
     const runtime = runtimeView(session);
     if (!runtime.source) return reply.code(409).send({ success: false, error: 'Choose a plan or local model profile in runtime settings before restarting' });
     const headers: Record<string, string> = {};
