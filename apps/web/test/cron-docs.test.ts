@@ -13,7 +13,7 @@ const cronSection = (text: string) => text.split('## Cron jobs\n')[1]?.split('\n
 describe('cron documentation', () => {
   it('documents every cron route in both API references', () => {
     const routes = [...read('src/web/routes/cron-routes.ts').matchAll(/app\.(get|post|put|delete)\('([^']+)'/g)];
-    expect(routes).toHaveLength(13);
+    expect(routes).toHaveLength(14);
     for (const [, method, path] of routes) {
       const row = `| ${method.toUpperCase()} | \`${path.replace('/api/', '/api/v1/')}\` |`;
       expect(cronSection(reference)).toContain(row);

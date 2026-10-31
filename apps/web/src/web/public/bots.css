@@ -157,6 +157,26 @@ a:focus-visible {
 #watch-dialog [hidden] {
   display: none;
 }
+/* A routine's schedule: only the fields its repeat kind uses are shown. */
+.schedule {
+  display: grid;
+  gap: 14px;
+}
+.schedule [hidden] {
+  display: none;
+}
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.schedule-days legend {
+  width: 100%;
+}
+.schedule-days .check {
+  min-height: 44px;
+}
+
 .bot-icon-row {
   display: flex;
   align-items: center;

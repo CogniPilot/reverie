@@ -1950,14 +1950,8 @@ function refineCronJob(val: z.infer<typeof CronJobBaseSchema>, ctx: z.Refinement
     } else if (val.postWhen || val.postChangeOnly) {
       add('postWhen and postChangeOnly need a postSource', 'postSource');
     }
-    if (val.scheduleType === 'once' && val.runAt === undefined) add('runAt is required for a one-time schedule', 'runAt');
-    if (val.scheduleType === 'interval' && val.intervalMinutes === undefined) {
-      add('intervalMinutes is required for an interval schedule', 'intervalMinutes');
-    }
-    if (val.scheduleType === 'daily' && !val.dailyTime) add('dailyTime is required for a daily schedule', 'dailyTime');
-    if (val.scheduleType === 'weekly' && (!val.weeklyTime || !val.weeklyDays?.length)) {
-      add('weeklyDays and weeklyTime are required for a weekly schedule', 'weeklyTime');
-    }
+    const problem = scheduleProblem(val);
+    if (problem) add(problem.message, problem.path);
     return;
   }
   if (!val.agentType) add('agentType is required to launch a session', 'agentType');
@@ -1972,18 +1966,23 @@ function refineCronJob(val: z.infer<typeof CronJobBaseSchema>, ctx: z.Refinement
   if (val.promptMode === 'prompt_file_path' && !val.promptFilePath) {
     add('promptFilePath is required when promptMode is prompt_file_path', 'promptFilePath');
   }
-  if (val.scheduleType === 'once' && val.runAt === undefined) {
-    add('runAt is required for a one-time schedule', 'runAt');
-  }
+  const problem = scheduleProblem(val);
+  if (problem) add(problem.message, problem.path);
+}
+
+type ScheduleFields = Pick<z.infer<typeof CronJobBaseSchema>, 'scheduleType' | 'runAt' | 'intervalMinutes' | 'dailyTime' | 'weeklyDays' | 'weeklyTime'>;
+
+/** The field a schedule is missing for its type, or null. Shared by a new job, an edited one and a schedule preview. */
+export function scheduleProblem(val: Partial<ScheduleFields>): { message: string; path: string } | null {
+  if (val.scheduleType === 'once' && val.runAt === undefined) return { message: 'runAt is required for a one-time schedule', path: 'runAt' };
   if (val.scheduleType === 'interval' && val.intervalMinutes === undefined) {
-    add('intervalMinutes is required for an interval schedule', 'intervalMinutes');
+    return { message: 'intervalMinutes is required for an interval schedule', path: 'intervalMinutes' };
   }
-  if (val.scheduleType === 'daily' && !val.dailyTime) {
-    add('dailyTime is required for a daily schedule', 'dailyTime');
-  }
+  if (val.scheduleType === 'daily' && !val.dailyTime) return { message: 'dailyTime is required for a daily schedule', path: 'dailyTime' };
   if (val.scheduleType === 'weekly' && (!val.weeklyTime || !val.weeklyDays?.length)) {
-    add('weeklyDays and weeklyTime are required for a weekly schedule', 'weeklyTime');
+    return { message: 'weeklyDays and weeklyTime are required for a weekly schedule', path: 'weeklyTime' };
   }
+  return null;
 }
 
 /** POST /api/cron/jobs — full job definition. */
@@ -1991,6 +1990,23 @@ export const CronJobSchema = CronJobBaseSchema.superRefine(refineCronJob);
 
 /** PUT /api/cron/jobs/:id — partial update. */
 export const CronJobUpdateSchema = CronJobBaseSchema.partial();
+
+/** POST /api/cron/schedule-preview — a schedule as a job would hold it, and how many next runs to show. */
+export const CronSchedulePreviewSchema = CronJobBaseSchema.pick({
+  scheduleType: true,
+  runAt: true,
+  intervalMinutes: true,
+  timeZone: true,
+  dailyTime: true,
+  weeklyDays: true,
+  weeklyTime: true,
+})
+  .extend({ count: z.number().int().min(1).max(10).optional() })
+  .strict()
+  .superRefine((val, ctx) => {
+    const problem = scheduleProblem(val);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem.message, path: [problem.path] });
+  });
 
 /** PUT /api/cron/jobs/:id/enabled */
 export const CronJobEnabledSchema = z.object({ enabled: z.boolean() });

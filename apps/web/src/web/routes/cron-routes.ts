@@ -10,7 +10,8 @@ import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 import { FastifyInstance } from 'fastify';
 import { getCli } from '../../config/cli-registry/registry.js';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
-import { CronJobSchema, CronJobUpdateSchema, CronJobEnabledSchema } from '../schemas.js';
+import { CronJobSchema, CronJobUpdateSchema, CronJobEnabledSchema, CronSchedulePreviewSchema } from '../schemas.js';
+import { nextRuns } from '../../cron/cron-time.js';
 import { canAccessOwned, getAuthUser, isWorkingDirAllowed, ownerFor, parseBody } from '../route-helpers.js';
 import { canUsernameRunPrivilegedCommands } from '../../user-store.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
@@ -219,6 +220,13 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
       );
     }
     return { job: ctx.cron.createJob(body, ownerFor(req), undefined, verifiedOwner(req)) };
+  });
+
+  // The next runs a schedule would have, before it is saved (the Bots page schedule form). Nothing is stored.
+  app.post('/api/cron/schedule-preview', async (req) => {
+    const { count = 3, ...schedule } = parseBody(CronSchedulePreviewSchema, req.body);
+    const job = { ...schedule, timeZone: schedule.timeZone || undefined } as CronJob;
+    return { runs: nextRuns(job, Date.now(), count) };
   });
 
   app.get('/api/cron/jobs/:id', async (req) => {

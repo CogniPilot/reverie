@@ -108,6 +108,7 @@ lists the value inside `data` on success.
 | POST | `/api/v1/cron/jobs/:id/run` | None | `{ run: CronJobRun, activeAgents: number }` |
 | GET | `/api/v1/cron/jobs/:id/runs` | None | `CronJobRun[]` |
 | GET | `/api/v1/cron/runs` | None | `CronJobRun[]` |
+| POST | `/api/v1/cron/schedule-preview` | The schedule fields of a job, plus optional `count` (1-10, default 3) | `{ runs: number[] }`, epoch ms; owner only, nothing is saved |
 | GET | `/api/v1/routines-grants` | None | `{ roles: string[], employees: Record<employeeId, boolean> }` |
 | PUT | `/api/v1/routines-grants` | `{ roles?: string[], employees?: Record<employeeId, boolean> }` (owner only) | the stored grants |
 
