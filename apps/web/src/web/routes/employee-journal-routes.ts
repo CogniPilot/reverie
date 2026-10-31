@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ChatMessage } from '../../chatroom-store.js';
-import type { CompanyEmployee } from '../../company-types.js';
+import { employeeMemoryContext, type CompanyEmployee, type EmployeeMemoryRecall } from '../../company-types.js';
 import { EmployeeJournalError, journalId, type EmployeeJournalStore, type ReadVisibleMessage } from '../../employee-journal.js';
 import type { OwnerVerifier } from '../../owner-auth/marks.js';
 import type { SessionPort } from '../ports/session-port.js';
@@ -131,6 +131,20 @@ export function registerEmployeeJournalRoutes(
       if (deps.company(owner).employees.filter(employee => employee.id === request.params.id).length !== 1)
         throw new EmployeeJournalError(404, 'no such employee', 'JOURNAL_NOT_FOUND');
       return { success: true, data: deps.journal().ownerPage(owner ?? '', request.params.id, query.before) };
+    } catch (error) { return failed(reply, error); }
+  });
+  // The identity and memory block an employee's room briefings carry, for a first prompt the owner's runtime tools send to a
+  // fresh backend (a switch, reboot or fallback session). An unreadable journal still gives the block, saying so.
+  app.get<{ Params: { id: string } }>('/api/company/employees/:id/memory-brief', options, async (request, reply) => {
+    headers(reply);
+    try {
+      if (!deps.verifiedOwner(request)) throw new EmployeeJournalError(403, 'owner only', 'JOURNAL_UNAVAILABLE');
+      const owner = ownerFor(request);
+      const matches = deps.company(owner).employees.filter(employee => employee.id === request.params.id);
+      if (matches.length !== 1) throw new EmployeeJournalError(404, 'no such employee', 'JOURNAL_NOT_FOUND');
+      let recall: EmployeeMemoryRecall;
+      try { recall = deps.journal().highlights(owner ?? '', matches[0].id); } catch { recall = 'unreadable'; }
+      return { success: true, data: { brief: employeeMemoryContext(matches[0], recall) } };
     } catch (error) { return failed(reply, error); }
   });
 }

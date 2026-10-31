@@ -33,6 +33,9 @@ def atomic_write(path, value):
 DISAPPEARANCE = {"deleted":"deleted", "mux_died":"restart", "stale_cleaned":"restart"}
 # Phases the watcher never leaves on its own; `activate` or the owner resets them.
 STOPPED = ("owner_closed", "clean_exit", "missing_needs_owner", "needs_owner", "candidate_failed")
+# Reverie's employee memory block (GET /api/company/employees/:id/memory-brief) starts with this; it is bounded server side.
+MEMORY_BRIEF = "Identity and memory:"
+MEMORY_BRIEF_MAX = 8000
 RECOVERY_NOTE = ("Automatic recovery: do not accept dialogs, and do not rerun interrupted or uncertain jobs;"
                  " review them first.")
 
@@ -199,6 +202,8 @@ class Runtime:
         session = value.get("session", value)
         session_id = (value.get("sessionId") or session.get("id")) if isinstance(session, dict) else None
         if not session_id: raise RuntimeError("Reverie returned no session id; inspect before retrying")
+        # A fresh backend remembers nothing else: the handoff it is sent first also says who it is and where its memory lives.
+        self.state.update(handoff=self.with_memory_brief(handoff))
         self.state.update(candidate=session_id, candidate_backend=backend, creation_uncertain=False,
                           phase="awaiting_verified_handoff", candidate_created_at=time.time(),
                           candidates_seen=self.state.get("candidates_seen", [])[-19:] + [session_id])
@@ -253,6 +258,28 @@ class Runtime:
                     and isinstance(entry.get("ts"), (int, float)) and entry["ts"] > since]
         if not decisive: return "unknown"
         return DISAPPEARANCE[max(decisive, key=lambda entry: entry["ts"])["event"]]
+
+    def memory_brief(self):
+        """The agent's identity and memory block, as its room briefings carry it, or '' when it cannot be read."""
+        current = self.state.get("current")
+        known = self.state.get("bindings") or {}
+        employees = known.get("employees") if current and known.get("session") == current else None
+        if employees is None and current:
+            try: employees = self.bindings(current)["employees"]
+            except (OSError, ValueError, RuntimeError, KeyError, TypeError): employees = None
+        if not employees or len(employees) != 1: return ""
+        path = "/api/v1/company/employees/" + urllib.parse.quote(str(employees[0]["employee_id"]), safe="") + "/memory-brief"
+        try: value = self.api.call("GET", path)
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError): return ""
+        brief = value.get("brief") if isinstance(value, dict) else None
+        if not isinstance(brief, str) or not brief.startswith(MEMORY_BRIEF) or len(brief) > MEMORY_BRIEF_MAX: return ""
+        return " ".join(brief.split())
+
+    def with_memory_brief(self, handoff):
+        """The handoff led by the memory block, once; the handoff alone when the block cannot be read."""
+        if handoff.startswith(MEMORY_BRIEF): return handoff
+        brief = self.memory_brief()
+        return brief + " " + handoff if brief else handoff
 
     def bindings(self, session_id):
         """Room memberships and company employees currently bound to session_id."""

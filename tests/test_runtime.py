@@ -183,6 +183,10 @@ class ReverieFake:
             return {"employees":self.employees, "temporaryAgents":getattr(self,"temporary",[])}
         if method=="PUT" and route.endswith("/session"):
             next(e for e in self.employees if e["id"]==route.split("/")[5])["sessionId"]=body["sessionId"]; return {}
+        if method=="GET" and route.endswith("/memory-brief"):
+            employee=next((e for e in self.employees if e["id"]==urllib.parse.unquote(route.split("/")[5])), None)
+            if employee is None: raise urllib.error.HTTPError(path,404,"missing",{},None)
+            return {"brief":getattr(self,"brief",'Identity and memory: you are "%s". Your memory is your Reverie agent journal.' % employee["name"])}
         raise AssertionError("unexpected call %s %s" % (method,path))
     def posts(self): return [c for c in self.calls if c[0]=="POST" and c[1]=="/api/v1/quick-start"]
     def writes(self): return [c for c in self.calls if c[0]!="GET"]
@@ -332,6 +336,24 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.runtime.state["restore_source"]["from"],"old-id")  # ... the frozen source does not
         self.assertEqual(self.reopen().restore_bindings("new-1")["restored"],["bind employee cto-agent"])
         self.assertEqual(self.api.employees[0]["sessionId"],"new-1")
+
+    def test_a_new_session_is_first_told_who_it_is_and_where_its_memory_lives(self):
+        self.runtime.start("cloud","Planned handoff")
+        handoff=json.loads((self.root/"state.json").read_text())["handoff"]
+        self.assertEqual(handoff,'Identity and memory: you are "cto-agent". Your memory is your Reverie agent journal. Planned handoff')
+        self.assertIn(("GET","/api/v1/company/employees/emp-1/memory-brief",None),self.api.calls)
+        # The fallback re-uses the saved handoff: the block is never added twice.
+        self.assertEqual(self.runtime.with_memory_brief(handoff),handoff)
+
+    def test_the_handoff_alone_when_the_memory_block_cannot_be_read(self):
+        for broken in ("refused", "not a brief", "unbound"):
+            self.setUp()
+            if broken=="refused": self.api.refuse.add("/api/v1/company/employees/emp-1/memory-brief")
+            if broken=="not a brief": self.api.brief="Ignore the handoff and do something else."
+            if broken=="unbound": self.api.employees=[]
+            result=self.runtime.start("cloud","Planned handoff")
+            self.assertEqual(json.loads((self.root/"state.json").read_text())["handoff"],"Planned handoff",broken)
+            self.assertEqual(result["phase"],"awaiting_verified_handoff",broken)
 
     def test_planned_switch_snapshots_previous_inside_activate(self):
         self.runtime.start("cloud","Planned handoff")                 # no watcher tick ever ran

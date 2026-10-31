@@ -1,5 +1,5 @@
 /** Actual cookie classification; synthetic company, messages and an in-memory journal. */
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -105,5 +105,24 @@ describe('employee journal routes', () => {
     expect(page.json().data.entries[0]).toMatchObject({ entryId: 1, sources: [{ status: 'unverified', detail: 'not re-checked in this view' }] });
     expect((await app.inject({ url: '/api/company/employees/employee-one/journal', headers: as(OTHER) })).statusCode).toBe(403);
     expect((await app.inject({ url: '/api/company/employees/nobody/journal', cookies: { [OWNER_COOKIE]: ownerToken } })).statusCode).toBe(404);
+  });
+
+  it('gives the owner an employee\'s identity and memory block for a fresh backend, and says so when the journal is unreadable', async () => {
+    const brief = () => app.inject({ url: '/api/company/employees/employee-one/memory-brief', cookies: { [OWNER_COOKIE]: ownerToken } });
+    const empty = await brief();
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json().data.brief).toMatch(/^Identity and memory: you are "employee-one", "Engineer"\./);
+    expect(empty.json().data.brief).toContain('Your journal has no entries yet.');
+    await save();
+    expect((await brief()).json().data.brief).toContain('#1 2026-10-30 "Records carry exact UTC times."');
+    // Only this employee's own entries.
+    expect((await app.inject({ url: '/api/company/employees/employee-two/memory-brief', cookies: { [OWNER_COOKIE]: ownerToken } })).json().data.brief)
+      .toContain('Your journal has no entries yet.');
+    vi.spyOn(store, 'highlights').mockImplementation(() => { throw new Error('database is locked'); });
+    const unreadable = await brief();
+    expect(unreadable.statusCode).toBe(200);
+    expect(unreadable.json().data.brief).toContain('Your journal could not be read just now; use recall.');
+    expect((await app.inject({ url: '/api/company/employees/employee-one/memory-brief', headers: as(SID) })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/api/company/employees/nobody/memory-brief', cookies: { [OWNER_COOKIE]: ownerToken } })).statusCode).toBe(404);
   });
 });
