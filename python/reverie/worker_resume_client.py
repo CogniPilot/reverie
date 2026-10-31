@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import struct
 import time
@@ -37,6 +38,8 @@ def main(argv=None):
     parser.add_argument('--deployment',type=Path)
     parser.add_argument('--snapshot-sha256')
     parser.add_argument('--plan-sha256')
+    parser.add_argument('--employee',action='append',metavar='UUID',
+                        help='prepare only: select a current eligible employee; repeat for a bounded batch (default: all eligible)')
     args=parser.parse_args(argv);os.umask(0o077)
     expected={
         'describe':(False,False,False,False),'prepare':(True,True,True,False),
@@ -44,12 +47,18 @@ def main(argv=None):
     }
     if tuple(x is not None for x in (args.operation,args.deployment,args.snapshot_sha256,args.plan_sha256))!=expected[args.action]:
         parser.error('Select only the fixed fields required for this action')
+    if args.employee is not None:
+        if (args.action!='prepare' or len(args.employee)>16 or
+                any(re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',eid) is None for eid in args.employee) or
+                len(set(args.employee))!=len(args.employee)):
+            parser.error('Select distinct canonical employee UUIDs only for prepare (at most 16)')
     request={'action':{'describe':'worker-resume-describe','prepare':'prepare-worker-resume',
                       'apply':'apply-worker-resume','status':'worker-resume-status'}[args.action]}
     if args.operation is not None:request['operationId']=args.operation
     if args.deployment is not None:request['deploymentPath']=str(args.deployment)
     if args.snapshot_sha256 is not None:request['expectedSnapshotDigest']=args.snapshot_sha256
     if args.plan_sha256 is not None:request['planDigest']=args.plan_sha256
+    if args.employee is not None:request['employeeIds']=sorted(args.employee)
     proof=None
     try:
         config=load_config(args.config);proof=RegisteredTransport(WorkerService(args.config),config)

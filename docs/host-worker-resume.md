@@ -24,10 +24,40 @@ website unpause, prepare a fresh operation using that original digest:
 ```sh
 nix run .#worker-resume -- --config /private/worker.json prepare \
   --operation UUID --deployment /private/instance/deployment.json \
-  --snapshot-sha256 SHA256
+  --snapshot-sha256 SHA256 --employee EMPLOYEE_UUID
 nix run .#worker-resume -- --config /private/worker.json apply \
   --operation UUID --plan-sha256 SHA256
 ```
+
+`--employee UUID` is repeatable and accepted only by `prepare`. An explicit
+selection must contain one to sixteen distinct current employees who are
+desired ON, not vacationing and not migrating. The host stores their sorted
+IDs in the plan digest. Omitting the option retains the all-eligible behavior.
+The snapshot still includes every employee: at apply's initial snapshot check,
+a changed unselected identity, recipe, saved conversation or owner intent also
+invalidates the operation. The full canonical cohort remains checked during apply.
+Already-live selected employees use the normal already-live path; the tool does
+not restart them. Saved Hands sessions use the ordinary cold-start producer,
+with their existing session ID and settings, rather than attach-only recovery.
+
+Every prepared plan expires at most 300 seconds after it is created. Waiting
+between prepare and apply and final verification spend that budget. Selected
+seats start serially, with at most 120 seconds
+per wake inside that same deadline. The caller's longer transport timeout does
+not extend either limit. For slow cold starts, use one-seat operations: obtain
+a fresh `describe`, review its complete snapshot against the retained bindings,
+prepare a fresh UUID for one employee, apply once, and confirm completion and
+current native health before preparing the next employee. Selection does not
+make a failed or uncertain operation resumable.
+
+The website must be unpaused and registered before describe/prepare/apply.
+Let existing automatic recovery settle first: the normal producer's shared
+in-flight wake can refuse another recovery. Native health alone does not prove
+that this flight has completed. Do not change stop or vacation choices to
+avoid that refusal.
+
+Plans prepared by an older broker without the employee selection field cannot
+be applied by this version; obtain a new snapshot and prepare a new operation.
 
 Prepare and apply take the deployment's existing maintenance lock internally;
 do not wrap the caller in another independently opened flock. Apply consumes one

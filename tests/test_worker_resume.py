@@ -3,7 +3,8 @@
 Website/program metadata is controlled in transaction fixtures. These tests do
 not turn a source fixture into native registration or running-provider proof.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager,redirect_stderr,redirect_stdout
+import io
 import copy
 import fcntl
 import hashlib
@@ -38,7 +39,7 @@ class ResumeTransactions(unittest.TestCase):
         self.f=F.Reservations();self.f.setUp(deployment_layout=True);self.addCleanup(self.f.doCleanups)
         f=self.f;f.native.resource_reservations=f.gate;f.native.stopping=threading.Event()
         f.employee['runtimeRecipe']={'mode':'codex','workingDir':'/workspace','configs':{}}
-        f.company();self.owner=(os.getpid(),os.getuid(),os.getgid());self.calls=[];self.fault=None
+        f.company();self.owner=(os.getpid(),os.getuid(),os.getgid());self.calls=[];self.woken=[];self.saved_digests={};self.fault=None
         f.native.config_file=f.root/'broker.json';f.native.config_file.write_bytes(M.encoded(f.config));f.native.config_file.chmod(0o600)
         self.deployment=f.root/'deployment';self.deployment.mkdir(mode=0o700)
         self.definition=self.deployment/'deployment.json'
@@ -55,9 +56,9 @@ class ResumeTransactions(unittest.TestCase):
             def call(self,verb,value,deadline,**kwargs):
                 test.calls.append(verb)
                 if verb=='describe':
-                    rows=[{**row,'savedDigest':'c'*64}for row in M.cohort(f.native)]
+                    rows=[{**row,'savedDigest':test.saved_digests.get(row['employeeId'],'c'*64)}for row in M.cohort(f.native)]
                     return {'cohort':rows,'snapshotDigest':M.digest(M.encoded(rows).rstrip(b'\n'))}
-                test.assertEqual(verb,'wake')
+                test.assertEqual(verb,'wake');test.assertEqual(set(value),{'operationId','employee'})
                 # Normal J must be able to take admission, while the actual
                 # deployment maintenance OFD remains locked for this batch.
                 with (f.control/'admission.lock').open('r+')as admission:
@@ -65,21 +66,128 @@ class ResumeTransactions(unittest.TestCase):
                 with test.lock.open('r+')as maintenance:
                     with test.assertRaises(BlockingIOError):fcntl.flock(maintenance,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 if test.fault=='ack-loss':raise EOFError('CONTROLLED_ACK_LOSS')
-                row=value['employee']
+                row=value['employee'];test.woken.append(row['employeeId'])
                 return {**{k:row[k]for k in ('employeeId','sessionId','generation')},'state':'already-live'}
         self.stream=Stream();self.service=M.HostWorkerResume(f.native,'/not-a-program')
         self.service.stream=self.stream
         self.before={p:str(p.read_bytes())for p in (F.Path(f.config['companyFile']),f.control/'operations/operations.json',
                                                    f.control/'profiles/profiles.json')}
 
-    def prepare(self,operation=OP):
+    def prepare(self,operation=OP,employee_ids=None):
         snapshot=self.service.dispatch({'action':'worker-resume-describe'},self.owner)
         return self.service.dispatch({'action':'prepare-worker-resume','operationId':operation,
-            'expectedSnapshotDigest':snapshot['snapshotDigest'],'deploymentPath':str(self.definition)},self.owner)
+            'expectedSnapshotDigest':snapshot['snapshotDigest'],'deploymentPath':str(self.definition),
+            **({'employeeIds':employee_ids}if employee_ids is not None else{})},self.owner)
 
     def apply(self,plan):
         return self.service.dispatch({'action':'apply-worker-resume','operationId':plan['operationId'],
                                      'planDigest':plan['planDigest']},self.owner)
+
+    def second_employee(self):
+        other='ffffffff-ffff-4fff-8fff-ffffffffffff'
+        company=json.loads(Path(self.f.config['companyFile']).read_bytes())
+        employee={**copy.deepcopy(self.f.employee),'id':other,'sessionId':F.TARGET}
+        company['employees'].append(employee)
+        Path(self.f.config['companyFile']).write_text(json.dumps(company))
+        row=self.f.native.row('3'*64,self.f.config['deployment']+'-agent-'+F.TARGET,125,
+            self.f.config['memoryMiB'],{'reverie.worker':self.f.config['deployment'],
+                'reverie.session':F.TARGET,'reverie.employee':other,
+                'reverie.worker-policy':M.R.policy_digest(self.f.config,F.TARGET)})
+        # The same owned proc-root metadata seam as Reservations.setUp, extended
+        # to a second independently addressed native seat; no engine is invoked.
+        namespace={};identity=M.R._identity
+        for destination,source in [('/home/agent',Path(self.f.config['stateRoot'])/'employees'/other/'home'),
+                ('/nix',Path(self.f.config['stateRoot'])/'employees'/other/'nix'),
+                ('/scratch',Path(self.f.config['scratchRoot'])/'employees'/other)]:
+            source.mkdir(mode=0o700,parents=True,exist_ok=True)
+            namespace[self.f.proc/'125/root'/destination.lstrip('/')]=source
+            row['Mounts'].append({'Type':'bind','Source':str(source),'Destination':destination,'RW':True})
+        self.enterContext(patch.object(M.R,'_identity',side_effect=lambda path:identity(namespace.get(Path(path),Path(path)))))
+        self.f.native.rows.append(row);self.f.kernel(row)
+        return other
+
+    def test_selected_batches_wake_only_chosen_seat_and_preserve_other_native_and_stores(self):
+        other=self.second_employee();native=copy.deepcopy(self.f.native.rows)
+        company=Path(self.f.config['companyFile']).read_bytes()
+        first=self.prepare(employee_ids=[F.EID]);result=self.apply(first)
+        self.assertEqual(self.woken,[F.EID]);self.assertEqual([r['employeeId']for r in result['results']],[F.EID])
+        self.assertEqual(self.f.native.rows,native)
+        second=self.prepare(str(uuid.uuid4()),[other]);result=self.apply(second)
+        self.assertEqual(self.woken,[F.EID,other]);self.assertEqual([r['employeeId']for r in result['results']],[other])
+        self.assertEqual(self.f.native.rows,native);self.assertEqual(Path(self.f.config['companyFile']).read_bytes(),company)
+        for path,raw in self.before.items():
+            if str(path)!=self.f.config['companyFile']:self.assertEqual(str(path.read_bytes()),raw)
+
+    def test_selection_is_canonical_and_default_retains_all_eligible_employees(self):
+        other=self.second_employee();selected=self.prepare(employee_ids=[other,F.EID])
+        plan=json.loads((self.f.control/'host-resume'/OP/'PLAN.json').read_bytes())
+        self.assertEqual(plan['employeeIds'],sorted([F.EID,other]))
+        self.assertEqual(len(plan['snapshot']['cohort']),2)
+        result=self.apply(selected);self.assertEqual(self.woken,sorted([F.EID,other]))
+        self.assertEqual(len(result['results']),2)
+        self.woken.clear();self.apply(self.prepare(str(uuid.uuid4())))
+        self.assertEqual(self.woken,sorted([F.EID,other]))
+
+    def test_invalid_duplicate_unknown_or_ineligible_selection_refuses_before_attempt(self):
+        other=self.second_employee()
+        for selected in ([],[F.EID,F.EID],['not-an-id'],['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'],[1]):
+            operation=str(uuid.uuid4())
+            with self.subTest(selected=selected),self.assertRaisesRegex(ValueError,'SELECTION'):
+                self.prepare(operation,selected)
+            self.assertFalse((self.f.control/'host-resume'/operation/'ATTEMPT.json').exists())
+            self.assertEqual(self.woken,[])
+        company=json.loads(Path(self.f.config['companyFile']).read_bytes())
+        for field,value in [('desiredRunning',False),('onVacation',True),('bindingMigration',{'pending':True})]:
+            current=copy.deepcopy(company);current['employees'][1][field]=value
+            Path(self.f.config['companyFile']).write_text(json.dumps(current))
+            with self.subTest(field=field),self.assertRaisesRegex(ValueError,'SELECTION'):
+                self.prepare(str(uuid.uuid4()),[other])
+        self.assertEqual(self.woken,[])
+
+    def test_null_selection_is_not_the_default_and_all_ineligible_default_stays_noop(self):
+        snapshot=self.service.dispatch({'action':'worker-resume-describe'},self.owner)
+        with self.assertRaisesRegex(ValueError,'SELECTION'):
+            self.service.dispatch({'action':'prepare-worker-resume','operationId':OP,
+                'expectedSnapshotDigest':snapshot['snapshotDigest'],'deploymentPath':str(self.definition),
+                'employeeIds':None},self.owner)
+        self.assertFalse((self.f.control/'host-resume'/OP).exists())
+        self.f.employee['desiredRunning']=False;self.f.company()
+        result=self.apply(self.prepare())
+        self.assertEqual(result['results'],[]);self.assertEqual(self.woken,[])
+
+    def test_unselected_binding_change_still_refuses_full_snapshot_before_attempt(self):
+        self.second_employee();plan=self.prepare(employee_ids=[F.EID])
+        company=json.loads(Path(self.f.config['companyFile']).read_bytes())
+        company['employees'][1]['sessionGeneration']+=1
+        Path(self.f.config['companyFile']).write_text(json.dumps(company))
+        with self.assertRaisesRegex(ValueError,'SNAPSHOT_CHANGED'):self.apply(plan)
+        self.assertFalse((self.f.control/'host-resume'/OP/'ATTEMPT.json').exists())
+        self.assertEqual(self.woken,[])
+
+    def test_unselected_saved_conversation_change_refuses_before_attempt(self):
+        other=self.second_employee();plan=self.prepare(employee_ids=[F.EID])
+        self.saved_digests[other]='d'*64
+        with self.assertRaisesRegex(ValueError,'SNAPSHOT_CHANGED'):self.apply(plan)
+        self.assertFalse((self.f.control/'host-resume'/OP/'ATTEMPT.json').exists())
+        self.assertEqual(self.woken,[])
+
+    def test_noncanonical_or_duplicate_stored_selection_refuses_before_attempt(self):
+        other=self.second_employee()
+        for selection in ([other,F.EID],[F.EID,F.EID],['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee']):
+            operation=str(uuid.uuid4());plan=self.prepare(operation,[F.EID])
+            path=self.f.control/'host-resume'/operation/'PLAN.json'
+            value=json.loads(path.read_bytes());value['employeeIds']=selection
+            raw=M.encoded(value);path.write_bytes(raw)
+            with self.subTest(selection=selection),self.assertRaisesRegex(ValueError,'SELECTION'):
+                self.apply({**plan,'planDigest':M.digest(raw)})
+            self.assertFalse((path.parent/'ATTEMPT.json').exists())
+        self.assertEqual(self.woken,[])
+
+    def test_older_plan_without_selection_requires_fresh_prepare(self):
+        plan=self.prepare();path=self.f.control/'host-resume'/OP/'PLAN.json'
+        value=json.loads(path.read_bytes());del value['employeeIds'];raw=M.encoded(value);path.write_bytes(raw)
+        with self.assertRaisesRegex(ValueError,'CLOSED_SCHEMA'):self.apply({**plan,'planDigest':M.digest(raw)})
+        self.assertFalse((path.parent/'ATTEMPT.json').exists());self.assertEqual(self.woken,[])
 
     def test_older_plan_without_data_parent_binding_requires_fresh_prepare(self):
         plan = self.prepare()
@@ -245,6 +353,43 @@ class ResumeTransactions(unittest.TestCase):
             with self.subTest(extra=extra),self.assertRaisesRegex(ValueError,'CLOSED_SCHEMA'):
                 self.service.dispatch({'action':'worker-resume-describe',**extra},self.owner)
         self.assertEqual(self.calls,[])
+
+
+class EmployeeSelectionCLI(unittest.TestCase):
+    def test_only_prepare_accepts_distinct_bounded_canonical_employee_ids_before_config_io(self):
+        from reverie import worker_resume_client as C
+        common=['--config','/never-read-config']
+        prepared=['prepare','--operation',OP,'--deployment','/never-read-deployment','--snapshot-sha256','a'*64]
+        vectors=[['describe','--employee',F.EID],['status','--operation',OP,'--employee',F.EID],
+            ['apply','--operation',OP,'--plan-sha256','a'*64,'--employee',F.EID],
+            [*prepared,'--employee','NOT-A-UUID'],[*prepared,'--employee',F.EID,'--employee',F.EID],
+            [*prepared,*sum((['--employee',str(uuid.uuid4())] for _ in range(17)),[])]]
+        with patch.object(C,'load_config',side_effect=AssertionError('CONFIG_IO_FORBIDDEN')) as load:
+            for args in vectors:
+                with self.subTest(args=args),redirect_stderr(io.StringIO()),self.assertRaises(SystemExit) as error:
+                    C.main([*common,*args])
+                self.assertEqual(error.exception.code,2)
+            load.assert_not_called()
+
+    def test_prepare_canonical_selection_uses_existing_host_channel_and_default_omits_field(self):
+        from reverie import worker_resume_client as C
+        other='ffffffff-ffff-4fff-8fff-ffffffffffff';body=json.dumps({'version':1,'purpose':M.PURPOSE,'state':'RESUME_PREPARED'}).encode()
+        for chosen in ([other,F.EID],None):
+            proof=Mock();proof.credentials=(os.getpid(),os.getuid(),os.getgid());frames=[]
+            args=['--config','/owned/config','prepare','--operation',OP,'--deployment','/owned/deployment','--snapshot-sha256','a'*64]
+            if chosen:args+=sum((['--employee',eid]for eid in chosen),[])
+            with patch.object(C,'load_config',return_value={'uid':os.getuid()}),\
+                 patch.object(C,'WorkerService',return_value=object()),\
+                 patch.object(C,'RegisteredTransport',return_value=proof),\
+                 patch.object(C,'host_peer'),\
+                 patch.object(C,'take',side_effect=[b'HOST_RESUME_OWNER_READY\n',b'J'+struct.pack('!I',len(body)),body]),\
+                 patch.object(C,'send_frame',side_effect=lambda _,kind,raw:frames.append((kind,json.loads(raw)))),\
+                 redirect_stdout(io.StringIO()):
+                self.assertEqual(C.main(args),0)
+            self.assertEqual(frames[0],(b'C',{'action':'worker-resume-channel'}))
+            expected={'action':'prepare-worker-resume','operationId':OP,'deploymentPath':'/owned/deployment','expectedSnapshotDigest':'a'*64}
+            if chosen:expected['employeeIds']=sorted(chosen)
+            self.assertEqual(frames[1],(b'C',expected));proof.finalize.assert_called_once();proof.close.assert_not_called()
 
 
 class ActualHostCredentials(unittest.TestCase):
