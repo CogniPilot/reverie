@@ -27,6 +27,7 @@ from . import owner_terminal_lifecycle as L
 from .owner_terminal_native import private_bytes, private_document
 from .website_image_provenance import verify_image_spec
 from .website_service_auth import WEB, protected_startup
+from .linux_root_files import open_in_root
 
 LINK_PURPOSE = 'owner-terminal-console-links-v1'
 UUID = re.compile(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}')
@@ -39,6 +40,10 @@ def need(value, reason):
 
 def encoded(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+
+
+def _auth_stamp(info):
+    return [*L._native_stamp(info), info.st_gid]
 
 
 def auth_mount_facts(mounts, selected, uid):
@@ -58,7 +63,7 @@ def auth_mount_facts(mounts, selected, uid):
     facts = []
     try:
         for part in (*relative.parts, None):
-            info = os.fstat(fd); facts.append(list(L._native_stamp(info)))
+            info = os.fstat(fd); facts.append(_auth_stamp(info))
             need(info.st_uid in (0, uid) and not info.st_mode & 0o022,
                  'H_WEBSITE_SERVICE_AUTH_SOURCE')
             if part is None:break
@@ -72,6 +77,31 @@ def auth_mount_facts(mounts, selected, uid):
     finally:os.close(fd)
     return {'mount': {k: mount.get(k) for k in ('Type', 'Source', 'Destination', 'RW', 'Propagation')},
             'identities': facts}
+
+
+def _auth_process(pid):
+    return L.read_proc(pid)
+
+
+def _auth_root(pid):
+    # Intentionally open this kernel magic link; all guest descendants use
+    # openat2 IN_ROOT|NO_MAGICLINKS|NO_SYMLINKS, never host Path.resolve().
+    return os.open('/proc/' + str(pid) + '/root', os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
+
+
+def _auth_birth(pid):
+    # After stop a reused PID may be unrelated: read only bounded kernel stat,
+    # not that replacement process's argv, executable or namespaces.
+    from .worker_resource_reservations import _pid
+    return int(_pid(pid))
+
+
+def _close_auth_fds(fds):
+    failed = False
+    while fds:
+        try:os.close(fds.pop())
+        except OSError:failed = True
+    need(not failed, 'H_WEBSITE_AUTH_CLOSE_UNCONFIRMED')
 
 
 def describe_link_facts(initial, standard, container_id):
@@ -195,24 +225,96 @@ class TerminalWebsiteProfile:
         need(len(set(paths)) == len(paths), 'H_WEBSITE_DUPLICATE_LINK')
         from .resource_actor_install import artifact
         self.provenance = artifact(initial.runtime.value['imageProvenance'])
+        self.auth_fds = []; self.auth_held = []; self.auth_old = None; self.auth_candidate = None
+        self.auth_closed = False
         command = self.provenance['imageSpec']['Config'].get('Cmd', [])
         self.auth = None
         if any(type(arg) is str and arg.startswith('--service-auth-config') for arg in command):
             self.auth = protected_startup(initial.program)
             need(self.auth['serviceAuthConfig'] is not None and self.auth['command'] == command,
                  'H_WEBSITE_SERVICE_AUTH_PROGRAM')
-            self.auth_binding = self._auth_binding()
+            try:self.auth_binding = self._auth_binding(acquire=True)
+            except BaseException:
+                self.close()
+                raise
         self.operation = None
 
-    def _auth_binding(self):
+    def close(self):
+        self.auth_closed = True
+        try:_close_auth_fds(self.auth_fds)
+        finally:self.auth_held = []
+
+    def _auth_guest(self, item, binding, expected=None, *, retain=False):
+        state = item['State']; pid = state.get('Pid')
+        need(state.get('Running') is True and not any(state.get(k) for k in ('Paused', 'Restarting', 'Dead'))
+             and type(pid) is int and pid > 1, 'H_WEBSITE_AUTH_INIT_REQUIRED')
+        before = _auth_process(pid); fds = []
+        try:
+            root = _auth_root(pid); fds.append(root); root_info = os.fstat(root)
+            mounted = open_in_root(root, binding['mount']['Destination'], path_link=True); fds.append(mounted)
+            leaf = open_in_root(root, self.auth['serviceAuthConfig'], path_link=True); fds.append(leaf)
+            identities = [_auth_stamp(os.fstat(fd)) for fd in (mounted, leaf)]
+            need(identities == [binding['identities'][0], binding['identities'][-1]],
+                 'H_WEBSITE_AUTH_GUEST_SOURCE_CHANGED')
+            proof = {'process': before, 'root': [root_info.st_dev, root_info.st_ino],
+                     'mount': identities[0], 'leaf': identities[1]}
+            named = _auth_root(pid)
+            try:
+                current_root = os.fstat(named)
+                need([current_root.st_dev, current_root.st_ino] == proof['root'],
+                     'H_WEBSITE_AUTH_INIT_CHANGED')
+            finally:_close_auth_fds([named])
+            need(_auth_process(pid) == before and
+                 [os.fstat(root).st_dev, os.fstat(root).st_ino] == proof['root'],
+                 'H_WEBSITE_AUTH_INIT_CHANGED')
+            need(expected is None or proof == expected, 'H_WEBSITE_AUTH_INIT_CHANGED')
+            if retain:
+                self.auth_held.extend([(root, proof['root'], True),
+                                       (mounted, identities[0], False), (leaf, identities[1], False)])
+                self.auth_fds.extend(fds); fds = []
+            return proof
+        finally:_close_auth_fds(fds)
+
+    def _auth_binding(self, *, acquire=False):
+        need(not self.auth_closed, 'H_WEBSITE_AUTH_PROOF_CLOSED')
         path = self.initial.roots['ledgerBase'] / 'website-selection.json'
         selection, identity = private_document(path)
         cid = selection.get('oldId')
         need(type(cid) is str and re.fullmatch('[a-f0-9]{64}', cid), 'H_WEBSITE_SERVICE_AUTH_SELECTION')
         old = self.initial.engine.get('/containers/' + cid + '/json')
         need(old.get('Id') == cid, 'H_WEBSITE_SERVICE_AUTH_SELECTION')
+        binding = auth_mount_facts(old['Mounts'], self.auth['serviceAuthConfig'], os.getuid())
+        if acquire:
+            self.auth_old = self._auth_guest(old, binding, retain=True)
+        elif old['State'].get('Running') is True:
+            self._auth_guest(old, binding, self.auth_old)
+        else:
+            need(old['State'].get('Running') is False and old['State'].get('Pid') == 0
+                 and not any(old['State'].get(k) for k in ('Paused', 'Restarting', 'Dead')),
+                 'H_WEBSITE_AUTH_OLD_STATE_UNKNOWN')
+            try:actual = _auth_birth(self.auth_old['process']['pid'])
+            except (FileNotFoundError, ProcessLookupError):actual = None
+            need(actual is None or actual != self.auth_old['process']['start'],
+                 'H_WEBSITE_AUTH_OLD_INIT_STILL_LIVE')
+        if self.auth_candidate is not None:
+            candidate = self.initial.engine.get('/containers/' + self.created_id + '/json')
+            need(candidate.get('Id') == self.created_id, 'H_WEBSITE_CREATED_CID_CHANGED')
+            self._auth_guest(candidate, binding, self.auth_candidate)
+        # Hold the original namespace/root and bound inodes through OLD stop.
+        # Reopening the host source alone cannot establish OLD's mounted file.
+        for fd, expected, root in self.auth_held:
+            info = os.fstat(fd)
+            actual = [info.st_dev, info.st_ino] if root else _auth_stamp(info)
+            need(actual == expected, 'H_WEBSITE_AUTH_HELD_CHANGED')
+        again = self.initial.engine.get('/containers/' + cid + '/json')
+        need(all(again.get(k) == old.get(k) for k in ('Id', 'Image', 'Mounts'))
+             and all(again['State'].get(k) == old['State'].get(k)
+                     for k in ('Pid', 'Running', 'Paused', 'Restarting', 'Dead', 'StartedAt')),
+             'H_WEBSITE_AUTH_INIT_CHANGED')
+        need(auth_mount_facts(again['Mounts'], self.auth['serviceAuthConfig'], os.getuid()) == binding,
+             'H_WEBSITE_SERVICE_AUTH_CHANGED')
         return {'selectionIdentity': list(identity), 'selectionSHA256': hashlib.sha256(encoded(selection)).hexdigest(),
-                'binding': auth_mount_facts(old['Mounts'], self.auth['serviceAuthConfig'], os.getuid())}
+                'binding': binding, 'oldGuestAtCapture': self.auth_old}
 
     def input_binding(self):
         value, identity = private_document(self.links_path)
@@ -444,7 +546,13 @@ class TerminalWebsiteProfile:
 
     def await_ready(self, candidate_id):
         need(candidate_id == self.created_id, 'H_WEBSITE_CREATED_CID_CHANGED')
-        return self.phase('await-ready', self.initial.await_ready)
+        result = self.phase('await-ready', self.initial.await_ready)
+        if self.auth is not None:
+            current = self.initial.engine.get('/containers/' + candidate_id + '/json')
+            need(current.get('Id') == candidate_id, 'H_WEBSITE_CREATED_CID_CHANGED')
+            self.auth_candidate = self._auth_guest(current, self.auth_binding['binding'], retain=True)
+            self.input_binding()
+        return result
 
 
 class _NativeControl:
@@ -720,6 +828,7 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
     if args.plan_sha256 is not None and re.fullmatch('sha256:[a-f0-9]{64}', args.plan_sha256) is None:
         parser.error('Select the exact prepared plan SHA256')
     os.umask(0o077)
+    profile = None
     try:
         need(runtime_manifest is not None and type(service_binding) is dict
              and set(service_binding) == {'unit', 'python', 'entry'}
@@ -761,6 +870,7 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
             operation.mkdir(mode=0o700);L._sync(prepared)
             L.exclusive(operation / 'PLAN.json', raw)
             native._time()
+            profile.close(); profile = None
             print(json.dumps({'version': 1, 'state': 'H_WEBSITE_PREPARED', 'operation': args.operation,
                               'planDigest': standard.digest(plan), 'specDigest': plan['specPin'],
                               'finalSpecApproval': plan['finalSpecApproval'], 'effects': False}, sort_keys=True))
@@ -769,9 +879,16 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
         need(standard.digest(plan) == args.plan_sha256, 'H_WEBSITE_PREPARED_PLAN_CHANGED')
         native.bind_plan(plan)
         record = stage.apply(plan, args.plan_sha256)
+        profile.close(); profile = None
         print(json.dumps({'version': 1, 'state': 'H_WEBSITE_ADOPTED', 'receipt': record,
                           'providerCompletenessQualified': False, 'ownerShellAcceptanceRequired': True}, sort_keys=True))
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         print('Laptop terminal website operation refused or unconfirmed. Retain its private state; it was not retried.', file=sys.stderr)
         return 1
+    finally:
+        if profile is not None:
+            try:profile.close()
+            except (OSError, ValueError, RuntimeError):
+                print('Laptop terminal proof cleanup unconfirmed; retain its private state.', file=sys.stderr)
+                return 1

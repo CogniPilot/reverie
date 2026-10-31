@@ -71,7 +71,13 @@ flake apps still select the default no-auth packages.
 The old website command must be exactly the normal host/port command with the
 same selected auth path. Its existing single read-only bind must survive with
 identical source, destination, propagation and physical file identities. Missing,
-writable, masked, aliased or changed sources refuse. Keep the original reviewed
+writable, masked, aliased or changed sources refuse. Before effects the host
+source must also match the OLD website's actual guest mount-root and config
+leaf, bracketed by its init birth/root/namespaces. Owned nofollow descriptors
+retain that proof through stop; a stopped engine record alone does not prove
+the original init is gone. READY and final adoption repeat the candidate's
+actual guest join. Every owned proof descriptor closes before success; an
+uncertain close or observation refuses. Keep the original reviewed
 backup scopes for the auth document and every selected key; the existing
 checkpoint checks remain mandatory. No private auth file is imported into Nix.
 
