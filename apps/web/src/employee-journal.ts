@@ -204,8 +204,6 @@ CREATE INDEX IF NOT EXISTS journal_imports_employee ON journal_imports(owner, em
 export interface JournalSaveInput { roomId: string; turnId: string; draft: unknown; project?: string }
 /** One current (not superseded) entry chosen for an employee's brief: its own account, never re-checked here. */
 export interface JournalHighlight { entryId: number; committedAt: string; importance?: string; text: string }
-const IMPORTANCE_RANK: Record<string, number> = { keystone: 3, important: 2, notable: 1 };
-const HIGHLIGHT_SCAN = 200;
 export interface JournalSaveResult { status: 'committed'; entryId: number; turnId: string; replayed: boolean; payloadSha256: string; gates: JournalGate[]; sources: JournalSourceCheck[] }
 
 export class EmployeeJournalStore {
@@ -461,21 +459,13 @@ export class EmployeeJournalStore {
   }
 
   /**
-   * The employee's most important current entries, for its brief: superseded entries are skipped, then keystone before
-   * important before notable or unmarked, newest first within each. Only the newest HIGHLIGHT_SCAN entries are considered.
+   * The employee's most important current entries, for its room brief: the same choice as the session brief (superseded
+   * and imported entries left out, keystone first, newest first within a level), without tags.
    */
   highlights(owner: string, employeeId: string, limit = 5): JournalHighlight[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10) throw invalid('limit must be 1 to 10');
-    const rows = this.db.prepare(`SELECT j.id, j.committed_ms, j.payload FROM journal_entries j
-      WHERE j.owner = ? AND j.employee_id = ?
-        AND NOT EXISTS (SELECT 1 FROM journal_links l WHERE l.target_id = j.id AND l.kind = 'supersedes')
-      ORDER BY j.id DESC LIMIT ?`).all(owner, employeeId, HIGHLIGHT_SCAN);
-    return rows.map(row => {
-      const draft = (JSON.parse(String(row.payload)) as { draft: JournalDraft }).draft;
-      const importance = draft.annotations?.importance;
-      return { entryId: Number(row.id), committedAt: iso(Number(row.committed_ms)), ...(importance ? { importance } : {}), text: draft.text };
-    }).sort((a, b) => (IMPORTANCE_RANK[b.importance ?? ''] ?? 0) - (IMPORTANCE_RANK[a.importance ?? ''] ?? 0) || b.entryId - a.entryId)
-      .slice(0, limit);
+    return this.brief(owner, employeeId, limit).entries.map(({ entryId, committedAt, importance, text }) =>
+      ({ entryId, committedAt, ...(importance ? { importance } : {}), text }));
   }
 
   /** One page of headers, newest first. `more` marks truncation; it is not a count. */

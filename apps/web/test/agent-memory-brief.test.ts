@@ -55,6 +55,15 @@ describe('EmployeeJournalStore.highlights', () => {
     expect(() => store.highlights(OWNER, SELF, 0)).toThrow();
     expect(() => store.highlights(OWNER, SELF, 11)).toThrow();
   });
+
+  it('leaves imported entries out, as the session brief does', () => {
+    const { save } = journalWith();
+    store.importLegacy(OWNER, SELF, Array.from({ length: 6 }, (_, i) => ({ scope: 'private', legacyId: i + 1,
+      createdAt: Date.parse('2026-10-01T00:00:00Z') + i, kind: 'reflection', importance: 'keystone', text: `Imported note ${i + 1}.` })));
+    const own = save(store, 'My own note.');
+    expect(store.highlights(OWNER, SELF).map(h => h.entryId)).toEqual([own]);
+    expect(store.highlights(OWNER, SELF)).toEqual(store.brief(OWNER, SELF, 5).entries.map(({ tags: _tags, ...rest }) => rest));
+  });
 });
 
 describe('the identity and memory block', () => {
