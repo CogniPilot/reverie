@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentJournalMap, agentJournalRecall, agentJournalSave, elapsed } from '../src/cli-agent-journal.js';
+import { agentJournalBrief, agentJournalMap, agentJournalRecall, agentJournalSave, elapsed } from '../src/cli-agent-journal.js';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 
 function fixture(json: boolean, reply: { status: number; json: Record<string, unknown> }) {
@@ -14,6 +14,25 @@ const entry = { entryId: 4, turnId: 'm-turn', roomId: 'room-one', committedAt: '
   sources: [{ roomId: 'room-one', id: 'm-source', quote: 're-test', status: 'checked', detail: 'quote matches' }] };
 
 describe('journal CLI', () => {
+  it('prints the memory brief, as SessionStart hook JSON on request, and nothing in the hook when it is unavailable', async () => {
+    const ok = fixture(false, { status: 200, json: { success: true, data: { text: 'Your memory: you are Maple.', total: 0, entries: [] } } });
+    expect(await agentJournalBrief(ok.deps)).toBe(0);
+    expect(await agentJournalBrief(ok.deps, 'SessionStart')).toBe(0);
+    expect(ok.calls.map((c) => [c.method, c.path, c.query])).toEqual([['GET', '/api/agent/memory-brief', undefined], ['GET', '/api/agent/memory-brief', undefined]]);
+    expect(ok.output[0]).toBe('Your memory: you are Maple.');
+    expect(JSON.parse(ok.output[1])).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'Your memory: you are Maple.' } });
+    for (const reply of [
+      { status: 403, json: { success: false, error: 'journal unavailable for this caller' } },
+      { status: 200, json: { success: true, data: { text: 'x'.repeat(1801) } } },
+    ]) {
+      const f = fixture(false, reply);
+      expect(await agentJournalBrief(f.deps, 'SessionStart')).toBe(0);
+      expect(f.output).toEqual([]);
+      expect(await agentJournalBrief(f.deps)).not.toBe(0);
+    }
+    expect(await agentJournalBrief(ok.deps, 'PostToolUse')).not.toBe(0);
+  });
+
   it('shows exact UTC times with a coarse elapsed time', () => {
     const now = Date.parse('2026-10-30T14:00:00Z');
     expect(elapsed('2026-10-30T04:00:00.000Z', now)).toBe('10 h ago');

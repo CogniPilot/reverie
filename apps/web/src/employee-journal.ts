@@ -22,6 +22,9 @@ export const JOURNAL_SAVES_PER_HOUR = 30;
 export const JOURNAL_ATTEMPTS_PER_HOUR = 120;
 export const JOURNAL_INTERPRETATION = "the agent's own account, not verified";
 const MAP_PAGE = 20;
+/** One recall returns at most this many entries and, past the first, this many bytes of entry JSON. */
+export const RECALL_MAX_ENTRIES = 2;
+export const RECALL_MAX_BYTES = 8 * 1024;
 const HOUR = 3_600_000;
 
 export class EmployeeJournalError extends Error {
@@ -56,6 +59,7 @@ export interface JournalEntryView {
   entryId: number; turnId: string; roomId: string; committedAt: string; text: string; tags: string[];
   annotations?: JournalAnnotations; supersededBy: number[]; sources: JournalSourceCheck[]; interpretation: string;
 }
+export interface JournalBriefEntry { entryId: number; committedAt: string; tags: string[]; text: string; importance?: string }
 export interface JournalHeader { entryId: number; committedAt: string; roomId: string; tags: string[]; topics: string[]; importance?: string; superseded: boolean }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
@@ -300,8 +304,18 @@ export class EmployeeJournalStore {
     if (!expression) return [];
     const rows = this.db.prepare(`SELECT j.* FROM journal_fts f JOIN journal_entries j ON j.id = f.rowid
       WHERE journal_fts MATCH ? AND j.owner = ? AND j.employee_id = ? ${roomId ? 'AND j.room_id = ?' : ''}
-      ORDER BY rank, j.id DESC LIMIT 2`).all(expression, owner, employeeId, ...(roomId ? [roomId] : []));
-    return rows.map(row => this.view(row, read));
+      ORDER BY rank, j.id DESC LIMIT ${RECALL_MAX_ENTRIES}`).all(expression, owner, employeeId, ...(roomId ? [roomId] : []));
+    // Bounded in bytes as well as entries: the best match always, then only what still fits.
+    const views: JournalEntryView[] = [];
+    let used = 0;
+    for (const row of rows) {
+      const view = this.view(row, read);
+      const size = Buffer.byteLength(JSON.stringify(view));
+      if (views.length && used + size > RECALL_MAX_BYTES) break;
+      views.push(view);
+      used += size;
+    }
+    return views;
   }
 
   /** One page of headers, newest first. `more` marks truncation; it is not a count. */
@@ -343,6 +357,26 @@ export class EmployeeJournalStore {
   }
 
   /** Owner view: one page of full entries for an employee, newest first; sources are not re-checked here. */
+  /**
+   * What a new session should see first: how many entries there are and the few that matter most, keystone and important
+   * before notable, newest first within a level. Superseded entries are left out; recall still finds them.
+   */
+  brief(owner: string, employeeId: string, limit = 8): { total: number; entries: JournalBriefEntry[] } {
+    const total = Number((this.db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE owner = ? AND employee_id = ?')
+      .get(owner, employeeId) as { n: number }).n);
+    const rows = this.db.prepare(`SELECT j.id, j.committed_ms, j.payload FROM journal_entries j
+      WHERE j.owner = ? AND j.employee_id = ?
+        AND NOT EXISTS(SELECT 1 FROM journal_links l WHERE l.target_id = j.id AND l.kind = 'supersedes')
+      ORDER BY j.id DESC LIMIT 200`).all(owner, employeeId);
+    const rank = (importance?: string) => JOURNAL_IMPORTANCE.indexOf(importance as (typeof JOURNAL_IMPORTANCE)[number]);
+    const entries = rows.map(row => {
+      const draft = (JSON.parse(String(row.payload)) as { draft: JournalDraft }).draft;
+      return { entryId: Number(row.id), committedAt: iso(Number(row.committed_ms)), tags: draft.tags, text: draft.text,
+        ...(draft.annotations?.importance ? { importance: draft.annotations.importance } : {}) };
+    }).sort((a, b) => rank(b.importance) - rank(a.importance) || b.entryId - a.entryId);
+    return { total, entries: entries.slice(0, Math.max(0, Math.min(limit, 20))) };
+  }
+
   ownerPage(owner: string, employeeId: string, before?: number): { entries: JournalEntryView[]; more: boolean } {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 1)) throw invalid('before must be an entry id');
     const rows = this.db.prepare(`SELECT * FROM journal_entries WHERE owner = ? AND employee_id = ? ${before ? 'AND id < ?' : ''} ORDER BY id DESC LIMIT ?`)

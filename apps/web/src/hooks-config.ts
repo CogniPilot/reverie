@@ -452,6 +452,39 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
   ].join('\n');
 }
 
+const MEMORY_BRIEF_MARKER_PREFIX = 'REVERIE_MEMORY_BRIEF_V';
+const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}1`;
+
+/**
+ * The session-start memory brief, as its own handler with its own budget: the chat summary can fill its 3000 characters
+ * on a busy inbox, and one oversized output would drop both. Fails open: no brief, nothing printed.
+ */
+export function generateMemoryBriefScript(): string {
+  return [
+    `const ${MEMORY_BRIEF_MARKER} = true;`,
+    "const { execFile } = require('node:child_process');",
+    'process.stdin.resume();',
+    "const sessionId = process.env.REVERIE_SESSION_ID || '';",
+    'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
+    "execFile('reverie', ['agent', 'journal', 'brief', '--hook-event', 'SessionStart'],",
+    "  { timeout: 2500, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout) => {",
+    '  if (error) return;',
+    '  try {',
+    '    const output = JSON.parse(stdout).hookSpecificOutput;',
+    "    if (output?.hookEventName !== 'SessionStart' || typeof output.additionalContext !== 'string') return;",
+    '    const text = output.additionalContext.trim();',
+    '    if (!text || text.length > 2000) return;',
+    "    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));",
+    '  } catch {}',
+    '});',
+  ].join('\n');
+}
+
+function memoryBriefEntry(): { hooks: unknown[] } {
+  const script = generateMemoryBriefScript().replaceAll("'", "'\\''");
+  return { hooks: [{ type: 'command', command: `node -e '${script}'`, timeout: 3 }] };
+}
+
 function turnSummaryEntry(event: TurnSummaryHookEvent): { hooks: unknown[] } {
   // A command string works in both harnesses; quote the inline script for POSIX
   // shells rather than depending on harness-specific support for an args field.
@@ -462,7 +495,8 @@ function turnSummaryEntry(event: TurnSummaryHookEvent): { hooks: unknown[] } {
 export function generateCodexTurnSummaryHooks(): { hooks: Record<string, unknown[]> } {
   return {
     hooks: Object.fromEntries(
-      (['SessionStart', 'UserPromptSubmit', 'PostToolUse'] as const).map((event) => [event, [turnSummaryEntry(event)]])
+      (['SessionStart', 'UserPromptSubmit', 'PostToolUse'] as const).map((event) =>
+        [event, event === 'SessionStart' ? [memoryBriefEntry(), turnSummaryEntry(event)] : [turnSummaryEntry(event)]])
     ),
   };
 }
@@ -552,7 +586,10 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
 
   return {
     hooks: {
+      // The memory brief first, then the chat summary: a new session (start, resume, clear, compact or a new backend)
+      // begins with its own memory.
       SessionStart: [
+        memoryBriefEntry(),
         turnSummaryEntry('SessionStart'),
         // A session (re)started from a compaction: the compaction is over. Silent: SessionStart stdout becomes context.
         { matcher: 'compact', hooks: [{ type: 'command', command: curlCmdSilent('compact_finished'), timeout: HOOK_TIMEOUT_SECONDS }] },
@@ -652,7 +689,8 @@ function isReverieHookHandler(value: unknown): boolean {
       serialized.includes('/api/hook-event') ||
       serialized.includes(BACKGROUND_WAKE_MARKER_PREFIX) ||
       serialized.includes(SUBAGENT_STOP_GUARD_MARKER_PREFIX) ||
-      serialized.includes(TURN_SUMMARY_MARKER_PREFIX)
+      serialized.includes(TURN_SUMMARY_MARKER_PREFIX) ||
+      serialized.includes(MEMORY_BRIEF_MARKER_PREFIX)
     );
   } catch {
     return false;

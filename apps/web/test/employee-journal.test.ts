@@ -1,7 +1,7 @@
 /** Synthetic messages and an in-memory store; ports the hands journal validation, gate and recall cases. */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
-  asksToRemember, EmployeeJournalError, EmployeeJournalStore, JOURNAL_SAVES_PER_HOUR, readOnlyRequest, validateDraft,
+  asksToRemember, EmployeeJournalError, EmployeeJournalStore, JOURNAL_SAVES_PER_HOUR, RECALL_MAX_BYTES, RECALL_MAX_ENTRIES, readOnlyRequest, validateDraft,
   type JournalMessage, type ReadVisibleMessage,
 } from '../src/employee-journal.js';
 
@@ -22,6 +22,32 @@ describe('employee journal store', () => {
     message('m-turn', 'Remember this: records carry exact UTC times.', 200);
   });
   afterEach(() => store.close());
+
+  it('caps recall at two entries and 8 KB, always keeping the best match', () => {
+    for (const [i, at] of [[2, 300], [3, 400], [4, 500]] as const) message(`m-t${i}`, 'Remember this: records carry exact UTC times.', at);
+    const long = 'exact UTC times ' + 'x'.repeat(1000);
+    for (const turn of ['m-turn', 'm-t2', 'm-t3', 'm-t4'])
+      store.save(OWNER, SELF, { roomId: ROOM, turnId: turn, draft: draft({ text: long.slice(0, 1000) }) }, read);
+    const found = store.recall(OWNER, SELF, 'exact UTC times', read);
+    expect(found.length).toBeLessThanOrEqual(RECALL_MAX_ENTRIES);
+    expect(found.length).toBeGreaterThanOrEqual(1);
+    expect(Buffer.byteLength(JSON.stringify(found))).toBeLessThanOrEqual(RECALL_MAX_BYTES + 1024);
+  });
+
+  it('briefs keystone entries first, then the newest, without superseded ones, and counts every entry', () => {
+    const turn = (id: string, at: number) => message(id, 'Remember this: records carry exact UTC times.', at);
+    turn('m-t2', 300); turn('m-t3', 400); turn('m-t4', 500);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft({ annotations: { importance: 'notable' } }) }, read);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t2', draft: draft({ text: 'Standing rule: James merges.', tags: ['decision'], annotations: { importance: 'keystone' } }) }, read);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t3', draft: draft({ text: 'Plain note.', tags: ['lesson'] }) }, read);
+    store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-t4', draft: draft({ text: 'Corrects the first.', tags: ['correction'], annotations: { supersedes: [1] } }) }, read);
+    const brief = store.brief(OWNER, SELF);
+    expect(brief.total).toBe(4);
+    expect(brief.entries.map((e) => [e.entryId, e.importance ?? null])).toEqual([[2, 'keystone'], [4, null], [3, null]]);
+    expect(brief.entries[0]).toMatchObject({ text: 'Standing rule: James merges.', tags: ['decision'] });
+    expect(store.brief(OWNER, SELF, 1).entries.map((e) => e.entryId)).toEqual([2]);
+    expect(store.brief(OWNER, 'employee-two')).toEqual({ total: 0, entries: [] });
+  });
 
   it('keeps the hands journal limits', () => {
     expect(validateDraft(draft()).tags).toEqual(['promise']);
