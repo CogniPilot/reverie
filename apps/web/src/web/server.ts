@@ -14,7 +14,7 @@ import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
-import { employeeRestContext, employeeBriefContext, employeeMemoryContext } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -1452,9 +1452,9 @@ export class WebServer extends EventEmitter {
     let employeeJournal: EmployeeJournalStore | undefined;
     this.app.addHook('onClose', async () => employeeJournal?.close());
     const openJournal = () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db')));
-    // A brief without a recall is still a brief: an unreadable journal never blocks delivery.
-    const journalHighlights = (employee: { id: string; owner?: string }) => {
-      try { return openJournal().highlights(employee.owner ?? '', employee.id); } catch { return []; }
+    // A brief without a recall is still a brief: an unreadable journal never blocks delivery, and says so instead of reading as empty.
+    const journalHighlights = (employee: { id: string; owner?: string }): EmployeeMemoryRecall => {
+      try { return openJournal().highlights(employee.owner ?? '', employee.id); } catch { return 'unreadable'; }
     };
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
