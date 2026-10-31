@@ -141,6 +141,108 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         f.policy.write_bytes(H.encoded(review))
         return self.stage.plan('reverie', W.NEW_IMAGE, W.OLD, W.OLD_IMAGE)
 
+    def select_service_auth(self):
+        f = self.fixture
+        self.auth = '/run/private-services/service-auth.json'
+        self.auth_root = self.root / 'auth'; self.auth_root.mkdir(mode=0o700)
+        (self.auth_root / 'service-auth.json').write_text('{"version":1,"principals":[]}')
+        (self.auth_root / 'service-auth.json').chmod(0o600)
+        self.auth_tail = ['--service-auth-config', self.auth]
+        f.engine.images[W.OLD_IMAGE]['Config']['Cmd'] = ['reverie', 'web', '--host', '0.0.0.0', '--port', '3000']
+        f.engine.containers[W.OLD]['Config']['Cmd'] = ['reverie', 'web', '--host', '0.0.0.0', '--port', '3000', *self.auth_tail]
+        self.auth_mount = {'Type': 'bind', 'Source': str(self.auth_root),
+                           'Destination': '/run/private-services', 'RW': False, 'Propagation': 'rprivate'}
+        f.engine.containers[W.OLD]['Mounts'].append(deepcopy(self.auth_mount))
+        target = f.engine.images[W.NEW_IMAGE]['Config']
+        target['Cmd'] += self.auth_tail
+        self.provenance['imageSpec']['Config'] = deepcopy(target)
+        node = shutil.which('node')
+        self.initial.program = {'nodeInvocation': node,
+            'nodeWrapper': '/nix/store/console/lib/reverie/scripts/owner-terminal-start.mjs',
+            'applicationEntry': '/nix/store/console/lib/reverie/dist/index.js',
+            'argvPrefix': [node,
+                '/nix/store/console/lib/reverie/scripts/owner-terminal-start.mjs', *target['Cmd'][1:]],
+            'startupPython': {'invocation': '/nix/store/python/bin/python',
+                'entry': target['Cmd'][0],
+                'argvPrefix': ['/nix/store/python/bin/python', '-I', *target['Cmd']]}}
+        (self.initial.roots['ledgerBase'] / 'website-selection.json').write_bytes(
+            H.encoded({'oldId': W.OLD}))
+        (self.initial.roots['ledgerBase'] / 'website-selection.json').chmod(0o600)
+        review = json.loads(f.policy.read_bytes())
+        review['backupScopes'].append({'containerPath': self.auth, 'exclude': []})
+        f.policy.write_bytes(H.encoded(review))
+        self.rebuild()
+
+    def test_selected_service_auth_survives_real_stage_and_readonly_mount(self):
+        self.select_service_auth()
+        plan = self.approve()
+        self.assertEqual(plan['spec']['Cmd'], self.fixture.engine.images[W.NEW_IMAGE]['Config']['Cmd'])
+        self.assertEqual(plan['spec']['Cmd'][-2:], self.auth_tail)
+        selected = [m for m in plan['spec']['HostConfig']['Mounts']
+                    if m['Target'] == self.auth_mount['Destination']]
+        self.assertEqual(len(selected), 1); self.assertTrue(selected[0]['ReadOnly'])
+        self.assertEqual(selected[0]['Source'], str(self.auth_root))
+        result = self.stage.apply(plan, W.website.digest(plan))
+        self.assertEqual(result['state'], 'adopted')
+        self.fixture.assert_no_old_restore()
+
+    def test_service_auth_refuses_wrong_or_extra_old_commands_before_effects(self):
+        self.select_service_auth(); old = self.fixture.engine.containers[W.OLD]
+        original = deepcopy(old['Config']['Cmd'])
+        for command in (original[:-2], [*original, '--unknown'], [*original, *self.auth_tail],
+                        [*original[:-1], '/run/private-services/other.json'],
+                        ['/private/wrapper', *original[1:]]):
+            with self.subTest(command=command):
+                old['Config']['Cmd'] = command
+                with self.assertRaisesRegex(ValueError, 'EXPLICIT_OLD_COMMAND'):self.approve()
+                self.assertFalse(self.fixture.engine.mutations())
+        old['Config']['Cmd'] = original
+
+    def test_service_auth_refuses_missing_writable_or_masked_mount(self):
+        self.select_service_auth(); old = self.fixture.engine.containers[W.OLD]
+        original = deepcopy(old['Mounts'])
+        variants = ([m for m in original if m['Destination'] != self.auth_mount['Destination']],
+                    [{**m, 'RW': True} if m['Destination'] == self.auth_mount['Destination'] else m for m in original],
+                    [*original, {**self.auth_mount, 'Destination': self.auth}])
+        for mounts in variants:
+            with self.subTest(mounts=mounts):
+                old['Mounts'] = mounts
+                with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH'):self.approve()
+                self.assertFalse(self.fixture.engine.mutations())
+        old['Mounts'] = original
+
+    def test_service_auth_changed_leaf_or_mount_source_invalidates_prepared_plan(self):
+        self.select_service_auth(); plan = self.approve()
+        leaf = self.auth_root / 'service-auth.json'
+        staged = self.auth_root / 'replacement'; staged.write_text('{}'); staged.chmod(0o600)
+        staged.replace(leaf)
+        with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH_CHANGED'):
+            self.stage.apply(plan, W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_service_auth_unselected_and_manifest_disagreement_refuse(self):
+        self.select_service_auth()
+        self.initial.program['argvPrefix'][-1] = '/different/auth.json'
+        with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH'):self.rebuild()
+        self.initial.program['argvPrefix'][-1] = self.auth
+        target = self.fixture.engine.images[W.NEW_IMAGE]['Config']
+        target['Cmd'] = target['Cmd'][:-2]
+        self.provenance['imageSpec']['Config'] = deepcopy(target);self.rebuild()
+        with self.assertRaisesRegex(ValueError, 'EXPLICIT_OLD_COMMAND'):self.approve()
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_service_auth_alias_or_rebound_mount_source_refuses(self):
+        self.select_service_auth(); old = self.fixture.engine.containers[W.OLD]
+        selected = next(m for m in old['Mounts'] if m['Destination'] == self.auth_mount['Destination'])
+        alias = self.root / 'auth-alias'; alias.symlink_to(self.auth_root, target_is_directory=True)
+        selected['Source'] = str(alias)
+        with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH_SOURCE'):self.approve()
+        other = self.root / 'other-auth'; other.mkdir(mode=0o700)
+        (other / 'service-auth.json').write_text('{"version":1,"principals":[]}')
+        (other / 'service-auth.json').chmod(0o600);selected['Source'] = str(other)
+        with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH_CHANGED'):self.approve()
+        self.assertFalse(self.fixture.engine.mutations())
+
     def test_actual_stage_same_OFD_order_exact_CID_spec_and_preserved_isolated_socket(self):
         plan = self.approve(); f = self.fixture
         self.assertTrue(any(x['Target'] == '/run/reverie-workers' and x['ReadOnly'] for x in plan['spec']['HostConfig']['Mounts']))

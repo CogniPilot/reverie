@@ -26,6 +26,7 @@ from contextlib import nullcontext
 from . import owner_terminal_lifecycle as L
 from .owner_terminal_native import private_bytes, private_document
 from .website_image_provenance import verify_image_spec
+from .website_service_auth import WEB, protected_startup
 
 LINK_PURPOSE = 'owner-terminal-console-links-v1'
 UUID = re.compile(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}')
@@ -38,6 +39,39 @@ def need(value, reason):
 
 def encoded(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+
+
+def auth_mount_facts(mounts, selected, uid):
+    """Only metadata of the existing protected config; never read its contents."""
+    guest = PurePosixPath(selected)
+    covered = [m for m in mounts if guest == PurePosixPath(m['Destination'])
+               or guest.is_relative_to(PurePosixPath(m['Destination']))]
+    need(len(covered) == 1 and covered[0]['Type'] == 'bind' and covered[0]['RW'] is False
+         and not any(PurePosixPath(m['Destination']).is_relative_to(guest)
+                     and PurePosixPath(m['Destination']) != guest for m in mounts),
+         'H_WEBSITE_SERVICE_AUTH_MOUNT')
+    mount = covered[0]; source = Path(mount['Source'])
+    need(source.is_absolute() and source.resolve(strict=True) == source,
+         'H_WEBSITE_SERVICE_AUTH_SOURCE')
+    relative = guest.relative_to(PurePosixPath(mount['Destination']))
+    fd = os.open(source, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+    facts = []
+    try:
+        for part in (*relative.parts, None):
+            info = os.fstat(fd); facts.append(list(L._native_stamp(info)))
+            need(info.st_uid in (0, uid) and not info.st_mode & 0o022,
+                 'H_WEBSITE_SERVICE_AUTH_SOURCE')
+            if part is None:break
+            need(stat.S_ISDIR(info.st_mode), 'H_WEBSITE_SERVICE_AUTH_SOURCE')
+            following = os.open(part, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd); fd = following
+        # Match the ordinary config's root/service-UID, non-writable trust
+        # boundary. Secret key permissions remain the server's existing rule.
+        need(stat.S_ISREG(info.st_mode) and info.st_uid in (0, uid) and info.st_nlink == 1
+             and not info.st_mode & 0o022, 'H_WEBSITE_SERVICE_AUTH_FILE')
+    finally:os.close(fd)
+    return {'mount': {k: mount.get(k) for k in ('Type', 'Source', 'Destination', 'RW', 'Propagation')},
+            'identities': facts}
 
 
 def describe_link_facts(initial, standard, container_id):
@@ -161,7 +195,24 @@ class TerminalWebsiteProfile:
         need(len(set(paths)) == len(paths), 'H_WEBSITE_DUPLICATE_LINK')
         from .resource_actor_install import artifact
         self.provenance = artifact(initial.runtime.value['imageProvenance'])
+        command = self.provenance['imageSpec']['Config'].get('Cmd', [])
+        self.auth = None
+        if any(type(arg) is str and arg.startswith('--service-auth-config') for arg in command):
+            self.auth = protected_startup(initial.program)
+            need(self.auth['serviceAuthConfig'] is not None and self.auth['command'] == command,
+                 'H_WEBSITE_SERVICE_AUTH_PROGRAM')
+            self.auth_binding = self._auth_binding()
         self.operation = None
+
+    def _auth_binding(self):
+        path = self.initial.roots['ledgerBase'] / 'website-selection.json'
+        selection, identity = private_document(path)
+        cid = selection.get('oldId')
+        need(type(cid) is str and re.fullmatch('[a-f0-9]{64}', cid), 'H_WEBSITE_SERVICE_AUTH_SELECTION')
+        old = self.initial.engine.get('/containers/' + cid + '/json')
+        need(old.get('Id') == cid, 'H_WEBSITE_SERVICE_AUTH_SELECTION')
+        return {'selectionIdentity': list(identity), 'selectionSHA256': hashlib.sha256(encoded(selection)).hexdigest(),
+                'binding': auth_mount_facts(old['Mounts'], self.auth['serviceAuthConfig'], os.getuid())}
 
     def input_binding(self):
         value, identity = private_document(self.links_path)
@@ -169,12 +220,16 @@ class TerminalWebsiteProfile:
         initial_raw, initial_identity = private_bytes(self.initial.path)
         need(initial_identity == self.initial.identity and json.loads(initial_raw) == self.initial.value,
              'H_WEBSITE_INSTALLATION_CHANGED')
-        return {'installationSHA256': hashlib.sha256(initial_raw).hexdigest(),
+        result = {'installationSHA256': hashlib.sha256(initial_raw).hexdigest(),
                 'installationIdentity': list(initial_identity),
                 'rootIdentities': {name: list(identity) for name, identity in self.initial.root_ids.items()},
                 'runtimeManifest': self.initial.runtime.pair,
                 'linkFactsSHA256': hashlib.sha256(encoded(self.links)).hexdigest(),
                 'linkFactsIdentity': list(self.links_identity)}
+        if self.auth is not None:
+            need(self._auth_binding() == self.auth_binding, 'H_WEBSITE_SERVICE_AUTH_CHANGED')
+            result['serviceAuth'] = copy.deepcopy(self.auth_binding)
+        return result
 
     def require_launch(self, old, target):
         normal = ['/bin/tini', '-g', '-s', '--', '/usr/local/bin/reverie-start']
@@ -193,8 +248,14 @@ class TerminalWebsiteProfile:
         verify_image_spec(self.provenance, target)
         need(deployment.get('websiteRuntime') == 'terminal' and deployment.get('protectedWebsite') is True
              and deployment.get('ownerTerminalConfig') == str(self.initial.path), 'H_WEBSITE_OWNER_SELECTION')
-        need(old['Config'].get('Cmd') == previous['Config'].get('Cmd')
-             and old['Config'].get('Entrypoint') == previous['Config'].get('Entrypoint'),
+        command = old['Config'].get('Cmd'); previous_command = previous['Config'].get('Cmd')
+        matched = command == previous_command
+        if self.auth is not None:
+            expected = [[entry, *WEB, '--service-auth-config', self.auth['serviceAuthConfig']]
+                        for entry in ('reverie', '/bin/reverie')]
+            matched = command in expected and previous_command in (
+                command, [command[0], *WEB])
+        need(matched and old['Config'].get('Entrypoint') == previous['Config'].get('Entrypoint'),
              'H_WEBSITE_EXPLICIT_OLD_COMMAND_UNSUPPORTED')
         host = old['HostConfig']
         need(not host.get('Privileged') and not host.get('CapAdd') and not host.get('Devices')
@@ -204,6 +265,16 @@ class TerminalWebsiteProfile:
         config = self.initial.guard()
         need(old['Config']['User'] == str(config['uid']) + ':' + str(config['gid']), 'H_WEBSITE_OWNER_UID')
         result = original(old, previous, target, deployment['adminPhoneWake'], deployment.get('ownerCodingEvidence', True))
+        if self.auth is not None:
+            # Only the exact reviewed ordinary-auth -> compiled H-auth form.
+            result['Cmd'] = copy.deepcopy(self.auth['command'])
+            candidate_mounts = [{'Type': m['Type'], 'Source': m['Source'], 'Destination': m['Target'],
+                                 'RW': not m.get('ReadOnly', False),
+                                 'Propagation': m.get('BindOptions', {}).get('Propagation', 'rprivate')}
+                                for m in result['HostConfig']['Mounts']]
+            need(auth_mount_facts(old['Mounts'], self.auth['serviceAuthConfig'], os.getuid()) ==
+                 auth_mount_facts(candidate_mounts, self.auth['serviceAuthConfig'], os.getuid()) ==
+                 self.auth_binding['binding'], 'H_WEBSITE_SERVICE_AUTH_CHANGED')
         self.require_launch(old['Config'], result)
         need(result.get('Cmd') == target['Config'].get('Cmd'), 'H_WEBSITE_FIXED_TARGET_PROGRAM')
         result.pop('Hostname', None)  # Docker derives exactly the new CID prefix.
@@ -230,6 +301,9 @@ class TerminalWebsiteProfile:
 
     def assert_links(self, standard, old, spec):
         self.input_binding()
+        if self.auth is not None:
+            need(auth_mount_facts(old['Mounts'], self.auth['serviceAuthConfig'], os.getuid()) ==
+                 self.auth_binding['binding'], 'H_WEBSITE_SERVICE_AUTH_CHANGED')
         env = standard.environment(spec.get('Env') or [])
         get = lambda k, default: env.get(k, k + '=' + default).split('=', 1)[1] or default
         console = get('REVERIE_DATA_DIR', get('REVERIE_DATA', '/instances/default') + '/console')
