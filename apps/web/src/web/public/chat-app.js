@@ -142,6 +142,14 @@ function caProfilePronouns(company) {
   return out;
 }
 
+/** A member's 'doing' Board cards (`focus`, read from the Board by the server) as one line, or ''. */
+function caFocusLine(m) {
+  const cards = Array.isArray(m?.focus) ? m.focus.filter(c => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+  if (!cards.length) return '';
+  const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
+  return `${cards.map(c => `${c.id} ${c.title}`).join(' · ')}${more}`;
+}
+
 /**
  * The pronouns a member last proposed in `messages` (`reverie agent profile --pronouns`, which writes nothing), or ''.
  * Only the member's own agent message counts: `<name> proposes pronouns: <text> (<who> can set them on my member card)`.
@@ -6528,7 +6536,7 @@ class ReverieChatApp {
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
-    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
+    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || caFocusLine(m);
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
     const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
@@ -6783,6 +6791,7 @@ class ReverieChatApp {
     const facts = caAgentFacts(session);
     for (const [k, v] of facts.headline) kv(k, v, technical);
     kv('Goal', m.goal, technical);
+    kv('Doing', caFocusLine(m), technical);
     kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '', technical);
     if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
     // What the page already knows is shown at once; the runtime's fuller profile replaces it when it arrives.
