@@ -87,8 +87,10 @@ five_P(end)   = min(100, five_P + r5_P'·H5_P)      five_Q(end)   = min(100, fiv
 `plan-pace.ts` computes it. `H5` is the hours to its five-hour reset. Each side also reports the run-out time when its
 projection passes 100, and the before values (without the move) for comparison. Every plan has a factor: a plan with no readings yet uses its provider and tier prior, so a move to a fresh plan, or across providers, is still estimated, just with the prior's wider band. `moveImpact` returns that band for both ends (`endAfterLow`, `endAfterHigh`).
 
-The API is `GET /api/plans/move-impact?session=<id>&to=<account id>`, owner only like the rest of the plan burn data.
-The plan-move confirmation and the Plans page show its result. The page also lists each plan's agents with their burn.
+The API is `GET /api/plans/move-impact?session=<id>&to=<account id>`, for the owner or an agent with plans.view_all, like
+`/api/plans`. Each side's rate now is the plan's realtime rate when its sessions report cost, otherwise its 6-hour slope,
+otherwise 0 for a plan with no data, and `rateBasis` says which. The plan-move confirmation is to show its result next;
+the Plans page already lists each plan's agents with their burn.
 
 ## Accuracy check
 
@@ -114,11 +116,12 @@ The estimates are checked against what actually happened, from the stored histor
 In this change: per-session cost samples from the status line (`plan-agent-cost-history.json`); the 30-minute agent
 cost rate; the per-plan factor with its provider and tier prior, update from the plan's own readings and band; per-agent
 burn and the realtime plan rate on `/api/plans` rows and the board's plan burn, shown on each Claude plan card; and
-`moveImpact` as a tested pure function; and each factor's hourly fit error against the plan's own readings.
+`moveImpact` and its route `GET /api/plans/move-impact`; and each factor's hourly fit error against the plan's own
+readings.
 
 Remaining:
 
-1. The move-impact route (`/api/plans/move-impact`) and its display in the plan-move dialog.
+1. Showing the move impact in the plan-move dialog. The route `/api/plans/move-impact` is done.
 2. The five-hour side: store five-hour percent in the usage samples and add `c5_P`.
 3. Persisting the factor's posterior across windows and restarts. Today each read recomputes it from the kept history.
 4. An explicit tier field on subscription profiles instead of reading the label.

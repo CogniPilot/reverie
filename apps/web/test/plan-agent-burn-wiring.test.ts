@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
 import { createRouteTestHarness, type RouteTestHarness } from './routes/_route-test-utils.js';
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
+import { registerPlansRoutes } from '../src/web/routes/plans-routes.js';
+import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import { registerStatusTelemetryRoutes } from '../src/web/routes/status-telemetry-routes.js';
 import { PlanCostTracker } from '../src/plan-agent-burn.js';
 import { PlanService } from '../src/plan-accounts.js';
@@ -62,6 +66,76 @@ describe('Plans rows carry per-agent burn', () => {
     process.env.HOME = savedHome;
     resetLatestAccountPlanUsage();
     rmSync(home, { recursive: true, force: true });
+  });
+
+  /** Two Claude plans: `secondary` with two working sessions and a rising history, `team-20x` with no data. */
+  const twoPlans = () => {
+    mkdirSync(join(home, '.claude-accounts', 'team-20x'), { recursive: true });
+    writeFileSync(join(home, '.claude-accounts', 'team-20x', '.credentials.json'), '{}');
+    const history = join(home, 'plan-usage-history.json');
+    const weekly = [];
+    for (let t = NOW - 6 * H; t <= NOW; t += 5 * M) weekly.push({ at: t, weekly: Math.round(20 + (1.5 * (t - NOW + 6 * H)) / H), resetAt: RESET });
+    writeFileSync(history, JSON.stringify({ 'acct-anthropic-secondary': weekly }));
+    const samples: Record<string, { at: number; cost: number }[]> = { a: [], b: [] };
+    for (let t = NOW - 6 * H; t <= NOW; t += M) {
+      samples.a.push({ at: t, cost: (2 * (t - NOW + 6 * H)) / H });
+      samples.b.push({ at: t, cost: (1 * (t - NOW + 6 * H)) / H });
+    }
+    writeFileSync(join(home, 'costs.json'), JSON.stringify(samples));
+    for (const [id, label, used] of [['acct-anthropic-secondary', 'secondary', 29], ['acct-anthropic-team-20x', 'team-20x', 10]] as const)
+      setLatestAccountPlanUsage({ id, label, provider: 'anthropic', status: 'ready', updatedAt: NOW, usage: { sevenDay: { usedPercentage: used, resetAt: RESET } } });
+    const dirOf = join(home, '.claude-accounts', 'secondary');
+    const session = (id: string, name: string) => ({ id, name, mode: 'claude', status: 'busy', getEnvOverridesForPersist: () => ({ CLAUDE_CONFIG_DIR: dirOf }) });
+    return new PlanService({
+      reader: {
+        read: async (p: SubscriptionProfile) => ({ id: p.id, label: p.label, provider: p.provider, status: 'ready' as const, authState: 'signed-in' as const, updatedAt: NOW, usage: null }),
+      },
+      sessions: () => [session('a', 'Worker A'), session('b', 'Worker B')],
+      coordinatorIds: () => [],
+      historyFile: history,
+      costs: new PlanCostTracker(join(home, 'costs.json')),
+      home,
+      now: () => NOW,
+      gpu: async () => ({ available: false, utilization: null, memoryUsedMb: null, memoryTotalMb: null, models: [], lastHolder: null }),
+    });
+  };
+
+  it('estimates a move with the leaving plan learned factor and the joining plan prior', async () => {
+    const service = twoPlans();
+    const target = (await service.rows()).accounts.find((r) => r.label === 'team-20x')!;
+    const impact = (await service.moveImpact('a', target.id))!;
+    expect(impact.usdPerHour).toBeCloseTo(2, 1);
+    expect(impact.from.id).toBe('acct-anthropic-secondary');
+    expect(impact.from.conversion.basis).toBe('learned');
+    expect(impact.to.conversion.basis).toBe('prior');
+    expect(impact.to.conversion.tier).toBe('20x');
+    // Leaving drops the plan's rate by about 2 units × ~0.5; joining adds 2 units × the 20x prior (1/20).
+    expect(impact.from.rateAfter!).toBeLessThan(impact.from.rateNow!);
+    expect(impact.from.endAfter!).toBeLessThan(impact.from.endNow!);
+    expect(impact.to.rateBasis).toBe('none');
+    expect(impact.to.rateNow).toBe(0);
+    expect(impact.to.rateAfter!).toBeCloseTo(2 * (1 / 20), 2);
+    expect(impact.from.rateBasis).toBe('realtime');
+    expect(impact.to.endAfterLow!).toBeLessThanOrEqual(impact.to.endAfter!);
+    expect(impact.to.endAfterHigh!).toBeGreaterThanOrEqual(impact.to.endAfter!);
+    expect(await service.moveImpact('nobody', target.id)).toBeNull();
+    expect(await service.moveImpact('a', 'acct-anthropic-secondary')).toBeNull();
+  });
+
+  it('serves the move impact to the owner and refuses a bad query', async () => {
+    const app = Fastify({ logger: false });
+    registerPlansRoutes(app, twoPlans(), undefined, undefined, trustedFixtureOwner);
+    installRouteErrorHandler(app);
+    await app.ready();
+    try {
+      const ok = await app.inject({ method: 'GET', url: `/api/plans/move-impact?session=a&to=${encodeURIComponent('acct-anthropic-team-20x')}` });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json().data.to.label).toBe('team-20x');
+      expect((await app.inject({ method: 'GET', url: '/api/plans/move-impact?session=a' })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'GET', url: '/api/plans/move-impact?session=zz&to=x' })).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
   });
 
   it('splits the plan burn across the sessions on it', async () => {
