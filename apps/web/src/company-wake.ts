@@ -178,6 +178,9 @@ export class CompanyWake {
       const lease = this.deps.begin(employee.id, employee.sessionId);
       if (!lease) { skip('lifecycle-in-progress'); continue; }
       const allowed = () => lease.current() && baseAllowed();
+      // Before the wake call nothing was started. Once it is called a throw may come after the session started, so its
+      // outcome is unknown: never reported as "did not start", which would invite a second start.
+      let attempted = false;
       try {
         if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId))) {
           skip('disabled-or-retry-limited');
@@ -191,6 +194,7 @@ export class CompanyWake {
           await this.deps.noteRunning(employee.sessionId);
           continue;
         }
+        attempted = true;
         const woke = await this.deps.wake(entry, allowed);
         if (!allowed()) {
           skip('changed-or-stopping');
@@ -207,7 +211,7 @@ export class CompanyWake {
           }
         } else skip('wake-failed');
       } catch {
-        skip('wake-failed');
+        skip(attempted ? 'start-unconfirmed' : 'wake-failed');
       } finally {
         lease.finish();
       }

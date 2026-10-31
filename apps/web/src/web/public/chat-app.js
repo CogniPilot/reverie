@@ -7309,6 +7309,8 @@ class ReverieChatApp {
       if (recovery.awakened.length) return this.toast(`Woke ${employee.name}. Check that their terminal is ready.`, 'info');
       if (!recovery.skipped.length) return this.toast(`${employee.name} is already running. Nothing was started.`, 'info');
       const reason = recovery.skipped[0].reason;
+      // The start was attempted and its outcome is unknown: not "not woken", and never offered as a retry.
+      if (reason === 'start-unconfirmed') return this.toast(`Startup of ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
       this.toast(`${employee.name} was not woken: ${CA_WAKE_SKIPS[reason] ?? reason}.`, 'error');
     } finally { this._wakingEmployees.delete(employee.id); }
   }

@@ -51,6 +51,19 @@ it.each([
   expect(calls).toHaveLength(1); expect(toasts()).toContain(text);
 });
 
+it('an attempted start with an unknown outcome says so, sends one request and never retries', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const { h, employee, calls, toasts, reply } = await setup();
+    reply({ ok: true, data: { recovery: { awakened: [], skipped: [{ employeeId: 'expert', reason: 'start-unconfirmed' }] } } });
+    await h.shell.wakeEmployee(employee);
+    await vi.advanceTimersByTimeAsync(60_000); await h.flush();
+    expect(calls).toEqual([{ path: '/api/company/employees/expert/wake', method: 'POST', body: {} }]);
+    expect(toasts()).toContain('Startup of Alex could not be confirmed. Check their status before trying again.');
+    expect(toasts().some((text: string) => text.includes('was not woken') || text.startsWith('Woke'))).toBe(false);
+  } finally { vi.useRealTimers(); }
+});
+
 it('shows a refusal from the server and does not retry it', async () => {
   const { h, employee, calls, toasts, reply } = await setup();
   reply({ ok: false, status: 409, error: 'Return the employee from vacation before waking them' });
