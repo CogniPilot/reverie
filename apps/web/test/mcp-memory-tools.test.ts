@@ -200,6 +200,19 @@ describe('inside a Reverie session: the office journal', () => {
     }
   });
 
+  it('still answers from the old store, and says so, when the journal lookup fails', async () => {
+    const out: Array<Record<string, unknown>> = [];
+    const srv = createMcpServer({ config: { ...mcpConfig, apiUrl: 'http://office.test', selfId: MINE }, write: (m) => out.push(m), modes: ['shell'],
+      memory: ON, memoryRunner: recorder({ stdout: '[{"text":"an old reflection"}]' }).runner,
+      request: async () => ({ status: 503, json: { success: false, error: 'journal unavailable' } as never, text: '' }) });
+    await srv.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'memory_recall', arguments: { query: 'q' } } }));
+    const result = out[0].result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(false);
+    const body = JSON.parse(result.content[0].text);
+    expect(body).toMatchObject({ journal: [], legacy: [{ text: 'an old reflection' }] });
+    expect(body.note).toContain('journal lookup failed (journal unavailable)');
+  });
+
   it('recalls from the journal as this session, with the old store as labelled read-only history', async () => {
     const s = journalServer({ stdout: '[{"text":"an old reflection"}]' }, { entries: [{ entryId: 3, text: 'baseline' }] });
     const result = await s.call('memory_recall', { query: 'baseline', project: 'rumoca' });

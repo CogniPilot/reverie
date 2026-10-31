@@ -79,6 +79,23 @@ describe('employee journal routes', () => {
     expect((await save(SID, { roomId: ROOM, turnId: 'm-turn', project: 'No Caps', draft: {} })).statusCode).toBe(400);
   });
 
+  it('imports old-store memories into the calling session\'s own journal, and refuses owner, service and spoofed callers', async () => {
+    const items = [{ scope: 'private', legacyId: 1, createdAt: Date.parse('2026-10-01T00:00:00Z'), kind: 'reflection', importance: 'important', text: 'Parity passed.' }];
+    const imported = await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload: { items }, headers: as(SID) });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().data.results).toMatchObject([{ legacyId: 1, status: 'imported' }]);
+    expect((await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload: { items }, headers: as(SID) })).json().data.results[0].status).toBe('duplicate');
+    expect((await app.inject({ url: '/api/agent/journal/recall?q=parity', headers: as(OTHER) })).json().data.entries).toEqual([]); // not another's
+    for (const response of [
+      await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload: { items }, cookies: { [OWNER_COOKIE]: ownerToken }, headers: as(SID) }),
+      await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload: { items }, headers: { [SERVICE_HEADER]: serviceToken, ...as(SID) } }),
+      await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload: { items }, headers: as(SID.slice(0, 16)) }),
+      await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload: { items } }),
+    ]) expect(response.statusCode).toBe(403);
+    for (const payload of [{ items: [] }, { items, extra: 1 }, { items: Array(51).fill(items[0]) }])
+      expect((await app.inject({ method: 'POST', url: '/api/agent/journal/import', payload, headers: as(SID) })).statusCode).toBe(400);
+  });
+
   it('gives a session its own memory brief, and refuses owner, service, spoofed and parameterized calls', async () => {
     const empty = await app.inject({ url: '/api/agent/memory-brief', headers: as(SID) });
     expect(empty.statusCode).toBe(200);

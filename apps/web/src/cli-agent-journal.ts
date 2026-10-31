@@ -7,7 +7,8 @@ import { MEMORY_BRIEF_MAX } from './memory-brief.js';
 import type { Command } from 'commander';
 import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
-import { JOURNAL_INTERPRETATION, type JournalEntryView, type JournalGate, type JournalHeader } from './employee-journal.js';
+import { agentJournalImportLegacy, type ImportLegacyOptions } from './cli-agent-journal-import.js';
+import { JOURNAL_INTERPRETATION, JOURNAL_PROJECT_SAVES_PER_DAY, type JournalEntryView, type JournalGate, type JournalHeader } from './employee-journal.js';
 
 const bounds = { maxBytes: 256 * 1024, deadlineMs: 10_000 };
 const repeat = (value: string, all: string[] = []) => [...all, value];
@@ -194,6 +195,13 @@ export function registerJournalCommands(
     .option('--json', 'Machine-readable page')
     .action((words: string[] | undefined, options: { room?: string; before?: string; json?: boolean }) =>
       run(Boolean(options.json), deps => agentJournalMap(deps, words ?? [], options)));
+  journal.command('import-legacy').description('Move your old reverie-memory store into this journal, as imported, unverified entries (run --dry-run first)')
+    .option('--dry-run', 'Show what would be imported; write nothing')
+    .option('--write', 'Import (safe to repeat: memories already imported are skipped)')
+    .option('--include-projects', `Also import project stores, which every employee can then read; they use your own ${JOURNAL_PROJECT_SAVES_PER_DAY} project saves a day`)
+    .option('--instance <path>', 'Your own instance config (default: REVERIE_INSTANCE_CONFIG)')
+    .option('--json', 'Machine-readable result')
+    .action((options: ImportLegacyOptions & { json?: boolean }) => run(Boolean(options.json), deps => agentJournalImportLegacy(deps, options)));
   journal.command('source <message-id>').description('Re-read a cited message as you can see it now')
     .requiredOption('-r, --room <id>', 'Room of the message')
     .option('--json', 'Machine-readable message')

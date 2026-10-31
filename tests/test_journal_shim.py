@@ -131,6 +131,15 @@ class DispatchThroughJournalTests(unittest.TestCase):
                 dispatch(self.brain, {"action": "recall", "query": "personal", "channel": "work"})
         recall.assert_not_called()
 
+    def test_a_failed_journal_lookup_still_answers_from_the_old_store_and_says_so(self):
+        self.store.add_reflection("Old note about parity", 7, [], "shared")
+        with patch.object(journal_shim, "available", return_value=True), \
+                patch.object(journal_shim, "recall", side_effect=RuntimeError("journal unavailable")):
+            result = dispatch(self.brain, {"action": "recall", "query": "parity"})
+        self.assertEqual(result["journal"], [])
+        self.assertIn("Old note about parity", json.dumps(result["legacy"]))
+        self.assertIn("journal lookup failed (journal unavailable)", result["note"])
+
     def test_with_the_journal_remember_goes_to_the_journal_only(self):
         before = self.store._db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         with patch.object(journal_shim, "available", return_value=True), \
