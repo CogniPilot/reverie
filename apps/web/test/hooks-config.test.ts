@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { renderTurnSummary } from '../src/chatroom-turn-summary.js';
+import { MEMORY_BRIEF_NO_CLI, MEMORY_BRIEF_UNREADABLE } from '../src/memory-brief.js';
 import { SETTINGS_PATH } from '../src/web/route-helpers.js';
 import { tmpdir, homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -1688,7 +1689,7 @@ describe('per-turn message summary hooks', () => {
   it('starts every session with the memory brief as its own bounded handler, before the summary, in both harnesses', () => {
     for (const config of [generateHooksConfig(), generateCodexTurnSummaryHooks()]) {
       const handlers = (config.hooks.SessionStart as Array<{ hooks: Array<{ command: string; timeout: number }> }>).flatMap((e) => e.hooks);
-      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V1'));
+      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V2'));
       const summary = handlers.findIndex((h) => h.command.includes('REVERIE_TURN_SUMMARY_V2'));
       expect(brief).toBeGreaterThanOrEqual(0);
       expect(brief).toBeLessThan(summary);
@@ -1741,18 +1742,18 @@ describe('per-turn message summary hooks', () => {
     expect(run({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'wrong event' } })).toBe('');
   });
 
-  it('runs the real memory brief helper: shows the brief every session start, and nothing when it fails or is too long', () => {
+  it('runs the real memory brief helper: shows the brief every session start, says when it could not be had, and drops bad output', () => {
     const dir = join(tmpdir(), `reverie-brief-hook-${randomUUID()}`);
     mkdirSync(dir, { mode: 0o700 });
     writeFileSync(
       join(dir, 'reverie'),
-      `#!${process.execPath}\nif(process.argv.slice(2).join(' ')!=='agent journal brief --hook-event SessionStart'||process.env.BRIEF_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:process.env.BRIEF_TEXT}}));\n`,
+      `#!${process.execPath}\nif(process.env.BRIEF_FAIL==='old'){process.stderr.write("error: unknown command 'journal'\\n");process.exit(1)}if(process.argv.slice(2).join(' ')!=='agent journal brief --hook-event SessionStart'||process.env.BRIEF_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:process.env.BRIEF_TEXT}}));\n`,
       { mode: 0o700 }
     );
-    const run = (text: string, fail = false) => {
+    const run = (text: string, fail: boolean | 'old' = false) => {
       const result = spawnSync(process.execPath, ['-e', generateMemoryBriefScript()], {
         env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(),
-          REVERIE_API_URL: 'http://office', BRIEF_TEXT: text, BRIEF_FAIL: fail ? '1' : '' },
+          REVERIE_API_URL: 'http://office', BRIEF_TEXT: text, BRIEF_FAIL: fail === 'old' ? 'old' : fail ? '1' : '' },
         encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
       });
       expect(result.status).toBe(0);
@@ -1763,7 +1764,10 @@ describe('per-turn message summary hooks', () => {
       expect(run('Your memory: you are Maple.')).toEqual({ hookEventName: 'SessionStart', additionalContext: 'Your memory: you are Maple.' });
       expect(run('Your memory: you are Maple.')?.additionalContext).toBe('Your memory: you are Maple.'); // every start, no dedup
       expect(run('x'.repeat(2001))).toBeUndefined();
-      expect(run('Your memory: you are Maple.', true)).toBeUndefined();
+      // The CLI failed or timed out: the session is told its brief could not be read, not left to assume it has no memory.
+      expect(run('Your memory: you are Maple.', true)).toEqual({ hookEventName: 'SessionStart', additionalContext: MEMORY_BRIEF_UNREADABLE });
+      // A laptop CLI from before the journal: the gap is named, not a command that is not there.
+      expect(run('Your memory: you are Maple.', 'old')).toEqual({ hookEventName: 'SessionStart', additionalContext: MEMORY_BRIEF_NO_CLI });
       expect(run('  ')).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });

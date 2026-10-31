@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agentJournalBrief, agentJournalMap, agentJournalRecall, agentJournalSave, elapsed } from '../src/cli-agent-journal.js';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
+import { MEMORY_BRIEF_UNREADABLE } from '../src/memory-brief.js';
 
 function fixture(json: boolean, reply: { status: number; json: Record<string, unknown> }) {
   const output: string[] = [], errors: string[] = [], calls: RequestOptions[] = [];
@@ -14,22 +15,34 @@ const entry = { entryId: 4, turnId: 'm-turn', roomId: 'room-one', committedAt: '
   sources: [{ roomId: 'room-one', id: 'm-source', quote: 're-test', status: 'checked', detail: 'quote matches' }] };
 
 describe('journal CLI', () => {
-  it('prints the memory brief, as SessionStart hook JSON on request, and nothing in the hook when it is unavailable', async () => {
+  it('prints the memory brief, as SessionStart hook JSON on request, and in the hook says when it could not be read', async () => {
     const ok = fixture(false, { status: 200, json: { success: true, data: { text: 'Your memory: you are Maple.', total: 0, entries: [] } } });
     expect(await agentJournalBrief(ok.deps)).toBe(0);
     expect(await agentJournalBrief(ok.deps, 'SessionStart')).toBe(0);
     expect(ok.calls.map((c) => [c.method, c.path, c.query])).toEqual([['GET', '/api/agent/memory-brief', undefined], ['GET', '/api/agent/memory-brief', undefined]]);
     expect(ok.output[0]).toBe('Your memory: you are Maple.');
     expect(JSON.parse(ok.output[1])).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'Your memory: you are Maple.' } });
+    // A session that is no employee's: the journal's own refusal, and nothing to say in the hook.
+    const notEmployee = fixture(false, { status: 403, json: { success: false, error: 'journal unavailable for this caller', errorCode: 'JOURNAL_UNAVAILABLE' } });
+    expect(await agentJournalBrief(notEmployee.deps, 'SessionStart')).toBe(0);
+    expect(notEmployee.output).toEqual([]);
+    expect(await agentJournalBrief(notEmployee.deps)).not.toBe(0);
+    // An employee whose brief could not be read (store down, refused by policy, malformed, oversized): the hook says so.
     for (const reply of [
-      { status: 403, json: { success: false, error: 'journal unavailable for this caller' } },
+      { status: 503, json: { success: false, error: 'journal unavailable', errorCode: 'JOURNAL_UNAVAILABLE' } },
+      { status: 403, json: { success: false, error: 'Owner only', errorCode: 'FORBIDDEN' } },
       { status: 200, json: { success: true, data: { text: 'x'.repeat(1801) } } },
     ]) {
       const f = fixture(false, reply);
       expect(await agentJournalBrief(f.deps, 'SessionStart')).toBe(0);
-      expect(f.output).toEqual([]);
+      expect(f.output.map((line) => JSON.parse(line))).toEqual([{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: MEMORY_BRIEF_UNREADABLE } }]);
       expect(await agentJournalBrief(f.deps)).not.toBe(0);
     }
+    const offline = fixture(false, { status: 200, json: {} });
+    offline.deps.request = async () => { throw new Error('offline'); };
+    expect(await agentJournalBrief(offline.deps, 'SessionStart')).toBe(0);
+    expect(JSON.parse(offline.output[0]).hookSpecificOutput.additionalContext).toBe(MEMORY_BRIEF_UNREADABLE);
+    expect(MEMORY_BRIEF_UNREADABLE).toMatch(/^Your memory: .*do not act on what you think you remember/);
     expect(await agentJournalBrief(ok.deps, 'PostToolUse')).not.toBe(0);
   });
 
