@@ -138,6 +138,31 @@ describe('Plans rows carry per-agent burn', () => {
     }
   });
 
+  it('serves the move impact to a coordinator with plans.view_all on its session header, not to a plain agent', async () => {
+    const app = Fastify({ logger: false });
+    const scope = {
+      callerSession: (req: { headers: Record<string, unknown> }) => req.headers['x-reverie-parent-session'] as string | undefined,
+      canViewAll: (id: string) => id === 'coordinator',
+    };
+    // No verified owner: only the session header speaks.
+    registerPlansRoutes(app, twoPlans(), undefined, scope as never);
+    installRouteErrorHandler(app);
+    await app.ready();
+    try {
+      const url = `/api/plans/move-impact?session=a&to=${encodeURIComponent('acct-anthropic-team-20x')}`;
+      const asCoordinator = await app.inject({ method: 'GET', url, headers: { 'x-reverie-parent-session': 'coordinator' } });
+      expect(asCoordinator.statusCode).toBe(200);
+      expect(asCoordinator.json().data.from.id).toBe('acct-anthropic-secondary');
+      expect((await app.inject({ method: 'GET', url, headers: { 'x-reverie-parent-session': 'b' } })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
+      expect(
+        (await app.inject({ method: 'GET', url, headers: { 'x-reverie-parent-session': 'coordinator', 'x-reverie-service-token': 't' } })).statusCode
+      ).toBe(403);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('splits the plan burn across the sessions on it', async () => {
     const history = join(home, 'plan-usage-history.json');
     // The plan rose 1.5 points an hour for 6 hours while its two sessions spent 2 and 1 work units an hour.
