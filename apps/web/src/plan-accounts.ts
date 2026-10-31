@@ -32,6 +32,7 @@ import type { SubscriptionUsage } from './subscription-usage.js';
 import { getLatestAccountPlanUsage } from './web/plan-usage-latest.js';
 import type { BankedResets } from './usage-telemetry.js';
 import { addSample, planPace, suggestAccount, toMs, type PlanPace, type UsageSample } from './plan-pace.js';
+import { moveImpact, planAgentBurn, planConversion, type PlanAgentBurn, type PlanCostTracker } from './plan-agent-burn.js';
 
 export interface PlanAccount {
   /** The profile id when there is one, else `acct-<provider>-<name>`. */
@@ -79,6 +80,8 @@ export interface PlanRow {
   bankedResets: BankedResets | null;
   sessions: PlanSession[];
   orchestrator: boolean;
+  /** Each session's share of this plan's burn from its status-line cost, and the realtime rate; null without cost reports. */
+  agentBurn: PlanAgentBurn | null;
 }
 
 export interface GpuStatus {
@@ -266,6 +269,8 @@ export interface PlanServiceDeps {
   /** Session ids that coordinate a chatroom: their accounts are marked as the orchestrator's. */
   coordinatorIds(): string[];
   historyFile: string;
+  /** Per-session status-line cost samples (Claude Code only); without it no per-agent burn is computed. */
+  costs?: PlanCostTracker;
   home?: string;
   now?: () => number;
   gpu?: () => Promise<GpuStatus>;
@@ -375,6 +380,7 @@ export class PlanService {
     );
     const sessionsByAccount = await this.sessionsByAccount(catalogue);
     const coordinators = new Set(this.deps.coordinatorIds());
+    const costs = this.deps.costs ? await this.deps.costs.snapshot() : null;
     let changed = false;
     const accounts = catalogue.map((a, i): PlanRow => {
       let reading = readings[i];
@@ -422,6 +428,16 @@ export class PlanService {
         changed = true;
       }
       const sessions = sessionsByAccount.get(a.id) ?? [];
+      const agentBurn = costs && a.provider === 'anthropic'
+        ? planAgentBurn({
+            provider: a.provider,
+            label: a.label,
+            usage: history[a.id] ?? [],
+            sessions: sessions.map((s) => ({ id: s.id, name: s.name, costs: costs[s.id] ?? [] })),
+            weekReset: toMs(reading.usage?.sevenDay?.resetAt),
+            now,
+          })
+        : null;
       return {
         id: a.id,
         label: a.label,
@@ -448,6 +464,7 @@ export class PlanService {
         bankedResets: reading.usage?.bankedResets ?? null,
         sessions,
         orchestrator: sessions.some((s) => coordinators.has(s.id)),
+        agentBurn,
       };
     });
     if (changed) this.saveHistory();
@@ -465,6 +482,41 @@ export class PlanService {
       (this.deps.gpu ?? (() => gpuStatus(this.deps.home)))(),
     ]);
     return { generatedAt: this.now(), accounts, gpu };
+  }
+
+  /**
+   * What moving one session to another plan would do to both plans, from that session's last 30 minutes of work (see
+   * `moveImpact` in plan-agent-burn.ts). A plan with no cost reports converts with its provider/tier prior. Each plan's
+   * rate now is its realtime rate when its sessions report cost, else its 6-hour slope, else 0 (`rateBasis` says which).
+   * Null when the session or the
+   * target plan is unknown, or the session has no work rate yet.
+   */
+  async moveImpact(sessionId: string, toId: string) {
+    const { accounts } = await this.rows();
+    const from = accounts.find((r) => r.sessions.some((s) => s.id === sessionId));
+    const to = accounts.find((r) => r.id === toId);
+    const usdPerHour = from?.agentBurn?.agents.find((a) => a.sessionId === sessionId)?.usdPerHour ?? null;
+    if (!from || !to || from.id === to.id || usdPerHour === null) return null;
+    const now = this.now();
+    const rated = (row: PlanRow) => Boolean(row.agentBurn?.agents.some((a) => a.usdPerHour !== null));
+    const rateBasis = (row: PlanRow): 'realtime' | 'steady' | 'none' =>
+      rated(row) ? 'realtime' : row.pace.burnPerHour !== null ? 'steady' : 'none';
+    // A plan with neither a reporting session nor a steady rate is taken as idle (0 %/h), and says so.
+    const side = (row: PlanRow) => ({
+      used: row.pace.weekly,
+      rate: rated(row) ? row.agentBurn!.realtimePerHour : (row.pace.burnPerHour ?? 0),
+      conversion:
+        row.agentBurn?.conversion ??
+        planConversion({ provider: row.provider, label: row.label, usage: [], sessionCosts: [], now, weekReset: row.pace.weekReset }),
+      budgetStop: row.pace.budgetStop,
+    });
+    const impact = moveImpact({ usdPerHour, from: side(from), to: side(to), now });
+    return {
+      sessionId,
+      usdPerHour,
+      from: { id: from.id, label: from.label, rateBasis: rateBasis(from), conversion: side(from).conversion, ...impact.left },
+      to: { id: to.id, label: to.label, rateBasis: rateBasis(to), conversion: side(to).conversion, ...impact.joined },
+    };
   }
 
   /** One catalogue account by id (a Plans row id), or undefined. */

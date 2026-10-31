@@ -43,6 +43,7 @@ export interface PlansScope {
 
 const SuggestSchema = z.object({ provider: z.enum(['anthropic', 'openai']).optional() }).strict();
 const CodeSchema = z.object({ code: z.string().min(1).max(2048) }).strict();
+const MoveImpactSchema = z.object({ session: z.string().min(1).max(200), to: z.string().min(1).max(200) }).strict();
 
 export function registerPlansRoutes(
   app: FastifyInstance,
@@ -85,6 +86,26 @@ export function registerPlansRoutes(
     if (scope?.canViewAll(self)) return { success: true, data: all };
     const { gpu: _gpu, ...rest } = all;
     return { success: true, data: { ...rest, accounts: all.accounts.filter((a) => a.sessions.some((s) => s.id === self)) } };
+  });
+
+  // Plan-move impact for one session (owner, or an agent with plans.view_all): both plans' projected end-of-window use.
+  app.get('/api/plans/move-impact', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (verifiedOwner(req)) {
+      if (!isAdmin(req)) return forbid(reply);
+    } else {
+      const self = req.headers['x-reverie-service-token'] === undefined ? scope?.callerSession(req) : undefined;
+      if (!self || !scope?.canViewAll(self)) return forbid(reply);
+    }
+    const query = MoveImpactSchema.safeParse(req.query ?? {});
+    if (!query.success) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'session and to are required'));
+    const impact = await plans.moveImpact(query.data.session, query.data.to);
+    if (!impact) {
+      return reply
+        .code(404)
+        .send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'No work rate for that session yet, or the session or plan is unknown'));
+    }
+    return { success: true, data: impact };
   });
 
   app.post('/api/plans/suggest', async (req, reply) => {
