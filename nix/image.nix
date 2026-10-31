@@ -159,6 +159,7 @@ pkgs.dockerTools.buildLayeredImage {
     max-jobs = 1
     cores = 4
     flake-registry = /etc/nix/registry.json
+    auto-optimise-store = true
     NIXCONF
     cat > etc/nix/registry.json <<'REGISTRY'
     ${builtins.toJSON { version = 2; flakes = [{ from = { type = "indirect"; id = "nixpkgs"; }; to = nixpkgsPin; }]; }}
