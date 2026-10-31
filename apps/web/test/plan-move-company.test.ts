@@ -77,6 +77,9 @@ describe('plan move recovery using real company and chatroom persistence', () =>
       });
       const stopped: string[] = [];
       const postStop = failure === 'start' || failure === 'ready';
+      const phase = postStop ? 'recovery-required' : 'failed';
+      // The move shows its final phase before its journal save finishes; its failure audit comes after that save.
+      let settled = false;
       const journal = new PlanMoveStore(join(directory, 'moves.json'));
       const port: PlanMovePort = {
         load: () => journal.load(),
@@ -113,7 +116,10 @@ describe('plan move recovery using real company and chatroom persistence', () =>
           panes.delete(id);
           return [];
         },
-        audit: async record => { if (failure === 'audit' && record.phase === 'stopping') throw new Error('Audit storage unavailable'); },
+        audit: async record => {
+          if (record.phase === phase) settled = true;
+          if (failure === 'audit' && record.phase === 'stopping') throw new Error('Audit storage unavailable');
+        },
       };
       const moves = new PlanMoves(port);
       const input: PlanMoveInput = {
@@ -126,8 +132,8 @@ describe('plan move recovery using real company and chatroom persistence', () =>
         handoff: 'Resume the task.',
       };
       await moves.begin(input);
-      const phase = postStop ? 'recovery-required' : 'failed';
-      await vi.waitFor(async () => expect((await moves.get('move'))?.phase).toBe(phase));
+      await vi.waitFor(() => expect(settled).toBe(true));
+      expect((await moves.get('move'))?.phase).toBe(phase);
       const current = postStop ? 'candidate' : 'old';
       const retired = postStop ? 'old' : 'candidate';
       expect(company.view().employees.map((person) => [person.id, person.sessionId])).toEqual([[employee.id, current]]);
