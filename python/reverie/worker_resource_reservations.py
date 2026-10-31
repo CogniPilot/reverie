@@ -37,6 +37,11 @@ ENGINE_FORMAT = ('{"Id":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Image
     '"Mounts":{{json .Mounts}},"HostConfig":{'
     '"Memory":{{json .HostConfig.Memory}},"MemorySwap":{{json .HostConfig.MemorySwap}},'
     '"PidsLimit":{{json .HostConfig.PidsLimit}},"NanoCpus":{{json .HostConfig.NanoCpus}}}}')
+STOPPED_ENGINE_FORMAT = ENGINE_FORMAT.replace(
+    '"State":{"Running":{{json .State.Running}},"Pid":{{json .State.Pid}}}',
+    '"State":{"Running":{{json .State.Running}},"Pid":{{json .State.Pid}},'
+    '"Status":{{json .State.Status}},"StartedAt":{{json .State.StartedAt}},'
+    '"Paused":{{json .State.Paused}},"Restarting":{{json .State.Restarting}},"Dead":{{json .State.Dead}}}')
 
 
 class Refused(ValueError):
@@ -272,6 +277,37 @@ class NativeObserver:
         rows.sort(key=lambda row:row['Id'])
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
         return rows
+
+    def stopped_state(self, row, deadline=None):
+        """Fresh selected-CID metadata joined to the unchanged ordinary projection."""
+        from .worker_image import strict_json
+        deadline = self._deadline(deadline)
+        need(type(row) is dict and type(row.get('Id')) is str and
+             len(row['Id']) == 64 and all(c in '0123456789abcdef' for c in row['Id']) and
+             type(row.get('State')) is dict and set(row['State']) == {'Running', 'Pid'} and
+             row['State']['Running'] is False and type(row['State']['Pid']) is int and
+             row['State']['Pid'] == 0, 'RESERVATION_STOPPED_ROW')
+        result = self.broker.run_engine(['inspect', '--format', STOPPED_ENGINE_FORMAT, row['Id']],
+                                       deadline=deadline)
+        need(result.returncode == 0 and type(result.stdout) is str and
+             len(result.stdout) <= MAX_NATIVE_BYTES and len(result.stdout.splitlines()) == 1,
+             'RESERVATION_STOPPED_OBSERVATION')
+        observed = strict_json(result.stdout)
+        need(type(observed) is dict and type(observed.get('State')) is dict and
+             set(observed['State']) == {'Running', 'Pid', 'Status', 'StartedAt', 'Paused', 'Restarting', 'Dead'},
+             'RESERVATION_STOPPED_OBSERVATION')
+        state = observed['State']
+        need(type(state['Running']) is bool and type(state['Pid']) is int and
+             all(type(state[k]) is bool for k in ('Paused', 'Restarting', 'Dead')),
+             'RESERVATION_STOPPED_OBSERVATION')
+        observed['State'] = {key: state[key] for key in ('Running', 'Pid')}
+        mounts = observed.get('Mounts')
+        need(type(mounts) is list and all(type(m) is dict for m in mounts), 'RESERVATION_MOUNT_INVENTORY')
+        observed['Mounts'] = sorted(mounts, key=lambda m: json.dumps(m, sort_keys=True,
+            separators=(',', ':'), allow_nan=False))
+        need(journal.fingerprint(observed) == journal.fingerprint(row), 'RESERVATION_STOPPED_IDENTITY_CHANGED')
+        need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
+        return state
 
     def custody(self, root, binding, *, deadline=None):
         deadline = self._deadline(deadline)
