@@ -1698,6 +1698,11 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-gpu-dialog .ca-gpu-graph { display: block; width: min(480px, 100%); height: auto; margin: 8px 0; background: var(--ca-side-bg); border-radius: 6px; }
 .ca-gpu-dialog .ca-gpu-grid { stroke: var(--ca-line); stroke-width: 1; }
 .ca-gpu-dialog .ca-gpu-line { fill: none; stroke: var(--accent, #5865f2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ca-company-gpu-history { margin-top: 20px; }
+.ca-company-gpu-history .ca-gpu-graph { display: block; width: min(720px, 100%); height: 140px; margin: 8px 0; background: var(--ca-side-bg); border-radius: 6px; }
+.ca-company-gpu-history .ca-gpu-grid { stroke: var(--ca-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ca-company-gpu-history .ca-gpu-line { fill: none; stroke: var(--accent, #5865f2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ca-company-gpu-history [aria-pressed="true"] { border-color: var(--accent, #5865f2); }
 
 /* Viewer transport loss is a neutral warning, separate from agent availability. */
 .ca-root .ca-viewer-warning, .ca-root .ca-runtime-health.is-viewer-unavailable,

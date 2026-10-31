@@ -1079,6 +1079,35 @@ function caGpuHistoryShape(samples, width, height) {
   return { points, avg, peak: Math.max(...valid.map(s => s.u)), minutes: Math.round(span / 60000), count: valid.length };
 }
 
+/**
+ * The recorded GPU history (/api/resource-history points) as polyline segments: the bucket average of each observed or
+ * partial point, split wherever the collector recorded nothing, so a gap never draws as a straight line across it.
+ */
+function caRecordedGpuShape(history, width, height) {
+  const points = Array.isArray(history?.points) ? history.points : [];
+  const start = Number(history?.start), end = Number(history?.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  const segments = [];
+  let current = [], sum = 0, count = 0, peak = 0;
+  for (const p of points) {
+    const avg = p?.gpu_pct?.avg;
+    if (p?.status === 'missing' || !Number.isFinite(avg) || avg < 0 || avg > 100 || !Number.isFinite(p?.t)) {
+      if (current.length) segments.push(current);
+      current = [];
+      continue;
+    }
+    const x = ((p.t + (Number(p.end) - p.t) / 2 - start) / (end - start)) * width;
+    current.push(`${Math.max(0, Math.min(width, x)).toFixed(1)},${(height - avg / 100 * height).toFixed(1)}`);
+    // A bucket's max counts only when it is a real percentage at or above its own average; otherwise its average stands.
+    const max = p.gpu_pct.max;
+    sum += avg; count += 1; peak = Math.max(peak, Number.isFinite(max) && max >= avg && max <= 100 ? max : avg);
+  }
+  if (current.length) segments.push(current);
+  if (!count) return null;
+  return { segments: segments.map(points => points.length === 1 ? [points[0], points[0]] : points).map(points => points.join(' ')),
+    avg: Math.round(sum / count), peak: Math.round(peak), count };
+}
+
 function caStatsView(stats) {
   const out = [];
   const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : Number.NaN);
@@ -1460,6 +1489,73 @@ class ReverieChatApp {
     dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
     dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="disk"]')?.focus(); });
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
+  }
+
+  /**
+   * Owner-only: the host's recorded GPU utilization (GET /api/resource-history, a shared host observation, never per
+   * employee), for the last day or week. When the history service is not set up the section says so instead of erring.
+   */
+  companyGpuHistory() {
+    const host = this.el('section', 'ca-company-gpu-history');
+    host.setAttribute('aria-label', 'GPU history');
+    const ns = 'http://www.w3.org/2000/svg', W = 480, H = 120;
+    const svg = this.doc.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-gpu-graph'); svg.setAttribute('role', 'img');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const note = this.el('p', 'ca-hint'); note.setAttribute('role', 'status');
+    const ranges = this.el('div', 'ca-company-actions');
+    let epoch = 0;
+    const load = async (days) => {
+      const turn = ++epoch;
+      this._gpuHistoryDays = days; // a repaint of the Company page (after a hire, say) keeps the chosen range
+      for (const b of ranges.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.days === String(days)));
+      note.textContent = 'Loading GPU history…';
+      const end = Math.floor(Date.now() / 1000), start = end - days * 86400;
+      const read = () => this.app._chatApi(`/api/resource-history?start=${start}&end=${end}&resolution=${days > 1 ? 'hour' : 'five-minute'}`);
+      let result = await read();
+      // The route serves one read at a time, and a Company repaint can land while the last section's read is in flight.
+      if (!result.ok && result.status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (turn !== epoch || !host.isConnected) return;
+        result = await read();
+      }
+      if (turn !== epoch || !host.isConnected) return;
+      svg.replaceChildren();
+      for (const y of [0, H / 2, H]) {
+        const grid = this.doc.createElementNS(ns, 'line');
+        grid.setAttribute('x1', '0'); grid.setAttribute('x2', String(W)); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
+        grid.setAttribute('class', 'ca-gpu-grid'); svg.append(grid);
+      }
+      const history = result.ok ? result.data : null;
+      if (!result.ok) {
+        note.textContent = result.status === 503 ? 'GPU history is not recorded on this host. The live GPU meter still works.'
+          : result.error || 'GPU history could not be read.';
+        svg.setAttribute('aria-label', 'No GPU history');
+        return;
+      }
+      const shape = caRecordedGpuShape(history, W, H);
+      if (!shape) {
+        note.textContent = `No GPU readings were recorded in the last ${days > 1 ? `${days} days` : 'day'}.`;
+        svg.setAttribute('aria-label', 'No GPU history');
+        return;
+      }
+      for (const points of shape.segments) {
+        const line = this.doc.createElementNS(ns, 'polyline');
+        line.setAttribute('points', points); line.setAttribute('class', 'ca-gpu-line'); svg.append(line);
+      }
+      const freshness = history.freshness === 'fresh' ? '' : history.freshness === 'stale' ? ' The newest reading is stale.' : ' The newest reading is unavailable.';
+      const span = days > 1 ? `the last ${days} days` : 'the last day';
+      note.textContent = `GPU use over ${span} (whole host): average ${shape.avg}%, peak ${shape.peak}%. Top line is 100%; gaps are times with no reading.${freshness}`;
+      svg.setAttribute('aria-label', `GPU utilization over ${span}, average ${shape.avg}%, peak ${shape.peak}%`);
+    };
+    for (const [days, label] of [[1, 'Day'], [7, 'Week']]) {
+      const b = this.button('ca-btn', `GPU history for the last ${days > 1 ? `${days} days` : 'day'}`, () => { void load(days); }, { text: label });
+      b.dataset.days = String(days);
+      ranges.append(b);
+    }
+    host.append(this.el('h3', '', 'GPU history'), ranges, svg, note);
+    void load(this._gpuHistoryDays === 7 ? 7 : 1);
+    return host;
   }
 
   /** GPU utilization over the readings this page has taken (every 5 s, up to an hour), redrawn as new ones arrive. */
@@ -3105,6 +3201,7 @@ class ReverieChatApp {
         finally { saving = false; submit.disabled = false; }
       });
       section.append(form); content.append(section);
+      content.append(this.companyGpuHistory());
       head.querySelector('.ca-company-settings-button')?.remove();
       head.querySelector('.ca-company-tools-button')?.remove();
       head.insertBefore(this.button('ca-btn ca-company-settings-button', 'Company settings', () => this.openCompanySettings(paint), { text: 'Company settings' }), head.lastElementChild);
