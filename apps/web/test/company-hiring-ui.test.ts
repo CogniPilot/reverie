@@ -95,6 +95,21 @@ it('saves the delegates and caps on a fresh read, keeping every other setting', 
   expect(form()!.querySelector('[role="status"]')!.textContent).toBe('Hiring settings saved.');
 });
 
+it('does not overwrite delegates or caps changed elsewhere since the section loaded; it shows them again', async () => {
+  const { form, submit, boxes, settings, puts } = await setup();
+  boxes()[0].checked = true;
+  settings.maxActive = 9; // another owner session saved meanwhile
+  await submit();
+  expect(puts).toEqual([]);
+  expect(form()!.querySelector('[role="alert"]')!.textContent).toContain('changed elsewhere');
+  expect((form()!.querySelector('[aria-label="Active hires at most"]') as HTMLInputElement).value).toBe('9');
+  expect(boxes()[0].checked).toBe(false); // the shown state is the fresh one
+  boxes()[0].checked = true;
+  await submit();
+  expect(puts).toHaveLength(1);
+  expect(puts[0]).toMatchObject({ hireDelegates: ['sess-ada', 'sess-bo', 'sess-gone-1234'], maxActive: 9 });
+});
+
 it('refuses a cap out of range without a request', async () => {
   const { form, submit, puts } = await setup();
   (form()!.querySelector('[aria-label="Hires in any 24 hours"]') as HTMLInputElement).value = '21';

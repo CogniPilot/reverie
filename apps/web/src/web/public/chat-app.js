@@ -3291,8 +3291,11 @@ class ReverieChatApp {
     const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
     form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap, delegates, actions, status, error, hires);
     const when = (ms) => globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
+    let shown = null; // the delegates and caps this section last showed, to notice a change made elsewhere before a save
+    const hiring = (settings) => JSON.stringify([[...(settings.hireDelegates || [])].sort(), settings.maxHiresPerDay, settings.maxActive]);
     const render = (data) => {
       const settings = data.settings || {}, limits = data.limits || {};
+      shown = hiring(settings);
       usage.textContent = `In the last 24 hours: ${limits.hiresLast24h} of ${limits.maxHiresPerDay} hires. Active now: ${limits.active} of ${limits.maxActive}.`;
       perDay.input.value = String(settings.maxHiresPerDay); active.input.value = String(settings.maxActive);
       // Delegates are session ids: pick from the roster, and keep showing a listed one that no current expert holds.
@@ -3336,6 +3339,10 @@ class ReverieChatApp {
       try {
         const fresh = await this.app._chatApi('/api/experts');
         if (!fresh.ok || !fresh.data?.settings) throw new Error(fresh.error || 'Hiring settings could not be read before saving. Nothing was changed.');
+        if (hiring(fresh.data.settings) !== shown) {
+          render(fresh.data);
+          throw new Error('Hiring settings were changed elsewhere since this page loaded. They are shown again; review them and save once more.');
+        }
         const body = { ...fresh.data.settings, hireDelegates, maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) };
         const saved = await this.app._chatApi('/api/experts-settings', { method: 'PUT', body });
         if (!saved.ok) throw new Error(saved.error || 'Hiring settings could not be saved.');
