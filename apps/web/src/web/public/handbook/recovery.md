@@ -13,7 +13,7 @@ Native observations require matching broker/website versions, expire within 25 s
 1. Open the expert's profile from its conversation or Company → People. Preserve deliberate departures and vacations.
 2. Inspect Debug terminal activity. An idle prompt is not a failure. Wait for running work before changing anything.
 3. As the signed-in owner, choose Restart session and review confirmation. Identity, memory and channel memberships are preserved. Return vacationing experts only when intended.
-4. For an unresponsive session, select Recover a stalled session only after checking activity. Running tasks or activity within two minutes block this recovery. If the result is unconfirmed, check status before retrying.
+4. For an unresponsive session, select Recover a stalled session only after checking activity. Running tasks, an open dialog or input within two minutes block this recovery; screen output alone does not. If the result is unconfirmed, check status before retrying.
 5. Verify that the terminal is ready and request a short chat acknowledgement.
 
 A scoped wake result of `intentionally-ended` preserves a deliberately ended session. An owner who wants to resume it should use Restart session; agents must not bypass the saved stop.

@@ -261,6 +261,20 @@ permission fallback; a permission failure after READY still refuses qualificatio
 The Nix Python checks exercise this with an inert immutable C wrapper and actual
 owned child procfs permissions, including failure and cleanup schedules.
 
+The normal host-resume website peer also accepts the tracked authenticated
+startup form `reverie web --host 0.0.0.0 --port 3000 --service-auth-config
+/absolute/private/config.json`, optionally followed by `--resource-replacement`.
+The selected path comes only from the existing container's native `Config.Cmd`;
+the actual measured Node entry must have exactly those arguments. In this
+authenticated form, duplicate, unknown or reordered options and lexically
+aliased path arguments refuse. The four historical no-auth program variants
+remain unchanged. Full container metadata,
+including command and environment, is rechecked at every peer/final-code guard.
+This neither reads service keys nor issues grants: the website's existing
+trusted-file loader and canonical service authorization remain responsible for
+authentication. The optional protected terminal wrapper retains its separate
+fixed no-auth startup contract.
+
 For future explicit transport calls, `--diagnostic` also reports an allowlisted
 `POSTSTART_*` stage on post-start failures. It never prints paths, command output
 or exception text. Nonzero status, retained attempts, unknown outcomes and no

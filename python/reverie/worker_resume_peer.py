@@ -13,7 +13,7 @@ import math
 
 from .owner_terminal_channel import need, read_proc, WebsitePeer, Program, digest
 from .linux_root_files import open_in_root, mapped_root_uid
-from .worker_resume_program import immutable, signature, require_programs, PURPOSE, MAX_FILES, MAX_BYTES
+from .worker_resume_program import immutable, signature, require_programs, selected_programs, PURPOSE, MAX_FILES, MAX_BYTES
 
 
 def host_peer(credentials, uid):
@@ -214,7 +214,8 @@ class ResumeWebsitePeer(WebsitePeer):
         else: need(False,'RESUME_NODE_ANCESTRY')
         with (Path('/proc')/str(pid)/'cmdline').open('rb') as stream:argv=stream.read(65537)
         need(len(argv)<=65536,'RESUME_NODE_ARGV_BOUND')
-        need(argv in [b'\0'.join(x.encode() for x in program)+b'\0' for program in self.manifest['programs']] and
+        allowed = selected_programs(self.manifest, self.initial_item['Config']['Cmd'])
+        need(argv in [b'\0'.join(x.encode() for x in program)+b'\0' for program in allowed] and
              peer['exe'] == self.code_identities[str(self.executable)][:2], 'RESUME_NODE_PROGRAM')
         with (Path('/proc')/str(pid)/'status').open('rb') as stream:status=stream.read(65537)
         need(len(status)<=65536,'RESUME_NODE_STATUS_BOUND');status=status.decode('ascii')

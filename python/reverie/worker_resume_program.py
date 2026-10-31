@@ -58,6 +58,30 @@ def require_programs(value):
          'RESUME_FIXED_WEBSITE_ARGV')
 
 
+def selected_programs(value, command):
+    """Bind ordinary auth startup to native same-container Cmd, never wire input.
+
+    The optional protected wrapper has its own fixed startup contract. Only the
+    measured ordinary entry may use the explicit service-auth launch option.
+    """
+    need(type(command) is list and 1 <= len(command) <= 16 and all(
+         type(arg) is str and 0 < len(arg.encode('utf8')) <= 4096 and
+         not any(char in arg for char in '\0\r\n') for arg in command), 'RESUME_FIXED_WEBSITE_ARGV')
+    if not any(arg == '--service-auth-config' or arg.startswith('--service-auth-config=') for arg in command):
+        return value['programs']
+    base = ['web', '--host', '0.0.0.0', '--port', '3000']
+    end = 1 + len(base)
+    need(command[0] in ('reverie', '/bin/reverie') and command[1:end] == base,
+         'RESUME_FIXED_WEBSITE_ARGV')
+    extra = command[end:]
+    need(len(extra) in (2, 3) and extra[0] == '--service-auth-config' and
+         (len(extra) == 2 or extra[2] == '--resource-replacement'), 'RESUME_FIXED_WEBSITE_ARGV')
+    path = Path(extra[1])
+    need(path.is_absolute() and extra[1] != '/' and not extra[1].startswith('//') and
+         '..' not in path.parts and str(path) == extra[1], 'RESUME_FIXED_WEBSITE_ARGV')
+    return [[*value['programs'][0], *extra]]
+
+
 def build(console, node, *, input_validator=None):
     """The Nix package fixes both inputs; includes the complete console output."""
     console, node = Path(console), Path(node)

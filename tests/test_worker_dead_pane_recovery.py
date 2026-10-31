@@ -52,6 +52,39 @@ class DeadPaneRecovery(unittest.TestCase):
   self.stop.assert_called_once_with(self.item['Name'][1:],retain_storage=True,expected_id='a'*64,
     expected_process={'pid':os.getpid(),'start':_pid(os.getpid())})
   self.assertEqual(len([c for c in self.calls if c[0]=='exec']),2)
+ def test_owner_stop_retains_a_warm_off_window_for_canonical_j_recovery(self):
+  tmux=shutil.which('tmux');bash=shutil.which('bash')
+  self.assertIsNotNone(tmux);self.assertIsNotNone(bash)
+  owned_socket=self.root/'warm.sock'
+  self.addCleanup(lambda:subprocess.run([tmux,'-S',str(owned_socket),'kill-server'],capture_output=True))
+  # An old laptop's window-local OFF overrides the global ON used by newer launches.
+  subprocess.run([tmux,'-S',str(owned_socket),'-f','/dev/null','new-session','-d','-s','office','exec sleep 120',
+   ';','set-option','-g','remain-on-exit','on',';','set-option','-w','-t','office','remain-on-exit','off'],check=True,capture_output=True)
+  def query(*args):
+   return subprocess.check_output([tmux,'-S',str(owned_socket),*args],text=True,timeout=2).strip()
+  self.assertEqual(query('show-options','-w','-A','-v','-t','office','remain-on-exit'),'off')
+  pid=int(query('display-message','-p','-t','office','#{pane_pid}'))
+  name=self.item['Name'][1:];self.broker.laptops[SID]=name
+  self.broker.stop_fence_dir=str(self.paths.home/'.reverie-stop')
+  original=self.broker.run_engine
+  def engine(args,optional=False,**kwargs):
+   if args[0]!='exec':return original(args,optional,**kwargs)
+   self.calls.append(args);self.assertEqual(args[1:3],['--env','LANG=C.UTF-8'] if '/bin/tmux'in args else[name,'/bin/bash'])
+   if '/bin/tmux'in args:
+    at=args.index('/bin/tmux');self.assertIn(args[at-1],(name,self.item['Id']))
+    self.assertEqual(args[at+1:at+4],['-u','-L','reverie-laptop'])
+    return subprocess.run([tmux,'-S',str(owned_socket),*args[at+4:]],capture_output=True,text=True,timeout=5)
+   self.assertEqual(args[1:4],[name,'/bin/bash','-c'])
+   return subprocess.run([bash,'-c',*args[4:]],capture_output=True,text=True,timeout=5,check=not optional)
+  self.broker.run_engine=engine
+  self.assertTrue(self.broker.stop_agent(SID,int(time.time()*1000)+10_000)['stopped'])
+  self.assertEqual(query('display-message','-p','-t','office','#{pane_dead} #{pane_pid}'),f'1 {pid}')
+  self.assertFalse((self.paths.home/'.reverie-launch/owned.exit').exists())
+  self.calls.clear();kind,body=self.run_request()
+  self.assertEqual(kind,b'E');self.assertIn(b'exact stop boundary',body)
+  self.stop.assert_called_once_with(name,retain_storage=True,expected_id='a'*64,
+   expected_process={'pid':os.getpid(),'start':_pid(os.getpid())})
+  self.assertFalse(any(c[0]in('create','start','rm','kill')for c in self.calls))
  def test_live_inner_provider_is_reattached_without_stop_create_or_start(self):
   self.panes=['0'];kind,body=self.run_request();self.assertEqual(kind,b'E');self.assertIn(b'viewer boundary',body)
   self.stop.assert_not_called();self.assertFalse(any(c[0]in('stop','kill','rm','create','start')for c in self.calls))

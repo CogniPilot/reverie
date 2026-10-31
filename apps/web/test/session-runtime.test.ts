@@ -145,11 +145,11 @@ describe('owner runtime transaction', () => {
     } finally { await app.close(); }
   });
 
-  it.each(['task', 'submit', 'output', 'dialog'])('refuses owner recovery over current %s evidence', async (kind) => {
+  it.each(['task', 'submit', 'dialog'])('refuses owner recovery over current %s evidence', async (kind) => {
     const { app, session } = await harness();
     try {
       vi.spyOn(session, 'isBusy').mockReturnValue(true);
-      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(kind === 'output' ? Date.now() : Date.now() - 300_000);
+      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
       if (kind === 'dialog') vi.spyOn(session, 'paneDialog', 'get').mockReturnValue('permission');
       if (kind === 'task') vi.spyOn(session, 'runningTaskCount', 'get').mockReturnValue(1);
       if (kind === 'submit') vi.spyOn(session, 'lastSubmitAt', 'get').mockReturnValue(Date.now());
@@ -159,6 +159,20 @@ describe('owner runtime transaction', () => {
         expect(result.statusCode).toBe(409);
       }
       expect(restart).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it('lets the owner recover a session whose only sign of life is fresh terminal output, never without confirming', async () => {
+    const { app, session } = await harness();
+    try {
+      vi.spyOn(session, 'isBusy').mockReturnValue(true);
+      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now()); // a stuck agent's redrawing status line
+      const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+      expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload })).statusCode).toBe(409);
+      expect(restart).not.toHaveBeenCalled();
+      const force = { ...payload, forceRestart: true, confirmSessionId: session.id };
+      expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload: force })).statusCode).toBe(200);
+      expect(restart).toHaveBeenCalledOnce();
     } finally { await app.close(); }
   });
 
@@ -321,11 +335,15 @@ describe('explicit company restart', () => {
 describe('restart work evidence', () => {
   const stale = { isBusy: () => true, isWorking: false, runningTaskCount: 0,
     lastSubmitAt: 1, lastActivityAt: 1, paneDialog: null };
-  it('ignores a stale status label, but keeps live tasks, recent activity and submissions protected', () => {
+  it('ignores a stale status label, but keeps live tasks, open dialogs and recent input protected', () => {
     expect(restartEligibility(stale, 300_000)).toEqual({ blocked: false, recoverable: true });
-    for (const evidence of [{ runningTaskCount: 1 }, { lastSubmitAt: 299_999 }, { lastActivityAt: 299_999 },
-      { lastActivityAt: Number.NaN }, { lastSubmitAt: 400_000 }]) {
+    for (const evidence of [{ runningTaskCount: 1 }, { lastSubmitAt: 299_999 }, { lastSubmitAt: 400_000 }]) {
       expect(restartEligibility({ ...stale, ...evidence }, 300_000)).toEqual({ blocked: true, recoverable: false });
+    }
+    // Fresh or unknown terminal output still blocks an ordinary restart, but only the owner's confirmed recovery may
+    // override it: a stuck agent keeps redrawing its status line, which is output, not work.
+    for (const evidence of [{ lastActivityAt: 299_999 }, { lastActivityAt: Number.NaN }]) {
+      expect(restartEligibility({ ...stale, ...evidence }, 300_000)).toEqual({ blocked: true, recoverable: true });
     }
     expect(restartEligibility({ ...stale, isWorking: true }, 300_000)).toEqual({ blocked: true, recoverable: true });
     expect(restartEligibility({ ...stale, paneDialog: 'permission' }, 300_000)).toEqual({ blocked: true, recoverable: false });

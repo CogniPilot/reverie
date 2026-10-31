@@ -145,6 +145,17 @@ in place remain unavailable for an attached isolated laptop. An HTTP recovery
 response means the normal launch was requested, not proof of native provider
 readiness. Package and installed acceptance remain separate.
 
+A wedged but live agent on an isolated laptop cannot change runtime in place
+either. When the owner confirms recovery of that exact session, the broker's
+`stop-agent` operation kills only the inner pane's process group (wrapper,
+provider and relays) as the laptop's own user, so no exit receipt is written and
+the laptop keeps running; the pane stays as a dead pane because the inner
+session is created with `remain-on-exit`. The Restart then continues as the
+dead-pane recovery above. It is refused while a task runs, a dialog is open or
+input arrived within two minutes; raw terminal output is not counted, since a
+stuck agent keeps redrawing its status line. Processes the agent moved into a
+session of their own (`setsid`) are not in that group and keep running.
+
 Session and company projections include `runtimeHealth` and
 `runtimeHealthScope`. A confirmed local exit is `dead`/`provider`; an isolated
 worker's outside exit is `disconnected`/`terminal`. Missing evidence is `unknown`,

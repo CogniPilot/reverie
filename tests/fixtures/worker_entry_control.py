@@ -29,6 +29,7 @@ broker = worker.Broker.__new__(worker.Broker)
 broker.config = worker.load_config(config)
 broker.config_file = str(config)
 broker.lock = threading.RLock()
+broker._provider_health_init_lock = threading.Lock()
 broker.laptops = {}
 broker.stopping = worker.StopBudget()
 broker.cleanup_uncertain = set()

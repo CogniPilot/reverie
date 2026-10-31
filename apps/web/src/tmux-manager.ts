@@ -2379,6 +2379,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const createSessionCommand = this.supportsLiveHistoryResize()
         ? `${this.tmux()} new-session -ds "${muxName}" -c ${TMUX_LAUNCH_CWD} \\; set-option -t "${muxName}" history-limit ${safeHistoryLimit}`
         : `${this.tmux()} set-option -g history-limit ${safeHistoryLimit} \\; new-session -ds "${muxName}" -c ${TMUX_LAUNCH_CWD} \\; set-option -t "${muxName}" history-limit ${safeHistoryLimit}`;
+      // Final admission: from here to the pane launch below nothing awaits, so this is the last moment to refuse.
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted; nothing was started');
       execSync(createSessionCommand, {
         cwd: TMUX_LAUNCH_CWD,
         timeout: EXEC_TIMEOUT_MS,
@@ -2662,7 +2664,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
         : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
 
-    if (options.stillCurrent && !options.stillCurrent()) return null;
+    if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
     try {
       // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.
       this._configureCliEnv(
@@ -2679,7 +2681,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
-      if (options.stillCurrent && !options.stillCurrent()) return null;
+      if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
       await execAsync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {

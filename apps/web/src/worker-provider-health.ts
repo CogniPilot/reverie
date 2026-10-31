@@ -138,6 +138,24 @@ export class WorkerProviderHealth {
           throw Error('Ambiguous native provider health');
         // One fresh census after the async query, independent of response size.
         const employees = this.deps.employees();
+        if (rows.length === 0) {
+          // A busy observer can return a valid empty snapshot. It supplies no
+          // new proof: keep only current facts with their original deadlines.
+          for (const [sid, entry] of this.entries) {
+            const current = employees.filter((e) => e.sessionId === sid);
+            if (
+              current.length === 1 &&
+              employees.filter((e) => e.id === current[0].id).length === 1 &&
+              before.get(sid) === fingerprint(current[0]) &&
+              this.read(current[0])
+            )
+              entries.set(sid, entry);
+          }
+          const removed = entries.size !== this.entries.size;
+          this.entries = entries;
+          if (removed) this.deps.changed();
+          return;
+        }
         for (const row of rows) {
           const current = employees.filter(
             (e) =>
