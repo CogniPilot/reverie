@@ -52,7 +52,8 @@ class StopAgentTests(unittest.TestCase):
                                        text=True, timeout=2).strip()
 
     def group(self, pid):
-        # The members of process group pid, as `ps -g` lists them, read from /proc (the build sandbox has no ps).
+        # The live members of process group pid, read from /proc (the build sandbox has no ps). A zombie is dead and can
+        # signal nothing; it stays listed until something reaps it, and the sandbox's PID 1 (the builder) may never do so.
         members = []
         for entry in Path('/proc').iterdir():
             if entry.name.isdigit():
@@ -60,15 +61,24 @@ class StopAgentTests(unittest.TestCase):
                     line = (entry / 'stat').read_text()
                 except OSError:
                     continue  # exited while listing
-                if int(line[line.rindex(')') + 2:].split()[2]) == pid:  # after "pid (comm)": state, ppid, pgrp
+                state, _ppid, pgrp = line[line.rindex(')') + 2:].split()[:3]  # after "pid (comm)"
+                if int(pgrp) == pid and state not in ('Z', 'X'):
                     members.append(entry.name)
         return sorted(members, key=int)
+
+    def assertGroupGone(self, pid, within=5.0):
+        # SIGKILL is sent at once but each member exits on its own time; a path that does not wait for the dead pane
+        # (a failed answer after the signal, say) can look before the last one has gone.
+        deadline = time.monotonic() + within
+        while self.group(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(self.group(pid), [])
 
     def test_stop_kills_the_whole_pane_group_without_a_receipt_and_leaves_a_dead_pane(self):
         pid = self.start_inner()
         self.assertEqual(len(self.group(pid)), 3)  # wrapper, provider, relay
         self.assertEqual(self.broker.stop_agent(SID), {'action': 'stop-agent', 'success': True, 'stopped': True, 'paneDead': True})
-        self.assertEqual(self.group(pid), [])
+        self.assertGroupGone(pid)
         self.assertFalse(self.receipt.exists())  # a receipt would make the broker stop the whole laptop
         self.assertEqual(self.query('#{pane_dead} #{pane_pid}'), f'1 {pid}')
         self.assertEqual(self.broker.laptops, {SID: self.name})  # the laptop itself is untouched
@@ -142,7 +152,7 @@ class StopAgentTests(unittest.TestCase):
             self.broker.stop_agent(SID)
         self.assertNotIsInstance(raised.exception, StopNotDispatched)
         self.assertEqual(len(signalled), 1)
-        self.assertEqual(self.group(pid), [])
+        self.assertGroupGone(pid)
 
     def test_control_frame_carries_the_deadline_and_reports_a_refusal_as_not_dispatched(self):
         self.start_inner()
@@ -214,7 +224,7 @@ class StopAgentTests(unittest.TestCase):
     def test_the_fence_lives_in_a_private_directory_the_laptop_user_creates(self):
         pid = self.start_inner()
         self.assertEqual(self.broker.stop_agent(SID, int(time.time() * 1000) + 60_000, '8' * 32)['stopped'], True)
-        self.assertEqual(self.group(pid), [])
+        self.assertGroupGone(pid)
         fences = Path(self.broker.stop_fence_dir)
         self.assertEqual(stat.S_IMODE(fences.stat().st_mode), 0o700)
         self.assertEqual((fences / ('reverie-stop-' + '8' * 32)).read_text(), f'signal {pid}\n')  # bound to its target
@@ -274,7 +284,7 @@ class StopAgentTests(unittest.TestCase):
             return result
         self.broker.run_engine = lost
         self.assertEqual(self.broker.stop_agent(SID, int(time.time() * 1000) + 60_000, 'c' * 32)['stopped'], True)
-        self.assertEqual(self.group(pid), [])
+        self.assertGroupGone(pid)
         self.assertEqual(self.broker.settle_stop(SID, 'c' * 32)['signalled'], True)
 
     def test_settle_is_unknown_while_its_answer_is_missing_and_never_signals(self):
