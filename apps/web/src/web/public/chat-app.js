@@ -4219,6 +4219,7 @@ class ReverieChatApp {
   }
 
   syncVoice() {
+    this.syncReading();
     const voice = this.els.voiceBtn;
     if (!voice) return;
     const room = this.room;
@@ -4385,6 +4386,8 @@ class ReverieChatApp {
         },
       });
     }
+    const speech = this.readAloudEntry(m);
+    if (speech) out.push(speech);
     if (m.text && sheet) {
       // A touch screen turns selection off on messages (a long press opens this sheet): this turns it on for one.
       out.push({ label: 'Select text', run: () => this.startSelectMode(m.id) });
@@ -4404,6 +4407,46 @@ class ReverieChatApp {
     }
     if (reportable) out.push({ label: 'Report message', danger: true, run: () => this.openReportDialog(m, lead) });
     return out;
+  }
+
+  /**
+   * An agent message is read aloud on request ("Read aloud", then "Speak again"), all of it, now, in its author's voice; while
+   * it is being said the entry and the message itself offer Stop. Off where this browser has no speech.
+   */
+  readAloudEntry(m) {
+    const app = this.app;
+    if (m.from.kind !== 'agent' || !m.text || m.deleted || typeof app._readAloudMessage !== 'function' || !this.doc.defaultView?.speechSynthesis) return null;
+    if (app._readAloud?.playingMessageId === m.id) return { label: 'Stop reading', run: () => this.stopReading(m.id) };
+    const roomId = this.roomId;
+    return {
+      label: app._readAloudSpoken?.has(m.id) ? 'Speak again' : 'Read aloud',
+      run: () => {
+        if (!app._readAloudMessage(roomId, m)) this.toast('Could not read this message aloud', 'error');
+        this.syncVoice();
+      },
+    };
+  }
+
+  stopReading(id) {
+    this.app._readAloudStopMessage?.(id);
+    this.syncVoice();
+  }
+
+  /** The message being read aloud shows it, with its own Stop; every other message drops both. */
+  syncReading() {
+    const feed = this.app._chatEls?.feed;
+    if (!feed) return;
+    const id = this.app._readAloud?.playingMessageId || null;
+    for (const el of feed.querySelectorAll('.ca-msg.is-reading')) {
+      if (el.dataset.msgId === id) continue;
+      el.classList.remove('is-reading');
+      el.querySelector('.ca-reading-stop')?.remove();
+    }
+    const el = id ? this.msgEl(id) : null;
+    if (!el || el.querySelector('.ca-reading-stop')) return;
+    el.classList.add('is-reading');
+    const stop = this.button('ca-btn ca-reading-stop', 'Stop reading this message aloud', () => this.stopReading(id), { text: 'Reading aloud · Stop' });
+    (el.querySelector('.ca-msg-body') || el).append(stop);
   }
 
   // Leaves the sheet closed so the native selection handles stay usable; a tap outside the message ends select mode.
