@@ -4502,7 +4502,7 @@ Object.assign(ReverieApp.prototype, {
       footer.append(download);
       // A movie is streamed into a player from the same authorized URL, never read into memory. The server serves it
       // inline only when its bytes are that container (video-container.ts), so anything else fails to load and says so.
-      // VIDEO_EXTS above mirrors VIDEO_ATTACHMENT_EXTENSIONS; test/media-extension-parity.test.ts pins it.
+      // READ_ONLY_VIDEO_EXTS mirrors VIDEO_ATTACHMENT_EXTENSIONS (src/attachment-registry.ts); test/media-extension-parity.test.ts pins it.
       const READ_ONLY_VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv']);
       const ext = descriptor.name.includes('.') ? descriptor.name.split('.').pop().toLowerCase() : '';
       if (READ_ONLY_VIDEO_EXTS.has(ext)) {
@@ -4512,7 +4512,7 @@ Object.assign(ReverieApp.prototype, {
         video.preload = 'metadata';
         video.setAttribute('aria-label', descriptor.name);
         video.onerror = () => {
-          if (current()) body.replaceChildren(node('p', 'This video cannot be played here. Use Download.', 'binary-message'));
+          if (current()) body.replaceChildren(node('p', 'This file cannot be played here: it is not a video this browser can play. Use Download.', 'binary-message'));
         };
         video.src = ReverieBase.url(descriptor.raw);
         body.replaceChildren(video);

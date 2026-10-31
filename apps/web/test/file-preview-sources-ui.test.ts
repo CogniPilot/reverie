@@ -490,7 +490,7 @@ it('plays a movie in a player streamed from the authorized URL instead of refusi
   expect(f.calls).toHaveLength(0); // never fetched as bytes
   expect(f.document.querySelector('.file-preview-source-download')).not.toBeNull();
   video.dispatchEvent(new f.dom.window.Event('error'));
-  expect(f.document.getElementById('filePreviewBody')?.textContent).toContain('cannot be played here. Use Download');
+  expect(f.document.getElementById('filePreviewBody')?.textContent).toContain('not a video this browser can play. Use Download');
   const movie = { ...metadata, path: 'reports/run.webm', name: 'run.webm', absolutePath: '/drive/reports/run.webm' };
   const g = fixture(async () => Response.json({ success: true, data: movie }));
   await g.app.openWorkspaceFilePreview(movie.absolutePath);
