@@ -740,6 +740,15 @@ export function registerHostGuard(app: FastifyInstance, getPolicy: () => HostPol
 }
 
 /**
+ * The pages that host the chat app: index.html, served at the root, as /index.html and as a detached /session/:id window
+ * (server.ts renderIndexHtml). req.url is already base-stripped by the server's rewriteUrl.
+ */
+function hostsChat(url: string | undefined): boolean {
+  const path = (url ?? '').split('?')[0];
+  return path === '/' || path === '/index.html' || /^\/session\/[^/]+$/.test(path);
+}
+
+/**
  * Register security headers and CORS middleware on every response.
  */
 export function registerSecurityHeaders(app: FastifyInstance, https: boolean, basePath = ''): void {
@@ -758,18 +767,22 @@ export function registerSecurityHeaders(app: FastifyInstance, https: boolean, ba
   // Risk is minimal — only same-origin scripts (already governed by script-src)
   // can construct blob workers.
   const workerSrc = "; worker-src 'self' blob:";
-  // Web links in chat messages open beside the conversation (chat-app.js installWebPane), so this page may frame any https
-  // site. The frame is sandboxed without top navigation and gets no referrer; a site that refuses framing stays blank and
-  // the pane offers its new tab. Plain http stays out: an https console could not show it anyway (mixed content).
-  const frameSrc = "frame-src 'self' https:";
-  const csp =
+  // Web links in chat messages open beside the conversation (chat-app.js installWebPane), so the document that hosts the
+  // chat may frame any https site. The frame is sandboxed without top navigation and gets no referrer; a site that refuses
+  // framing stays blank and the pane offers its new tab. Plain http stays out: an https console could not show it anyway
+  // (mixed content). Every other page keeps frames to this site (default-src), so HTML injected into one of them cannot
+  // show an external page there.
+  const policy = (chat: boolean) =>
     `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ` +
-    `img-src 'self' data: blob:; ${connectSrc}; font-src 'self' https://cdn.jsdelivr.net; ${frameSrc}; frame-ancestors 'self'${workerSrc}`;
+    `img-src 'self' data: blob:; ${connectSrc}; font-src 'self' https://cdn.jsdelivr.net; ` +
+    `${chat ? "frame-src 'self' https:; " : ''}frame-ancestors 'self'${workerSrc}`;
+  const csp = policy(false);
+  const chatCsp = policy(true);
 
   app.addHook('onRequest', (req, reply, done) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'SAMEORIGIN');
-    reply.header('Content-Security-Policy', csp);
+    reply.header('Content-Security-Policy', req.method === 'GET' && hostsChat(req.url) ? chatCsp : csp);
     if (https) {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     }
