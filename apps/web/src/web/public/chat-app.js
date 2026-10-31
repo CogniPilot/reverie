@@ -8133,11 +8133,13 @@ class ReverieChatApp {
         const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
         if (!dialog.isConnected) return;
         const phase = result.ok ? result.data?.phase : null;
-        status.textContent = !result.ok ? `Status could not be read (${result.status ?? 'network'}). Try again shortly.`
+        // A memory change never ends as 'failed': a failure stays recovery-required until its actor reconciles it.
+        // No record at all (an Apply refused before the move began) reads as unavailable, the same as a broker outage.
+        status.textContent = !result.ok
+          ? `Status could not be read (${result.status ?? 'network'}). If this keeps happening, the restart may not have started: preview again to try once more.`
           : phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
-            : phase === 'failed' ? `The change did not happen: ${result.data?.error || 'the old laptop was kept'}.`
-              : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
-                : `In progress (${phase || 'unknown'}). Check again shortly.`;
+            : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
+              : `In progress (${phase || 'unknown'}). Check again shortly.`;
       } finally { busy = false; check.disabled = false; }
     }, { text: 'Check status' });
     check.hidden = true;

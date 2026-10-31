@@ -155,6 +155,24 @@ describe('the Laptop memory section of the owner profile', () => {
     expect(status()).toContain('needs recovery');
   });
 
+  it('an Apply refused before the move began leaves Check status pointing back to Preview', async () => {
+    const { h, section, button, status } = await setup(true, {
+      preview: () => ({ ok: true, data: draft }),
+      apply: () => ({ ok: false, status: 503, errorCode: 'RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY' }),
+      // No move record exists, so the result route answers 503 every time.
+      result: () => ({ ok: false, status: 503, errorCode: 'RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY' }),
+    });
+    (section()!.querySelector('input[type="number"]') as HTMLInputElement).value = '8192';
+    button('Preview laptop memory for River').click();
+    await h.flush();
+    button('Restart River with 8,192 MiB').click();
+    await h.flush();
+    button('Check laptop memory change for River').click();
+    await h.flush();
+    expect(status()).toBe('Status could not be read (503). If this keeps happening, the restart may not have started: preview again to try once more.');
+    expect(button('Preview laptop memory for River').disabled).toBe(false);
+  });
+
   it('a refused preview changes nothing and says why', async () => {
     const { h, calls, section, button, status } = await setup(true, { preview: () => ({ ok: false, status: 404, error: 'HTTP 404' }) });
     (section()!.querySelector('input[type="number"]') as HTMLInputElement).value = '8192';
