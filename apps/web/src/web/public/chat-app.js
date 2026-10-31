@@ -5102,12 +5102,9 @@ class ReverieChatApp {
     external.rel = 'noopener noreferrer';
     head.append(close, host, this.el('span', 'ca-spacer'), external);
     const note = this.el('p', 'ca-web-note', 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.');
-    const frame = this.el('iframe', 'ca-web-frame');
-    frame.setAttribute('sandbox', CA_WEB_SANDBOX);
-    frame.referrerPolicy = 'no-referrer';
-    pane.append(head, note, frame);
+    pane.append(head, note);
     this.els.body.insertBefore(pane, this.els.members);
-    Object.assign(this.els, { web: pane, webHost: host, webExternal: external, webFrame: frame });
+    Object.assign(this.els, { web: pane, webHost: host, webExternal: external });
     const feed = this.app._chatEls.feed;
     feed.addEventListener('click', (event) => {
       if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -5130,13 +5127,21 @@ class ReverieChatApp {
   }
 
   openWebPane(url) {
-    const { web, webHost, webExternal, webFrame } = this.els;
+    const { web, webHost, webExternal } = this.els;
     const address = new URL(url);
     webHost.textContent = address.host;
     webHost.title = address.href;
     webExternal.href = address.href;
-    webFrame.title = 'Web page from ' + address.host;
-    if (webFrame.getAttribute('src') !== address.href) webFrame.src = address.href;
+    // The frame exists only while a page is open, so a closed pane leaves no empty frame in the page.
+    let frame = web.querySelector('.ca-web-frame');
+    if (!frame) {
+      frame = this.el('iframe', 'ca-web-frame');
+      frame.setAttribute('sandbox', CA_WEB_SANDBOX);
+      frame.referrerPolicy = 'no-referrer';
+      web.append(frame);
+    }
+    frame.title = 'Web page from ' + address.host;
+    if (frame.getAttribute('src') !== address.href) frame.src = address.href;
     web.hidden = false;
     this.els.root.classList.add('ca-web-open');
     const win = this.doc.defaultView;
@@ -5156,10 +5161,10 @@ class ReverieChatApp {
 
   /** `history: false` when Back already left the pane's history entry. */
   closeWebPane({ history = true } = {}) {
-    const { web, webFrame } = this.els;
+    const { web } = this.els;
     if (!web || web.hidden) return;
     web.hidden = true;
-    webFrame.src = 'about:blank';
+    web.querySelector('.ca-web-frame')?.remove();
     this.els.root.classList.remove('ca-web-open');
     if (!this.embed) this.els.chat.inert = false;
     if (history && this._webHistory) {

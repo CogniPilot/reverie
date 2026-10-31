@@ -31,6 +31,7 @@ async function setup(options: { narrow?: boolean } = {}) {
 it('a plain click opens an https page beside the chat, sandboxed, with its host and a new-tab link', async () => {
   const { h, link, click, pane, frame } = await setup();
   expect(pane().hidden).toBe(true);
+  expect(frame()).toBeNull();
   expect(link('https://status.example.com').target).toBe('_blank');   // the link itself still names its new tab
   expect(click(link('https://status.example.com'))).toBe(false);
   expect(pane().hidden).toBe(false);
@@ -48,7 +49,9 @@ it('a plain click opens an https page beside the chat, sandboxed, with its host 
   expect((h.document.querySelector('.ca-chat') as HTMLElement).inert).toBeFalsy();
   (h.document.querySelector('.ca-web-close') as HTMLButtonElement).click();
   expect(pane().hidden).toBe(true);
-  expect(frame().getAttribute('src')).toBe('about:blank');
+  // Closing unloads the page by removing its frame, so the page never holds an empty frame (only the pane's is ever made).
+  expect(frame()).toBeNull();
+  expect(h.document.querySelectorAll('iframe')).toHaveLength(0);
 });
 
 it('modified and middle clicks, right-click, this site and plain http keep the browser\'s own new tab', async () => {
