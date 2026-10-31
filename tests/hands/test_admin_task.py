@@ -22,7 +22,8 @@ class NaturalAdminTaskTests(unittest.TestCase):
         self.assertEqual(Limits().argument_chars, 24000)
 
     def config(self):
-        return {'admin_task': 'workspace', 'coding': {'tasks': {'workspace': {'enabled': True, 'rooms': ['office'], 'delegate_sessions': ['delegate']}}}}
+        return {'admin_task': 'workspace', 'self_name': 'Helper', 'self_session_id': 'helper-session',
+                'coding': {'tasks': {'workspace': {'enabled': True, 'rooms': ['office', 'break-room'], 'delegate_sessions': ['delegate']}}}}
 
     def test_only_actual_owner_or_explicit_delegate_and_room_get_a_task_tool(self):
         cfg = self.config();manager = Mock()
@@ -39,7 +40,7 @@ class NaturalAdminTaskTests(unittest.TestCase):
     def test_structured_tool_starts_existing_manager_with_original_identity_and_source_id(self):
         manager = Mock();manager.control.return_value = 'Task workspace queued'
         cfg = self.config();state = {};history = []
-        message = {'id': 'original-message', 'from': OWNER, 'text': 'Create the four Board decision requests.'}
+        message = {'id': 'original-message', 'from': OWNER, 'text': '@Helper Create the four Board decision requests.'}
         callback = admin_task.callback(cfg, manager, state, 'office', history, message)
         call = {'type': 'function', 'id': 'call_1', 'function': {'name': admin_task.TOOL_NAME, 'arguments': json.dumps({'brief': 'Read the Board, add missing IDs, verify.'})}}
         self.assertEqual(admin_task.invoke({'tool_calls': [call]}, callback), 'Task workspace queued')
@@ -91,6 +92,48 @@ class NaturalAdminTaskTests(unittest.TestCase):
             reply, size, _ = loop.answer(cfg, 'office', [], {'id': 'm', 'text': 'Edit and test this file.', 'from': OWNER}, model, None)
             self.assertIn('not complete', reply);self.assertLessEqual(size, cfg['prompt_cap_chars'])
             cfg['_admin_start_task'].assert_called_once_with('Edit and run the test.')
+
+    def test_a_bound_senders_conversation_never_starts_work_but_can_still_stop_it(self):
+        # The incident: a bound delegate narrated a game turn as a reply to another player. The harness's model answered
+        # it with run_workspace_task and a workspace task started; the later stop was refused.
+        cfg = self.config();manager = Mock();manager.control.return_value = 'Task workspace cancelled.'
+        history = [{'id': 'player-turn', 'from': {'kind': 'agent', 'sessionId': 'player', 'name': 'Player'}, 'text': 'Latch takes the rope.'},
+                   {'id': 'helper-said', 'from': {'kind': 'agent', 'sessionId': 'helper-session', 'name': 'Helper'}, 'text': 'Holding.'}]
+        turn = {'id': 'game-turn', 'from': DELEGATE, 'replyTo': 'player-turn',
+                'text': 'Latch, there is a waist-high stone mooring post beside the stair; a rope would reach the lower landing.'}
+        callback = admin_task.callback(cfg, manager, {}, 'break-room', history, turn)
+        self.assertEqual([tool['function']['name'] for tool in callback.tools], [admin_task.CANCEL_TOOL_NAME])
+        run = {'type': 'function', 'id': 'call_1', 'function': {'name': admin_task.TOOL_NAME, 'arguments': json.dumps({'brief': 'tie the rope'})}}
+        self.assertIn('did not address me', admin_task.invoke({'tool_calls': [run]}, callback))
+        manager.control.assert_not_called()
+        stop = {'type': 'function', 'id': 'call_2', 'function': {'name': admin_task.CANCEL_TOOL_NAME, 'arguments': '{}'}}
+        self.assertEqual(admin_task.invoke({'tool_calls': [stop]}, callback), 'Task workspace cancelled.')
+        for everyone in ('@everyone run the tests', '@here everyone close your laptops', 'helper run the tests', 'email@Helper.dev'):
+            self.assertEqual(admin_task.callback(cfg, Mock(), {}, 'office', history, {'id': 'x', 'from': OWNER, 'text': everyone}).tools,
+                             [admin_task.CANCEL_TOOL], everyone)
+
+    def test_a_message_that_addresses_the_harness_may_start_work(self):
+        cfg = dict(self.config(), dm_rooms=['dm-room'])
+        history = [{'id': 'helper-said', 'from': {'kind': 'agent', 'sessionId': 'helper-session', 'name': 'Helper'}, 'text': 'Done?'}]
+        for room, message in (('office', {'text': '@helper please run the tests'}), ('office', {'text': 'yes, go ahead', 'replyTo': 'helper-said'}),
+                              ('office', {'text': 'run them', 'to': ['helper-session']}), ('dm-room', {'text': 'run the tests'})):
+            cfg['coding']['tasks']['workspace']['rooms'] = ['office', 'dm-room']
+            callback = admin_task.callback(cfg, Mock(), {}, room, history, {'id': 'm', 'from': OWNER, **message})
+            self.assertEqual(callback.tools, admin_task.TOOLS, message)
+
+    def test_answer_offers_only_the_cancel_tool_for_conversation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = cfg_for(directory)
+            start = Mock(return_value='unused');start.tools = [admin_task.CANCEL_TOOL];cfg['_admin_start_task'] = start
+            seen = []
+            def model(config, messages, tools):
+                seen.append([tool['function']['name'] for tool in tools or []])
+                return {'content': 'Nice roll!'}
+            reply, _, _ = loop.answer(cfg, 'office', [], {'id': 'm', 'text': 'Latch ties the rope.', 'from': OWNER}, model, None)
+            self.assertEqual(reply, 'Nice roll!')
+            self.assertTrue(seen and all(admin_task.TOOL_NAME not in names for names in seen))
+            self.assertTrue(any(admin_task.CANCEL_TOOL_NAME in names for names in seen))
+            start.assert_not_called()
 
     def test_office_access_preserves_only_own_loopback_context_when_explicitly_enabled(self):
         cfg = self.config();cfg['self_session_id'] = '11111111-2222-4333-8444-555555555555'
