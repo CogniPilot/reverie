@@ -291,8 +291,10 @@ export class BuiltinEmbassy {
           q.state = 'revoked';
           q.sessionHash = null;
         }
-        if (s.posts.length < 2000)
-          this.post(s, { kind: 'host', company: s.company, identity: 'Host' }, 'The host closed this embassy. Guest access has ended.');
+        // The notice always posts, and revocation above never depends on it: a room already at the post quota makes room
+        // by dropping its oldest post. Sequences keep increasing, so a guest reading from its cursor still sees the notice.
+        if (s.posts.length >= 2000) s.posts.shift();
+        this.post(s, { kind: 'host', company: s.company, identity: 'Host' }, 'The host closed this embassy. Guest access has ended.');
         return { closed: true, revoked };
       }
       if (call.method === 'POST' && path === '/invites') {
@@ -394,7 +396,7 @@ export class BuiltinEmbassy {
       }
     }
     if (s.posts.length >= 2000) fail(409, 'POST_LIMIT');
-    const post = { ackId: randomUUID(), sequence: s.posts.length + 1, at: this.now(), text, author, requestId };
+    const post = { ackId: randomUUID(), sequence: (s.posts.at(-1)?.sequence ?? 0) + 1, at: this.now(), text, author, requestId };
     s.posts.push(post);
     return post;
   }
