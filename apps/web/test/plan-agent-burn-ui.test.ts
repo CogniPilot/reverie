@@ -102,3 +102,34 @@ it('never lets a slow answer for an earlier destination overwrite the current on
   expect(box.textContent).toContain('Second');
   expect(box.textContent).not.toContain('Big plan');
 });
+
+it('drops an older answer for the same destination after A to B to A', async () => {
+  const pending: Array<(label: string) => void> = [];
+  const fetch = () =>
+    new Promise((resolve) => {
+      pending.push((label) => resolve({ status: 200, ok: true, json: () => Promise.resolve({ success: true, data: { ...IMPACT, to: { ...IMPACT.to, label } } }) }));
+    });
+  const { box, show } = moveDialog(fetch);
+  const firstA = show('A');
+  const toB = show('B');
+  const secondA = show('A');
+  pending[2]('newest A');
+  await secondA;
+  expect(box.textContent).toContain('newest A');
+  pending[0]('oldest A');
+  pending[1]('B');
+  await Promise.all([firstA, toB]);
+  expect(box.textContent).toContain('newest A');
+  expect(box.textContent).not.toContain('oldest A');
+});
+
+it('drops an answer once the form it was asked for is gone', async () => {
+  let release: (v: unknown) => void = () => {};
+  const { doc, box, show } = moveDialog(() => new Promise((resolve) => { release = resolve; }));
+  const asked = show('A');
+  box.remove();
+  release({ status: 200, ok: true, json: () => Promise.resolve({ success: true, data: IMPACT }) });
+  await asked;
+  expect(box.textContent).toBe('Estimating the impact on both plans…');
+  expect(doc.querySelector('[data-move-impact]')).toBeNull();
+});

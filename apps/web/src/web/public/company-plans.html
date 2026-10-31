@@ -391,14 +391,17 @@ async function moveImpactText(sessionId, toAccount) {
   } finally { clearTimeout(timeout); }
 }
 
-// After the destination changes: refresh the estimate, ignoring an answer for an earlier choice.
+// After the destination changes: refresh the estimate. Each request takes a new generation, so only the newest answer for
+// this form and session is shown; an older one (even for the same destination, after A → B → A) is dropped.
+let moveImpactGeneration = 0;
 async function showMoveImpact(dialog, sessionId, toAccount) {
   const box = dialog.querySelector('[data-move-impact]');
   if (!box) return;
-  box.dataset.for = toAccount;
+  const generation = String(++moveImpactGeneration);
+  Object.assign(box.dataset, {gen: generation, for: toAccount, session: sessionId});
   box.textContent = 'Estimating the impact on both plans…';
   const text = await moveImpactText(sessionId, toAccount);
-  if (box.dataset.for === toAccount && box.isConnected) box.textContent = text;
+  if (box.isConnected && box.dataset.gen === generation && box.dataset.session === sessionId && box.dataset.for === toAccount) box.textContent = text;
 }
 
 async function openPlanMove(employeeId, destination) {
@@ -430,7 +433,7 @@ async function openPlanMove(employeeId, destination) {
     dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. After approval, the old session stops before the replacement starts; saved files stay with the employee.</p><form>
       <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
       <p class="hint" data-target-harness role="status"></p>
-      <p class="hint" data-move-impact data-for="${esc(firstTarget)}" role="status">${esc(impact)}</p>
+      <p class="hint" data-move-impact data-for="${esc(firstTarget)}" data-session="${esc(preview.sessionId)}" role="status">${esc(impact)}</p>
       <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-inspect>Inspect existing moves</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
     view = planDialogView(dialog);
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
