@@ -1,4 +1,5 @@
 """Real H source producer/entry bindings; owned isolated policy fixture only."""
+import ast
 import hashlib
 import json
 import os
@@ -74,13 +75,15 @@ from pathlib import Path
 from unittest.mock import patch
 runpy.run_path(sys.argv[1],run_name='packaged_host_fixture')
 from reverie import owner_terminal_native as native,worker_perf as perf,worker_gpu as gpu
+from reverie.owner_terminal_website import _standard_stage
+stage=_standard_stage()
 manifest=json.loads(Path(sys.argv[2]).read_text());eid='11111111-1111-1111-1111-111111111111'
 config={'employeePerfPolicies':{eid:'task-v1'},'rootlessDocker':{
 'enabled':True,'seccompProfile':manifest['baseProfile'],'seccompSha256':manifest['baseSHA256']}}
 with patch.object(perf,'_read',side_effect=lambda path:Path(path).read_bytes()), \\
      patch.object(gpu,'current_employee',return_value={'id':eid}):
  value=native.policy_digest(config,'22222222-2222-2222-2222-222222222222')
-print(json.dumps({'native':native.__file__,'perf':perf.__file__,'policyDigest':value}))
+print(json.dumps({'native':native.__file__,'perf':perf.__file__,'stage':stage.__file__,'policyDigest':value}))
 '''
         return subprocess.run([sys.executable, '-I', '-B', '-c', code, str(self.entry),
                                str(self.fixture.perf / 'worker-perf-profile.json')],
@@ -92,6 +95,7 @@ print(json.dumps({'native':native.__file__,'perf':perf.__file__,'policyDigest':v
         value = json.loads(result.stdout)
         self.assertEqual(value['native'], str(self.runtime / 'python/reverie/owner_terminal_native.py'))
         self.assertEqual(value['perf'], str(self.runtime / 'python/reverie/worker_perf.py'))
+        self.assertEqual(value['stage'], str(self.runtime / 'apps/host/website-update.py'))
         manifest = self.fixture.manifest
         selected = {'rootlessDocker': {'enabled': True, 'seccompProfile': manifest['profile'],
                     'seccompSha256': manifest['profileSHA256']}, '_taskPerfPolicy': 'task-v1'}
@@ -106,6 +110,42 @@ print(json.dumps({'native':native.__file__,'perf':perf.__file__,'policyDigest':v
         self.assertIn(str(self.runtime / 'scripts/reverie-owner-terminal-host'), self.package['lifecycle'])
         self.assertEqual((self.runtime / 'python/reverie/worker-perf-profile.json').read_bytes(),
                          (self.fixture.perf / 'worker-perf-profile.json').read_bytes())
+
+    def test_all_fixed_root_relative_consumer_files_are_preserved(self):
+        required = set()
+        for module in (ROOT / 'python/reverie').glob('owner_terminal*.py'):
+            for node in ast.walk(ast.parse(module.read_text())):
+                if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
+                        and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)
+                        and isinstance(node.left, ast.Subscript) and isinstance(node.left.slice, ast.Constant)
+                        and node.left.slice.value == 2 and isinstance(node.left.value, ast.Attribute)
+                        and node.left.value.attr == 'parents'
+                        and any(isinstance(part, ast.Name) and part.id == '__file__' for part in ast.walk(node.left))):
+                    required.add(node.right.value)
+        self.assertEqual(required, {'scripts/reverie-owner-terminal-host',
+                                   'scripts/owner-terminal-lifecycle.mjs', 'apps/host/website-update.py'})
+        for relative in required:
+            with self.subTest(relative=relative):
+                self.assertEqual((self.runtime / relative).read_bytes(), (ROOT / relative).read_bytes())
+        for source in (ROOT / 'python').rglob('*.py'):
+            self.assertEqual((self.runtime / source.relative_to(ROOT)).read_bytes(), source.read_bytes())
+
+    @unittest.skipUnless(shutil.which('node'), 'normal Node interpreter unavailable')
+    def test_packaged_javascript_import_and_closed_created_guard(self):
+        script = self.runtime / 'scripts/owner-terminal-lifecycle.mjs'
+        code = "import {pathToFileURL} from 'node:url';const m=await import(pathToFileURL(process.argv[2]));if(typeof m.acceptedCreateSpec!=='function')process.exit(2);"
+        result = subprocess.run(['node', '--input-type=module', '-e', code, 'owned-import-control', str(script)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inputs = []
+        for name in ('created', 'image', 'intent'):
+            path = self.fixture.root / (name + '.json'); path.write_text('{}'); path.chmod(0o600); inputs.append(str(path))
+        output = self.fixture.root / 'accepted.json'
+        result = subprocess.run(['node', str(script), 'validate-created', *inputs, str(output)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('H created container identity/state differs', result.stderr)
+        self.assertFalse(output.exists())
 
     def test_missing_generated_host_manifest_still_refuses(self):
         (self.runtime / 'python/reverie/worker-perf-profile.json').unlink()

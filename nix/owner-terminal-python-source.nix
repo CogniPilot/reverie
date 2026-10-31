@@ -7,9 +7,10 @@ let
 in pkgs.runCommand "reverie-owner-terminal-python-source" {
   nativeBuildInputs = [ pkgs.python3 ];
 } ''
-  mkdir -p "$out/scripts"
+  mkdir -p "$out/scripts" "$out/apps/host"
   cp -R ${src}/python "$out/python"
-  cp ${src}/scripts/reverie-owner-terminal-host "$out/scripts/"
+  cp ${src}/scripts/reverie-owner-terminal-host ${src}/scripts/owner-terminal-lifecycle.mjs "$out/scripts/"
+  cp ${src}/apps/host/website-update.py "$out/apps/host/"
   chmod u+w "$out/python/reverie"
   cp ${perfPolicy}/share/reverie/worker-perf-profile.json \
     "$out/python/reverie/worker-perf-profile.json"
