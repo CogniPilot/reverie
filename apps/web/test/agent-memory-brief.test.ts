@@ -85,9 +85,15 @@ describe('the identity and memory block', () => {
   it('says an unreadable journal could not be read, never that it is empty', () => {
     const text = employeeMemoryContext(employee, 'unreadable');
     expect(text).toContain('you are "Sam", "Reviewer"');
-    expect(text).toContain('Your journal could not be read just now; use recall.');
+    expect(text).toContain('Your journal could not be read just now, so do not answer from memory of earlier work; say that your memory is unavailable.');
     expect(text).not.toContain('no entries yet');
     expect(text).not.toContain('Recall from your journal');
+    expect(text).not.toContain('use recall'); // recall reads the same journal: never offered as the way around it
+  });
+
+  it('carries the time it is rendered, in UTC', () => {
+    const text = employeeMemoryContext(employee, [], Date.parse('2026-10-31T07:50:42Z'));
+    expect(text).toContain('you are "Sam", "Reviewer". It is now 2026-10-31 07:50 UTC. Your memory is your Reverie agent journal');
   });
 
   it('lists entries as quoted data, cut per entry and bounded to five entries and 1.5 KB', () => {
@@ -184,7 +190,7 @@ describe('the server delivers it', () => {
     try {
       const brief = s.chatroomService.deps.restContextOf(employee.sessionId)!;
       expect(brief).toContain('you are "Cy", "Archivist"');
-      expect(brief).toContain('Your journal could not be read just now; use recall.');
+      expect(brief).toContain('Your journal could not be read just now, so do not answer from memory of earlier work; say that your memory is unavailable.');
       expect(brief).not.toContain('no entries yet');
       await s.companyWake.deps.kickoff(employee, () => true);
       expect(highlights).toHaveBeenCalledTimes(2);
@@ -193,7 +199,7 @@ describe('the server delivers it', () => {
       highlights.mockRestore();
     }
     expect(writeViaMux).toHaveBeenCalledOnce();
-    expect(writeViaMux.mock.calls[0][0]).toContain('Your journal could not be read just now; use recall.');
+    expect(writeViaMux.mock.calls[0][0]).toContain('Your journal could not be read just now, so do not answer from memory of earlier work; say that your memory is unavailable.');
   });
 
   it('re-briefs a session in each of its live rooms after its backend changes, and nowhere else', () => {
