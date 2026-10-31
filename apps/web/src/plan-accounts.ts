@@ -335,6 +335,11 @@ export class PlanService {
       .catch(() => {});
   }
 
+  /** Resolves once every history write started so far has finished (for shutdown and for tests that remove the file's directory). */
+  settled(): Promise<void> {
+    return this.saving;
+  }
+
   private async sessionsByAccount(catalogue: PlanAccount[]): Promise<Map<string, PlanSession[]>> {
     const assigned = new Map<string, PlanSession[]>();
     for (const session of this.deps.sessions()) {

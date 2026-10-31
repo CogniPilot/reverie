@@ -3,7 +3,7 @@
  * the Plans rows carry each Claude plan's per-agent burn from those samples and the plan's weekly history.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -37,6 +37,8 @@ describe('status-telemetry records session cost', () => {
 
   afterEach(async () => {
     await h.app.close();
+    // The tracker writes in the background; let that write land before its directory goes.
+    await tracker.flushed();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -52,6 +54,9 @@ describe('status-telemetry records session cost', () => {
 describe('Plans rows carry per-agent burn', () => {
   let home: string;
   const savedHome = process.env.HOME;
+  /** Every service a test builds: each saves its usage history in the background, into `home`. */
+  const services: PlanService[] = [];
+  const track = (service: PlanService) => (services.push(service), service);
 
   beforeEach(() => {
     rmSync(join(getDataDir(), 'subscription-profiles.json'), { force: true });
@@ -62,7 +67,9 @@ describe('Plans rows carry per-agent burn', () => {
     resetLatestAccountPlanUsage();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Settle every history write before removing the home it writes into (it otherwise races rmSync: ENOTEMPTY).
+    await Promise.all(services.splice(0).map((service) => service.settled()));
     process.env.HOME = savedHome;
     resetLatestAccountPlanUsage();
     rmSync(home, { recursive: true, force: true });
@@ -86,7 +93,7 @@ describe('Plans rows carry per-agent burn', () => {
       setLatestAccountPlanUsage({ id, label, provider: 'anthropic', status: 'ready', updatedAt: NOW, usage: { sevenDay: { usedPercentage: used, resetAt: RESET } } });
     const dirOf = join(home, '.claude-accounts', 'secondary');
     const session = (id: string, name: string) => ({ id, name, mode: 'claude', status: 'busy', getEnvOverridesForPersist: () => ({ CLAUDE_CONFIG_DIR: dirOf }) });
-    return new PlanService({
+    return track(new PlanService({
       reader: {
         read: async (p: SubscriptionProfile) => ({ id: p.id, label: p.label, provider: p.provider, status: 'ready' as const, authState: 'signed-in' as const, updatedAt: NOW, usage: null }),
       },
@@ -97,7 +104,7 @@ describe('Plans rows carry per-agent burn', () => {
       home,
       now: () => NOW,
       gpu: async () => ({ available: false, utilization: null, memoryUsedMb: null, memoryTotalMb: null, models: [], lastHolder: null }),
-    });
+    }));
   };
 
   it('estimates a move with the leaving plan learned factor and the joining plan prior', async () => {
@@ -163,6 +170,16 @@ describe('Plans rows carry per-agent burn', () => {
     }
   });
 
+  it('settles the background history write, so the home can be removed cleanly', async () => {
+    const service = twoPlans();
+    const history = join(home, 'plan-usage-history.json');
+    await service.rows(); // records a usage sample and starts a background save
+    await service.settled();
+    const saved = JSON.parse(readFileSync(history, 'utf8'));
+    expect(saved['acct-anthropic-secondary'].at(-1).at).toBe(NOW);
+    expect(readdirSync(home).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('splits the plan burn across the sessions on it', async () => {
     const history = join(home, 'plan-usage-history.json');
     // The plan rose 1.5 points an hour for 6 hours while its two sessions spent 2 and 1 work units an hour.
@@ -192,7 +209,7 @@ describe('Plans rows carry per-agent burn', () => {
       status: 'busy',
       getEnvOverridesForPersist: () => ({ CLAUDE_CONFIG_DIR: dirOf }),
     });
-    const service = new PlanService({
+    const service = track(new PlanService({
       reader: {
         read: async (p: SubscriptionProfile) => ({ id: p.id, label: p.label, provider: p.provider, status: 'ready' as const, authState: 'signed-in' as const, updatedAt: NOW, usage: null }),
       },
@@ -203,7 +220,7 @@ describe('Plans rows carry per-agent burn', () => {
       home,
       now: () => NOW,
       gpu: async () => ({ available: false, utilization: null, memoryUsedMb: null, memoryTotalMb: null, models: [], lastHolder: null }),
-    });
+    }));
     const row = (await service.rows()).accounts.find((r) => r.id === 'acct-anthropic-secondary')!;
     expect(row.agentBurn).not.toBeNull();
     const burn = row.agentBurn!;
