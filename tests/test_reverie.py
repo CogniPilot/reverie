@@ -14,6 +14,7 @@ import sqlite3
 from reverie.chat import Brain
 from reverie.reverie import Reverie, RevisionConflict
 from reverie.memory import MemoryStore
+from reverie.project_memory import ProjectMemory
 from reverie.opencode import dispatch, install, voice_reply
 from reverie.reverie import INITIAL_SELF, runtime_permissions, SAFEGUARDS
 from reverie.beliefs import ensure_seeded
@@ -296,8 +297,12 @@ class ReverieTests(unittest.TestCase):
 
     def test_project_memory_is_separate_and_private_recall_blocked_at_work(self):
         self.store.add_episode("A private conversation", "private detail")
-        dispatch(self.brain, {"action": "remember", "project": "rumoca", "text": "Compiler parity passed",
-                              "source": "public handoff, commit abc123"})
+        # remember writes only the office journal now; the old project store is still read as history.
+        memory = ProjectMemory(self.brain.cfg.data_dir / "projects", "rumoca")
+        try:
+            memory.remember("Compiler parity passed", "public handoff, commit abc123")
+        finally:
+            memory.close()
         recalled = dispatch(self.brain, {"action": "recall", "project": "rumoca", "query": "parity", "channel": "work"})
         self.assertEqual(len(recalled), 1)
         self.assertNotIn("private detail", json.dumps(recalled))

@@ -41,7 +41,7 @@ printf '%s\n' '{"action":"recall","project":"project-name","query":"verified dep
 printf '%s\n' '{"action":"remember","project":"project-name","text":"Verified finding","source":"commit or receipt reference"}' | reverie-memory
 ```
 
-In a Reverie session these requests use your office journal. A remember there needs `"room"`, `"turn"` (the message you act on), a `"tag"`, and `"quote"` (checked) or `"source"` (unverified); otherwise it saves nothing and shows the `reverie agent journal save` command. Recall lists `journal` entries, then read-only `legacy` ones.
+These requests use your office journal. A remember needs your own Reverie session, `"room"`, `"turn"` (the message you act on), a `"tag"`, and `"quote"` (checked) or `"source"` (unverified); otherwise it saves nothing and shows the `reverie agent journal save` command. Recall lists `journal` entries, then read-only `legacy` ones.
 
 To move the old store over, run `reverie agent journal import-legacy --dry-run`, then `--write`. It reads only your instance; imports are unverified and stay out of your brief. Project stores need `--include-projects`. Re-runs add only new memories.
 
