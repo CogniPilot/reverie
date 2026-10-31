@@ -80,9 +80,9 @@ describe('the Laptop memory section of the owner profile', () => {
       if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
       if (path === '/api/company/hire-options') return { ok: true, data: { sources: [], harnesses: [] } };
       if (path.startsWith('/api/company/resources/')) {
-        calls.push({ path, body: opts?.body });
+        if (!path.endsWith('/operations')) calls.push({ path, body: opts?.body });
         const reply = replies[path.slice('/api/company/resources/'.length)];
-        return reply ? reply(opts?.body) : { ok: false, status: 503, error: 'HTTP 503' };
+        return reply ? reply(opts?.body) : path.endsWith('/operations') ? { ok: true, data: [] } : { ok: false, status: 503, error: 'HTTP 503' };
       }
       return previous(path, opts);
     };
@@ -147,7 +147,8 @@ describe('the Laptop memory section of the owner profile', () => {
     const restart = button('Restart River with 8,192 MiB');
     restart.click();
     await h.flush();
-    expect(status()).toBe('Not confirmed. Check the status before trying again.');
+    expect(status()).toContain('Restart unconfirmed');
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
     expect(restart.disabled).toBe(true);
     expect(calls.filter(call => call.path.endsWith('/apply'))).toHaveLength(1);
     button('Check laptop memory change for River').click();
@@ -155,7 +156,7 @@ describe('the Laptop memory section of the owner profile', () => {
     expect(status()).toContain('needs recovery');
   });
 
-  it('an Apply refused before the move began leaves Check status pointing back to Preview', async () => {
+  it('an unavailable result retains the unknown operation instead of suggesting another Preview', async () => {
     const { h, section, button, status } = await setup(true, {
       preview: () => ({ ok: true, data: draft }),
       apply: () => ({ ok: false, status: 503, errorCode: 'RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY' }),
@@ -169,8 +170,9 @@ describe('the Laptop memory section of the owner profile', () => {
     await h.flush();
     button('Check laptop memory change for River').click();
     await h.flush();
-    expect(status()).toBe('Status could not be read (503). If this keeps happening, the restart may not have started: preview again to try once more.');
-    expect(button('Preview laptop memory for River').disabled).toBe(false);
+    expect(status()).toContain('outcome is unknown');
+    expect(status()).not.toContain('preview again');
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
   });
 
   it('a refused preview changes nothing and says why', async () => {
@@ -182,4 +184,71 @@ describe('the Laptop memory section of the owner profile', () => {
     expect(section()!.querySelector('textarea')).toBeNull();
     expect(calls).toHaveLength(1);
   });
+  it('retains identity before a thrown Apply and recovers it after closing and reopening the profile', async () => {
+    const { h, section, button, status, calls } = await setup(true, {
+      preview: () => ({ ok: true, data: draft }),
+      apply: () => { throw new Error('lost transport'); },
+      result: () => ({ ok: false, status: 503 }),
+    });
+    (section()!.querySelector('input') as HTMLInputElement).value = '8192';
+    button('Preview laptop memory for River').click(); await h.flush();
+    button('Restart River with 8,192 MiB').click(); await h.flush();
+    expect(status()).toContain('unconfirmed');
+    expect(JSON.parse(h.window.localStorage.getItem(`reverie:laptop-memory:${employeeId}`)!)).toEqual([draft.operationId]);
+    const dialog = h.document.querySelector('.ca-expert-profile') as HTMLDialogElement;
+    dialog.close();
+    h.document.querySelector<HTMLButtonElement>('[aria-label="Edit profile for River"]')!.click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(calls.filter(call => call.path.endsWith('/result')).at(-1)?.body).toEqual({operationId: draft.operationId});
+    expect(calls.filter(call => call.path.endsWith('/apply'))).toHaveLength(1);
+  });
+
+  it('discovers a pending server operation on a fresh page with no browser recovery state', async () => {
+    const { h, button, status, calls } = await setup(true, {
+      operations: () => ({ok: true, data: [{id: draft.operationId, employeeId, phase: 'recovery-required'}]}),
+      result: () => ({ok: true, data: {id: draft.operationId, phase: 'completed'}}),
+    });
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(status()).toContain('now has the new memory');
+    expect(button('Preview laptop memory for River').disabled).toBe(false);
+    expect(h.window.localStorage.getItem(`reverie:laptop-memory:${employeeId}`)).toBe('[]');
+    expect(calls.filter(call => call.path.endsWith('/apply'))).toHaveLength(0);
+  });
+
+  it('allows a fresh Preview only after authoritative not-started, never a 503', async () => {
+    const { h, section, button, status } = await setup(true, {
+      preview: () => ({ok: true, data: draft}), apply: () => ({ok: false, status: 503}),
+      result: () => ({ok: true, data: {id: draft.operationId, phase: 'not-started'}}),
+    });
+    (section()!.querySelector('input') as HTMLInputElement).value = '8192';
+    button('Preview laptop memory for River').click(); await h.flush();
+    button('Restart River with 8,192 MiB').click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(status()).toContain('not dispatched');
+    expect(button('Preview laptop memory for River').disabled).toBe(false);
+  });
+
+  it('closing during Apply does not lose its pending identity or let a late reply unlock a reopened profile', async () => {
+    let finish!: (value: unknown) => void;
+    const { h, section, button, calls } = await setup(true, {
+      preview: () => ({ok: true, data: draft}),
+      apply: () => new Promise(resolve => {finish = resolve;}),
+      result: () => ({ok: true, data: {id: draft.operationId, phase: 'completed'}}),
+    });
+    (section()!.querySelector('input') as HTMLInputElement).value = '8192';
+    button('Preview laptop memory for River').click(); await h.flush();
+    button('Restart River with 8,192 MiB').click(); await h.flush();
+    (h.document.querySelector('.ca-expert-profile') as HTMLDialogElement).close();
+    h.document.querySelector<HTMLButtonElement>('[aria-label="Edit profile for River"]')!.click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    finish({ok: true, data: {id: draft.operationId, phase: 'starting'}}); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    expect(calls.filter(call => call.path.endsWith('/apply'))).toHaveLength(1);
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(false);
+  });
+
 });

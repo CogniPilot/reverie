@@ -4,6 +4,7 @@
  */
 import Fastify, {type FastifyInstance} from 'fastify';
 import cookie from '@fastify/cookie';
+import {createHarness, member, room} from './helpers/chat-app-harness.mjs';
 import {createServer, type Server, type Socket} from 'node:net';
 import {spawn, type ChildProcess} from 'node:child_process';
 import {once} from 'node:events';
@@ -22,6 +23,7 @@ import {Session} from '../src/session.js';
 import {expertRuntimeRecipe} from '../src/expert-runtime-recipe.js';
 import {OwnerAuthStore} from '../src/owner-auth/store.js';
 import {OwnerAuthService} from '../src/owner-auth/service.js';
+import {ResourceNativeClient} from '../src/resource-native-client.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../src/resource-replacement-controller.js';
 import {buildSpawnCommand} from '../src/tmux-manager.js';
 import {workerLaunchCommand} from '../src/worker-execution.js';
@@ -210,6 +212,7 @@ beforeEach(async () => {
   registerResourceReplacementRoutes(app, controller);
   restartController = async () => {
     controller.close(); await app.close();
+    journal = new PlanMoveStore(join(directory, 'plan-moves.json'));
     moves = new PlanMoves({load: () => journal.load(), save: rows => journal.save(rows)} as PlanMovePort);
     app = Fastify(); await app.register(cookie);
     controller = new ResourceReplacementController(app, auth, company, plans, chat, moves, journal, port, mux, path);
@@ -325,3 +328,97 @@ it('a fresh registered result route reconciles settled restart metadata without 
   expect(verbs.filter(verb => verb === 'start')).toHaveLength(1);
   expect(handoffs).toEqual(['Preserve this explicit handoff.\r']);
 },20_000);
+
+it('persists a known pre-begin refusal and permits a fresh preview after controller restart', async () => {
+  const preview = (await post('preview', {employeeId: eid, memoryMiB: 3072})).json().data;
+  await chmod(path, 0o666); // normal NativeClient.open refuses before a claim
+  expect((await post('apply', {previewId: preview.draftId, handoff: 'Keep work'})).statusCode).toBe(503);
+  await chmod(path, 0o600);
+  expect(verbs).toEqual(['draft']);
+  await restartController();
+  const result = await post('result', {operationId: draft.operationId});
+  expect(result.statusCode).toBe(200); expect(result.json().data.phase).toBe('not-started');
+  expect((await post('operations', {employeeId: eid})).json().data).toEqual([
+    {id: draft.operationId, employeeId: eid, phase: 'not-started'}]);
+  expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(200);
+});
+
+it.each(['preparing', 'dispatching'] as const)('retains %s crash uncertainty without a move and prevents another preview', async phase => {
+  await journal.resourceAttemptStart(String(draft.operationId), eid, undefined, []);
+  if (phase === 'dispatching') await journal.resourceAttemptPhase(String(draft.operationId), undefined, phase);
+  await restartController();
+  expect((await post('result', {operationId: draft.operationId})).json().data.phase).toBe('unknown');
+  expect((await post('operations', {employeeId: eid})).json().data).toEqual([
+    {id: draft.operationId, employeeId: eid, phase: 'unknown'}]);
+  expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(503);
+  expect(verbs).toEqual([]);
+  expect((await post('operations', {employeeId: eid}, {cookie: ''})).statusCode).toBe(403);
+});
+
+it('the real profile keeps a lost Apply reply fenced and discovers its server record after reload', async () => {
+  rejectAt = 'verify';
+  const screens: Awaited<ReturnType<typeof createHarness>>[] = [];
+  const open = async (loseReply = false) => {
+    const employee = {...company.view().employees[0], available: true};
+    const data = {canManage: true, settings: {ownerName: 'Owner'}, employees: [employee], resourceReplacement: true};
+    const h = await createHarness({sessions: [{id: source.id, name: 'Worker', mode: 'codex'}],
+      rooms: [room('office', 'Office', [member(source.id, 'Worker')])], company: data});
+    screens.push(h);
+    const previous = h.app._chatApi.bind(h.app);
+    h.app._chatApi = async (url: string, opts: {body?: unknown}) => {
+      if (url === '/api/company') return {ok: true, data};
+      if (url === '/api/chatrooms/phone-status') return {ok: true, data: {self: 'owner', canSetOwn: true}};
+      if (url === '/api/company/hire-options') return {ok: true, data: {sources: [], harnesses: []}};
+      if (!url.startsWith('/api/company/resources/')) return previous(url, opts);
+      const response = await app.inject({method: 'POST', url, headers: headers(), payload: opts.body});
+      if (loseReply && url.endsWith('/apply')) throw new Error('HTTP reply lost AFTER real Apply');
+      return {ok: response.statusCode < 400, status: response.statusCode, ...response.json()};
+    };
+    vi.spyOn(h.shell, 'confirmCompanyAction').mockResolvedValue(true);
+    await h.shell.openCompany('people');
+    h.document.querySelector<HTMLButtonElement>('[aria-label="Edit profile for Worker"]')!.click(); await h.flush();
+    return h;
+  };
+  try {
+    const h = await open(true);
+    const button = (screen: typeof h, name: string) => screen.document.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
+    h.document.querySelector<HTMLInputElement>('.ca-profile-memory input')!.value = '3072';
+    button(h, 'Preview laptop memory for Worker').click();
+    await until(async () => {await h.flush(); return h.document.querySelector('.ca-profile-memory textarea');}, Boolean);
+    button(h, 'Restart Worker with 3,072 MiB').click();
+    await until(async () => {await h.flush();return (await moves.get(String(draft.operationId)))?.phase;},
+      phase => phase === 'recovery-required');
+    expect(button(h, 'Preview laptop memory for Worker').disabled).toBe(true);
+    expect(h.document.querySelector('.ca-profile-memory')!.textContent).toContain('unconfirmed');
+    const fresh = await open(); // no copied localStorage: real owner discovery
+    await until(async () => {await fresh.flush(); return fresh.document.querySelector<HTMLButtonElement>('[aria-label="Check laptop memory change for Worker"]')?.hidden;}, value => value === false);
+    expect(button(fresh, 'Preview laptop memory for Worker').disabled).toBe(true);
+    button(fresh, 'Check laptop memory change for Worker').click(); await fresh.flush();
+    expect(fresh.document.querySelector('.ca-profile-memory')!.textContent).toContain('needs recovery');
+    expect(verbs.filter(verb => verb === 'claim')).toHaveLength(1);
+    expect(verbs.filter(verb => verb === 'source-stop')).toHaveLength(1);
+  } finally {for (const h of screens) h.dom.window.close();}
+}, 20_000);
+
+it('a live pre-begin attempt cannot be mistaken for not-started or overtaken by a second preview', async () => {
+  const preview = (await post('preview', {employeeId: eid, memoryMiB: 3072})).json().data;
+  let rejectOpen!: (error: Error) => void;
+  vi.spyOn(ResourceNativeClient, 'open').mockImplementation(() => new Promise((_resolve, reject) => {rejectOpen = reject;}));
+  const applying = post('apply', {previewId: preview.draftId, handoff: 'Keep work'}).then(value => value);
+  await until(async () => (await journal.resourceAttempts(undefined))[0]?.phase, value => value === 'preparing');
+  expect((await post('result', {operationId: draft.operationId})).json().data.phase).toBe('preparing');
+  expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(503);
+  rejectOpen(new Error('Owned pre-begin refusal'));
+  expect((await applying).statusCode).toBe(503);
+  expect((await post('result', {operationId: draft.operationId})).json().data.phase).toBe('not-started');
+  expect(verbs).toEqual(['draft']);
+});
+
+it('keeps a known no-dispatch receipt discoverable when a later unrelated attempt is recorded', async () => {
+  const id = String(draft.operationId);
+  await journal.resourceAttemptStart(id, eid, undefined, []);
+  await journal.resourceAttemptPhase(id, undefined, 'not-started');
+  await journal.resourceAttemptStart(randomUUID(), randomUUID(), undefined, []);
+  await restartController();
+  expect((await post('result', {operationId: id})).json().data).toEqual({id, employeeId: eid, phase: 'not-started'});
+});
