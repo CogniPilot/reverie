@@ -110,6 +110,7 @@ versioned endpoints are:
 | POST | `/api/v1/cron/jobs/:id/run` | Run now, without changing the schedule |
 | GET | `/api/v1/cron/jobs/:id/runs` | Read a job's run history |
 | GET | `/api/v1/cron/runs` | Read all accessible run history |
+| POST | `/api/v1/cron/schedule-preview` | Owner only: the next runs a schedule would have (`count`, 1-10, default 3); nothing is saved |
 | GET | `/api/v1/routines-grants` | Read who may author post jobs besides the owner |
 | PUT | `/api/v1/routines-grants` | Owner only: set the roles and employees that may author post jobs |
 

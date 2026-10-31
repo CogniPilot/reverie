@@ -34,6 +34,140 @@
   const terminal = new Set(['posted', 'failed', 'skipped', 'prompt_sent']);
   const active = (run) => run.finishedAt === null && !terminal.has(run.status);
   const time = (value) => (Number.isFinite(value) && value > 0 ? new Date(value).toLocaleString() : '—');
+  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const validZone = (zone) => {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: zone });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /** The company's time zone, else this browser's: the zone a new daily or weekly schedule starts in. */
+  const defaultZone = () =>
+    [snapshot?.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone].find((zone) => zone && validZone(zone)) ||
+    'UTC';
+
+  /**
+   * A routine's schedule: every so many minutes, daily at a time, or weekly on chosen days at a time, read in a time zone.
+   * The next runs show while it is filled in, worked out by the server's own schedule code (nothing is saved).
+   */
+  function scheduleEditor(host) {
+    const field = (text, control) => {
+      const label = node('label', text);
+      label.append(control);
+      return label;
+    };
+    const repeat = node('select');
+    repeat.name = 'scheduleType';
+    for (const [value, text] of [
+      ['interval', 'Every few minutes'],
+      ['daily', 'Daily'],
+      ['weekly', 'Weekly'],
+    ])
+      repeat.append(new Option(text, value));
+    const minutes = node('input');
+    Object.assign(minutes, { name: 'intervalMinutes', type: 'number', min: '5', max: '525600', value: '60' });
+    const at = node('input');
+    Object.assign(at, { name: 'at', type: 'time', value: '09:00' });
+    const days = node('fieldset', undefined, 'schedule-days');
+    days.append(node('legend', 'On'));
+    // Monday first, as a week is usually read; the values stay the server's 0 = Sunday.
+    for (const day of [1, 2, 3, 4, 5, 6, 0]) {
+      const box = node('input');
+      Object.assign(box, { type: 'checkbox', name: 'weeklyDays', value: String(day) });
+      const label = node('label', undefined, 'check');
+      label.append(box, WEEKDAYS[day]);
+      days.append(label);
+    }
+    const zone = node('input');
+    Object.assign(zone, { name: 'timeZone', autocomplete: 'off', spellcheck: false, placeholder: 'America/New_York' });
+    let list = byId('time-zones');
+    if (!list) {
+      list = node('datalist');
+      list.id = 'time-zones';
+      for (const name of Intl.supportedValuesOf?.('timeZone') || []) list.append(new Option(name));
+      document.body.append(list);
+    }
+    zone.setAttribute('list', 'time-zones');
+    const preview = node('p', '', 'hint schedule-preview');
+    preview.setAttribute('aria-live', 'polite');
+    const parts = {
+      minutes: field('Every (minutes)', minutes),
+      at: field('At', at),
+      days,
+      zone: field('Time zone', zone),
+    };
+    host.replaceChildren(field('Repeat', repeat), parts.minutes, parts.days, parts.at, parts.zone, preview);
+    let timer = 0,
+      asked = 0;
+
+    /** The schedule as the job holds it, or an Error saying what is missing. */
+    function read() {
+      const type = repeat.value;
+      if (type === 'interval') {
+        const value = Number(minutes.value);
+        if (!Number.isInteger(value) || value < 5 || value > 525600) return new Error('Repeat every 5 to 525600 minutes.');
+        return { scheduleType: 'interval', intervalMinutes: value };
+      }
+      if (!/^\d{2}:\d{2}$/.test(at.value)) return new Error('Choose a time.');
+      const tz = zone.value.trim();
+      if (!tz || !validZone(tz)) return new Error('Choose a time zone such as America/New_York.');
+      if (type === 'daily') return { scheduleType: 'daily', dailyTime: at.value, timeZone: tz };
+      const picked = [...days.querySelectorAll('input:checked')].map((box) => Number(box.value)).sort((a, b) => a - b);
+      if (!picked.length) return new Error('Choose at least one day.');
+      return { scheduleType: 'weekly', weeklyDays: picked, weeklyTime: at.value, timeZone: tz };
+    }
+
+    function sync() {
+      const type = repeat.value;
+      parts.minutes.hidden = type !== 'interval';
+      minutes.required = type === 'interval';
+      parts.at.hidden = parts.zone.hidden = type === 'interval';
+      parts.days.hidden = type !== 'weekly';
+      clearTimeout(timer);
+      timer = setTimeout(showNext, 250);
+    }
+
+    async function showNext() {
+      const schedule = read();
+      const mine = ++asked;
+      if (schedule instanceof Error) {
+        preview.textContent = schedule.message;
+        return;
+      }
+      preview.textContent = 'Next runs: working them out…';
+      try {
+        const { runs } = await api('cron/schedule-preview', { method: 'POST', body: JSON.stringify({ ...schedule, count: 3 }) });
+        if (mine !== asked) return;
+        const shown = new Intl.DateTimeFormat('en-US', {
+          weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+          timeZoneName: 'short', ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
+        });
+        preview.textContent = runs.length
+          ? `Next runs${schedule.scheduleType === 'interval' ? ' if saved now' : ''}: ${runs.map((at) => shown.format(at)).join(' · ')}`
+          : 'This schedule has no next run.';
+      } catch (error) {
+        if (mine === asked) preview.textContent = 'Next runs unavailable: ' + error.message;
+      }
+    }
+
+    /** Show a job's schedule, or the defaults for a new one. */
+    function write(job) {
+      repeat.value = job?.scheduleType === 'daily' || job?.scheduleType === 'weekly' ? job.scheduleType : 'interval';
+      minutes.value = String(job?.intervalMinutes || 60);
+      // A routine keeps the other kind's time after a change of kind, so the time shown is the one its kind uses.
+      at.value = (job?.scheduleType === 'weekly' ? job.weeklyTime : job?.dailyTime) || '09:00';
+      zone.value = job?.timeZone || defaultZone();
+      const chosen = new Set(job?.weeklyDays || [1, 2, 3, 4, 5]);
+      for (const box of days.querySelectorAll('input')) box.checked = chosen.has(Number(box.value));
+      sync();
+    }
+
+    host.addEventListener('input', sync);
+    host.addEventListener('change', sync);
+    return { read, write };
+  }
   async function api(path, options = {}) {
     const controller = new AbortController();
     requests.add(controller);
@@ -96,6 +230,7 @@
         rooms: rooms.rooms.filter((room) => !room.dm && room.kind !== 'dm' && !room.archivedAt),
         employees: company?.employees || [],
         executing: executing.jobs,
+        timeZone: company?.settings?.timeZone,
       };
       credentialsAvailable = Array.isArray(tokenMetadata.data?.tokens);
       credentials = credentialsAvailable ? tokenMetadata.data.tokens.slice(0, 64) : [];
@@ -347,7 +482,7 @@
   const schedule = (job) => {
     if (job.scheduleType === 'interval') return `Every ${job.intervalMinutes} minutes`;
     if (job.scheduleType === 'once') return 'Once: ' + time(job.runAt);
-    return `${job.scheduleType === 'weekly' ? 'Weekly ' + (job.weeklyDays || []).map((day) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]).join(', ') : 'Daily'} at ${job.dailyTime || job.weeklyTime || '—'}${job.timeZone ? ' · ' + job.timeZone : ''}`;
+    return `${job.scheduleType === 'weekly' ? 'Weekly ' + (job.weeklyDays || []).map((day) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]).join(', ') : 'Daily'} at ${(job.scheduleType === 'weekly' ? job.weeklyTime : job.dailyTime) || '—'}${job.timeZone ? ' · ' + job.timeZone : ''}`;
   };
   function card(title, state, className = '') {
     const element = node('article', undefined, 'card');
@@ -570,6 +705,13 @@
       const edit = node('button', 'Edit content');
       edit.type = 'button';
       edit.addEventListener('click', () => openContent(job));
+      // A one-time job and the fixed repository watcher keep their schedules in Advanced schedules and the watcher form.
+      if (job.scheduleType !== 'once' && job.postSourceArgs?.pull === undefined) {
+        const reschedule = node('button', 'Edit schedule');
+        reschedule.type = 'button';
+        reschedule.addEventListener('click', () => openSchedule(job));
+        actions.append(reschedule);
+      }
       const preview = node('button', 'Preview or run once');
       preview.type = 'button';
       preview.addEventListener('click', () => openTrial(job));
@@ -995,6 +1137,7 @@
     }
     const form = byId('routine-form');
     form.reset();
+    routineSchedule.write(null);
     byId('routine-error').textContent = '';
     form.elements.botId.replaceChildren(...snapshot.bots.map((bot) => new Option(bot.name, bot.id)));
     fillRoutineRooms();
@@ -1002,6 +1145,37 @@
     form.elements.name.focus();
   });
   byId('routine-form').elements.botId.addEventListener('change', fillRoutineRooms);
+  const routineSchedule = scheduleEditor(byId('routine-schedule'));
+  const editSchedule = scheduleEditor(byId('edit-schedule'));
+  let editingSchedule = null;
+  function openSchedule(job) {
+    editingSchedule = job;
+    byId('schedule-error').textContent = '';
+    byId('schedule-title').textContent = 'Edit schedule: ' + (job.name || 'Unnamed routine');
+    editSchedule.write(job);
+    byId('schedule-dialog').showModal();
+  }
+  byId('schedule-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submit = event.currentTarget.querySelector('[type=submit]');
+    if (!editingSchedule || submit.disabled) return;
+    const schedule = editSchedule.read();
+    if (schedule instanceof Error) {
+      byId('schedule-error').textContent = schedule.message;
+      return;
+    }
+    submit.disabled = true;
+    byId('schedule-error').textContent = '';
+    try {
+      await api('cron/jobs/' + encodeURIComponent(editingSchedule.id), { method: 'PUT', body: JSON.stringify(schedule) });
+      byId('schedule-dialog').close();
+      await refresh();
+    } catch (error) {
+      byId('schedule-error').textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
   byId('content-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget,
@@ -1046,6 +1220,8 @@
             }),
           });
         } else {
+          const schedule = routineSchedule.read();
+          if (schedule instanceof Error) throw schedule;
           await api('cron/jobs', {
             method: 'POST',
             body: JSON.stringify({
@@ -1054,8 +1230,7 @@
               botId: fields.get('botId'),
               roomId: fields.get('roomId'),
               postText: fields.get('postText'),
-              scheduleType: 'interval',
-              intervalMinutes: Number(fields.get('intervalMinutes')),
+              ...schedule,
               enabled: fields.has('enabled'),
             }),
           });
