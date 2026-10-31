@@ -43,6 +43,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { MAX_MESSAGE_CHARS } from './chatroom-store.js';
 import { saveChatAttachment, chatAttachmentDestinationRefusal } from './cli-chat-attachment.js';
 import type { Command } from 'commander';
+import type { CompanyWakeReport } from './company-wake.js';
 import {
   basicAuthHeader,
   credentialsFrom,
@@ -841,6 +842,67 @@ export async function agentWake(deps: AgentDeps, options: { id: string }): Promi
     return fail(deps, `not waking ${row.name ?? target.id}: it is ${row.status ?? 'in an unknown state'}, not idle`, EXIT.refused);
   }
   return agentSend(deps, { id: target.id, text: WAKE_PROMPT, enter: true, ifIdle: true });
+}
+
+/** Recover one exact company employee through the caller's existing scoped API. Never types session input. */
+export async function agentWakeEmployee(deps: AgentDeps, options: { employeeId: string }): Promise<number> {
+  const id = options.employeeId;
+  if (!UUID_RE.test(id) || id !== id.toLowerCase()) {
+    return fail(
+      deps,
+      'Use a full canonical employee UUID from /api/company; session IDs and PIDs are not employee IDs.',
+      EXIT.refused
+    );
+  }
+  const company = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
+  if (company.status < 200 || company.status >= 300 || !company.json?.success)
+    return fail(
+      deps,
+      describeFailure(company),
+      company.status === 401 || company.status === 403 ? EXIT.refused : EXIT.error
+    );
+  const employees = (company.json.data as { employees?: Array<{ id?: unknown }> } | undefined)?.employees;
+  if (!Array.isArray(employees)) return fail(deps, 'Company employee identities could not be confirmed.');
+  if (employees.filter((employee) => employee?.id === id).length !== 1)
+    return fail(deps, 'No unique company employee has that full UUID; do not use a session ID or PID.', EXIT.refused);
+
+  let response: ApiResponse;
+  try {
+    response = await deps.request(deps.ctx, {
+      method: 'POST',
+      path: `/api/company/employees/${id}/wake`,
+      body: {},
+    });
+  } catch {
+    return fail(deps, 'Employee wake outcome is unconfirmed. Check its current state before trying again.');
+  }
+  if (response.status < 200 || response.status >= 300 || !response.json?.success)
+    return fail(deps, describeFailure(response), [401, 403, 409].includes(response.status) ? EXIT.refused : EXIT.error);
+  const data = response.json.data as { recovery?: CompanyWakeReport } | undefined;
+  const recovery = data?.recovery;
+  if (
+    !recovery ||
+    !Array.isArray(recovery.awakened) ||
+    !Array.isArray(recovery.skipped) ||
+    recovery.awakened.length + recovery.skipped.length > 1 ||
+    !recovery.awakened.every((employeeId) => employeeId === id) ||
+    !recovery.skipped.every(
+      (skip) =>
+        skip &&
+        typeof skip === 'object' &&
+        skip.employeeId === id &&
+        typeof skip.reason === 'string' &&
+        skip.reason.length > 0 &&
+        skip.reason.length <= 200
+    )
+  )
+    return fail(deps, 'Employee wake result could not be confirmed. Check its current state before trying again.');
+  if (deps.json) emitJson(deps, data);
+  else if (recovery.awakened.length) deps.io.out(`Awakened employee ${id}.`);
+  else if (recovery.skipped.length)
+    deps.io.out(`Skipped employee ${id}: ${quoteForPane(recovery.skipped[0].reason, 200)}`);
+  else deps.io.out(`No employee awakened; the server returned no recovery outcome for ${id}.`);
+  return recovery.awakened.length ? EXIT.ok : EXIT.refused;
 }
 
 function describeWait(wait: WaitResult): string {
@@ -2713,6 +2775,16 @@ export function registerAgentCommands(program: Command): Command {
     .description('Nudge an idle colleague: type the standard "check your rooms and Board, then carry on" prompt (a working session is left alone)')
     .option('--json', 'Machine-readable output')
     .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentWake(deps, { id })));
+
+  agent
+    .command('wake-employee <employee-id>')
+    .description(
+      'Recover a company employee by full employee UUID using your recovery grant; agent wake instead nudges an idle session'
+    )
+    .option('--json', 'Print the real awakened/skipped recovery report; a skipped or unconfirmed wake exits nonzero')
+    .action((employeeId: string, options: { json?: boolean }) =>
+      run(Boolean(options.json), (deps) => agentWakeEmployee(deps, { employeeId }))
+    );
 
   agent
     .command('wait <id>')

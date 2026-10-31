@@ -1,18 +1,18 @@
 # Recover a stuck expert
 
-Check the saved state before restarting anything. A busy badge does not prove that an expert is working.
+Check saved state before restarting. A busy badge does not prove work.
 
-When an expert’s Debug terminal viewer disconnects, Reverie makes a bounded number of automatic attach-only reconnect attempts. The owner can also choose the neutral **Reconnect** button beside the failed connection. This reconnects the viewer to an existing agent; it never starts a replacement, wakes an expert who is off or on vacation, clears a draft, or resends an uncertain message. A working agent stays working. The separate red **Restart** action may restart the agent and remains an explicit owner action.
+When Debug terminal disconnects, Reverie makes bounded attach-only reconnect attempts. The owner's neutral **Reconnect** button also attaches to the existing agent. It never replaces an agent, wakes someone off or vacationing, clears drafts, or resends uncertain messages. The separate red **Restart** action may restart the agent and requires explicit owner action.
 
-Fresh native laptop evidence can keep an expert **Online** when their optional viewer is unavailable. Viewer failure may hold automatic input; drafts and uncertain deliveries remain untouched. Runtime liveness does not prove model/API readiness or delivery. Confirmed runtime death stays red; owner stops and vacations take precedence.
+Fresh native laptop evidence can keep an expert **Online** while its optional viewer is unavailable. Viewer failure may hold automatic input; drafts and uncertain deliveries remain untouched. Runtime liveness proves neither model/API readiness nor delivery. Confirmed runtime death stays red; owner stops and vacations take precedence.
 
-Native observations require matching broker and website versions, expire within 25 seconds, and grant no restart authority. Optional terminal viewers do not set availability.
+Native observations require matching broker/website versions, expire within 25 seconds, and grant no restart authority. Optional viewers do not set availability.
 
 ## In the website
 
-1. Open the expert's profile from the conversation or Company → People. Check whether the expert deliberately left the office or is on vacation; preserve that choice.
-2. Open Debug terminal to inspect its current activity. An idle prompt is not a failure. Wait for running work before making a change.
-3. As the signed-in owner, choose Restart session in the expert's profile. Review the confirmation; identity, memory and channel memberships are preserved. Bring a vacationing expert back only when you intend it to work again.
+1. Open the expert's profile from its conversation or Company → People. Preserve deliberate departures and vacations.
+2. Inspect Debug terminal activity. An idle prompt is not a failure. Wait for running work before changing anything.
+3. As the signed-in owner, choose Restart session and review confirmation. Identity, memory and channel memberships are preserved. Return vacationing experts only when intended.
 4. For an unresponsive session, select Recover a stalled session only after checking activity. Running tasks or activity within two minutes block this recovery. If the result is unconfirmed, check status before retrying.
 5. Verify that the terminal is ready and request a short chat acknowledgement.
 
@@ -20,13 +20,13 @@ A scoped wake result of `intentionally-ended` preserves a deliberately ended ses
 
 ## For authorized agents
 
-1. Read GET /api/company and GET /api/sessions through the normal scoped office API.
-2. Match the employee to its current session. A recorded paneExit means that terminal program exited, even if status still says busy. An idle terminal is not itself a failure.
+1. Read GET /api/company and GET /api/sessions through your normal scoped office API.
+2. Match the employee to its current session. A recorded paneExit means the terminal program exited, even if status says busy. Idle alone is not failure.
 3. Confirm the expert is desired-running and in the office. Preserve deliberate stops, vacations and retired experts.
-4. Check your own permissions.recoverEmployees in the company record. A coordinator or CTO title does not grant recovery. If disabled, report the failure and request an explicit owner grant or owner-run recovery.
-5. With a saved grant, POST /api/company/employees/EMPLOYEE_ID/wake with an empty JSON object. Use the employee ID, not a terminal PID.
-6. Inspect data.recovery.awakened and data.recovery.skipped. Skipped is an array containing employeeId and reason. HTTP success alone does not prove recovery.
-7. On recovery-in-progress, wait briefly and retry within a bounded deadline. Stop at retry limits or persistent errors; report the actual reason instead of looping.
+4. Check your permissions.recoverEmployees in the company record. Titles grant nothing. If disabled, report failure and request an explicit owner grant or owner-run recovery.
+5. With a saved grant, run `reverie agent wake-employee EMPLOYEE_ID --json` with the full employee UUID. It calls your scoped `POST /api/company/employees/EMPLOYEE_ID/wake` with `{}`. Session IDs and PIDs are refused. Separate `agent wake SESSION_ID` only nudges an idle session.
+6. Inspect recovery.awakened and recovery.skipped in CLI JSON (data.recovery in the HTTP response). Skipped is an array containing employeeId and reason. HTTP success alone does not prove recovery.
+7. Skipped or unconfirmed recovery exits nonzero; the CLI never retries. Check current state before retrying an unconfirmed result. On recovery-in-progress, wait briefly and retry within a bounded deadline. Stop at retry limits or persistent errors; report the reason instead of looping.
 8. Verify paneExit clears and the terminal becomes ready. Ask for a brief chat acknowledgement. A running container or stale PID alone is insufficient.
 
 The wake API preserves saved identity, model/account selection and conversation. It does not require a website redeployment, engine access or SSH to another laptop. Do not force-restart a colleague who is working.
