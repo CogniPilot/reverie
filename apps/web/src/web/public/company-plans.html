@@ -370,6 +370,37 @@ function planDialogView(dialog) {
   };
 }
 
+// The move-impact estimate for a destination (GET /api/plans/move-impact; see docs/plan-burn-per-agent.md): both plans'
+// projected weekly use at their stop point, now and with this session's last 30 minutes of work moved, with the joining
+// plan's band. Advisory only: it never throws, and a slow or failed estimate never blocks the move.
+async function moveImpactText(sessionId, toAccount) {
+  if (!sessionId || !toAccount) return '';
+  const pct = v => (v == null ? '–' : Math.round(v) + '%');
+  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 4e3);
+  try {
+    const response = await fetch(`/api/plans/move-impact?session=${encodeURIComponent(sessionId)}&to=${encodeURIComponent(toAccount)}`, {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}, signal: controller.signal});
+    if (response.status === 404) return 'No impact estimate yet: this session has no recent work rate.';
+    const result = await response.json();
+    if (!response.ok || !result.success) return 'Impact estimate unavailable.';
+    const m = result.data;
+    const band = m.to.endAfterLow != null && m.to.endAfterHigh != null && Math.round(m.to.endAfterLow) !== Math.round(m.to.endAfterHigh) ? ` (${pct(m.to.endAfterLow)}–${pct(m.to.endAfterHigh)})` : '';
+    const basis = m.to.conversion?.basis === 'prior' ? '; the destination has no readings yet, so its conversion is a prior guess' : '';
+    return `Estimated at each plan's stop, from this session's last 30 minutes (${Math.round(m.usdPerHour * 100) / 100} work units/h): ${m.from.label} ${pct(m.from.endNow)} → ${pct(m.from.endAfter)}; ${m.to.label} ${pct(m.to.endNow)} → ${pct(m.to.endAfter)}${band}${basis}.`;
+  } catch {
+    return 'Impact estimate unavailable.';
+  } finally { clearTimeout(timeout); }
+}
+
+// After the destination changes: refresh the estimate, ignoring an answer for an earlier choice.
+async function showMoveImpact(dialog, sessionId, toAccount) {
+  const box = dialog.querySelector('[data-move-impact]');
+  if (!box) return;
+  box.dataset.for = toAccount;
+  box.textContent = 'Estimating the impact on both plans…';
+  const text = await moveImpactText(sessionId, toAccount);
+  if (box.dataset.for === toAccount && box.isConnected) box.textContent = text;
+}
+
 async function openPlanMove(employeeId, destination) {
   const dialog = document.getElementById('moveDlg');
   if (!dialog || dialog.open) return;
@@ -392,9 +423,14 @@ async function openPlanMove(employeeId, destination) {
     if (!targets.length) throw new Error('No other plan is available.');
     if (destination === preview.account) { dialog.close(); return; }
     if (destination && !targets.some(account => account.id === destination)) throw new Error('Choose an available destination plan.');
+    // The first estimate is part of the form as it opens, so the open form does not change under the user.
+    const firstTarget = destination || targets[0].id;
+    const impact = await moveImpactText(preview.sessionId, firstTarget);
+    if (!view.current()) return;
     dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. After approval, the old session stops before the replacement starts; saved files stay with the employee.</p><form>
       <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
       <p class="hint" data-target-harness role="status"></p>
+      <p class="hint" data-move-impact data-for="${esc(firstTarget)}" role="status">${esc(impact)}</p>
       <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-inspect>Inspect existing moves</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
     view = planDialogView(dialog);
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
@@ -404,7 +440,7 @@ async function openPlanMove(employeeId, destination) {
       const mode = account?.provider === 'openai' ? 'codex' : 'claude';
       dialog.querySelector('[data-target-harness]').textContent = `Harness: ${mode === 'codex' ? 'Codex' : 'Claude'}. ${mode === preview.mode ? 'Your model and effort stay the same.' : 'The destination provider’s model and effort defaults apply.'}`;
     };
-    target.onchange = explainHarness;
+    target.onchange = () => { explainHarness(); void showMoveImpact(dialog, preview.sessionId, target.value); };
     explainHarness();
     dialog.querySelector('[data-force]').onclick = () => { void forcePlanMove(dialog, employee, target.value); };
     dialog.querySelector('[data-inspect]').onclick = () => { void openPlanMoveHistory(employeeId); };

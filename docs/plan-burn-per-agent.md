@@ -89,8 +89,10 @@ projection passes 100, and the before values (without the move) for comparison. 
 
 The API is `GET /api/plans/move-impact?session=<id>&to=<account id>`, for the owner or an agent with plans.view_all, like
 `/api/plans`. Each side's rate now is the plan's realtime rate when its sessions report cost, otherwise its 6-hour slope,
-otherwise 0 for a plan with no data, and `rateBasis` says which. The plan-move confirmation is to show its result next;
-the Plans page already lists each plan's agents with their burn.
+otherwise 0 for a plan with no data, and `rateBasis` says which. The plan-move dialog shows the result for the chosen
+destination: the first estimate when the form opens, then a fresh one whenever the destination changes. A late answer
+for an earlier choice is ignored, and a missing estimate never blocks the move. The Plans page lists each plan's agents
+with their burn.
 
 ## Accuracy check
 
@@ -116,18 +118,17 @@ The estimates are checked against what actually happened, from the stored histor
 In this change: per-session cost samples from the status line (`plan-agent-cost-history.json`); the 30-minute agent
 cost rate; the per-plan factor with its provider and tier prior, update from the plan's own readings and band; per-agent
 burn and the realtime plan rate on `/api/plans` rows and the board's plan burn, shown on each Claude plan card; and
-`moveImpact` and its route `GET /api/plans/move-impact`; and each factor's hourly fit error against the plan's own
+`moveImpact`, its route `GET /api/plans/move-impact` and its display in the plan-move dialog; and each factor's hourly fit error against the plan's own
 readings.
 
 Remaining:
 
-1. Showing the move impact in the plan-move dialog. The route `/api/plans/move-impact` is done.
-2. The five-hour side: store five-hour percent in the usage samples and add `c5_P`.
-3. Persisting the factor's posterior across windows and restarts. Today each read recomputes it from the kept history.
-4. An explicit tier field on subscription profiles instead of reading the label.
-5. The out-of-sample accuracy report (`burnCheck`) and the per-move check. The in-sample hourly fit is already shown.
-6. A work-unit source for Codex sessions (no per-session cost today).
-7. Pooling factors across plans of one tier.
+1. The five-hour side: store five-hour percent in the usage samples and add `c5_P`.
+2. Persisting the factor's posterior across windows and restarts. Today each read recomputes it from the kept history.
+3. An explicit tier field on subscription profiles instead of reading the label.
+4. The out-of-sample accuracy report (`burnCheck`) and the per-move check. The in-sample hourly fit is already shown.
+5. A work-unit source for Codex sessions (no per-session cost today).
+6. Pooling factors across plans of one tier.
 
 ## Not in scope
 

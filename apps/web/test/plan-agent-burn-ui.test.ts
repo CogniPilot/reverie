@@ -55,3 +55,50 @@ it('adds nothing for a plan without per-agent burn', () => {
   expect(block({ id: 'acct-3', agentBurn: null })).toBe('');
   expect(block({ id: 'acct-3' })).toBe('');
 });
+
+const moveStart = html.indexOf('async function moveImpactText(sessionId, toAccount)');
+const moveHelper = html.slice(moveStart, html.indexOf('async function openPlanMove(employeeId, destination)', moveStart));
+const IMPACT = {
+  usdPerHour: 2,
+  from: { label: 'Team plan', endNow: 92.4, endAfter: 71.2 },
+  to: { label: 'Big plan', endNow: 10, endAfter: 14.6, endAfterLow: 12.1, endAfterHigh: 19.8, conversion: { basis: 'prior' } },
+};
+
+function moveDialog(fetch: unknown) {
+  const doc = new JSDOM('<dialog><p data-move-impact></p></dialog>').window.document;
+  const show = runInNewContext(moveHelper + ';showMoveImpact', { fetch, encodeURIComponent, Math, AbortController, setTimeout, clearTimeout }) as (d: unknown, s: string, t: string) => Promise<void>;
+  return { doc, box: doc.querySelector('[data-move-impact]')!, show: (to: string) => show(doc.querySelector('dialog'), 'session-1', to) };
+}
+const reply = (status: number, body: unknown) => Promise.resolve({ status, ok: status < 300, json: () => Promise.resolve(body) });
+
+it('shows both plans before and after the move, with the joining band and a prior note', async () => {
+  const urls: string[] = [];
+  const { box, show } = moveDialog((url: string) => (urls.push(url), reply(200, { success: true, data: IMPACT })));
+  await show('acct big');
+  expect(urls[0]).toBe('/api/plans/move-impact?session=session-1&to=acct%20big');
+  expect(box.textContent).toContain('(2 work units/h)');
+  expect(box.textContent).toContain('Team plan 92% → 71%; Big plan 10% → 15% (12%–20%)');
+  expect(box.textContent).toContain('prior guess');
+});
+
+it('says when there is no work rate yet, or no estimate, without blocking the dialog', async () => {
+  let m = moveDialog(() => reply(404, { success: false }));
+  await m.show('x');
+  expect(m.box.textContent).toBe('No impact estimate yet: this session has no recent work rate.');
+  m = moveDialog(() => Promise.reject(new Error('offline')));
+  await m.show('x');
+  expect(m.box.textContent).toBe('Impact estimate unavailable.');
+});
+
+it('never lets a slow answer for an earlier destination overwrite the current one', async () => {
+  let release: (v: unknown) => void = () => {};
+  const slow = new Promise((resolve) => { release = resolve; });
+  let calls = 0;
+  const { box, show } = moveDialog(() => (++calls === 1 ? slow : reply(200, { success: true, data: { ...IMPACT, to: { ...IMPACT.to, label: 'Second' } } })));
+  const first = show('first');
+  await show('second');
+  release({ status: 200, ok: true, json: () => Promise.resolve({ success: true, data: IMPACT }) });
+  await first;
+  expect(box.textContent).toContain('Second');
+  expect(box.textContent).not.toContain('Big plan');
+});
