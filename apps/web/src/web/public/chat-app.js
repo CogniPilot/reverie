@@ -8789,43 +8789,118 @@ class ReverieChatApp {
     const label = this.el('label', 'ca-hint', 'Memory (MiB) ');
     const input = this.el('input', 'ca-field');
     input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '512'; input.required = true;
-    input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`);
-    label.append(input);
+    input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`); label.append(input);
     const draftBox = this.el('div', 'ca-profile-memory-draft');
     const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
-    let busy = false, operationId = null;
-    const unconfirmed = 'Not confirmed. Check the status before trying again.';
+    const legacyKey = `reverie:laptop-memory:${employee.id}`;
+    let ownerId = null, key = null;
+    const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+    const tracked = new Set();
+    let busy = false, discovering = true, discoveryFailed = false, storageFailed = false;
+    const currentOwner = async () => {
+      try {
+        const result = await this.app._chatApi('/api/owner/status');
+        const data = result.data, identity = data?.identity;
+        if (!result.ok || data?.configured !== true || data.signedIn !== true || identity?.role !== 'owner'
+          || typeof identity.id !== 'string' || !(identity.id === 'owner' || uuid.test(identity.id))
+          || (ownerId !== null && ownerId !== identity.id)) throw new Error();
+        ownerId = identity.id;
+        key = `reverie:laptop-memory:${ownerId}:${employee.id}`;
+        return true;
+      } catch {
+        discoveryFailed = true;
+        status.textContent = 'The signed-in owner could not be verified or changed. Reopen this profile after signing in; recovery records have been kept.';
+        return false;
+      }
+    };
+    const readIds = () => {
+      try {
+        // Older records have no attributable owner. Preserve and fence them;
+        // neither a new account nor an empty server listing proves them safe.
+        const legacy = JSON.parse(this.doc.defaultView.localStorage.getItem(legacyKey) || '[]');
+        if (!Array.isArray(legacy) || legacy.length || !key) throw new Error();
+        const value = JSON.parse(this.doc.defaultView.localStorage.getItem(key) || '[]');
+        if (!Array.isArray(value) || value.length > 100 || value.some(id => typeof id !== 'string' || !uuid.test(id))) throw new Error();
+        storageFailed = false; return value;
+      } catch { storageFailed = true; return []; }
+    };
+    const retain = (remove) => {
+      // Merge other open profiles/tabs; a late response may remove only its own
+      // definitively terminal ID, never a newer unknown request.
+      const ids = new Set([...readIds(), ...tracked]);
+      if (storageFailed) return false;
+      if (remove) ids.delete(remove);
+      try { this.doc.defaultView.localStorage.setItem(key, JSON.stringify([...ids])); return !storageFailed; }
+      catch { storageFailed = true; return false; }
+    };
+    const unconfirmed = 'Restart unconfirmed. Check status; do not preview or apply another change.';
+    const sync = () => {
+      preview.disabled = busy || discovering || discoveryFailed || storageFailed || tracked.size > 0;
+      input.disabled = preview.disabled;
+      check.hidden = tracked.size === 0 && !discoveryFailed && !storageFailed;
+      check.disabled = busy || discovering;
+    };
+    const discover = async () => {
+      discovering = true; sync();
+      try {
+        if (!await currentOwner()) return;
+        for (const id of readIds()) tracked.add(id);
+        const result = await this.app._chatApi('/api/company/resources/operations', { method: 'POST', body: { employeeId: employee.id } });
+        if (!await currentOwner()) return;
+        if (!result.ok || !Array.isArray(result.data) || result.data.length > 200 || result.data.some(item =>
+          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string')) throw new Error();
+        for (const item of result.data) if (!['completed', 'not-started'].includes(item.phase)) tracked.add(item.id);
+        discoveryFailed = false;
+        if (tracked.size) { retain(); status.textContent = unconfirmed; }
+        else status.textContent = storageFailed ? 'The local recovery record is unavailable. Do not start another change; inspect owner operations.' : '';
+      } catch {
+        discoveryFailed = true;
+        status.textContent = 'Previous memory changes could not be checked. Check status before starting another change.';
+      } finally { discovering = false; sync(); }
+    };
     const check = this.button('ca-btn', `Check laptop memory change for ${employee.name}`, async () => {
-      if (busy || !operationId) return;
-      busy = true; check.disabled = true;
+      if (busy || discovering) return;
+      if (discoveryFailed || storageFailed) await discover();
+      if (discoveryFailed || !tracked.size) return;
+      busy = true; sync();
       try {
-        const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
-        if (!dialog.isConnected) return;
-        const phase = result.ok ? result.data?.phase : null;
-        // A memory change never ends as 'failed': a failure stays recovery-required until its actor reconciles it.
-        // No record at all (an Apply refused before the move began) reads as unavailable, the same as a broker outage.
-        status.textContent = !result.ok
-          ? `Status could not be read (${result.status ?? 'network'}). If this keeps happening, the restart may not have started: preview again to try once more.`
-          : phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
-            : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
-              : `In progress (${phase || 'unknown'}). Check again shortly.`;
-      } finally { busy = false; check.disabled = false; }
+        if (!await currentOwner()) return;
+        for (const operationId of [...tracked]) {
+          try {
+            if (!await currentOwner()) return;
+            const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
+            if (!await currentOwner()) return;
+            const phase = result.ok && result.data?.id === operationId ? result.data.phase : null;
+            if (phase === 'completed' || phase === 'not-started') {
+              tracked.delete(operationId); retain(operationId);
+              status.textContent = phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
+                : 'The restart was not dispatched. You can prepare a new preview.';
+            } else status.textContent = !result.ok
+              ? `Status could not be read (${result.status ?? 'network'}). The outcome is unknown; do not start another change.`
+              : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
+                : `In progress or unconfirmed (${phase || 'unknown'}). Check again; do not start another change.`;
+          } catch { status.textContent = 'Status could not be read. The outcome is unknown; do not start another change.'; }
+        }
+        if (tracked.size && !status.textContent.includes('not start another')) status.textContent = unconfirmed;
+      } finally { busy = false; sync(); }
     }, { text: 'Check status' });
-    check.hidden = true;
     const preview = this.button('ca-btn', `Preview laptop memory for ${employee.name}`, async () => {
-      if (busy || !input.reportValidity()) return;
-      busy = true; preview.disabled = true; draftBox.replaceChildren(); status.textContent = 'Preparing a preview…';
+      if (busy || discovering || discoveryFailed || storageFailed || tracked.size || !input.reportValidity()) return;
+      busy = true; sync(); draftBox.replaceChildren(); status.textContent = 'Preparing a preview…';
       try {
+        if (!await currentOwner()) return;
         const memoryMiB = Number(input.value);
         const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
-        if (!dialog.isConnected) return;
+        if (!dialog.isConnected || !await currentOwner()) return;
         if (!result.ok) {
           status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
             : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
-              : 'No preview: the laptop may be busy, or this agent cannot be restarted this way. Nothing was changed.';
+              : 'No preview: the laptop may be busy, or a previous change needs inspection. Check status before trying again.';
+          if (result.status !== 403 && result.status !== 404) void discover();
           return;
         }
         const draft = result.data, r = draft?.resources || {};
+        if (!uuid.test(draft?.operationId) || !uuid.test(draft?.draftId)) throw new Error();
         status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
         draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} processes, ${r.cpus} CPUs. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
         const note = this.el('textarea', 'ca-field');
@@ -8833,26 +8908,31 @@ class ReverieChatApp {
         note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
         note.setAttribute('aria-label', `Handoff note for ${employee.name} after the restart`);
         const apply = this.button('ca-btn is-danger', `Restart ${employee.name} with ${mib(r.memoryMiB)}`, async () => {
-          if (busy || !note.value.trim()) return;
+          if (busy || tracked.size || !note.value.trim()) return;
           const question = `Restart ${employee.name}'s laptop with ${mib(r.memoryMiB)} of memory? Current work is interrupted and resumes from the note.`;
-          if (!await this.confirmCompanyAction(employee.name, question, 'Restart laptop') || !dialog.isConnected) return;
-          busy = true; apply.disabled = true; preview.disabled = true; status.textContent = 'Restarting the laptop…';
+          if (!await this.confirmCompanyAction(employee.name, question, 'Restart laptop') || !dialog.isConnected || busy || tracked.size) return;
+          busy = true; sync();
+          if (!await currentOwner()) { busy = false; sync(); return; }
+          if (!dialog.isConnected) { busy = false; sync(); return; }
+          // Retain identity BEFORE dispatch/await and even if the profile closes.
+          tracked.add(draft.operationId);
+          if (!retain()) { busy = false; tracked.delete(draft.operationId); status.textContent = 'The recovery record could not be saved. Nothing was dispatched; check status before trying again.'; sync(); return; }
+          busy = true; apply.disabled = true; sync(); status.textContent = 'Restarting the laptop…';
           try {
             const applied = await this.app._chatApi('/api/company/resources/apply', { method: 'POST', body: { previewId: draft.draftId, handoff: note.value.trim() } });
-            if (!dialog.isConnected) return;
-            // One attempt for this preview: the server refuses a second Apply, so the button stays off either way.
-            operationId = draft.operationId; check.hidden = false;
             status.textContent = applied.ok ? `Restart started (${applied.data?.phase || 'starting'}). Use Check status to follow it.` : unconfirmed;
-          } finally { busy = false; preview.disabled = false; }
+          } catch { status.textContent = unconfirmed; }
+          finally { busy = false; sync(); }
         }, { text: `Restart with ${mib(r.memoryMiB)}` });
         draftBox.append(this.el('label', 'ca-hint', 'Note for the agent after the restart'), note, apply);
-      } finally { busy = false; preview.disabled = false; }
+      } catch { status.textContent = 'A preview could not be obtained. No restart was dispatched.'; }
+      finally { busy = false; sync(); }
     }, { text: 'Preview' });
     row.append(label, preview, check);
     host.append(this.el('h3', '', 'Laptop memory'),
       this.el('p', 'ca-hint', 'Changes this expert\'s laptop memory by restarting it on a new laptop. Processes, CPUs and the shared pool stay as they are.'),
       row, draftBox, status);
-    container.append(host);
+    container.append(host); status.textContent = 'Checking previous memory changes…'; sync(); void discover();
   }
 
   /** Company marks share the existing upload, preview and workspace-picture persistence. */

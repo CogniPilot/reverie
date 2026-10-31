@@ -36,7 +36,8 @@ class ProviderHealth(unittest.TestCase):
             'Mounts':[{'Type':'bind','Source':str(self.paths.home),'Destination':'/home/agent','RW':True}]}
         self.calls=[];self.after=None;self.pane_dead=False;self.guest_pid=self.pane_pid;self.omit_command=False
         self.broker=SimpleNamespace(config=self.config,config_file=self.path,stopping=StopBudget(),run_engine=self.engine)
-        self.clock=0.;self.monotonic=time.monotonic();self.observer=H.ProviderHealthObserver(self.broker,
+        # Keep the fake clock exact at TTL; a real offset can round five seconds above the inclusive boundary.
+        self.clock=0.;self.monotonic=0.;self.observer=H.ProviderHealthObserver(self.broker,
             monotonic=lambda:self.monotonic+self.clock,epoch=lambda:1000+self.clock)
         original=Path.stat;guest=Path('/proc')/str(self.init_pid)/'root/home/agent'
         home=self.paths.home
@@ -249,6 +250,22 @@ class ProviderHealth(unittest.TestCase):
             self.after=after
             rows=self.result();self.assertFalse(any(r['state']=='healthy'for r in rows))
             self.after=None
+
+
+class CacheClockFixture(unittest.TestCase):
+    def test_ttl_boundary_is_independent_of_real_monotonic_offset(self):
+        # This real-clock offset makes (offset + 5) - offset exceed the
+        # inclusive five-second TTL. Keep the existing real-kernel assertions.
+        import math
+        class OffsetSetup(ProviderHealth):
+            def setUp(self):
+                clock = SimpleNamespace(monotonic=lambda: math.nextafter(1024., -math.inf))
+                with patch(__name__ + '.time', clock):
+                    super().setUp()
+        result = unittest.TestResult()
+        OffsetSetup('test_cache_retains_original_epoch_and_binding_and_expires_monotonically').run(result)
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.failures, [])
 
 
 

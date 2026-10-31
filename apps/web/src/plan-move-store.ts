@@ -80,6 +80,13 @@ const JournalSchema = z
       context.addIssue({ code: 'custom', message: 'Duplicate move identifiers' });
   });
 
+const ResourceAttempt = z.object({operationId: z.string().uuid().regex(/^[0-9a-f-]+$/),
+  employeeId: z.string().uuid().regex(/^[0-9a-f-]+$/), owner: z.string().min(1).max(200).nullable(),
+  phase: z.enum(['preparing', 'dispatching', 'not-started'])}).strict();
+type ResourceAttemptRecord = z.infer<typeof ResourceAttempt>;
+const ResourceAttempts = z.array(ResourceAttempt).max(100).refine(rows =>
+  new Set(rows.map(row => row.operationId)).size === rows.length);
+
 export class PlanMoveStore {
   private chain: Promise<void> = Promise.resolve();
 
@@ -115,6 +122,75 @@ export class PlanMoveStore {
         throw new Error('Current private resource move is unavailable');
       return Object.freeze(structuredClone(matches[0]));
     } finally {await handle.close();}
+  }
+
+  /** Discovery only: these receipts never authorize native work or completion. */
+  private async readResourceAttempts(): Promise<ResourceAttemptRecord[]> {
+    const file = this.file + '.resource-attempts.json';
+    let handle;
+    try {handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);}
+    catch (error) {if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error;}
+    try {
+      const before = await handle.stat({bigint: true});
+      if (!before.isFile() || before.nlink !== 1n || before.size > 65536n ||
+          (before.mode & 0o777n) !== 0o600n || (process.getuid && before.uid !== BigInt(process.getuid())))
+        throw new Error('Private resource attempts unavailable');
+      const bytes = Buffer.alloc(Number(before.size) + 1); let offset = 0;
+      while (offset < bytes.length) {
+        const result = await handle.read(bytes, offset, bytes.length - offset, null);
+        if (!result.bytesRead) break; offset += result.bytesRead;
+      }
+      const after = await handle.stat({bigint: true}), named = await fs.lstat(file, {bigint: true});
+      const stamp = (info: typeof before) => [info.dev, info.ino, info.mode, info.uid, info.nlink,
+        info.size, info.mtimeNs, info.ctimeNs].map(String).join(':');
+      if (offset !== Number(before.size) || stamp(before) !== stamp(after) || stamp(before) !== stamp(named))
+        throw new Error('Private resource attempts changed');
+      const text = new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(0, offset));
+      const value = ResourceAttempts.parse(JSON.parse(text));
+      if (JSON.stringify(value) !== text) throw new Error('Noncanonical resource attempts');
+      return value;
+    } finally {await handle.close();}
+  }
+
+  async resourceAttempts(owner: string | undefined): Promise<ResourceAttemptRecord[]> {
+    await this.chain;
+    return (await this.readResourceAttempts()).filter(row => row.owner === (owner ?? null));
+  }
+
+  resourceAttemptStart(operationId: string, employeeId: string, owner: string | undefined,
+    completed: string[]): Promise<void> {
+    const next = ResourceAttempt.parse({operationId, employeeId, owner: owner ?? null, phase: 'preparing'});
+    const write = this.chain.then(async () => {
+      // Only definitive no-dispatch or already verified completion may age out.
+      // Keep no-dispatch history until the 100-record bound, including across
+      // unrelated new attempts whose replies may also be lost.
+      // Unknown receipts are never discarded to make room for another request.
+      const rows = (await this.readResourceAttempts()).filter(row =>
+        !completed.includes(row.operationId));
+      if (rows.some(row => row.operationId === operationId ||
+          row.employeeId === employeeId && row.owner === next.owner && row.phase !== 'not-started'))
+        throw new Error('A resource attempt still requires inspection');
+      if (rows.length >= 100) {
+        const settled = rows.findIndex(row => row.phase === 'not-started');
+        if (settled < 0) throw new Error('Resource attempt history requires inspection');
+        rows.splice(settled, 1);
+      }
+      rows.push(next);
+      await writeCompanyStateFile(this.file + '.resource-attempts.json', JSON.stringify(ResourceAttempts.parse(rows)));
+    });
+    this.chain = write.catch(() => {}); return write;
+  }
+
+  resourceAttemptPhase(operationId: string, owner: string | undefined,
+    phase: 'dispatching' | 'not-started'): Promise<void> {
+    const write = this.chain.then(async () => {
+      const rows = await this.readResourceAttempts();
+      const row = rows.find(item => item.operationId === operationId && item.owner === (owner ?? null));
+      if (!row || row.phase !== 'preparing') throw new Error('Resource dispatch boundary changed');
+      row.phase = phase;
+      await writeCompanyStateFile(this.file + '.resource-attempts.json', JSON.stringify(ResourceAttempts.parse(rows)));
+    });
+    this.chain = write.catch(() => {}); return write;
   }
 
   private recoveryFile(id: string, kind: 'pending' | 'verified'): string {
