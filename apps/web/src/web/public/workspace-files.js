@@ -374,11 +374,19 @@
         note.replaceWith(container);
         pdfPreview = await module.mountReadOnlyPdf({ bytes, container, signal: controller.signal });
       } else {
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(
-          await previewBytes(res, 256 * 1024, controller.signal)
-        );
+        const bytes = await previewBytes(res, 256 * 1024, controller.signal);
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         if (turn !== previewEpoch) return;
-        if (/\.md(?:own)?$|\.markdown$/i.test(entry.name) && window.marked?.parse && window.sanitizeMarkdownHtml) {
+        if (/\.svg$/i.test(entry.name)) {
+          // Drawn by an <img> from a data: URL, as in the console viewers: an image runs none of the file's script, and a
+          // data: URL (unlike a same-origin blob:) cannot be opened as a page on this origin. The server sends it as text.
+          let binary = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          const img = node('img');
+          img.alt = entry.name;
+          img.src = `data:image/svg+xml;base64,${btoa(binary)}`;
+          note.replaceWith(img);
+        } else if (/\.md(?:own)?$|\.markdown$/i.test(entry.name) && window.marked?.parse && window.sanitizeMarkdownHtml) {
           const template = staticDocument(window.marked.parse(text, { async: false }));
           const article = node('article', undefined, 'workspace-markdown');
           article.append(template.content);
