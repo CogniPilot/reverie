@@ -64,8 +64,10 @@ class ResumeWebsitePeer(WebsitePeer):
                 need(key not in value, 'RESUME_PROGRAM_MANIFEST_DUPLICATE'); value[key] = item
             return value
         value = json.loads(raw, object_pairs_hook=pairs)
-        need(type(value) is dict and set(value) == {'version','purpose','console','nodeInvocation',
-             'nodeExecutable','programs','files','links','directories'} and type(value['version'])is int and value['version'] == 1 and
+        fields = {'version','purpose','console','nodeInvocation',
+                  'nodeExecutable','programs','files','links','directories'}
+        need(type(value) is dict and set(value) in (fields, fields | {'ownerTerminalProgram'})
+             and type(value['version'])is int and value['version'] == 1 and
              value['purpose'] == PURPOSE, 'RESUME_PROGRAM_MANIFEST_SCHEMA')
         self.manifest, self.manifest_identity = value, before
         self.files = value['files']; console = Path(value['console'])

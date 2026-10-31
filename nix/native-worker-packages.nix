@@ -2,7 +2,7 @@
 # Regenerate complete program/profile provenance; never copy a prior manifest.
 # An already-qualified console remains subject to the complete console/Node
 # measurements in workerResumeProgram's normal build.
-{ pkgs, src, console }:
+{ pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
   workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs; };
   workerTaskPerfPolicy = import ./worker-perf-profile.nix {
@@ -10,7 +10,7 @@ rec {
     baseProfile = workerDockerSeccomp;
   };
   workerResumeProgram = import ./worker-resume-program.nix {
-    inherit pkgs src console;
+    inherit pkgs src console ownerTerminalProgram;
   };
   workerBrokerSource = pkgs.runCommand "reverie-worker-broker-source" {
     nativeBuildInputs = [ pkgs.python3 ];

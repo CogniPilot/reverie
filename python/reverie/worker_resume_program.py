@@ -56,17 +56,40 @@ def require_programs(value):
     need(value['programs']==programs(value['console'],value['nodeInvocation']) and
          str(Path(value['console'])/'lib/reverie/scripts/owner-terminal-start.mjs')in value['files'],
          'RESUME_FIXED_WEBSITE_ARGV')
+    owner_program(value, verify_files=True)
+
+
+def owner_program(value, *, verify_files=False, input_validator=None):
+    """An optional Nix-selected H manifest, never a caller's argv extension."""
+    pair = value.get('ownerTerminalProgram')
+    if pair is None:
+        need('ownerTerminalProgram' not in value, 'RESUME_H_PROGRAM_PAIR')
+        return None
+    need(type(pair) is dict and set(pair) == {'path', 'sha256'}
+         and type(pair['path']) is str and 0 < len(pair['path']) <= 4096
+         and type(pair['sha256']) is str and len(pair['sha256']) == 64
+         and all(c in '0123456789abcdef' for c in pair['sha256']), 'RESUME_H_PROGRAM_PAIR')
+    from .website_image_provenance import startup_program
+    from .website_service_auth import protected_startup
+    program, observed = startup_program(pair['path'], value['console'], value['nodeInvocation'],
+        verify_files=verify_files, input_validator=input_validator)
+    need(observed == pair, 'RESUME_H_PROGRAM_CHANGED')
+    return protected_startup(program)
 
 
 def selected_programs(value, command):
     """Bind ordinary auth startup to native same-container Cmd, never wire input.
 
-    The optional protected wrapper has its own fixed startup contract. Only the
-    measured ordinary entry may use the explicit service-auth launch option.
+    Protected authenticated startup additionally requires its exact immutable
+    H manifest selected in this broker's program graph.
     """
     need(type(command) is list and 1 <= len(command) <= 16 and all(
          type(arg) is str and 0 < len(arg.encode('utf8')) <= 4096 and
          not any(char in arg for char in '\0\r\n') for arg in command), 'RESUME_FIXED_WEBSITE_ARGV')
+    protected = owner_program(value)
+    if protected is not None and command[0] == protected['command'][0]:
+        need(command == protected['command'], 'RESUME_FIXED_WEBSITE_ARGV')
+        return [protected['node']]
     if not any(arg == '--service-auth-config' or arg.startswith('--service-auth-config=') for arg in command):
         return value['programs']
     base = ['web', '--host', '0.0.0.0', '--port', '3000']
@@ -82,7 +105,7 @@ def selected_programs(value, command):
     return [[*value['programs'][0], *extra]]
 
 
-def build(console, node, *, input_validator=None):
+def build(console, node, *, input_validator=None, owner_terminal_program=None):
     """The Nix package fixes both inputs; includes the complete console output."""
     console, node = Path(console), Path(node)
     need(console.is_absolute() and console.resolve(strict=True) == console and
@@ -117,20 +140,29 @@ def build(console, node, *, input_validator=None):
     need(entry in files and str(console / 'lib/reverie/dist/host-worker-resume.js') in files and
          str(console/'lib/reverie/scripts/owner-terminal-start.mjs')in files,
          'RESUME_MATCHING_CONSOLE_REQUIRED')
-    return {'version': 1, 'purpose': PURPOSE, 'console': str(console),
+    result = {'version': 1, 'purpose': PURPOSE, 'console': str(console),
             'nodeInvocation': invocation, 'nodeExecutable': str(executable),
             'programs': programs(console,invocation), 'files': files, 'links': links,
             'directories': sorted(directories)}
+    if owner_terminal_program is not None:
+        selected = validate(Path(owner_terminal_program))
+        need(selected.stat().st_size <= 65536, 'RESUME_H_PROGRAM_BOUND')
+        result['ownerTerminalProgram'] = {'path': str(selected), 'sha256': file_fact(selected)['sha256']}
+        owner_program(result, verify_files=True, input_validator=(
+            lambda path, maximum, **kwargs: validate(path)))
+    return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     for name in ('console', 'node', 'output'): parser.add_argument('--' + name, required=True)
     parser.add_argument('--nix-build-inputs',action='store_true')
+    parser.add_argument('--owner-terminal-program')
     args = parser.parse_args(argv)
     from .website_image_provenance import nix_build_input
     value = build(args.console, args.node,input_validator=(
-        lambda path:nix_build_input(path,256<<20))if args.nix_build_inputs else None)
+        lambda path:nix_build_input(path,256<<20))if args.nix_build_inputs else None,
+        owner_terminal_program=args.owner_terminal_program)
     raw=(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
     need(0<len(raw)<=16<<20,'RESUME_MANIFEST_GRAPH_BOUND')
     output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)
