@@ -227,7 +227,8 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       const since = now() - DAY_MS;
       return {
         experts: state.templates,
-        hires: state.hires,
+        // An active hire whose session no longer exists still counts against maxActive until it is retired.
+        hires: state.hires.map((h) => (h.status === 'active' ? { ...h, sessionLive: deps.sessionExists(h.sessionId) } : h)),
         // The whole settings object: PUT /api/experts-settings replaces it, so a caller reads, changes and writes it back.
         settings: state.settings,
         limits: {
