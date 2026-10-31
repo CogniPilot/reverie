@@ -658,6 +658,22 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
   }
 }
 
+/* ── a web page from a message, beside the conversation; on a phone it covers the conversation until Back ── */
+.ca-web { flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; background: var(--ca-main-bg); border-left: 1px solid var(--ca-line); }
+.ca-web[hidden] { display: none; }
+.ca-root.ca-web-open .ca-chat { flex: 1 1 50%; }
+.ca-web-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--ca-line); }
+.ca-web-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ca-web-external { flex: none; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.ca-web-note { flex: none; margin: 0; padding: 4px 12px; color: var(--text-dim); font-size: 12px; }
+.ca-web-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; }
+@media (max-width: 767px) {
+  .ca-web { position: fixed; top: var(--ca-vtop, 0); right: 0; bottom: 0; left: 0; z-index: 2; min-width: 0; border-left: 0; }
+  .ca-web-head { padding-top: max(4px, env(safe-area-inset-top)); }
+  .ca-web-head .ca-icon-btn, .ca-web-external { min-height: 44px; min-width: 44px; }
+  .ca-web-frame { padding-bottom: env(safe-area-inset-bottom); box-sizing: border-box; }
+}
+
 /* ── phones: one column, the rail and sidebar are a drawer ──
    Closed, a drawer is moved fully off-screen (its own width plus its left offset) AND hidden, so no
    edge of it can show and nothing in it can be tabbed to. */
