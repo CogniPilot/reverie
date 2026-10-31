@@ -3226,6 +3226,7 @@ class ReverieChatApp {
           } catch (failure) { error.textContent = failure.message || 'Company core beliefs could not be saved.'; }
           finally { saveCore.disabled = false; }
         }); content.append(coreForm);
+        content.append(this.companyHiringFields(data.employees || []));
       } else content.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
       const receipts = this.el('details', 'ca-company-settings-receipts');
       receipts.append(this.el('summary', '', 'Research receipts'));
@@ -3263,6 +3264,88 @@ class ReverieChatApp {
       }, { text: 'Refresh receipts' });
       receipts.append(reports, refresh); content.append(receipts);
     } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Company settings are unavailable.'; } }
+  }
+
+  /**
+   * Owner-only hiring settings: who may hire for the owner, the two hire caps with their current use, and the active hires,
+   * flagging any whose session is gone. PUT /api/experts-settings replaces the whole settings object, so each save starts
+   * from a fresh read and changes only these fields.
+   */
+  companyHiringFields(employees) {
+    const form = this.el('form', 'ca-company-hiring');
+    form.setAttribute('aria-label', 'Hiring');
+    const usage = this.el('p', 'ca-hint');
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const number = (label, max) => {
+      const wrap = this.el('label', 'ca-label');
+      const input = this.el('input', 'ca-field');
+      input.type = 'number'; input.min = '0'; input.max = String(max); input.step = '1'; input.required = true; input.setAttribute('aria-label', label);
+      wrap.append(this.el('span', 'ca-label-text', label), input);
+      return { wrap, input };
+    };
+    const perDay = number('Hires in any 24 hours', 20), active = number('Active hires at most', 50);
+    const delegates = this.el('fieldset', 'ca-company-hiring-delegates');
+    const hires = this.el('div', 'ca-company-hiring-active');
+    const save = this.el('button', 'ca-btn is-primary', 'Save hiring settings'); save.type = 'submit'; save.disabled = true;
+    const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
+    form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap, delegates, actions, status, error, hires);
+    const when = (ms) => globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
+    const render = (data) => {
+      const settings = data.settings || {}, limits = data.limits || {};
+      usage.textContent = `In the last 24 hours: ${limits.hiresLast24h} of ${limits.maxHiresPerDay} hires. Active now: ${limits.active} of ${limits.maxActive}.`;
+      perDay.input.value = String(settings.maxHiresPerDay); active.input.value = String(settings.maxActive);
+      // Delegates are session ids: pick from the roster, and keep showing a listed one that no current expert holds.
+      const chosen = new Set(settings.hireDelegates || []);
+      const rows = employees.filter((e) => e.sessionId).map((e) => [e.sessionId, e.position ? `${e.name} · ${e.position}` : e.name]);
+      for (const id of chosen) if (!rows.some(([sid]) => sid === id)) rows.push([id, `Session ${id.slice(0, 8)} (no current expert)`]);
+      delegates.replaceChildren(this.el('legend', '', 'Who may hire for you'),
+        this.el('p', 'ca-hint', 'A delegate may hire and retire experts within these limits, without asking you each time.'));
+      for (const [sid, text] of rows) {
+        const wrap = this.el('label', 'ca-label'); const box = this.el('input');
+        box.type = 'checkbox'; box.name = 'hireDelegate'; box.value = sid; box.checked = chosen.has(sid);
+        wrap.append(box, this.el('span', '', text)); delegates.append(wrap);
+      }
+      const templates = new Map((data.experts || []).map((t) => [t.id, t.name]));
+      const who = (by) => by === 'owner' ? 'you' : by.startsWith('agent:')
+        ? employees.find((e) => e.sessionId === by.slice(6))?.name ?? `session ${by.slice(6, 14)}` : by;
+      const list = (data.hires || []).filter((h) => h.status === 'active');
+      hires.replaceChildren(this.el('h4', '', `Active hires · ${list.length}`));
+      if (!list.length) hires.append(this.el('p', 'ca-hint', 'No active hires.'));
+      for (const h of list) {
+        const row = this.el('div', 'ca-company-hire-record');
+        const name = employees.find((e) => e.id === h.employeeId)?.name ?? templates.get(h.templateId) ?? h.templateId;
+        row.append(this.el('strong', '', name),
+          this.el('p', 'ca-hint', `${templates.get(h.templateId) ?? h.templateId}, hired by ${who(h.by)} ${when(h.hiredAt)}. ${h.reason}`));
+        // Still counted against the active cap until it is retired.
+        if (h.sessionLive === false) row.append(this.el('p', 'ca-company-error', 'Its session no longer exists. It still counts as active until it is retired.'));
+        hires.append(row);
+      }
+      save.disabled = false;
+    };
+    const load = async () => {
+      const result = await this.app._chatApi('/api/experts');
+      if (!result.ok || !result.data?.settings) { error.textContent = 'Hiring settings could not be loaded. Reopen Company settings to try again.'; return; }
+      render(result.data);
+    };
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); if (save.disabled || !form.reportValidity()) return;
+      const hireDelegates = [...delegates.querySelectorAll('input[name="hireDelegate"]:checked')].map((box) => box.value);
+      if (hireDelegates.length > 20) { error.textContent = 'Choose at most 20 delegates.'; return; }
+      save.disabled = true; error.textContent = ''; status.textContent = '';
+      try {
+        const fresh = await this.app._chatApi('/api/experts');
+        if (!fresh.ok || !fresh.data?.settings) throw new Error(fresh.error || 'Hiring settings could not be read before saving. Nothing was changed.');
+        const body = { ...fresh.data.settings, hireDelegates, maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) };
+        const saved = await this.app._chatApi('/api/experts-settings', { method: 'PUT', body });
+        if (!saved.ok) throw new Error(saved.error || 'Hiring settings could not be saved.');
+        status.textContent = 'Hiring settings saved.';
+        await load();
+      } catch (failure) { error.textContent = failure.message || 'Hiring settings could not be saved.'; }
+      finally { save.disabled = false; }
+    });
+    void load();
+    return form;
   }
 
   confirmCompanyAction(name, message, confirmLabel) {

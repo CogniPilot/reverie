@@ -477,6 +477,17 @@ describe('experts api', () => {
       expect((await req('POST', '/api/experts/alpha/retire', { sessionId, reason: 'again please' })).statusCode).toBe(404);
     });
 
+    it('marks each active hire with whether its session still exists', async () => {
+      const kept = (await hire('alpha')).json().data.sessionId;
+      const gone = (await hire('alpha')).json().data.sessionId;
+      sessions.delete(gone); // the session was removed outside the experts routes
+      const hires = (await req('GET', '/api/experts')).json().data.hires;
+      expect(hires.find((h: { sessionId: string }) => h.sessionId === kept)).toMatchObject({ status: 'active', sessionLive: true });
+      expect(hires.find((h: { sessionId: string }) => h.sessionId === gone)).toMatchObject({ status: 'active', sessionLive: false });
+      await req('POST', '/api/experts/alpha/retire', { sessionId: kept, reason: 'Work is finished' });
+      expect((await req('GET', '/api/experts')).json().data.hires.find((h: { sessionId: string }) => h.sessionId === kept).sessionLive).toBeUndefined();
+    });
+
     it('refuses to delete a template with an active hire', async () => {
       await hire('alpha');
       expect((await req('DELETE', '/api/experts/alpha')).statusCode).toBe(409);
