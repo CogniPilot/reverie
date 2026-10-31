@@ -177,20 +177,65 @@ class ProviderHealth(unittest.TestCase):
                 self.assertFalse(any(row['state']=='healthy'for row in self.result()))
                 self.after=None
 
-    def test_stop_budget_and_held_lifecycle_mutex_never_queue_or_issue_engine_work(self):
+    def test_held_lifecycle_mutex_does_not_hide_fresh_native_observations(self):
         from reverie.worker import Broker
         broker=Broker(self.config,config_file=self.path)
-        broker.run_engine=lambda *args,**kwargs:self.fail('No engine work while held/stopping')
+        broker.run_engine=self.engine
         entered=threading.Event();release=threading.Event()
         def hold():
-            with broker.lock:entered.set();release.wait(2)
-        owner=threading.Thread(target=hold);owner.start();self.assertTrue(entered.wait(1))
+            with broker.lock:entered.set();release.wait(5)
+        owner=threading.Thread(target=hold);owner.start()
+        self.addCleanup(lambda:owner.join(1));self.addCleanup(release.set)
+        self.assertTrue(entered.wait(1))
         try:
             started=time.monotonic();value=broker.control('provider-health')
-            self.assertLess(time.monotonic()-started,.2);self.assertEqual(value['providerHealth']['providers'],[])
+            self.assertLess(time.monotonic()-started,1)
+            self.assertFalse(release.is_set());self.assertTrue(owner.is_alive())
+            self.assertEqual(value['providerHealth']['purpose'],'worker-provider-health-v1')
+            self.assertEqual([row['state']for row in value['providerHealth']['providers']],['healthy'])
+            self.assertTrue(any(call[0]=='exec'for call in self.calls))
         finally:release.set();owner.join(1)
         self.assertFalse(owner.is_alive())
-        broker.stopping.set();self.assertEqual(broker.control('provider-health')['providerHealth']['providers'],[])
+
+    def test_concurrent_initialization_constructs_one_observer_without_queuing(self):
+        from reverie.worker import Broker
+        broker=Broker(self.config,config_file=self.path)
+        entered=threading.Event();release=threading.Event();second_done=threading.Event()
+        created=[];results=[];errors=[];threads=[]
+        def settle():
+            release.set()
+            for thread in threads:thread.join(1)
+        self.addCleanup(settle)
+        proof={'version':1,'purpose':'worker-provider-health-v1','providers':[{'observedAtEpochMs':1234}]}
+        def construct(selected):
+            self.assertIs(selected,broker);created.append(selected);entered.set()
+            self.assertTrue(release.wait(5));return SimpleNamespace(read=lambda:copy.deepcopy(proof))
+        def read(done=None):
+            try:results.append(broker.control('provider-health'))
+            except BaseException as error:errors.append(error)
+            finally:
+                if done:done.set()
+        with patch.object(H,'ProviderHealthObserver',side_effect=construct):
+            first=threading.Thread(target=read);first.start();threads.append(first);self.assertTrue(entered.wait(1))
+            second=threading.Thread(target=read,args=(second_done,));second.start();threads.append(second)
+            try:
+                self.assertTrue(second_done.wait(1));self.assertFalse(release.is_set())
+                self.assertEqual(results,[{'providerHealth':{'version':1,'purpose':'worker-provider-health-v1','providers':[]}}])
+            finally:release.set();first.join(1);second.join(1)
+            self.assertFalse(first.is_alive());self.assertFalse(second.is_alive());self.assertEqual(errors,[])
+            self.assertEqual(len(created),1);self.assertEqual(results[-1],{'providerHealth':proof})
+            self.assertEqual(broker.control('provider-health'),{'providerHealth':proof})
+            self.assertEqual(len(created),1)  # Reuse never rewrites observation time.
+
+    def test_control_stopped_or_cleanup_uncertain_still_refuses_before_engine_work(self):
+        from reverie.worker import Broker
+        for state in ('stopped','cleanup'):
+            with self.subTest(state=state):
+                broker=Broker(self.config,config_file=self.path)
+                broker.run_engine=lambda *args,**kwargs:self.fail('No engine work while stopped/uncertain')
+                if state=='stopped':broker.stopping.set()
+                else:broker.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
+                self.assertEqual(broker.control('provider-health')['providerHealth']['providers'],[])
 
     def test_late_init_birth_or_runtime_file_change_cannot_publish_cached_healthy(self):
         for changed in ('runtime','init'):

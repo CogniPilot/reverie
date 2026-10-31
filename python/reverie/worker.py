@@ -684,6 +684,7 @@ class Broker:
         self.goals = GoalBrokerBootstrap(self)
         self.config_file = config_file
         self.lock = threading.RLock()
+        self._provider_health_init_lock = threading.Lock()
         self.active = {}
         self.laptops = {}
         self.offices = {}
@@ -1454,8 +1455,9 @@ class Broker:
                 return {'runningLaptops': len(self.laptops), 'runningSessionIds': self.running_sessions(), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
         if action == 'provider-health':
             empty = {'version': 1, 'purpose': 'worker-provider-health-v1', 'providers': []}
-            # Observations never queue behind a lifecycle mutation or shutdown.
-            if self.stopping.is_set() or not self.lock.acquire(blocking=False):
+            # Observer creation must not queue behind lifecycle work. Its reader
+            # retains its own nonblocking lock and final native revalidation.
+            if self.stopping.is_set() or not self._provider_health_init_lock.acquire(blocking=False):
                 return {'providerHealth': empty}
             try:
                 if not hasattr(self, '_provider_health_observer'):
@@ -1463,7 +1465,7 @@ class Broker:
                     self._provider_health_observer = ProviderHealthObserver(self)
                 observer = self._provider_health_observer
             finally:
-                self.lock.release()
+                self._provider_health_init_lock.release()
             return {'providerHealth': observer.read()}
         if action not in ['stop-laptops', 'shutdown', 'restart-website']:
             raise ValueError('Unknown office power action')
