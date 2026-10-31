@@ -469,6 +469,7 @@ export class WebServer extends EventEmitter {
   private workerProviderHealth?: WorkerProviderHealth;
   /** The console Board, once created; the chat digest reads it for an agent's own cards. */
   private boardStore?: BoardStore;
+  private chatBots?: ChatBotRegistry;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -1496,6 +1497,8 @@ export class WebServer extends EventEmitter {
           if (session) this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
         }
       },
+      // A bot's posts show its current picture (the registry is created further down).
+      botOf: (botId) => this.chatBots?.get(botId),
     });
     await this.chatroomService.init();
     this.chatroomService.onMessage((room, message) => {
@@ -1928,8 +1931,10 @@ export class WebServer extends EventEmitter {
     registerBrowserJobEvidence(this.app, { sessions: ctx, chat: this.chatroomService, company: companyStore, currentOwner: id => ownerAuth.isMessageOwner(id), policy: { service: ownerAuth, ctx } });
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
+    this.chatBots = chatBots;
     registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>
-      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id)
+      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id),
+      (bot) => this.chatroomService.botChanged(bot.id, bot.rooms)
     );
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
