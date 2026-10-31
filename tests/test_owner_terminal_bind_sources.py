@@ -94,6 +94,41 @@ class BindSources(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'H_BIND_CONTAINER_CHANGED'):
             with self.bound():self.item['State']['Pid']+=1000000
 
+    def test_full_mount_record_rotation_between_actual_inspects_is_harmless(self):
+        second={'Type':'bind','Source':str(self.b),'Destination':str(self.b),'RW':False,
+                'Propagation':'rprivate','Future':{'ordered':[1,2]}}
+        self.item['Mounts'].append(second)
+        dev,root=C._mount_location(self.b,self.table)
+        self.guest.append({'id':10**9+1,'device':dev,'root':root,'point':self.b})
+        original=self.engine.get;calls=0
+        def rotate(route):
+            nonlocal calls
+            item=original(route)
+            if route!='/containers/json?all=1':
+                calls+=1
+                item['Mounts']=item['Mounts'][calls%2:]+item['Mounts'][:calls%2]
+            return item
+        self.engine.get=rotate
+        with self.bound() as bindings:self.assertEqual(len(bindings),2)
+        self.assertGreaterEqual(calls,3)
+
+    def test_full_mount_fields_and_inner_array_order_are_not_projected_away(self):
+        self.mount['Future']={'ordered':[1,2]}
+        for change in ('RW','Propagation','Future'):
+            with self.subTest(change=change),self.assertRaisesRegex(ValueError,'H_BIND_CONTAINER_CHANGED'):
+                with self.bound():
+                    if change=='RW':self.mount['RW']=False
+                    elif change=='Propagation':self.mount['Propagation']='rshared'
+                    else:self.mount['Future']['ordered'].reverse()
+            self.mount.update(RW=True,Propagation='rprivate',Future={'ordered':[1,2]})
+
+    def test_duplicate_full_mount_records_or_destinations_refuse(self):
+        for changed in (dict(self.mount),dict(self.mount,RW=False)):
+            self.item['Mounts'].append(changed)
+            with self.subTest(changed=changed),self.assertRaises(ValueError):
+                with self.bound():self.fail('duplicate destination accepted')
+            self.item['Mounts'].pop()
+
     def test_cold_is_prospective_only_and_contradictory_or_null_state_refuses(self):
         self.item['State'].update(Running=False,Pid=0,Status='exited')
         with self.bound() as rows:

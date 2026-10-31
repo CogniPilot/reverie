@@ -2,6 +2,7 @@
 from collections import deque
 from contextlib import contextmanager
 import copy
+import json
 import os
 from pathlib import Path
 import stat
@@ -9,6 +10,7 @@ import time
 
 from .owner_terminal_channel import need, read_proc
 from .linux_root_files import open_in_root
+from .website_peer_facts import mounts
 from .worker_cold_tmp import read_mount_table, refuse_host_mount_aliases, refuse_mount_aliases
 
 
@@ -128,7 +130,10 @@ class BoundMount:
         selected = [m for m in raw['Mounts'] if all(m.get(k) == self.mount.get(k)
                     for k in ('Type', 'Source', 'Destination', 'RW'))]
         need(len(selected) == 1, 'H_BIND_MOUNT_CHANGED')
-        return {k:copy.deepcopy(raw[k]) for k in ('Id', 'Image', 'Name', 'State', 'Mounts')}
+        result={k:copy.deepcopy(raw[k]) for k in ('Id','Image','Name','State')}
+        result['Mounts']=sorted(mounts(raw['Mounts']),key=lambda row:json.dumps(
+            row,sort_keys=True,separators=(',',':'),allow_nan=False))
+        return result
 
     def check_source(self):
         need(not self.closed,'H_BIND_PROOF_CLOSED')
