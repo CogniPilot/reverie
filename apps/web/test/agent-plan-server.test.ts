@@ -207,6 +207,47 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     await owner('POST', `/api/plans/requests/${second.id}/cancel`);
   });
 
+  it('executes an approved Claude account move when optional launch policy is absent', async () => {
+    await mkdir(join(directory, 'third'));
+    const target = await addSubscriptionProfile({ label: 'Fixture destination Claude', provider: 'anthropic',
+      configDir: join(directory, 'third') });
+    vi.mocked(server.planService.rows).mockResolvedValue({ accounts: [
+      { id: originAccount, signedIn: true }, { id: destination, signedIn: true }, { id: target.id, signedIn: true },
+    ], catalogue: [] });
+    const created = await owner('POST', '/api/sessions', {
+      workingDir: directory, mode: 'claude', name: 'Optional policy fixture', subscriptionProfileId: destination,
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const old = created.json().data.session.id;
+    expect(server.sessions.get(old).toState()).toMatchObject({ model: undefined, effort: undefined, advisorModel: undefined });
+    const hired = await owner('POST', '/api/company/employees', {
+      sessionId: old, name: 'Optional policy fixture', position: 'Developer', icon: 'T', expertise: ['testing'],
+    });
+    expect(hired.statusCode, hired.body).toBe(200);
+    const person = hired.json().data.employee;
+    expect((await owner('PUT', `/api/company/employees/${managerEmployee.id}`, {
+      permissions: { managePlans: true },
+    })).statusCode).toBe(200);
+    const input = { id: 'claude-account-optional-policy', employeeId: person.id, sessionId: old, toAccount: target.id };
+    expect((await agent(manager, '/api/plans/agent-requests', input)).statusCode).toBe(202);
+    const { nonce } = await new PlanRequestCapabilities().read(old, input.id);
+    expect((await agent(old, `/api/plans/requests/${input.id}/approve`, { nonce, handoff: 'Continue the synthetic checkpoint.' })).statusCode).toBe(202);
+    let record: any;
+    for (let n = 0; n < 100; n++) {
+      record = (await owner('POST', `/api/plans/requests/${input.id}/status`)).json().data;
+      if (['completed', 'failed', 'recovery-required'].includes(record.phase)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    expect(record, JSON.stringify(record)).toMatchObject({ phase: 'completed', newSession: expect.any(String) });
+    expect(server.sessions.has(old)).toBe(false);
+    const replacement = server.sessions.get(record.newSession);
+    expect(replacement.toState()).toMatchObject({ mode: 'claude', subscriptionProfile: { id: target.id },
+      model: undefined, effort: undefined, advisorModel: undefined });
+    expect(replacement.parentSessionId).toBe(old);
+    expect(server.companyService.view().employees.find((e: any) => e.id === person.id).sessionId).toBe(replacement.id);
+    expect((await agent(manager, '/api/sessions', { workingDir: directory, mode: 'claude' })).statusCode).toBe(403);
+  });
+
   it.each(['codex', 'claude'] as const)('executes a same-account %s self refresh through real HTTP approval and normal replacement handlers', async mode => {
     const selectedAccount = mode === 'codex' ? originAccount : destination;
     const created = await owner('POST', '/api/sessions', {
