@@ -99,6 +99,7 @@ async function fixture(legacy = false) {
     vault,
     deps,
     cfg,
+    bot,
     messages,
     now: () => now,
     advance: (n = 1800001) => (now += n),
@@ -523,7 +524,7 @@ it('does not commit scan success or lose events when temporary-file writing cons
           if (key === 'writeFile')
             return async (data: unknown) => {
               await target.writeFile(String(data));
-              if (JSON.parse(String(data)).slots.repo.lastSuccessAt === f.now()) {
+              if (JSON.parse(String(data)).slots.repo.pending?.scannedAt === f.now()) {
                 expiredDuringWrite = true;
                 elapsed = 60001;
               }
@@ -673,3 +674,256 @@ it.each(['configuration', 'credential'] as const)(
     expect(f.messages).toHaveLength(0);
   }
 );
+
+it('durably drains >30 changes without advancing seen or success before the final chunk', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  const baseline = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  const scannedAt = f.now();
+  f.setRuns(Array.from({ length: 70 }, (_, i) => f.run(i + 1)));
+  await f.service.tick();
+  let slot = f.service.store.snapshot().slots.repo!;
+  expect(f.messages).toHaveLength(1);
+  expect(f.messages[0]!.text.match(/https:\/\//g)).toHaveLength(30);
+  expect(slot.scan).toEqual(baseline.scan);
+  expect(slot.lastSuccessAt).toBe(baseline.lastSuccessAt);
+  expect(f.service.status().watches[0]!.status.pendingCount).toBe(2);
+  const requests = f.requests();
+  const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+  await reopened.init();
+  await reopened.tick();
+  expect(reopened.store.snapshot().slots.repo!.scan).toEqual(baseline.scan);
+  await reopened.tick();
+  slot = reopened.store.snapshot().slots.repo!;
+  expect(f.requests()).toBe(requests);
+  expect(slot.pending).toBeUndefined();
+  expect(Object.keys(slot.scan.ciSeen)).toHaveLength(70);
+  expect(slot.lastSuccessAt).toBe(scannedAt);
+  expect(f.messages).toHaveLength(3);
+  expect(new Set(f.messages.flatMap((m) => m.text.match(/actions\/runs\/\d+/g) ?? []))).toHaveLength(70);
+});
+
+it('chunks long notices below5000 characters and respects bot backpressure without renewing scan time', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  f.advance();
+  f.bot.maxPerHour = 1;
+  const scannedAt = f.now();
+  f.setRuns(Array.from({ length: 30 }, (_, i) => ({ ...f.run(i + 1), name: 'Long build '.repeat(20) })));
+  await f.service.tick();
+  const pending = f.service.store.snapshot().slots.repo!.pending!;
+  expect(pending).toBeDefined();
+  expect(f.messages[0]!.text.length).toBeLessThanOrEqual(5000);
+  const requests = f.requests();
+  await f.service.tick();
+  expect(f.messages).toHaveLength(1);
+  expect(f.service.store.snapshot().slots.repo!.pending).toEqual(pending);
+  f.advance(3600001);
+  await f.service.tick();
+  expect(f.requests()).toBe(requests);
+  expect(f.messages).toHaveLength(2);
+  expect(f.messages.every((m) => m.text.length <= 5000)).toBe(true);
+  expect(f.service.store.snapshot().slots.repo!.lastSuccessAt).toBe(scannedAt);
+});
+
+it('keeps frozen earlier revisions while later repository revisions wait for the next scan', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  f.advance();
+  f.setRuns(Array.from({ length: 35 }, (_, i) => f.run(i + 1)));
+  await f.service.tick();
+  f.setRuns(Array.from({ length: 35 }, (_, i) => f.run(i + 1, 2)));
+  await f.service.tick();
+  expect(f.messages[1]!.text).toContain('attempt 1');
+  expect(f.messages[1]!.text).not.toContain('attempt 2');
+  f.advance();
+  await f.service.tick();
+  await f.service.tick();
+  expect(f.messages).toHaveLength(4);
+  for (const attempt of [1, 2]) {
+    const matching = f.messages.filter((m) => m.text.includes('attempt ' + attempt));
+    expect(matching.flatMap((m) => m.text.match(/actions\/runs\/\d+/g) ?? [])).toHaveLength(35);
+  }
+  expect(Object.values(f.service.store.snapshot().slots.repo!.scan.ciSeen).every((s) => s.attempt === 2)).toBe(true);
+});
+
+it.each([false, true])(
+  'holds an ambiguous chunk and all successors across restart (actual post=%s)',
+  async (actualPost) => {
+    const f = await fixture();
+    await f.configure();
+    await f.service.tick();
+    const baseline = f.service.store.snapshot().slots.repo!;
+    f.advance();
+    f.setRuns(Array.from({ length: 35 }, (_, i) => f.run(i + 1)));
+    const post = f.deps.post;
+    f.deps.post = (...args) => {
+      if (actualPost) post(...args);
+      throw Error('Interrupted acknowledgement');
+    };
+    await f.service.tick();
+    expect(f.service.store.snapshot().slots.repo!.pending!.phase).toBe('unknown');
+    f.deps.post = post;
+    const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+    await reopened.init();
+    await reopened.tick();
+    expect(reopened.store.snapshot().slots.repo!.scan).toEqual(baseline.scan);
+    expect(reopened.store.snapshot().slots.repo!.lastSuccessAt).toBe(baseline.lastSuccessAt);
+    if (!actualPost) {
+      await reopened.tick();
+      expect(f.messages).toHaveLength(0);
+      expect(reopened.status().watches[0]!.status.pendingCount).toBe(2);
+      expect(reopened.status().watches[0]!.status.state).toBe('hold');
+    } else {
+      expect(f.messages).toHaveLength(1); // Exact existing message confirms, never resends, the interrupted chunk.
+      await reopened.tick();
+      expect(f.messages).toHaveLength(2);
+      expect(reopened.store.snapshot().slots.repo!.pending).toBeUndefined();
+      expect(Object.keys(reopened.store.snapshot().slots.repo!.scan.ciSeen)).toHaveLength(35);
+    }
+  }
+);
+
+it('refuses an entire spool over the aggregate4MiB limit without seen, success or delivery progress', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  await f.service.store.update((s) => {
+    const padding = structuredClone(s.slots.repo!);
+    padding.config.id = 'padding';
+    padding.config.enabled = false;
+    padding.scan.pageCache = { fixture: { etag: 'padding', next: false, body: '' } };
+    s.slots.padding = padding;
+    padding.scan.pageCache.fixture!.body = 'x'.repeat(4 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(s)) - 4000);
+  });
+  const baseline = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  f.setRuns(Array.from({ length: 35 }, (_, i) => f.run(i + 1)));
+  await f.service.tick();
+  const after = f.service.store.snapshot().slots.repo!;
+  expect(after.lastError).toBe('SPOOL_CAPACITY');
+  expect(after.scan).toEqual(baseline.scan);
+  expect(after.lastSuccessAt).toBe(baseline.lastSuccessAt);
+  expect(after.pending).toBeUndefined();
+  expect(f.messages).toHaveLength(0);
+  await f.service.store.update((s) => {
+    delete s.slots.padding;
+  });
+  f.advance(3600001);
+  await f.service.tick();
+  await f.service.tick();
+  expect(f.messages).toHaveLength(2);
+  expect(Object.keys(f.service.store.snapshot().slots.repo!.scan.ciSeen)).toHaveLength(35);
+});
+
+it.each(['reserved', 'delivered'] as const)(
+  'recovers a crash at the durable %s boundary without replaying a chunk',
+  async (phase) => {
+    const f = await fixture();
+    await f.configure();
+    await f.service.tick();
+    f.advance();
+    f.bot.maxPerHour = 0;
+    f.setRuns(Array.from({ length: 35 }, (_, i) => f.run(i + 1)));
+    await f.service.tick();
+    const p = f.service.store.snapshot().slots.repo!.pending!;
+    const message = phase === 'delivered' ? f.deps.post(f.bot, f.cfg.roomId, p.text) : undefined;
+    await f.service.store.update((s) => {
+      s.slots.repo!.pending!.phase = phase;
+      if (message) s.slots.repo!.pending!.messageId = message.id;
+    });
+    f.bot.maxPerHour = 30;
+    const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+    await reopened.init();
+    await reopened.tick();
+    if (phase === 'reserved') {
+      expect(f.messages).toHaveLength(0);
+      expect(reopened.status().watches[0]!.status.state).toBe('hold');
+      expect(reopened.status().watches[0]!.status.pendingCount).toBe(2);
+    } else {
+      expect(f.messages).toHaveLength(1);
+      await reopened.tick();
+      expect(f.messages).toHaveLength(2);
+      expect(reopened.store.snapshot().slots.repo!.pending).toBeUndefined();
+    }
+  }
+);
+
+it('checks credential revocation before delivering each queued chunk', async () => {
+  const f = await fixture();
+  const token = await f.vault.create(
+    undefined,
+    { name: 'read', token: 'owned-fixture-only', repositories: ['owner/repo'] },
+    () => {}
+  );
+  let rows: unknown[] = [];
+  f.setFetch(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/issues')) return reply([]);
+    if (path.includes('/actions/runs')) return reply({ total_count: rows.length, workflow_runs: rows });
+    return reply({ full_name: 'owner/repo', private: true });
+  });
+  await f.configure([{ ...f.cfg, visibility: 'private', credentialId: token.id }]);
+  await f.service.tick();
+  const baseline = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  rows = Array.from({ length: 35 }, (_, i) => f.run(i + 1));
+  await f.service.tick();
+  await f.vault.remove(undefined, token.id, () => {});
+  await f.service.tick();
+  const after = f.service.store.snapshot().slots.repo!;
+  expect(f.messages).toHaveLength(1);
+  expect(after.pending).toBeDefined();
+  expect(after.scan).toEqual(baseline.scan);
+  expect(after.lastSuccessAt).toBe(baseline.lastSuccessAt);
+  expect(after.lastError).toBe('CREDENTIAL_REPOSITORY_REQUIRED');
+});
+
+it.each(['membership', 'configuration'] as const)('refuses queued delivery after %s changes', async (change) => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  f.advance();
+  f.setRuns(Array.from({ length: 35 }, (_, i) => f.run(i + 1)));
+  await f.service.tick();
+  const before = f.service.store.snapshot().slots.repo!;
+  if (change === 'membership') f.bot.rooms = [];
+  else
+    await f.service.store.update((s) => {
+      s.slots.repo!.config.roomId = 'second';
+    });
+  await f.service.tick();
+  expect(f.messages).toHaveLength(1);
+  expect(f.service.store.snapshot().slots.repo!.pending).toEqual(before.pending);
+  expect(f.service.store.snapshot().slots.repo!.scan).toEqual(before.scan);
+});
+
+it('reads pre-spool pending records and confirms them without inventing a new success timestamp', async () => {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  const baseline = f.service.store.snapshot().slots.repo!;
+  f.advance();
+  f.bot.maxPerHour = 0;
+  f.setIssues([f.issue()]);
+  await f.service.tick();
+  await f.service.store.update((s) => {
+    const p = s.slots.repo!.pending!;
+    delete p.remaining;
+    delete p.configDigest;
+    delete p.credentialDigest;
+    delete p.scannedAt;
+    delete p.createdSince;
+  });
+  f.bot.maxPerHour = 30;
+  const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+  await reopened.init();
+  await reopened.tick();
+  expect(f.messages).toHaveLength(1);
+  expect(reopened.store.snapshot().slots.repo!.pending).toBeUndefined();
+  expect(reopened.store.snapshot().slots.repo!.lastSuccessAt).toBe(baseline.lastSuccessAt);
+});
