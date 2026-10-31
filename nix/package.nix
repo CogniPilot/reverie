@@ -89,6 +89,7 @@ let
         test/command-failure-routes.test.ts test/command-failure-ui.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
+        test/plan-agent-burn.test.ts test/plan-agent-burn-wiring.test.ts test/plan-agent-burn-ui.test.ts test/plan-move-impact-policy.test.ts \
         test/member-menu.test.ts test/menu-viewport.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts test/plan-five-hour-ui.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
