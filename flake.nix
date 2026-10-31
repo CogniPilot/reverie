@@ -17,6 +17,9 @@
           nativeWorkerPackages = import ./nix/native-worker-packages.nix {
             inherit pkgs; src = source; inherit (packages) console;
           };
+          terminalPackages = import ./nix/owner-terminal-packages.nix {
+            inherit pkgs packages; src = source;
+          };
           container-memory = pkgs.writeShellApplication {
             name = "container-memory";
             runtimeInputs = [ pkgs.coreutils pkgs.gawk pkgs.gnused pkgs.gnugrep ];
@@ -77,23 +80,9 @@
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
           opsCore = import ./nix/ops-core.nix { inherit pkgs; src = source; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
-          ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
-          ownerTerminalHost = import ./nix/owner-terminal-host.nix {
-            inherit pkgs; src = source; inherit (packages) console memory memoryPackage entrypoint;
-          };
-          ownerTerminalWebsiteManifest = self.packages.${system}.ownerTerminalHost.websiteManifest;
-          ownerTerminalImageProvenance = import ./nix/website-image-provenance.nix {
-            inherit pkgs; src = source;
-            image = self.packages.${system}.ownerTerminalImage;
-            console = packages.console;
-            clientManifest = packages.workerResourceClientManifest;
-            startupManifest = self.packages.${system}.ownerTerminalWebsiteManifest;
-          };
-          ownerTerminalImage = import ./nix/image.nix {
-            inherit pkgs; src = source; inherit (packages) reverie console memory runtime;
-            ownerTerminalWebsite = self.packages.${system}.ownerTerminalHost.website;
-          };
-          humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
+          inherit (terminalPackages) ownerTerminalCore ownerTerminalHost ownerTerminalWebsiteManifest
+            ownerTerminalImageProvenance ownerTerminalImage humanTerminalToolkit
+            ownerTerminalLifecycle ownerTerminalWebsiteSetup;
           # Optional diagnostic candidate only; never part of default runtime/image.
           codexObserver = import ./nix/codex-observer.nix { inherit pkgs; };
           codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
@@ -203,19 +192,6 @@
             clientManifest = packages.workerResourceClientManifest;
             startupManifest = self.packages.${system}.resourceTerminalWebsiteManifest;
           };
-          ownerTerminalLifecycle = import ./nix/owner-terminal-lifecycle.nix {
-            inherit pkgs; src = source; memory = packages.memory;
-            profile = "terminal";
-            websiteManifest = self.packages.${system}.ownerTerminalWebsiteManifest;
-            imageProvenance = self.packages.${system}.ownerTerminalImageProvenance;
-            toolkit = self.packages.${system}.humanTerminalToolkit;
-          };
-          ownerTerminalWebsiteSetup = import ./nix/owner-terminal-website.nix {
-            inherit pkgs; src = source; memory = packages.memory;
-            lifecycle = self.packages.${system}.ownerTerminalLifecycle;
-            workerUnit = self.packages.${system}.workerService;
-            workerBrokerSource = self.packages.${system}.workerBrokerSource;
-          };
           resourceTerminalLifecycle = import ./nix/owner-terminal-lifecycle.nix {
             inherit pkgs; src = source; memory = packages.memory;
             profile = "resource-terminal";
@@ -297,6 +273,12 @@
       };
       packages = forAllSystems packagesFor;
       lib.nativeWorkerPackages = import ./nix/native-worker-packages.nix;
+      lib.ownerTerminalPackages = { system, serviceAuthConfig ? null }:
+        let pkgs = pkgsFor system;
+        in import ./nix/owner-terminal-packages.nix {
+          inherit pkgs serviceAuthConfig; src = source;
+          packages = import ./nix/package.nix { inherit pkgs; src = source; };
+        };
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false }:
         let pkgs = pkgsFor system; packages = packagesFor system;
         in assert builtins.isBool browser; import ./nix/image.nix {

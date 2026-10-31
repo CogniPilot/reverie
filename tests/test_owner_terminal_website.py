@@ -8,6 +8,9 @@ from copy import deepcopy
 import fcntl
 import hashlib
 import json
+import io
+import contextlib
+import uuid
 import os
 from pathlib import Path
 import shutil
@@ -66,7 +69,8 @@ class TerminalWebsiteStageTests(unittest.TestCase):
                            'imageSpec': {k: deepcopy(target[k]) for k in ('Config', 'RootFS', 'Architecture', 'Os', 'Created')}}
         class Engine:
             def get(inner, route):
-                if route == '/containers/' + W.OLD + '/json':return deepcopy(f.engine.containers[W.OLD])
+                if route in ('/containers/' + W.OLD + '/json', '/containers/' + W.NEW + '/json'):
+                    return deepcopy(f.engine.containers[route[12:-5]])
                 self.assertEqual(route, '/images/' + W.NEW_IMAGE + '/json')
                 return deepcopy(f.engine.images[W.NEW_IMAGE])
         initial.engine = Engine()
@@ -105,6 +109,10 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         def engine(method, path, data=None):
             result = original(method, path, data)
             if method == 'POST':
+                if path.startswith('/containers/' + W.OLD + '/stop'):
+                    f.engine.containers[W.OLD]['State']['Pid'] = 0
+                if path == '/containers/' + W.NEW + '/start':
+                    f.engine.containers[W.NEW]['State']['Pid'] = 420
                 self.events.append((path, None))
                 if path.startswith('/containers/create?'):
                     row = f.engine.containers[W.NEW]
@@ -125,8 +133,10 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         self.links.chmod(0o600)
 
     def rebuild(self):
+        if hasattr(self, 'profile'):self.profile.close()
         with patch('reverie.resource_actor_install.artifact', return_value=deepcopy(self.provenance)):
             self.profile = H.TerminalWebsiteProfile(self.initial, self.links)
+        self.addCleanup(self.profile.close)
         f = self.fixture
         self.stage = W.website.WebsiteStage(self.engine, f.state, f.deployment, f.policy,
                                            guard=f.guard, ready=lambda cid, spec: self.ready(cid), terminal=self.profile)
@@ -140,6 +150,266 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         review = json.loads(f.policy.read_bytes());review['approvedSpecDigest'] = draft['specPin']
         f.policy.write_bytes(H.encoded(review))
         return self.stage.plan('reverie', W.NEW_IMAGE, W.OLD, W.OLD_IMAGE)
+
+    def select_service_auth(self, *, nested=False):
+        f = self.fixture
+        self.auth = '/run/private-services/service-auth.json'
+        parent = self.root
+        if nested:
+            parent = self.root / 'auth-parent'; parent.mkdir(mode=0o700)
+        self.auth_root = parent / 'auth'; self.auth_root.mkdir(mode=0o700)
+        (self.auth_root / 'service-auth.json').write_text('{"version":1,"principals":[]}')
+        (self.auth_root / 'service-auth.json').chmod(0o600)
+        self.auth_tail = ['--service-auth-config', self.auth]
+        f.engine.images[W.OLD_IMAGE]['Config']['Cmd'] = ['reverie', 'web', '--host', '0.0.0.0', '--port', '3000']
+        f.engine.containers[W.OLD]['Config']['Cmd'] = ['reverie', 'web', '--host', '0.0.0.0', '--port', '3000', *self.auth_tail]
+        self.auth_mount = {'Type': 'bind', 'Source': str(self.auth_root),
+                           'Destination': '/run/private-services', 'RW': False, 'Propagation': 'rprivate'}
+        f.engine.containers[W.OLD]['Mounts'].append(deepcopy(self.auth_mount))
+        target = f.engine.images[W.NEW_IMAGE]['Config']
+        target['Cmd'] += self.auth_tail
+        self.provenance['imageSpec']['Config'] = deepcopy(target)
+        node = shutil.which('node')
+        self.initial.program = {'nodeInvocation': node,
+            'nodeWrapper': '/nix/store/console/lib/reverie/scripts/owner-terminal-start.mjs',
+            'applicationEntry': '/nix/store/console/lib/reverie/dist/index.js',
+            'argvPrefix': [node,
+                '/nix/store/console/lib/reverie/scripts/owner-terminal-start.mjs', *target['Cmd'][1:]],
+            'startupPython': {'invocation': '/nix/store/python/bin/python',
+                'entry': target['Cmd'][0],
+                'argvPrefix': ['/nix/store/python/bin/python', '-I', *target['Cmd']]}}
+        (self.initial.roots['ledgerBase'] / 'website-selection.json').write_bytes(
+            H.encoded({'oldId': W.OLD}))
+        (self.initial.roots['ledgerBase'] / 'website-selection.json').chmod(0o600)
+        review = json.loads(f.policy.read_bytes())
+        review['backupScopes'].append({'containerPath': self.auth, 'exclude': []})
+        f.policy.write_bytes(H.encoded(review))
+        self.auth_guest_mount = os.open(self.auth_root, os.O_PATH | os.O_DIRECTORY)
+        self.auth_guest_leaf = os.open(self.auth_root / 'service-auth.json', os.O_PATH | os.O_NOFOLLOW)
+        self.addCleanup(os.close, self.auth_guest_mount); self.addCleanup(os.close, self.auth_guest_leaf)
+        self.auth_new_guest = [self.auth_guest_mount, self.auth_guest_leaf]
+        self.auth_guest_roots = {}
+        self.auth_births = {410: 1234, 420: 5678}
+        self.auth_namespaces = {pid: (pid, pid + 1, pid + 2) for pid in (410, 420)}
+        for pid in (410, 420):
+            path = self.root / ('guest-root-' + str(pid));path.mkdir()
+            self.auth_guest_roots[pid] = path
+        f.engine.containers[W.OLD]['State']['Pid'] = 410
+        def process(pid):
+            cid = W.OLD if pid == 410 else W.NEW
+            if not f.engine.containers.get(cid, {}).get('State', {}).get('Running'):
+                raise FileNotFoundError('owned fixture process absent')
+            return {'pid': pid, 'start': self.auth_births[pid], 'parent': 1, 'argv': 'a' * 64,
+                    'exe': (1, 2), 'namespaces': self.auth_namespaces[pid]}
+        def root(pid):return os.open(self.auth_guest_roots[pid], os.O_PATH | os.O_DIRECTORY)
+        def guest(fd, path, *, path_link=False):
+            self.assertTrue(path_link)
+            info = os.fstat(fd)
+            old_root = self.auth_guest_roots[410].stat()
+            old = (info.st_dev, info.st_ino) == (old_root.st_dev, old_root.st_ino)
+            selected = next(m for m in f.engine.containers[W.OLD]['Mounts']
+                            if m['Destination'] in (self.auth_mount['Destination'], self.auth))
+            pair = [self.auth_guest_mount, self.auth_guest_leaf] if old else self.auth_new_guest
+            if path == self.auth:return os.dup(pair[1])
+            self.assertEqual(path, selected['Destination']);return os.dup(pair[0])
+        self.enterContext(patch.object(H, '_auth_process', side_effect=process))
+        self.enterContext(patch.object(H, '_auth_birth', side_effect=lambda pid: process(pid)['start']))
+        self.enterContext(patch.object(H, '_auth_root', side_effect=root))
+        self.enterContext(patch.object(H, 'open_in_root', side_effect=guest))
+        self.rebuild()
+
+    def test_selected_service_auth_survives_real_stage_and_readonly_mount(self):
+        self.select_service_auth()
+        plan = self.approve()
+        self.assertEqual(plan['spec']['Cmd'], self.fixture.engine.images[W.NEW_IMAGE]['Config']['Cmd'])
+        self.assertEqual(plan['spec']['Cmd'][-2:], self.auth_tail)
+        selected = [m for m in plan['spec']['HostConfig']['Mounts']
+                    if m['Target'] == self.auth_mount['Destination']]
+        self.assertEqual(len(selected), 1); self.assertTrue(selected[0]['ReadOnly'])
+        self.assertEqual(selected[0]['Source'], str(self.auth_root))
+        held = list(self.profile.auth_fds);listener = self.initial.start_listener
+        def retained_after_stop(fd):
+            self.assertFalse(self.fixture.engine.containers[W.OLD]['State']['Running'])
+            for proof_fd in held:os.fstat(proof_fd)
+            return listener(fd)
+        self.initial.start_listener = retained_after_stop
+        result = self.stage.apply(plan, W.website.digest(plan))
+        self.assertEqual(result['state'], 'adopted')
+        self.fixture.assert_no_old_restore()
+        all_proofs = list(self.profile.auth_fds);self.profile.close()
+        self.assertGreaterEqual(len(all_proofs), 6)
+        for proof_fd in all_proofs:
+            with self.assertRaises(OSError):os.fstat(proof_fd)
+
+    def test_service_auth_refuses_wrong_or_extra_old_commands_before_effects(self):
+        self.select_service_auth(); old = self.fixture.engine.containers[W.OLD]
+        original = deepcopy(old['Config']['Cmd'])
+        for command in (original[:-2], [*original, '--unknown'], [*original, *self.auth_tail],
+                        [*original[:-1], '/run/private-services/other.json'],
+                        ['/private/wrapper', *original[1:]]):
+            with self.subTest(command=command):
+                old['Config']['Cmd'] = command
+                with self.assertRaisesRegex(ValueError, 'EXPLICIT_OLD_COMMAND'):self.approve()
+                self.assertFalse(self.fixture.engine.mutations())
+        old['Config']['Cmd'] = original
+
+    def test_service_auth_refuses_missing_writable_or_masked_mount(self):
+        self.select_service_auth(); old = self.fixture.engine.containers[W.OLD]
+        original = deepcopy(old['Mounts'])
+        variants = ([m for m in original if m['Destination'] != self.auth_mount['Destination']],
+                    [{**m, 'RW': True} if m['Destination'] == self.auth_mount['Destination'] else m for m in original],
+                    [*original, {**self.auth_mount, 'Destination': self.auth}])
+        for mounts in variants:
+            with self.subTest(mounts=mounts):
+                old['Mounts'] = mounts
+                with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH'):self.approve()
+                self.assertFalse(self.fixture.engine.mutations())
+        old['Mounts'] = original
+
+    def test_service_auth_changed_leaf_or_mount_source_invalidates_prepared_plan(self):
+        self.select_service_auth(); plan = self.approve()
+        leaf = self.auth_root / 'service-auth.json'
+        staged = self.auth_root / 'replacement'; staged.write_text('{}'); staged.chmod(0o600)
+        staged.replace(leaf)
+        with self.assertRaisesRegex(ValueError, 'AUTH_.*CHANGED'):
+            self.stage.apply(plan, W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_service_auth_unselected_and_manifest_disagreement_refuse(self):
+        self.select_service_auth()
+        self.initial.program['argvPrefix'][-1] = '/different/auth.json'
+        with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH'):self.rebuild()
+        self.initial.program['argvPrefix'][-1] = self.auth
+        target = self.fixture.engine.images[W.NEW_IMAGE]['Config']
+        target['Cmd'] = target['Cmd'][:-2]
+        self.provenance['imageSpec']['Config'] = deepcopy(target);self.rebuild()
+        with self.assertRaisesRegex(ValueError, 'EXPLICIT_OLD_COMMAND'):self.approve()
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_service_auth_alias_or_rebound_mount_source_refuses(self):
+        self.select_service_auth(); old = self.fixture.engine.containers[W.OLD]
+        selected = next(m for m in old['Mounts'] if m['Destination'] == self.auth_mount['Destination'])
+        alias = self.root / 'auth-alias'; alias.symlink_to(self.auth_root, target_is_directory=True)
+        selected['Source'] = str(alias)
+        with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH_SOURCE'):self.approve()
+        other = self.root / 'other-auth'; other.mkdir(mode=0o700)
+        (other / 'service-auth.json').write_text('{"version":1,"principals":[]}')
+        (other / 'service-auth.json').chmod(0o600);selected['Source'] = str(other)
+        with self.assertRaisesRegex(ValueError, 'AUTH_.*CHANGED'):self.approve()
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_old_init_birth_namespace_or_root_drift_refuses_before_effects(self):
+        for change in ('birth', 'namespace', 'root'):
+            with self.subTest(change=change):
+                case = TerminalWebsiteStageTests(methodName='runTest');case.setUp()
+                try:
+                    case.select_service_auth();plan = case.approve()
+                    if change == 'birth':case.auth_births[410] += 1
+                    elif change == 'namespace':case.auth_namespaces[410] = (91, 92, 93)
+                    else:
+                        other = case.root / 'changed-init-root';other.mkdir()
+                        case.auth_guest_roots[410] = other
+                    with self.assertRaisesRegex(ValueError, 'AUTH_INIT_CHANGED'):
+                        case.stage.apply(plan, W.website.digest(plan))
+                    self.assertFalse(case.fixture.engine.mutations())
+                finally:case.doCleanups()
+
+    def test_stopped_engine_state_does_not_replace_actual_old_birth_absence(self):
+        self.select_service_auth();old = self.fixture.engine.containers[W.OLD]
+        old['State'].update(Running=False, Pid=0)
+        with patch.object(H, '_auth_birth', return_value=self.auth_births[410]):
+            with self.assertRaisesRegex(ValueError, 'OLD_INIT_STILL_LIVE'):self.profile.input_binding()
+        with patch.object(H, '_auth_birth', side_effect=PermissionError('owned unknown metadata')):
+            with self.assertRaises(PermissionError):self.profile.input_binding()
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_host_ancestor_rebind_during_guest_observation_is_bracketed(self):
+        self.select_service_auth(nested=True);original = H._auth_process.side_effect;calls = 0
+        def rebind(pid):
+            nonlocal calls
+            value = original(pid);calls += 1
+            if calls == 2:
+                parent = self.auth_root.parent;parent.rename(self.root / 'old-auth-parent')
+                parent.mkdir(mode=0o700);self.auth_root.mkdir(mode=0o700)
+                leaf = self.auth_root / 'service-auth.json'
+                leaf.write_text('{"version":1,"principals":[]}');leaf.chmod(0o600)
+            return value
+        with patch.object(H, '_auth_process', side_effect=rebind):
+            with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH_CHANGED'):self.profile.input_binding()
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def other_guest_auth(self):
+        path = self.root / 'different-mounted-auth';path.mkdir(mode=0o700)
+        leaf = path / 'service-auth.json';leaf.write_text('{"version":1,"principals":[]}');leaf.chmod(0o600)
+        fds = [os.open(path, os.O_PATH | os.O_DIRECTORY), os.open(leaf, os.O_PATH | os.O_NOFOLLOW)]
+        for fd in fds:self.addCleanup(os.close, fd)
+        return fds
+
+    def test_candidate_guest_rebind_at_ready_retains_unknown_without_adoption(self):
+        self.select_service_auth();plan = self.approve();self.auth_new_guest = self.other_guest_auth()
+        with self.assertRaisesRegex(W.website.WebsiteRefusal, 'attempt held'):
+            self.stage.apply(plan, W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.containers[W.NEW]['State']['Running'])
+        self.fixture.assert_no_old_restore()
+        self.assertEqual(json.loads((self.fixture.state / 'website-active.json').read_bytes())['state'], 'unconfirmed')
+
+    def test_candidate_guest_rebind_after_http_ready_is_checked_before_adoption(self):
+        self.select_service_auth();plan = self.approve();other = self.other_guest_auth();original = self.ready
+        def ready(cid):
+            self.auth_new_guest = other
+            return original(cid)
+        self.ready = ready
+        with self.assertRaisesRegex(W.website.WebsiteRefusal, 'attempt held'):
+            self.stage.apply(plan, W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.containers[W.NEW]['State']['Running'])
+        self.fixture.assert_no_old_restore()
+
+    def test_proof_descriptor_close_failure_attempts_all_and_forbids_reuse(self):
+        self.select_service_auth();fds = list(self.profile.auth_fds);closed = [];actual = os.close
+        def fail_once(fd):
+            actual(fd);closed.append(fd)
+            if len(closed) == 1:raise OSError('owned close finalizer fixture')
+        with patch.object(H.os, 'close', side_effect=fail_once):
+            with self.assertRaisesRegex(ValueError, 'CLOSE_UNCONFIRMED'):self.profile.close()
+        self.assertEqual(set(closed), set(fds));self.assertEqual(self.profile.auth_fds, [])
+        for fd in fds:
+            with self.assertRaises(OSError):os.fstat(fd)
+        with self.assertRaisesRegex(ValueError, 'PROOF_CLOSED'):self.profile.input_binding()
+
+    def test_main_closes_proof_before_success_and_reports_close_failure_as_unconfirmed(self):
+        self.select_service_auth();initial = self.initial
+        selection = initial.roots['ledgerBase'] / 'website-selection.json'
+        selection.write_bytes(H.encoded({'version': 1, 'purpose': 'owner-terminal-website-selection-v1',
+            'oldId': W.OLD, 'oldImage': W.OLD_IMAGE, 'newImage': W.NEW_IMAGE,
+            'providerPIDs': [], 'expiresAtEpoch': time.time() + 300}))
+        binding = {'unit': '/nix/store/unit/service', 'python': '/nix/store/python/bin/python',
+                   'entry': '/nix/store/source/worker.py'}
+        plan = {'specPin': 'sha256:' + 'a' * 64, 'finalSpecApproval': 'approved'}
+        for fail in (False, True):
+            events = [];stdout = io.StringIO();stderr = io.StringIO()
+            def close():
+                events.append('close')
+                if fail:raise ValueError('H_WEBSITE_AUTH_CLOSE_UNCONFIRMED')
+            profile = SimpleNamespace(close=close)
+            standard = SimpleNamespace(WebsiteStage=lambda *a, **k: SimpleNamespace(plan=lambda *a: plan),
+                                       digest=W.website.digest)
+            native = SimpleNamespace(name='reverie', _time=lambda: None, http_ready=lambda *a: True)
+            with patch('reverie.website_image_provenance.immutable', side_effect=lambda path, *a: path), \
+                 patch.object(Path, 'resolve', lambda path, strict=True: path), \
+                 patch.object(L, 'RuntimeManifest', return_value=initial.runtime), \
+                 patch.object(L, 'InitialInstallation', return_value=initial), \
+                 patch.object(H, '_standard_stage', return_value=standard), \
+                 patch.object(H, '_NativeControl', return_value=native), \
+                 patch.object(H, 'TerminalWebsiteProfile', return_value=profile), \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                rc = H.main(['--installation', str(initial.path), 'prepare', '--operation', str(uuid.uuid4())],
+                            runtime_manifest={'path': '/nix/store/runtime', 'sha256': 'a' * 64}, service_binding=binding)
+            self.assertTrue(events)
+            if fail:
+                self.assertEqual(rc, 1);self.assertEqual(stdout.getvalue(), '')
+            else:
+                self.assertEqual(rc, 0);self.assertEqual(events, ['close'])
+                self.assertEqual(json.loads(stdout.getvalue())['state'], 'H_WEBSITE_PREPARED')
 
     def test_actual_stage_same_OFD_order_exact_CID_spec_and_preserved_isolated_socket(self):
         plan = self.approve(); f = self.fixture

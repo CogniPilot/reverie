@@ -41,7 +41,8 @@ class AuthenticatedStartupPeer(unittest.TestCase):
         peer = self.peer = object.__new__(P.ResumeWebsitePeer)
         peer.broker = broker; peer.deadline = time.monotonic() + 60
         peer.manifest = {'console': self.console, 'nodeInvocation': self.node,
-                         'programs': Q.programs(self.console, self.node)}
+                         'programs': Q.programs(self.console, self.node),
+                         'files': {self.console + '/lib/reverie/scripts/owner-terminal-start.mjs': {}}}
         peer.executable = Path(self.node); peer.code_identities = {self.node: (23, 24)}
         peer.manifest_path = self.root / 'manifest.json'; peer.manifest_path.write_text('{}')
         peer.manifest_identity = Q.signature(peer.manifest_path.stat())
@@ -140,6 +141,43 @@ class AuthenticatedStartupPeer(unittest.TestCase):
     def test_authenticated_command_does_not_authorize_protected_wrapper(self):
         self.argv([*Q.programs(self.console, self.node)[2], *self.tail])
         with self.assertRaisesRegex(ValueError, 'RESUME_NODE_PROGRAM'): self.check()
+
+    def h_program(self):
+        entry = '/nix/store/compiled-h/libexec/reverie'
+        return {'nodeInvocation': self.node, 'nodeWrapper': self.console + '/lib/reverie/scripts/owner-terminal-start.mjs',
+                'applicationEntry': self.console + '/lib/reverie/dist/index.js',
+                'argvPrefix': [*Q.programs(self.console, self.node)[2], *self.tail],
+                'startupPython': {'invocation': '/nix/store/python/bin/python', 'entry': entry,
+                    'argvPrefix': ['/nix/store/python/bin/python', '-I', entry, *self.base, *self.tail]}}
+
+    def test_protected_auth_requires_exact_paired_manifest_command_and_hash(self):
+        program = self.h_program(); pair = {'path': '/nix/store/h-manifest/program.json', 'sha256': 'a' * 64}
+        self.item['Config']['Cmd'] = program['startupPython']['argvPrefix'][2:]
+        self.peer.initial_item = self.peer._item();self.argv(program['argvPrefix'])
+        with self.assertRaisesRegex(ValueError, 'RESUME_FIXED_WEBSITE_ARGV'):self.check()
+        self.peer.manifest['ownerTerminalProgram'] = pair
+        with patch('reverie.website_image_provenance.startup_program', return_value=(program, pair)) as reader:
+            Q.require_programs(self.peer.manifest)
+            self.assertTrue(reader.call_args.kwargs['verify_files'])
+            self.check()
+            for tail in ([*self.tail, '--unknown'], [*self.tail, *self.tail],
+                         ['--service-auth-config', '/different/config.json'], []):
+                self.item['Config']['Cmd'] = [program['startupPython']['entry'], *self.base, *tail]
+                self.peer.initial_item = self.peer._item()
+                with self.assertRaisesRegex(ValueError, 'RESUME_FIXED_WEBSITE_ARGV'):self.check()
+        with patch('reverie.website_image_provenance.startup_program', return_value=(program, {**pair, 'sha256': 'b' * 64})):
+            with self.assertRaisesRegex(ValueError, 'RESUME_H_PROGRAM_CHANGED'):Q.require_programs(self.peer.manifest)
+
+    def test_paired_h_manifest_cannot_introduce_unknown_node_or_bootstrap_arguments(self):
+        program = self.h_program(); pair = {'path': '/nix/store/h-manifest/program.json', 'sha256': 'a' * 64}
+        self.peer.manifest['ownerTerminalProgram'] = pair
+        for change in ('node', 'bootstrap', 'relative'):
+            bad = copy.deepcopy(program)
+            if change == 'node':bad['argvPrefix'][1] = '/private/arbitrary.js'
+            elif change == 'bootstrap':bad['startupPython']['argvPrefix'].append('--unknown')
+            else:bad['argvPrefix'][-1] = 'relative.json'
+            with self.subTest(change=change),patch('reverie.website_image_provenance.startup_program', return_value=(bad, pair)):
+                with self.assertRaisesRegex(ValueError, 'SERVICE_AUTH'):Q.require_programs(self.peer.manifest)
 
     def test_original_no_auth_variants_remain_exact(self):
         self.item['Config']['Cmd'] = ['reverie', *self.base]
