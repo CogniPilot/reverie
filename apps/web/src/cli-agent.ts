@@ -1084,6 +1084,9 @@ interface ChatMemberRow {
   away?: string;
   /** Owner-set, from the member's employee record. */
   pronouns?: string;
+  /** Its own 'doing' Board cards, read from the Board by the server (never stored on the membership). */
+  focus?: Array<{ id: string; title: string; end?: number }>;
+  focusMore?: number;
   alive?: boolean;
   working?: boolean;
   updatedAt?: number;
@@ -1954,7 +1957,14 @@ export async function agentChatWho(deps: AgentDeps, options: { room?: string; na
     // Owner-set pronouns (your own too, so you know how you are referred to): use them when you write about a member.
     if (m.pronouns) deps.io.out(`    pronouns: ${quoteForPane(m.pronouns, 40)}`);
     if (m.away) deps.io.out(`    away: ${quoteForPane(m.away, 500)}`);
-    deps.io.out(`    goal: ${m.goal ? quoteForPane(m.goal, 500) : '-'}`);
+    // A goal the member set itself wins; without one, its first 'doing' Board card stands in, marked as such.
+    const first = m.focus?.[0];
+    const goal = m.goal ? quoteForPane(m.goal, 500) : first ? `${quoteForPane(`${first.id} ${first.title}`, 160)} (from the Board)` : '-';
+    deps.io.out(`    goal: ${goal}`);
+    if (m.focus?.length) {
+      const cards = m.focus.map((c) => quoteForPane(`${c.id} ${c.title}`, 160)).join('; ');
+      deps.io.out(`    doing: ${cards}${m.focusMore ? ` (+${m.focusMore} more)` : ''}`);
+    }
     deps.io.out(`    progress: ${m.progress ? quoteForPane(m.progress, 500) : '-'}`);
   }
   return EXIT.ok;

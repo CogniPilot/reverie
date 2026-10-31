@@ -990,14 +990,25 @@ Object.assign(ReverieApp.prototype, {
     top.append(actions);
     card.append(top);
     const goal = this._chatEl('div', 'chatroom-synopsis');
-    goal.append(this._chatEl('span', 'chatroom-synopsis-key', 'Goal'), this._chatEl('span', '', m.goal || '–'));
+    // A goal the member set itself wins; without one, its first 'doing' Board card (read from the Board, never stored) stands in.
+    const cards = Array.isArray(m.focus) ? m.focus.filter((c) => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+    const fromBoard = !m.goal && cards.length ? `${cards[0].id} ${cards[0].title} (from the Board)` : '';
+    goal.append(this._chatEl('span', 'chatroom-synopsis-key', 'Goal'), this._chatEl('span', '', m.goal || fromBoard || '–'));
+    const doing = this._chatEl('div', 'chatroom-synopsis');
+    if (cards.length) {
+      const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
+      doing.append(
+        this._chatEl('span', 'chatroom-synopsis-key', 'Doing'),
+        this._chatEl('span', '', `${cards.map((c) => `${c.id} ${c.title}`).join(' · ')}${more}`)
+      );
+    }
     const progress = this._chatEl('div', 'chatroom-synopsis');
     progress.append(
       this._chatEl('span', 'chatroom-synopsis-key', 'Progress'),
       this._chatEl('span', '', m.progress || '–'),
       this._chatEl('span', 'chatroom-ago', m.updatedAt ? ` · ${this._chatAgo(m.updatedAt)}` : '')
     );
-    card.append(goal, progress);
+    card.append(goal, ...(cards.length ? [doing] : []), progress);
     card.setAttribute('data-i18n-skip', '');
     return card;
   },
