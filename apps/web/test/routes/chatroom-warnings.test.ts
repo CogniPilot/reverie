@@ -114,11 +114,11 @@ describe('post warnings', () => {
 
   it('warns the owner too, and lists several names in one line', async () => {
     const id = await room();
-    const res = await post(id, 'ping @linus and @ada');
+    const res = await post(id, 'ping @linus and @abe');
     expect(res.statusCode).toBe(200);
     expect(res.json().data.warnings).toHaveLength(1);
-    expect(res.json().data.warnings[0].names).toEqual(['linus', 'ada']);
-    expect(res.json().data.warnings[0].text).toContain('@linus, @ada are not in "Reverie"');
+    expect(res.json().data.warnings[0].names).toEqual(['linus', 'abe']);
+    expect(res.json().data.warnings[0].text).toContain('@linus, @abe are not in "Reverie"');
   });
 
   it('a refused post carries no warning and a DM is called "Direct message"', async () => {

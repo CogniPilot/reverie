@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 const snapshot = (): AgentCapabilities => ({
   checkedAt: 1,
-  identity: { kind: 'agent', sessionId: 'self-session', employeeId: 'employee-one', name: 'Jinx' },
+  identity: { kind: 'agent', sessionId: 'self-session', employeeId: 'employee-one', name: 'Jester' },
   board: {
     read: true,
     fileIssue: true,

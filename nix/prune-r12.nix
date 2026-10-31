@@ -3,8 +3,8 @@
 { pkgs, src }:
 let
   hashes = {
-    prune = "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181";
-    lease = "7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9";
+    prune = "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed";
+    lease = "606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa";
   };
 in pkgs.runCommand "reverie-prune-r12-candidate" {
   nativeBuildInputs = [ pkgs.makeWrapper ];

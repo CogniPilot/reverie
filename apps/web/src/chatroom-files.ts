@@ -94,7 +94,7 @@ export const VIDEO_SNIFF_BYTES = 12;
  * The video type to serve inline for a chat attachment, or null to keep it a download. The uploader declares the type, so
  * it is only trusted when the file starts like that container: an MP4 `ftyp` box, a QuickTime top-level atom (iPhone
  * `.mov` clips open on `ftyp`; older QuickTime files can open on another atom) or the WebM/EBML magic. Movies then play
- * in the chat like Discord's (James 10-29) instead of forcing a download. Whether a QuickTime clip decodes is the
+ * in the chat like Discord's instead of forcing a download. Whether a QuickTime clip decodes is the
  * browser's: Safari plays iPhone HEVC, other browsers may not, and the chat falls back to the download card.
  */
 export function inlineVideoType(type: string, head: Uint8Array): string | null {

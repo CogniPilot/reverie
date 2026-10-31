@@ -118,11 +118,11 @@ describe('reverie board', () => {
 
   it('show with filters asks the server once and never fetches the whole board', async () => {
     const f = fake();
-    expect(await boardShow(f.deps, { mine: true, owner: ['Kit'], status: ['doing,todo', 'blocked'], tag: ['slam'], fields: 'id,title' })).toBe(0);
+    expect(await boardShow(f.deps, { mine: true, owner: ['Kai'], status: ['doing,todo', 'blocked'], tag: ['slam'], fields: 'id,title' })).toBe(0);
     expect(f.calls).toEqual([{
       method: 'GET',
       path: '/api/board/issues',
-      query: { mine: true, owner: 'Kit', status: 'doing,todo,blocked', tag: 'slam', fields: 'id,title' },
+      query: { mine: true, owner: 'Kai', status: 'doing,todo,blocked', tag: 'slam', fields: 'id,title' },
     }]);
     expect(JSON.parse(f.out[0])).toEqual({ rev: 7, issues: board.issues });
   });

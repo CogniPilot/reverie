@@ -62,7 +62,7 @@ const State = z
     roomId: uuid,
     origin: z.string().nullable(),
     company: label,
-    /** The owner's name for the room (James 10-23: rename); absent means the default. */
+    /** The owner's name for the room (rename); absent means the default. */
     name: label.optional(),
     invites: z.array(Invite).max(1000),
     requests: z.array(Request).max(1000),

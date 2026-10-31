@@ -18,7 +18,7 @@ TOOLS = [TOOL, CANCEL_TOOL]
 RULE = ('You are the Reverie Admin Harness. For an action request, use run_workspace_task to start real work; '
         'a plain chat answer does not run commands. Never say you edited, tested or filed something unless a tool receipt confirms it. '
         'To stop, cancel or abort the running work, use cancel_workspace_task; never start a new task to stop one. '
-        'A queued task is not completion. For current permissions use reverie agent capabilities; file decision requests with reverie board decision add, not an imagined Burt-only queue.')
+        'A queued task is not completion. For current permissions use reverie agent capabilities; file decision requests with reverie board decision add, not an imagined coordinator-only queue.')
 
 def validate(cfg):
     name = cfg.get('admin_task')

@@ -211,7 +211,7 @@ it('AUTH-S1: service authority is budgeted at commit; over-budget issuance leave
   expect(f.store.snapshot().serviceGrants).toHaveLength(filled.serviceGrants.length);
 }, 30_000);
 
-it('Rex OREC ADA-3: expired grants past retention are pruned with their revocations, so 1000 issue/revoke cycles never jam', async () => {
+it('OREC retention check: expired grants past retention are pruned with their revocations, so 1000 issue/revoke cycles never jam', async () => {
   const { SERVICE_GRANT_RETENTION_MS } = await import('../src/goal-lifecycle.js');
   const lease = (expiresIn: number) => ({
     purpose: 'LEASE_SERVICE',
@@ -230,7 +230,7 @@ it('Rex OREC ADA-3: expired grants past retention are pruned with their revocati
   expect(state.serviceGrantRevocations.every((r) => state.serviceGrants.some((g) => g.id === r.grantId))).toBe(true);
 }, 120_000);
 
-it('Rex OREC ADA-3: retention keeps revocation evidence; 256 live grants refuse clearly with the file unchanged', async () => {
+it('OREC retention check: retention keeps revocation evidence; 256 live grants refuse clearly with the file unchanged', async () => {
   const { SERVICE_GRANT_RETENTION_MS } = await import('../src/goal-lifecycle.js');
   const lease = (expiresIn: number) => ({
     purpose: 'LEASE_SERVICE',

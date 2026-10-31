@@ -26,10 +26,10 @@ colors. Highlighting uses bundled assets and works offline. Copy preserves the
 exact source; language assistance still edits a separate scratch copy. Unknown,
 unlabelled and oversized snippets remain plain text.
 
-The parser, renderer safety settings and generated HTML sanitizer reuse Mira's
-reviewed `chat-rendering-final-operator-composition-r1` packet. This plugin adds
-an opt-in lifecycle and source/edit/preview controls without enabling that packet's
-unrelated formatting changes. Renderer settings follow the primary
+The parser, renderer safety settings and generated HTML sanitizer share the
+existing safe rendering components. This plugin adds an opt-in lifecycle and
+source/edit/preview controls without changing unrelated formatting. Renderer
+settings follow the primary
 [KaTeX options](https://katex.org/docs/options.html) and
 [security guidance](https://katex.org/docs/security.html): untrusted commands,
 bounded expansion and sizes, fresh macro state and a dedicated DOMPurify policy.

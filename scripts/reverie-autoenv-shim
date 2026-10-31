@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# reverie autoenv shim (prototype r3, Ada; r3: the F3 job count comes from the launcher helper, one implementation). Installed as <shimdir>/<cmd> -> this file, with <shimdir> early on PATH.
+# reverie autoenv shim (prototype r3; r3: the F3 job count comes from the launcher helper, one implementation). Installed as <shimdir>/<cmd> -> this file, with <shimdir> early on PATH.
 # At EACH call it finds the repo enclosing the CURRENT directory (so `cd repo && cargo build` inside one command works, which a
 # BASH_ENV hook cannot do), and if that repo is owner-approved in config and its dev env is cached for the CURRENT flake.nix +
 # flake.lock, it execs the real tool inside that env. Otherwise it execs the next tool of that name on PATH unchanged.
@@ -7,7 +7,7 @@
 # set (already in a dev shell), or REVERIE_AUTOENV_ACTIVE set (recursion guard: tools started by an activated tool).
 name=${0##*/}; shimdir=$(cd "${0%/*}" && pwd -P)
 strip() { local IFS=: out= p; for p in $PATH; do [ "$p" = "$shimdir" ] || [ "$p" = "${0%/*}" ] || out=${out:+$out:}$p; done; printf '%s' "$out"; }
-# r3 (F3, Vale 16:0x): ONE implementation of the job count, managed Tim's launcher helper (formula clamp(floor((memory.max -
+# r3 (F3): ONE implementation of the job count, the launcher helper (formula clamp(floor((memory.max -
 # 1 GiB) / 1 GiB), 1, nproc)). For the commands in REVERIE_AUTOENV_JOBS_CMDS (default: cargo), when CARGO_BUILD_JOBS is unset
 # and no -j/--jobs is given, the shim runs the helper (REVERIE_JOBS_HELPER, default `reverie-build-jobs` found on PATH outside
 # the shim dir) and exports its output if it is a positive integer. No helper, a failure or other output changes nothing.

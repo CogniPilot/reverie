@@ -177,7 +177,7 @@ class SchemaTests(unittest.TestCase):
         self.assertIsNone(P.validate_option(base))
         good=dict(base,leaseAcceptance={'socket':'/host/state/lease-peer/peer.sock','employeeId':EMP,'leaseSubdirectory':'.local/state/reverie/leases','peerBinary':'/nix/store/test-static/bin/peer'})
         self.assertEqual(P.validate_option(good)['employeeId'],EMP)
-        for option in (dict(good['leaseAcceptance'],command='x'),dict(good['leaseAcceptance'],socket='/host/state/employees/x/p.sock'),dict(good['leaseAcceptance'],employeeId='Stan'),dict(good['leaseAcceptance'],leaseSubdirectory='../escape')):
+        for option in (dict(good['leaseAcceptance'],command='x'),dict(good['leaseAcceptance'],socket='/host/state/employees/x/p.sock'),dict(good['leaseAcceptance'],employeeId='Sam'),dict(good['leaseAcceptance'],leaseSubdirectory='../escape')):
             with self.subTest(option=option),self.assertRaises(ValueError):P.validate_option(dict(base,leaseAcceptance=option))
 
     def test_control_never_confuses_direct_result_with_process_exit(self):

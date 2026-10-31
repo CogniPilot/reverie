@@ -8,7 +8,7 @@ import { agentChatEmote, agentChatStatus, agentChatWho, type AgentDeps, type Req
 const ME = '0000002d-0035-4000-8000-000000000047';
 const member = (sessionId: string, name: string, extra: Record<string, unknown> = {}) => ({ sessionId, name, role: 'agent', goal: '', progress: '', ...extra });
 const ROOMS = [
-  { id: 'room-aaaa', name: 'Platform', members: [member(ME, 'Ada'), member('g-id', 'Grace', { away: 'back at 3' }), member('l-id', 'Linus')] },
+  { id: 'room-aaaa', name: 'Platform', members: [member(ME, 'Abe'), member('g-id', 'Grace', { away: 'back at 3' }), member('l-id', 'Linus')] },
 ];
 
 function deps(json = false) {
@@ -34,10 +34,10 @@ describe('agent chat who', () => {
     const text = deps();
     expect(await agentChatWho(text.d, { room: 'Platform', names: true })).toBe(0);
     // Quoted like every name `who` prints, since a name is text another member wrote.
-    expect(text.out).toEqual(['"Ada"', '"Grace"', '"Linus"']);
+    expect(text.out).toEqual(['"Abe"', '"Grace"', '"Linus"']);
     const json = deps(true);
     await agentChatWho(json.d, { room: 'Platform', names: true });
-    expect(JSON.parse(json.out.join(''))).toEqual({ names: ['Ada', 'Grace', 'Linus'] });
+    expect(JSON.parse(json.out.join(''))).toEqual({ names: ['Abe', 'Grace', 'Linus'] });
   });
 
   it('shows a member\'s away note, and no line for a member who is here', async () => {
@@ -65,7 +65,7 @@ describe('agent chat emote', () => {
     expect(await agentChatEmote(d, { room: 'Platform', action: 'dances' })).toBe(0);
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.path).toBe('/api/v1/chatrooms/room-aaaa/messages');
-    expect(post.body).toEqual({ text: '* Ada dances' });
+    expect(post.body).toEqual({ text: '* Abe dances' });
   });
 
   it('refuses an empty action, and a room you are not in', async () => {

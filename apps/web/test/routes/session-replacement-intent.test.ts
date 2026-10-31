@@ -62,8 +62,8 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
       payload: { workingDir: directory, mode: 'claude', ...extra },
     });
   const hireStopped = async () => {
-    const ada = await company.hire({
-      name: 'Ada',
+    const abe = await company.hire({
+      name: 'Abe',
       icon: '🔭',
       position: 'Scientist',
       expertise: ['x'],
@@ -71,13 +71,13 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
       researchEnabled: false,
     } as never);
     await company.setDesiredRunning('test-session-1', false); // the owner's Stop
-    return ada;
+    return abe;
   };
   const employee = () => company.view().employees[0]!;
 
   it('owner Stop, then an owner replacement: bound to the new session with running intent', async () => {
-    const ada = await hireStopped();
-    const replaced = await owner({ employeeId: ada.id });
+    const abe = await hireStopped();
+    const replaced = await owner({ employeeId: abe.id });
     expect(replaced.statusCode, replaced.body).toBe(200);
     const created = replaced.json().session.id;
     expect(employee().sessionId).toBe(created);
@@ -87,40 +87,40 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
   });
 
   it("the employee's own session replacing itself records nothing (agent caller)", async () => {
-    const ada = await hireStopped();
-    const replaced = await agent('test-session-1', { employeeId: ada.id });
+    const abe = await hireStopped();
+    const replaced = await agent('test-session-1', { employeeId: abe.id });
     expect(replaced.statusCode, replaced.body).toBe(200);
     expect(employee().sessionId).toBe(replaced.json().session.id);
     expect(employee().desiredRunning).toBe(false);
   });
 
   it('a non-owner request records nothing', async () => {
-    const ada = await hireStopped();
+    const abe = await hireStopped();
     await app.close();
     app = Fastify();
     await app.register(fastifyCookie);
     registerSessionRoutes(app, ctx, { company, verifiedOwner: () => false });
     installRouteErrorHandler(app);
     await app.ready();
-    const replaced = await owner({ employeeId: ada.id });
+    const replaced = await owner({ employeeId: abe.id });
     expect(replaced.statusCode, replaced.body).toBe(200);
     expect(employee().desiredRunning).toBe(false);
   });
 
   it('a vacationing employee keeps its stop', async () => {
-    const ada = await hireStopped();
+    const abe = await hireStopped();
     await store.update((state) => {
       state.employees[0]!.onVacation = true;
     });
-    const replaced = await owner({ employeeId: ada.id });
+    const replaced = await owner({ employeeId: abe.id });
     expect(replaced.statusCode, replaced.body).toBe(200);
     expect(employee().desiredRunning).toBe(false);
   });
 
   it('a failed replacement launch rolls the claim back and leaves no open transaction', async () => {
-    const ada = await hireStopped();
+    const abe = await hireStopped();
     ctx.addSession.mockRejectedValueOnce(new Error('synthetic launch failure'));
-    const failed = await owner({ employeeId: ada.id });
+    const failed = await owner({ employeeId: abe.id });
     expect(failed.statusCode).toBeGreaterThanOrEqual(400);
     expect(employee().sessionId).toBe('test-session-1');
     expect(employee().desiredRunning).toBe(false);
@@ -128,8 +128,8 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
   });
 
   it('a replacement of a running employee keeps it running (the thread claim stop is not the owner Stop)', async () => {
-    const ada = await company.hire({
-      name: 'Ada',
+    const abe = await company.hire({
+      name: 'Abe',
       icon: '🔭',
       position: 'Scientist',
       expertise: ['x'],
@@ -137,7 +137,7 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
       researchEnabled: false,
     } as never);
     await company.setDesiredRunning('test-session-1', true);
-    const replaced = await owner({ employeeId: ada.id });
+    const replaced = await owner({ employeeId: abe.id });
     expect(replaced.statusCode, replaced.body).toBe(200);
     expect(employee().desiredRunning).toBe(true);
   });

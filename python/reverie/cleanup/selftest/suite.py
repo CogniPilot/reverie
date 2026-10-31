@@ -1,5 +1,5 @@
 """Independent pre-live acceptance suite for reverie-prune (roadmap T7d). Written against prune-spec r4 (19792d84)
-and Ada's lease contract r8 (SHA256SUMS 84787809); NOT against the implementation. Run: python3 -I suite.py --prune 'CMD' --work DIR
+and the lease contract r8 (SHA256SUMS 84787809); NOT against the implementation. Run: python3 -I suite.py --prune 'CMD' --work DIR
   CMD   the prune command, split on spaces (e.g. '/path/reverie-prune' or 'python3 -I /path/prune.py').
   DIR   a NEW directory under /tmp; everything the suite creates lives there and is removed at the end (--keep keeps it).
 Each case builds its own fixture tree, writes its own config, runs the prune, then checks both the JSONL log and the
@@ -37,7 +37,7 @@ except FileNotFoundError:
 key = f"{st.st_dev}-{st.st_ino}"
 if mode == "reserve":                                           # contract r3 RESERVE, created under barrier SH
     now = time.time()
-    json.dump({"version": 1, "path": d, "owner": "rex-suite", "created_utc": now, "until_utc": now + 6 * 3600},
+    json.dump({"version": 1, "path": d, "owner": "prune-suite", "created_utc": now, "until_utc": now + 6 * 3600},
               open(os.path.join(leases, key + ".reserve.json"), "w"))
     fcntl.flock(b, fcntl.LOCK_UN); os.close(b)
     print("held", flush=True); time.sleep(3600)
@@ -77,7 +77,7 @@ def age_tree(root, days):
     t = time.time() - days * DAY
     for d, dirs, files in os.walk(root, topdown=False):
         for n in files + [x for x in dirs if os.path.islink(os.path.join(d, x))]:
-            os.utime(os.path.join(d, n), (t, t), follow_symlinks=False)  # dir-symlinks too (Vale, c13)
+            os.utime(os.path.join(d, n), (t, t), follow_symlinks=False)  # dir-symlinks too (c13)
         os.utime(d, (t, t))
 
 
@@ -91,7 +91,7 @@ def tree_bytes(root, size=64 * 1024, files=4, age_days=10):
 class Holder:
     """A separate process that acquires a lease on D exactly as contract r3 specifies (barrier SH, lock SH,
     fstat == stat, re-stat D, release barrier) and holds it for as long as it lives. It is the suite's own
-    implementation of the holder side, so the prune is tested against the contract, not against Bev's CLI."""
+    implementation of the holder side, so the prune is tested against the contract, not against the lease CLI."""
 
     def __init__(self, d, sb, lid="L1", mode="lease", wait=True):
         self.p = subprocess.Popen([sys.executable, "-I", "-c", HOLDER, d, lease_dir(sb, lid), mode],
@@ -327,7 +327,7 @@ def c06b_unreadable_subdir(sb, prune):
     expect_control(ctl)
 
 
-@case("staged inputs idle for hours under a lease survive (Ada); same tree after holder death is deletable")
+@case("staged inputs idle for hours under a lease survive (lease contract); same tree after holder death is deletable")
 def c07_staged_then_release(sb, prune):
     L = sb.laptop(); d = sb.project(L, "p1", "downloads")
     for n in ("src.tar", "deps.zip", "tool.bin"):
@@ -630,7 +630,7 @@ def reserve(sb, d, lid="L1", until_s=3600, raw=None):
         st = os.stat(d, follow_symlinks=False); now = time.time()
         created = min(now, now + until_s - 3600)    # an expired one was created before it expired (well-formed)
         body = raw if raw is not None else json.dumps({
-            "version": 1, "path": d, "owner": "rex-suite",
+            "version": 1, "path": d, "owner": "prune-suite",
             "created_utc": created, "until_utc": now + until_s})   # epoch seconds, as lease_ref3/4 write them
         with open(os.path.join(leases, LEASE_KEY(st) + ".reserve.json"), "w") as f:
             f.write(body)
@@ -667,7 +667,7 @@ def c08c_reserve_bad(sb, prune):
     far = sb.project(L, "far"); tree_bytes(far); reserve(sb, far, until_s=48 * 3600)
     inv = sb.project(L, "inv"); tree_bytes(inv)
     t = time.time()
-    reserve(sb, inv, raw=json.dumps({"version": 1, "path": inv, "owner": "rex-suite",   # until before created
+    reserve(sb, inv, raw=json.dumps({"version": 1, "path": inv, "owner": "prune-suite",   # until before created
                                      "created_utc": t, "until_utc": t - 3600}))
     sb.run(prune, sb.config(live=True), "--pass", "high-water", "--live")
     expect(os.path.exists(os.path.join(bad, "f0.bin")), "malformed reservation treated as free")
@@ -681,7 +681,7 @@ def reasons_of(rows, d):
 
 
 def raw_reserve(sb, d, body):
-    reserve(sb, d, raw=json.dumps({"version": 1, "path": d, "owner": "rex-suite", **body}))
+    reserve(sb, d, raw=json.dumps({"version": 1, "path": d, "owner": "prune-suite", **body}))
 
 
 @case("contract r8 §T: future-dated or over-cap reservations are UNKNOWN, never live or expired")
@@ -875,7 +875,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--only", default="")
     ap.add_argument("--keep", action="store_true")
-    ap.add_argument("--lease-lib", default="", help="lease library the prune loads (config key lease_lib), e.g. Bev's lease.py")
+    ap.add_argument("--lease-lib", default="", help="lease library the prune loads (config key lease_lib), e.g. lease.py")
     ap.add_argument("--extra", action="append", default=[], help="KEY=JSON added to every config (e.g. test_unbound_ok=true)")
     a = ap.parse_args()
     if a.lease_lib:

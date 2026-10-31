@@ -39,6 +39,10 @@ GIB = 1024**3
 OFFLINE_IMAGE_SCOPE = "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"
 OFFLINE_EVIDENCE_SCOPE = "OFFLINE_IMAGE_TOOL_SHELL"
 CURRENT_AGENT_SCOPE = "CURRENT_CODEX_TOOL_SHELL_ONLY"
+# Preserve the exact legacy report prefix without retaining personal provenance.
+# Suffix acceptance is unchanged; the raw receipt digest remains checked below.
+D2_LEGACY_SHIM_PREFIX_LENGTH = 50
+D2_LEGACY_SHIM_PREFIX_DIGEST = "sha256:d269adb515570c5188ef3752a6ae7abb57e8050b7fe39b8445967e814c3a79a2"
 
 
 class Refused(RuntimeError):
@@ -433,13 +437,15 @@ class OfflineStoreMaintenance:
             if kind == "D2":
                 lines = text.splitlines()
                 passes = [line for line in lines if line.startswith("PASS ")]
-                expected = ["shim body = F1 r7 / Ada r5 (shebang line excluded)",
+                expected = ["shim body = F1 r7 / native bridge r5 (shebang line excluded)",
                             "builder body = r5 (", "cargo resolves to the shim",
                             "shim sets CARGO_BUILD_JOBS=" + str(data["jobs"]),
                             "REVERIE_NO_AUTOENV=1 untouched", "explicit -j left as given"]
                 need(type(data.get("jobs")) is int and data["jobs"] > 0
                      and len(passes) == 6 and not any(s.startswith("FAIL") for s in lines)
-                     and all(line[5:].startswith(prefix) for line, prefix in zip(passes, expected))
+                     and (passes[0][5:].startswith(expected[0]) or
+                          sha(passes[0][5:5 + D2_LEGACY_SHIM_PREFIX_LENGTH].encode()) == D2_LEGACY_SHIM_PREFIX_DIGEST)
+                     and all(line[5:].startswith(prefix) for line, prefix in zip(passes[1:], expected[1:]))
                      and re.search(r"\bjobs=" + str(data["jobs"]) + r"\b", text), "target D2 did not pass")
             else:
                 # Exact existing CAN core predicates. Reporting-only probe/T10/

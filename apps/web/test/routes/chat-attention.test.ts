@@ -32,7 +32,7 @@ async function fixture(waitMs = 1000, activation: string | null = 'enabled') {
   const { app, ctx } = await createRouteTestHarness((f, c) => {
     context = c;
     c.sessions.set(A, createMockSession(A)); c.sessions.set(B, createMockSession(B));
-    c.sessions.get(A).name = 'Jinx'; c.sessions.get(A).mode = 'hands'; c.sessions.get(B).name = 'Peer';
+    c.sessions.get(A).name = 'Jester'; c.sessions.get(A).mode = 'hands'; c.sessions.get(B).name = 'Peer';
     registerChatAttention(f, c, service as never, waitMs);
     f.addHook('onClose', async () => { await service.stop(); await rm(directory, { recursive: true, force: true }); });
   });
@@ -41,7 +41,7 @@ async function fixture(waitMs = 1000, activation: string | null = 'enabled') {
   service.addMember(room.id, A); service.addMember(room.id, B);
   let counter = 0;
   const emit = (target: ChatRoom, extra: Partial<ChatMessage> = {}) => {
-    const message = { id: 'message-' + ++counter, roomId: target.id, at: counter, to: 'all', text: '@Jinx private text',
+    const message = { id: 'message-' + ++counter, roomId: target.id, at: counter, to: 'all', text: '@Jester private text',
       phoneWakes: target.members.map(member => member.sessionId),
       from: { kind: 'agent', sessionId: B, name: 'Peer' }, ...extra } as ChatMessage;
     target.messages.push(message);
@@ -63,7 +63,7 @@ it.each([null, '', 'true', 'disabled', 'ENABLED'])('defaults phone wake OFF with
     // Changing the environment after startup must not change the instance configuration.
     vi.stubEnv('REVERIE_ADMIN_PHONE_WAKE', 'enabled');
     const delivery = vi.spyOn(f.service.delivery, 'deliverMessage');
-    const message = f.service.post(f.room.id, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, '@Jinx question');
+    const message = f.service.post(f.room.id, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, '@Jester question');
     expect(f.service.room(f.room.id)!.messages.find(item => item.id === message.id)).not.toHaveProperty('phoneWakes');
     expect(delivery).toHaveBeenCalledOnce();
     expect(delivery.mock.calls[0][2]).toEqual([B]); // Hands stays post-only; existing native pane delivery is unchanged.
@@ -104,7 +104,7 @@ it('configuration-OFF preserves stored receipts while stripping public reads, mu
 it.each(['mention', 'address', 'reply', 'everyone', 'dm'])('wakes only the caller on a new %s with IDs only', async (kind) => {
   const f = await fixture();
   try {
-    const own = f.emit(f.room, { from: { kind: 'agent', sessionId: A, name: 'Jinx' }, text: 'earlier' });
+    const own = f.emit(f.room, { from: { kind: 'agent', sessionId: A, name: 'Jester' }, text: 'earlier' });
     if (kind === 'dm') { f.room.kind = 'dm'; f.room.dm = ['user', A]; }
     const { pending } = await f.wait();
     const message = f.emit(f.room, kind === 'mention' ? {} : kind === 'address' ? { text: 'question', to: [A] } :
@@ -123,8 +123,8 @@ it('uses Vibrate to filter general chatter, and ignores self/system/deleted post
     const { pending } = await f.wait();
     f.emit(f.room, { text: 'general discussion' });
     f.emit(f.room, { from: { kind: 'user', name: 'Owner' }, text: 'general owner post' });
-    f.emit(f.room, { text: 'email@Jinx or @Jinx-other' });
-    f.emit(f.room, { from: { kind: 'agent', sessionId: A, name: 'Jinx' } });
+    f.emit(f.room, { text: 'email@Jester or @Jester-other' });
+    f.emit(f.room, { from: { kind: 'agent', sessionId: A, name: 'Jester' } });
     f.emit(f.room, { from: { kind: 'system', name: 'system' } });
     f.emit(f.room, { deleted: { at: 1, by: 'owner' } });
     f.room.members = f.room.members.filter(member => member.sessionId !== A);
@@ -180,11 +180,11 @@ it('releases the subscription when the phone disconnects', async () => {
 it.each([
   ['ring', 'peer', 'general conversation', true],
   ['vibrate', 'peer', 'general conversation', false],
-  ['vibrate', 'peer', '@Jinx please respond', true],
+  ['vibrate', 'peer', '@Jester please respond', true],
   ['vibrate', 'owner', 'owner question', true],
-  ['silent', 'peer', '@Jinx please respond', false],
+  ['silent', 'peer', '@Jester please respond', false],
   ['silent', 'owner', 'owner question', false],
-  ['silent', 'owner', '@Jinx please respond', true],
+  ['silent', 'owner', '@Jester please respond', true],
   ['silent', 'owner', '@everyone please respond', true],
 ] as const)('event wake follows %s phone policy for %s: %s', async (mode, sender, text, accepted) => {
   const f = await fixture(50);
@@ -205,7 +205,7 @@ it('uses changed phone policy while a request is pending and never resurrects di
   try {
     const { pending } = await f.wait();
     await f.service.setAlertMode(A, 'silent', 3600_000);
-    const muted = f.service.post(f.room.id, { kind: 'agent', sessionId: B, name: 'Peer' }, '@Jinx muted');
+    const muted = f.service.post(f.room.id, { kind: 'agent', sessionId: B, name: 'Peer' }, '@Jester muted');
     expect(f.listeners.size).toBe(1);
     await f.service.setAlertMode(A, 'ring', 3600_000);
     expect(f.service.phoneAccepts(A, f.room.id, muted.id)).toBe(false);
@@ -227,14 +227,14 @@ it('respects post-only/notify membership changes instead of treating a mention a
     const member = f.room.members.find(item => item.sessionId === A)!;
     f.ctx.sessions.get(A)!.mode = 'codex'; // Explicit typed post-only is distinct from polling transport's post-only flag.
     member.postOnly = true;
-    const blocked = f.service.post(f.room.id, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, '@Jinx blocked');
+    const blocked = f.service.post(f.room.id, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, '@Jester blocked');
     expect(f.listeners.size).toBe(1);
     delete member.postOnly;
     expect(f.service.phoneAccepts(A, f.room.id, blocked.id)).toBe(false);
     member.notify = 'mentions';
     f.service.post(f.room.id, { kind: 'agent', sessionId: B, name: 'Peer' }, 'not addressed');
     expect(f.listeners.size).toBe(1);
-    const fresh = f.service.post(f.room.id, { kind: 'agent', sessionId: B, name: 'Peer' }, '@Jinx addressed');
+    const fresh = f.service.post(f.room.id, { kind: 'agent', sessionId: B, name: 'Peer' }, '@Jester addressed');
     expect((await pending).json().data.event.messageId).toBe(fresh.id);
   } finally { await f.app.close(); }
 });
@@ -255,7 +255,7 @@ it.each(['enabled', null])('normal history and exact reads keep stored receipts 
   const directory = await mkdtemp(join(tmpdir(), 'phone-policy-read-'));
   let service!: ChatroomService;
   const { app } = await createRouteTestHarness((f, c) => {
-    c.sessions.set(A, createMockSession(A)); c.sessions.get(A).name = 'Jinx'; c.sessions.get(A).mode = 'hands';
+    c.sessions.set(A, createMockSession(A)); c.sessions.get(A).name = 'Jester'; c.sessions.get(A).mode = 'hands';
     service = new ChatroomService({ file: join(directory, 'rooms.json'), employeeOf: id => 'employee-' + id,
       getSession: id => c.sessions.get(id), broadcast: () => {} });
     registerChatroomRoutes(f, c, service, new ChatFileStore(directory), trustedFixtureOwner);

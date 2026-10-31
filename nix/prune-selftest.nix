@@ -1,10 +1,10 @@
 { pkgs, src, prune ? import ./prune-r12.nix { inherit pkgs src; } }:
 let
   hashes = {
-    "selftest.py" = "280dd66b9c83f0faa99c263dddbee99f8e37a1104548f4d4f690066d0061574e";
-    "p3kit.py" = "cf4ca5a1b0fc84b2502e126be5a0c9b06881a11eba9161324efc1e352db0024a";
-    "suite.py" = "b94a3959f6a9a836f22e744c0c12041bea197d1744a4cc5e085f010afad96312";
-    "p3_host_runner.sh" = "5e5f776fcc158f4c54a17a0fac43c1ae2a5f403e78a4f6fc6cc2a1f1e624eab8";
+    "selftest.py" = "2468295330b1d75a4c7eefff6f8f1d2669e792cf13515277c2b1143e6a6c591c";
+    "p3kit.py" = "34a1642b16484aeb876277e87a058556ef8f47c608cc64acf3268b06f37c6a83";
+    "suite.py" = "3dd4961eeda3045a0962bb2c1af491370b3526fbdaa955b078128f8df4027e98";
+    "p3_host_runner.sh" = "401569b70f20f7f7f0883134d3a1ca88832f8dc33bf6de46bca7c593847e7927";
   };
 in pkgs.runCommand "reverie-prune-selftest-r2" {
   nativeBuildInputs = [ pkgs.makeWrapper ];

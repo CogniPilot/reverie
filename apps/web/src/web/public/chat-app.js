@@ -1372,7 +1372,7 @@ class ReverieChatApp {
       // A small file read on the server; an older server without the route simply shows no GPU.
       const gpu = await this.app._chatApi('/api/system/gpu');
       this.stats = { ...this.stats, gpu: gpu.ok ? gpu.data : undefined };
-      // The GPU history graph (James 10-27) draws from these readings, kept while this page is open.
+      // The GPU history graph draws from these readings, kept while this page is open.
       const u = gpu.ok && gpu.data?.available ? Number(gpu.data.utilization) : NaN;
       if (Number.isFinite(u)) {
         this.gpuHistory = [...(this.gpuHistory || []), { t: Date.now(), u }].slice(-CA_GPU_HISTORY_MAX);
@@ -3542,7 +3542,7 @@ class ReverieChatApp {
     this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
-      // Workspace sits beside Company and Board as a quick link (James 10-27).
+      // Workspace sits beside Company and Board as a quick link.
       ? ['company', 'board', 'workspace'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
       : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
     for (const entry of entries) pane.append(this.button('ca-btn ca-office-pane-link', entry.label, async () => {
@@ -9935,7 +9935,7 @@ class ReverieEmbassyView {
     const focusLabel = focused?.getAttribute('aria-label');
     previous?.remove();
     host.querySelector('.eg-access-note')?.remove();
-    // Embassies are shared rooms beside the server's channels, not part of Direct Messages (James 10-20).
+    // Embassies are shared rooms beside the server's channels, not part of Direct Messages.
     if (this.shell.workspace === 'home') return;
     if (!this.allowed) {
       if (this.ownerRequired) {
@@ -10625,7 +10625,7 @@ class ReverieEmbassyPairingView {
     fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
     this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
   }
-  /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access (James 10-23). */
+  /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access. */
   hostRoom() {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
     this.clearBody(); this.title.textContent = 'Embassy name and closing'; const epoch = this.epoch;

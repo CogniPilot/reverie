@@ -7,7 +7,7 @@ import { agentChatSay, resolveChatRoom, type AgentDeps, type RequestOptions } fr
 
 const member = (name: string) => ({ sessionId: `${name}-id`, name, role: '', goal: '', progress: '' });
 const ROOMS = [
-  { id: 'room-aaaa', name: 'Platform', members: [member('Ada'), member('Grace')] },
+  { id: 'room-aaaa', name: 'Platform', members: [member('Abe'), member('Grace')] },
   { id: '00000047-005b-4000-8000-00000000008c', name: '', kind: 'dm' as const, dm: ['user', 'x'], members: [] },
 ];
 

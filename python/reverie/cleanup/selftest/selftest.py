@@ -1,4 +1,4 @@
-"""reverie-prune self-test (r2, Rex; r2 = Stan N1/N2/N4): phase 3 run by the tracked module itself, so no one hand-runs root on the host.
+"""reverie-prune self-test (r2; N1/N2/N4): phase 3 run by the tracked module itself, so no one hand-runs root on the host.
 
 Runs as root inside its systemd unit (PrivateMounts, PrivateTmp, ProtectSystem=strict, writable only --base and the
 receipt dir). Steps:
@@ -18,11 +18,11 @@ Exit 0 only on PASS. The receipt pins every file's sha256, so live enablement ca
 import argparse, ctypes, datetime, hashlib, json, os, shutil, signal, stat, subprocess, sys, tempfile, time
 
 # The reviewed bytes this self-test may run (kit r4 and runner r5). Anything else refuses before any effect.
-KIT_SHA = {"p3kit.py": "cf4ca5a1b0fc84b2502e126be5a0c9b06881a11eba9161324efc1e352db0024a",
-           "suite.py": "b94a3959f6a9a836f22e744c0c12041bea197d1744a4cc5e085f010afad96312"}
-RUNNER_SHA = "5e5f776fcc158f4c54a17a0fac43c1ae2a5f403e78a4f6fc6cc2a1f1e624eab8"
+KIT_SHA = {"p3kit.py": "34a1642b16484aeb876277e87a058556ef8f47c608cc64acf3268b06f37c6a83",
+           "suite.py": "3dd4961eeda3045a0962bb2c1af491370b3526fbdaa955b078128f8df4027e98"}
+RUNNER_SHA = "401569b70f20f7f7f0883134d3a1ca88832f8dc33bf6de46bca7c593847e7927"
 WORK = "p3/w"                       # the kit's WORK, relative to the laptop /tmp
-# r2 (Stan N1): PASS needs EXACTLY these kit checks, each a dict that is ok and not NOT RUN; an empty or partial result fails.
+# r2 (N1): PASS needs EXACTLY these kit checks, each a dict that is ok and not NOT RUN; an empty or partial result fails.
 EXPECTED = frozenset({"checkout", "control", "cwd", "exe", "fsmonitor_not_run", "host_result", "leased", "mmap", "mount",
                       "no_proc_unreadable", "openfile", "reserved", "victim_intact"})
 MS_BIND, MS_REC, MS_PRIVATE = 4096, 0x4000, 1 << 18
@@ -56,7 +56,7 @@ def plain_root_dir(path):
 
 
 def read_owned(path, uid, limit):
-    """r2 (Stan N2): read a file the self-test uid wrote, without following a link or blocking on a FIFO: a regular file
+    """r2 (N2): read a file the self-test uid wrote, without following a link or blocking on a FIFO: a regular file
     owned by that uid, at most `limit` bytes."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
@@ -202,7 +202,7 @@ def main():
         if r.returncode != 0:
             result["why"] = f"runner exit {r.returncode}"
             return result
-        # r2 (Stan N2): the kit writes RESULT.json, then RESULT.md; wait for RESULT.md, so RESULT.json is complete.
+        # r2 (N2): the kit writes RESULT.json, then RESULT.md; wait for RESULT.md, so RESULT.json is complete.
         if not wait_for(os.path.join(work, "RESULT.md"), child, deadline):
             result["why"] = "laptop side did not grade the run"
             return result
@@ -232,7 +232,7 @@ def main():
         return result
     except subprocess.TimeoutExpired:
         result["why"] = "runner timed out"
-        unmount_failed = True   # r2 (Stan N4): its trap never ran, so a bind mount may remain; keep the run dir, FAIL
+        unmount_failed = True   # r2 (N4): its trap never ran, so a bind mount may remain; keep the run dir, FAIL
         return result
     finally:
         child.stop(15)

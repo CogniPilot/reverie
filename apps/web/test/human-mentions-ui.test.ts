@@ -3,7 +3,7 @@ import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
 const opened: Awaited<ReturnType<typeof createHarness>>[] = [];
 afterEach(() => { for (const h of opened.splice(0)) h.window.close(); });
-const nova = { id: 'human-nova', name: 'Nova', role: 'limited', online: true, avatar: '/assets/avatars/pack-151.png' };
+const nora = { id: 'human-nora', name: 'Nora', role: 'limited', online: true, avatar: '/assets/avatars/pack-151.png' };
 const owner = { id: 'owner', name: 'Primary Owner', role: 'owner', primary: true, online: true };
 
 async function fixture(extraMembers: object[] = []) {
@@ -15,7 +15,7 @@ async function fixture(extraMembers: object[] = []) {
     stored: { 'reverie:chatroom': 'shared' },
   });
   opened.push(h);
-  h.shell.humans = [owner, nova];
+  h.shell.humans = [owner, nora];
   h.shell.humanRoomId = h.shell.roomId;
   return h;
 }
@@ -35,14 +35,14 @@ it('offers an authorized human with their own avatar and completes the name with
   const h = await fixture();
   const originalMembers = structuredClone(h.shell.room.members);
   const input = type(h, 'Hello @No');
-  expect(names(h)).toEqual(['Nova']);
-  expect(h.document.querySelector('.ca-mention-item img')!.getAttribute('src')).toBe(nova.avatar);
+  expect(names(h)).toEqual(['Nora']);
+  expect(h.document.querySelector('.ca-mention-item img')!.getAttribute('src')).toBe(nora.avatar);
   expect(h.document.querySelector('.ca-mention-sub')!.textContent).toBe('Person · Guest');
-  expect(h.shell.mention.items[0]).toMatchObject({ kind: 'human', human: { id: nova.id } });
+  expect(h.shell.mention.items[0]).toMatchObject({ kind: 'human', human: { id: nora.id } });
   expect(h.shell.mention.items[0].member).toBeUndefined();
   expect(h.shell.mention.items[0].human.sessionId).toBeUndefined();
   input.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
-  expect(input.value).toBe('Hello @Nova ');
+  expect(input.value).toBe('Hello @Nora ');
   expect(h.server.posts).toEqual([]);
   expect(h.shell.room.members).toEqual(originalMembers);
 });
@@ -50,9 +50,9 @@ it('offers an authorized human with their own avatar and completes the name with
 it('highlights a channel human alongside agent/everyone mentions, leaving addresses, code and links alone', async () => {
   const h = await fixture();
   const el = h.document.createElement('div');
-  el.innerHTML = 'Hi @Nova and @Alpha, @everyone. Email a@Nova.test. <code>@Nova</code> <a href="/">@Nova</a>';
+  el.innerHTML = 'Hi @Nora and @Alpha, @everyone. Email a@Nora.test. <code>@Nora</code> <a href="/">@Nora</a>';
   h.shell.decorateMentions(el);
-  expect([...el.querySelectorAll('.ca-mention-tag')].map(node => node.textContent)).toEqual(['@Nova', '@Alpha', '@everyone']);
+  expect([...el.querySelectorAll('.ca-mention-tag')].map(node => node.textContent)).toEqual(['@Nora', '@Alpha', '@everyone']);
   expect(el.querySelector('code .ca-mention-tag')).toBeNull();
   expect(el.querySelector('a .ca-mention-tag')).toBeNull();
 });
@@ -62,7 +62,7 @@ it('does not reuse humans from another channel or leak them into a private DM', 
   h.shell.humanRoomId = 'other';
   type(h, '@No');
   expect(names(h)).toEqual([]);
-  const el = h.document.createElement('div'); el.textContent = '@Nova';
+  const el = h.document.createElement('div'); el.textContent = '@Nora';
   h.shell.decorateMentions(el);
   expect(el.querySelector('.ca-mention-tag')).toBeNull();
   await h.shell.selectRoom('private');
@@ -75,9 +75,9 @@ it('does not reuse humans from another channel or leak them into a private DM', 
 
 it('deduplicates the legacy owner and human records and reserves exactly one everyone suggestion', async () => {
   const h = await fixture([member('user', owner.name), member('reserved-agent', 'everyone')]);
-  h.shell.humans = [owner, owner, nova, { id: 'reserved-human', name: 'EVERYONE', role: 'limited' }];
+  h.shell.humans = [owner, owner, nora, { id: 'reserved-human', name: 'EVERYONE', role: 'limited' }];
   type(h, '@');
-  expect(names(h)).toEqual([owner.name, 'Nova', 'Alpha', '@everyone']);
+  expect(names(h)).toEqual([owner.name, 'Nora', 'Alpha', '@everyone']);
   expect(names(h).filter(name => name === owner.name)).toHaveLength(1);
   expect(names(h).filter(name => name?.toLowerCase() === '@everyone')).toHaveLength(1);
 });
@@ -85,7 +85,7 @@ it('deduplicates the legacy owner and human records and reserves exactly one eve
 it('the person card\'s Mention appends a mention, focuses the composer and preserves even a selected draft', async () => {
   const h = await fixture();
   h.shell.renderMembers();
-  const button = h.document.querySelector('[data-human-id="human-nova"]') as HTMLButtonElement;
+  const button = h.document.querySelector('[data-human-id="human-nora"]') as HTMLButtonElement;
   expect(button.tagName).toBe('BUTTON');
   const input = type(h, 'Keep this unfinished draft');
   input.setSelectionRange(0, input.value.length);
@@ -95,7 +95,7 @@ it('the person card\'s Mention appends a mention, focuses the composer and prese
     action.click();
   };
   mention();
-  expect(input.value).toBe('Keep this unfinished draft @Nova ');
+  expect(input.value).toBe('Keep this unfinished draft @Nora ');
   expect(h.document.activeElement).toBe(input);
   expect(input.selectionStart).toBe(input.value.length);
   expect(h.server.posts).toEqual([]);
@@ -115,9 +115,9 @@ it('refreshes an open mention query when authorized human presence arrives', asy
   h.app._chatApi = async (path: string, options?: object) => {
     if (path === '/api/office/me') return { ok: true, data: { person: owner } };
     if (path === '/api/office/presence') return { ok: true, data: { present: true } };
-    if (path.startsWith('/api/office/presence?')) return { ok: true, data: { people: [owner, nova] } };
+    if (path.startsWith('/api/office/presence?')) return { ok: true, data: { people: [owner, nora] } };
     return original(path, options);
   };
   await h.shell.startHumanPresence();
-  expect(names(h)).toEqual(['Nova']);
+  expect(names(h)).toEqual(['Nora']);
 });

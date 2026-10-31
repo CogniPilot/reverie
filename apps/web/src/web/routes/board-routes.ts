@@ -429,7 +429,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         if (typeof owner !== 'string') throw new BoardError(`owner: ${owner.error}`, 400);
         wanted.add(owner);
       }
-      // mine and owner together are one owner set: --mine --owner Kit is "mine or Kit's".
+      // mine and owner together are one owner set: --mine --owner Reviewer is "mine or the reviewer's".
       const issues = state.issues.filter(issue =>
         (!wanted.size || wanted.has(ownerOf(issue) ?? '')) &&
         (!q.status || q.status.includes(issue.status)) &&
