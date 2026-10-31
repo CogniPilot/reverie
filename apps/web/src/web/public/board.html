@@ -165,6 +165,8 @@ const zoneShort = () => { try { return (new Intl.DateTimeFormat('en-US', {timeZo
 const managedBoard = window.frameElement?.dataset.boardManaged === 'true';
 let boardActive = !managedBoard || window.frameElement.dataset.boardActive === 'true';
 let failures = 0, loading = false, renderKey = null, loadVersion = 0, boardRequest = null, pollTimer = null, clockTimer = null, readyForActions = false;
+// Choices need a board that has loaded while visible. A refresh does not take them away: the first click into the frame
+// is what focuses it and starts one, so an inert section would drop that click, and a stale choice is refused by ifRev.
 function boardActionState(ready) {
   readyForActions = ready;
   document.getElementById('sec-decisions').inert = !ready;
@@ -184,10 +186,12 @@ function boardVisibility(active) {
   boardActive = next; pauseBoard();
   if (next) { startBoardTimers(); void load(); }
 }
-async function load(warm = false) {
+async function load(warm = false, afterWrite = false) {
+  // After a choice, read again even if a refresh was already in flight: that read began before the write.
+  if (afterWrite && loading) { ++loadVersion; boardRequest?.abort(); boardRequest = null; loading = false; }
   if (loading || (!boardActive && !warm)) return;
   const version = ++loadVersion, controller = boardRequest = new AbortController();
-  loading = true; boardActionState(false);
+  loading = true;
   const banner = document.getElementById('banner');
   try {
     const r = await fetch('/api/board', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}, signal: controller.signal});
@@ -623,7 +627,7 @@ function cards() {
     root.querySelectorAll(`[data-key="${CSS.escape(key)}"] button`).forEach(button => button.disabled = true);
     try { await post(`/api/board/decisions/${encodeURIComponent(b.dataset.decide)}/choose`, {option: b.dataset.opt, ifRev: B.rev}); delete cardErr[key]; }
     catch (e) { cardErr[key] = 'Choice not saved: ' + e.message; }
-    await load();
+    await load(false, true);
   });
   root.querySelectorAll('[data-vote]').forEach(b => b.onclick = async () => {
     const k = b.dataset.vote, roomId = k.slice(0, k.indexOf(':')), messageId = k.slice(k.indexOf(':') + 1);
@@ -632,21 +636,21 @@ function cards() {
       await post(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/poll/vote`, {options: [b.dataset.opt]});
       delete cardErr[b.dataset.vote];
     } catch (e) { cardErr[b.dataset.vote] = 'Vote not saved: ' + e.message; }
-    await load();
+    await load(false, true);
   });
   root.querySelectorAll('[data-undo]').forEach(b => b.onclick = async () => {
     const k = b.dataset.undo, roomId = k.slice(0, k.indexOf(':')), messageId = k.slice(k.indexOf(':') + 1);
     b.disabled = true;
     try { await post(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/poll/vote`, {options: []}); }
     catch (e) { cardErr[b.dataset.undo] = 'Could not reopen: ' + e.message; }
-    await load();
+    await load(false, true);
   });
   root.querySelectorAll('[data-clear]').forEach(b => b.onclick = async () => {
     const key = 'd:' + b.dataset.clear;
     b.disabled = true;
     try { await post(`/api/board/decisions/${encodeURIComponent(b.dataset.clear)}/clear`, {}); delete cardErr[key]; }
     catch (e) { cardErr[key] = 'Not saved: ' + e.message; }
-    await load();
+    await load(false, true);
   });
 }
 </script>
