@@ -230,6 +230,21 @@ describe('company crash recovery selection', () => {
     });
     expect((await new CompanyWake(f.deps).tick()).awakened).toEqual([]);
   });
+  it('a wake that throws after it was called is unconfirmed, never "did not start"; a throw before it is wake-failed', async () => {
+    const f = fixture();
+    const recovery = new CompanyWake(f.deps);
+    f.deps.wake.mockRejectedValueOnce(new Error('lost after the session was created'));
+    expect(await recovery.wakeOne(f.report.id)).toEqual({ awakened: [], skipped: [{ employeeId: 'report', reason: 'start-unconfirmed' }] });
+    expect(f.deps.kickoff).not.toHaveBeenCalled();
+    const before = fixture();
+    before.deps.claim.mockRejectedValueOnce(new Error('store unavailable'));
+    expect(await new CompanyWake(before.deps).wakeOne(before.report.id)).toEqual({ awakened: [], skipped: [{ employeeId: 'report', reason: 'wake-failed' }] });
+    expect(before.deps.wake).not.toHaveBeenCalled();
+    const refused = fixture();
+    refused.deps.wake.mockResolvedValueOnce(false);
+    expect((await new CompanyWake(refused.deps).wakeOne(refused.report.id)).skipped).toEqual([{ employeeId: 'report', reason: 'wake-failed' }]);
+  });
+
   it('explicit delegated wake starts a report without another kickoff or duplicate process', async () => {
     const f = fixture();
     const recovery = new CompanyWake(f.deps);

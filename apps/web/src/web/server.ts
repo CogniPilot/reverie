@@ -4297,7 +4297,7 @@ export class WebServer extends EventEmitter {
           .tick()
           .then((report) => {
             for (const item of report.skipped)
-              if (item.reason === 'kickoff-failed' || item.reason === 'wake-failed')
+              if (item.reason === 'kickoff-failed' || item.reason === 'wake-failed' || item.reason === 'start-unconfirmed')
                 console.error('[company] crash recovery needs owner attention:', item.employeeId, item.reason);
           })
           .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
