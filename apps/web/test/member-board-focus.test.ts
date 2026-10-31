@@ -209,7 +209,7 @@ describe('the web member views show the Board focus', () => {
   it('the member line falls back to the doing cards, and the profile lists them under Doing', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha', { focus, focusMore: 1 })], {})] });
     expect(h.document.querySelector('.ca-member[aria-label^="alpha,"] .ca-member-sub')?.textContent).toBe(
-      'i-00000001 Sync goals · i-00000002 Fix composer · +1 more'
+      'i-00000001 Sync goals · i-00000002 Fix composer · +1 more (from the Board)'
     );
     (h.document.querySelector('.ca-member') as HTMLElement).click();
     const rows = [...h.document.querySelectorAll('.ca-profile-technical > .ca-kv')].map((r) => r.textContent);
