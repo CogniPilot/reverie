@@ -4203,6 +4203,19 @@ class ReverieApp {
             // Session no longer exists — the input can never land. Drop it
             // rather than retry forever (not a "lost" prompt: the target is gone).
             this._ackDelivery(sessionId, rec.seq);
+          } else if (resp && resp.status === 422) {
+            // This input's outcome is final but may be unknown. Re-POSTing its
+            // spent seq cannot resolve it and would wedge every later frame.
+            this._dropUnconfirmedInput(sessionId, rec);
+          } else if (resp && resp.status === 409) {
+            let typedUnsent = false;
+            try {
+              const body = await resp.json();
+              typedUnsent = body?.success === false && body.errorCode === 'SESSION_BUSY' &&
+                body.data?.typedUnsent === true && body.data?.delivered === false;
+            } catch { /* Unknown/busy refusals stay queued for a later retry. */ }
+            if (typedUnsent) this._dropUnconfirmedInput(sessionId, rec, true);
+            else break;
           } else if (resp && (resp.status === 400 || resp.status === 413)) {
             // The frame itself was refused, so a retry gets the same answer. Kept
             // queued, it was re-POSTed every 2 s forever and blocked every later
@@ -4223,6 +4236,17 @@ class ReverieApp {
   _dropRejectedInput(sessionId, rec) {
     this._ackDelivery(sessionId, rec.seq);
     this.showToast?.(`Input refused by the server (${Math.ceil(rec.data.length / 1024)} KB); not sent`, 'error');
+  }
+
+  /** Finalize this queue entry without claiming its input was delivered. */
+  _dropUnconfirmedInput(sessionId, rec, typedUnsent = false) {
+    this._ackDelivery(sessionId, rec.seq);
+    // Persist even while later frames remain: a reload must not replay the
+    // uncertain/unsent frame during the normal debounce window.
+    this._persistReliableNow();
+    this.showToast?.(typedUnsent
+      ? 'Input text remains unsent; Enter was withheld. Check the session before sending again.'
+      : 'Input delivery is unconfirmed; check the session before sending again.', 'warning');
   }
 
   /** Drop an ACKed record (by exact seq) and persist. */

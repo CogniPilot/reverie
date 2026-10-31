@@ -26,11 +26,11 @@ import { registerSessionRoutes, _resetPaneLivenessState } from '../../src/web/ro
 import { sessionWaits } from '../../src/web/session-wait-registry.js';
 import { createMockRouteContext, type MockRouteContext } from '../mocks/index.js';
 
-async function createEnvelopeHarness(): Promise<{ app: FastifyInstance; ctx: MockRouteContext }> {
+async function createEnvelopeHarness(options: Parameters<typeof registerSessionRoutes>[2] = {}): Promise<{ app: FastifyInstance; ctx: MockRouteContext }> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
+  registerSessionRoutes(app, ctx as never, { ...options, verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api')) return done(null, payload);
@@ -351,6 +351,61 @@ describe('terminal viewer delivery never establishes native worker death', () =>
   });
   const terminal = () => Object.assign(harness.ctx.sessions.get('test-session-1')!, {
     runtimeHealthScope: 'terminal', viewerInputHeld: false,
+  });
+
+  it('ACKs a lost buffered-wake response without buffering or typing the same seq again', async () => {
+    await harness.app.close();
+    const wake = { hasWakeTarget: vi.fn(async () => true), handleInput: vi.fn(async () => 'buffered') };
+    harness = await createEnvelopeHarness({ remoteWake: wake as never });
+    const session = terminal();
+    const mux = vi.spyOn(session, 'writeViaMux'), raw = vi.spyOn(session, 'write');
+    expect((await post({ wait: false })).json().data).toEqual({ buffered: true });
+    const lostResponseRetry = await post({ wait: false });
+    expect(lostResponseRetry.statusCode).toBe(200);
+    expect(lostResponseRetry.json().success).toBe(true);
+    expect(wake.handleInput).toHaveBeenCalledTimes(1);
+    expect(mux).not.toHaveBeenCalled();
+    expect(raw).not.toHaveBeenCalled();
+    expect(session.shouldApplyInput('viewer-client', 1)).toBe(false);
+  });
+
+  it('a real terminal Session reports a late idle-only refusal as busy before typing and lets its seq retry', async () => {
+    await harness.app.close();
+    let session!: Session;
+    let first = true;
+    const wake = { hasWakeTarget: vi.fn(async () => {
+      if (first) {
+        first = false;
+        Object.assign(session, { _isWorking: true, _status: 'busy' });
+      }
+      return false;
+    }) };
+    harness = await createEnvelopeHarness({ remoteWake: wake as never });
+    const mux = {
+      capturePaneText: () => '›\n  gpt-6.1-sol high · /owned/fixture\n? for shortcuts',
+      sendInput: vi.fn(async () => true),
+    };
+    session = new Session({ id: 'test-session-1', workingDir: process.env.HOME!, mode: 'codex', useMux: true,
+      mux: mux as never, muxSession: { muxName: 'reverie-owned-idle', sessionId: 'test-session-1', pid: 42 } as never });
+    Object.assign(session, { _workerBacked: true, _pid: 42 });
+    harness.ctx.sessions.set(session.id, session as never);
+    Object.assign(harness.ctx.mux, { isPaneDead: () => false });
+    try {
+      const refused = await post({ ifIdle: true });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().errorCode).toBe(ApiErrorCode.SESSION_BUSY);
+      expect(refused.json().error).toMatch(/busy.*nothing was typed/i);
+      expect(mux.sendInput).not.toHaveBeenCalled();
+      expect(session.lastInputSeq('viewer-client')).toBe(0);
+      Object.assign(session, { _isWorking: false, _status: 'idle' });
+      const retry = await post({ ifIdle: true });
+      expect(retry.json().data.delivered).toBe(true);
+      expect(mux.sendInput).toHaveBeenCalledOnce();
+      expect(session.lastInputSeq('viewer-client')).toBe(1);
+    } finally {
+      Object.assign(session, { ptyProcess: null, _muxSession: null, _mux: null, _pid: null });
+      await session.stop(false);
+    }
   });
 
   it.each(['dead-pane', 'held-input', 'missing-client'])('refuses %s before any write and keeps the seq retryable', async (cause) => {

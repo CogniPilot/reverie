@@ -5182,17 +5182,26 @@ export class Session extends EventEmitter {
       return false;
     }
     const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
-    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
+    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) {
+      if (options.requireIdle) options.onIdleRefused?.();
+      return false;
+    }
     // Idle-only is decided here, at the write, not by the route's earlier look: a turn can start during any await before it.
     // The check and the claim below (_beginMuxWrite) run with no await between them, so two wakes cannot both pass.
-    if (options.requireIdle && (!this._mux || !this._muxSession || !this._idleForWake(null, true))) return false;
+    if (options.requireIdle && (!this._mux || !this._muxSession || !this._idleForWake(null, true))) {
+      options.onIdleRefused?.();
+      return false;
+    }
     // A capacity retry's text in flight or left unsent owns the composer until it reads empty again.
     if (this._capacityTextPending && !options.capacityRetry) {
       const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
       const empty = !!glyph && !!this._muxSession && !this._capacityRetryWriting() &&
         composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
       if (empty) this._capacityTextPending = false;
-      else if (options.requireEmptyComposer || options.requireIdle) return false;
+      else if (options.requireEmptyComposer || options.requireIdle) {
+        if (options.requireIdle) options.onIdleRefused?.();
+        return false;
+      }
     }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;

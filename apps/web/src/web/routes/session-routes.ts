@@ -2206,6 +2206,8 @@ export function registerSessionRoutes(
         'Input text remains unsent in the composer; Enter was withheld. Do not resend the text.'),
       data: { delivered: false, typedUnsent: true },
     });
+    const idleRefusal = () => createErrorResponse(ApiErrorCode.SESSION_BUSY,
+      'Session is busy or has a draft in its composer; nothing was typed.');
     if (duplicate && terminalScope && receipts?.get(receiptKey) === 'typed-unsent') return typedUnsentInput();
     if (duplicate && terminalScope && receipts?.get(receiptKey) !== 'confirmed') return unconfirmedInput();
     if (duplicate && !wantsWait) {
@@ -2247,7 +2249,10 @@ export function registerSessionRoutes(
         // `buffered` is additive to the historical bare `{}`; `dropped` says the chunk
         // was over the wake buffer's cap and is GONE (a 200 with no field could not
         // tell delivered from buffered from dropped).
-        if (outcome === 'buffered') return { buffered: true };
+        if (outcome === 'buffered') {
+          recordReceipt('confirmed'); // The wake buffer owns this seq; a lost ACK must not enqueue it twice.
+          return { buffered: true };
+        }
         if (outcome === 'dropped') return { buffered: true, dropped: true };
       }
     }
@@ -2310,7 +2315,7 @@ export function registerSessionRoutes(
     // receipt stays unconfirmed. A move gate that typed nothing is retryable.
     let terminalWriteUnconfirmed = false;
     const undoOnFailure = () => {
-      if (terminalScope && !heldByMove) {
+      if (terminalScope && !heldByMove && !idleRefused) {
         terminalWriteUnconfirmed = true;
         recordReceipt('unconfirmed');
         return;
@@ -2328,6 +2333,7 @@ export function registerSessionRoutes(
     // A gated write whose text went in but whose Enter was withheld (a turn started, or a plan move took the composer, in
     // between): reported, never retried.
     let typedUnsent = false;
+    let idleRefused = false;
     // An agent's write refused before any byte because a plan move took the composer after the early check above (during the
     // wake-target probe, say): busy, with the seq handed back for a retry once the move is done.
     let heldByMove = false;
@@ -2361,7 +2367,8 @@ export function registerSessionRoutes(
       // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
       // just started a turn or holds a draft gets nothing typed.
       delivered = await session
-        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true, onTypedUnsent: () => { typedUnsent = true; } })
+        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true,
+          onTypedUnsent: () => { typedUnsent = true; }, onIdleRefused: () => { idleRefused = true; } })
         .catch(() => false);
       // Typed but Enter withheld is not "nothing was typed": the text sits unsent in the composer, so the seq stays spent
       // and a retry cannot type it a second time.
@@ -2432,6 +2439,7 @@ export function registerSessionRoutes(
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
     }
     if (!waitPromise && terminalScope && typedUnsent) return typedUnsentInput();
+    if (!waitPromise && terminalScope && idleRefused) return idleRefusal();
     if (!waitPromise && terminalWriteUnconfirmed) return unconfirmedInput();
     if (!waitPromise) return ifIdle || typedUnsent ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
@@ -2458,6 +2466,7 @@ export function registerSessionRoutes(
         return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
       }
       if (terminalScope && typedUnsent) return typedUnsentInput();
+      if (terminalScope && idleRefused) return idleRefusal();
       if (terminalScope && !delivered && !duplicate) return unconfirmedInput();
       if (terminalScope && (result.signal === 'exit' || result.ended)) {
         return createErrorResponse(
