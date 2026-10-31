@@ -110,6 +110,10 @@ const AGENT_ROUTES = new Set([
   'GET /api/experts/:id',
   'POST /api/experts/:id/hire',
   'POST /api/experts/:id/retire',
+  // Hire requests: a listed delegate asks, lists its own and withdraws its own; approve and decline stay owner-only.
+  'POST /api/experts/:id/hire-requests',
+  'GET /api/experts-hire-requests',
+  'POST /api/experts-hire-requests/:requestId/withdraw',
   // The board: every agent's `reverie board` reads and moves cards.
   'GET /api/board',
   'GET /api/board/issues',
