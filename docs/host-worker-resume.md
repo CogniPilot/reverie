@@ -43,8 +43,14 @@ with their existing session ID and settings, rather than attach-only recovery.
 Every prepared plan expires at most 300 seconds after it is created. Waiting
 between prepare and apply and final verification spend that budget. Selected
 seats start serially, with at most 120 seconds
-per wake inside that same deadline. The caller's longer transport timeout does
-not extend either limit. For slow cold starts, use one-seat operations: obtain
+per wake inside that same deadline. That per-seat deadline is fixed before the
+single wake call: its ACK and subsequent read-only native readiness checks share
+the same budget. The caller's longer transport timeout does not extend either limit.
+An ACK can precede native creation; the broker waits only for an absent or known
+stopped laptop, releasing admission between probes. A running laptop with the
+wrong binding, image, policy, limits or storage refuses immediately. The wait
+never repeats the wake, sends input or changes a laptop. Native checks do not
+claim model readiness. For slow cold starts, use one-seat operations: obtain
 a fresh `describe`, review its complete snapshot against the retained bindings,
 prepare a fresh UUID for one employee, apply once, and confirm completion and
 current native health before preparing the next employee. Selection does not

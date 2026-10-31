@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from unittest.mock import patch,Mock
@@ -182,6 +183,139 @@ class ResumeTransactions(unittest.TestCase):
                 self.apply({**plan,'planDigest':M.digest(raw)})
             self.assertFalse((path.parent/'ATTEMPT.json').exists())
         self.assertEqual(self.woken,[])
+
+    def test_one_ack_waits_for_delayed_native_creation_without_holding_admission(self):
+        running=copy.deepcopy(self.f.native.rows[0]);self.f.native.rows[0]['State']={'Running':False,'Pid':0}
+        original=self.stream.call;threads=[];admitted=[]
+        def call(verb,value,deadline,**kwargs):
+            reply=original(verb,value,deadline,**kwargs)
+            if verb=='wake':
+                def startup():
+                    time.sleep(.03)
+                    with (self.f.control/'admission.lock').open('r+')as fd:
+                        for _ in range(100):
+                            try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+                            except BlockingIOError:time.sleep(.01)
+                        else:return
+                        admitted.append(True);self.f.native.rows[0]=running
+                thread=threading.Thread(target=startup);threads.append(thread);thread.start()
+            return reply
+        self.stream.call=call
+        try:result=self.apply(self.prepare(employee_ids=[F.EID]))
+        finally:
+            for thread in threads:thread.join(2)
+        self.assertEqual(result['state'],'RESUME_BATCH_CONFIRMED');self.assertEqual(admitted,[True])
+        self.assertEqual(self.woken,[F.EID]);self.assertTrue(all(not t.is_alive()for t in threads))
+
+    def test_one_ack_waits_for_complete_inventory_absence_then_native_creation(self):
+        running=self.f.native.rows.pop(0);original=self.stream.call;threads=[]
+        def call(verb,value,deadline,**kwargs):
+            reply=original(verb,value,deadline,**kwargs)
+            if verb=='wake':
+                def startup():
+                    time.sleep(.03)
+                    with (self.f.control/'admission.lock').open('r+')as fd:
+                        fcntl.flock(fd,fcntl.LOCK_EX);self.f.native.rows.insert(0,running)
+                thread=threading.Thread(target=startup);threads.append(thread);thread.start()
+            return reply
+        self.stream.call=call
+        try:result=self.apply(self.prepare(employee_ids=[F.EID]))
+        finally:
+            for thread in threads:thread.join(2)
+        self.assertEqual(result['state'],'RESUME_BATCH_CONFIRMED');self.assertEqual(self.woken,[F.EID])
+
+    def test_wake_and_readonly_wait_share_original_deadline_and_timeout_retains_unknown(self):
+        self.f.native.rows[0]['State']={'Running':False,'Pid':0}
+        original=self.stream.call;await_running=self.service._await_running
+        real=time.monotonic;offset=[0];deadlines=[]
+        def call(verb,value,deadline,**kwargs):
+            reply=original(verb,value,deadline,**kwargs)
+            if verb=='wake':deadlines.append(deadline);offset[0]=119.98
+            return reply
+        def await_same(selected,deadline,current):
+            self.assertEqual(deadline,deadlines[0])
+            return await_running(selected,deadline,current)
+        self.stream.call=call;plan=self.prepare(employee_ids=[F.EID])
+        with patch.object(M.time,'monotonic',side_effect=lambda:real()+offset[0]),\
+             patch.object(self.service,'_await_running',side_effect=await_same),\
+             self.assertRaisesRegex(ValueError,'DEADLINE|PLAN_EXPIRED'):
+            self.apply(plan)
+        path=self.f.control/'host-resume'/OP
+        self.assertEqual(self.woken,[F.EID]);self.assertTrue((path.parent/'ACTIVE.json').exists())
+        self.assertFalse((path/'COMPLETE.json').exists())
+        with self.assertRaisesRegex(ValueError,'NO_REPLAY'):self.apply(plan)
+        with self.assertRaisesRegex(ValueError,'UNKNOWN_BATCH_RETAINED'):self.prepare(str(uuid.uuid4()))
+        self.assertEqual(self.woken,[F.EID])
+
+    def unsafe_start(self,kind):
+        row=self.f.native.rows[0]
+        if kind=='image':row['Image']='wrong-current-image'
+        elif kind=='policy':row['Config']['Labels']['reverie.worker-policy']='wrong'
+        elif kind=='duplicate':self.f.native.rows.append({**copy.deepcopy(row),'Id':'f'*64})
+        elif kind=='foreign-binding':row['Config']['Labels']['reverie.employee']='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+        else:row['State']={'Running':False,'Pid':123}
+        plan=self.prepare(employee_ids=[F.EID])
+        with patch.object(self.f.native.stopping,'wait',side_effect=AssertionError('UNSAFE_MUST_NOT_WAIT')),\
+             self.assertRaises(ValueError):self.apply(plan)
+        self.assertEqual(self.woken,[F.EID]);self.assertTrue((self.f.control/'host-resume/ACTIVE.json').exists())
+        self.assertFalse((self.f.control/'host-resume'/OP/'COMPLETE.json').exists())
+
+    def test_wrong_running_image_refuses_without_readiness_wait(self):self.unsafe_start('image')
+    def test_wrong_running_policy_refuses_without_readiness_wait(self):self.unsafe_start('policy')
+    def test_duplicate_native_identity_refuses_without_readiness_wait(self):self.unsafe_start('duplicate')
+    def test_foreign_native_binding_refuses_without_readiness_wait(self):self.unsafe_start('foreign-binding')
+    def test_inconsistent_cold_pid_refuses_without_readiness_wait(self):self.unsafe_start('invalid-cold')
+
+    def test_owner_change_during_native_wait_retains_unknown(self):
+        self.f.native.rows[0]['State']={'Running':False,'Pid':0};plan=self.prepare(employee_ids=[F.EID])
+        def changed(_seconds):
+            self.f.employee['desiredRunning']=False;self.f.company()
+        with patch.object(self.f.native.stopping,'wait',side_effect=changed),\
+             self.assertRaisesRegex(ValueError,'COHORT_CHANGED'):
+            self.apply(plan)
+        self.assertEqual(self.woken,[F.EID]);self.assertTrue((self.f.control/'host-resume/ACTIVE.json').exists())
+
+    def test_final_native_confirmation_is_strict_and_uses_original_plan_deadline(self):
+        running=self.service._running;observed=[]
+        def checked(selected,**kwargs):
+            observed.append(dict(kwargs));return running(selected,**kwargs)
+        plan=self.prepare(employee_ids=[F.EID])
+        before=time.monotonic()
+        with patch.object(self.service,'_running',side_effect=checked):self.apply(plan)
+        self.assertGreaterEqual(len(observed),2)
+        self.assertTrue(observed[0]['pending'])
+        self.assertFalse(observed[-1].get('pending',False))
+        self.assertTrue(all(type(v.get('deadline'))in(int,float)and before<v['deadline']<=before+300 for v in observed))
+
+    def test_configuration_change_during_native_wait_retains_unknown(self):
+        self.f.native.rows[0]['State']={'Running':False,'Pid':0};plan=self.prepare(employee_ids=[F.EID])
+        def changed(_seconds):self.f.native.config_file.write_text('{}')
+        with patch.object(self.f.native.stopping,'wait',side_effect=changed),\
+             self.assertRaisesRegex(ValueError,'CONFIG_CHANGED'):
+            self.apply(plan)
+        self.assertEqual(self.woken,[F.EID]);self.assertTrue((self.f.control/'host-resume/ACTIVE.json').exists())
+
+    def test_active_fence_replaced_during_native_wait_refuses_before_ack(self):
+        self.f.native.rows[0]['State']={'Running':False,'Pid':0};plan=self.prepare(employee_ids=[F.EID])
+        path=self.f.control/'host-resume'/OP;active=path.parent/'ACTIVE.json';foreign=b'{"foreign":true}\n'
+        def changed(_seconds):
+            replacement=active.with_suffix('.foreign');replacement.write_bytes(foreign)
+            replacement.chmod(0o600);replacement.replace(active)
+        with patch.object(self.f.native.stopping,'wait',side_effect=changed),\
+             self.assertRaisesRegex(ValueError,'AUDIT_CHANGED'):self.apply(plan)
+        self.assertEqual(self.woken,[F.EID]);self.assertEqual(active.read_bytes(),foreign)
+        self.assertFalse((path/'ACK-0.json').exists());self.assertFalse((path/'COMPLETE.json').exists())
+
+    def test_namespace_replaced_during_native_wait_refuses_before_ack(self):
+        self.f.native.rows[0]['State']={'Running':False,'Pid':0};plan=self.prepare(employee_ids=[F.EID])
+        root=self.f.control/'host-resume';old=root.with_name('host-resume-old')
+        def changed(_seconds):
+            root.rename(old);root.mkdir(mode=0o700);(old/OP).rename(root/OP)
+        with patch.object(self.f.native.stopping,'wait',side_effect=changed),self.assertRaises(ValueError):
+            self.apply(plan)
+        self.assertEqual(self.woken,[F.EID]);self.assertTrue((old/'ACTIVE.json').exists())
+        self.assertTrue((root/OP/'ATTEMPT.json').exists());self.assertFalse((root/OP/'ACK-0.json').exists())
+        self.assertFalse((root/OP/'COMPLETE.json').exists())
 
     def test_older_plan_without_selection_requires_fresh_prepare(self):
         plan=self.prepare();path=self.f.control/'host-resume'/OP/'PLAN.json'
