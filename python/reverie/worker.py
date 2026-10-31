@@ -35,6 +35,7 @@ import json
 import os
 import pty
 import re
+import secrets
 import selectors
 import signal
 import socket
@@ -666,6 +667,32 @@ class OfficeAPI:
         return not self.thread.is_alive() and not self.requests and not self.upstreams and not self.request_threads
 
 
+
+class StopNotDispatched(RuntimeError):
+    """An owner stop that was refused before any signal was sent: nothing changed, and the caller may let go at once."""
+
+STOP_FENCE = re.compile(r'[0-9a-f]{32}')
+# Both run in the laptop as its own user, so the outcome is decided where the signal is sent, not by how long a client
+# waited. Each stop has a fence file, created exclusively (noclobber is O_EXCL) by whichever runs first: the signal
+# writes "signal <process group>" and then kills, a settle writes "fenced". Once a settle has fenced it, an engine exec of
+# that stop that was accepted but ran late finds the file and exits without signalling. The signal also refuses after the
+# request's deadline (in microseconds, against the laptop's clock), so a late run is refused even before a settle.
+# A fence that cannot be created at all (exit 6) is a refusal too: nothing was signalled.
+STOP_SIGNAL = ('set -C; now=${EPOCHREALTIME//[!0-9]/}; [ -n "$now" ] || exit 5; '
+               '[ -z "$2" ] || [ "$now" -le "$2" ] || exit 3; mkdir -p -m 700 -- "${3%/*}" 2>/dev/null; '
+               'if ! { echo "signal $1" > "$3"; } 2>/dev/null; then [ -e "$3" ] && exit 4; exit 6; fi; kill -KILL -- "-$1"')
+# Settling answers "fenced" (that stop never signals), or "signalled" only once the exec that claimed the fence has
+# exited, so it cannot signal anything later, whichever process holds the pane by then. A claimed stop whose exec is
+# still running is "pending", and a fence claimed but not yet written prints nothing: both are still unknown.
+STOP_SETTLE = ('set -C; f=$1; mkdir -p -m 700 -- "${f%/*}" 2>/dev/null; '
+               'if { echo fenced > "$f"; } 2>/dev/null; then echo fenced; exit 0; fi; '
+               'IFS= read -r state < "$f" 2>/dev/null || exit 0; '
+               'case $state in fenced) echo fenced; exit 0;; "signal "[0-9]*) ;; *) exit 0;; esac; '
+               'for p in /proc/[0-9]*; do [ "${p#/proc/}" = "$$" ] && continue; '
+               'mapfile -d "" -t args < "$p/cmdline" 2>/dev/null || continue; n=${#args[@]}; '
+               '[ "$n" -ge 2 ] && [ "${args[n-1]}" = "$f" ] || continue; '
+               'for a in "${args[@]}"; do [ "$a" = stop-agent ] && { echo pending; exit 0; }; done; done; echo signalled')
+
 class Broker:
     def __init__(self, config, engine='docker', config_file=None, host_actions=None):
         self.config, self.engine = config, engine
@@ -1291,6 +1318,117 @@ class Broker:
         self.offices.update(created)
         self.laptops=recovered
 
+    # In the laptop user's own home (its bind-mounted storage), like .reverie-launch: /run is a root-owned tmpfs that the
+    # laptop user cannot write. Each stop's fence is one small file, and it outlives the container, which only keeps a
+    # settled answer valid; a pending exec cannot outlive the container.
+    stop_fence_dir = '/home/agent/.reverie-stop'
+
+    def stop_agent(self, session_id, not_after=None, fence=None):
+        """Owner stop of one laptop's agent: kill its inner pane's whole process group (wrapper, provider and relays
+        share it), so no exit receipt is written and the pane reads dead. Normal J then replaces the dead pane on the
+        same laptop, keeping its storage. The laptop itself keeps running. Processes the agent moved into a session of
+        their own (setsid) are outside the group and are not stopped.
+
+        not_after (epoch ms) bounds the request: the signal is not sent after it. fence names this stop so that a
+        caller that lost the answer can settle it later (settle_stop). Every refusal before the signal raises
+        StopNotDispatched. If the engine call that signals does not answer, this settles the stop itself: fenced
+        first is a refusal, signalled first goes on to confirm the exit, and otherwise the outcome stays unknown."""
+        if type(session_id) is not str or not SESSION.fullmatch(session_id):
+            raise ValueError('Invalid session')
+        if not_after is not None and (type(not_after) is not int or not_after <= 0):
+            raise ValueError('Invalid stop deadline')
+        if fence is None:
+            fence = secrets.token_hex(16)
+        elif type(fence) is not str or not STOP_FENCE.fullmatch(fence):
+            raise ValueError('Invalid stop fence')
+        with self.lock:
+            name = self.laptops.get(session_id)
+        if name is None:
+            raise StopNotDispatched('This expert has no running laptop')
+        def pane(signalled):
+            state = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead} #{pane_pid}'), optional=True)
+            fields = state.stdout.split() if state.returncode == 0 else []
+            if len(fields) != 2 or fields[0] not in ('0', '1') or not fields[1].isdigit() or int(fields[1]) <= 1:
+                if signalled: raise RuntimeError('Laptop pane state is unavailable after the stop signal; its outcome is unknown')
+                raise StopNotDispatched('Laptop pane state is unavailable; nothing was stopped')
+            return fields[0] == '1', int(fields[1])
+        dead, pid = pane(False)
+        if dead:
+            return {'action': 'stop-agent', 'success': True, 'stopped': False, 'paneDead': True}
+        if not_after is not None and time.time() * 1000 > not_after:
+            raise StopNotDispatched('The stop request expired before the signal; nothing was stopped')
+        # As the laptop's own user (the container user), never root: it may signal only its own processes.
+        try:
+            sent = self.run_engine(['exec', name, '/bin/bash', '-c', STOP_SIGNAL, 'stop-agent', str(pid),
+                                    '' if not_after is None else str(not_after * 1000), self._stop_fence(fence)], optional=True)
+        except Exception:
+            sent = None
+        refused = {3: 'The stop request expired before the signal; nothing was stopped',
+                   4: 'The stop was already settled; nothing was stopped',
+                   5: 'The laptop shell cannot check the stop deadline; nothing was stopped',
+                   6: 'The laptop cannot record the stop; nothing was stopped'}
+        if sent is not None and sent.returncode in refused:
+            raise StopNotDispatched(refused[sent.returncode])
+        if sent is None or sent.returncode:
+            try:
+                signalled = self._settle_stop(name, fence)
+            except RuntimeError:
+                # Keep settling here too, so the stop is decided even if the caller (and its own retries) go away.
+                threading.Thread(target=self._keep_settling, args=(session_id, name, fence), daemon=True).start()
+                raise
+            if not signalled:
+                raise StopNotDispatched('The laptop did not run the stop in time and it is now fenced; nothing was stopped')
+        deadline = time.monotonic() + 5
+        while True:
+            dead, current = pane(True)
+            if dead and current == pid:
+                return {'action': 'stop-agent', 'success': True, 'stopped': True, 'paneDead': True}
+            if current != pid:
+                raise RuntimeError('Laptop pane changed during stop; reconnect before restarting')
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Laptop agent did not stop; nothing else was changed')
+            time.sleep(0.1)
+
+    def _stop_fence(self, fence):
+        return f'{self.stop_fence_dir}/reverie-stop-{fence}'
+
+    def _settle_stop(self, name, fence):
+        """False once the stop is fenced (no exec of it can signal from now on); True once it signalled and the exec that
+        did so has exited (it can signal nothing later). Raises while that is not yet known: no answer, a fence claimed
+        but not yet written, or a claimed stop whose exec is still running."""
+        try:
+            state = self.run_engine(['exec', name, '/bin/bash', '-c', STOP_SETTLE, 'settle-stop', self._stop_fence(fence)]).stdout.strip()
+        except Exception as error:
+            raise RuntimeError('The laptop did not answer the stop settle; its outcome is unknown') from error
+        if state not in ('signalled', 'fenced'):
+            raise RuntimeError('The laptop stop is not settled yet; its outcome is unknown')
+        return state == 'signalled'
+
+    stop_settle_retry = 5.
+
+    def _keep_settling(self, session_id, name, fence):
+        while not self.stopping.is_set():
+            with self.lock:
+                if self.laptops.get(session_id) != name:
+                    return  # that laptop is gone, and an exec cannot outlive it
+            try:
+                self._settle_stop(name, fence)
+                return
+            except RuntimeError:
+                time.sleep(self.stop_settle_retry)
+
+    def settle_stop(self, session_id, fence):
+        """Settle a stop whose answer the caller lost: afterwards the stop either signalled or never will."""
+        if type(session_id) is not str or not SESSION.fullmatch(session_id):
+            raise ValueError('Invalid session')
+        if type(fence) is not str or not STOP_FENCE.fullmatch(fence):
+            raise ValueError('Invalid stop fence')
+        with self.lock:
+            name = self.laptops.get(session_id)
+        if name is None:
+            raise RuntimeError('This expert has no running laptop; its stop cannot be settled')
+        return {'action': 'settle-stop', 'success': True, 'signalled': self._settle_stop(name, fence)}
+
     def stop_laptops(self):
         # Same admission -> broker -> journal ordering as launch/reload. Never
         # acquire the global allocation lock while holding the broker mutex.
@@ -1646,6 +1784,22 @@ class Broker:
                     result = gpu_dispatch(self, gpu_decode(raw))
                     send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
                     return
+                if isinstance(control, dict) and control.get('action') == 'settle-stop':
+                    if set(control) != {'action', 'sessionId', 'fence'}:
+                        raise ValueError('Invalid settle-stop request')
+                    send_frame(connection, b'J', json.dumps(self.settle_stop(control['sessionId'], control['fence'])).encode())
+                    return
+                if isinstance(control, dict) and control.get('action') == 'stop-agent':
+                    # Website owner path only: exactly one session, its deadline and fence, no maintenance caller.
+                    if set(control) not in ({'action', 'sessionId'}, {'action', 'sessionId', 'notAfter'}, {'action', 'sessionId', 'notAfter', 'fence'}):
+                        raise ValueError('Invalid stop-agent request')
+                    try:
+                        result = self.stop_agent(control['sessionId'], control.get('notAfter'), control.get('fence'))
+                    except StopNotDispatched as refused:
+                        # Definitive: no signal was sent, so the caller may release what it holds at once.
+                        result = {'action': 'stop-agent', 'success': False, 'dispatched': False, 'error': str(refused)}
+                    send_frame(connection, b'J', json.dumps(result).encode())
+                    return
                 if isinstance(control, dict) and control.get('action') == 'provider-health' and set(control) != {'action'}:
                     raise ValueError('Closed read-only provider health request required')
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
@@ -1921,7 +2075,9 @@ class Broker:
                         finish_retained(self.config, paths, retention_ready,
                                         lambda: self.confirm_retained_temporary(paths, retention_ready, retention_container_id))
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
-                    self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
+                    # remain-on-exit in the same tmux command: a wrapper that dies (or an owner stop-agent)
+                    # leaves a dead pane that canonical J can see and replace, instead of a vanished server.
+                    self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name, ';', 'set-option', '-g', 'remain-on-exit', 'on'))
                     self.run_engine(tmux_exec_args(name, 'set-option', '-g', 'status', 'off'))
                     if _resource_launch is not None:
                         from reverie.worker_resource_native import record_cli_started
@@ -2285,7 +2441,20 @@ def client(args):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(120)
             connection.connect(path)
-            send_frame(connection, b'C', json.dumps({'action': args.control, **({'caller': args.caller_session} if args.caller_session else {})}).encode())
+            if args.control == 'stop-agent':
+                if args.caller_session or not SESSION.fullmatch(args.session_id or '') or args.cwd or args.command or (args.fence and args.not_after is None):
+                    raise ValueError('stop-agent takes exactly --session-id (and optionally --not-after, then --fence)')
+                request = {'action': 'stop-agent', 'sessionId': args.session_id}
+                if args.not_after is not None: request['notAfter'] = args.not_after
+                if args.fence is not None: request['fence'] = args.fence
+                send_frame(connection, b'C', json.dumps(request).encode())
+            elif args.control == 'settle-stop':
+                if args.caller_session or not SESSION.fullmatch(args.session_id or '') or args.cwd or args.command or args.not_after is not None or not args.fence:
+                    raise ValueError('settle-stop takes exactly --session-id and --fence')
+                send_frame(connection, b'C', json.dumps({'action': 'settle-stop', 'sessionId': args.session_id, 'fence': args.fence}).encode())
+            else:
+                if args.not_after is not None or args.fence is not None: raise ValueError('--not-after and --fence are only for stop-agent')
+                send_frame(connection, b'C', json.dumps({'action': args.control, **({'caller': args.caller_session} if args.caller_session else {})}).encode())
             kind, payload = receive_frame(connection)
             if kind != b'J':
                 raise RuntimeError(payload.decode() if kind == b'E' else 'Office power request failed')
@@ -2293,6 +2462,8 @@ def client(args):
         return 0
     if not all([args.session_id, args.cwd, args.command]):
         raise ValueError('A laptop launch requires session, directory and command')
+    if args.not_after is not None or args.fence is not None:
+        raise ValueError('--not-after and --fence are only for stop-agent')
     cols, rows = terminal_size()
     env = {k: v for k, v in os.environ.items() if ENV_KEY.fullmatch(k)}
     request = dict(sessionId=args.session_id, cwd=args.cwd, command=args.command, env=env, cols=cols, rows=rows)
@@ -2374,7 +2545,7 @@ def main():
     serve = commands.add_parser('broker')
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
-    execute.add_argument('--control', choices=['status', 'provider-health', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
+    execute.add_argument('--control', choices=['status', 'provider-health', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources', 'stop-agent', 'settle-stop'])
     execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
     execute.add_argument('--command-failure-report', action='store_true', help='Closed host/server-only failure metadata report')
     execute.add_argument('--employee-id', action='append')
@@ -2382,6 +2553,8 @@ def main():
     execute.add_argument('--attach-only', action='store_true')
     execute.add_argument('--resource-ref', help='Server-private registered resource launch reference')
     execute.add_argument('--session-id')
+    execute.add_argument('--not-after', type=int, help='stop-agent: epoch ms after which the signal is not dispatched')
+    execute.add_argument('--fence', help='stop-agent/settle-stop: 32 hex digits naming one stop')
     execute.add_argument('--cwd')
     execute.add_argument('--command')
     launch = commands.add_parser('child')

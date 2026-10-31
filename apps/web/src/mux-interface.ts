@@ -94,6 +94,8 @@ export interface CreateSessionOptions {
   codexTrustWorkspace?: string;
   /** Internal reconnect: the broker must never launch a new provider. */
   workerAttachOnly?: boolean;
+  /** Process-local final admission (an owner stop holds the pane), checked right before the first process starts. */
+  admitted?: () => boolean;
   /** Process-local fixed resource actor join, never a persisted/wire option. */
   workerResourceLaunch?: ResourceWorkerLaunch;
   sessionId: string;
@@ -143,6 +145,8 @@ export interface CreateSessionOptions {
 export interface RespawnPaneOptions {
   /** Reconnect an existing worker viewer only; the broker refuses any cold start. */
   workerAttachOnly?: boolean;
+  /** Process-local final admission (an owner stop holds the pane), checked with stillCurrent right before the launch. */
+  admitted?: () => boolean;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
   sessionId: string;

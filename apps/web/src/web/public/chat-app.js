@@ -7269,7 +7269,7 @@ class ReverieChatApp {
     dialog.append(this.literalText('h2', '', `Restart session · ${employee.name}`), this.literalText('p', 'ca-dialog-note', `Restart ${employee.name} using their saved runtime settings? Active work is interrupted without a fresh handoff. Their expert identity, saved conversation, memory, files and channel memberships stay the same. Ask them to checkpoint first if the current work matters.`));
     const recoverLabel = this.el('label', 'ca-hint');
     const recover = this.doc.createElement('input'); recover.type = 'checkbox'; recover.disabled = true;
-    recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks or activity within two minutes prevent recovery.'));
+    recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks, an open dialog or input within two minutes prevent recovery.'));
     dialog.append(recoverLabel);
     const health = this.employeeHealth(employee);
     const restartHealth = this.employeeHealthBadge(employee); restartHealth.dataset.healthRole = 'note'; restartHealth.setAttribute('role', 'note');

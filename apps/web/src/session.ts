@@ -160,6 +160,7 @@ import { checkFullAccessFlags, fullAccessByDefault, withFullAccessDefault, type 
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
 import { readProcStat, stopPtyChild } from './signal-target.js';
 import { getLifecycleLog } from './session-lifecycle-log.js';
+import { ownerStopPending } from './owner-stop-journal.js';
 import {
   launchModelFor,
   readScreenModel,
@@ -500,6 +501,9 @@ export interface ClaudeMessage {
  * @fires Session#autoClear - Token threshold reached, clearing context
  * @fires Session#autoCompact - Token threshold reached, compacting context
  */
+/** Why a pane was not replaced: an owner stop of this agent is not settled yet. */
+const OWNER_STOP_HELD = 'An unsettled owner stop holds this expert; its pane is not replaced until the laptop settles the stop';
+
 export class Session extends EventEmitter {
   readonly id: string;
   readonly workingDir: string;
@@ -2487,6 +2491,10 @@ export class Session extends EventEmitter {
     spawnErrLabel: string;
   }): Promise<{ isRestored: boolean; respawnedResumeId?: string; respawnedDeadPane: boolean }> {
     const mux = this._mux!;
+    // An unsettled owner stop (owner-stop-journal) could still signal whatever holds this agent's pane, so until the
+    // laptop settles it no new process goes there: only an existing live pane may be attached to.
+    if (ownerStopPending(this.id) && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName) || mux.isPaneDead(this._muxSession.muxName)))
+      throw new Error(OWNER_STOP_HELD);
 
     // Verify stale mux session — tmux may have been destroyed (e.g., killed externally).
     // A session that HAD a mux session relaunches its CLI below just like a failed
@@ -2512,8 +2520,10 @@ export class Session extends EventEmitter {
       // check ran, so it still carries the pre-pin ompConfig; rebuild it.
       this._pinOmpRespawnId();
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
+      // The pane may have read live at the guard above and dead here: check again, now and at the tmux command.
+      this._refuseNewProcessWhileStopHeld();
       this._beginClaudeConversationSelection();
-      const newPid = await mux.respawnPane(respawnOptions);
+      const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => !ownerStopPending(this.id) });
       if (!newPid) {
         console.error('[Session] Failed to respawn pane, will create new session');
         needsNewSession = true;
@@ -2564,8 +2574,9 @@ export class Session extends EventEmitter {
           this._resumeSessionId = pinned;
         }
       }
+      this._refuseNewProcessWhileStopHeld();
       this._beginClaudeConversationSelection();
-      this._muxSession = await mux.createSession(options.createSessionOptions);
+      this._muxSession = await mux.createSession({ ...options.createSessionOptions, admitted: () => !ownerStopPending(this.id) });
       console.log('[Session] Created mux session:', this._muxSession.muxName);
       // No extra sleep — createSession() already waits for tmux readiness
     }
@@ -2643,10 +2654,11 @@ export class Session extends EventEmitter {
       return false;
     }
 
+    if (ownerStopPending(this.id)) return false;  // an unsettled owner stop: no new process in this pane yet
     // Confirmed the mux session (and thus the pane) exists but this reattach
     // is about to respawn it — safe to resolve/pin now.
     this._pinOmpRespawnId();
-    const newPid = await mux.respawnPane(this._buildRespawnPaneOptions());
+    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: () => !ownerStopPending(this.id) });
     if (!newPid) {
       console.error('[Session] reattachRemote: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -2744,6 +2756,10 @@ export class Session extends EventEmitter {
   private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
     explicitRecovery = false): Promise<boolean> {
     if (!this._useMux || !this._mux || !this._muxSession) return false;
+    if (ownerStopPending(this.id)) {
+      console.log(`[Session ${this.id.slice(0, 8)}] restart refused: an unsettled owner stop holds this pane`);
+      return false;
+    }
     const mux = this._mux;
 
     if (!mux.muxSessionExists(this._muxSession.muxName)) {
@@ -2760,8 +2776,14 @@ export class Session extends EventEmitter {
     }
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
+    // Preparation above awaited: an owner stop may have been recorded meanwhile. Check now and at the tmux command.
+    if (ownerStopPending(this.id)) {
+      console.log(`[Session ${this.id.slice(0, 8)}] restart refused after preparation: an unsettled owner stop holds this pane`);
+      return false;
+    }
+    const admitted = () => !ownerStopPending(this.id);
     this._beginClaudeConversationSelection();
-    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent } : options);
+    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
     if (!newPid) {
       console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -3125,6 +3147,11 @@ export class Session extends EventEmitter {
     if (this._closing) {
       throw new Error('Session is being closed');
     }
+    // Before any fallback (a direct PTY included) can start a process: only attaching to a live pane is allowed while an
+    // unsettled owner stop could still signal it (see _doSetupOrAttachMuxSession).
+    if (ownerStopPending(this.id) && (!this._mux || !this._muxSession || !this._mux.muxSessionExists(this._muxSession.muxName)
+      || this._mux.isPaneDead(this._muxSession.muxName)))
+      throw new Error(OWNER_STOP_HELD);
     if (this._respawnBlocked) {
       throw new Error(
         'Respawn blocked: interactive PTY exited non-zero too many times in a short window (circuit breaker tripped). Restart the session to clear it.'
@@ -3386,6 +3413,8 @@ export class Session extends EventEmitter {
         }
       } catch (err) {
         if (this._workerResourceLaunch) throw err;
+        // Held by an unsettled owner stop: keep the pane as it is (no fallback process, no forgotten mux session).
+        if (ownerStopPending(this.id)) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -3426,6 +3455,7 @@ export class Session extends EventEmitter {
           getClaudeCliVersion(),
           this._advisorModel
         );
+        this._refuseNewProcessWhileStopHeld();
         this.ptyProcess = spawnPtyWithHelperRepair(() =>
           pty.spawn(getClaudeBinaryPath(), args, {
             name: 'xterm-256color',
@@ -4316,6 +4346,7 @@ export class Session extends EventEmitter {
           }, 100);
         }
       } catch (err) {
+        if (ownerStopPending(this.id)) throw err;  // held by an unsettled owner stop: no fallback process
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -4328,6 +4359,7 @@ export class Session extends EventEmitter {
         throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
       }
       try {
+        this._refuseNewProcessWhileStopHeld();
         this.ptyProcess = spawnPtyWithHelperRepair(() =>
           pty.spawn(shell, [], {
             name: 'xterm-256color',
@@ -4442,6 +4474,7 @@ export class Session extends EventEmitter {
         const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id);
 
         try {
+          this._refuseNewProcessWhileStopHeld();
           this.ptyProcess = spawnPtyWithHelperRepair(() =>
             pty.spawn(launch.binary, launch.args, {
               name: 'xterm-256color',
@@ -4954,7 +4987,7 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
-    if (this._viewerInputHeld) return false;
+    if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
     // An agent's raw write (a mux failure's fallback, an explicit raw send) is checked here, with no await before the write.
     if (options.agentInput && this._moveHolds > 0) {
       options.onMoveHeld?.();
@@ -5127,6 +5160,42 @@ export class Session extends EventEmitter {
     };
   }
 
+  /** An owner recovery is stopping this agent: no input from anyone (a person's included) reaches the pane until released. */
+  private _recoveryHold = false;
+
+  /** Also while a durably recorded owner stop of this session is unsettled, whichever Session object (or process) took it. */
+  private _inputHeldForRecovery(): boolean {
+    return this._recoveryHold || ownerStopPending(this.id);
+  }
+
+  /**
+   * No new agent process may start in this pane while an unsettled owner stop could still signal it (owner-stop-journal).
+   * Called immediately before each process creation, after any await, and also handed to the mux as `admitted`, so the
+   * last check is at the tmux command itself. Attaching a viewer to a live pane is not a new process.
+   */
+  private _refuseNewProcessWhileStopHeld(): void {
+    if (ownerStopPending(this.id)) throw new Error(OWNER_STOP_HELD);
+  }
+
+  /**
+   * Take this pane's input before an owner recovery asks the laptop to stop the agent, so the stop cannot kill work
+   * submitted after the owner's check. Refused (undefined) while any write is still being typed; every later write, raw
+   * write and deferred verifier Enter is refused until the returned release runs. No await from the caller's checks to here.
+   */
+  holdInputForRecovery(): (() => void) | undefined {
+    // A start, restart or attach in progress may be about to create a process: a stop must not race it.
+    if (this._inputHeldForRecovery() || this._muxWritesInFlight > 0 || this._paneLifecycleOps > 0) return undefined;
+    this._recoveryHold = true;
+    const resume = this._capacityRetry?.pause() ?? (() => {});
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._recoveryHold = false;
+      resume();
+    };
+  }
+
   private _capacityWrites = 0;
   /** The gate of the write the submit verifier is tracking (null: an ungated write); see _verifySubmitted. */
   private _verifierGate: (() => boolean) | null = null;
@@ -5174,7 +5243,7 @@ export class Session extends EventEmitter {
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
-    if (this._viewerInputHeld) return false;
+    if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
     // An agent's input is refused here, at the write, not only by the route's earlier look: a plan move can take the composer
     // during any await before it. From here to the first key there is no await.
     if (options.agentInput && this._moveHolds > 0) {
@@ -5302,7 +5371,7 @@ export class Session extends EventEmitter {
           : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
       sendEnter: async () => {
-        if (this._viewerInputHeld) return false;
+        if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
         const gate = this._verifierGate;
         if (gate && !gate()) {
           // Closed once (busy, or a plan move took the composer): this write's verification ends here and its text stays unsent.
