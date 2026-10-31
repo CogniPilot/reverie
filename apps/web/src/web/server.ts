@@ -14,7 +14,7 @@ import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
-import { employeeRestContext, employeeBriefContext } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -988,6 +988,17 @@ export class WebServer extends EventEmitter {
     return buildHostPolicy(this.host, this.tunnelManager.getUrl());
   }
 
+  /**
+   * A new backend under the same session remembers nothing else: brief it again in each live room it is in, so it hears
+   * who it is and where its memory lives (the briefing carries the journal recall). Returns how many briefs were queued.
+   */
+  private rebriefAfterBackendChange(sessionId: string): number {
+    let briefed = 0;
+    for (const room of this.chatroomService.rooms())
+      if (!room.archivedAt && room.members.some((m) => m.sessionId === sessionId)) briefed += this.chatroomService.rebrief(room.id, sessionId);
+    return briefed;
+  }
+
   private async setupRoutes(): Promise<void> {
     // multipart/form-data: parser is provided by @fastify/multipart (registered
     // below). Its parser is a no-op marker that leaves the body on req.raw, so
@@ -1440,6 +1451,14 @@ export class WebServer extends EventEmitter {
     const chatroomFiles = new ChatFileStore(getDataDir());
     await chatroomFiles.initializeShared();
     let boardIssuesCache: { rev: number; issues: Issue[] } | undefined;
+    // The employee journal: opened on first use, in its own file beside the chat database. Briefs read its highlights.
+    let employeeJournal: EmployeeJournalStore | undefined;
+    this.app.addHook('onClose', async () => employeeJournal?.close());
+    const openJournal = () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db')));
+    // A brief without a recall is still a brief: an unreadable journal never blocks delivery.
+    const journalHighlights = (employee: { id: string; owner?: string }) => {
+      try { return openJournal().highlights(employee.owner ?? '', employee.id); } catch { return []; }
+    };
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
@@ -1459,7 +1478,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
+          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1704,6 +1723,7 @@ export class WebServer extends EventEmitter {
           }));
         await deliverRecoveryPrompt(
           session,
+          employeeMemoryContext(employee, journalHighlights(employee)) + ' ' +
           'Crash recovery: you are the owner-selected recovery expert. Continue with your existing memory and conversation. Wake all eligible desired-running experts in organization order; managers may delegate downward. Preserve deliberately stopped, paused and retired experts, skip already-live agents, and report failures. Stable agent IDs identify experts independently of their runtime sessions or models. With an explicit owner-granted recoverEmployees permission, call POST /api/company/employees/:id/wake through the authenticated console API; selection alone grants no permission. If permission is absent, ask the owner. Organization: ' +
             JSON.stringify(roster),
           () => allowed() && this.sessions.get(employee.sessionId) === session
@@ -1751,14 +1771,11 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     });
-    // Opened on first use, in its own file beside the chat database.
-    let employeeJournal: EmployeeJournalStore | undefined;
-    this.app.addHook('onClose', async () => employeeJournal?.close());
     registerEmployeeJournalRoutes(this.app, ctx, {
       verifiedOwner,
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
-      journal: () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db'))),
+      journal: openJournal,
       visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
@@ -1791,6 +1808,7 @@ export class WebServer extends EventEmitter {
     }, this.companyService, async (session) => {
       await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
       await this.companyService.setDesiredRunning(session.id, true);
+      this.rebriefAfterBackendChange(session.id);
     }, laptopAgentStop);
     registerCompanyHireRoutes(this.app, {
       company: this.companyService,
