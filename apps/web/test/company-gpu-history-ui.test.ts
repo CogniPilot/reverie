@@ -72,6 +72,30 @@ it('says history is not recorded when the service is off, and shows nothing when
   expect(empty.section().querySelector('[role="status"]').textContent).toBe('No GPU readings were recorded in the last day.');
 });
 
+it('counts a bucket peak only when it is a real percentage at or above that bucket average', async () => {
+  const day = now - 86400;
+  const { section } = await setup(() => ({ ok: true, data: history([point(day, 20, 'observed', 150), point(day + 300, 40, 'observed', 10), point(day + 600, 30, 'observed', NaN)]) }));
+  const note = section().querySelector('[role="status"]').textContent;
+  expect(note).toContain('average 30%'); expect(note).toContain('peak 40%'); expect(note).not.toContain('150');
+});
+
+it('reads once more after a busy answer instead of showing it, and gives up after that', async () => {
+  const later = () => new Promise((resolve) => setTimeout(resolve, 1100)); // the section waits one second before its retry
+  let busy = 1;
+  const { h, calls, section } = await setup(() => busy-- > 0 ? { ok: false, status: 429, error: 'Resource history read already active' }
+    : { ok: true, data: history([point(now - 3600, 25)]) });
+  expect(calls).toHaveLength(1);
+  expect(section().querySelector('[role="status"]').textContent).toBe('Loading GPU history…');
+  await later(); await h.flush();
+  expect(calls).toHaveLength(2);
+  expect(section().querySelector('[role="status"]').textContent).toContain('average 25%');
+  busy = 2;
+  (section().querySelector('[aria-label="GPU history for the last 7 days"]') as HTMLButtonElement).click(); await h.flush();
+  await later(); await h.flush();
+  expect(calls).toHaveLength(4); // one retry only
+  expect(section().querySelector('[role="status"]').textContent).toBe('Resource history read already active');
+});
+
 it('is not shown to a viewer who is not the verified owner, and asks nothing', async () => {
   const { calls, section } = await setup(() => ({ ok: true, data: history([]) }), false);
   expect(section()).toBeNull();

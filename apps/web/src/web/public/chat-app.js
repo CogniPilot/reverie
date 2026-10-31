@@ -1075,7 +1075,9 @@ function caRecordedGpuShape(history, width, height) {
     }
     const x = ((p.t + (Number(p.end) - p.t) / 2 - start) / (end - start)) * width;
     current.push(`${Math.max(0, Math.min(width, x)).toFixed(1)},${(height - avg / 100 * height).toFixed(1)}`);
-    sum += avg; count += 1; peak = Math.max(peak, Number.isFinite(p.gpu_pct.max) ? p.gpu_pct.max : avg);
+    // A bucket's max counts only when it is a real percentage at or above its own average; otherwise its average stands.
+    const max = p.gpu_pct.max;
+    sum += avg; count += 1; peak = Math.max(peak, Number.isFinite(max) && max >= avg && max <= 100 ? max : avg);
   }
   if (current.length) segments.push(current);
   if (!count) return null;
@@ -1486,7 +1488,14 @@ class ReverieChatApp {
       for (const b of ranges.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.days === String(days)));
       note.textContent = 'Loading GPU history…';
       const end = Math.floor(Date.now() / 1000), start = end - days * 86400;
-      const result = await this.app._chatApi(`/api/resource-history?start=${start}&end=${end}&resolution=${days > 1 ? 'hour' : 'five-minute'}`);
+      const read = () => this.app._chatApi(`/api/resource-history?start=${start}&end=${end}&resolution=${days > 1 ? 'hour' : 'five-minute'}`);
+      let result = await read();
+      // The route serves one read at a time, and a Company repaint can land while the last section's read is in flight.
+      if (!result.ok && result.status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (turn !== epoch || !host.isConnected) return;
+        result = await read();
+      }
       if (turn !== epoch || !host.isConnected) return;
       svg.replaceChildren();
       for (const y of [0, H / 2, H]) {
