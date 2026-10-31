@@ -45,7 +45,7 @@ html[data-theme="light"]{color-scheme:light;background:#f4f3ef}
   </header>
   <div class="banner" id="banner" hidden></div>
   <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point. The dashed blue horizontal line marks the 5-hour cap and the vertical blue line marks its actual reset time. The weekly line and current 5-hour point each show a percentage of their own window’s limit, not interchangeable quantities. There is no reconstructed 5-hour history.</p></details><div class="tools plan-header-actions" aria-label="Plan controls"><button type="button" class="btn" id="refresh">Refresh</button><button type="button" class="btn" id="theme">Theme</button><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button><button type="button" class="btn" id="addAcct" hidden>Add account</button></div></div>
+    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point. The blue outline spans five hours ending at the reported reset, with a 100% cap; it is clipped to the plotted week. The weekly line and current 5-hour point each show a percentage of their own window’s limit, not interchangeable quantities. The outline is a time window, not reconstructed 5-hour usage history.</p></details><div class="tools plan-header-actions" aria-label="Plan controls"><button type="button" class="btn" id="refresh">Refresh</button><button type="button" class="btn" id="theme">Theme</button><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button><button type="button" class="btn" id="addAcct" hidden>Add account</button></div></div>
     <div class="grid2" id="plans"></div>
   </section>
 
@@ -228,7 +228,7 @@ function plans() {
       <div class="who">${p.reset ? 'Resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
       <div class="plan-members" data-plan-members="${esc(p.id)}" role="group" aria-label="${esc('People allocated to ' + p.name)}" aria-live="polite"></div>
       <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>weekly used</div>${bankedStat(p)}</div>
-      <div class="plan-usage-plot"><div class="plan-plot-legend" aria-label="Usage plot legend"><span><i class="weekly-key" style="border-color:${css('--' + risk)}"></i>Weekly usage</span><span><i class="five-hour-key"></i>5h cap / reset / reading</span></div><svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg><div class="plan-five-hour-status hint" role="status"></div></div>
+      <div class="plan-usage-plot"><div class="plan-plot-legend" aria-label="Usage plot legend"><span><i class="weekly-key" style="border-color:${css('--' + risk)}"></i>Weekly usage</span><span><i class="five-hour-key"></i><span class="five-hour-label">5h window</span></span></div><svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg><div class="plan-five-hour-status hint" role="status"></div></div>
       ${planActions(p)}</div>`;
   }).join('') + localPlanCards();
   B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });
@@ -824,6 +824,11 @@ function burnChart(svg, p) {
   const resetLabel5h = reset5h === null ? 'Reset time unavailable' : 'Reset ' + stamp5h(reset5h) + (outside5h ? ' (outside plotted week)' : '');
   const summary5h = '5h: ' + (used5h === null ? 'usage unavailable' : used5h + '% used · ' + Math.round((100 - used5h) * 10) / 10 + '% remaining · 100% cap') + '. ' + resetLabel5h + '. ' + (stale5h ? 'Last reported; refresh required. ' : '') + (asOf5h === null ? 'Reading time unavailable.' : 'As of ' + stamp5h(asOf5h) + '.');
   const explanation5h = 'Weekly usage and the 5h snapshot are percentages of their own window limits; no quota conversion or five-hour usage history is shown.';
+  const legend5h = svg.parentElement?.querySelector('.five-hour-label');
+  if (legend5h) {
+    legend5h.textContent = '5h window · ' + (used5h === null ? 'usage unavailable' : used5h + '% / 100% max') + (stale5h ? ' · last reported' : '');
+    legend5h.title = summary5h;
+  }
   // When the reading, cap and reset are all drawn, the legend says what they are; the words stay in the hover titles
   // and the label. Text under the plot appears only for what the lines cannot show: unavailable, stale or out of view.
   const drawn5h = weeklyRange && used5h !== null && reset5h !== null && !outside5h && !stale5h
@@ -869,6 +874,11 @@ function burnChart(svg, p) {
   if (used5h !== null || reset5h !== null) {
     const c5h = css('--accent'), opacity5h = stale5h ? '.5' : '.9';
     g += `<g class="five-hour-markers" opacity="${opacity5h}"><title>${esc(summary5h + ' ' + explanation5h)}</title>`;
+    if (reset5h !== null) {
+      // Only the duration and reported reset define this outline; no usage is interpolated.
+      const start5h = reset5h - 5 * H, left5h = Math.max(s, start5h), right5h = Math.min(e, reset5h);
+      if (right5h > left5h) g += `<rect class="five-hour-window" x="${X(left5h)}" y="${Y(100)}" width="${X(right5h) - X(left5h)}" height="${Y(0) - Y(100)}" data-window-start="${start5h}" data-window-reset="${reset5h}" fill="none" stroke="${c5h}" stroke-opacity=".45" stroke-dasharray="3 3"><title>${esc('Five-hour span ending at reported reset: ' + stamp5h(start5h) + ' – ' + stamp5h(reset5h) + '. 100% maximum; not usage history.')}</title></rect>`;
+    }
     g += `<line class="five-hour-cap" x1="${L}" x2="${W - R}" y1="${Y(100)}" y2="${Y(100)}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="8 3 2 3"/>`;
     if (reset5h !== null && !outside5h) {
       const rx = X(reset5h);

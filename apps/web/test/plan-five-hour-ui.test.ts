@@ -7,7 +7,7 @@ const helper=html.slice(html.indexOf('function burnChart(svg, p)'),html.indexOf(
 const NOW=Date.UTC(2026,9,26,20),DAY=864e5,HOUR=36e5,START=NOW-DAY,END=NOW+6*DAY;
 function render(reading?:unknown,extra:Record<string,unknown>={}) {
  const draw=runInNewContext(helper+';burnChart',{Date:{now:()=>NOW},Number,Math,css:(x:string)=>x,fmt:(t:number)=>new Intl.DateTimeFormat('en-US',{dateStyle:'short',timeStyle:'short',timeZone:'UTC'}).format(t),esc:(x:unknown)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!)),planRisk:()=> 'good',startOfDay:(t:number)=>Math.floor(t/DAY)*DAY,D:DAY,H:HOUR});
- const dom=new JSDOM('<div><svg></svg><div class="plan-five-hour-status"></div></div>');const doc=dom.window.document;
+ const dom=new JSDOM('<div><span class="five-hour-label"></span><svg></svg><div class="plan-five-hour-status"></div></div>');const doc=dom.window.document;
  draw(doc.querySelector('svg'),{fiveHour:reading,used:95,rate:.1,at:NOW,weekStart:START,reset:END,points:[{t:NOW-HOUR,used:90},{t:NOW,used:95}],...extra});return doc;
 }
 it.each([0,40,100])('plots actual %s%% reading plus horizontal cap and real reset time on the weekly chart',used=>{
@@ -17,11 +17,35 @@ it.each([0,40,100])('plots actual %s%% reading plus horizontal cap and real rese
  expect(Number(line.getAttribute('x1'))).toBeCloseTo(28+(reset-START)/(END-START)*284);expect(line.getAttribute('x1')).toBe(line.getAttribute('x2'));
  expect(Number(point.getAttribute('cx'))).toBeCloseTo(28+(asOf-START)/(END-START)*284);expect(Number(point.getAttribute('cy'))).toBeCloseTo(8+(1-used/110)*94);
  expect(doc.body.textContent).toContain(`${100-used}% remaining`);expect(svg.getAttribute('aria-label')).toContain('100% cap');expect(svg.getAttribute('aria-label')).toContain('percentages of their own window limits');
- expect(svg.querySelectorAll('.five-hour-markers polyline,.five-hour-markers polygon,.five-hour-markers rect')).toHaveLength(0);expect(svg.querySelectorAll('polyline')).toHaveLength(1);expect(svg.querySelector('polyline')!.getAttribute('points')).toContain('68.6');
+ expect(svg.querySelectorAll('.five-hour-markers polyline,.five-hour-markers polygon')).toHaveLength(0);expect(svg.querySelectorAll('polyline')).toHaveLength(1);expect(svg.querySelector('polyline')!.getAttribute('points')).toContain('68.6');
+ const window=svg.querySelector('.five-hour-window')!;
+ expect(Number(window.getAttribute('x'))).toBeCloseTo(28+(reset-5*HOUR-START)/(END-START)*284);
+ expect(Number(window.getAttribute('width'))).toBeCloseTo(5*HOUR/(END-START)*284);
+ expect(window.getAttribute('fill')).toBe('none');
+ expect(Number(window.getAttribute('height'))).toBeCloseTo(94*100/110);
+ expect(window.getAttribute('data-window-start')).toBe(String(reset-5*HOUR));
+ expect(doc.querySelector('.five-hour-label')!.textContent).toBe(`5h window · ${used}% / 100% max`);
  expect(doc.querySelectorAll('svg')).toHaveLength(1);
  // Everything is drawn, so the legend explains it: no text under the plot, the words stay in the label and hover titles.
  const status=doc.querySelector<HTMLElement>('.plan-five-hour-status')!;expect(status.hidden).toBe(true);expect(status.textContent).toBe('');
  expect(svg.querySelector('.five-hour-markers > title')!.textContent).toContain(`${100-used}% remaining`);expect(svg.querySelectorAll('.five-hour-markers text')).toHaveLength(0);
+});
+it.each([
+ ['left',START+2*HOUR,28,2],
+ ['right',END+2*HOUR,28+(END-3*HOUR-START)/(END-START)*284,3],
+] as const)('clips the five-hour span at the plotted %s edge without shifting its reset',(_edge,reset,x,hours)=>{
+ const doc=render({used:25,reset,asOf:NOW,stale:false}),window=doc.querySelector('.five-hour-window')!;
+ expect(Number(window.getAttribute('x'))).toBeCloseTo(x);
+ expect(Number(window.getAttribute('width'))).toBeCloseTo(hours*HOUR/(END-START)*284);
+ expect(window.getAttribute('data-window-start')).toBe(String(reset-5*HOUR));
+ expect(window.getAttribute('data-window-reset')).toBe(String(reset));
+});
+it('does not fabricate a window when reset is unknown or the whole span is out of view',()=>{
+ for(const reset of [null,START-HOUR,END+6*HOUR])
+  expect(render({used:25,reset,asOf:NOW}).querySelector('.five-hour-window')).toBeNull();
+ const doc=render({used:25,reset:null,asOf:NOW});
+ expect(doc.querySelector('.five-hour-label')!.textContent).toContain('25% / 100% max');
+ expect(doc.querySelector('.plan-five-hour-status')!.textContent).toContain('Reset time unavailable');
 });
 it.each([
  ['stale',{used:80,reset:NOW-1,asOf:NOW-HOUR,stale:false},'refresh required'],
@@ -36,7 +60,7 @@ it.each([undefined,{used:null},{used:-1},{used:101},{used:Infinity},{used:'40'}]
  const doc=render(reading);expect(doc.querySelector('.plan-five-hour-status')!.textContent).toContain('usage unavailable');expect(doc.querySelector('.five-hour-reading')).toBeNull();expect(doc.querySelector('.five-hour-markers')).toBeNull();expect(doc.querySelector('polyline')).not.toBeNull();
 });
 it('retains expired readings at their actual time and dims them without assuming a refill',()=>{
- const doc=render({used:80,reset:NOW-1,asOf:NOW-HOUR,stale:false});expect(doc.body.textContent).toContain('80% used');expect(doc.body.textContent).toContain('Last reported; refresh required');expect(doc.querySelector('.five-hour-markers')!.getAttribute('opacity')).toBe('.5');expect(doc.querySelector('.five-hour-reading')).not.toBeNull();
+ const doc=render({used:80,reset:NOW-1,asOf:NOW-HOUR,stale:false});expect(doc.body.textContent).toContain('80% used');expect(doc.body.textContent).toContain('Last reported; refresh required');expect(doc.querySelector('.five-hour-markers')!.getAttribute('opacity')).toBe('.5');expect(doc.querySelector('.five-hour-window')!.getAttribute('data-window-reset')).toBe(String(NOW-1));expect(doc.querySelector('.five-hour-label')!.textContent).toBe('5h window · 80% / 100% max · last reported');expect(doc.querySelector('.five-hour-reading')).not.toBeNull();
 });
 it('does not invent a reading position when only its timestamp is unavailable',()=>{
  const doc=render({used:10,reset:null,asOf:null,stale:true});expect(doc.body.textContent).toContain('Reset time unavailable');expect(doc.body.textContent).toContain('Reading time unavailable');expect(doc.querySelector('.five-hour-cap')).not.toBeNull();expect(doc.querySelector('.five-hour-reading')).toBeNull();expect(doc.querySelector('.five-hour-reset')).toBeNull();
