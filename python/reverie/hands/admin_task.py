@@ -39,8 +39,14 @@ def validate(cfg):
         raise ValueError('admin_task must exist in the configured coding task map')
 
 def addressed(cfg, room, history, message):
-    """Only a message meant for this harness may start work: one in a direct-message room, one sent to it, a reply to
-    its own message, or an @name mention. A room-wide @everyone, or a reply to someone else, is conversation."""
+    """Only a message meant for this harness may start work: the authenticated owner's own message, one in a
+    direct-message room, one sent to it, a reply to its own message, or an @name mention. For a delegate, a room-wide
+    @everyone or a reply to someone else is conversation."""
+    sender = message.get('from') or {}
+    # The owner's message counts as addressed wherever the task is bound, as wakes() treats it (the owner's
+    # decision); a delegate still has to mention this harness or reply to it.
+    if isinstance(sender, dict) and sender.get('kind') == 'user' and sender.get('authenticatedOwner') is True:
+        return True
     self_id = cfg.get('self_session_id')
     if room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', ()):
         return True

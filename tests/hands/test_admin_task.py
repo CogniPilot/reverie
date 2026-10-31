@@ -109,8 +109,17 @@ class NaturalAdminTaskTests(unittest.TestCase):
         stop = {'type': 'function', 'id': 'call_2', 'function': {'name': admin_task.CANCEL_TOOL_NAME, 'arguments': '{}'}}
         self.assertEqual(admin_task.invoke({'tool_calls': [stop]}, callback), 'Task workspace cancelled.')
         for everyone in ('@everyone run the tests', '@here everyone close your laptops', 'helper run the tests', 'email@Helper.dev'):
-            self.assertEqual(admin_task.callback(cfg, Mock(), {}, 'office', history, {'id': 'x', 'from': OWNER, 'text': everyone}).tools,
+            self.assertEqual(admin_task.callback(cfg, Mock(), {}, 'office', history, {'id': 'x', 'from': DELEGATE, 'text': everyone}).tools,
                              [admin_task.CANCEL_TOOL], everyone)
+
+    def test_the_owners_own_message_may_start_work_without_a_mention(self):
+        # The owner's decision: the owner's plain message in a bound shared room is addressed, as wakes() treats it.
+        cfg = self.config()
+        for text in ('Helper, please run the tests', 'run the tests', '@everyone run the tests'):
+            callback = admin_task.callback(cfg, Mock(), {}, 'office', [], {'id': 'o', 'from': OWNER, 'text': text})
+            self.assertEqual(callback.tools, admin_task.TOOLS, text)
+        # A user message that is not the authenticated owner's is not bound at all, so it never reaches the start tool.
+        self.assertIsNone(admin_task.callback(cfg, Mock(), {}, 'office', [], {'id': 'u', 'from': {'kind': 'user', 'name': 'Owner'}, 'text': 'run the tests'}))
 
     def test_a_message_that_addresses_the_harness_may_start_work(self):
         cfg = dict(self.config(), dm_rooms=['dm-room'])
