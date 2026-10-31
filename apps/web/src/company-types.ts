@@ -39,6 +39,12 @@ export const EmployeePermissionsSchema = z
       .refine(ids => new Set(ids).size === ids.length, 'Choose each PAT only once').optional(),
   })
   .strict();
+/** Permission edits preserve omitted grants; creation-only defaults must not become revocations. */
+export const EmployeePermissionsPatchSchema = EmployeePermissionsSchema.extend({
+  recoverEmployees: EmployeePermissionsSchema.shape.recoverEmployees.removeDefault(),
+  moveOwnPlan: EmployeePermissionsSchema.shape.moveOwnPlan.removeDefault(),
+  managePlans: EmployeePermissionsSchema.shape.managePlans.removeDefault(),
+}).partial();
 export const EmployeeSchema = z
   .object({
     id: text,
