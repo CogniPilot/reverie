@@ -23,6 +23,12 @@ function chatPhoneComposer(nav) {
   return nav?.userAgentData?.mobile === true || /Android|iPhone|iPod/i.test(nav?.userAgent || '');
 }
 
+/** A random id for one spoken turn (crypto.randomUUID needs a secure context, which the microphone needs too). */
+function chatVoiceTurnId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0')).join('-');
+}
+
 const CHAT_MIN_WIDTH = 320;
 /** Client trace lines kept for "Send diagnostics". */
 const CHAT_DIAG_LINES = 300;
@@ -257,6 +263,8 @@ Object.assign(ReverieApp.prototype, {
           dur: Number.isFinite(audio.duration) ? Number(audio.duration.toFixed(2)) : null,
           src: String(audio.src).slice(-40),
           err: audio.error ? audio.error.code : undefined,
+          // Only while this element still plays the turn's own reply: car-mode and read-aloud audio reuse it.
+          turnId: this._chatAudioTurn && audio.src === this._chatAudioTurn.src ? this._chatAudioTurn.id : undefined,
         })
       );
     }
@@ -1226,21 +1234,26 @@ Object.assign(ReverieApp.prototype, {
     const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported?.(t));
     const recorder = new MediaRecorder(this._chatStream, type ? { mimeType: type } : undefined);
     const chunks = [];
+    // One id per spoken turn, from this press to the reply's playback: the trace lines and the server log share it.
+    const turnId = target ? chatVoiceTurnId() : null;
+    const capturing = performance.now();
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onstop = () => {
       this._chatRecorder = null;
       this._releaseChatMic();
       this._setChatRecording(false);
       const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
+      if (turnId) this._diag('voice:capture-end', { turnId, captureMs: Math.round(performance.now() - capturing), bytes: blob.size });
       if (blob.size < 1000) {
         this._chatVoiceStatus('Too short: hold the mic while you speak', 'error');
         return;
       }
-      if (target) this._sendChatVoice(blob, target);
+      if (target) this._sendChatVoice(blob, target, turnId);
       else this._transcribeOnServer?.(blob);
     };
     this._chatRecorder = recorder;
     recorder.start();
+    if (turnId) this._diag('voice:capture-start', { turnId, member: target.sessionId });
     this._setChatRecording(true);
     this._chatVoiceStatus(
       `\u25CF Recording for ${target ? target.name : this._chatToLabel?.() || 'everyone'}\u2026 release (or tap) to send`,
@@ -1270,17 +1283,17 @@ Object.assign(ReverieApp.prototype, {
     mic.setAttribute('aria-pressed', String(on));
   },
 
-  async _sendChatVoice(blob, target) {
+  async _sendChatVoice(blob, target, turnId = null) {
     // The turn plays this member's answer itself: voice-chat.js leaves it out of read-aloud meanwhile.
     this._chatVoiceTurnFor = target.sessionId;
     try {
-      return await this._sendChatVoiceTurn(blob, target);
+      return await this._sendChatVoiceTurn(blob, target, turnId);
     } finally {
       if (this._chatVoiceTurnFor === target.sessionId) this._chatVoiceTurnFor = null;
     }
   },
 
-  async _sendChatVoiceTurn(blob, target) {
+  async _sendChatVoiceTurn(blob, target, turnId = null) {
     this._chatVoiceStatus(`${target.name} is typing\u2026`, 'busy');
     const car = () => this._carScreen && !this._carScreen.hidden;
     // The wait for a linked answer can be long: car mode says whom it waits for, and a tap stops it
@@ -1292,10 +1305,12 @@ Object.assign(ReverieApp.prototype, {
     const q = `room=${encodeURIComponent(this._chatRoomId)}&member=${encodeURIComponent(target.sessionId)}`;
     let res;
     let body = null;
+    const sent = performance.now();
+    if (turnId) this._diag('voice:turn-sent', { turnId, bytes: blob.size });
     try {
       res = await fetch(this._chatUrl(`/api/voice/turn?${q}`), {
         method: 'POST',
-        headers: { 'Content-Type': blob.type.split(';')[0] || 'audio/webm' },
+        headers: { 'Content-Type': blob.type.split(';')[0] || 'audio/webm', ...(turnId ? { 'X-Reverie-Voice-Turn': turnId } : {}) },
         body: blob,
         signal: stop.signal,
       });
@@ -1305,7 +1320,11 @@ Object.assign(ReverieApp.prototype, {
         if (stop.signal.aborted) throw stop.signal.reason;
         /* non-JSON error page */
       }
+      // The server's own stage times (speech to text, the member's answer, text to speech) under the same id.
+      if (turnId) this._diag('voice:turn-answered', { turnId, status: res.status, roundTripMs: Math.round(performance.now() - sent),
+        messageId: body?.data?.messages?.[0]?.id, answerId: body?.data?.messages?.[1]?.id, timing: body?.data?.timing });
     } catch {
+      if (turnId) this._diag('voice:turn-failed', { turnId, aborted: stop.signal.aborted, roundTripMs: Math.round(performance.now() - sent) });
       if (stop.signal.aborted) {
         this._chatVoiceStatus('');
         if (car()) this._renderCarState?.('paused', `Stopped waiting; ${target.name}'s answer will show in the room`);
@@ -1324,7 +1343,7 @@ Object.assign(ReverieApp.prototype, {
       return false;
     }
     this._chatVoiceStatus('');
-    if (data.audioUrl) this._playChatAudio(data.audioUrl, target.sessionId);
+    if (data.audioUrl) this._playChatAudio(data.audioUrl, target.sessionId, turnId);
     // The answer came but its audio did not (the voice service failed or timed out): say so, never go quiet.
     else if (data.reply)
       this._chatVoiceStatus(`Couldn't make audio for ${target.name}'s answer; its text is in the room`, 'error');
@@ -1362,11 +1381,12 @@ Object.assign(ReverieApp.prototype, {
    * retry on the very next tap or key anywhere on the page, which is a gesture.
    */
   /** Play a reply; `from` is who is speaking (the car screen shows them). */
-  _playChatAudio(url, from = null) {
+  _playChatAudio(url, from = null, turnId = null) {
     this._chatAudioFrom = from;
     this._chatAudioEl();
     const src = this._chatUrl(url);
     this._chatAudio.src = src;
+    this._chatAudioTurn = turnId ? { id: turnId, src: this._chatAudio.src } : null;
     this._chatAudio.play().then(
       () => {
         this._chatAudioUnlocked = true;
@@ -1386,7 +1406,7 @@ Object.assign(ReverieApp.prototype, {
 
   _offerChatAudioRetry(url) {
     const { voiceStatus, mic } = this._chatEls;
-    const from = this._chatAudioFrom;
+    const from = this._chatAudioFrom, turnId = this._chatAudioTurn?.id ?? null;
     this._chatVoiceStatus('');
     voiceStatus.hidden = false;
     voiceStatus.className = 'chatroom-voice-status';
@@ -1400,7 +1420,7 @@ Object.assign(ReverieApp.prototype, {
       if (mic.contains(event.target) || this._chatRecorder?.state === 'recording') return;
       this._clearChatAudioRetry();
       this._chatVoiceStatus('');
-      this._playChatAudio(url, from);
+      this._playChatAudio(url, from, turnId);
     };
     document.addEventListener('pointerup', this._chatAudioRetry, { capture: true });
     document.addEventListener('keydown', this._chatAudioRetry, { capture: true });
