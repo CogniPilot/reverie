@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
 import fs, { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -926,4 +927,200 @@ it('reads pre-spool pending records and confirms them without inventing a new su
   expect(f.messages).toHaveLength(1);
   expect(reopened.store.snapshot().slots.repo!.pending).toBeUndefined();
   expect(reopened.store.snapshot().slots.repo!.lastSuccessAt).toBe(baseline.lastSuccessAt);
+});
+
+async function queuedArchiveFixture(count = 3000) {
+  const f = await fixture();
+  f.cfg.events = { issues: false, pullRequests: false, workflowFailures: true };
+  await f.configure();
+  await f.service.tick();
+  f.advance();
+  f.bot.maxPerHour = 0;
+  const rows = Array.from({ length: count }, (_, i) => ({
+    ...f.run(i + 1),
+    name: '🧭'.repeat(60),
+    created_at: stamp(f.now() - 31 * 86400000 + Math.floor(((i + 1) * 30 * 86400000) / (count + 1))),
+  }));
+  f.setFetch(async (url) => {
+    const u = new URL(url);
+    if (!u.pathname.endsWith('/actions/runs')) return reply({ full_name: 'owner/repo', private: false });
+    const [start, end] = u.searchParams.get('created')!.split('..').map(Date.parse);
+    const selected = rows.filter((row) => Date.parse(row.created_at) >= start! && Date.parse(row.created_at) <= end!);
+    const page = Number(u.searchParams.get('page') ?? 1);
+    return reply(
+      { total_count: selected.length, workflow_runs: selected.slice((page - 1) * 100, page * 100) },
+      { etag: 'owned-' + u.search, ...(page * 100 < selected.length ? { link: '<fixed>; rel="next"' } : {}) }
+    );
+  });
+  await f.service.tick();
+  expect(f.service.store.snapshot().slots.repo!.pending).toBeDefined();
+  return f;
+}
+const cancellation = (slot: ReturnType<GithubRepositoryWatches['store']['snapshot']>['slots'][string]) => ({
+  kind: 'github-watch-prepared-cancelled',
+  id: slot.config.id,
+  generation: slot.generation,
+  pending: slot.pending,
+});
+interface CancellationFrame {
+  kind: string;
+  version: number;
+  id: string;
+  generation: number;
+  recordSHA256: string;
+  recordBytes: number;
+  partIndex: number;
+  partCount: number;
+  payload: string;
+}
+async function storedCancellationFrames(file: string): Promise<CancellationFrame[]> {
+  const lines = (await readFile(file + '.history.jsonl', 'utf8')).trimEnd().split('\n');
+  for (const line of lines) expect(Buffer.byteLength(line + '\n')).toBeLessThanOrEqual(2 * 1024 * 1024);
+  return lines
+    .map((line) => JSON.parse(line).record)
+    .filter((r) => r.kind === 'github-watch-prepared-cancelled-fragment');
+}
+function reconstructCancellation(frames: CancellationFrame[]) {
+  if (!frames.length || frames.length !== frames[0]!.partCount) throw Error('Incomplete cancellation frames');
+  const first = frames[0]!;
+  const parts = frames.map((frame, index) => {
+    if (
+      frame.version !== 1 ||
+      frame.partIndex !== index ||
+      frame.partCount !== frames.length ||
+      frame.recordSHA256 !== first.recordSHA256 ||
+      frame.recordBytes !== first.recordBytes ||
+      frame.id !== first.id ||
+      frame.generation !== first.generation
+    )
+      throw Error('Cancellation frame sequence differs');
+    const part = Buffer.from(frame.payload, 'base64');
+    if (part.toString('base64') !== frame.payload || part.length > 256 * 1024)
+      throw Error('Cancellation frame payload differs');
+    return part;
+  });
+  const bytes = Buffer.concat(parts);
+  if (bytes.length !== first.recordBytes || createHash('sha256').update(bytes).digest('hex') !== first.recordSHA256)
+    throw Error('Cancellation record bytes differ');
+  return bytes;
+}
+it('archives an oversized prepared spool losslessly before owner disable', async () => {
+  const f = await queuedArchiveFixture();
+  const original = cancellation(f.service.store.snapshot().slots.repo!);
+  const expected = Buffer.from(JSON.stringify(original));
+  expect(expected.length).toBeGreaterThan(2 * 1024 * 1024);
+  await f.configure([{ ...f.cfg, enabled: false }]);
+  const frames = await storedCancellationFrames(f.service.store.file);
+  expect(reconstructCancellation(frames)).toEqual(expected);
+  expect(JSON.parse(reconstructCancellation(frames).toString('utf8'))).toEqual(original);
+  expect(f.service.store.snapshot().slots.repo!.config.enabled).toBe(false);
+  expect(f.service.store.snapshot().slots.repo!.pending).toBeUndefined();
+  expect(f.messages).toHaveLength(0);
+  expect(() => reconstructCancellation(frames.slice(1))).toThrow('Incomplete');
+  expect(() => reconstructCancellation([...frames].reverse())).toThrow('sequence');
+  expect(() =>
+    reconstructCancellation(frames.map((p, i) => (i ? p : { ...p, payload: Buffer.from('wrong').toString('base64') })))
+  ).toThrow('bytes differ');
+});
+
+it('archives several unchanged small cancellation records separately when their sum exceeds2MiB', async () => {
+  const f = await queuedArchiveFixture(1500);
+  await f.service.store.update((s) => {
+    const second = structuredClone(s.slots.repo!);
+    second.config.id = 'second';
+    second.config.repo = 'other';
+    s.slots.second = second;
+  });
+  const slots = f.service.store.snapshot().slots;
+  const originals = [cancellation(slots.repo!), cancellation(slots.second!)];
+  const sizes = originals.map((r) => Buffer.byteLength(JSON.stringify({ version: 1, record: r }) + '\n'));
+  expect(sizes.every((n) => n <= 2 * 1024 * 1024)).toBe(true);
+  expect(sizes.reduce((a, b) => a + b)).toBeGreaterThan(2 * 1024 * 1024);
+  await f.configure([
+    { ...f.cfg, enabled: false },
+    { ...slots.second!.config, enabled: false },
+  ]);
+  const records = (await readFile(f.service.store.file + '.history.jsonl', 'utf8'))
+    .trimEnd()
+    .split('\n')
+    .map((s) => JSON.parse(s).record);
+  expect(records.filter((r) => r.kind === 'github-watch-prepared-cancelled')).toEqual(originals);
+  expect(records.some((r) => r.kind === 'github-watch-prepared-cancelled-fragment')).toBe(false);
+});
+
+it.each([false, true])(
+  'preserves the original live spool when a fragment append fails (tornLine=%s)',
+  async (tornLine) => {
+    const f = await queuedArchiveFixture();
+    const original = await readFile(f.service.store.file);
+    const pending = f.service.store.snapshot().slots.repo!.pending;
+    const history = f.service.store.file + '.history.jsonl',
+      open = fs.open.bind(fs);
+    let injected = false;
+    vi.spyOn(fs, 'open').mockImplementation((async (path: Parameters<typeof fs.open>[0], ...args: unknown[]) => {
+      const handle = await (open as (...a: unknown[]) => ReturnType<typeof fs.open>)(path, ...args);
+      if (String(path) !== history) return handle;
+      return new Proxy(handle, {
+        get(target, key) {
+          if (key === 'writeFile')
+            return async (data: unknown) => {
+              const text = String(data),
+                record = JSON.parse(text).record;
+              if (record.kind === 'github-watch-prepared-cancelled-fragment' && record.partIndex === 1) {
+                injected = true;
+                await target.writeFile(tornLine ? text.slice(0, 17) : text);
+                throw Error('Owned append interruption');
+              }
+              return target.writeFile(text);
+            };
+          const value = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    }) as typeof fs.open);
+    await expect(f.configure([{ ...f.cfg, enabled: false }])).rejects.toThrow();
+    expect(injected).toBe(true);
+    expect(await readFile(f.service.store.file)).toEqual(original);
+    expect(() => f.service.store.snapshot()).toThrow('unavailable');
+    vi.restoreAllMocks();
+    const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+    if (tornLine) await expect(reopened.init()).rejects.toThrow('history');
+    else {
+      await reopened.init(); // Existing init validates framing, not semantic completeness of fragment groups.
+      expect(reopened.store.snapshot().slots.repo!.config.enabled).toBe(true);
+      expect(reopened.store.snapshot().slots.repo!.pending).toEqual(pending);
+      const frames = await storedCancellationFrames(f.service.store.file);
+      expect(() => reconstructCancellation(frames)).toThrow('Incomplete');
+    }
+    expect(f.messages).toHaveLength(0);
+  }
+);
+
+it('requires all archived frames and current authority before cancellation commit', async () => {
+  const f = await queuedArchiveFixture();
+  const original = await readFile(f.service.store.file);
+  const expected = Buffer.from(JSON.stringify(cancellation(f.service.store.snapshot().slots.repo!)));
+  const archive = f.service.store.archive.bind(f.service.store);
+  let allArchived = false;
+  vi.spyOn(f.service.store, 'archive').mockImplementation(async (records) => {
+    await archive(records);
+    const last = records.at(-1) as CancellationFrame;
+    if (last.kind === 'github-watch-prepared-cancelled-fragment' && last.partIndex === last.partCount - 1)
+      allArchived = true;
+  });
+  await expect(
+    f.service.configure(
+      { version: 1, expectedRevision: f.service.status().revision, watches: [{ ...f.cfg, enabled: false }] },
+      () => {
+        if (allArchived) throw Error('Owner revoked before cancellation commit');
+      }
+    )
+  ).rejects.toThrow('Owner revoked');
+  expect(allArchived).toBe(true);
+  expect(await readFile(f.service.store.file)).toEqual(original);
+  expect(reconstructCancellation(await storedCancellationFrames(f.service.store.file))).toEqual(expected);
+  const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+  await reopened.init();
+  expect(reopened.store.snapshot().slots.repo!.config.enabled).toBe(true);
+  expect(f.messages).toHaveLength(0);
 });

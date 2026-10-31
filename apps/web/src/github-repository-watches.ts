@@ -1,6 +1,7 @@
 /** Owner-selected fixed GET watchers; durable reservations and legacy cursor adoption, no model/shell jobs. */
 import { z } from 'zod';
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
 import { BotWatchState, BotWatchPostRefused, BOT_WATCH_MAX_STATE_BYTES } from './bot-watch-state.js';
 import { PublicIssueWatch } from './cron/public-issue-watch.js';
 import type { ChatBot } from './chat-bots.js';
@@ -78,6 +79,12 @@ const stateSchema = z
     slots: z.record(z.string(), slotSchema).refine((x) => Object.keys(x).length <= 32),
   })
   .strict();
+type PreparedCancellation = {
+  kind: 'github-watch-prepared-cancelled';
+  id: string;
+  generation: number;
+  pending: NonNullable<z.infer<typeof slotSchema>['pending']>;
+};
 export const GithubWatchCollectionInput = z
   .object({
     version: z.literal(1),
@@ -324,6 +331,33 @@ export class GithubRepositoryWatches {
       throw new GithubWatchError('AUTH_REQUIRED');
     }
   }
+  private async archiveCancellation(record: PreparedCancellation) {
+    const bytes = Buffer.from(JSON.stringify(record));
+    // Preserve small legacy records exactly; the generic archive's per-call/line cap stays 2MiB.
+    if (Buffer.byteLength(JSON.stringify({ version: 1, record }) + '\n') <= 2 * 1024 * 1024) {
+      await this.store.archive([record]);
+      return;
+    }
+    need(bytes.length <= BOT_WATCH_MAX_STATE_BYTES, 'SPOOL_CAPACITY');
+    const partBytes = 256 * 1024,
+      partCount = Math.ceil(bytes.length / partBytes),
+      recordSHA256 = createHash('sha256').update(bytes).digest('hex');
+    for (let partIndex = 0; partIndex < partCount; partIndex++)
+      await this.store.archive([
+        {
+          kind: 'github-watch-prepared-cancelled-fragment',
+          version: 1,
+          id: record.id,
+          generation: record.generation,
+          recordSHA256,
+          recordBytes: bytes.length,
+          partIndex,
+          partCount,
+          payload: bytes.subarray(partIndex * partBytes, (partIndex + 1) * partBytes).toString('base64'),
+        },
+      ]);
+    // Init validates framing only. A partial frame group never replaces the original primary pending record.
+  }
   async configure(raw: unknown, validate: () => void = () => {}) {
     const check = () => {
       need(validate() === undefined, 'SYNCHRONOUS_AUTHORITY_REQUIRED');
@@ -399,7 +433,7 @@ export class GithubRepositoryWatches {
           lastSuccessAt: legacyState.lastSuccessAt,
           posts: legacyState.posts,
         };
-      const cancelled: unknown[] = [];
+      const cancelled: PreparedCancellation[] = [];
       for (const [id, x] of Object.entries(priorSlots)) {
         const c = input.watches.find((c) => c.id === id);
         if (fingerprint(c) !== fingerprint(x.config) && x.pending) {
@@ -422,8 +456,8 @@ export class GithubRepositoryWatches {
           revision: input.expectedRevision,
           watches: input.watches,
         },
-        ...cancelled,
       ]);
+      for (const record of cancelled) await this.archiveCancellation(record);
       check();
       await this.store.update((s) => {
         check();
