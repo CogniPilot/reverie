@@ -91,9 +91,15 @@ class CompleteInventoryTests(unittest.TestCase):
 
 
 class Reservations(unittest.TestCase):
-    def setUp(self):
+    def setUp(self, *, deployment_layout=False):
         f = fixture.WorkerTests(); f.setUp(); self.addCleanup(f.doCleanups)
         self.root, self.config = f.root, f.config
+        if deployment_layout:
+            # reverie-start mounts descriptor companyRoot/data at /instances/default;
+            # isolate derives these native paths from that mounted data directory.
+            data = self.root / 'company/data'
+            (data / 'console').mkdir(mode=0o700, parents=True)
+            self.config.update(companyRoot=str(data), companyFile=str(data / 'console/company.json'))
         self.config.update(budgetMode='admission', memoryMiB=2048, poolMemoryMiB=8192)
         Path(self.config['stateRoot']).mkdir(mode=0o700)
         self.control = self.root / 'ram-private'; self.control.mkdir(mode=0o700)
@@ -106,6 +112,9 @@ class Reservations(unittest.TestCase):
                          'sessionGeneration': 1, 'desiredRunning': True, 'onVacation': False}
         self.company()
         self.native = NativeFixture(self.config)
+        if deployment_layout:
+            self.native.rows[1]['Mounts'].append({'Type': 'bind', 'Source': self.config['companyRoot'],
+                                                'Destination': '/instances/default', 'RW': True})
         self.proc, self.cgroup = self.root / 'proc', self.root / 'cgroup'
         self.proc.mkdir(); self.cgroup.mkdir()
         (self.proc / 'meminfo').write_text('MemTotal: 16777216 kB\nMemAvailable: 12582912 kB\n')

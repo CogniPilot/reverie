@@ -35,7 +35,7 @@ class ResumeTransactions(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.object(Broker,'run_engine',side_effect=AssertionError('REAL_ENGINE_FORBIDDEN')))
         model_nix_fixture_ancestry(self)
-        self.f=F.Reservations();self.f.setUp();self.addCleanup(self.f.doCleanups)
+        self.f=F.Reservations();self.f.setUp(deployment_layout=True);self.addCleanup(self.f.doCleanups)
         f=self.f;f.native.resource_reservations=f.gate;f.native.stopping=threading.Event()
         f.employee['runtimeRecipe']={'mode':'codex','workingDir':'/workspace','configs':{}}
         f.company();self.owner=(os.getpid(),os.getuid(),os.getgid());self.calls=[];self.fault=None
@@ -43,7 +43,7 @@ class ResumeTransactions(unittest.TestCase):
         self.deployment=f.root/'deployment';self.deployment.mkdir(mode=0o700)
         self.definition=self.deployment/'deployment.json'
         self.definition.write_text(json.dumps({'version':1,'containerName':f.config['serverContainer'],
-                                             'companyRoot':f.config['companyRoot']}));self.definition.chmod(0o600)
+                                             'companyRoot':str(Path(f.config['companyRoot']).parent)}));self.definition.chmod(0o600)
         self.lock=self.deployment/'runtime/update-state/update.lock';self.lock.parent.mkdir(mode=0o700,parents=True)
         self.lock.write_bytes(b'');self.lock.chmod(0o600)
         test=self
@@ -80,6 +80,29 @@ class ResumeTransactions(unittest.TestCase):
     def apply(self,plan):
         return self.service.dispatch({'action':'apply-worker-resume','operationId':plan['operationId'],
                                      'planDigest':plan['planDigest']},self.owner)
+
+    def test_older_plan_without_data_parent_binding_requires_fresh_prepare(self):
+        plan = self.prepare()
+        operation = self.f.control / 'host-resume' / OP
+        selected = json.loads((operation / 'PLAN.json').read_bytes())
+        del selected['deploymentParents']
+        raw = M.encoded(selected)
+        (operation / 'PLAN.json').write_bytes(raw)
+        with self.assertRaisesRegex(ValueError, 'RESUME_CLOSED_SCHEMA'):
+            self.apply({**plan, 'planDigest': M.digest(raw)})
+        self.assertFalse((operation / 'ATTEMPT.json').exists())
+        self.assertFalse((operation.parent / 'ACTIVE.json').exists())
+
+    def test_data_directory_rebound_after_prepare_refuses_before_attempt(self):
+        plan = self.prepare()
+        data = Path(self.f.config['companyRoot'])
+        previous = data.with_name('previous-data')
+        data.rename(previous)
+        shutil.copytree(previous, data)
+        with self.assertRaisesRegex(ValueError, 'RESUME_DEPLOYMENT_BINDING'):
+            self.apply(plan)
+        self.assertFalse((self.f.control / 'host-resume' / OP / 'ATTEMPT.json').exists())
+        self.assertFalse((self.f.control / 'host-resume/ACTIVE.json').exists())
 
     def test_real_store_batch_holds_common_maintenance_but_not_creation_admission(self):
         plan=self.prepare();self.assertFalse(plan['capacityHeld']);self.assertFalse(plan['nativeEffects'])

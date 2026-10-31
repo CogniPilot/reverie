@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -22,7 +23,7 @@ class _Fixture(unittest.TestCase):
         # Set the class-level backstop before ANY fake broker/gate construction.
         forbid = patch.object(Broker, 'run_engine', side_effect=AssertionError('REAL_ENGINE_FORBIDDEN'))
         forbid.start(); self.addCleanup(forbid.stop)
-        f = F.Reservations(); f.setUp(); self.addCleanup(f.doCleanups)
+        f = F.Reservations(); f.setUp(deployment_layout=True); self.addCleanup(f.doCleanups)
         self.f, self.root = f, f.root
         self.path = self.root / 'broker.json'
         self.path.write_text(json.dumps(f.config)); self.path.chmod(0o600)
@@ -189,7 +190,7 @@ class TransactionFiles(_Fixture):
         self.operation = self.root / 'image-switch'; self.operation.mkdir(mode=0o700)
         self.deployment = self.root / 'deployment.json'
         self.deployment.write_text(json.dumps({'version': 1, 'containerName': self.f.config['serverContainer'],
-                                             'companyRoot': self.f.config['companyRoot']}))
+                                             'companyRoot': str(Path(self.f.config['companyRoot']).parent)}))
         self.deployment.chmod(0o600)
         lockdir = self.root / 'runtime/update-state'; lockdir.mkdir(mode=0o700, parents=True)
         self.lock = lockdir / 'update.lock'; self.lock.touch(mode=0o600)
@@ -247,6 +248,17 @@ class TransactionFiles(_Fixture):
     def assert_retained(self):
         self.assertTrue(R.pending(self.f.config).exists())
         self.assertEqual(R.marker(self.f.config).read_bytes(), self.marker)
+
+    def test_data_directory_rebound_after_preview_refuses_before_attempt(self):
+        prepared = self.transition.prepare(self.selection)
+        data = Path(self.f.config['companyRoot'])
+        previous = data.with_name('previous-data')
+        data.rename(previous)
+        shutil.copytree(previous, data)
+        with self.assertRaisesRegex(ValueError, 'WORKER_IMAGE_PLAN_CHANGED'):
+            self.transition.apply(prepared['planSHA256'])
+        self.assertFalse((self.operation / 'ATTEMPT.json').exists())
+        self.assertEqual(self.path.read_bytes(), self.before)
 
     def test_preview_no_hold_apply_changes_only_image_no_lifecycle(self):
         expected = self.prepare()
