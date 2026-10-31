@@ -5,7 +5,7 @@ import { CompanyError, CompanyService } from '../../company-service.js';
 import {
   CompanySettingsSchema,
   EmployeeSchema,
-  EmployeePermissionsSchema,
+  EmployeePermissionsPatchSchema,
   PronounsSchema,
   SelfProfileSchema,
 } from '../../company-types.js';
@@ -40,7 +40,7 @@ const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, resp
     sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
     dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
     voice: EmployeeVoiceSchema.nullable(),
-    permissions: EmployeePermissionsSchema.partial(),
+    permissions: EmployeePermissionsPatchSchema,
   })
   .partial()
   .strict()

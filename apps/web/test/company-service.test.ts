@@ -83,6 +83,22 @@ describe('company identities and genuine research lifecycle', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('preserves other grants when changing a single permission through the service', async () => {
+    const employee = await hire();
+    expect(employee.permissions).toEqual({ recoverEmployees: false, moveOwnPlan: false, managePlans: false });
+    await service.update(employee.id, undefined, { permissions: { moveOwnPlan: true, manageBoard: true } });
+    await service.update(employee.id, undefined, { permissions: { managePlans: true } });
+    expect(store.snapshot().employees[0].permissions).toEqual({
+      recoverEmployees: false, moveOwnPlan: true, managePlans: true, manageBoard: true,
+    });
+    await service.update(employee.id, undefined, { permissions: { recoverEmployees: true } });
+    await service.update(employee.id, undefined, { permissions: { managePlans: false } });
+    const reloaded = new CompanyStore(store.file); await reloaded.init();
+    expect(reloaded.snapshot().employees[0].permissions).toEqual({
+      recoverEmployees: true, moveOwnPlan: true, managePlans: false, manageBoard: true,
+    });
+  });
+
   it('rechecks authority after a pending audit and never commits a revoked grant', async () => {
     const employee = await hire();
     const previous = store.snapshot();
