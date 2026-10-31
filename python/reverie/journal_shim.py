@@ -23,9 +23,9 @@ from reverie import env_names
 TAGS = ("decision", "promise", "correction", "preference", "identity", "relationship", "open-question", "lesson",
         "personal-reflection")
 TIMEOUT_S = 60
-# Said with every save that could not reach the journal, so the agent does not assume it survives a backend switch.
-LOCAL_ONLY = ("saved to the old local store only, not to your office journal: it will not follow a runtime or model "
-              "switch until import-legacy runs")
+# Said when remember runs outside a Reverie session. Nothing writes the old store any more; it stays read-only history.
+NO_SESSION = ("remember saves to your office journal as your own Reverie session, and this process is not running "
+              "inside one. Nothing was saved. Inside your session, run: ")
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
 

@@ -201,15 +201,8 @@ def dispatch(brain, request: dict):
             raise ValueError("memory is empty or crossed a hard floor")
         if journal_shim.available():
             return journal_shim.remember({**request, "text": text})
-        if request.get("project"):
-            memory = ProjectMemory(brain.cfg.data_dir / "projects", request["project"])
-            try:
-                return {**memory.remember(text, str(request.get("source", ""))), "note": journal_shim.LOCAL_ONLY}
-            finally:
-                memory.close()
-        if request.get("channel") == "work":
-            raise ValueError("work memories require a project and verification source")
-        return {**brain.store.add_reflection(text, 7, [], "shared", meta={"verified_note": True}).as_dict(), "note": journal_shim.LOCAL_ONLY}
+        # The journal is the only store remember writes; outside a session, say so and show the command.
+        raise ValueError(journal_shim.NO_SESSION + journal_shim.save_command({**request, "text": text}))
     if action == "plan":
         if "text" in request:
             text = request["text"]

@@ -154,14 +154,22 @@ class DispatchThroughJournalTests(unittest.TestCase):
                 dispatch(self.brain, {"action": "remember", "text": "   "})
         remember.assert_not_called()
 
-    def test_without_the_journal_the_old_store_behaves_as_before(self):
+    def test_without_a_session_remember_saves_nothing_and_shows_the_journal_command(self):
         self.assertFalse(journal_shim.available())
-        saved = dispatch(self.brain, {"action": "remember", "text": "A verified note"})
-        self.assertEqual(saved["text"], "A verified note")
-        self.assertIn("not to your office journal", saved["note"])  # never mistaken for a journal save
-        project = dispatch(self.brain, {"action": "remember", "text": "Parity passed", "project": "rumoca", "source": "commit 1"})
-        self.assertEqual(project["note"], journal_shim.LOCAL_ONLY)
-        self.assertIsInstance(dispatch(self.brain, {"action": "recall", "query": "verified note"}), list)
+        self.store.add_reflection("A verified note", 7, [], "shared")
+        before = self.store._db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+        for request in ({"action": "remember", "text": "Ship on Friday"},
+                        {"action": "remember", "text": "Parity passed", "project": "rumoca", "source": "commit 1"},
+                        {"action": "remember", "text": "Work note", "channel": "work"}):
+            with self.subTest(request=request), self.assertRaises(ValueError) as refused:
+                dispatch(self.brain, request)
+            self.assertIn("Nothing was saved", str(refused.exception))
+            self.assertIn("reverie agent journal save", str(refused.exception))
+            self.assertIn(request["text"], str(refused.exception))
+        self.assertEqual(self.store._db.execute("SELECT COUNT(*) FROM memories").fetchone()[0], before)
+        self.assertFalse((self.brain.cfg.data_dir / "projects" / "rumoca").exists())
+        # The old store stays readable history.
+        self.assertIn("A verified note", json.dumps(dispatch(self.brain, {"action": "recall", "query": "verified note"})))
 
 
 if __name__ == "__main__":
