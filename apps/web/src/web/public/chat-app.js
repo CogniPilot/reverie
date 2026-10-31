@@ -1257,6 +1257,7 @@ function caPageFromHash(hash) {
  * but never navigate this page, and it gets no referrer.
  */
 const CA_WEB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+const CA_WEB_NOTE = 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.';
 
 /** The address to show beside the chat for a link, or null when the link keeps its new tab. */
 function caWebPaneUrl(href, origin) {
@@ -5056,8 +5057,9 @@ class ReverieChatApp {
     for (const node of this.app._chatEls.feed.querySelectorAll('.ca-msg')) {
       const on = this.deleteSelection.has(node.dataset.msgId);
       node.classList.toggle('is-delete-selected', on);
-      if (on) node.setAttribute('aria-selected', 'true');
-      else node.removeAttribute('aria-selected');
+      // aria-selected is not a state of role=article, so a picked message says so in its own label.
+      if (on) node.setAttribute('aria-label', 'Selected for deletion');
+      else node.removeAttribute('aria-label');
     }
     const n = this.deleteSelection.size;
     bar.hidden = !n;
@@ -5606,10 +5608,10 @@ class ReverieChatApp {
     external.target = '_blank';
     external.rel = 'noopener noreferrer';
     head.append(close, host, this.el('span', 'ca-spacer'), external);
-    const note = this.el('p', 'ca-web-note', 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.');
+    const note = this.el('p', 'ca-web-note', CA_WEB_NOTE);
     pane.append(head, note);
     this.els.body.insertBefore(pane, this.els.members);
-    Object.assign(this.els, { web: pane, webHost: host, webExternal: external });
+    Object.assign(this.els, { web: pane, webHost: host, webExternal: external, webNote: note });
     const feed = this.app._chatEls.feed;
     feed.addEventListener('click', (event) => {
       if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -5632,17 +5634,31 @@ class ReverieChatApp {
   }
 
   openWebPane(url) {
-    const { web, webHost, webExternal } = this.els;
+    const { web, webHost, webExternal, webNote } = this.els;
     const address = new URL(url);
     webHost.textContent = address.host;
     webHost.title = address.href;
     webExternal.href = address.href;
+    webNote.textContent = CA_WEB_NOTE;
     // The frame exists only while a page is open, so a closed pane leaves no empty frame in the page.
     let frame = web.querySelector('.ca-web-frame');
     if (!frame) {
       frame = this.el('iframe', 'ca-web-frame');
       frame.setAttribute('sandbox', CA_WEB_SANDBOX);
       frame.referrerPolicy = 'no-referrer';
+      // Another site's page cannot be read from here. One that can be read is a page of this site that the framed site
+      // navigated its frame to: it would run same-origin inside the pane, so it is blanked and the new tab offered instead.
+      frame.addEventListener('load', () => {
+        let href = null;
+        try {
+          href = frame.contentWindow?.location.href ?? null;
+        } catch {
+          return;
+        }
+        if (!href || href === 'about:blank') return;
+        frame.src = 'about:blank';
+        webNote.textContent = 'That page tried to open a Reverie page inside the pane, so it was stopped. Use Open in new tab.';
+      });
       web.append(frame);
     }
     frame.title = 'Web page from ' + address.host;

@@ -42,10 +42,15 @@ it('Ctrl- or Cmd-click picks messages, a plain click or a click on a button does
   click(msg('m2'), {});                                          // a plain click
   click(msg('m4').querySelector('[aria-label="More"]') ?? msg('m4').querySelector('button')!); // a button inside keeps its click
   expect(selected()).toEqual(['m1', 'm3']);
+  // aria-selected is not a state of role=article: a picked message says so in its label, an unpicked one has none.
+  expect(msg('m1').getAttribute('aria-label')).toBe('Selected for deletion');
+  expect(msg('m1').hasAttribute('aria-selected')).toBe(false);
+  expect(msg('m2').hasAttribute('aria-label')).toBe(false);
   expect(bar().hidden).toBe(false);
   expect(bar().textContent).toContain('2 messages selected');
   click(msg('m3'));                                              // again: unpicks
   expect(selected()).toEqual(['m1']);
+  expect(msg('m3').hasAttribute('aria-label')).toBe(false);
   expect(bar().textContent).toContain('1 message selected');
   // The button kept its own click (it opened the message menu): the first Escape closes that menu, the next clears the pick.
   const escape = () => h.document.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
