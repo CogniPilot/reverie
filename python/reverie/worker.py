@@ -1357,6 +1357,28 @@ class Broker:
             return {'action': 'stop-agent', 'success': True, 'stopped': False, 'paneDead': True}
         if not_after is not None and time.time() * 1000 > not_after:
             raise StopNotDispatched('The stop request expired before the signal; nothing was stopped')
+        # Warm laptops may predate retained panes, and a window-local OFF overrides
+        # the global launch default. Admit and read back this exact office window
+        # before signalling, so its dead pane remains available to canonical J.
+        try:
+            retained = self.run_engine(tmux_exec_args(name, 'set-option', '-w', '-t', 'office', 'remain-on-exit', 'on'), optional=True)
+            option = self.run_engine(tmux_exec_args(name, 'show-options', '-w', '-A', '-v', '-t', 'office', 'remain-on-exit'), optional=True) if retained.returncode == 0 else None
+            if option is None or option.returncode != 0 or option.stdout.strip() != 'on':
+                raise StopNotDispatched('Laptop pane retention could not be confirmed; nothing was stopped')
+            dead, current = pane(False)
+        except StopNotDispatched:
+            raise
+        except Exception as error:
+            raise StopNotDispatched('Laptop pane retention could not be confirmed; nothing was stopped') from error
+        if current != pid:
+            raise StopNotDispatched('Laptop pane changed before the stop signal; nothing was stopped')
+        if dead:
+            return {'action': 'stop-agent', 'success': True, 'stopped': False, 'paneDead': True}
+        with self.lock:
+            if self.laptops.get(session_id) != name:
+                raise StopNotDispatched('Laptop binding changed before the stop signal; nothing was stopped')
+        if not_after is not None and time.time() * 1000 > not_after:
+            raise StopNotDispatched('The stop request expired before the signal; nothing was stopped')
         # As the laptop's own user (the container user), never root: it may signal only its own processes.
         try:
             sent = self.run_engine(['exec', name, '/bin/bash', '-c', STOP_SIGNAL, 'stop-agent', str(pid),

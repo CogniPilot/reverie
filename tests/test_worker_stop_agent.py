@@ -2,6 +2,7 @@
 import tests  # noqa: F401
 import json, shutil, socket, stat, subprocess, time, unittest
 from pathlib import Path
+from unittest.mock import patch
 from tests import test_worker as F
 from reverie.worker import Broker, StopNotDispatched, create_args, send_frame, receive_frame
 
@@ -134,6 +135,62 @@ class StopAgentTests(unittest.TestCase):
         for bad in (0, -5, 1.5, '1', True):
             with self.assertRaises(ValueError):
                 self.broker.stop_agent(SID, bad)
+
+    def test_retention_failure_or_unknown_readback_never_signals(self):
+        pid = self.start_inner()
+        for mode in ('set-error', 'set-nonzero', 'read-error', 'read-nonzero', 'read-empty', 'read-off', 'read-unknown'):
+            with self.subTest(mode=mode):
+                self.calls.clear()
+                def engine(args, optional=False, **kwargs):
+                    if '/bin/tmux' in args and 'remain-on-exit' in args:
+                        setting = 'set-option' in args
+                        if mode == ('set-error' if setting else 'read-error'):
+                            raise subprocess.TimeoutExpired(args, 20)
+                        if mode == ('set-nonzero' if setting else 'read-nonzero'):
+                            return subprocess.CompletedProcess(args, 1, '', 'controlled refusal')
+                        if not setting and mode.startswith('read-'):
+                            return subprocess.CompletedProcess(args, 0, {'read-empty': '', 'read-off': 'off\n', 'read-unknown': 'unknown\n'}[mode], '')
+                    return self.engine(args, optional, **kwargs)
+                self.broker.run_engine = engine
+                with self.assertRaisesRegex(StopNotDispatched, 'retention could not be confirmed'):
+                    self.broker.stop_agent(SID)
+                self.assertFalse([c for c in self.calls if '/bin/bash' in c])
+                self.assertEqual(self.query('#{pane_dead} #{pane_pid}'), f'0 {pid}')
+                self.assertEqual(len(self.group(pid)), 3)
+
+    def test_deadline_expiring_during_retention_readback_never_signals(self):
+        pid = self.start_inner(); clock = [time.time()]
+        deadline = int(clock[0] * 1000) + 10_000
+        def engine(args, optional=False, **kwargs):
+            result = self.engine(args, optional, **kwargs)
+            if 'show-options' in args: clock[0] += 20
+            return result
+        self.broker.run_engine = engine
+        with patch('reverie.worker.time.time', side_effect=lambda: clock[0]), self.assertRaisesRegex(StopNotDispatched, 'expired before the signal'):
+            self.broker.stop_agent(SID, deadline)
+        self.assertFalse([c for c in self.calls if '/bin/bash' in c])
+        self.assertEqual(self.query('#{pane_dead} #{pane_pid}'), f'0 {pid}')
+
+    def test_pane_or_laptop_binding_changes_during_retention_never_signal(self):
+        pid = self.start_inner()
+        for mode in ('pane', 'binding', 'pane-error', 'pane-unknown'):
+            with self.subTest(mode=mode):
+                admitted = []; self.calls.clear(); self.broker.laptops[SID] = self.name
+                def engine(args, optional=False, **kwargs):
+                    if admitted and 'display-message' in args:
+                        if mode == 'pane-error': raise subprocess.TimeoutExpired(args, 20)
+                        if mode == 'pane-unknown': return subprocess.CompletedProcess(args, 0, '', '')
+                        if mode == 'pane': return subprocess.CompletedProcess(args, 0, f'0 {pid + 1}\n', '')
+                    result = self.engine(args, optional, **kwargs)
+                    if 'show-options' in args:
+                        admitted.append(True)
+                        if mode == 'binding': self.broker.laptops[SID] = 'different-laptop'
+                    return result
+                self.broker.run_engine = engine
+                with self.assertRaisesRegex(StopNotDispatched, 'changed before the stop signal|retention|state is unavailable'):
+                    self.broker.stop_agent(SID)
+                self.assertFalse([c for c in self.calls if '/bin/bash' in c])
+                self.assertEqual(self.query('#{pane_dead} #{pane_pid}'), f'0 {pid}')
 
     def test_refusals_before_the_signal_are_definitive_and_failures_after_it_are_not(self):
         self.broker.laptops.clear()
