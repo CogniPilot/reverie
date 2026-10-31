@@ -197,6 +197,9 @@ class Runtime:
                 "sessionName":self.session_name(backend)}
         if mode == "claude": body["model"] = profile["model"]
         else: body["openCodeConfig" if mode == "opencode" else "codexConfig"] = {"model":profile["model"]}
+        # The previous switch's prompt must not accompany this attempt's handoff or
+        # candidate if creation or the later memory-brief lookup is interrupted.
+        self.state.pop("first_prompt", None)
         self.state.update(handoff=handoff, requested_backend=backend, creation_uncertain=True)
         self.save()  # Persist BEFORE creating; an ambiguous response must not duplicate agents.
         value = self.api.call("POST", "/api/v1/quick-start", body)

@@ -368,6 +368,37 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(result["first_prompt"],self.api.brief+" Planned handoff")
         self.assertEqual(result["first_prompt"].count("Your memory:"),1)
 
+    def test_interrupted_new_brief_cannot_reuse_a_completed_switch_prompt(self):
+        previous=self.runtime.start("cloud","Previous handoff A")
+        self.runtime.activate(previous["session_id"])
+        self.assertEqual(self.reopen().state["first_prompt"],"Previous handoff A")
+        class Killed(BaseException): pass
+        with patch.object(self.runtime,"memory_brief",side_effect=Killed):
+            with self.assertRaises(Killed):
+                self.runtime.start("local","New handoff B\nKeep its exact text.")
+        saved=self.reopen().state
+        self.assertEqual((saved["current"],saved["candidate"],saved["creation_uncertain"]),
+                         ("new-1","new-2",False))
+        self.assertEqual(saved["handoff"],"New handoff B\nKeep its exact text.")
+        self.assertNotIn("first_prompt",saved)
+        with self.assertRaisesRegex(ValueError,"resolve the pending handoff"):
+            self.runtime.start("local","Do not duplicate the candidate")
+        self.assertEqual(len(self.api.posts()),2)
+
+    def test_uncertain_new_creation_does_not_persist_a_previous_prompt(self):
+        self.runtime.state["first_prompt"]="Previous handoff A"
+        self.runtime.save()
+        with patch.object(self.api,"call",side_effect=TimeoutError("ambiguous creation")) as called:
+            with self.assertRaises(TimeoutError):
+                self.runtime.start("cloud","New handoff B")
+        saved=self.reopen().state
+        self.assertTrue(saved["creation_uncertain"])
+        self.assertEqual(saved["handoff"],"New handoff B")
+        self.assertNotIn("first_prompt",saved)
+        with self.assertRaisesRegex(ValueError,"resolve the pending handoff"):
+            self.runtime.start("cloud","Do not retry an uncertain creation")
+        called.assert_called_once()
+
     def test_the_handoff_alone_when_the_brief_is_not_this_agents_to_read(self):
         # Another session (a watcher) or none: Reverie would answer with the caller's own brief, so it is not asked.
         for who in ("watcher", None):
