@@ -15,6 +15,7 @@ import {
   EmployeeSchema,
   employeeRestContext,
   effectiveCoreBeliefs,
+  EmployeePermissionsPatchSchema,
   EmployeePermissionsSchema,
   PronounsSchema,
   ResearchResultSchema,
@@ -735,7 +736,7 @@ export class CompanyService {
         sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
         dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
         voice: EmployeeVoiceSchema.nullable(),
-        permissions: EmployeePermissionsSchema.partial(),
+        permissions: EmployeePermissionsPatchSchema,
       })
       .partial()
       .strict()

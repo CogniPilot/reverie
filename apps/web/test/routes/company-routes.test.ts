@@ -72,6 +72,37 @@ describe('company HTTP ownership and expert invites', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('saves successive permission checkboxes without resetting other owner grants', async () => {
+    const employee = await service.hire(hireBody);
+    const url = `/api/company/employees/${employee.id}`;
+    const permissions = { recoverEmployees: false, moveOwnPlan: true, managePlans: false,
+      editBoardIssues: false, manageBoard: true, manageDecisions: false };
+    await service.store.update(state => { state.employees[0].permissions = { ...permissions }; });
+    const before = service.store.snapshot();
+    for (const headers of [{ 'x-reverie-parent-session': employee.sessionId }, { 'x-reverie-service-token': 'service' }]) {
+      expect((await app.inject({ method: 'PUT', url, headers, payload: { permissions: { managePlans: true } } })).statusCode).toBe(403);
+      expect(service.store.snapshot()).toEqual(before);
+    }
+    const save = async (patch: Record<string, boolean>) => {
+      const response = await app.inject({ method: 'PUT', url, payload: { permissions: patch } });
+      expect(response.statusCode).toBe(200);
+      Object.assign(permissions, patch);
+      expect(response.json().data.employee.permissions).toEqual(permissions);
+      expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
+    };
+    await save({ managePlans: true });
+    await save({ recoverEmployees: true });
+    await save({ moveOwnPlan: false });
+    await save({ recoverEmployees: false });
+    await save({ manageBoard: false });
+    const reloaded = new CompanyStore(service.store.file); await reloaded.init();
+    expect(reloaded.snapshot().employees[0].permissions).toEqual(permissions);
+    for (const patch of [{ managePlans: 'true' }, { unknownGrant: true }]) {
+      expect((await app.inject({ method: 'PUT', url, payload: { permissions: patch } })).statusCode).toBe(400);
+      expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
+    }
+  });
+
   it('reports current inherited Board grants without saving them, and returns explicit revocation after an owner edit', async () => {
     const employee = await service.hire(hireBody);
     const room = rooms.create('planning', undefined);

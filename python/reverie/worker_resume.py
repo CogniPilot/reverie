@@ -287,20 +287,31 @@ class HostWorkerResume:
                    value['operationId']==path.name and value['planDigest']==digest(private(path/'PLAN.json')) and
                    value['resultDigest']==digest(private(path/'RESULT.json')),'RESUME_HISTORY_UNCONFIRMED')
 
-    def _running(self, selected):
+    def _running(self, selected, *, deadline=None, pending=False):
         """Normal wake ACK alone cannot qualify a stale outer viewer."""
         from .worker_resources import effective_config, policy_digest
         from .worker_storage import storage_paths
         gate=self._gate()
-        with gate.admission():
-            rows=gate.native.inventory()
-            found=[r for r in rows if r['Config']['Labels'].get('reverie.employee')==selected['employeeId'] and
-                   r['Config']['Labels'].get('reverie.session')==selected['sessionId']]
+        with gate.admission(deadline=deadline):
+            rows=gate.native.inventory(deadline)
+            name=self.broker.config['deployment']+'-agent-'+selected['sessionId']
+            found=[r for r in rows if r['Config']['Labels'].get('reverie.employee')==selected['employeeId'] or
+                   r['Config']['Labels'].get('reverie.session')==selected['sessionId'] or r['Name']=='/'+name]
+            if not found and pending:return False
             R.need(len(found)==1,'RESUME_NATIVE_LAPTOP_REQUIRED');row=found[0]
             resources=effective_config(self.broker.config,selected['sessionId']);labels=row['Config']['Labels']
-            R.need(row['Image']==resources['image'] and labels.get('reverie.worker')==self.broker.config['deployment'] and
+            R.need(labels.get('reverie.employee')==selected['employeeId'] and
+                   labels.get('reverie.session')==selected['sessionId'] and
+                   labels.get('reverie.worker')==self.broker.config['deployment'],'RESUME_NATIVE_POLICY_CHANGED')
+            state=row['State']
+            R.need(type(state) is dict and set(state)=={'Running','Pid'} and type(state.get('Running')) is bool and
+                   type(state.get('Pid')) is int,'RESUME_NATIVE_STATE_UNKNOWN')
+            if pending and state['Running'] is False:
+                R.need(state['Pid']==0,'RESUME_NATIVE_STATE_UNKNOWN')
+                return False
+            R.need(row['Image']==resources['image'] and
                    labels.get('reverie.worker-policy')==policy_digest(self.broker.config,selected['sessionId']) and
-                   row['State']['Running']is True,'RESUME_NATIVE_POLICY_CHANGED')
+                   state['Running']is True,'RESUME_NATIVE_POLICY_CHANGED')
             _,native=gate.native.limits(row)
             R.need(native['memory']==resources['memoryMiB']*1024**2 and native['tasks']==resources['pidsLimit'],
                    'RESUME_NATIVE_LIMITS_CHANGED')
@@ -308,8 +319,19 @@ class HostWorkerResume:
             paths=storage_paths(self.broker.config,selected['sessionId'])
             R.need(paths.kind=='employee' and paths.identity==selected['employeeId'],'RESUME_STORAGE_BINDING_CHANGED')
             gate.native.storage(row,paths)
-            R.need(gate.native.inventory()==rows,'RESUME_NATIVE_CHANGED')
-        R.need(gate.native.inventory()==rows,'RESUME_TERMINAL_NATIVE_CHANGED')
+            R.need(gate.native.inventory(deadline)==rows,'RESUME_NATIVE_CHANGED')
+        R.need(gate.native.inventory(deadline)==rows,'RESUME_TERMINAL_NATIVE_CHANGED')
+        return True
+
+    def _await_running(self, selected, deadline, current):
+        """Observe startup after one ACK; never repeat a launch or hold admission while sleeping."""
+        while True:
+            current()
+            if self._running(selected,deadline=deadline,pending=True):
+                current();self._stream().website.final_code(deadline=deadline);current()
+                return
+            current()
+            self.broker.stopping.wait(min(.25,max(0,deadline-time.monotonic())))
 
     def describe(self, deadline):
         config_path,config_stamp=self._configuration()
@@ -416,12 +438,24 @@ class HostWorkerResume:
                         publish(path/('STEP-'+str(index)+'.json'),row)
                         self._time(plan,end)
                         R.need(stamp(config_path)==config_stamp,'RESUME_CONFIG_CHANGED')
+                        seat_end=min(end,time.monotonic()+120)
                         result=self._stream().call('wake',{'operationId':request['operationId'],'employee':row},
-                            min(end,time.monotonic()+120),expires_at=plan['expiresAt'])
+                            seat_end,expires_at=plan['expiresAt'])
                         exact(result,('employeeId','sessionId','generation','state'))
                         R.need(all(result[k]==row[k]for k in ('employeeId','sessionId','generation')) and
                                result['state']in('awakened','already-live'),'RESUME_WAKE_UNCONFIRMED')
-                        self._running(row)
+                        def startup_current():
+                            current();self._time(plan,seat_end);_parents_current(parents)
+                            R.need(R._identity(root)==plan['namespaceIdentity'] and
+                                   R._identity(path)==plan['operationIdentity'],'RESUME_OPERATION_DIRECTORY_CHANGED')
+                            R.need(stamp(path/'PLAN.json')==plan_stamp and stamp(root/'ACTIVE.json')==fence,
+                                   'RESUME_AUDIT_CHANGED')
+                            R.need(not self.broker.stopping.is_set(),'RESUME_BROKER_STOPPING')
+                            R.need(host_peer(credentials,self.broker.config['uid'])==process,'RESUME_HOST_PEER_CHANGED')
+                            R.need(stamp(config_path)==config_stamp,'RESUME_CONFIG_CHANGED')
+                            R.need(cohort(self.broker)==[{k:v for k,v in item.items()if k!='savedDigest'}
+                                for item in snapshot['cohort']],'RESUME_COHORT_CHANGED')
+                        self._await_running(row,seat_end,startup_current)
                         publish(path/('ACK-'+str(index)+'.json'),result);results.append(result)
                     R.need(stamp(root/'ACTIVE.json')==fence and stamp(path/'PLAN.json')==plan_stamp,'RESUME_AUDIT_CHANGED')
                     outcome={'version':1,'purpose':PURPOSE,'state':'RESUME_RESULTS_RECORDED',
@@ -429,7 +463,7 @@ class HostWorkerResume:
                     result_stamp=publish(path/'RESULT.json',outcome)
             # All operation/maintenance finalizers run while the unknown fence remains.
             for row in snapshot['cohort']:
-                if row['employeeId'] in selected:self._running(row)
+                if row['employeeId'] in selected:self._running(row,deadline=end)
             self._stream().website.final_code(deadline=end)
             company_path=Path(self.broker.config['companyFile']);company_stamp=stamp(company_path)
             R.need(cohort(self.broker)==[{k:v for k,v in item.items()if k!='savedDigest'}for item in snapshot['cohort']],
