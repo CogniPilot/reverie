@@ -38,6 +38,19 @@ function chatBadgeCount(n) {
 const CA_SHEET_MAX_WIDTH = 767;
 const CA_CARD_WIDTH = 280;
 
+/** Plain words for the reasons an expert's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
+const CA_WAKE_SKIPS = {
+  'recovery-in-progress': 'another recovery is running. Check their status when it ends',
+  'lifecycle-in-progress': 'a restart or office change is in progress for them',
+  'changed-or-stopping': 'they changed or are stopping',
+  'not-desired': 'they are out of office',
+  'disabled-or-retry-limited': 'a restart is running for them, or their wake limit (three in fifteen minutes) is reached',
+  'intentionally-ended': 'their session was ended on purpose. Use Restart session to resume it',
+  'no-owned-session-record': 'there is no saved session to start',
+  'not-previously-running': 'they were not running before',
+  'wake-failed': 'their agent did not start. Check Runtime settings, or use Restart session',
+};
+
 /** How long a woken member may take to start (be seen busy) before the "is typing" line is dropped, and the longest it ever shows. */
 const CA_TURN_START_MS = 45000;
 const CA_TURN_MAX_MS = 240000;
@@ -6567,6 +6580,7 @@ class ReverieChatApp {
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
       entries.push({ label: 'Runtime settings', run: () => this.openRuntimeSettings(employee) },
         { label: 'Edit profile', run: () => this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); }) });
+      entries.push({ label: 'Wake', disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before waking them' : '', tip: 'Start this expert if their agent is not running; a running agent is not interrupted', run: () => this.wakeEmployee(employee) });
       entries.push({ label: 'Restart session', danger: true, disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
       const returning = employee.onVacation === true;
       entries.push({ label: returning ? 'Enter office' : 'Leave office', success: returning, danger: !returning, run: () => returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee) });
@@ -6817,7 +6831,8 @@ class ReverieChatApp {
         this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); });
       }, { text: 'Edit profile' }));
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.humanSelf?.role === 'owner' && ['dead', 'disconnected'].includes(this.employeeHealth(employee).state) && !this.employeeHealth(employee).viewerOnly)
-      actions.append(this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
+      actions.append(this.button('ca-btn', `Wake ${employee.name}`, () => { this.closeProfile(); void this.wakeEmployee(employee); }, { text: 'Wake' }),
+        this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
     if (employee && (this.employeeHealth(employee).viewerOnly || this.canReconnectEmployee(employee)))
       actions.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
@@ -7257,6 +7272,35 @@ class ReverieChatApp {
     } catch {
       this.toast(applied ? `${employee.name}’s office status was saved. Reopen Company to refresh the view.` : 'Office status could not be confirmed. Check Company for the current state.', 'error');
     } finally { this._changingOfficeEmployees.delete(employee.id); }
+  }
+
+  /**
+   * Wake: start an expert whose agent is not running, through the same scoped recovery the CLI's agent wake-employee uses.
+   * It never interrupts a running agent, and never retries: the server decides (owner, vacation, wake budget) and its
+   * awakened/skipped report is shown as it is. An answer that cannot be confirmed says so, so the owner checks first.
+   */
+  async wakeEmployee(employee, onSaved) {
+    this._wakingEmployees ||= new Set();
+    if (this._wakingEmployees.has(employee.id)) return this.toast(`A wake is already in progress for ${employee.name}.`, 'info');
+    this._wakingEmployees.add(employee.id);
+    const unconfirmed = () => this.toast(`Wake for ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
+    try {
+      let result;
+      try { result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/wake`, { method: 'POST', body: {} }); }
+      catch { return unconfirmed(); }
+      // A missing HTTP response cannot tell us whether the POST committed.
+      if (!result.ok) return result.status ? this.toast(result.error || `${employee.name} could not be woken.`, 'error') : unconfirmed();
+      const recovery = result.data?.recovery;
+      const ours = Array.isArray(recovery?.awakened) && Array.isArray(recovery?.skipped) && recovery.awakened.length + recovery.skipped.length <= 1
+        && recovery.awakened.every(id => id === employee.id)
+        && recovery.skipped.every(skip => skip?.employeeId === employee.id && typeof skip.reason === 'string' && skip.reason.length > 0 && skip.reason.length <= 200);
+      if (!ours) return unconfirmed();
+      try { await this.loadOwner(); await onSaved?.(); } catch { /* the wake itself is settled; the view refreshes on the next load */ }
+      if (recovery.awakened.length) return this.toast(`Woke ${employee.name}. Check that their terminal is ready.`, 'info');
+      if (!recovery.skipped.length) return this.toast(`${employee.name} is already running. Nothing was started.`, 'info');
+      const reason = recovery.skipped[0].reason;
+      this.toast(`${employee.name} was not woken: ${CA_WAKE_SKIPS[reason] ?? reason}.`, 'error');
+    } finally { this._wakingEmployees.delete(employee.id); }
   }
 
   async openEmployeeRestart(employee, onSaved) {
@@ -7958,7 +8002,10 @@ class ReverieChatApp {
       const retirement = this.el('details', 'ca-company-retirement');
       retirement.append(this.el('summary', 'ca-hint', 'Remove from company'),
         this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' }));
-      lifecycle.append(restart, officeLabel);
+      const wake = this.button('ca-btn', `Wake ${employee.name}`, () => this.wakeEmployee(employee, onSaved), { text: 'Wake' });
+      wake.disabled = restart.disabled;
+      wake.title = restart.disabled ? 'Bring this expert into the office before waking them.' : 'Start this expert if their agent is not running. A running agent is not interrupted.';
+      lifecycle.append(wake, restart, officeLabel);
       if (leave) lifecycle.append(leave);
       lifecycle.append(this.el('span', 'ca-hint', 'Off stays off until you switch it on.'), retirement);
       host.append(lifecycle, lifecycleError);
