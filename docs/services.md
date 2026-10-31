@@ -265,8 +265,10 @@ The normal host-resume website peer also accepts the tracked authenticated
 startup form `reverie web --host 0.0.0.0 --port 3000 --service-auth-config
 /absolute/private/config.json`, optionally followed by `--resource-replacement`.
 The selected path comes only from the existing container's native `Config.Cmd`;
-the actual measured Node entry must have exactly those arguments. Duplicate,
-unknown, reordered or aliased arguments refuse. Full container metadata,
+the actual measured Node entry must have exactly those arguments. In this
+authenticated form, duplicate, unknown or reordered options and lexically
+aliased path arguments refuse. The four historical no-auth program variants
+remain unchanged. Full container metadata,
 including command and environment, is rechecked at every peer/final-code guard.
 This neither reads service keys nor issues grants: the website's existing
 trusted-file loader and canonical service authorization remain responsible for
