@@ -888,7 +888,7 @@ class _CapacityProbe:
                          'H_LIFECYCLE_CREATED_BINDING_CHANGED')
                 # Keep every Mount/limit/state fact; do not return Env/argv.
                 value={key:row[key] for key in ('Id','Name','Image','State','Mounts','HostConfig')}
-                value['Config']={'Labels':row['Config'].get('Labels')}
+                value['Config']={'Labels':row['Config'].get('Labels'),'User':row['Config'].get('User')}
                 output.append(json.dumps(value,separators=(',',':'),allow_nan=False))
             raw='\n'.join(output)
         need(len(raw.encode())<=MAX_NATIVE_BYTES and time.monotonic()<end,'H_LIFECYCLE_CAPACITY_DEADLINE')
