@@ -1,5 +1,5 @@
 /**
- * A member's shown focus follows the Board (card i-453e512d): room views carry each employee member's own 'doing'
+ * A member's shown focus follows the Board: room views carry each employee member's own 'doing'
  * cards, earliest end first (three, then a count), read from the Board on every view and never stored on the
  * membership. A goal the member set itself still wins; without one, its first 'doing' card stands in. A saved Board
  * write re-announces only the rooms whose members' cards moved.

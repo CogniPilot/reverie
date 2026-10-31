@@ -1,5 +1,5 @@
 /**
- * The server wiring behind each member's 'doing'-card focus (card i-453e512d), on a real WebServer: every committed
+ * The server wiring behind each member's 'doing'-card focus, on a real WebServer: every committed
  * Board write reaches the chat service, the Board copy the chat service reads follows each revision, a refused write
  * announces nothing, and a listener that throws never undoes the write. The suite's setup gives it a temporary HOME.
  */

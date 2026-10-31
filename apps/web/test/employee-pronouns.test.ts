@@ -1,6 +1,6 @@
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
- * Employee pronouns (card i-f5b288f8): an optional one-line field on the employee record that only the owner sets
+ * Employee pronouns: an optional one-line field on the employee record that only the owner sets
  * (PUT /api/company/employees/:id, null clears it). An agent can neither set them on itself (/api/company/self stays
  * name and icon) nor on anyone else; `reverie agent profile --pronouns` only posts a proposal line in the room, which
  * remains a chat message. Room views and `agent chat who` carry them where known; editing uses the owner profile form.

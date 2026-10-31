@@ -1,5 +1,5 @@
 /**
- * Laptop memory from the Company profile (card i-b48a4678): the owner previews a memory change through the protected
+ * Laptop memory from the Company profile: the owner previews a memory change through the protected
  * replacement routes (POST /api/company/resources/preview, apply, result), sees the limits that are kept, and restarts
  * the laptop with a handoff note. Apply is sent once and never retried; an unconfirmed answer says to check first.
  * The section exists only when the server reports the routes (resourceReplacement), and only to the verified owner.
