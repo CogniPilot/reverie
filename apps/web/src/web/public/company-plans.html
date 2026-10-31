@@ -824,8 +824,12 @@ function burnChart(svg, p) {
   const resetLabel5h = reset5h === null ? 'Reset time unavailable' : 'Reset ' + stamp5h(reset5h) + (outside5h ? ' (outside plotted week)' : '');
   const summary5h = '5h: ' + (used5h === null ? 'usage unavailable' : used5h + '% used · ' + Math.round((100 - used5h) * 10) / 10 + '% remaining · 100% cap') + '. ' + resetLabel5h + '. ' + (stale5h ? 'Last reported; refresh required. ' : '') + (asOf5h === null ? 'Reading time unavailable.' : 'As of ' + stamp5h(asOf5h) + '.');
   const explanation5h = 'Weekly usage and the 5h snapshot are percentages of their own window limits; no quota conversion or five-hour usage history is shown.';
+  // When the reading, cap and reset are all drawn, the legend says what they are; the words stay in the hover titles
+  // and the label. Text under the plot appears only for what the lines cannot show: unavailable, stale or out of view.
+  const drawn5h = weeklyRange && used5h !== null && reset5h !== null && !outside5h && !stale5h
+    && asOf5h !== null && asOf5h >= p.weekStart && asOf5h <= p.reset;
   const status = svg.parentElement?.querySelector('.plan-five-hour-status');
-  if (status) status.textContent = summary5h;
+  if (status) { status.textContent = drawn5h ? '' : summary5h; status.hidden = drawn5h; }
   svg.setAttribute?.('aria-label', 'Weekly usage with 5-hour cap and reset. ' + summary5h + ' ' + explanation5h);
   if (!weeklyRange) { svg.innerHTML = `<title>${esc(summary5h + ' ' + explanation5h)}</title><text x="28" y="60" fill="${css('--muted')}" font-size="11">Weekly time range unavailable</text>`; return; }
   const s = p.weekStart;

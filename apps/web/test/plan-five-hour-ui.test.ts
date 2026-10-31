@@ -19,6 +19,18 @@ it.each([0,40,100])('plots actual %s%% reading plus horizontal cap and real rese
  expect(doc.body.textContent).toContain(`${100-used}% remaining`);expect(svg.getAttribute('aria-label')).toContain('100% cap');expect(svg.getAttribute('aria-label')).toContain('percentages of their own window limits');
  expect(svg.querySelectorAll('.five-hour-markers polyline,.five-hour-markers polygon,.five-hour-markers rect')).toHaveLength(0);expect(svg.querySelectorAll('polyline')).toHaveLength(1);expect(svg.querySelector('polyline')!.getAttribute('points')).toContain('68.6');
  expect(doc.querySelectorAll('svg')).toHaveLength(1);
+ // Everything is drawn, so the legend explains it: no text under the plot, the words stay in the label and hover titles.
+ const status=doc.querySelector<HTMLElement>('.plan-five-hour-status')!;expect(status.hidden).toBe(true);expect(status.textContent).toBe('');
+ expect(svg.querySelector('.five-hour-markers > title')!.textContent).toContain(`${100-used}% remaining`);expect(svg.querySelectorAll('.five-hour-markers text')).toHaveLength(0);
+});
+it.each([
+ ['stale',{used:80,reset:NOW-1,asOf:NOW-HOUR,stale:false},'refresh required'],
+ ['reset outside the week',{used:25,reset:END+HOUR,asOf:NOW},'outside plotted week'],
+ ['no reset time',{used:10,reset:null,asOf:NOW},'Reset time unavailable'],
+ ['reading time unknown',{used:10,reset:NOW+HOUR,asOf:null},'Reading time unavailable'],
+ ['no reading',undefined,'usage unavailable'],
+])('keeps the text under the plot when the lines cannot show it: %s',(_label,reading,words)=>{
+ const status=render(reading).querySelector<HTMLElement>('.plan-five-hour-status')!;expect(status.hidden).toBe(false);expect(status.textContent).toContain(words);
 });
 it.each([undefined,{used:null},{used:-1},{used:101},{used:Infinity},{used:'40'}])('does not substitute weekly use or fabricated 5h history for unavailable data %j',reading=>{
  const doc=render(reading);expect(doc.querySelector('.plan-five-hour-status')!.textContent).toContain('usage unavailable');expect(doc.querySelector('.five-hour-reading')).toBeNull();expect(doc.querySelector('.five-hour-markers')).toBeNull();expect(doc.querySelector('polyline')).not.toBeNull();
