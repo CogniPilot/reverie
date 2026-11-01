@@ -462,8 +462,10 @@ test("Delivery-format contract, DM privacy, the turn clock and the web taint", a
     const hooks = await plugin.ReveriePlugin({ directory: dir, serverUrl: new URL("http://127.0.0.1:1234"),
       client: { app: { log: async () => {} }, session: { messages: async () => ({data: messages}) } } });
     const system = async () => { const out = {system: ["base"]}; await hooks["experimental.chat.system.transform"]({sessionID: "s1"}, out); return out.system[0]; };
+    // Pin both seasons: the host's current date can legitimately be EST or EDT.
+    globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : ["2026-10-17T14:31:00Z"])); } static now() { return new RealDate("2026-10-17T14:31:00Z").getTime(); } };
     const first = await system();
-    assert.match(first, /Current time: .*EDT; .*UTC\./);
+    assert.match(first, /Current time: Saturday, 10\/17\/2026, 10:31 EDT; Saturday, 10\/17\/2026, 14:31 UTC\./);
     globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : ["2027-01-04T09:00:00Z"])); } static now() { return new RealDate("2027-01-04T09:00:00Z").getTime(); } };
     assert.match(await system(), /Monday, 01\/04\/2027, 04:00 EST; Monday, 01\/04\/2027, 09:00 UTC/);   // fresh each turn
     globalThis.Date = RealDate;

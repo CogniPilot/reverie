@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyRequest } from 'fastify';
+import { performance } from 'node:perf_hooks';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ownPlanRecovery, OwnPlanRecoveries } from '../src/agent-plan-recovery.js';
-import { PlanMoves, type PlanMoveRecord } from '../src/plan-move.js';
+import { PlanMoves, PlanMoveComposerNotReady, type PlanMoveRecord } from '../src/plan-move.js';
 import { PlanMoveRequests, type PlanRequestRecord } from '../src/plan-request.js';
 import { PlanMoveStore } from '../src/plan-move-store.js';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
@@ -154,7 +155,7 @@ describe('current holder own existing plan recovery', () => {
       const success = await app.inject({ method: 'POST', url: '/api/plans/agent-moves/existing/resolve', headers,
         payload: { action: 'adopt-existing', ...expected } });
       expect(success.statusCode).toBe(202); expect(success.json().recovery.state).toBe('waiting-for-idle');
-      for (let n = 0; n < 50 && (await j.moves.get('existing'))?.phase !== 'completed'; n++)
+      for (let n = 0; n < 1000 && (await j.moves.get('existing'))?.phase !== 'completed'; n++)
         await new Promise(resolve => setTimeout(resolve, 10));
       expect((await j.moves.get('existing'))?.phase).toBe('completed');
       expect(h.runtime.cleanup).not.toHaveBeenCalled();
@@ -275,5 +276,188 @@ describe('request readers cannot publish provisional plain adoption', () => {
       expect(saved.some(rows => rows.some(row => row.phase === 'completed'))).toBe(false);
       expect((await new PlanMoveStore(j.store.file).load())[0].phase).toBe('recovery-required');
     }
+  });
+});
+
+
+describe('native composer readiness before one self recovery transaction', () => {
+  it('waits with isWorking=false until the actual composer mark appears, then adopts once through the real route and journal', async () => {
+    const h = fixture(), j = await journal(h), app = Fastify();
+    h.session.isWorking = false; // SDK/tool turns can be busy without this cached flag
+    h.runtime.mux.capturePaneText.mockReturnValue('Tool execution is still in progress');
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    registerPlanMoveRoutes(app, j.moves, { authSessions: null }, undefined, undefined, undefined, req => ownPlanRecovery(req, h.runtime));
+    const headers = h.request.headers as Record<string, string>;
+    try {
+      const accepted = await app.inject({ method: 'POST', url: '/api/plans/agent-moves/existing/resolve', headers,
+        payload: { action: 'adopt-existing', ...expected } });
+      expect(accepted.statusCode).toBe(202);
+      await new Promise(done => setTimeout(done, 50));
+      const pending = await app.inject({ method: 'POST', url: '/api/plans/agent-moves/existing/status', headers, payload: {} });
+      expect(pending.json().recovery.state).toBe('waiting-for-idle');
+      expect(pending.json().data.phase).toBe('recovery-required');
+      expect(resolve).not.toHaveBeenCalled();
+      expect((await readdir(j.directory)).some(name => name.endsWith('.pending.json'))).toBe(false);
+      h.runtime.mux.capturePaneText.mockReturnValue(composerReadyMark('codex'));
+      await vi.waitFor(async () => {
+        const status = await app.inject({ method: 'POST', url: '/api/plans/agent-moves/existing/status', headers, payload: {} });
+        expect(status.json().recovery.state).toBe('completed');
+        expect(status.json().data.phase).toBe('completed');
+      }, { timeout: 10_000, interval: 25 });
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect((await new PlanMoveStore(j.store.file).load())[0].phase).toBe('completed');
+      expect(h.runtime.cleanup).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+});
+
+
+const strictClaudeHUD = [
+  'Goal active · generic task',
+  '──────────────────── generic-worker ─',
+  '❯ ',
+  '────────────────────────────────────',
+  'Generic model · usage 12%',
+  '⏵⏵ bypass permissions on · 1 shell · 1 feedback draft',
+].join('\n');
+function claudeFixture() {
+  const h = fixture();
+  h.session.mode = 'claude';
+  h.session.toState = () => ({ mode: 'claude', workingDir: '/synthetic' });
+  h.runtime.plans.account.mockResolvedValue({ provider: 'anthropic', id: 'target', profileId: 'target' });
+  h.runtime.mux.capturePaneText.mockReturnValue(strictClaudeHUD);
+  return h;
+}
+async function awaitOwnRecovery(queue: OwnPlanRecoveries): Promise<void> {
+  await vi.waitFor(() => expect(['completed', 'refused']).toContain(queue.status('existing', 'expert')?.state),
+    { timeout: 10_000, interval: 25 });
+}
+
+describe('strict runtime composer readiness and bounded preflight', () => {
+  it('adopts the confirmed Claude task footer without the historical marker or any input', async () => {
+    const h = claudeFixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    expect(strictClaudeHUD).not.toContain('shift+tab');
+    queue.enqueue(h.record, expected, j.actor);
+    try {
+      await awaitOwnRecovery(queue);
+      expect(queue.status('existing', 'expert')?.state).toBe('completed');
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect((await new PlanMoveStore(j.store.file).load())[0].phase).toBe('completed');
+      expect(h.runtime.cleanup).not.toHaveBeenCalled();
+    } finally { await queue.close(); }
+  });
+  it.each(['draft', 'dialog', 'busy', 'shell', 'history', 'codex'] as const)('never verifies %s as the new Claude composer', async kind => {
+    const h = claudeFixture();
+    if (kind === 'draft') h.runtime.mux.capturePaneText.mockReturnValue(strictClaudeHUD.replace('❯ ', '❯ unsent draft'));
+    if (kind === 'dialog') (h.session as { paneDialog?: string }).paneDialog = 'trust';
+    if (kind === 'busy') h.session.isWorking = true;
+    if (kind === 'shell') h.runtime.mux.capturePaneText.mockReturnValue('$ printf "❯"\n$ ');
+    if (kind === 'history') h.runtime.mux.capturePaneText.mockReturnValue(strictClaudeHUD + '\n$ ');
+    if (kind === 'codex') {
+      h.session.mode = 'codex'; h.session.toState = () => ({ mode: 'codex', workingDir: '/synthetic' });
+      h.runtime.plans.account.mockResolvedValue({ provider: 'openai', id: 'target', profileId: 'target' });
+    }
+    await expect(h.capture()!.executor.verifyRecovery!(h.record)).rejects.toBeInstanceOf(PlanMoveComposerNotReady);
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+  it.each(['capability', 'capture-unknown', 'account', 'source-live'] as const)('immediately refuses %s rather than polling an unknown/permanent failure', async kind => {
+    const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    h.runtime.mux.capturePaneText.mockReturnValue('No composer yet');
+    if (kind === 'capability') h.runtime.mux.capturePaneText = undefined;
+    if (kind === 'capture-unknown') h.runtime.mux.capturePaneText.mockReturnValue(undefined);
+    if (kind === 'account') h.runtime.plans.allocations.mockResolvedValue({ accounts: [] });
+    if (kind === 'source-live') h.runtime.sessions.set('source', { ...h.session, id: 'source' });
+    queue.enqueue(h.record, expected, j.actor);
+    try {
+      await awaitOwnRecovery(queue);
+      expect(queue.status('existing', 'expert')?.state).toBe('refused');
+      expect(resolve).not.toHaveBeenCalled();
+      expect((await readdir(j.directory)).some(name => name.endsWith('.pending.json'))).toBe(false);
+    } finally { await queue.close(); }
+  });
+  it.each(['grant', 'sid', 'generation', 'off'] as const)('rechecks %s while waiting for native readiness', async kind => {
+    const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    h.runtime.mux.capturePaneText.mockReturnValue('Tool turn has not reached its composer');
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    queue.enqueue(h.record, expected, j.actor);
+    try {
+      await vi.waitFor(() => expect(h.runtime.mux.capturePaneText).toHaveBeenCalled(), { timeout: 10_000 });
+      if (kind === 'grant') h.employee.permissions.moveOwnPlan = false;
+      if (kind === 'sid') h.employee.sessionId = 'retargeted';
+      if (kind === 'generation') h.employee.sessionGeneration++;
+      if (kind === 'off') h.employee.desiredRunning = false;
+      await awaitOwnRecovery(queue);
+      expect(queue.status('existing', 'expert')?.state).toBe('refused');
+      expect(resolve).not.toHaveBeenCalled();
+      expect((await j.moves.get('existing'))?.phase).toBe('recovery-required');
+    } finally { await queue.close(); }
+  });
+  it('does not retry resolve when readiness disappears after pending/audit mutation', async () => {
+    const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    h.runtime.chat.auditEntry.mockImplementation(async () => { h.runtime.mux.capturePaneText.mockReturnValue('busy again'); });
+    queue.enqueue(h.record, expected, j.actor);
+    try {
+      await awaitOwnRecovery(queue);
+      expect(queue.status('existing', 'expert')?.state).toBe('refused');
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect((await readdir(j.directory)).some(name => name.endsWith('.pending.json'))).toBe(true);
+      expect((await readdir(j.directory)).some(name => name.endsWith('.verified.json'))).toBe(false);
+      h.runtime.mux.capturePaneText.mockReturnValue(composerReadyMark('codex'));
+      await new Promise(done => setTimeout(done, 550));
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect((await j.moves.get('existing'))?.phase).toBe('recovery-required');
+    } finally { await queue.close(); }
+  });
+  it('does not renew the monotonic five-minute fence after delayed idle, even before a timer callback can run', async () => {
+    const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    let release!: () => void;
+    j.actor.executor.idle = async () => { await new Promise<void>(done => { release = done; }); };
+    try {
+      queue.enqueue(h.record, expected, j.actor);
+      now = 5 * 60_000 + 1; release();
+      await awaitOwnRecovery(queue);
+      expect(queue.status('existing', 'expert')?.error).toContain('five minutes');
+      expect(resolve).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); await queue.close(); }
+  });
+  it('bounds an unresponsive read-only verifier and aborts it on shutdown without starting a transaction', async () => {
+    const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    let entered!: () => void;
+    const reading = new Promise<void>(done => { entered = done; });
+    h.runtime.plans.allocations.mockImplementation(async () => { entered(); return new Promise(() => {}); });
+    queue.enqueue(h.record, expected, j.actor);
+    await reading;
+    await queue.close();
+    expect(queue.status('existing', 'expert')?.state).toBe('refused');
+    expect(resolve).not.toHaveBeenCalled();
+    expect((await j.moves.get('existing'))?.phase).toBe('recovery-required');
+  });
+});
+
+
+describe('one actual abort timer for a stalled readonly preflight', () => {
+  it('expires the whole wait after five minutes without invoking core recovery', async () => {
+    const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
+    const resolve = vi.spyOn(j.moves, 'resolve');
+    let entered!: () => void;
+    const reading = new Promise<void>(done => { entered = done; });
+    h.runtime.plans.allocations.mockImplementation(async () => { entered(); return new Promise(() => {}); });
+    vi.useFakeTimers();
+    try {
+      queue.enqueue(h.record, expected, j.actor);
+      await reading;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(queue.status('existing', 'expert')?.state).toBe('refused');
+      expect(queue.status('existing', 'expert')?.error).toContain('five minutes');
+      expect(resolve).not.toHaveBeenCalled();
+      await queue.close();
+    } finally { vi.useRealTimers(); await queue.close(); }
   });
 });

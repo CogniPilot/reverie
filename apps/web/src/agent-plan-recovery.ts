@@ -1,7 +1,9 @@
 /** Own journal recovery grants no launch, stop, cancellation or account-edit authority. */
+import { setTimeout as delay } from 'node:timers/promises';
+import { performance } from 'node:perf_hooks';
 import type { FastifyRequest } from 'fastify';
 import { isMultiUserMode } from './config/multiuser.js';
-import { PlanMoveError, type PlanMoveExecutor, type PlanMoveRecord, type PlanMoves } from './plan-move.js';
+import { PlanMoveError, PlanMoveComposerNotReady, type PlanMoveExecutor, type PlanMoveRecord, type PlanMoves } from './plan-move.js';
 import { planMoveExecutor, type PlanMoveRuntime } from './plan-move-runtime.js';
 import { ownerFor, resolveParentSessionId } from './web/route-helpers.js';
 
@@ -47,6 +49,18 @@ export function ownPlanRecovery(request: FastifyRequest,
   return { employeeId: eid, sessionId: id, owner, assertCurrent, executor };
 }
 
+/** Abort only read-only waits. Never race a journal mutation or its durable ACK. */
+async function readBeforeAbort<T>(read: Promise<T>, signal: AbortSignal): Promise<T> {
+  let aborted!: () => void;
+  const stop = new Promise<never>((_resolve, reject) => {
+    aborted = () => reject(signal.reason);
+    if (signal.aborted) aborted();
+    else signal.addEventListener('abort', aborted, { once: true });
+  });
+  try { return await Promise.race([read, stop]); }
+  finally { signal.removeEventListener('abort', aborted); }
+}
+
 export interface OwnRecoveryStatus {
   state: 'waiting-for-idle' | 'verifying' | 'completed' | 'refused';
   error?: string;
@@ -79,29 +93,58 @@ export class OwnPlanRecoveries {
       throw new PlanMoveError('Recovery requires durable source-cleanup proof and an existing destination; retain the journal hold');
     for (const [id, job] of this.jobs) if (['completed', 'refused'].includes(job.status.state)) this.jobs.delete(id);
     if (this.jobs.size >= 100) throw new PlanMoveError('Recovery waiters are full', 503);
+    const recoveryRecord = Object.freeze({ ...record });
     const abort = new AbortController();
+    const deadlineAt = performance.now() + 5 * 60_000;
+    // One deadline includes the initial cached-idle wait AND native readiness.
+    // It never resets for another probe, duplicate enqueue, or core verification.
+    const expire = () => abort.abort(new PlanMoveError(
+      'Verified composer readiness timed out after five minutes; the existing move remains held'
+    ));
+    const deadline = setTimeout(expire, 5 * 60_000);
+    deadline.unref();
     const job = { tuple, employeeId: actor.employeeId, status: { state: 'waiting-for-idle' } as OwnRecoveryStatus,
       abort, done: Promise.resolve() };
     this.jobs.set(record.id, job);
+    const assertWaiting = () => {
+      // A synchronous native observation can delay timer delivery. The monotonic
+      // fence still prevents entering a mutation after the original deadline.
+      if (performance.now() >= deadlineAt && !abort.signal.aborted) expire();
+      abort.signal.throwIfAborted(); actor.assertCurrent();
+    };
     const executor = { ...actor.executor, verifyRecovery: async (row: Readonly<PlanMoveRecord>) => {
-      abort.signal.throwIfAborted(); actor.assertCurrent();
-      const fence = await actor.executor.verifyRecovery!(row);
-      abort.signal.throwIfAborted(); actor.assertCurrent();
-      return () => { abort.signal.throwIfAborted(); actor.assertCurrent(); fence(); };
+      assertWaiting();
+      const fence = await readBeforeAbort(actor.executor.verifyRecovery!(row), abort.signal);
+      assertWaiting();
+      return () => { assertWaiting(); fence(); };
     } };
     job.done = (async () => {
       try {
-        // Existing idle() holds its original five-minute deadline, checks fresh
-        // authorization each wait, and never launches or sends provider input.
-        await actor.executor.idle(actor.sessionId, abort.signal);
-        abort.signal.throwIfAborted(); actor.assertCurrent();
+        // isWorking can be false during an SDK/tool turn. Wait read-only for
+        // the actual verified composer, while retaining the one overall deadline.
+        await readBeforeAbort(actor.executor.idle(actor.sessionId, abort.signal), abort.signal);
+        while (true) {
+          assertWaiting();
+          try {
+            const ready = await executor.verifyRecovery(recoveryRecord);
+            assertWaiting(); ready();
+            break;
+          } catch (error) {
+            assertWaiting();
+            if (!(error instanceof PlanMoveComposerNotReady)) throw error;
+          }
+          await delay(500, undefined, { signal: abort.signal });
+        }
+        assertWaiting();
         job.status = { state: 'verifying' };
+        // Exactly one mutation attempt. A later refusal/uncertain ACK is never
+        // fed back into the readiness loop, even if it has the readiness type.
         await this.moves.resolve(moveId, target, actor.owner, executor);
         // Successful durable ACK is the commitpoint; no post-ACK rollback.
         job.status = { state: 'completed' };
       } catch (error) {
         job.status = { state: 'refused', error: error instanceof PlanMoveError ? error.message : 'Recovery was not confirmed; inspect the existing move before any further action' };
-      }
+      } finally { clearTimeout(deadline); }
     })();
     return { state: 'waiting-for-idle' };
   }

@@ -137,6 +137,16 @@ export class PlanMoveError extends Error {
   }
 }
 
+/** Only a supported, currently observed composer that is not yet ready is retryable.
+ * Unknown capability, account, binding and source-cleanup failures remain ordinary refusals.
+ */
+export class PlanMoveComposerNotReady extends PlanMoveError {
+  constructor() {
+    super('The existing candidate is not at its verified composer');
+    this.name = 'PlanMoveComposerNotReady';
+  }
+}
+
 export class PlanMoves {
   private records = new Map<string, PlanMoveRecord>();
   private locked = new Set<string>();
