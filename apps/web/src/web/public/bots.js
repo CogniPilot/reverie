@@ -30,6 +30,12 @@
     credentialBusy = false;
   let credentialEpoch = 0;
   let watchCadenceEdited = false;
+  /** The disk-space watch status from GET /api/bot-watches (data.disk), or null while unavailable. */
+  let disk = null,
+    diskError = '',
+    diskBusy = false;
+  /** The bot the disk panel creates when no existing bot may post in the chosen channel. */
+  const DISK_BOT = { id: 'disk-alarm', name: 'Disk Alarm', icon: '💾', maxPerHour: 6 };
   const requests = new Set();
   const terminal = new Set(['posted', 'failed', 'skipped', 'prompt_sent']);
   const active = (run) => run.finishedAt === null && !terminal.has(run.status);
@@ -198,7 +204,7 @@
     busy = true;
     byId('refresh').disabled = true;
     try {
-      const [bots, jobs, runs, rooms, company, executing, watchers, tokenMetadata] = await Promise.all([
+      const [bots, jobs, runs, rooms, company, executing, watchers, tokenMetadata, watches] = await Promise.all([
         api('chat-bots'),
         api('cron/jobs'),
         api('cron/runs'),
@@ -212,6 +218,10 @@
         api('publication/tokens').then(
           (data) => ({ data }),
           () => ({ data: null })
+        ),
+        api('bot-watches').then(
+          (data) => ({ data }),
+          (error) => ({ error })
         ),
       ]);
       if (closed) return;
@@ -248,6 +258,7 @@
           watchError = 'Repository watcher data is unavailable. Refresh to try again.';
         }
       }
+      acceptDisk(watches);
       byId('status').className = '';
       byId('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
       render();
@@ -264,6 +275,8 @@
           : 'Repository watchers are unavailable. Refresh to try again.';
       for (const id of ['summary', 'routines', 'bots', 'history', 'github-watches']) byId(id).replaceChildren();
       renderWatchers();
+      acceptDisk({ error });
+      renderDisk();
     } finally {
       busy = false;
       byId('refresh').disabled = false;
@@ -623,9 +636,111 @@
     go.textContent = 'Done';
     await refresh();
   }
+  function acceptDisk(result) {
+    const status = result?.data?.disk;
+    if (result?.error || !status || typeof status !== 'object') {
+      disk = null;
+      diskError =
+        result?.error?.status === 403
+          ? 'Sign in as the owner to manage the disk alarm.'
+          : 'The disk alarm is unavailable. Refresh to try again.';
+    } else if (status.state === 'HOLD') {
+      disk = null;
+      diskError = 'The disk alarm is held until the server reconciles its state.';
+    } else {
+      disk = status;
+      diskError = '';
+    }
+  }
+  const levelLabel = { ok: 'OK', warn: 'Warning', critical: 'Critical' };
+  function renderDisk() {
+    const config = disk?.config;
+    const bot = config && snapshot?.bots.find((b) => b.id === config.botId);
+    byId('disk-status').textContent =
+      diskError ||
+      (!config
+        ? 'The disk alarm is not set up.'
+        : `${config.enabled ? 'On' : 'Off'}: warns at ${config.warnPercent}%, critical at ${config.criticalPercent}%, ` +
+          `checked every ${config.intervalMinutes} min, posts in #${snapshot ? roomName(config.roomId) : config.roomId}` +
+          ` as ${bot?.name || config.botId}${config.mention ? `, mentioning @${config.mention}` : ''}.`);
+    const volumes = Object.values(disk?.volumes || {});
+    const notes = [];
+    if (disk?.failures) notes.push(node('p', `Disk readings failed ${disk.failures} time(s) in a row.`, 'github-watch-error'));
+    if (disk && disk.durable === false)
+      notes.push(node('p', 'Alarm state is not being saved; alarms continue until the server restarts.', 'github-watch-error'));
+    byId('disk-volumes').replaceChildren(
+      ...volumes.map((volume) => {
+        const element = node('article', undefined, 'card');
+        element.append(
+          node('h3', (volume.labels || []).join(' / ') || 'Disk'),
+          node('p', levelLabel[volume.level] || 'Unknown', 'github-watch-detail')
+        );
+        return element;
+      }),
+      ...notes
+    );
+    const edit = byId('disk-edit'),
+      toggle = byId('disk-toggle');
+    edit.textContent = config ? 'Edit disk alarm' : 'Set up the disk alarm';
+    edit.disabled = !snapshot || !disk || diskBusy;
+    toggle.hidden = !config;
+    toggle.textContent = config?.enabled ? 'Turn off' : 'Turn on';
+    toggle.disabled = !snapshot || !disk || diskBusy;
+  }
+  /** Bots that may post in the room, plus the dedicated disk bot when it cannot yet. */
+  function fillDiskBots(selected) {
+    const form = byId('disk-form'),
+      roomId = form.elements.roomId.value;
+    const allowed = (snapshot?.bots || []).filter((bot) => bot.rooms.includes(roomId));
+    const options = allowed.map((bot) => new Option(bot.name, bot.id));
+    if (!allowed.some((bot) => bot.id === DISK_BOT.id)) {
+      const existing = snapshot?.bots.some((bot) => bot.id === DISK_BOT.id);
+      options.unshift(new Option(`${DISK_BOT.name} (${existing ? 'also post here' : 'new'})`, DISK_BOT.id));
+    }
+    form.elements.botId.replaceChildren(...options);
+    form.elements.botId.value = options.some((o) => o.value === selected) ? selected : options[0]?.value || '';
+  }
+  function openDisk() {
+    if (!snapshot || !disk || diskBusy) return;
+    const config = disk.config,
+      form = byId('disk-form');
+    form.reset();
+    form.elements.roomId.replaceChildren(...snapshot.rooms.map((room) => new Option('#' + room.name, room.id)));
+    if (config && snapshot.rooms.some((room) => room.id === config.roomId)) form.elements.roomId.value = config.roomId;
+    fillDiskBots(config?.botId || DISK_BOT.id);
+    form.elements.warnPercent.value = String(config?.warnPercent ?? 90);
+    form.elements.criticalPercent.value = String(config?.criticalPercent ?? 99);
+    form.elements.intervalMinutes.value = String(config?.intervalMinutes ?? 5);
+    form.elements.mention.value = config?.mention || '';
+    byId('disk-error').textContent = '';
+    byId('disk-dialog').showModal();
+  }
+  /** Saves through the owner-only bot-watch route; the server validates and refuses anything out of range. */
+  async function saveDisk(config) {
+    acceptDisk({ data: await api('bot-watches/disk-space', { method: 'PUT', body: JSON.stringify(config) }) });
+  }
+  /**
+   * One save at a time: busy is set before the first request and cleared once the last settles, so a second click can
+   * never write the bot or the watch from settings read before the first save finished.
+   */
+  async function withDiskSave(work) {
+    if (diskBusy || closed) return;
+    const submit = byId('disk-form').querySelector('[type=submit]');
+    diskBusy = true;
+    submit.disabled = true;
+    renderDisk();
+    try {
+      await work();
+    } finally {
+      diskBusy = false;
+      submit.disabled = false;
+      if (!closed) renderDisk();
+    }
+  }
   function render() {
     if (!snapshot) return;
     renderWatchers();
+    renderDisk();
     const { bots, jobs, runs } = snapshot;
     const running = new Set(snapshot.executing.map((job) => job.id));
     byId('summary').replaceChildren(
@@ -944,6 +1059,63 @@
   }
   byId('new-bot').addEventListener('click', () => openBot());
   byId('new-watch').addEventListener('click', () => openWatcher());
+  byId('disk-edit').addEventListener('click', () => openDisk());
+  byId('disk-form').elements.roomId.addEventListener('change', () => fillDiskBots(byId('disk-form').elements.botId.value));
+  byId('disk-toggle').addEventListener('click', async () => {
+    const config = disk?.config;
+    if (!config) return;
+    try {
+      await withDiskSave(() => saveDisk({ ...config, enabled: !config.enabled }));
+    } catch (error) {
+      byId('disk-status').textContent = 'The disk alarm change could not be confirmed: ' + error.message;
+    }
+  });
+  byId('disk-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!snapshot || !disk || diskBusy || closed) return;
+    byId('disk-error').textContent = '';
+    try {
+      const roomId = form.elements.roomId.value,
+        botId = form.elements.botId.value;
+      const warnPercent = Number(form.elements.warnPercent.value),
+        criticalPercent = Number(form.elements.criticalPercent.value),
+        intervalMinutes = Number(form.elements.intervalMinutes.value),
+        mention = form.elements.mention.value.trim().replace(/^@/, '');
+      if (!snapshot.rooms.some((room) => room.id === roomId)) throw new Error('Choose a channel.');
+      if (!Number.isInteger(warnPercent) || !Number.isInteger(criticalPercent) || warnPercent >= criticalPercent)
+        throw new Error('The warning level must be a whole percent below the critical level.');
+      if (mention && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/.test(mention))
+        throw new Error('A mention is a name of letters, digits, spaces, dots, dashes or underscores.');
+      await withDiskSave(async () => {
+        let bot = snapshot.bots.find((b) => b.id === botId);
+        if (botId === DISK_BOT.id && !bot?.rooms.includes(roomId)) {
+          // The dedicated bot is created for this channel, or allowed in it as well; nothing else about it changes.
+          const body = bot
+            ? { name: bot.name, ...(bot.icon ? { icon: bot.icon } : {}), rooms: [...bot.rooms, roomId], maxPerHour: bot.maxPerHour }
+            : { name: DISK_BOT.name, icon: DISK_BOT.icon, rooms: [roomId], maxPerHour: DISK_BOT.maxPerHour };
+          bot = (await api('chat-bots/' + DISK_BOT.id, { method: 'PUT', body: JSON.stringify(body) })).bot || { id: DISK_BOT.id, ...body };
+          snapshot.bots = [...snapshot.bots.filter((b) => b.id !== DISK_BOT.id), bot];
+        }
+        if (!bot?.rooms.includes(roomId)) throw new Error('Choose a bot that may post in this channel.');
+        await saveDisk({
+          version: 1,
+          type: 'disk-space',
+          enabled: true,
+          botId: bot.id,
+          roomId,
+          warnPercent,
+          criticalPercent,
+          rearmMarginPercent: disk.config?.rearmMarginPercent ?? 1,
+          intervalMinutes,
+          ...(mention ? { mention } : {}),
+        });
+        byId('disk-dialog').close();
+      });
+    } catch (error) {
+      byId('disk-error').textContent = error.message;
+    }
+  });
   byId('watch-form').elements.botId.addEventListener('change', () => fillWatchRooms());
   byId('watch-form').elements.intervalMinutes.addEventListener('input', () => {
     watchCadenceEdited = true;
