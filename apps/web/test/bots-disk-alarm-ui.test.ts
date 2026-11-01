@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 type Config = Record<string, unknown>;
-function fixture(options: { config?: Config; owner?: boolean; bots?: unknown[]; volumes?: Record<string, unknown> } = {}) {
+function fixture(options: { config?: Config; owner?: boolean; bots?: unknown[]; volumes?: Record<string, unknown>; holdBotWrite?: Promise<void> } = {}) {
   const dom = new JSDOM(read('bots.html'), { url: 'http://example.test/bots', runScripts: 'outside-only' });
   doms.push(dom);
   const w = dom.window;
@@ -34,7 +34,7 @@ function fixture(options: { config?: Config; owner?: boolean; bots?: unknown[]; 
     'cron/runs': [],
     'cron/active': { jobs: [] },
     company: { success: true, data: { employees: [] } },
-    chatrooms: { success: true, data: { rooms: [{ id: 'r1', name: 'office' }, { id: 'r2', name: 'boardroom' }, { id: 'dm', name: 'private', dm: true }] } },
+    chatrooms: { success: true, data: { rooms: [{ id: 'r1', name: 'office' }, { id: 'r2', name: 'boardroom' }, { id: 'r3', name: 'ops' }, { id: 'dm', name: 'private', dm: true }] } },
     'bot-watches/github': { success: true, data: { version: 1, revision: 0, watches: [] } },
   };
   const fetch = vi.fn(async (url: URL, init: { method?: string; body?: string }) => {
@@ -42,6 +42,7 @@ function fixture(options: { config?: Config; owner?: boolean; bots?: unknown[]; 
     if (init.method === 'PUT') {
       const body = JSON.parse(init.body!);
       if (path.startsWith('chat-bots/')) {
+        await options.holdBotWrite;
         const bot = parseBot(body, path.split('/')[1]!);
         return { ok: true, json: async () => ({ success: true, data: { bot } }) };
       }
@@ -122,6 +123,30 @@ describe('disk alarm panel', () => {
     form.dispatchEvent(new p.w.Event('submit', { cancelable: true }));
     await tick();
     expect(p.writes()[0]).toEqual(['/api/chat-bots/disk-alarm', { name: 'Disk Alarm', icon: '💾', rooms: ['r1', 'r2'], maxPerHour: 4 }]);
+  });
+
+  it('takes one save at a time: a second submit while the bot write is pending sends nothing', async () => {
+    let release!: () => void;
+    const holdBotWrite = new Promise<void>((done) => (release = done));
+    const p = fixture({ bots: [{ id: 'disk-alarm', name: 'Disk Alarm', icon: '💾', rooms: ['r1'], maxPerHour: 4 }], holdBotWrite });
+    await tick();
+    p.get('disk-edit').click();
+    const form = p.form();
+    set(form, 'roomId', 'r2');
+    form.dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+    await tick();
+    const disabledWhileSaving = (form.querySelector('[type=submit]') as HTMLButtonElement).disabled;
+    set(form, 'roomId', 'r3');
+    form.dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+    await tick();
+    release();
+    await tick();
+    expect(p.writes()).toEqual([
+      ['/api/chat-bots/disk-alarm', { name: 'Disk Alarm', icon: '💾', rooms: ['r1', 'r2'], maxPerHour: 4 }],
+      ['/api/bot-watches/disk-space', expect.objectContaining({ botId: 'disk-alarm', roomId: 'r2' })],
+    ]);
+    expect(disabledWhileSaving).toBe(true);
+    expect((form.querySelector('[type=submit]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('refuses a warning level at or above critical and an invalid mention, writing nothing', async () => {

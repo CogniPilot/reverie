@@ -717,14 +717,23 @@
   }
   /** Saves through the owner-only bot-watch route; the server validates and refuses anything out of range. */
   async function saveDisk(config) {
+    acceptDisk({ data: await api('bot-watches/disk-space', { method: 'PUT', body: JSON.stringify(config) }) });
+  }
+  /**
+   * One save at a time: busy is set before the first request and cleared once the last settles, so a second click can
+   * never write the bot or the watch from settings read before the first save finished.
+   */
+  async function withDiskSave(work) {
+    if (diskBusy || closed) return;
+    const submit = byId('disk-form').querySelector('[type=submit]');
     diskBusy = true;
+    submit.disabled = true;
     renderDisk();
     try {
-      const data = await api('bot-watches/disk-space', { method: 'PUT', body: JSON.stringify(config) });
-      acceptDisk({ data });
-      return true;
+      await work();
     } finally {
       diskBusy = false;
+      submit.disabled = false;
       if (!closed) renderDisk();
     }
   }
@@ -1054,11 +1063,11 @@
   byId('disk-form').elements.roomId.addEventListener('change', () => fillDiskBots(byId('disk-form').elements.botId.value));
   byId('disk-toggle').addEventListener('click', async () => {
     const config = disk?.config;
-    if (!config || diskBusy || closed) return;
+    if (!config) return;
     try {
-      await saveDisk({ ...config, enabled: !config.enabled });
+      await withDiskSave(() => saveDisk({ ...config, enabled: !config.enabled }));
     } catch (error) {
-      byId('disk-status').textContent = 'The disk alarm was not changed: ' + error.message;
+      byId('disk-status').textContent = 'The disk alarm change could not be confirmed: ' + error.message;
     }
   });
   byId('disk-form').addEventListener('submit', async (event) => {
@@ -1078,29 +1087,31 @@
         throw new Error('The warning level must be a whole percent below the critical level.');
       if (mention && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/.test(mention))
         throw new Error('A mention is a name of letters, digits, spaces, dots, dashes or underscores.');
-      let bot = snapshot.bots.find((b) => b.id === botId);
-      if (botId === DISK_BOT.id && !bot?.rooms.includes(roomId)) {
-        // The dedicated bot is created for this channel, or allowed in it as well; nothing else about it changes.
-        const body = bot
-          ? { name: bot.name, ...(bot.icon ? { icon: bot.icon } : {}), rooms: [...bot.rooms, roomId], maxPerHour: bot.maxPerHour }
-          : { name: DISK_BOT.name, icon: DISK_BOT.icon, rooms: [roomId], maxPerHour: DISK_BOT.maxPerHour };
-        bot = (await api('chat-bots/' + DISK_BOT.id, { method: 'PUT', body: JSON.stringify(body) })).bot || { id: DISK_BOT.id, ...body };
-        snapshot.bots = [...snapshot.bots.filter((b) => b.id !== DISK_BOT.id), bot];
-      }
-      if (!bot?.rooms.includes(roomId)) throw new Error('Choose a bot that may post in this channel.');
-      await saveDisk({
-        version: 1,
-        type: 'disk-space',
-        enabled: true,
-        botId: bot.id,
-        roomId,
-        warnPercent,
-        criticalPercent,
-        rearmMarginPercent: disk.config?.rearmMarginPercent ?? 1,
-        intervalMinutes,
-        ...(mention ? { mention } : {}),
+      await withDiskSave(async () => {
+        let bot = snapshot.bots.find((b) => b.id === botId);
+        if (botId === DISK_BOT.id && !bot?.rooms.includes(roomId)) {
+          // The dedicated bot is created for this channel, or allowed in it as well; nothing else about it changes.
+          const body = bot
+            ? { name: bot.name, ...(bot.icon ? { icon: bot.icon } : {}), rooms: [...bot.rooms, roomId], maxPerHour: bot.maxPerHour }
+            : { name: DISK_BOT.name, icon: DISK_BOT.icon, rooms: [roomId], maxPerHour: DISK_BOT.maxPerHour };
+          bot = (await api('chat-bots/' + DISK_BOT.id, { method: 'PUT', body: JSON.stringify(body) })).bot || { id: DISK_BOT.id, ...body };
+          snapshot.bots = [...snapshot.bots.filter((b) => b.id !== DISK_BOT.id), bot];
+        }
+        if (!bot?.rooms.includes(roomId)) throw new Error('Choose a bot that may post in this channel.');
+        await saveDisk({
+          version: 1,
+          type: 'disk-space',
+          enabled: true,
+          botId: bot.id,
+          roomId,
+          warnPercent,
+          criticalPercent,
+          rearmMarginPercent: disk.config?.rearmMarginPercent ?? 1,
+          intervalMinutes,
+          ...(mention ? { mention } : {}),
+        });
+        byId('disk-dialog').close();
       });
-      byId('disk-dialog').close();
     } catch (error) {
       byId('disk-error').textContent = error.message;
     }
