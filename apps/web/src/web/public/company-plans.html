@@ -325,7 +325,14 @@ async function planMoveRequest(path, payload) {
   try {
     const response = await fetch(path, {method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload || {}), signal: controller.signal});
     const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(result.error || 'Plan move request failed');
+    if (!response.ok || !result.success) {
+      const error = new Error(result.error || 'Plan move request failed');
+      error.status = response.status;
+      const blocker = result.blocker;
+      if (blocker?.action === 'inspect-existing' && typeof blocker.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(blocker.id))
+        error.blocker = {id: blocker.id, action: blocker.action};
+      throw error;
+    }
     return result.data;
   } finally { clearTimeout(timeout); }
 }
@@ -404,6 +411,33 @@ async function showMoveImpact(dialog, sessionId, toAccount) {
   if (box.isConnected && box.dataset.gen === generation && box.dataset.session === sessionId && box.dataset.for === toAccount) box.textContent = text;
 }
 
+// A held move is inspected in this employee's existing dialog, never retried as a new request.
+async function inspectBlockedPlanMove(dialog, employee, error, view) {
+  if (!error.blocker && !/move in progress|requiring recovery|awaiting recovery/i.test(error.message)) return false;
+  dialog.querySelectorAll('[type=submit], [data-force]').forEach(button => { button.disabled = true; });
+  const message = dialog.querySelector('.err') || dialog.querySelector('.status');
+  message.textContent = 'Checking the existing move. No new move will be submitted.';
+  try {
+    let move;
+    if (error.blocker) move = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(error.blocker.id)}/status`);
+    else {
+      const recent = await planMoveRequest('/api/plans/moves/recent');
+      if (!view.current()) return true;
+      const unresolved = recent.filter(record => record.employeeId === employee.id && !['completed', 'failed'].includes(record.phase));
+      if (unresolved.length !== 1) throw new Error('The current move is ambiguous or unavailable. Inspect existing moves; the hold is retained.');
+      move = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(unresolved[0].id)}/status`);
+      if (move.id !== unresolved[0].id) throw new Error('The current move changed; refresh before recovery.');
+    }
+    if (!view.current()) return true;
+    if (!move || move.employeeId !== employee.id || error.blocker && move.id !== error.blocker.id)
+      throw new Error('The current move changed; refresh before recovery.');
+    showPlanMoveProgress(dialog, move, employee.name);
+  } catch (failure) {
+    if (view.current()) message.textContent = `${failure.message} No request was retried. Choose Inspect existing moves to check the retained journal.`;
+  }
+  return true;
+}
+
 async function openPlanMove(employeeId, destination) {
   const dialog = document.getElementById('moveDlg');
   if (!dialog || dialog.open) return;
@@ -453,6 +487,7 @@ async function openPlanMove(employeeId, destination) {
       if (submitting) return;
       submitting = true;
       const form = event.currentTarget, submit = form.querySelector('[type=submit]'); submit.disabled = true;
+      form.querySelector('[data-force]').disabled = true;
       form.querySelector('.err').textContent = '';
       const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
       try {
@@ -462,73 +497,98 @@ async function openPlanMove(employeeId, destination) {
         if (view.current()) showPlanRequestProgress(dialog, record);
       } catch (error) {
         if (!view.current()) return;
-        form.querySelector('.err').textContent = `${error.message} Choose Inspect existing moves to check an interrupted move before retrying. Force move does not bypass a move awaiting recovery.`;
-        submitting = false; submit.disabled = false;
+        if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
+        if (!view.current()) return;
+        form.querySelector('.err').textContent = error.status ? error.message
+          : 'The request outcome is unconfirmed. Inspect existing moves before another request; no retry was sent.';
+        if (error.status) { submitting = false; submit.disabled = false; form.querySelector('[data-force]').disabled = false; }
       }
     };
   } catch (error) { if (view.current()) dialog.querySelector('.status').textContent = error.message; }
 }
 
 function showPlanMoveProgress(dialog, initial, name) {
-  dialog.innerHTML = `<h3>Plan move: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint">Old session: ${esc(initial.oldSession || initial.sessionId || 'not recorded')}<br>New session: ${esc(initial.newSession || 'not created yet')}</p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <p class="hint" data-recovery-info></p> <button type="button" class="btn" data-close>Hide progress</button>`;
-  const cancel = dialog.querySelector('[data-cancel]'), resolve = dialog.querySelector('[data-resolve]'), status = dialog.querySelector('.status');
-  let record = initial, stopped = false, timer;
+  dialog.innerHTML = `<h3>Plan move: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint"></p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-refresh>Refresh status</button><p class="hint" data-recovery-info></p> <button type="button" class="btn" data-close>Hide progress</button>`;
+  const cancel = dialog.querySelector('[data-cancel]'), resolve = dialog.querySelector('[data-resolve]');
+  const refresh = dialog.querySelector('[data-refresh]'), status = dialog.querySelector('.status');
+  let record = initial, stopped = false, busy = false, unconfirmed = false, feedback = '', statusGeneration = 0, timer;
   const view = planDialogView(dialog), current = view.current;
   const stop = () => { stopped = true; clearTimeout(timer); view.stop(); };
   dialog.querySelector('[data-close]').onclick = () => { stop(); dialog.close(); };
-  cancel.onclick = async () => {
-    if (!current()) return;
-    cancel.disabled = true;
-    try { await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/cancel`); }
-    catch (error) { if (current()) status.textContent = error.message; }
-  };
-  resolve.onclick = async () => {
-    if (!current()) return;
-    resolve.disabled = true;
-    status.textContent = 'Checking the existing destination; no session will be started or stopped.';
-    try {
-      const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
-        action: 'adopt-existing', oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount });
-      if (!current()) return;
-      record = next;
-      stopped = false;
-      await poll();
-    } catch (error) {
-      if (!current()) return;
-      status.textContent = `${error.message} The move journal is retained.`;
-      resolve.disabled = false;
-    }
+  const eligible = () => record.phase === 'recovery-required' && !!record.newSession && !record.resourceIntent && record.sourceCleanupVerified === true;
+  const readStatus = async expected => {
+    const generation = ++statusGeneration;
+    const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(expected.id)}/status`);
+    if (!current() || generation !== statusGeneration) return false;
+    if (!next || next.id !== expected.id || ['employeeId', 'oldSession', 'toAccount', 'newSession'].some(key => expected[key] !== undefined && next[key] !== expected[key]))
+      throw new Error('The recovery target changed; inspect the current move before recovery.');
+    record = next;
+    return true;
   };
   const deadline = Date.now() + 12 * 60e3;
   const paint = () => {
-    status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}`;
+    status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
     dialog.querySelector('.hint').textContent = `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
-    cancel.hidden = record.phase !== 'waiting';
+    cancel.hidden = record.phase !== 'waiting'; cancel.disabled = busy;
     resolve.hidden = record.phase !== 'recovery-required' || !record.newSession || !!record.resourceIntent;
-    dialog.querySelector('[data-recovery-info]').textContent = record.phase !== 'recovery-required' ? '' : record.resourceIntent
+    resolve.disabled = busy || unconfirmed || !eligible(); refresh.disabled = busy;
+    dialog.querySelector('[data-recovery-info]').textContent = unconfirmed
+      ? 'The recovery response is unconfirmed. Refresh status; do not replay recovery or start another move. The journal is retained.'
+      : record.phase !== 'recovery-required' ? '' : record.resourceIntent
       ? 'This resource change requires protected native recovery before another move can begin. The journal is retained.'
       : !record.newSession ? 'No destination session was recorded. Both sessions and the move journal need inspection before another move; Force move cannot bypass this hold.'
-      : record.sourceCleanupVerified !== true ? 'Source cleanup was not durably verified. Inspect both sessions before recovery; the journal is retained and Force move cannot bypass this hold.'
-      : 'Adopt existing destination checks the stopped source and current destination. It does not start or stop sessions or replay the handoff.';
-    resolve.disabled = record.sourceCleanupVerified !== true;
-    resolve.title = resolve.disabled ? 'Source cleanup was not durably verified; inspect both sessions before recovery.' : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
+      : record.sourceCleanupVerified !== true ? 'Source cleanup was not durably verified. Refresh status or inspect both sessions; the journal is retained and Force move cannot bypass this hold.'
+      : 'Adopt existing destination verifies the stopped source and current destination. It does not start or stop sessions or replay the handoff. This must finish before a new move.';
+    resolve.title = resolve.disabled ? 'Recovery requires confirmed current status and durable source-cleanup proof.' : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
     if (['completed', 'failed', 'recovery-required'].includes(record.phase)) {
       stopped = true;
       if (record.phase === 'completed') { stop(); dialog.close(); }
       void refreshPlanMembers();
       return true;
     }
-    if (Date.now() >= deadline) { stopped = true; status.textContent = 'Status polling ended. Inspect the current binding before retrying.'; return true; }
+    if (Date.now() >= deadline) { stopped = true; status.textContent = 'Status polling ended. Refresh status before another move.'; return true; }
     return false;
   };
-  const poll = async () => {
-    if (stopped || !current() || paint()) return;
+  refresh.onclick = async () => {
+    if (busy || !current()) return;
+    busy = true; clearTimeout(timer); paint();
+    try { if (await readStatus(record)) feedback = unconfirmed ? 'Status checked; the unconfirmed recovery is retained.' : ''; }
+    catch (error) { if (current()) feedback = `Status unavailable: ${error.message}. The hold is retained.`; }
+    finally { busy = false; if (current()) { stopped = false; if (!paint()) timer = setTimeout(poll, 1000); } }
+  };
+  cancel.onclick = async () => {
+    if (busy || !current() || record.phase !== 'waiting') return;
+    busy = true; clearTimeout(timer); paint();
+    try { await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/cancel`); await readStatus(record); }
+    catch (error) { if (current()) feedback = error.message; }
+    finally { busy = false; if (current()) { stopped = false; if (!paint()) timer = setTimeout(poll, 1000); } }
+  };
+  resolve.onclick = async () => {
+    if (busy || unconfirmed || !current() || !eligible()) return;
+    busy = true; clearTimeout(timer); feedback = 'Checking the current move; no session will be started or stopped.'; paint();
+    let dispatched = false;
     try {
-      const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/status`);
+      if (!await readStatus(record)) return;
+      paint();
+      if (!current() || record.phase === 'completed') return;
+      if (!eligible()) throw new Error('Recovery is not available for the current move; the hold is retained.');
+      dispatched = true;
+      const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
+        action: 'adopt-existing', oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount });
       if (!current()) return;
-      record = next;
-      if (paint()) return;
-    } catch (error) { if (current()) status.textContent = `Status unavailable: ${error.message}. Do not start another move until checked.`; }
+      if (!next || next.id !== record.id || ['employeeId', 'oldSession', 'newSession', 'toAccount'].some(key => record[key] !== undefined && next[key] !== record[key]))
+        throw new Error('The recovery result changed; refresh status.');
+      record = next; feedback = '';
+    } catch (error) {
+      if (!current()) return;
+      unconfirmed = dispatched;
+      feedback = `${error.message}${unconfirmed ? ' · Recovery outcome unconfirmed; refresh status without replaying.' : ' · The move journal is retained.'}`;
+    } finally { busy = false; if (current()) paint(); }
+  };
+  const poll = async () => {
+    if (stopped || busy || !current() || paint()) return;
+    try { if (!await readStatus(record)) return; if (paint()) return; }
+    catch (error) { if (current()) status.textContent = `Status unavailable: ${error.message}. Do not start another move until checked.`; }
     if (current()) timer = setTimeout(poll, 1000);
   };
   void poll();
@@ -602,8 +662,12 @@ async function forcePlanMove(dialog, employee, target, requestId) {
     if (view.current()) showPlanMoveProgress(dialog, record, employee.name);
   } catch (error) {
     if (!view.current()) return;
-    dialog.querySelector('.err').textContent = `${error.message} Choose Inspect existing moves to check recovery; forcing again cannot bypass the hold.`;
-    dialog.querySelectorAll('button').forEach(button => { button.disabled = false; });
+    if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
+    if (!view.current()) return;
+    dialog.querySelector('.err').textContent = error.status ? error.message
+      : 'The force-move outcome is unconfirmed. Inspect existing moves; no retry was sent.';
+    dialog.querySelectorAll('[data-close], [data-inspect]').forEach(button => { button.disabled = false; });
+    if (error.status) dialog.querySelectorAll('button').forEach(button => { button.disabled = false; });
   }
 }
 async function openPlanMoveHistory(employeeId) {
@@ -621,9 +685,19 @@ async function openPlanMoveHistory(employeeId) {
     // An approved request shares its id with its canonical move. Keep the move's
     // cleanup facts and recovery action instead of shadowing it with request status.
     const moveIds = new Set(moves.map(record => record.id));
+    const held = moves.filter(record => record.employeeId === employeeId && !['completed', 'failed'].includes(record.phase));
+    if (employeeId && held.length === 1) {
+      const record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(held[0].id)}/status`);
+      if (!view.current()) return;
+      if (!record || record.id !== held[0].id || record.employeeId !== employeeId)
+        throw new Error('The current move changed; refresh before recovery.');
+      showPlanMoveProgress(dialog, record, record.name);
+      return;
+    }
     const records = [...moves, ...requests.filter(record => !moveIds.has(record.id))]
       .filter(record => !employeeId || record.employeeId === employeeId);
-    dialog.querySelector('.status').textContent = records.length ? 'Select a request or move to inspect its status.' : 'No recorded requests or moves.';
+    dialog.querySelector('.status').textContent = held.length > 1 ? 'Multiple unresolved moves require inspection; no recovery was selected.'
+      : records.length ? 'Select a request or move to inspect its status.' : 'No recorded requests or moves.';
     const list = dialog.querySelector('[data-moves]');
     records.forEach(record => {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';

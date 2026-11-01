@@ -23,14 +23,14 @@ export function registerPlanRequestRoutes(
     return reply
       .code(error.status)
       .send(
-        createErrorResponse(
+        { ...createErrorResponse(
           error.status === 404
             ? ApiErrorCode.NOT_FOUND
             : error.status === 403
               ? ApiErrorCode.FORBIDDEN
               : ApiErrorCode.CONFLICT,
           error.message
-        )
+        ), ...(error.blocker ? { blocker: error.blocker } : {}) }
       );
   };
   const agentInput = z.object({ id: PlanRequestId, employeeId: PlanRequestId, sessionId: PlanRequestId, toAccount: PlanRequestId,

@@ -398,3 +398,24 @@ describe('why delivery of a plan request ended', () => {
     expect(first()).toBe(false);
   });
 });
+
+
+describe('request follows its verified existing move adoption', () => {
+  it('releases a cached recovery request only after its exact move was durably adopted', async () => {
+    const seed: PlanRequestRecord = { id: 'held', employeeId: 'alex', sessionId: 'source', newSession: 'destination',
+      name: 'Alex', fromAccount: 'first', toAccount: 'second', mode: 'codex', phase: 'recovery-required',
+      createdAt: 1, expiresAt: 99, notified: true };
+    const h = requestHarness([seed]);
+    const completed: PlanMoveRecord = { id: 'held', employeeId: 'alex', oldSession: 'source', newSession: 'destination',
+      name: 'Alex', fromAccount: 'first', toAccount: 'second', phase: 'completed', at: 1,
+      sourceStopRequested: true, sourceCleanupVerified: true, recoveryAction: 'adopt-existing', recoveredAt: 100 };
+    h.move({ ...completed, phase: 'recovery-required' });
+    expect((await h.service.get('held')).phase).toBe('recovery-required');
+    h.move({ ...completed, employeeId: 'other' });
+    expect((await h.service.get('held')).phase).toBe('recovery-required');
+    h.move(completed);
+    expect((await h.service.get('held')).phase).toBe('completed');
+    await expect(h.service.create(h.input, undefined, h.execution)).resolves.toMatchObject({ phase: 'pending' });
+    expect(h.port.moves.begin).not.toHaveBeenCalled();
+  });
+});

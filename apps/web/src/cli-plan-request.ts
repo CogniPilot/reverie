@@ -31,6 +31,9 @@ export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: 
     const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
     if (result.status >= 400 || !body?.success) {
       const reason = serverReason(body);
+      const blocker = (result.json as { blocker?: { id?: unknown; action?: unknown } })?.blocker;
+      if (blocker?.action === 'inspect-existing' && typeof blocker.id === 'string' && PlanRequestId.safeParse(blocker.id).success)
+        deps.io.err(`Existing move ${blocker.id}: use agent plan-move recovery-status ${blocker.id}, then explicitly recover-existing if eligible. Do not create another move.`);
       deps.io.err(`Plan move request refused${reason ? `: ${reason}` : ''}. Check the destination ID and owner-granted plan permissions.`);
       return 1;
     }
@@ -125,4 +128,48 @@ export async function agentPendingPlanMoves(deps: AgentDeps): Promise<number> {
     else for (const r of requests) deps.io.out(`${r.id}: ${r.phase}, destination ${r.toAccount}, expires ${new Date(r.expiresAt).toISOString()}. Prepare a handoff, then use plan-move approve or reject.`);
     return 0;
   } catch { deps.io.err('Could not read this session’s pending plan requests.'); return 1; }
+}
+
+/** Inspect and explicitly adopt only the current holder's existing move. Never submits a new move. */
+export async function agentPlanRecovery(deps: AgentDeps, id?: string, adopt = false): Promise<number> {
+  try {
+    if (adopt && !id) throw new Error('A move ID is required');
+    const path = id ? `/api/plans/agent-moves/${PlanRequestId.parse(id)}/status` : '/api/plans/agent-moves/current';
+    let result = await deps.request(deps.ctx, { method: 'POST', path, body: {} });
+    let body = result.json as { success?: boolean; data?: unknown; recovery?: { state?: unknown; error?: unknown } };
+    if (result.status >= 400 || body?.success !== true) {
+      deps.io.err(`Own move inspection refused: ${serverReason(body) || 'Unavailable'}`); return 1;
+    }
+    if (adopt) {
+      const record = body.data as { id?: unknown; phase?: unknown; oldSession?: unknown; newSession?: unknown;
+        toAccount?: unknown; sourceStopRequested?: unknown; sourceCleanupVerified?: unknown; resourceIntent?: unknown };
+      if (record?.id !== id || record.newSession !== deps.ctx.selfId || record.phase !== 'recovery-required' ||
+        record.sourceStopRequested !== true || record.sourceCleanupVerified !== true || record.resourceIntent !== undefined ||
+        !PlanRequestId.safeParse(record.oldSession).success || !PlanRequestId.safeParse(record.toAccount).success)
+        throw new Error('This existing move is not eligible for adoption; retain the hold and inspect with the owner');
+      // One explicit adoption attempt, using the exact inspected old/new/account tuple. No launch or automatic retry.
+      result = await deps.request(deps.ctx, { method: 'POST', path: `/api/plans/agent-moves/${PlanRequestId.parse(id!)}/resolve`,
+        body: { action: 'adopt-existing', oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount } });
+      body = result.json as typeof body;
+      if (result.status >= 400 || body?.success !== true) {
+        deps.io.err(`Existing move adoption unconfirmed: ${serverReason(body) || 'Inspect its status before any further action'}`); return 1;
+      }
+      if (result.status === 202 && (body.data as { id?: unknown })?.id === id &&
+        ['waiting-for-idle', 'verifying'].includes(String(body.recovery?.state))) {
+        deps.io.out(deps.json ? JSON.stringify({ success: true, accepted: true, completed: false, data: body.data, recovery: body.recovery }) :
+          `Existing move ${id} recovery queued, not completed. Finish this turn so your composer becomes idle; then inspect agent plan-move recovery-status ${id}. Do not submit another move.`);
+        return 0;
+      }
+      if ((body.data as { id?: unknown; phase?: unknown; recoveryAction?: unknown })?.id !== id ||
+        (body.data as { phase?: unknown }).phase !== 'completed' ||
+        (body.data as { recoveryAction?: unknown }).recoveryAction !== 'adopt-existing')
+        throw new Error('Existing move adoption remains unconfirmed; inspect its status');
+    }
+    deps.io.out(deps.json ? JSON.stringify({ success: true, data: body.data, ...(body.recovery ? { recovery: body.recovery } : {}) }) : JSON.stringify({ data: body.data, ...(body.recovery ? { recovery: body.recovery } : {}) }));
+    return 0;
+  } catch (error) {
+    deps.io.err(error instanceof Error && error.message.startsWith('This existing move') ? error.message :
+      'Own move outcome is unconfirmed. Inspect recovery-status before any further action; do not create another move.');
+    return 1;
+  }
 }

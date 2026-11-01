@@ -326,10 +326,9 @@ describe('held plan move recovery navigation', () => {
     const move = {id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',oldSession:'old',newSession:'new',toAccount:'second',sourceCleanupVerified:true};
     h.fetch.mockImplementation(async (path:string) => reply(path.endsWith('/requests/recent')
       ? [{id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',newSession:'new'}]
-      : path.endsWith('/moves/recent') ? [move] : {...move,phase:'completed'}));
+      : path.endsWith('/moves/recent') ? [move] : path.endsWith('/status') ? move : {...move,phase:'completed'}));
     await h.methods.openPlanMoveHistory('alex');
-    expect(h.dialog.querySelectorAll('[data-moves] button')).toHaveLength(1);
-    h.dialog.querySelector<HTMLButtonElement>('[data-moves] button')!.click();
+    expect(h.dialog.querySelector('[data-moves]')).toBeNull();
     const adopt=h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
     expect(adopt.hidden).toBe(false);expect(adopt.disabled).toBe(false);
     expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve'))).toBe(false);
@@ -341,14 +340,14 @@ describe('held plan move recovery navigation', () => {
   });
   it('links a rejected new request to employee-filtered history without retrying or mutating the journal', async () => {
     const h=harness();await h.methods.openPlanMove('alex','second');
+    const held={id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required'};
     h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'
       ? {ok:false,status:409,json:async()=>({success:false,error:'This employee already has a move in progress or requiring recovery'})}
-      : reply(path.endsWith('/moves/recent') ? [{id:'other',employeeId:'someone-else',name:'Other',phase:'recovery-required'},{id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required'}] : []));
+      : reply(path.endsWith('/moves/recent') ? [{...held,id:'other',employeeId:'someone-else',name:'Other'},held] : held));
     h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
-    await vi.waitFor(()=>expect(h.dialog.querySelector('.err')!.textContent).toContain('Inspect existing moves'));
-    h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.click();
-    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-moves]')!.textContent).toContain('Alex'));
-    expect(h.dialog.querySelector('[data-moves]')!.textContent).not.toContain('Other');
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-refresh]')).not.toBeNull());
+    expect(h.dialog.textContent).toContain('Alex');
+    expect(h.dialog.textContent).not.toContain('Other');
     expect(h.fetch.mock.calls.filter(([path])=>path==='/api/plans/requests')).toHaveLength(1);
     expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/force')||path.endsWith('/resolve')||path.endsWith('/cancel'))).toBe(false);
   });
@@ -364,4 +363,137 @@ describe('held plan move recovery navigation', () => {
     if(!record.hidden)expect(adopt.disabled).toBe(true);
     expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve')||path.endsWith('/force')||path.endsWith('/cancel')||path==='/api/plans/requests')).toBe(false);
   });
+});
+
+
+describe('blocked move contextual recovery', () => {
+  const reply = (data: unknown) => ({ok:true,status:200,json:async()=>({success:true,data})});
+  const held = {id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',oldSession:'old',newSession:'new',toAccount:'second',sourceStopRequested:true,sourceCleanupVerified:true};
+  const conflict = () => ({ok:false,status:409,json:async()=>({success:false,error:'This employee already has a move in progress or requiring recovery',blocker:{id:'held',action:'inspect-existing'}})});
+  it('takes the blocked form straight to its exact current move and recovers once only after a fresh check', async () => {
+    const h=harness();await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'?conflict():reply(path.endsWith('/resolve')?{...held,phase:'completed'}:held));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-resolve]')).not.toBeNull());
+    expect(h.dialog.textContent).toContain('Alex');expect(h.dialog.querySelector('form')).toBeNull();
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/recent'))).toHaveLength(0);
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(0);
+    const recover=h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;recover.click();recover.click();
+    await vi.waitFor(()=>expect(h.dialog.open).toBe(false));
+    expect(h.fetch.mock.calls.filter(([path])=>path==='/api/plans/moves/held/status')).toHaveLength(2);
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(1);
+    expect(h.fetch.mock.calls.filter(([path])=>path==='/api/plans/requests')).toHaveLength(1);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/force')||path.endsWith('/cancel'))).toBe(false);
+  });
+  it('refuses a blocker status for another employee rather than resolving or choosing a new move', async()=>{
+    const h=harness();await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'?conflict():reply({...held,employeeId:'other'}));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.err')!.textContent).toContain('changed'));
+    expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(true);
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(true);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve'))).toBe(false);
+  });
+  it('checks exact recovery binding again before adoption and refuses changed destinations',async()=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');
+    h.fetch.mockImplementation(async()=>reply({...held,newSession:'other-destination'}));
+    h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.status')!.textContent).toContain('changed'));
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(0);
+  });
+  it('refreshes a recovery hold without launching, resolving or submitting another request',async()=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,{...held,sourceCleanupVerified:false},'Alex');
+    h.fetch.mockImplementation(async()=>reply(held));
+    h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false));
+    expect(h.fetch.mock.calls.filter(([path])=>path.includes('/moves/')).map(([path])=>path)).toEqual(['/api/plans/moves/held/status']);
+    expect(h.fetch.mock.calls.some(([path])=>path==='/api/plans/requests'||path.endsWith('/resolve')||path.endsWith('/force')||path.endsWith('/cancel'))).toBe(false);
+  });
+  it('keeps a lost recovery response held and reads status without automatically replaying adoption',async()=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');let completed=false;
+    h.fetch.mockImplementation(async(path:string)=>{if(path.endsWith('/resolve')){completed=true;throw new Error('Connection lost');}return reply({...held,phase:completed?'completed':'recovery-required'});});
+    h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.status')!.textContent).toContain('unconfirmed'));
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(true);
+    h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();await vi.waitFor(()=>expect(h.dialog.open).toBe(false));
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(1);
+  });
+  it('uses the exact blocker for force conflicts without forcing a second move', async()=>{
+    const h=harness();vi.spyOn(h.dom.window,'confirm').mockReturnValue(true);await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path.endsWith('/force')?conflict():reply(held));
+    h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-resolve]')).not.toBeNull());
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/force'))).toHaveLength(1);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve')||path.endsWith('/cancel')||path==='/api/plans/requests')).toBe(false);
+  });
+  it('does not auto-select ambiguous legacy holds or re-enable the blocked form',async()=>{
+    const h=harness();await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'
+      ?{ok:false,status:409,json:async()=>({success:false,error:'Move in progress or requiring recovery'})}
+      :reply([{...held,id:'first-held'},{...held,id:'second-held'}]));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.err')!.textContent).toContain('ambiguous'));
+    expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(true);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/status')||path.endsWith('/resolve'))).toBe(false);
+  });
+  it('keeps active canonical moves held and never offers adoption',async()=>{
+    const h=harness();await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'?conflict():reply({...held,phase:'checking'}));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-resolve]')).not.toBeNull());
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.hidden).toBe(true);
+    expect(h.dialog.textContent).toContain('checking');
+    expect(h.fetch.mock.calls.filter(([path])=>path==='/api/plans/requests')).toHaveLength(1);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve')||path.endsWith('/cancel'))).toBe(false);
+  });
+  it('ignores a late blocker lookup after the owner closes and opens another dialog',async()=>{
+    const h=harness();await h.methods.openPlanMove('alex','second');let finish!:(value:ReturnType<typeof reply>)=>void;
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'?conflict():new Promise(resolve=>{finish=resolve;}));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));h.dialog.close();
+    h.fetch.mockImplementation(async()=>reply({account:'first',mode:'codex',sessionId:'source'}));
+    await h.methods.openPlanMove('alex','second');const current=h.dialog.innerHTML;
+    finish(reply(held));await new Promise(resolve=>setImmediate(resolve));
+    expect(h.dialog.innerHTML).toBe(current);expect(h.dialog.querySelector('[data-resolve]')).toBeNull();
+  });
+  it('does not repeat a request after a lost creation response',async()=>{
+    const h=harness();await h.methods.openPlanMove('alex','second');h.fetch.mockRejectedValue(new Error('Connection lost'));
+    const form=h.dialog.querySelector('form')!;form.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.err')!.textContent).toContain('unconfirmed'));
+    form.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(true);
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(true);
+    expect(h.fetch.mock.calls.filter(([path])=>path==='/api/plans/requests')).toHaveLength(1);
+  });
+
+  it('uses the unique employee hold on older conflict responses without selecting someone else',async()=>{
+    const h=harness();await h.methods.openPlanMove('alex','second');
+    h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'
+      ?{ok:false,status:409,json:async()=>({success:false,error:'Move in progress or requiring recovery'})}
+      :reply(path.endsWith('/recent')?[{...held,id:'foreign',employeeId:'other'},held]:held));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-resolve]')).not.toBeNull());
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/status')).map(([path])=>path)).toEqual(['/api/plans/moves/held/status']);
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/resolve'))).toBe(false);
+  });
+  it('ignores an older status answer after an explicit refresh checks the same move',async()=>{
+    const h=harness();let finish!:(value:ReturnType<typeof reply>)=>void;
+    h.fetch.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));h.dialog.showModal();
+    h.methods.showPlanMoveProgress(h.dialog,{...held,phase:'checking'},'Alex');
+    h.fetch.mockImplementation(async()=>reply(held));h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false));
+    finish(reply({...held,phase:'checking'}));await new Promise(resolve=>setImmediate(resolve));
+    expect(h.dialog.querySelector('.status')!.textContent).toContain('recovery-required');
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false);
+  });
+
+  it('leaves multiple employee holds in inspection instead of choosing one for recovery',async()=>{
+    const h=harness();h.fetch.mockImplementation(async(path:string)=>reply(path.endsWith('/moves/recent')?[held,{...held,id:'another'}]:[]));
+    await h.methods.openPlanMoveHistory('alex');
+    expect(h.dialog.querySelector('.status')!.textContent).toContain('Multiple unresolved moves');
+    expect(h.dialog.querySelectorAll('[data-moves] button')).toHaveLength(2);
+    expect(h.dialog.querySelector('[data-resolve]')).toBeNull();
+    expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/status')||path.endsWith('/resolve'))).toBe(false);
+  });
+
 });

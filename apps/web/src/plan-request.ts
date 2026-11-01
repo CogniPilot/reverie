@@ -57,7 +57,7 @@ export interface PlanRequestExecution {
 export interface PlanRequestPort {
   load(): Promise<PlanRequestRecord[]>;
   save(records: PlanRequestRecord[]): Promise<void>;
-  moves: Pick<PlanMoves, 'begin' | 'get' | 'cancel'>;
+  moves: Pick<PlanMoves, 'begin' | 'get' | 'cancel'> & Partial<Pick<PlanMoves, 'assertAvailable'>>;
   binding(employeeId: string, owner?: string): string | undefined;
   validateTarget(snapshot: PlanMoveSnapshot, target: string, owner?: string): Promise<{ mode: 'codex' | 'claude' } | void>;
   capability: {
@@ -147,6 +147,19 @@ export class PlanMoveRequests {
         record.phase = 'reauthorize-required';
         record.error = 'Owner authorization ended. Sign in and reauthorize the request.';
         await this.revoke(record);
+        await this.save();
+      }
+    }
+    // A request which observed the journal hold must follow that SAME move's
+    // verified terminal adoption. Otherwise it would keep blocking after the
+    // move and its durable recovery acknowledgement have already settled.
+    if (record.phase === 'recovery-required') {
+      const move = await this.port.moves.get(record.id, record.owner);
+      if (move?.phase === 'completed' && move.recoveryAction === 'adopt-existing' &&
+        move.sourceCleanupVerified === true && move.employeeId === record.employeeId &&
+        move.oldSession === record.sessionId && move.newSession === record.newSession &&
+        move.fromAccount === record.fromAccount && move.toAccount === record.toAccount) {
+        record.phase = 'completed'; record.movePhase = 'completed'; record.error = move.error;
         await this.save();
       }
     }
@@ -266,6 +279,8 @@ export class PlanMoveRequests {
         await this.current(existing);
         return view(existing);
       }
+      await this.port.moves.assertAvailable?.(input.employeeId, owner);
+      if (!execution.authorized()) throw new PlanMoveError('The plan permission or binding changed', 403);
       for (const record of this.records.values())
         if (record.owner === owner && record.employeeId === input.employeeId) {
           await this.current(record);

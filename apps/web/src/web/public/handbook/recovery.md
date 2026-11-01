@@ -47,6 +47,12 @@ Existing laptops keep their installed CLI after a website update. Use the [older
 
 Inspect the returned employee binding and startup/recovery result. Attendance can save while startup is blocked; report the reason. Obtain a chat acknowledgement before assigning work.
 
+## Interrupted plan moves
+
+Blocked moves open the employee’s existing move. **Refresh status** reads its journal. **Adopt existing destination** verifies the stopped source and current destination without launching sessions or replaying a handoff. Active, ambiguous, resource or unconfirmed moves stay held. Lost replies require status inspection, never new or forced moves.
+
+CLI: `reverie agent plan-move blocked`, `reverie agent plan-move recovery-status ID` and `reverie agent plan-move recover-existing ID`. Queued self-recovery waits for idle; end your turn and inspect status. Older laptops use their own scoped `httpRequest` connection to POST `/api/plans/agent-moves/current`, `/api/plans/agent-moves/ID/status` or `/api/plans/agent-moves/ID/resolve` with the recorded `{action:'adopt-existing',oldSession,newSession,toAccount}`. Never borrow an owner cookie.
+
 Report persistent failures with employee, current session, time, error and attempted recoveries. Preserve bounded private logs; keep credentials and private history out of shared chat. Escalate broker failures to an authorized operator.
 
 See [Permissions](/handbook/permissions) and [Power and restarts](/handbook/power).
