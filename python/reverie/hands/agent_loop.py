@@ -142,6 +142,7 @@ class Chat:
 
     def __init__(self, argv, timeout):
         self.argv, self.timeout = list(argv), timeout
+        self.time_zone = None  # the office's display zone, as the server last reported it with a room read
 
     def _run(self, args):
         r = subprocess.run(self.argv + args, capture_output=True, text=True, timeout=self.timeout)
@@ -151,6 +152,8 @@ class Chat:
 
     def read(self, room, n):
         data = json.loads(self._run(['read', '--room', room, '-n', str(n), '--json']))
+        if known_zone(data.get('timeZone')):
+            self.time_zone = data['timeZone']
         messages = [m for m in data.get('messages', []) if isinstance(m, dict) and m.get('id')]
         if any(type(message.get('phoneWake')) is not bool for message in messages):
             raise ValueError('Server did not verify current phone delivery; no automatic replies')
@@ -390,11 +393,31 @@ def load_images(cfg, room, msg):
     return parts, notes
 
 
+def known_zone(name):
+    """True for an IANA zone name this Python can resolve (bounded, never a fixed offset the caller invented)."""
+    if not isinstance(name, str) or not 0 < len(name) <= 100:
+        return False
+    try:
+        ZoneInfo(name)
+    except (ValueError, KeyError, OSError):
+        return False
+    return True
+
+
+def team_zone(cfg):
+    """The office's display zone: the company setting the server reports with each room read, else the configured
+    one. A zone name, not an offset, so daylight saving changes come from the zone database."""
+    name = cfg.get('_time_zone')
+    return ZoneInfo(name if known_zone(name) else cfg['timezone'])
+
+
 def now_line(cfg, now=None):
-    """Today's date and time in the team's time zone, so the model does not assume its training year."""
-    when = datetime.fromtimestamp(time.time() if now is None else now, timezone.utc).astimezone(ZoneInfo(cfg['timezone']))
+    """Today's date and time in the team's time zone, plus UTC, so the model neither assumes its training year nor
+    converts a clock by hand."""
+    instant = datetime.fromtimestamp(time.time() if now is None else now, timezone.utc)
+    when = instant.astimezone(team_zone(cfg))
     hour = when.hour % 12 or 12
-    return f"Now: {when.strftime('%A %Y-%m-%d')} {hour}:{when.strftime('%M %p %Z')}."
+    return f"Now: {when.strftime('%A %Y-%m-%d')} {hour}:{when.strftime('%M %p %Z')} ({instant.strftime('%H:%M')} UTC)."
 
 
 def ago(at_ms, now):
@@ -416,7 +439,7 @@ def clock(cfg, at_ms):
     """A message's server time (epoch ms) in the team's zone, e.g. '9:12 AM EDT'. None when it has no usable time."""
     if not isinstance(at_ms, (int, float)) or isinstance(at_ms, bool) or at_ms <= 0:
         return None
-    when = datetime.fromtimestamp(at_ms / 1000, timezone.utc).astimezone(ZoneInfo(cfg['timezone']))
+    when = datetime.fromtimestamp(at_ms / 1000, timezone.utc).astimezone(team_zone(cfg))
     return f"{when.hour % 12 or 12}:{when.strftime('%M %p %Z')}"
 
 
@@ -854,6 +877,8 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
         except Exception as e:
             log('read failed', room, repr(e)[:300])
             continue
+        if known_zone(getattr(chat, 'time_zone', None)):
+            cfg['_time_zone'] = chat.time_zone
         if rs['since'] is None:
             # First sight of a room: start from now, never answer the backlog.
             rs['since'] = max([m.get('at', 0) for m in history] + [0])
