@@ -92,7 +92,7 @@ export interface LaptopAgentStop {
   settle(sessionId: string, fence: string): Promise<unknown>;
 }
 
-export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session, stillCurrent: () => boolean) => Promise<void>,
+export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session, stillCurrent: () => boolean, preserveRecipe?: boolean) => Promise<void>,
   laptopStop?: LaptopAgentStop, deadPaneWaitMs = 15_000, stopBounds: StopBounds = STOP_BOUNDS) {
   const switching = runtimeSwitches;
   const authorize = (req: FastifyRequest) => req.headers['x-reverie-parent-session'] === undefined && verifiedOwner(req);
@@ -110,6 +110,8 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     const employee = company?.view(ownerFor(req)).employees.find((e) => e.id === (req.params as { id: string }).id);
     if (!employee) return reply.code(404).send({ success: false, error: 'Unknown active company expert' });
     if (employee.onVacation) return reply.code(409).send({ success: false, error: 'Return this expert from vacation before restarting' });
+    if (!authorize(req) && employee.desiredRunning === false)
+      return reply.code(409).send({success:false,error:'Enter the office before restarting this expert'});
     const session = ctx.sessions.get(employee.sessionId) ?? loadSession?.(employee.sessionId, req);
     if (!session) return reply.code(409).send({ success: false, error: 'No saved runtime recipe is available for this expert. Restore their runtime settings before restarting.' });
     // A wedged agent on an isolated laptop cannot change runtime in place. With the owner's confirmed recovery, the
@@ -143,8 +145,8 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       }
       const settled = () => { clearOwnerStop(session.id, fence); runtimeSwitches.delete(session.id); releaseInput(); };
       let outcome: unknown;
+      if (!authorized()) { settled(); return reply.code(409).send({success:false,error:'Office permission or employee binding changed'}); }
       try {
-        if (!authorized()) { settled(); throw new CompanyError('Office permission or employee binding changed', 409); }
         outcome = await laptopStop.stop(session.id, notAfter, fence);
       } catch (error) {
         // Unknown outcome (timeout, lost connection, a failure after the signal): an engine exec the laptop accepted can
@@ -192,7 +194,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
           return reply.code(409).send({ success: false, error: 'Recovery was not confirmed; the expert changed, stopped or its pane is already live' });
         if (!current()) return reply.code(409).send({ success: false, error: 'This expert changed or stopped during recovery' });
         ctx.persistSessionStateNow(session);
-        await onRuntimeSaved?.(session, current);
+        await onRuntimeSaved?.(session, current, true);
         if (!current()) return reply.code(409).send({ success: false, error: 'This expert changed or stopped during recovery' });
         const state = ctx.getSessionStateWithRespawn?.(session);
         if (state !== undefined) ctx.broadcast?.(SseEvent.SessionUpdated, { session: state });
@@ -211,7 +213,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       return reply.code(409).send({ success: false, error: `${employee.name || 'This expert'}’s laptop is running, so Restart cannot replace it in place. To recover them, use Leave office, then Enter office. That stops and starts their laptop and keeps their identity, saved conversation, memory and files.` });
     const runtime = runtimeView(session);
     if (!runtime.source) return reply.code(409).send({ success: false, error: 'Choose a plan or local model profile in runtime settings before restarting' });
-    const result = await changeRuntime(req, reply, employee.sessionId, Input.parse({ ...runtime, ...recovery }), authorized);
+    const result = await changeRuntime(req, reply, employee.sessionId, Input.parse({ ...runtime, ...recovery }), authorized, true);
     if (!result.success) return result;
     return {success:true,data:{employee:company?.view(ownerFor(req)).employees.find(e=>e.id===employee.id),sessionId:employee.sessionId,recovery:'normal-launch-requested'}};
   });
@@ -223,7 +225,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     return { success: true, data: runtimeView(session) };
   });
   const changeRuntime = async (req: FastifyRequest, reply: import('fastify').FastifyReply, id: string,
-    body: z.infer<typeof Input>, authorized: () => boolean) => {
+    body: z.infer<typeof Input>, authorized: () => boolean, preserveRecipe = false) => {
     if (!authorized()) return reply.code(403).send({ success: false, error: 'Runtime action is no longer authorized' });
     const detached = !ctx.sessions.has(id);
     const session = detached ? loadSession?.(id, req) : findSessionOrFail(ctx, id, req);
@@ -286,9 +288,9 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       await intent?.claim();
       requireIntent();
       const sourceKey = body.source.kind === 'subscription' ? 'subscription:' + body.source.profileId : 'local:' + body.source.endpointId;
-      rollback = session.configureRuntime({ mode: body.mode as SessionMode, selection, env, sourceKey, model, effort: body.effort, effortField: effort.field });
+      rollback = session.configureRuntime({ mode: body.mode as SessionMode, selection, env, sourceKey, model, effort: body.effort, effortField: effort.field, preserveRecipe });
       ctx.mux?.updateSessionMode(id, session.mode);
-      if (custom) session.setCustomModel(custom, env);
+      if (custom && !preserveRecipe) session.setCustomModel(custom, env);
       session.setPinned(true);
       launchAttempted = true;
       if (detached) {
@@ -300,7 +302,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       } else if (!await session.restartCli()) throw new Error('The selected runtime did not start');
       requireIntent();
       ctx.persistSessionStateNow(session);
-      await onRuntimeSaved?.(session, () => authorized() && (!intent || intent.current()));
+      await onRuntimeSaved?.(session, () => authorized() && (!intent || intent.current()), preserveRecipe);
       requireIntent();
       const state = ctx.getSessionStateWithRespawn?.(session);
       if (state !== undefined) ctx.broadcast?.(detached ? SseEvent.SessionCreated : SseEvent.SessionUpdated,
@@ -317,13 +319,15 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
           else await session.stop().catch(() => undefined);
         } else if (launchAttempted && (!authorized() || intent?.originallyStopped || (intent && !intent.current()))) {
           await session.stop().catch(() => undefined);
-        } else if (launchAttempted && ctx.sessions.get(id) === session) await session.restartCli().catch(() => false);
+        } else if (!preserveRecipe && launchAttempted && ctx.sessions.get(id) === session) await session.restartCli().catch(() => false);
         ctx.persistSessionStateNow(session);
       }
       await intent?.rollback();
       if (configDir) removeConfigDir(configDir);
       if (error instanceof CompanyError) return fail(error.status, error.message);
-      return fail(400, 'Runtime change failed; previous settings were restored. Check the account and harness compatibility.');
+      return preserveRecipe
+        ? fail(409, 'Runtime start outcome is unconfirmed. Inspect the expert before another explicit action.')
+        : fail(400, 'Runtime change failed; previous settings were restored. Check the account and harness compatibility.');
     } finally { intent?.finish(); switching.delete(id); }
   };
   app.post('/api/sessions/:id/runtime', async (req, reply) => {
@@ -340,6 +344,6 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (!session) throw new CompanyError('No saved runtime recipe is available for this expert',409);
     const runtime=runtimeView(session);
     if (!runtime.source) throw new CompanyError('Saved runtime source is unavailable',409);
-    return changeRuntime(req,reply,employee.sessionId,Input.parse(runtime),authorized);
+    return changeRuntime(req,reply,employee.sessionId,Input.parse(runtime),authorized,true);
   };
 }

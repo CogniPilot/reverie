@@ -1788,7 +1788,6 @@ export class WebServer extends EventEmitter {
       visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
-    let startOfficeEmployee: ReturnType<typeof registerSessionRuntimeRoutes> | undefined;
     registerCompanyRoutes(
       this.app,
       ctx,
@@ -1809,7 +1808,7 @@ export class WebServer extends EventEmitter {
         },
       }
     );
-    startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
+    const startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);
       const recipe = employee?.runtimeRecipe;
       const saved = this.store.getSession(id) ?? (recipe ? { ...recipe, ...recipe.configs, id, owner: employee?.owner, name: employee?.name } : undefined);
@@ -1820,8 +1819,9 @@ export class WebServer extends EventEmitter {
       if (custom) session.setCustomModel(custom);
       if (!custom && recipe?.customModel) session.setCustomModel({ ...recipe.customModel, label: 'Local model', envKeys: [] });
       return session;
-    }, this.companyService, async (session, stillCurrent) => {
-      await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session), stillCurrent);
+    }, this.companyService, async (session, stillCurrent, preserveRecipe) => {
+      // Attendance/restart preserves the canonical saved recipe, including absent optional fields.
+      if (!preserveRecipe) await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session), stillCurrent);
       await this.companyService.setDesiredRunning(session.id, true, stillCurrent);
       if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication',409);
       this.rebriefAfterBackendChange(session.id);
