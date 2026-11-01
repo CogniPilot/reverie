@@ -186,7 +186,7 @@ describe('DiskSpaceWatch', () => {
     const w = make({
       volumes: async () => [{ ...volume(percent), roots: ['/srv/private/root-path'] }],
       hostVolumes: async () => [volume(92, 'host-images', ['Host images'])],
-      consumers: async (v) => ({ entries: [{ name: v.key === 'host-images' ? 'layers/../x' : 'cases', bytes: 5 * GB }], partial: false }),
+      consumers: async (v) => ({ entries: [{ name: v.key === 'host:host-images' ? 'layers/../x' : 'cases', bytes: 5 * GB }], partial: false }),
     });
     await w.init();
     await w.configure(config);
@@ -196,7 +196,97 @@ describe('DiskSpaceWatch', () => {
     expect(posted[0]).toContain('Host images is at 92%');
     expect(posted[0]).not.toContain('/srv/private');
     expect(posted[0]).not.toContain('layers/');
+    expect(posted[0]).toContain('layers..x 5.0 GB');
     expect(posted[0].length).toBeLessThanOrEqual(1400);
+  });
+
+  it('keeps alarming from memory when the state file cannot be written (full data volume)', async () => {
+    const w = make();
+    await w.init();
+    await w.configure(config);
+    const enospc = Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+    (w.store as unknown as { update: () => Promise<void> }).update = async () => { throw enospc; };
+    await step(w, 99.5);
+    expect(pushed).toHaveLength(1);
+    expect(posted).toHaveLength(1);
+    expect(w.status().durable).toBe(false);
+    await step(w, 99.7);
+    expect(pushed).toHaveLength(1);
+    await step(w, 90);
+    expect(posted[1]).toContain('back below critical');
+    await step(w, 99.2);
+    expect(pushed).toHaveLength(2);
+    expect(posted[2]).toContain('Disk critical');
+  });
+
+  it('a refused pending warning does not hold back a critical push; both notices go in one later post', async () => {
+    const w = make();
+    await w.init();
+    await w.configure(config);
+    fail = new BotWatchPostRefused('cap');
+    await step(w, 92);
+    expect(w.status().pending).toBe('prepared');
+    await step(w, 99.5);
+    expect(pushed).toHaveLength(1);
+    expect(posted).toEqual([]);
+    fail = undefined;
+    await w.tick();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain('Disk warning');
+    expect(posted[0]).toContain('Disk critical');
+    expect(posted[0].match(/@James/g)).toHaveLength(1);
+  });
+
+  it('drops notices the bot can no longer post, and keeps reading and pushing', async () => {
+    const w = make();
+    await w.init();
+    await w.configure(config);
+    bot.rooms = [];
+    await step(w, 92);
+    expect(w.status().pending).toBeUndefined();
+    await step(w, 99.5);
+    expect(pushed).toHaveLength(1);
+    expect(w.status().volumes['dev-1']!.level).toBe('critical');
+    bot.rooms = ['boardroom'];
+    await step(w, 90);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain('back below critical');
+  });
+
+  it('adds a notice raised while a post is unconfirmed instead of replacing it', async () => {
+    const w = make();
+    await w.init();
+    await w.configure(config);
+    fail = new Error('timeout');
+    await step(w, 92);
+    expect(w.status().pending).toBe('unknown');
+    fail = undefined;
+    await step(w, 99.5); // the reading runs first: critical queues behind the unconfirmed warning
+    expect(pushed).toHaveLength(1);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain('Disk warning');
+    expect(posted[0]).toContain('Disk critical');
+  });
+
+  it('does not re-push a critical level that was saved before a restart', async () => {
+    let w = make();
+    await w.init();
+    await w.configure(config);
+    await step(w, 99.5);
+    expect(pushed).toHaveLength(1);
+    w = make();
+    await w.init();
+    await step(w, 99.6);
+    expect(pushed).toHaveLength(1);
+  });
+
+  it('never lets a host volume key replace a website filesystem', async () => {
+    const w = make({ hostVolumes: async () => [volume(93, 'dev-1', ['Host scratch'])] });
+    await w.init();
+    await w.configure(config);
+    await step(w, 95);
+    expect(posted[0]).toContain('Workspace is at 95%');
+    expect(posted[0]).toContain('Host scratch is at 93%');
   });
 
   it('refuses warn at or above critical and a bot that cannot post in the room', async () => {

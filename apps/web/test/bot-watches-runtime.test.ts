@@ -109,8 +109,9 @@ describe('typed bot watch owner-only runtime integration', () => {
   it('only the verified owner configures the disk-space alarm, and it posts as a notice on change', async () => {
     const room = { id: 'room', name: 'Room', members: [], messages: [] as unknown[] };
     const posts: Array<{ text: string; to: unknown; deliver: unknown }> = [];
-    let used = 50;
+    let used = 50, clock = Date.UTC(2026, 10, 1, 3);
     const runtime = await setup({
+      now: () => clock,
       chat: {
         room: () => room,
         rooms: () => [room],
@@ -141,7 +142,7 @@ describe('typed bot watch owner-only runtime integration', () => {
     await runtime.tick();
     expect(posts).toEqual([]);
     used = 95;
-    await runtime.disk.store.update((s) => { s.nextPollAt = 0; });
+    clock += 5 * 60_000;
     await runtime.tick();
     expect(posts).toHaveLength(1);
     expect(posts[0]!.text).toContain('Disk warning: Workspace is at 95% used');

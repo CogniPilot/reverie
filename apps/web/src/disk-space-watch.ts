@@ -35,7 +35,6 @@ export const DiskSpaceWatchStateSchema = z
       z.string().max(100),
       z.object({ level: Level, since: z.number().int(), labels: z.array(z.string().max(60)).max(8) }).strict()
     ),
-    nextPollAt: z.number().int(),
     failures: z.number().int().min(0).max(1000),
     unavailableNoticed: z.boolean(),
     posts: z.array(z.number().int()).max(120),
@@ -43,8 +42,6 @@ export const DiskSpaceWatchStateSchema = z
       .object({
         id: z.string().uuid(),
         text: z.string().max(1500),
-        critical: z.boolean(),
-        pushed: z.boolean(),
         retried: z.boolean(),
         reservedAt: z.number().int(),
         phase: z.enum(['prepared', 'reserved', 'delivered', 'unknown']),
@@ -52,6 +49,8 @@ export const DiskSpaceWatchStateSchema = z
       })
       .strict()
       .optional(),
+    /** Notices raised while a post was in flight; they become the next post. */
+    queued: z.string().max(1500).optional(),
   })
   .strict();
 type State = z.infer<typeof DiskSpaceWatchStateSchema>;
@@ -76,6 +75,8 @@ export interface DiskSpaceWatchDeps {
 }
 
 const MESSAGE_CHARS = 1400;
+/** One consumer-scan time budget per reading, shared by all volumes. */
+const SCAN_BUDGET_MS = 20_000;
 const FAILED_READS_NOTICE = 3;
 /** A consumer name as one plain path segment: no control characters or separators, at most 40 characters. */
 const plainName = (name: string) =>
@@ -160,24 +161,42 @@ export async function readWebsiteVolumes(targets?: DiskTarget[], timeoutMs = 2_0
   return read ? [...devices.values()] : null;
 }
 
+
+/**
+ * The watch decides from an in-memory copy of its state, so a failed state write (a full data volume) never stops
+ * readings or the critical push; it only loses restart dedup until the process restarts. Chat delivery never gates
+ * readings: new notices coalesce into the one pending post.
+ */
 export class DiskSpaceWatch {
   readonly store: BotWatchState<State>;
   private chain: Promise<unknown> = Promise.resolve();
+  private mem!: State;
+  private nextPollAt = 0;
+  private durable = true;
+  /** Volumes whose current critical episode already pushed, for this process. */
+  private pushed = new Set<string>();
   constructor(file: string, private deps: DiskSpaceWatchDeps) {
     this.store = new BotWatchState(file, DiskSpaceWatchStateSchema, {
-      version: 1, volumes: {}, nextPollAt: 0, failures: 0, unavailableNoticed: false, posts: [],
+      version: 1, volumes: {}, failures: 0, unavailableNoticed: false, posts: [],
     });
   }
-  init() { return this.store.init(); }
+  async init() {
+    await this.store.init();
+    this.mem = this.store.snapshot();
+    // A critical level saved before a restart was already pushed.
+    for (const [key, v] of Object.entries(this.mem.volumes)) if (v.level === 'critical') this.pushed.add(key);
+  }
   status() {
-    const s = this.store.snapshot();
-    return { config: s.config, volumes: s.volumes, failures: s.failures, pending: s.pending?.phase };
+    const s = this.mem;
+    return { config: s.config, volumes: s.volumes, failures: s.failures, pending: s.pending?.phase, durable: this.durable };
   }
   async configure(raw: unknown, beforeCommit: () => void = () => {}) {
     const cfg = DiskSpaceWatchConfig.parse(raw), bot = this.deps.bot(cfg.botId), room = this.deps.room(cfg.roomId);
     if (!bot || !bot.rooms.includes(cfg.roomId) || !room || room.kind === 'dm' || room.archivedAt)
       throw Error('Allowed ordinary bot room required');
-    await this.store.update((s) => { s.config = cfg; s.nextPollAt = 0; }, beforeCommit);
+    await this.store.update((s) => { s.config = cfg; }, beforeCommit);
+    this.mem.config = cfg;
+    this.nextPollAt = 0;
   }
   tick(): Promise<void> {
     const run = this.chain.then(() => this.poll());
@@ -186,9 +205,24 @@ export class DiskSpaceWatch {
   }
   private now() { return Math.trunc((this.deps.now ?? Date.now)()); }
 
+  /** Best-effort save of the in-memory state; a failure degrades only restart dedup. */
+  private async save() {
+    if (!this.durable) return;
+    const next = structuredClone(this.mem);
+    try {
+      await this.store.update((x) => { Object.assign(x, next); });
+    } catch {
+      this.durable = false;
+      console.warn('[disk-space-watch] state not saved; alarms continue from memory');
+    }
+  }
+
   private async readAll(): Promise<DiskVolume[] | null> {
     const own = await (this.deps.volumes ?? readWebsiteVolumes)().catch(() => null);
-    const host = this.deps.hostVolumes ? await this.deps.hostVolumes().catch(() => []) : [];
+    // Host keys are namespaced so an operator-supplied key can never replace a website filesystem.
+    const host = this.deps.hostVolumes
+      ? (await this.deps.hostVolumes().catch(() => [])).map((v) => ({ ...v, key: `host:${String(v?.key)}`.slice(0, 100) }))
+      : [];
     const valid = [...(own ?? []), ...host].filter((v) =>
       v && typeof v.key === 'string' && v.key.length <= 100 && Number.isSafeInteger(v.totalBytes) && v.totalBytes > 0 &&
       Number.isSafeInteger(v.availableBytes) && v.availableBytes >= 0 && v.availableBytes <= v.totalBytes);
@@ -197,55 +231,67 @@ export class DiskSpaceWatch {
   }
 
   private async poll() {
-    const s = this.store.snapshot(), c = s.config;
+    const c = this.mem.config;
     if (!c?.enabled) return;
-    if (s.pending) { await this.deliver(); return; }
-    if (this.now() < s.nextPollAt) return;
-    await this.store.update((x) => { x.nextPollAt = this.now() + c.intervalMinutes * 60_000; });
+    if (this.now() >= this.nextPollAt) {
+      this.nextPollAt = this.now() + c.intervalMinutes * 60_000;
+      await this.read(c);
+    }
+    await this.deliver();
+  }
+
+  private async read(c: Config) {
+    const s = this.mem;
     const volumes = await this.readAll();
     if (!volumes) {
-      const failures = Math.min(1000, s.failures + 1);
-      const notice = failures >= FAILED_READS_NOTICE && !s.unavailableNoticed;
-      await this.prepare(notice ? [`${this.mention(c)}❔ Disk readings unavailable for ${failures} checks in a row; alarms are paused until a reading succeeds.`] : [], false, (x) => {
-        x.failures = failures;
-        if (notice) x.unavailableNoticed = true;
-      });
+      s.failures = Math.min(1000, s.failures + 1);
+      if (s.failures >= FAILED_READS_NOTICE && !s.unavailableNoticed) {
+        s.unavailableNoticed = true;
+        this.queue([`❔ Disk readings unavailable for ${s.failures} checks in a row; alarms are paused until a reading succeeds.`], c);
+      }
+      await this.save();
       return;
     }
-    const lines: string[] = [];
-    let critical = false;
+    s.failures = 0;
+    s.unavailableNoticed = false;
+    const lines: string[] = [], critical: string[] = [];
     const levels: State['volumes'] = {};
+    const scanStop = this.now() + SCAN_BUDGET_MS;
     for (const v of volumes) {
       const percent = usedPercent(v);
       const previous = s.volumes[v.key]?.level ?? 'ok';
       const level = nextLevel(previous, percent, c);
       levels[v.key] = { level, since: level === previous ? s.volumes[v.key]?.since ?? this.now() : this.now(), labels: v.labels.slice(0, 8).map((l) => l.slice(0, 60)) };
+      if (level !== 'critical') this.pushed.delete(v.key);
       if (level === previous) continue;
       const name = v.labels.join(' / ') || 'Volume';
       const usage = `${Math.floor(percent)}% used, ${formatBytes(v.availableBytes)} free of ${formatBytes(v.totalBytes)}`;
       if (RANK[level] > RANK[previous]) {
-        if (level === 'critical') critical = true;
-        const top = await this.top(v);
-        lines.push(`${level === 'critical' ? '🛑 Disk critical' : '⚠️ Disk warning'}: ${name} is at ${usage}.${top}` +
-          (level === 'critical' ? ' Writes may start failing.' : ''));
+        const line = `${level === 'critical' ? '🛑 Disk critical' : '⚠️ Disk warning'}: ${name} is at ${usage}.`;
+        if (level === 'critical' && !this.pushed.has(v.key)) critical.push(line);
+        lines.push(line + await this.top(v, scanStop) + (level === 'critical' ? ' Writes may start failing.' : ''));
       } else {
         lines.push(`✅ Disk ${level === 'ok' ? 'recovered' : 'back below critical'}: ${name} is at ${usage}.`);
       }
     }
-    const text = lines.length ? [`${this.mention(c)}${lines.join('\n')}`] : [];
-    await this.prepare(text, critical, (x) => {
-      x.volumes = levels;
-      x.failures = 0;
-      x.unavailableNoticed = false;
-    });
+    s.volumes = levels;
+    // The push needs no disk and no chat, so it goes before any state write and whether or not chat can post.
+    if (critical.length && this.deps.push) {
+      await this.deps.push(critical.join(' ').slice(0, 220)).catch(() => 0);
+      for (const v of volumes) if (levels[v.key]?.level === 'critical') this.pushed.add(v.key);
+    }
+    if (lines.length) this.queue(lines, c);
+    await this.save();
   }
 
   private mention(c: Config) { return c.mention ? `@${c.mention} ` : ''; }
 
-  private async top(v: DiskVolume): Promise<string> {
+  private async top(v: DiskVolume, stop: number): Promise<string> {
     if (!this.deps.consumers && !v.roots.length) return '';
+    const left = stop - this.now();
+    if (left <= 0) return ' Top consumers: not scanned (time budget used).';
     try {
-      const found = await (this.deps.consumers ?? ((x: DiskVolume) => scanConsumers(x.roots)))(v);
+      const found = await (this.deps.consumers ?? ((x: DiskVolume) => scanConsumers(x.roots, { deadlineMs: left, now: () => this.now() })))(v);
       const entries = found.entries.filter((e) => e && typeof e.name === 'string' && Number.isFinite(e.bytes)).slice(0, 5);
       if (!entries.length) return '';
       const list = entries.map((e) => `${plainName(e.name)} ${formatBytes(e.bytes)}`).join(', ');
@@ -255,57 +301,72 @@ export class DiskSpaceWatch {
     }
   }
 
-  /** Levels and the message are saved together before any post; critical pushes first, since chat may not write. */
-  private async prepare(lines: string[], critical: boolean, change: (x: State) => void) {
-    const c = this.store.snapshot().config!;
-    let text = lines.join('\n');
-    if (text) {
-      text += `\n(${displayTime(this.now(), this.deps.timeZone?.())} · warn ${c.warnPercent}%, critical ${c.criticalPercent}%)`;
-      if (text.length > MESSAGE_CHARS) text = text.slice(0, MESSAGE_CHARS - 1) + '…';
-    }
-    let pushed = false;
-    if (text && critical && this.deps.push) {
-      await this.deps.push(text.slice(0, 220)).catch(() => 0);
-      pushed = true;
-    }
-    await this.store.update((x) => {
-      change(x);
-      if (text) x.pending = { id: randomUUID(), text, critical, pushed, retried: false, reservedAt: this.now(), phase: 'prepared' };
-    });
-    if (text) await this.deliver();
+  /** New notices join the one pending post (bounded) rather than waiting behind it. */
+  private queue(lines: string[], c: Config) {
+    const s = this.mem;
+    const stamp = `(${displayTime(this.now(), this.deps.timeZone?.())} · warn ${c.warnPercent}%, critical ${c.criticalPercent}%)`;
+    const body = lines.join('\n');
+    // A post in flight (reserved or unknown) is settled first; new notices wait in `queued` until then.
+    const inFlight = !!s.pending && s.pending.phase !== 'prepared';
+    const base = inFlight ? s.queued : s.pending?.text;
+    const text = this.join(base, `${this.mention(c)}${body}\n${stamp}`);
+    if (inFlight) s.queued = text;
+    else s.pending = { id: randomUUID(), text, retried: false, reservedAt: this.now(), phase: 'prepared' };
   }
 
   private async deliver() {
-    const s = this.store.snapshot(), c = s.config, p = s.pending;
+    const s = this.mem, c = s.config, p = s.pending;
     if (!c?.enabled || !p) return;
     const b = this.deps.bot(c.botId), r = this.deps.room(c.roomId);
-    if (!b || !r || r.archivedAt || r.kind === 'dm' || !b.rooms.includes(r.id)) return;
-    if (p.phase === 'reserved' || p.phase === 'unknown') {
-      // An interrupted post that landed is adopted, never re-sent. One that did not is retried once, then dropped,
-      // so an alarm can never wedge the watch (the level is already saved).
-      const matching = r.messages.filter((m) => m.from.kind === 'bot' && m.from.botId === b.id && m.text === p.text && !m.deleted);
-      if (matching.length) {
-        await this.store.update((x) => { delete x.pending; });
-        return;
-      }
-      if (p.phase === 'reserved') {
-        await this.store.update((x) => { x.pending!.phase = 'unknown'; });
-        return;
-      }
-      await this.store.update((x) => {
-        if (x.pending!.retried) delete x.pending;
-        else { x.pending!.retried = true; x.pending!.phase = 'prepared'; }
-      });
+    if (!b || !r || r.archivedAt || r.kind === 'dm' || !b.rooms.includes(r.id)) {
+      // The bot can no longer post here: drop the notices (any critical push already went) rather than wedge.
+      delete s.pending;
+      delete s.queued;
+      await this.save();
       return;
+    }
+    if (p.phase === 'reserved' || p.phase === 'unknown') {
+      // An interrupted post that landed is adopted, never re-sent. One that did not is retried once, then dropped.
+      const landed = r.messages.some((m) => m.from.kind === 'bot' && m.from.botId === b.id && m.text === p.text && !m.deleted);
+      if (landed || (p.phase === 'unknown' && p.retried)) delete s.pending;
+      else if (p.phase === 'reserved') p.phase = 'unknown';
+      else { p.retried = true; p.phase = 'prepared'; }
+      this.promote();
+      await this.save();
+      if (s.pending?.phase !== 'prepared') return;
     }
     const posts = s.posts.filter((t) => t > this.now() - 3_600_000);
     if (posts.length >= b.maxPerHour) return;
-    await this.store.update((x) => { x.pending!.phase = 'reserved'; x.posts = [...posts, this.now()]; });
+    const pending = s.pending!;
+    pending.phase = 'reserved';
+    s.posts = [...posts, this.now()];
+    await this.save();
     try {
-      this.deps.post(b, r.id, p.text, posts.length);
-      await this.store.update((x) => { delete x.pending; });
+      this.deps.post(b, r.id, pending.text, posts.length);
+      delete s.pending;
     } catch (error) {
-      await this.store.update((x) => { x.pending!.phase = error instanceof BotWatchPostRefused ? 'prepared' : 'unknown'; });
+      pending.phase = error instanceof BotWatchPostRefused ? 'prepared' : 'unknown';
     }
+    this.promote();
+    await this.save();
+  }
+
+  /** Earlier text plus a new notice, one mention, bounded: when too long the newest notice wins. */
+  private join(earlier: string | undefined, next: string): string {
+    if (!earlier) return next.slice(0, MESSAGE_CHARS);
+    const mention = this.mem.config ? this.mention(this.mem.config) : '';
+    const bare = next.startsWith(mention) ? next.slice(mention.length) : next;
+    const text = `${earlier}\n${bare}`;
+    return text.length <= MESSAGE_CHARS ? text : `${mention}…earlier notices omitted\n${bare}`.slice(0, MESSAGE_CHARS);
+  }
+
+  /** Notices queued while a post was in flight join, or become, the next pending post. */
+  private promote() {
+    const s = this.mem;
+    if (!s.queued) return;
+    if (!s.pending) s.pending = { id: randomUUID(), text: s.queued, retried: false, reservedAt: this.now(), phase: 'prepared' };
+    else if (s.pending.phase === 'prepared') s.pending.text = this.join(s.pending.text, s.queued);
+    else return;
+    delete s.queued;
   }
 }
