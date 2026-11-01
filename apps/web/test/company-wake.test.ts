@@ -72,6 +72,29 @@ function fixture() {
 }
 
 describe('company crash recovery selection', () => {
+  it('explicit entry preserves a genuinely healthy native provider even without a viewer or saved row', async () => {
+    const f=fixture();f.saved.delete(f.root.sessionId);
+    const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'healthy' as const});
+    expect(await recovery.wakeOne(f.root.id,{explicitStart:true})).toEqual({awakened:[],skipped:[]});
+    expect(f.deps.wake).not.toHaveBeenCalled();expect(f.deps.claim).not.toHaveBeenCalled();
+    expect(f.deps.noteRunning).toHaveBeenCalledExactlyOnceWith(f.root.sessionId);
+  });
+
+  it('explicit entry does not mistake an alive viewer for a dead native provider', async () => {
+    const f=fixture();f.live.add(f.root.sessionId);
+    const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'dead' as const});
+    expect((await recovery.wakeOne(f.root.id,{explicitStart:true})).awakened).toEqual([f.root.id]);
+    expect(f.deps.wake).toHaveBeenCalledOnce();
+  });
+
+  it('unknown native health with an alive viewer refuses instead of guessing or restarting', async () => {
+    const f=fixture();f.live.add(f.root.sessionId);
+    const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'unknown' as const});
+    expect(await recovery.wakeOne(f.root.id,{explicitStart:true})).toEqual({awakened:[],skipped:[{
+      employeeId:f.root.id,reason:'native-health-unconfirmed'}]});
+    expect(f.deps.wake).not.toHaveBeenCalled();expect(f.deps.claim).not.toHaveBeenCalled();
+  });
+
   it.each(['hands', 'codex', 'claude'])('an explicit office entry starts a stopped %s report without changing its saved recipe', async (mode) => {
     const f = fixture();
     const saved = f.saved.get(f.report.sessionId)!;

@@ -6,6 +6,8 @@ import { planRebootRestore, type RebootRestoreEntry } from './reboot-restore.js'
 export interface CompanyWakeDeps {
   company(): CompanyState;
   saved(sessionId: string): SessionState | undefined;
+  /** Fresh bounded native facts for explicit attendance; viewer/PID liveness is not provider health. */
+  nativeHealth?(sessionId: string): 'healthy' | 'dead' | 'unknown';
   live(sessionId: string): boolean;
   closing(sessionId: string): boolean;
   noteRunning(sessionId: string): Promise<void>;
@@ -144,7 +146,11 @@ export class CompanyWake {
         continue;
       }
       if (!stillCurrent()) { skip('changed-or-stopping'); continue; }
-      if (this.deps.live(employee.sessionId)) {
+      const isLive = () => explicitStart && this.deps.nativeHealth
+        ? this.deps.nativeHealth(employee.sessionId)==='healthy' : this.deps.live(employee.sessionId);
+      if (explicitStart && this.deps.nativeHealth && this.deps.live(employee.sessionId) &&
+          this.deps.nativeHealth(employee.sessionId)==='unknown') { skip('native-health-unconfirmed'); continue; }
+      if (isLive()) {
         await this.deps.noteRunning(employee.sessionId);
         continue;
       }
@@ -190,7 +196,7 @@ export class CompanyWake {
           skip('changed-or-stopping');
           continue;
         }
-        if (this.deps.live(employee.sessionId)) {
+        if (isLive()) {
           await this.deps.noteRunning(employee.sessionId);
           continue;
         }

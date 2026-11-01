@@ -13,5 +13,5 @@ export interface AgentCapabilities {
     clearDecision: boolean;
     reason: string;
   };
-  company: { recoverEmployees: boolean; moveOwnPlan: boolean; managePlans: boolean; planPreconditions: string };
+  company: { manageOffice?: boolean; recoverEmployees: boolean; moveOwnPlan: boolean; managePlans: boolean; planPreconditions: string };
 }

@@ -49,7 +49,7 @@ interface Employee {
   avatar?: string;
   position?: string;
   sessionId?: string;
-  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
+  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; manageOffice?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
 }
 
 export interface BoardDeps {
@@ -393,6 +393,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
             manageDecisions: boardAccess.manageDecisions,
             reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Current Board grants still apply.' : 'Current owner-selected Board permissions; absent grants retain owner-made membership compatibility. Titles and plan/recovery grants confer no Board authority.' },
           company: {
+            manageOffice: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageOffice === true,
             recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
             moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
             managePlans: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.managePlans === true,

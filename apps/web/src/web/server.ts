@@ -1676,6 +1676,10 @@ export class WebServer extends EventEmitter {
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
+      ...(process.env.REVERIE_WORKER_SOCKET ? { nativeHealth: (id: string) => {
+        const employee=this.companyService.registeredEmployees().find(e=>e.sessionId===id);
+        return employee ? this.workerProviderHealth?.read(employee)?.state ?? 'unknown' as const : 'unknown' as const;
+      }} : {}),
       live: (id) => {
         const session = this.sessions.get(id);
         return !!session && session.pid !== null && !session.paneExit && session.status !== 'stopped';
@@ -1696,7 +1700,9 @@ export class WebServer extends EventEmitter {
             existing?.pid !== null &&
             existing?.pid !== undefined &&
             !existing.paneExit &&
-            existing.status !== 'stopped'
+            existing.status !== 'stopped' &&
+            (!process.env.REVERIE_WORKER_SOCKET || !this.companyService.view(entry.owner).employees.some(e=>
+              e.sessionId===entry.sessionId && e.providerHealth?.state==='dead'))
           )
             return false;
           if (existing) await this.discardPartiallyBuiltSession(entry.sessionId);
@@ -1782,6 +1788,7 @@ export class WebServer extends EventEmitter {
       visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
+    let startOfficeEmployee: ReturnType<typeof registerSessionRuntimeRoutes> | undefined;
     registerCompanyRoutes(
       this.app,
       ctx,
@@ -1795,9 +1802,14 @@ export class WebServer extends EventEmitter {
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
         resourceReplacement: this.resourceReplacementEnabled === true,
+        refreshHealth: async () => { await this.workerProviderHealth?.refresh(); },
+        startEmployee: (id, req, reply, current) => {
+          if (!startOfficeEmployee) throw new CompanyError('Employee startup is not ready',503);
+          return startOfficeEmployee(id,req,reply,current);
+        },
       }
     );
-    registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
+    startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);
       const recipe = employee?.runtimeRecipe;
       const saved = this.store.getSession(id) ?? (recipe ? { ...recipe, ...recipe.configs, id, owner: employee?.owner, name: employee?.name } : undefined);
@@ -1808,9 +1820,10 @@ export class WebServer extends EventEmitter {
       if (custom) session.setCustomModel(custom);
       if (!custom && recipe?.customModel) session.setCustomModel({ ...recipe.customModel, label: 'Local model', envKeys: [] });
       return session;
-    }, this.companyService, async (session) => {
-      await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
-      await this.companyService.setDesiredRunning(session.id, true);
+    }, this.companyService, async (session, stillCurrent) => {
+      await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session), stillCurrent);
+      await this.companyService.setDesiredRunning(session.id, true, stillCurrent);
+      if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication',409);
       this.rebriefAfterBackendChange(session.id);
     }, laptopAgentStop);
     registerCompanyHireRoutes(this.app, {

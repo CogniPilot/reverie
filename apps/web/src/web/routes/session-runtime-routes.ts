@@ -13,7 +13,7 @@ import { readCustomModelHosts } from '../../custom-model-hosts.js';
 import { resolveLocalModelProfile } from '../../local-model-profile.js';
 import { applyCustomModelInjection, removeConfigDir } from '../../custom-model-injection-apply.js';
 import { getDataDir } from '../../config/instance.js';
-import { findSessionOrFail, parseBody, ownerFor } from '../route-helpers.js';
+import { findSessionOrFail, parseBody, ownerFor, resolveParentSessionId } from '../route-helpers.js';
 import { hireEffort } from './company-hire-routes.js';
 import { ModelIdSchema } from '../../experts.js';
 import type { SessionMode } from '../../types.js';
@@ -92,12 +92,20 @@ export interface LaptopAgentStop {
   settle(sessionId: string, fence: string): Promise<unknown>;
 }
 
-export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session) => Promise<void>,
+export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort> & { mux?: { updateSessionMode(id: string, mode: SessionMode): unknown } }, verifiedOwner: (req: FastifyRequest) => boolean, loadSession?: (id: string, req: FastifyRequest) => Session | undefined, company?: CompanyService, onRuntimeSaved?: (session: Session, stillCurrent: () => boolean) => Promise<void>,
   laptopStop?: LaptopAgentStop, deadPaneWaitMs = 15_000, stopBounds: StopBounds = STOP_BOUNDS) {
   const switching = runtimeSwitches;
   const authorize = (req: FastifyRequest) => req.headers['x-reverie-parent-session'] === undefined && verifiedOwner(req);
   app.post('/api/company/employees/:id/restart', async (req, reply) => {
-    if (!authorize(req)) return reply.code(403).send({ success: false, error: 'Only the verified owner may restart an expert' });
+    const id = (req.params as { id: string }).id;
+    const self = req.headers['x-reverie-service-token'] === undefined
+      ? resolveParentSessionId(ctx, req, undefined, ownerFor(req)) : undefined;
+    if (!authorize(req) && !self) return reply.code(403).send({ success: false, error: 'Office management permission is required' });
+    let action: ReturnType<CompanyService['officeAction']> | undefined;
+    try { action = company?.officeAction?.(id, ownerFor(req), authorize(req) ? undefined : self); }
+    catch (error) { if (error instanceof CompanyError) return reply.code(error.status).send({success:false,error:error.message}); throw error; }
+    const authorized = () => action ? action.current() : authorize(req);
+    if (!authorized()) return reply.code(403).send({ success: false, error: 'Office management permission is required' });
     const recovery = parseBody(Recovery, req.body ?? {});
     const employee = company?.view(ownerFor(req)).employees.find((e) => e.id === (req.params as { id: string }).id);
     if (!employee) return reply.code(404).send({ success: false, error: 'Unknown active company expert' });
@@ -136,6 +144,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       const settled = () => { clearOwnerStop(session.id, fence); runtimeSwitches.delete(session.id); releaseInput(); };
       let outcome: unknown;
       try {
+        if (!authorized()) { settled(); throw new CompanyError('Office permission or employee binding changed', 409); }
         outcome = await laptopStop.stop(session.id, notAfter, fence);
       } catch (error) {
         // Unknown outcome (timeout, lost connection, a failure after the signal): an engine exec the laptop accepted can
@@ -160,6 +169,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       if (!session.hasDeadPane?.())
         return reply.code(409).send({ success: false, error: 'The agent was stopped but its session has not reported the exit yet. Open Restart again in a moment.' });
     }
+    if (!authorized()) return reply.code(409).send({ success:false,error:'Office permission or employee binding changed' });
     // Preserve saved recipe/account/thread. Normal broker J decides whether
     // to reattach a live provider or stop/settle/recreate its dead inner pane.
     if (session.hasDeadPane?.()) {
@@ -172,17 +182,17 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       runtimeSwitches.add(session.id);
       let intent: RuntimeRestartIntent | undefined;
       try {
-        intent = company?.prepareRuntimeRestart(session.id, ownerFor(req));
+        intent = company?.prepareRuntimeRestart(session.id, ownerFor(req), authorized);
         if (!intent) return reply.code(409).send({ success: false, error: 'Current expert binding is unavailable' });
         const expectedRuntime = JSON.stringify(runtimeView(session));
-        const current = () => !!intent?.current() && ctx.sessions.get(session.id) === session &&
+        const current = () => authorized() && !!intent?.current() && ctx.sessions.get(session.id) === session &&
           JSON.stringify(runtimeView(session)) === expectedRuntime;
         await intent.claim();
         if (!current() || !await session.restartDeadCli(current))
           return reply.code(409).send({ success: false, error: 'Recovery was not confirmed; the expert changed, stopped or its pane is already live' });
         if (!current()) return reply.code(409).send({ success: false, error: 'This expert changed or stopped during recovery' });
         ctx.persistSessionStateNow(session);
-        await onRuntimeSaved?.(session);
+        await onRuntimeSaved?.(session, current);
         if (!current()) return reply.code(409).send({ success: false, error: 'This expert changed or stopped during recovery' });
         const state = ctx.getSessionStateWithRespawn?.(session);
         if (state !== undefined) ctx.broadcast?.(SseEvent.SessionUpdated, { session: state });
@@ -201,13 +211,9 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       return reply.code(409).send({ success: false, error: `${employee.name || 'This expert'}’s laptop is running, so Restart cannot replace it in place. To recover them, use Leave office, then Enter office. That stops and starts their laptop and keeps their identity, saved conversation, memory and files.` });
     const runtime = runtimeView(session);
     if (!runtime.source) return reply.code(409).send({ success: false, error: 'Choose a plan or local model profile in runtime settings before restarting' });
-    const headers: Record<string, string> = {};
-    for (const name of ['cookie', 'authorization', 'origin', 'host']) {
-      const value = req.headers[name]; if (typeof value === 'string') headers[name] = value;
-    }
-    const response = await app.inject({ method: 'POST', url: '/api/sessions/' + encodeURIComponent(employee.sessionId) + '/runtime', headers, payload: { ...runtime, ...recovery } });
-    if (response.statusCode >= 400) return reply.code(response.statusCode).send(response.json());
-    return { success: true, data: { employee: company?.view(ownerFor(req)).employees.find((e) => e.id === employee.id), sessionId: employee.sessionId } };
+    const result = await changeRuntime(req, reply, employee.sessionId, Input.parse({ ...runtime, ...recovery }), authorized);
+    if (!result.success) return result;
+    return {success:true,data:{employee:company?.view(ownerFor(req)).employees.find(e=>e.id===employee.id),sessionId:employee.sessionId,recovery:'normal-launch-requested'}};
   });
   app.get('/api/sessions/:id/runtime', async (req, reply) => {
     if (!authorize(req)) return reply.code(403).send({ success: false, error: 'Only the verified owner may view runtime settings' });
@@ -216,14 +222,13 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     return { success: true, data: runtimeView(session) };
   });
-  app.post('/api/sessions/:id/runtime', async (req, reply) => {
-    if (!authorize(req)) return reply.code(403).send({ success: false, error: 'Only the verified owner may change runtime settings' });
-    const { id } = req.params as { id: string };
+  const changeRuntime = async (req: FastifyRequest, reply: import('fastify').FastifyReply, id: string,
+    body: z.infer<typeof Input>, authorized: () => boolean) => {
+    if (!authorized()) return reply.code(403).send({ success: false, error: 'Runtime action is no longer authorized' });
     const detached = !ctx.sessions.has(id);
     const session = detached ? loadSession?.(id, req) : findSessionOrFail(ctx, id, req);
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     const fail = (status: number, error: string) => reply.code(status).send({ success: false, error });
-    const body = parseBody(Input, req.body);
     // A worker transport respawn replaces the server's terminal viewer. The
     // broker may reuse its still-running laptop and ignore the new launch line,
     // so a new viewer PID cannot confirm a runtime switch. Keep the selected
@@ -248,9 +253,9 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     let launchAttempted = false;
     const wasPinned = session.pinned;
     try {
-      intent = company?.prepareRuntimeRestart?.(id, ownerFor(req));
+      intent = company?.prepareRuntimeRestart?.(id, ownerFor(req), authorized);
       const requireIntent = () => {
-        if (intent && !intent.current()) throw new CompanyError('This expert changed or stopped during restart', 409);
+        if (!authorized() || (intent && !intent.current())) throw new CompanyError('This expert changed or stopped during restart', 409);
       };
       let selection: typeof session.subscriptionProfile;
       let env: Record<string, string> = {};
@@ -275,7 +280,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         custom = { ...resolved.customModel, label: host.label, envKeys: applied.envKeys, configDir, launchModel: applied.launchModel };
         model = applied.launchModel;
       }
-      if (workBlocked() || (!detached && ctx.sessions.get(id) !== session) || (detached && loadSession && !loadSession(id, req)))
+      if (!authorized() || workBlocked() || (!detached && ctx.sessions.get(id) !== session) || (detached && loadSession && !loadSession(id, req)))
         return fail(409, 'This expert changed or stopped while runtime settings were being validated');
       // The laptop broker reads this durable flag before accepting any launch.
       await intent?.claim();
@@ -295,7 +300,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       } else if (!await session.restartCli()) throw new Error('The selected runtime did not start');
       requireIntent();
       ctx.persistSessionStateNow(session);
-      await onRuntimeSaved?.(session);
+      await onRuntimeSaved?.(session, () => authorized() && (!intent || intent.current()));
       requireIntent();
       const state = ctx.getSessionStateWithRespawn?.(session);
       if (state !== undefined) ctx.broadcast?.(detached ? SseEvent.SessionCreated : SseEvent.SessionUpdated,
@@ -310,7 +315,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
           // A failed start may have created a pane before registration; discard cannot see it yet.
           if (ctx.sessions.get(id) === session) await ctx.discardPartiallyBuiltSession(id).catch(() => undefined);
           else await session.stop().catch(() => undefined);
-        } else if (launchAttempted && (intent?.originallyStopped || (intent && !intent.current()))) {
+        } else if (launchAttempted && (!authorized() || intent?.originallyStopped || (intent && !intent.current()))) {
           await session.stop().catch(() => undefined);
         } else if (launchAttempted && ctx.sessions.get(id) === session) await session.restartCli().catch(() => false);
         ctx.persistSessionStateNow(session);
@@ -320,5 +325,21 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
       if (error instanceof CompanyError) return fail(error.status, error.message);
       return fail(400, 'Runtime change failed; previous settings were restored. Check the account and harness compatibility.');
     } finally { intent?.finish(); switching.delete(id); }
+  };
+  app.post('/api/sessions/:id/runtime', async (req, reply) => {
+    if (!authorize(req)) return reply.code(403).send({success:false,error:'Only the verified owner may change runtime settings'});
+    return changeRuntime(req, reply, (req.params as {id:string}).id, parseBody(Input,req.body), () => authorize(req));
   });
+  // Internal closed same-recipe entry for an explicit attendance action. No HTTP identity is fabricated.
+  return async (id: string, req: FastifyRequest, reply: import('fastify').FastifyReply, authorized: () => boolean) => {
+    if (!authorized()) throw new CompanyError('Office permission or employee binding changed',409);
+    const employee=company?.view(ownerFor(req)).employees.find(e=>e.id===id);
+    if (!employee || employee.onVacation || employee.desiredRunning===false)
+      throw new CompanyError('Employee is no longer in the office',409);
+    const session=ctx.sessions.get(employee.sessionId) ?? loadSession?.(employee.sessionId,req);
+    if (!session) throw new CompanyError('No saved runtime recipe is available for this expert',409);
+    const runtime=runtimeView(session);
+    if (!runtime.source) throw new CompanyError('Saved runtime source is unavailable',409);
+    return changeRuntime(req,reply,employee.sessionId,Input.parse(runtime),authorized);
+  };
 }
