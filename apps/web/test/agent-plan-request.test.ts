@@ -83,6 +83,7 @@ describe('explicit agent plan delegation', () => {
   it('defaults both capabilities off; rejects titles, temporary agents, stale sessions and another owner', () => {
     expect(EmployeePermissionsSchema.parse({})).toEqual({
       recoverEmployees: false,
+      manageOffice: false,
       moveOwnPlan: false,
       managePlans: false,
     });

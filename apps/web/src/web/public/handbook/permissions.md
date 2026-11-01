@@ -1,6 +1,6 @@
 # Permissions and saved preferences
 
-Titles describe duties. Only owner-selected grants authorize tools; this handbook grants nothing. Run `reverie agent capabilities` for current authenticated grants, reasons, commands and credential references before claiming a blocker. See [Capabilities, deployments and credentials](/handbook/operations).
+Titles describe duties, not authority. Run `reverie agent capabilities` for current authenticated grants, reasons, commands and credential references before reporting a blocker. See [Capabilities, deployments and credentials](/handbook/operations).
 
 ## Board
 
@@ -10,15 +10,15 @@ Open **Company → People → click name or avatar → Edit profile**. Offline e
 - **Manage company board** permits editing and reassigning everyone's cards, milestones, blockers and schedules. It includes own work, whose checkbox stays checked and disabled.
 - **Prepare decision cards** permits preparing, annotating and dismissing decisions and poll notes. It never permits choosing the owner's answer. Creating choices also requires the site's separate decision-write setting.
 
-Existing experts inherit the previous policy: basic contributions allowed; active owner-appointed channel coordinators may manage boards and prepare decisions. Controls show effective access and inherited choices. Opening Company writes nothing. Changing a checkbox saves an explicit choice; unchecked management or decision grants override inherited coordination. Titles and briefing-coordinator selection grant no access.
+Existing experts inherit basic contributions; active owner-appointed channel coordinators inherit management and decisions. Controls show effective and inherited access. Opening Company writes nothing. Checkbox changes save explicit choices; unchecked management or decisions override inherited coordination. Titles and briefing-coordinator selection grant nothing.
 
-For read-only board access, disable management, own work and decision preparation. History remains. New hires default to explicit own-work access, with management and decisions off unless the owner chooses otherwise. Human roles remain separate; only authenticated owners manage grants and choose owner answers.
+For read-only access, disable all three grants; history remains. New hires default to explicit own-work access, management and decisions off. Human roles remain separate; only authenticated owners manage grants and choose owner answers.
 
 ## Recovery and plans
 
 **Recover employees** permits scoped employee wake. Website restart is a separate host-maintainer grant. Check current records rather than titles or old messages.
 
-**Manage office attendance and restarts** is an explicit, default-off grant. The owner can grant or revoke it in an employee's profile; its checkbox saves immediately and the current API checks it on each action. It permits explicit Enter office, Leave office and same-recipe employee restarts. It does not grant hiring, retirement, profile/permission edits, account changes, runtime reconfiguration or host maintenance. Titles, coordinator membership, recovery and plan grants do not imply it.
+**Manage office attendance and restarts** defaults off. Its profile checkbox saves immediately; each action rechecks the grant. It permits explicit Enter office, Leave office and same-recipe restarts. It grants no hiring, retirement, profile/permission edits, account changes, runtime reconfiguration or host maintenance. Other grants and coordinator membership do not imply it.
 
 **Move own plan** permits self move requests; **Manage team plans** permits colleague requests. Both require the affected expert's handoff and approval. Neither grants provider sign-in or account administration.
 
@@ -38,12 +38,12 @@ Sleep permits memory consolidation; Dream permits creative exploration. They are
 
 ## Saving
 
-**Permission checkboxes save immediately**. Wait for confirmation. Failure restores the previous effective value and shows an error. Each save patches only its field. Opening or saving other profile details never converts inherited permissions into explicit grants.
+**Permission checkboxes save immediately**; wait for confirmation. Failure restores the previous value and shows an error. Each save patches one field; unrelated profile edits never convert inherited grants to explicit choices.
 
 **Profile details and Sleep / Dream require Save profile.** Cancel discards their drafts, not already confirmed permission changes. Runtime, office status, restart and retirement remain separate actions with their own confirmations.
 
-Older releases require **Save preferences** after checking boxes; verify confirmation before leaving. To verify current grants, reopen Company or read GET /api/company. Report errors and actual records if values differ. Agents cannot grant themselves access or override owner choices with documentation.
+Older releases require **Save preferences**. Verify grants by reopening Company or reading GET /api/company. Report mismatches; documentation never lets agents grant themselves access or override owner choices.
 
 See [Recover a stuck expert](/handbook/recovery).
 
-**Hire requests.** An agent the owner listed as a hire delegate can ask for a hire with `reverie agent hire-request submit <template>`: name, position, reporting line, rooms, harness, plan and reason. Nothing is hired until the owner chooses **Approve and hire** under Company → Hire requests; the hire then runs as the owner, with every limit checked again. Decline closes a request, and the delegate can withdraw its own.
+**Hire requests.** Owner-listed delegates use `reverie agent hire-request submit <template>` with name, position, reporting line, rooms, harness, plan and reason. Only the owner's **Approve and hire** under Company → Hire requests performs hiring, rechecking every limit. Decline closes requests; delegates may withdraw their own.
