@@ -62,7 +62,7 @@ export function registerCompanyRoutes(
   service: CompanyService,
   avatars?: AvatarStore,
   ownerAvatars?: AvatarStore,
-  wakeEmployee?: (id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>,
+  wakeEmployee?: (id: string, options?: { explicitStart?: boolean; stillCurrent?: () => boolean }) => Promise<CompanyWakeReport>,
   authority: {
     verifiedOwner?: OwnerVerifier;
     serviceRebind?: ServiceVerifier;
@@ -70,6 +70,8 @@ export function registerCompanyRoutes(
     publicationTokens?: { assertGrantIds(owner: string | undefined, ids: string[]): Promise<void> };
     /** The protected laptop-memory replacement routes are registered (server started with --resource-replacement). */
     resourceReplacement?: boolean;
+    refreshHealth?: () => Promise<void>;
+    startEmployee?: (id: string, req: FastifyRequest, reply: import('fastify').FastifyReply, current: () => boolean) => Promise<unknown>;
   } = {}
 ): void {
   const verifiedOwner = authority.verifiedOwner ?? NO_OWNER;
@@ -150,6 +152,7 @@ export function registerCompanyRoutes(
       success: true,
       data: { ...view, employees: view.employees.map(employee =>
         presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req),
+        canManageAttendance: verifiedOwner(req) || view.employees.some(e=>e.sessionId===caller(req) && e.permissions.manageOffice===true),
         // Only the verified owner learns that laptop memory can be changed here; the routes recheck the owner themselves.
         ...(verifiedOwner(req) && authority.resourceReplacement === true ? { resourceReplacement: true } : {}) },
     };
@@ -280,17 +283,36 @@ export function registerCompanyRoutes(
   // Retire an employee whose session is gone, or put a retired one back (owner only; refused with any agent header).
   app.post('/api/company/employees/:id/vacation', async (req, reply) =>
     run(reply, async () => {
-      ownerOnly(req);
       const { id } = req.params as { id: string };
+      const owner = ownerFor(req), self = caller(req);
+      if (!(verifiedOwner(req) && req.headers['x-reverie-parent-session'] === undefined) && !self)
+        throw new CompanyError('Office management permission is required',403);
+      const action = service.officeAction(id, owner,
+        verifiedOwner(req) && req.headers['x-reverie-parent-session'] === undefined ? undefined : self);
       const { enabled } = parseBody(z.object({ enabled: z.boolean() }).strict(), req.body);
+      // A manager cannot close its own authority midway through the stop transaction.
+      if (enabled && self && service.view(owner).employees.some(e=>e.id===id && e.sessionId===self))
+        throw new CompanyError('Ask another office manager or the owner to put you out of office',409);
       if (!enabled && !wakeEmployee) throw new CompanyError('Employee startup is not ready', 503);
-      const employee = await service.setVacation(id, ownerFor(req), enabled);
+      const employee = await service.setVacation(id, owner, enabled, action.require);
+      const current=()=>action.current() && service.view(owner).employees.some(e=>e.id===id &&
+        e.onVacation===enabled && e.desiredRunning===!enabled);
+      if (!current()) throw new CompanyError('Employee office intent changed',409);
       if (enabled) return { employee };
+      await authority.refreshHealth?.();
+      if (!current()) throw new CompanyError('Office permission or employee binding changed',409);
       let recovery: CompanyWakeReport;
       try {
-        recovery = await wakeEmployee!(id, { explicitStart: true });
+        recovery = await wakeEmployee!(id, { explicitStart: true, stillCurrent: current });
       } catch {
         return { employee, startup: { state: 'blocked' as const, reason: 'wake-failed' } };
+      }
+      if (!current()) throw new CompanyError('Office permission or employee binding changed',409);
+      if (recovery.skipped.some(row=>row.employeeId===id && row.reason==='no-owned-session-record') && authority.startEmployee) {
+        const result = await authority.startEmployee(id,req,reply,current) as {success?:boolean;error?:string};
+        if (!current()) throw new CompanyError('Office permission or employee binding changed',409);
+        if (result?.success !== true) return {employee,startup:{state:'blocked' as const,reason:result?.error ?? 'start-unconfirmed'}};
+        return {employee,startup:{state:'started' as const}};
       }
       // Persisted intent and an actual successful start are distinct. Return a
       // launch refusal so the UI cannot claim that a disconnected expert started.

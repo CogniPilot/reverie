@@ -30,6 +30,7 @@ export const PronounsSchema = z
 export const EmployeePermissionsSchema = z
   .object({
     recoverEmployees: z.boolean().default(false),
+    manageOffice: z.boolean().default(false),
     moveOwnPlan: z.boolean().default(false),
     managePlans: z.boolean().default(false),
     editBoardIssues: z.boolean().optional(),
@@ -42,6 +43,7 @@ export const EmployeePermissionsSchema = z
 /** Permission edits preserve omitted grants; creation-only defaults must not become revocations. */
 export const EmployeePermissionsPatchSchema = EmployeePermissionsSchema.extend({
   recoverEmployees: EmployeePermissionsSchema.shape.recoverEmployees.removeDefault(),
+  manageOffice: EmployeePermissionsSchema.shape.manageOffice.removeDefault(),
   moveOwnPlan: EmployeePermissionsSchema.shape.moveOwnPlan.removeDefault(),
   managePlans: EmployeePermissionsSchema.shape.managePlans.removeDefault(),
 }).partial();
@@ -56,7 +58,7 @@ export const EmployeeSchema = z
     /** Owner-selected avatar background; absent retains the automatic identity color. */
     avatarBackground: z.union([z.string().regex(/^#[0-9a-fA-F]{6}$/), z.literal('transparent')]).optional(),
     position: text,
-    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, moveOwnPlan: false, managePlans: false }),
+    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false }),
     /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
     pronouns: PronounsSchema.optional(),
     voice: EmployeeVoiceSchema.optional(),

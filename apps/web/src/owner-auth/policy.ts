@@ -92,6 +92,8 @@ const AGENT_ROUTES = new Set([
   'GET /api/handbook',
   'GET /api/handbook/:slug',
   'GET /api/chat-plugins', // shared enablement is readable; only the verified owner may change it
+  'POST /api/company/employees/:id/vacation', // route checks explicit manageOffice, never title/admin status
+  'POST /api/company/employees/:id/restart', // unchanged-recipe only; runtime settings remain owner-only
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
   'GET /api/plans/move-impact', // read-only; the route admits only the owner and agents holding plans.view_all

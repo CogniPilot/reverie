@@ -98,6 +98,9 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       inspectBoard: 'reverie board show --json',
       plans: 'reverie plans --json',
       refreshRuntime: 'reverie agent plan-move request "<current-account-id>" --restart --id "<stable-id>" --json',
+      officeEnter: 'reverie agent office "<employee-id>" --in --json',
+      officeLeave: 'reverie agent office "<employee-id>" --out --json',
+      restartEmployee: 'reverie agent restart-employee "<employee-id>" --json',
       wakeEmployee: 'reverie agent wake-employee "<employee-id>" --json',
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
@@ -122,7 +125,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     if (typeof capabilities.board.editBoardIssues === 'boolean')
       deps.io.out(`Update own board work: ${capabilities.board.editBoardIssues ? 'allowed' : 'denied'}. Only the verified owner answers decision requests.`);
     deps.io.out(
-      `Recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
+      `Office attendance/restarts: ${capabilities.company.manageOffice === true ? 'allowed' : capabilities.company.manageOffice === false ? 'denied' : 'unknown (server does not report this grant)'}; recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
     );
     deps.io.out(`Plan preconditions: ${capabilities.company.planPreconditions}`);
     deps.io.out(

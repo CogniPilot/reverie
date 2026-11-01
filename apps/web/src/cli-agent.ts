@@ -32,6 +32,7 @@ import { isChatRaster, localImageFiles } from './chat-image-paths.js';
 import http from 'node:http';
 import { displayTime, displayTimeZone } from './display-time.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
+import { agentEmployeeOffice } from './cli-agent-office.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
 import { agentCredentialStatus } from './cli-agent-credential-status.js';
 import { agentContext, agentContextReceipt } from './cli-agent-context.js';
@@ -2814,6 +2815,20 @@ export function registerAgentCommands(program: Command): Command {
     .action((employeeId: string, options: { json?: boolean }) =>
       run(Boolean(options.json), (deps) => agentWakeEmployee(deps, { employeeId }))
     );
+
+  agent.command('office <employee-id>').description('Explicitly enter or leave office using your owner-granted manageOffice permission; saved identity and conversations remain')
+    .option('--in', 'Enter office and request normal startup, including a deliberately stopped employee')
+    .option('--out', 'Leave office and stop the employee through the normal attendance route')
+    .option('--json', 'Print the real attendance/startup result; startup acknowledgement is not native readiness')
+    .action((employeeId: string, options: { in?: boolean; out?: boolean; json?: boolean }) => run(Boolean(options.json), deps => {
+      if (Boolean(options.in) === Boolean(options.out)) return Promise.resolve(fail(deps, 'Choose exactly one of --in or --out.', EXIT.refused));
+      return agentEmployeeOffice(deps, { employeeId, action: options.in ? 'in' : 'out' });
+    }));
+  agent.command('restart-employee <employee-id>').description('Request a same-recipe employee restart using manageOffice; never edits runtime, plan or account')
+    .option('--force', 'Explicitly request stalled-agent recovery, confirmed against the current session; existing stop holds remain')
+    .option('--json', 'Print the normal restart acknowledgement, not a claim of native readiness')
+    .action((employeeId: string, options: { force?: boolean; json?: boolean }) => run(Boolean(options.json), deps =>
+      agentEmployeeOffice(deps, { employeeId, action: 'restart', forceRestart: options.force })));
 
   agent
     .command('wait <id>')

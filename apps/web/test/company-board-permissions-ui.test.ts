@@ -127,3 +127,44 @@ it('keeps legacy owner permissions inside the expert details and confirms each o
   company.canManage = false; await h.app._renderCompany();
   expect(h.app._companyPanel.querySelector('[aria-label="Manage company board for River"]')).toBeNull();
 });
+
+
+it('keeps office management explicit, saves only that grant, and rereads grant and revocation on reopen', async () => {
+  const { h, employee, pending, input } = await setup();
+  const label = 'Manage office attendance and restarts';
+  expect(input(label).checked).toBe(false);
+  expect(employee.permissions).not.toHaveProperty('manageOffice');
+  for (const value of [true, false]) {
+    input(label).click(); await h.flush();
+    const save = pending.at(-1)!;
+    expect(save.body).toEqual({ permissions: { manageOffice: value } });
+    expect(input(label).disabled).toBe(true);
+    employee.permissions.manageOffice = value;
+    save.resolve({ ok: true, data: { employee: structuredClone(employee) } }); await h.flush();
+    expect(input(label).checked).toBe(value);
+    expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('Preferences saved.');
+    h.shell.closePage(); await h.shell.openCompany();
+    (h.document.querySelector('[aria-label="Edit profile for River"]') as HTMLButtonElement).click(); await h.flush();
+    expect(input(label).checked).toBe(value);
+    expect(employee.permissions.recoverEmployees).toBe(false);
+    expect(employee.permissions.managePlans).toBe(false);
+    expect(employee.permissions).not.toHaveProperty('manageBoard');
+  }
+});
+
+it('does not expose the office grant to a delegate, or confirm an unverified grant response', async () => {
+  const label = 'Manage office attendance and restarts';
+  const denied = await setup({ owner: false });
+  expect(denied.input(label)).toBeNull(); expect(denied.pending).toEqual([]);
+  const { h, employee, pending, input } = await setup();
+  input(label).click(); await h.flush();
+  pending[0].resolve({ ok: false, status: 403, error: 'Owner session expired' }); await h.flush();
+  expect(input(label).checked).toBe(false);
+  expect(employee.permissions).not.toHaveProperty('manageOffice');
+  expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('Owner session expired');
+  input(label).click(); await h.flush();
+  pending[1].resolve({ ok: true, data: { employee: { id: 'different', permissions: { manageOffice: true } } } }); await h.flush();
+  expect(input(label).checked).toBe(false);
+  expect(employee.permissions).not.toHaveProperty('manageOffice');
+  expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('Save not confirmed');
+});

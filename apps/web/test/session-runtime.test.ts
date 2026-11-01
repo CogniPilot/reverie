@@ -49,6 +49,25 @@ describe('owner runtime transaction', () => {
     expect(runtimeView(session).source).toEqual({ kind: 'subscription', profileId: 'first' });
   });
 
+  it('same-recipe credential refresh preserves every public recipe field and rejects a different source', async () => {
+    const {expertRuntimeRecipe}=await import('../src/expert-runtime-recipe.js');
+    const session=makeSession();const before=expertRuntimeRecipe(session);
+    const env=session.getEnvOverridesForPersist();
+    const rollback=session.configureRuntime({mode:session.mode,selection:{id:'first',label:'Changed label',provider:'openai'},
+      env:{CODEX_HOME:'/fresh/account'},sourceKey:'subscription:first',model:'ignored-other-model',effort:'ignored',preserveRecipe:true});
+    expect(expertRuntimeRecipe(session)).toEqual(before);
+    expect(session.getEnvOverridesForPersist()?.CODEX_HOME).toBe('/fresh/account');
+    for(const change of [{mode:'codex' as const},{sourceKey:'subscription:other'},
+      {selection:{id:'first',label:'First',provider:'anthropic' as const}}]) {
+      expect(()=>session.configureRuntime({mode:session.mode,selection:session.subscriptionProfile,
+        env:{CODEX_HOME:'/wrong'},sourceKey:'subscription:first',preserveRecipe:true,...change})).toThrow('Saved runtime source changed');
+      expect(expertRuntimeRecipe(session)).toEqual(before);
+      expect(session.getEnvOverridesForPersist()?.CODEX_HOME).toBe('/fresh/account');
+    }
+    rollback();expect(session.getEnvOverridesForPersist()).toEqual(env);
+    expect(expertRuntimeRecipe(session)).toEqual(before);
+  });
+
   async function harness(detached = false) {
     const session = makeSession();
     const sessions = new Map(detached ? [] : [[session.id, session]]);
@@ -421,7 +440,7 @@ describe('owner restart across the durable laptop boundary', () => {
       const launch = vi.fn(async () => { expect(f.readEmployee().desiredRunning).toBe(true); throw new Error('synthetic launch failure'); });
       if (detached) vi.spyOn(f.session, 'startInteractive').mockImplementation(async () => { await launch(); });
       const restart = vi.spyOn(f.session, 'restartCli').mockImplementation(launch);
-      expect((await f.request()).statusCode).toBe(400);
+      expect((await f.request()).statusCode).toBe(409);
       expect(f.readEmployee().desiredRunning).toBe(false);
       expect(f.stop).toHaveBeenCalledOnce();
       expect(restart).toHaveBeenCalledTimes(detached ? 0 : 1);
@@ -474,7 +493,7 @@ describe('owner restart across the durable laptop boundary', () => {
     try {
       vi.spyOn(f.session, 'startInteractive').mockResolvedValue();
       f.hooks.saved = async () => { throw new Error('synthetic save failure'); };
-      expect((await f.request()).statusCode).toBe(400);
+      expect((await f.request()).statusCode).toBe(409);
       expect(f.ctx.persistSessionStateNow).toHaveBeenCalled();
       expect(f.ctx.discardPartiallyBuiltSession).toHaveBeenCalledWith(f.session.id);
       expect(f.stop).toHaveBeenCalledOnce();
@@ -489,7 +508,7 @@ describe('owner restart across the durable laptop boundary', () => {
       // The fixture's default is false; remove the field as in an older company record.
       await f.store.update((state) => { delete state.employees.find((e) => e.id === 'person')!.desiredRunning; });
       vi.spyOn(f.session, 'startInteractive').mockRejectedValue(new Error('synthetic launch failure'));
-      expect((await f.request()).statusCode).toBe(400);
+      expect((await f.request()).statusCode).toBe(409);
       expect(f.readEmployee().desiredRunning).toBeUndefined();
       expect(JSON.parse(await readFile(join(f.directory, 'company.json'), 'utf8')).employees[0]).not.toHaveProperty('desiredRunning');
       expect(f.stop).toHaveBeenCalledOnce();
@@ -519,7 +538,7 @@ describe('owner restart across the durable laptop boundary', () => {
         await f.service.setVacation(f.employee.id, undefined, false);
         throw new Error('late failure');
       });
-      expect((await f.request()).statusCode).toBe(400);
+      expect((await f.request()).statusCode).toBe(409);
       expect(f.readEmployee().desiredRunning).toBe(true);
       expect(f.ctx.broadcast).not.toHaveBeenCalled();
     } finally { await f.close(); }
@@ -563,4 +582,104 @@ describe('owner restart across the durable laptop boundary', () => {
       expect(f.ctx.broadcast).not.toHaveBeenCalled();
     } finally { await f.close(); }
   });
+});
+
+describe('delegated attendance uses the closed saved-recipe executor', () => {
+  async function officeFixture(sparseRecipe = false) {
+    const { registerCompanyRoutes } = await import('../src/web/routes/company-routes.js');
+    const { expertRuntimeRecipe } = await import('../src/expert-runtime-recipe.js');
+    const directory=await mkdtemp(join(tmpdir(),'office-recipe-'));
+    const store=new CompanyStore(join(directory,'company.json'));await store.init();
+    const session=makeSession();
+    const actor=new Session({id:'manager-session',name:'Manager',mode:'codex',workingDir:'/workspace'});
+    const sessions=new Map([[actor.id,actor]]);
+    const target=EmployeeSchema.parse({id:'target',name:'Expert',icon:'E',position:'Expert',expertise:['systems'],
+      sessionId:session.id,createdAt:1,onVacation:true,desiredRunning:false,runtimeRecipe:expertRuntimeRecipe(session)});
+    if(sparseRecipe)delete target.runtimeRecipe!.runtimeThreads;
+    const manager=EmployeeSchema.parse({...target,id:'manager',name:'Manager',sessionId:actor.id,
+      onVacation:false,desiredRunning:true,permissions:{manageOffice:true}});
+    await store.update(state=>{state.employees=[manager,target];});
+    const company=new CompanyService(store,{getSession:id=>sessions.get(id),stopSession:vi.fn(async()=>{}),
+      chatrooms:{} as never,research:{} as never});
+    const ctx={sessions,addSession:vi.fn(async(s:Session)=>{sessions.set(s.id,s);}),setupSessionListeners:vi.fn(),
+      persistSessionStateNow:vi.fn(),discardPartiallyBuiltSession:vi.fn(async(id:string)=>{sessions.delete(id);})};
+    const app=Fastify();const verified=(req:{headers:Record<string,unknown>})=>req.headers['x-owner-test']==='yes';
+    // This controlled loader represents the existing server's recipe-derived Session;
+    // there is intentionally NO StateStore saved-session row or live target object.
+    const start=registerSessionRuntimeRoutes(app,ctx as never,verified,()=>session,company,
+      async(s,current,preserveRecipe)=>{if(!preserveRecipe)await company.saveRuntimeRecipe(s.id,expertRuntimeRecipe(s),current);
+        await company.setDesiredRunning(s.id,true,current);});
+    const wake=vi.fn(async()=>({awakened:[],skipped:[{employeeId:target.id,reason:'no-owned-session-record'}]}));
+    registerCompanyRoutes(app,ctx as never,company,undefined,undefined,wake,
+      {verifiedOwner:verified as never,startEmployee:start});await app.ready();
+    const launch=vi.spyOn(session,'startInteractive').mockResolvedValue();
+    const stop=vi.spyOn(session,'stop').mockResolvedValue();
+    const request=()=>app.inject({method:'POST',url:'/api/company/employees/target/vacation',
+      headers:{'x-reverie-parent-session':actor.id},payload:{enabled:false}});
+    const close=async()=>{await app.close();await rm(directory,{recursive:true,force:true});};
+    return{app,store,company,session,target,manager,actor,ctx,wake,launch,stop,request,close};
+  }
+
+  it.each([false,true])('starts a cold expert once without an owner HTTP injection (sparse recipe %s)',async(sparse)=>{
+    const f=await officeFixture(sparse);try{
+      const before=f.session.toState();const recipe=f.target.runtimeRecipe;
+      const response=await f.request();
+      expect(response.statusCode,response.body).toBe(200);
+      expect(response.json().data.startup).toEqual({state:'started'});
+      expect(f.launch).toHaveBeenCalledOnce();expect(f.ctx.addSession).toHaveBeenCalledExactlyOnceWith(f.session);
+      expect(f.session.id).toBe(before.id);expect(f.session.mode).toBe(before.mode);
+      expect(f.session.toState().openCodeConfig?.continueSession).toBe('ses_exact');
+      expect(f.store.snapshot().employees.find(e=>e.id===f.target.id)).toMatchObject({
+        sessionId:f.target.sessionId,sessionGeneration:1,desiredRunning:true,onVacation:false,runtimeRecipe:JSON.parse(JSON.stringify(recipe))});
+      expect((await f.app.inject({method:'POST',url:'/api/sessions/'+f.session.id+'/runtime',
+        headers:{'x-reverie-parent-session':f.actor.id},payload:{mode:'codex',source:{kind:'subscription',profileId:'second'}}})).statusCode).toBe(403);
+    }finally{await f.close();}
+  });
+
+  it('does not automatically redispatch a same-recipe restart after an ambiguous launch throw',async()=>{
+    const f=await officeFixture();try{
+      await f.store.update(state=>{const target=state.employees.find(e=>e.id===f.target.id)!;
+        target.onVacation=false;target.desiredRunning=true;});
+      f.ctx.sessions.set(f.session.id,f.session);
+      const restart=vi.spyOn(f.session,'restartCli').mockRejectedValue(new Error('Owned post-dispatch uncertainty'));
+      const before=f.store.snapshot().employees.find(e=>e.id===f.target.id)!;
+      const response=await f.app.inject({method:'POST',url:'/api/company/employees/target/restart',
+        headers:{'x-reverie-parent-session':f.actor.id},payload:{}});
+      expect(response.statusCode,response.body).toBe(409);expect(response.json().error).toContain('unconfirmed');
+      expect(restart).toHaveBeenCalledOnce();expect(f.launch).not.toHaveBeenCalled();
+      expect(f.store.snapshot().employees.find(e=>e.id===f.target.id)).toEqual(before);
+    }finally{await f.close();}
+  });
+
+  it('a delegate must explicitly enter an OFF employee before requesting a restart',async()=>{
+    const f=await officeFixture();try{
+      await f.store.update(state=>{state.employees.find(e=>e.id===f.target.id)!.onVacation=false;});
+      const before=f.store.snapshot();
+      const response=await f.app.inject({method:'POST',url:'/api/company/employees/target/restart',
+        headers:{'x-reverie-parent-session':f.actor.id},payload:{}});
+      expect(response.statusCode,response.body).toBe(409);expect(response.json().error).toContain('Enter the office');
+      expect(f.launch).not.toHaveBeenCalled();expect(f.store.snapshot()).toEqual(before);
+    }finally{await f.close();}
+  });
+
+  it.each(['grant','actor-generation','owner-stop','target-binding'] as const)(
+    'refuses a delayed cold start after %s changes without a second launch',async(change)=>{
+      const f=await officeFixture();try{
+        const original=vi.mocked(selectedSubscription).getMockImplementation()!;
+        vi.mocked(selectedSubscription).mockImplementationOnce(async(...args)=>{
+          await f.store.update(state=>{
+            const actor=state.employees.find(e=>e.id===f.manager.id)!;
+            const target=state.employees.find(e=>e.id===f.target.id)!;
+            if(change==='grant')actor.permissions.manageOffice=false;
+            if(change==='actor-generation')actor.sessionGeneration++;
+            if(change==='owner-stop')target.desiredRunning=false;
+            if(change==='target-binding'){target.sessionId='replacement';target.sessionGeneration++;}
+          });
+          return original(...args);
+        });
+        const response=await f.request();expect(response.statusCode,response.body).toBe(409);
+        expect(f.launch).not.toHaveBeenCalled();expect(f.ctx.addSession).not.toHaveBeenCalled();
+        if(change==='owner-stop')expect(f.store.snapshot().employees.find(e=>e.id===f.target.id)?.desiredRunning).toBe(false);
+      }finally{await f.close();}
+    });
 });

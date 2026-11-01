@@ -1994,7 +1994,7 @@ export class Session extends EventEmitter {
   /** Stage an owner-selected runtime. The returned rollback never serializes private environment values. */
   configureRuntime(options: {
     mode: SessionMode; selection?: SessionState['subscriptionProfile']; env: Record<string, string>;
-    sourceKey: string; model?: string; effort?: string; effortField?: string;
+    sourceKey: string; model?: string; effort?: string; effortField?: string; preserveRecipe?: boolean;
   }): () => void {
     const record = this as unknown as Record<string, unknown>;
     const fields = ['_mode', '_acceptsPrompts', '_cliVersion', 'subscriptionProfile', '_envOverrides', '_customModel',
@@ -2003,6 +2003,25 @@ export class Session extends EventEmitter {
     const before = new Map(fields.map((key) => [key, structuredClone(record[key])]));
     const pending = new Set(this._pendingEnvUnsets);
     const currentSource = this._customModel ? 'local:' + this._customModel.endpointId : 'subscription:' + (this.subscriptionProfile?.id ?? '');
+    if (options.preserveRecipe) {
+      // Explicit attendance/restart resolves fresh credentials for the SAME
+      // stored source. It cannot rewrite launch settings or conversation pins.
+      if (options.mode !== this.mode || options.sourceKey !== currentSource ||
+          options.selection?.id !== this.subscriptionProfile?.id ||
+          options.selection?.provider !== this.subscriptionProfile?.provider)
+        throw new Error('Saved runtime source changed');
+      this._envOverrides ??= {};
+      for (const key of ['CODEX_HOME','CLAUDE_CONFIG_DIR','XDG_DATA_HOME','OPENCODE_CONFIG_CONTENT']) {
+        delete this._envOverrides[key]; this._pendingEnvUnsets.add(key);
+      }
+      Object.assign(this._envOverrides, options.env);
+      for (const key of Object.keys(options.env)) this._pendingEnvUnsets.delete(key);
+      return () => {
+        const changedKeys=Object.keys(this._envOverrides ?? {});
+        for (const [key,value] of before) record[key]=value;
+        this._pendingEnvUnsets=new Set([...pending,...changedKeys.filter(key=>!this._envOverrides?.[key])]);
+      };
+    }
     const currentKey = this.mode + ':' + currentSource;
     const currentField = getCli(this.mode)?.launch.legacyConfigField;
     const currentConfig = currentField ? record['_' + currentField] as Record<string, unknown> | undefined : undefined;

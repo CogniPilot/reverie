@@ -21,7 +21,7 @@ const snapshot = (): AgentCapabilities => ({
     clearDecision: true,
     reason: 'Owner-made coordinator membership.',
   },
-  company: { recoverEmployees: true, moveOwnPlan: false, managePlans: false, planPreconditions: 'Grant only; target/runtime checks remain.' },
+  company: { manageOffice: false, recoverEmployees: true, moveOwnPlan: false, managePlans: false, planPreconditions: 'Grant only; target/runtime checks remain.' },
 });
 const refs = async () => ({
   directory: '/home/agent/.config/reverie/credentials/github',
@@ -67,6 +67,8 @@ describe('current agent capability command', () => {
     expect(await agentCapabilities(f.deps, refs)).toBe(0);
     expect(JSON.parse(f.output[0]).board.createDecision).toBe(true);
     expect(JSON.parse(f.output[0]).commands.refreshRuntime).toContain('--restart');
+    expect(JSON.parse(f.output[0]).company.manageOffice).toBe(false);
+    expect(JSON.parse(f.output[0]).commands.officeEnter).toBe('reverie agent office "<employee-id>" --in --json');
     expect(JSON.parse(f.output[0]).commands.wakeEmployee).toBe('reverie agent wake-employee "<employee-id>" --json');
     expect(JSON.parse(f.output[0]).company.moveOwnPlan).toBe(false);
     const next = snapshot();
