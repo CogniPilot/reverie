@@ -406,7 +406,9 @@ const HOOK_CLI = "const cli = (process.env.REVERIE_CLI || '').startsWith('/') ? 
 
 /** Bounded, fail-open summary hooks shared by Claude Code and Codex. */
 const TURN_SUMMARY_MARKER_PREFIX = 'REVERIE_TURN_SUMMARY_V';
-const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}2`;
+// V3: the hooks run the laptop image's CLI (REVERIE_CLI). Bumping the version is what makes refreshStaleReverieHooks
+// rewrite an existing V2 block, which would otherwise keep running `reverie` from PATH.
+const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}3`;
 export type TurnSummaryHookEvent = 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse';
 
 export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
@@ -462,7 +464,7 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
 }
 
 const MEMORY_BRIEF_MARKER_PREFIX = 'REVERIE_MEMORY_BRIEF_V';
-const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}2`;
+const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}3`;
 
 /**
  * The session-start memory brief, as its own handler with its own budget: the chat summary can fill its 3000 characters
@@ -995,6 +997,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // quote-free for the same reason.
     const hasPromptSubmit = hooksJson.includes('prompt_submitted');
     const hasTurnSummary = hooksJson.includes(TURN_SUMMARY_MARKER);
+    const hasMemoryBrief = hooksJson.includes(MEMORY_BRIEF_MARKER);
     // Compaction reporting (PreCompact / SessionStart "compact"); quote-free like the markers above.
     const hasCompaction = hooksJson.includes('compact_started');
     if (
@@ -1005,6 +1008,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
         hasElicitationComplete &&
         hasPromptSubmit &&
         hasTurnSummary &&
+        hasMemoryBrief &&
         hasCompaction &&
         !hasTlsFlaglessCurl)
     )
