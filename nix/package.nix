@@ -119,7 +119,7 @@ let
       NIX_REVERIE_TEST_ROOT_CUSTODY=1 npm test -- test/cli-agent-credentials.test.ts
       npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts test/company-lifecycle-fence.test.ts
       npm test -- test/assignment-status-watch.test.ts test/assignment-exact-read.test.ts test/display-time.test.ts test/assignment-refused-reservation.test.ts test/public-issue-watch.test.ts \
-        test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts \
+        test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts test/disk-space-watch.test.ts \
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
       # The console owns this Python/Node composition check after its TS build.
