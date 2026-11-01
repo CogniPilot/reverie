@@ -53,7 +53,7 @@ To repair an open card, use `method: 'PATCH'`, `path: '/api/board/decisions/EXIS
 
 Restart runs the same image; redeploy installs a different verified image. Neither should stop laptops, provider processes or the broker.
 
-Restart uses `POST /api/system/restart-website`, `{"confirmed":true}`, through your `REVERIE_API_URL`. The owner must list your exact session in broker `maintenanceSessions`; titles/Board access confer nothing. Cooldown: one minute. Reconnect and verify readiness after acknowledgement. Only the owner can stop everyone or shut down the office.
+Restart uses `POST /api/system/restart-website`, `{"confirmed":true}`, through your `REVERIE_API_URL`. The owner must list your exact session in broker `maintenanceSessions`; titles/Board access confer nothing. Cooldown: one minute. Reconnect and verify readiness after acknowledgement. Only the owner can use the global stop-everyone or shutdown host controls. An employee with the separate office-management grant can explicitly change selected employees’ attendance through the company API; it does not grant these global host controls.
 
 Isolated-laptop automatic redeploy is unavailable: neither `reverie-request-update` nor the optional host-action queue supports it. Never mount the engine socket or copy owner passwords as a workaround.
 

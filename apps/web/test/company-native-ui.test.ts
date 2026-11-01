@@ -135,7 +135,7 @@ it('chooses a plan and harness with backend runtime defaults for a fresh expert;
       expertise: ['Code review', 'Flight systems'],
       responsibilities: [],
       personality: '',
-      permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false, editBoardIssues: true, manageBoard: false, manageDecisions: false },
+      permissions: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, editBoardIssues: true, manageBoard: false, manageDecisions: false },
       sleepEnabled: false,
       dreamEnabled: false,
       reportsTo: 'lead',

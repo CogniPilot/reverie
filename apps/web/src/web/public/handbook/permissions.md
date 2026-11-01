@@ -18,6 +18,8 @@ For read-only board access, disable management, own work and decision preparatio
 
 **Recover employees** permits scoped employee wake. Website restart is a separate host-maintainer grant. Check current records rather than titles or old messages.
 
+**Manage office attendance and restarts** is an explicit, default-off grant. The owner can grant or revoke it in an employee's profile; its checkbox saves immediately and the current API checks it on each action. It permits explicit Enter office, Leave office and same-recipe employee restarts. It does not grant hiring, retirement, profile/permission edits, account changes, runtime reconfiguration or host maintenance. Titles, coordinator membership, recovery and plan grants do not imply it.
+
 **Move own plan** permits self move requests; **Manage team plans** permits colleague requests. Both require the affected expert's handoff and approval. Neither grants provider sign-in or account administration.
 
 These grants also allow explicit self refresh on the same account with `plan-move request ACCOUNT_ID --restart`. Refresh remains self-only, with one-time approval and safe handoff. It grants no installation, arbitrary session creation or vacation wake.

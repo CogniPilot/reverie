@@ -3122,6 +3122,10 @@ class ReverieChatApp {
       const rest = this.expertRestFields(pages[2]);
       const recoveryWrap = this.el('label', 'ca-label');
       const recover = this.el('input'); recover.type = 'checkbox'; recover.name = 'recoverEmployees'; recoveryWrap.append(recover, this.el('span', '', 'May wake reporting experts after a crash')); pages[2].append(recoveryWrap, this.el('p', 'ca-hint', 'An explicit recovery permission only. It grants no ability to hire, manage plans or schedule work.'));
+      const officeWrap = this.el('label', 'ca-hint', ' Manage office attendance and restarts');
+      const manageOffice = this.el('input'); manageOffice.type = 'checkbox'; manageOffice.name = 'manageOffice';
+      officeWrap.prepend(manageOffice);
+      pages[2].append(officeWrap, this.el('p', 'ca-hint', 'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.'));
       const planPermissions = {};
       for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
         const wrap = this.el('label', 'ca-label');
@@ -3170,7 +3174,7 @@ class ReverieChatApp {
         pages[3].replaceChildren(this.el('legend', '', 'Ready to welcome them?'));
         const photo = appearance.picture.value(); if (photo) { const image = this.el('img', 'ca-hire-review-photo'); image.src = photo; image.alt = ''; pages[3].append(image); }
         const list = this.el('dl', 'ca-hire-review');
-        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
+        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Office management', manageOffice.checked ? 'May manage office attendance and restarts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
         list.append(this.el('dt', '', 'Board permissions'), this.literalText('dd', '', caBoardPermissionFields.filter(([key]) => boardPermissions[key].checked).map(([, text]) => text).join('; ') || 'Not granted'));
         pages[3].append(list, this.el('p', 'ca-hint', 'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'));
       };
@@ -3219,7 +3223,7 @@ class ReverieChatApp {
         saving = true; submit.disabled = true; error.textContent = '';
         const source = selectedSource();
         if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked, editBoardIssues: basicBoardChoice, manageBoard: boardPermissions.manageBoard.checked, manageDecisions: boardPermissions.manageDecisions.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, manageOffice: manageOffice.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked, editBoardIssues: basicBoardChoice, manageBoard: boardPermissions.manageBoard.checked, manageDecisions: boardPermissions.manageDecisions.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
@@ -8455,6 +8459,12 @@ class ReverieChatApp {
     recovery.checked = employee.permissions?.recoverEmployees === true;
     recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
     label.prepend(recovery);
+    const officeLabel = this.el('label', 'ca-hint', ' Manage office attendance and restarts');
+    const manageOffice = this.el('input'); manageOffice.type = 'checkbox';
+    manageOffice.checked = employee.permissions?.manageOffice === true;
+    manageOffice.setAttribute('aria-label', `Manage office attendance and restarts for ${employee.name}`);
+    officeLabel.title = 'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.';
+    officeLabel.prepend(manageOffice);
     const planPermissions = {};
     const planLabels = [];
     for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
@@ -8544,12 +8554,13 @@ class ReverieChatApp {
       }
     };
     recovery.addEventListener('change', () => { void savePreference(recovery, 'recoverEmployees', true); });
+    manageOffice.addEventListener('change', () => { void savePreference(manageOffice, 'manageOffice', true); });
     for (const [key, input] of Object.entries(planPermissions))
       input.addEventListener('change', () => { void savePreference(input, key, true); });
     for (const [key, { input }] of Object.entries(boardPermissions))
       input.addEventListener('change', () => { void savePreference(input, key, true); });
     const general = this.el('fieldset', 'ca-profile-permissions');
-    general.append(this.el('legend', '', 'Recovery and plans'), label, ...planLabels);
+    general.append(this.el('legend', '', 'Recovery, office and plans'), label, officeLabel, ...planLabels);
     preferenceStatus.classList.add('ca-profile-permission-status');
     container.append(this.el('p', 'ca-hint', 'Permission checkboxes save immediately. They do not need Save profile.'), general, boardFields, preferenceStatus);
   }

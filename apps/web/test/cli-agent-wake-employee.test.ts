@@ -1,3 +1,4 @@
+import { agentEmployeeOffice } from '../src/cli-agent-office.js';
 import http from 'node:http';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -236,5 +237,62 @@ describe('wake-employee CLI with an owned fake HTTP server', () => {
     expect(f.code).toBe(EXIT.refused);
     expect(f.calls).toEqual([]);
     expect(f.err.join('')).toContain('Not inside a Reverie-managed session');
+  });
+});
+
+
+describe('explicit employee office lifecycle client', () => {
+  const employee = { ...company.employees[0], sessionGeneration: 4, onVacation: false, desiredRunning: true };
+  const current = { employees: [employee] };
+  it.each(['in', 'out'] as const)('uses the same authenticated context for one exact %s transition', async action => {
+    const data = { employee: { ...employee, onVacation: action === 'out', desiredRunning: action === 'in' },
+      ...(action === 'in' ? { startup: { state: 'started' } } : {}) };
+    const f = fixture([ok(current), ok(data)], true);
+    expect(await agentEmployeeOffice(f.deps, { employeeId: EMPLOYEE, action })).toBe(EXIT.ok);
+    expect(f.calls).toEqual([{ ctx: f.deps.ctx, request: { method: 'GET', path: '/api/company' } },
+      { ctx: f.deps.ctx, request: { method: 'POST', path: `/api/company/employees/${EMPLOYEE}/vacation`, body: { enabled: action === 'out' } } }]);
+    expect(JSON.parse(f.out[0])).toEqual(data);
+  });
+  it('reports blocked startup as saved attendance but non-success, and never repeats it', async () => {
+    const data = { employee, startup: { state: 'blocked', reason: 'capacity' } };
+    const f = fixture([ok(current), ok(data)], true);
+    expect(await agentEmployeeOffice(f.deps, { employeeId: EMPLOYEE, action: 'in' })).toBe(EXIT.refused);
+    expect(JSON.parse(f.out[0])).toEqual(data); expect(f.calls).toHaveLength(2);
+  });
+  it.each([false, true])('confirms only the selected current session for explicit restart force=%s', async forceRestart => {
+    const f = fixture([ok(current), ok({ employee, sessionId: SESSION, recovery: 'normal-launch-requested' })]);
+    expect(await agentEmployeeOffice(f.deps, { employeeId: EMPLOYEE, action: 'restart', forceRestart })).toBe(EXIT.ok);
+    expect(f.calls[1].request).toEqual({ method: 'POST', path: `/api/company/employees/${EMPLOYEE}/restart`,
+      body: forceRestart ? { forceRestart: true, confirmSessionId: SESSION } : {} });
+    expect(f.out.join(' ')).toContain('native readiness is not proved');
+  });
+  it('refuses names, prefixes, duplicate/missing/stale bindings before dispatch', async () => {
+    for (const employeeId of ['Alex', EMPLOYEE.slice(0, 8), EMPLOYEE.toUpperCase()]) {
+      const f = fixture([]); expect(await agentEmployeeOffice(f.deps, { employeeId, action: 'out' })).toBe(EXIT.refused); expect(f.calls).toEqual([]);
+    }
+    for (const employees of [[], [employee, employee], [{ ...employee, sessionGeneration: undefined }], [{ ...employee, sessionId: 'unknown' }]]) {
+      const f = fixture([ok({ employees })]); expect(await agentEmployeeOffice(f.deps, { employeeId: EMPLOYEE, action: 'in' })).toBe(EXIT.refused); expect(f.calls).toHaveLength(1);
+    }
+  });
+  it('preserves real denial and lost-response uncertainty without replay', async () => {
+    const denied = fixture([ok(current), { status: 403, text: '', json: { success: false, error: 'Office permission revoked' } }]);
+    expect(await agentEmployeeOffice(denied.deps, { employeeId: EMPLOYEE, action: 'out' })).toBe(EXIT.refused);
+    expect(denied.err.join(' ')).toContain('revoked'); expect(denied.out).toEqual([]);
+    const lost = fixture([ok(current), new Error('lost reply')]);
+    expect(await agentEmployeeOffice(lost.deps, { employeeId: EMPLOYEE, action: 'in' })).toBe(EXIT.error);
+    expect(lost.err.join(' ')).toContain('unconfirmed'); expect(lost.calls).toHaveLength(2);
+  });
+  it('never accepts wrong returned employee/session/generation or attendance as confirmation', async () => {
+    for (const saved of [{ ...employee, id: SESSION }, { ...employee, sessionId: SELF }, { ...employee, sessionGeneration: 5 }, { ...employee, onVacation: true }]) {
+      const f = fixture([ok(current), ok({ employee: saved, startup: { state: 'started' } })]);
+      expect(await agentEmployeeOffice(f.deps, { employeeId: EMPLOYEE, action: 'in' })).toBe(EXIT.error); expect(f.out).toEqual([]); expect(f.calls).toHaveLength(2);
+    }
+  });
+  it('does not turn a generic success envelope into native restart confirmation', async () => {
+    const f = fixture([ok(current), ok({ employee })]);
+    expect(await agentEmployeeOffice(f.deps, { employeeId: EMPLOYEE, action: 'restart' })).toBe(EXIT.error); expect(f.out).toEqual([]);
+    const agent = registerAgentCommands(new Command());
+    expect(agent.commands.find(c => c.name() === 'office')?.helpInformation()).toContain('--out');
+    expect(agent.commands.find(c => c.name() === 'restart-employee')?.description()).toContain('same-recipe');
   });
 });

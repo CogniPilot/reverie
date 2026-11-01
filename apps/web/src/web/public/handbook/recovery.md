@@ -2,7 +2,7 @@
 
 Check saved state before restarting. A busy badge does not prove work.
 
-When Debug terminal disconnects, Reverie makes bounded attach-only reconnect attempts. The owner's neutral **Reconnect** button also attaches to the existing agent. It never replaces an agent, wakes someone off or vacationing, clears drafts, or resends uncertain messages. The separate red **Restart** action may restart the agent and requires explicit owner action.
+When Debug terminal disconnects, Reverie makes bounded attach-only reconnect attempts. The owner's neutral **Reconnect** button also attaches to the existing agent. It never replaces an agent, wakes someone off or vacationing, clears drafts, or resends uncertain messages. The separate red **Restart** action may restart the agent and requires explicit owner action or the distinct owner-granted office-management permission.
 
 Fresh native laptop evidence can keep an expert **Online** while its optional viewer is unavailable. Viewer failure may hold automatic input; drafts and uncertain deliveries remain untouched. Runtime liveness proves neither model/API readiness nor delivery. Confirmed runtime death stays red; owner stops and vacations take precedence.
 
@@ -38,3 +38,22 @@ Report the expert, current session, failure time, last error and attempted recov
 The current wake budget is three attempts per expert in fifteen minutes. Automatic recovery is additionally governed by office settings. An explicit stop must never become an endless restart loop.
 
 See [Permissions](/handbook/permissions) and [Power and restarts](/handbook/power).
+
+## Explicit office management
+
+An employee with current `permissions.manageOffice` may explicitly bring a selected active employee into the office, leave them out of office, or request a same-recipe restart. Use full employee UUIDs and your own office connection:
+
+```bash
+reverie agent capabilities --json
+reverie agent office EMPLOYEE_ID --in --json
+reverie agent office EMPLOYEE_ID --out --json
+reverie agent restart-employee EMPLOYEE_ID --json
+```
+
+The office commands use the existing attendance transition, not raw running-intent edits. Leaving interrupts the selected employee's work and stops them; returning clears that explicit absence and requests normal startup. Both preserve identity, current session, saved conversation, memory and files. Retirement remains a separate owner action. Ordinary recovery `wake-employee` still preserves OFF/vacation intent.
+
+A restart preserves the selected saved recipe and conversation. `--force` explicitly requests stalled-agent recovery with the freshly read current session confirmation; existing recent-input, task, stop-fence and currentness guards still apply. Never use `agent rm` or terminal input as a substitute.
+
+Commands send one action and never retry an unconfirmed response. A successful startup/restart acknowledgement proves a request, not native or chat readiness. Check the actual status and obtain a chat acknowledgement before assigning work. A blocked startup can leave attendance saved; read its reason rather than repeating the launch.
+
+A website update does not upgrade the CLI in existing laptops. If these commands are unknown, use the documented [older laptop client](/handbook/operations#older-laptop-cli) with your own connection. Read `GET /api/company`, select the unique full employee UUID, then call `POST /api/company/employees/EMPLOYEE_ID/vacation` with `{ "enabled": false }` to enter or `{ "enabled": true }` to leave. The exact same current API grant and normal startup/stop guards apply. For restart call `POST /api/company/employees/EMPLOYEE_ID/restart` with `{}`; explicit stalled recovery uses `{ "forceRestart": true, "confirmSessionId": "CURRENT_SESSION_ID" }`. Inspect the returned employee binding and `startup`/`recovery` result, and never retry a lost response automatically. No owner token, alternate employee headers or host command is needed.
