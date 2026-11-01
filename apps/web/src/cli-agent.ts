@@ -58,7 +58,7 @@ import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
-import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves } from './cli-plan-request.js';
+import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves, agentPlanRecovery } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
 import { registerJournalCommands } from './cli-agent-journal.js';
 import { registerHireRequestCommands } from './cli-agent-hire-request.js';
@@ -2673,6 +2673,12 @@ export function registerAgentCommands(program: Command): Command {
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
   planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
+  planMove.command('blocked').description('Inspect your unresolved existing moves without creating or replaying one').option('--json', 'Machine-readable result')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps)));
+  planMove.command('recovery-status <id>').description('Inspect an existing move held for recovery (not a new plan request)').option('--json', 'Machine-readable result')
+    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps, id)));
+  planMove.command('recover-existing <id>').description('Explicitly adopt your verified existing destination; never launch or replay').option('--json', 'Machine-readable result')
+    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps, id, true)));
   planMove.command('request <account-id>')
     .description('Prepare a permitted plan move or same-account runtime refresh for safe handoff')
     .option('--restart', 'Refresh this expert on its current account through handoff and approval')

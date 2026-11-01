@@ -130,7 +130,8 @@ export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPen
 export class PlanMoveError extends Error {
   constructor(
     message: string,
-    readonly status = 409
+    readonly status = 409,
+    readonly blocker?: { id: string; action: 'inspect-existing' }
   ) {
     super(message);
   }
@@ -169,10 +170,11 @@ export class PlanMoves {
   private view(record: PlanMoveRecord): PlanMoveRecord {
     // A completion journal write is provisional while final native/audit fences
     // are still pending. Readers must not turn that window into successful Apply.
-    return record.resourceIntent && record.phase === 'completed' &&
-      (this.aborts.has(record.id) || this.intents.has(record.id))
-      ? { ...record, phase: 'checking', resourcePhase: 'verifying' }
-      : { ...record };
+    if (record.phase === 'completed' && (this.aborts.has(record.id) || this.intents.has(record.id))) {
+      if (record.resourceIntent) return { ...record, phase: 'checking', resourcePhase: 'verifying' };
+      if (record.recoveryAction === 'adopt-existing') return { ...record, phase: 'checking' };
+    }
+    return { ...record };
   }
 
   /** Read-only flight guard shared with non-destructive viewer reconnection. */
@@ -193,6 +195,20 @@ export class PlanMoves {
       .filter((record) => record.owner === owner)
       .map((record) => this.view(record))
       .reverse();
+  }
+
+  /** Discovery never releases a journal hold or grants recovery authority. */
+  async assertAvailable(employeeId: string, owner?: string): Promise<void> {
+    await this.init();
+    this.assertUnlocked(employeeId, owner);
+  }
+
+  private assertUnlocked(employeeId: string, owner?: string): void {
+    if (!this.locked.has(employeeId)) return;
+    const record = [...this.records.values()].find(row => row.employeeId === employeeId &&
+      row.owner === owner && !['completed', 'failed'].includes(row.phase));
+    throw new PlanMoveError('This employee already has a move in progress or requiring recovery; inspect its existing move',
+      409, record ? { id: record.id, action: 'inspect-existing' } : undefined);
   }
 
   async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port,
@@ -242,8 +258,7 @@ export class PlanMoves {
       return this.view(existing);
     }
     if (this.intents.has(input.id)) throw new PlanMoveError('That move identifier is already being prepared');
-    if (this.locked.has(input.employeeId))
-      throw new PlanMoveError('This employee already has a move in progress or requiring recovery');
+    this.assertUnlocked(input.employeeId, owner);
     this.locked.add(input.employeeId);
     this.intents.add(input.id);
     try {

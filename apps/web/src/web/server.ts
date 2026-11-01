@@ -7,6 +7,7 @@ import { OfficeAuthService } from '../owner-auth/office.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
+import { ownPlanRecovery } from '../agent-plan-recovery.js';
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
@@ -2338,7 +2339,12 @@ export class WebServer extends EventEmitter {
       ctx,
       ownerAuth,
       capturePlanMove,
-      async (target) => (await availablePlanTarget(target)).mode
+      async (target) => (await availablePlanTarget(target)).mode,
+      request => {
+        const caller = callerOf(request, { service: ownerAuth, ctx });
+        return caller.kind === 'agent' && request.headers['x-reverie-parent-session'] === caller.session
+          ? ownPlanRecovery(request, planMoveRuntime) : undefined;
+      }
     );
     const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));
     const planRequestCapabilities = new PlanRequestCapabilities();
