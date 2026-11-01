@@ -1,0 +1,187 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e 'const REVERIE_MEMORY_BRIEF_V2 = true;\nconst { execFile } = require('\\''node:child_process'\\'');\nprocess.stdin.resume();\nconst sessionId = process.env.REVERIE_SESSION_ID || '\\'''\\'';\nif (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);\nexecFile('\\''reverie'\\'', ['\\''agent'\\'', '\\''journal'\\'', '\\''brief'\\'', '\\''--hook-event'\\'', '\\''SessionStart'\\''],\n  { timeout: 2500, maxBuffer: 32768, killSignal: '\\''SIGKILL'\\'' }, (error, stdout, stderr) => {\n  if (error) {\n    const text = error.code === '\\''ENOENT'\\'' || /unknown command '\\''journal'\\''/i.test(String(stderr)) ? \"Your memory: this laptop'\\''s reverie CLI has no journal commands yet, so your memory brief could not be loaded. Do not act on what you think you remember of earlier work; say that your memory is unavailable here and ask for a harness update. Your journal is still on the office server.\" : \"Your memory: your memory brief could not be read at session start, so do not act on what you think you remember of earlier work. Say that your memory is unavailable; your journal is still on the office server, so check it again with `reverie agent journal recall \\\"<topic>\\\"` before relying on an earlier decision.\";\n    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: '\\''SessionStart'\\'', additionalContext: text } }));\n    return;\n  }\n  try {\n    const output = JSON.parse(stdout).hookSpecificOutput;\n    if (output?.hookEventName !== '\\''SessionStart'\\'' || typeof output.additionalContext !== '\\''string'\\'') return;\n    const text = output.additionalContext.trim();\n    if (!text || text.length > 2000) return;\n    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: '\\''SessionStart'\\'', additionalContext: text } }));\n  } catch {}\n});'",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e 'const REVERIE_TURN_SUMMARY_V2 = true;\nconst { execFile } = require('\\''node:child_process'\\'');\nprocess.stdin.resume();\nconst sessionId = process.env.REVERIE_SESSION_ID || '\\'''\\'';\nif (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);\nexecFile('\\''reverie'\\'', ['\\''agent'\\'', '\\''chat'\\'', '\\''summary'\\'', '\\''--hook-event'\\'', '\\''SessionStart'\\''],\n  { timeout: 2500, maxBuffer: 32768, killSignal: '\\''SIGKILL'\\'' }, (error, stdout) => {\n  if (error) return;\n  try {\n    const output = JSON.parse(stdout).hookSpecificOutput;\n    if (output?.hookEventName !== '\\''SessionStart'\\'' || typeof output.additionalContext !== '\\''string'\\'') return;\n    let text = output.additionalContext.trim();\n    if (text.length > 3000) return;\n    let previous = null;\n    let unchanged = false;\n    try {\n      const fs = require('\\''node:fs'\\'');\n      const { join } = require('\\''node:path'\\'');\n      const uid = process.getuid();\n      const root = join(require('\\''node:os'\\'').tmpdir(), '\\''reverie-turn-summary-'\\'' + uid);\n      try { fs.mkdirSync(root, { mode: 0o700 }); } catch (error) { if (error.code !== '\\''EEXIST'\\'') throw error; }\n      const directory = fs.lstatSync(root);\n      if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== uid || (directory.mode & 0o077)) throw new Error();\n      const digest = require('\\''node:crypto'\\'').createHash('\\''sha256'\\'').update(text).digest('\\''hex'\\'');\n      const file = fs.openSync(join(root, sessionId.toLowerCase() + '\\''.json'\\''), fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);\n      try {\n        const stat = fs.fstatSync(file);\n        if (!stat.isFile() || stat.uid !== uid || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 128) throw new Error();\n        const buffer = Buffer.alloc(128);\n        const size = fs.readSync(file, buffer, 0, buffer.length, 0);\n        try { previous = JSON.parse(buffer.subarray(0, size).toString('\\''utf8'\\'')); } catch {}\n        if (!previous || !/^[a-f0-9]{64}$/.test(previous.digest) || typeof previous.nonempty !== '\\''boolean'\\'') previous = null;\n        unchanged = previous?.digest === digest;\n        const state = JSON.stringify({ digest, nonempty: Boolean(text) });\n        fs.writeSync(file, state, 0, '\\''utf8'\\'');\n        fs.ftruncateSync(file, Buffer.byteLength(state));\n      } finally { fs.closeSync(file); }\n    } catch { unchanged = false; }\n    if ('\\''SessionStart'\\'' === '\\''PostToolUse'\\'' && unchanged) return;\n    if (!text && previous?.nonempty) text = '\\''Reverie message summary cleared: no pending eligible messages.'\\'';\n    if (!text) return;\n    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: '\\''SessionStart'\\'', additionalContext: text } }));\n  } catch {}\n});'",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"compact_finished\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -o /dev/null -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"compact_started\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -o /dev/null -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"idle_prompt\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"permission_prompt\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"elicitation_dialog\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "elicitation_complete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"elicitation_complete\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "elicitation_response",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"elicitation_response\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"stop\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"prompt_submitted\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -o /dev/null -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node -e 'const REVERIE_TURN_SUMMARY_V2 = true;\nconst { execFile } = require('\\''node:child_process'\\'');\nprocess.stdin.resume();\nconst sessionId = process.env.REVERIE_SESSION_ID || '\\'''\\'';\nif (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);\nexecFile('\\''reverie'\\'', ['\\''agent'\\'', '\\''chat'\\'', '\\''summary'\\'', '\\''--hook-event'\\'', '\\''UserPromptSubmit'\\''],\n  { timeout: 2500, maxBuffer: 32768, killSignal: '\\''SIGKILL'\\'' }, (error, stdout) => {\n  if (error) return;\n  try {\n    const output = JSON.parse(stdout).hookSpecificOutput;\n    if (output?.hookEventName !== '\\''UserPromptSubmit'\\'' || typeof output.additionalContext !== '\\''string'\\'') return;\n    let text = output.additionalContext.trim();\n    if (text.length > 3000) return;\n    let previous = null;\n    let unchanged = false;\n    try {\n      const fs = require('\\''node:fs'\\'');\n      const { join } = require('\\''node:path'\\'');\n      const uid = process.getuid();\n      const root = join(require('\\''node:os'\\'').tmpdir(), '\\''reverie-turn-summary-'\\'' + uid);\n      try { fs.mkdirSync(root, { mode: 0o700 }); } catch (error) { if (error.code !== '\\''EEXIST'\\'') throw error; }\n      const directory = fs.lstatSync(root);\n      if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== uid || (directory.mode & 0o077)) throw new Error();\n      const digest = require('\\''node:crypto'\\'').createHash('\\''sha256'\\'').update(text).digest('\\''hex'\\'');\n      const file = fs.openSync(join(root, sessionId.toLowerCase() + '\\''.json'\\''), fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);\n      try {\n        const stat = fs.fstatSync(file);\n        if (!stat.isFile() || stat.uid !== uid || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 128) throw new Error();\n        const buffer = Buffer.alloc(128);\n        const size = fs.readSync(file, buffer, 0, buffer.length, 0);\n        try { previous = JSON.parse(buffer.subarray(0, size).toString('\\''utf8'\\'')); } catch {}\n        if (!previous || !/^[a-f0-9]{64}$/.test(previous.digest) || typeof previous.nonempty !== '\\''boolean'\\'') previous = null;\n        unchanged = previous?.digest === digest;\n        const state = JSON.stringify({ digest, nonempty: Boolean(text) });\n        fs.writeSync(file, state, 0, '\\''utf8'\\'');\n        fs.ftruncateSync(file, Buffer.byteLength(state));\n      } finally { fs.closeSync(file); }\n    } catch { unchanged = false; }\n    if ('\\''UserPromptSubmit'\\'' === '\\''PostToolUse'\\'' && unchanged) return;\n    if (!text && previous?.nonempty) text = '\\''Reverie message summary cleared: no pending eligible messages.'\\'';\n    if (!text) return;\n    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: '\\''UserPromptSubmit'\\'', additionalContext: text } }));\n  } catch {}\n});'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "const fs = require('node:fs');\nconst REVERIE_SUBAGENT_STOP_GUARD_V1 = true;\nlet input = {};\ntry { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }\nconst transcriptPath = typeof input.agent_transcript_path === 'string' ? input.agent_transcript_path : '';\nif (!transcriptPath) process.exit(0);\nlet text;\ntry {\n  const size = fs.statSync(transcriptPath).size;\n  const length = Math.min(size, 16 * 1024 * 1024);\n  const buffer = Buffer.allocUnsafe(length);\n  const fd = fs.openSync(transcriptPath, 'r');\n  const bytes = fs.readSync(fd, buffer, 0, length, size - length);\n  fs.closeSync(fd);\n  text = buffer.subarray(0, bytes).toString('utf8');\n} catch { process.exit(0); }\nconst launched = new Set();\nconst finished = new Set();\nfunction inspectToolResult(value) {\n  const serialized = typeof value === 'string' ? value : JSON.stringify(value ?? '');\n  for (const match of serialized.matchAll(/Command running in background with ID:\\s*([A-Za-z0-9_-]+)/gi)) launched.add(match[1]);\n  for (const match of serialized.matchAll(/Monitor started \\(task ([A-Za-z0-9_-]+)/gi)) launched.add(match[1]);\n}\nfunction inspectNotifications(value) {\n  if (typeof value !== 'string' || !value.includes('<task-notification>')) return;\n  for (const match of value.matchAll(/<task-notification>([\\s\\S]*?)<\\/task-notification>/gi)) {\n    const body = match[1];\n    const id = body.match(/<task-id>([^<]+)<\\/task-id>/i);\n    const status = body.match(/<status>(completed|failed|killed|error)<\\/status>/i);\n    if (id && status) finished.add(id[1].trim());\n  }\n}\nfor (const line of text.split(/\\r?\\n/)) {\n  let entry;\n  try { entry = JSON.parse(line); } catch { continue; }\n  const content = entry && entry.message ? entry.message.content : undefined;\n  if (Array.isArray(content)) {\n    for (const block of content) {\n      if (block && block.type === 'tool_result') inspectToolResult(block.content);\n      if (block && block.type === 'text') inspectNotifications(block.text);\n    }\n  } else {\n    inspectNotifications(content);\n  }\n  inspectNotifications(entry && entry.content);\n}\nfunction findLiveTasks(candidates) {\n  const live = new Set();\n  if (candidates.size === 0 || !fs.existsSync('/proc')) return live;\n  let processIds;\n  try { processIds = fs.readdirSync('/proc').filter((name) => /^\\d+$/.test(name)); } catch { return live; }\n  for (const processId of processIds) {\n    for (const descriptor of ['0', '1', '2']) {\n      let target;\n      try { target = fs.readlinkSync('/proc/' + processId + '/fd/' + descriptor); } catch { continue; }\n      const match = target.match(/[\\/]tasks[\\/]([A-Za-z0-9_-]+)\\.output(?: \\(deleted\\))?$/);\n      if (match && candidates.has(match[1])) live.add(match[1]);\n    }\n    if (live.size === candidates.size) break;\n  }\n  return live;\n}\nconst unfinished = new Set([...launched].filter((taskId) => !finished.has(taskId)));\nconst active = [...findLiveTasks(unfinished)];\nif (active.length === 0) process.exit(0);\nconst shown = active.slice(0, 8);\nconst suffix = active.length > shown.length ? ' and ' + (active.length - shown.length) + ' more' : '';\nprocess.stdout.write(JSON.stringify({\n  decision: 'block',\n  reason: 'You still own active background work (' + shown.join(', ') + suffix + '). Do not return an intermediate progress message as your final report. Process the task notifications or keep actively polling until every task completes, then return one complete summary.',\n}));"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"teammate_idle\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); printf '{\"event\":\"task_completed\",\"sessionId\":\"%s\",\"data\":%s}' \"$REVERIE_SESSION_ID\" \"$HOOK_DATA\" | curl -sk -X POST \"$REVERIE_API_URL/api/hook-event\" -H 'Content-Type: application/json' -H \"X-Reverie-Hook-Secret: $(cat \"$REVERIE_HOOK_SECRET_FILE\" 2>/dev/null)\" --data @- 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e 'const REVERIE_TURN_SUMMARY_V2 = true;\nconst { execFile } = require('\\''node:child_process'\\'');\nprocess.stdin.resume();\nconst sessionId = process.env.REVERIE_SESSION_ID || '\\'''\\'';\nif (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);\nexecFile('\\''reverie'\\'', ['\\''agent'\\'', '\\''chat'\\'', '\\''summary'\\'', '\\''--hook-event'\\'', '\\''PostToolUse'\\''],\n  { timeout: 2500, maxBuffer: 32768, killSignal: '\\''SIGKILL'\\'' }, (error, stdout) => {\n  if (error) return;\n  try {\n    const output = JSON.parse(stdout).hookSpecificOutput;\n    if (output?.hookEventName !== '\\''PostToolUse'\\'' || typeof output.additionalContext !== '\\''string'\\'') return;\n    let text = output.additionalContext.trim();\n    if (text.length > 3000) return;\n    let previous = null;\n    let unchanged = false;\n    try {\n      const fs = require('\\''node:fs'\\'');\n      const { join } = require('\\''node:path'\\'');\n      const uid = process.getuid();\n      const root = join(require('\\''node:os'\\'').tmpdir(), '\\''reverie-turn-summary-'\\'' + uid);\n      try { fs.mkdirSync(root, { mode: 0o700 }); } catch (error) { if (error.code !== '\\''EEXIST'\\'') throw error; }\n      const directory = fs.lstatSync(root);\n      if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== uid || (directory.mode & 0o077)) throw new Error();\n      const digest = require('\\''node:crypto'\\'').createHash('\\''sha256'\\'').update(text).digest('\\''hex'\\'');\n      const file = fs.openSync(join(root, sessionId.toLowerCase() + '\\''.json'\\''), fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);\n      try {\n        const stat = fs.fstatSync(file);\n        if (!stat.isFile() || stat.uid !== uid || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 128) throw new Error();\n        const buffer = Buffer.alloc(128);\n        const size = fs.readSync(file, buffer, 0, buffer.length, 0);\n        try { previous = JSON.parse(buffer.subarray(0, size).toString('\\''utf8'\\'')); } catch {}\n        if (!previous || !/^[a-f0-9]{64}$/.test(previous.digest) || typeof previous.nonempty !== '\\''boolean'\\'') previous = null;\n        unchanged = previous?.digest === digest;\n        const state = JSON.stringify({ digest, nonempty: Boolean(text) });\n        fs.writeSync(file, state, 0, '\\''utf8'\\'');\n        fs.ftruncateSync(file, Buffer.byteLength(state));\n      } finally { fs.closeSync(file); }\n    } catch { unchanged = false; }\n    if ('\\''PostToolUse'\\'' === '\\''PostToolUse'\\'' && unchanged) return;\n    if (!text && previous?.nonempty) text = '\\''Reverie message summary cleared: no pending eligible messages.'\\'';\n    if (!text) return;\n    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: '\\''PostToolUse'\\'', additionalContext: text } }));\n  } catch {}\n});'",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "const fs = require('node:fs');\nconst path = require('node:path');\nconst REVERIE_BACKGROUND_REWAKE_V3 = true;\nconst deadline = Date.now() + 21600 * 1000;\nconst RESULT_BEGIN = '=== REVERIE_RESULT_BEGIN ===';\nconst RESULT_END = '=== REVERIE_RESULT_END ===';\nconst MAX_RESULT_CHARS = 65536;\nlet input = {};\ntry { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }\nfunction findTaskId(value) {\n  const idKeys = new Set(['taskId', 'task_id', 'shellId', 'shell_id', 'backgroundTaskId', 'background_task_id']);\n  const stack = [value];\n  const seen = new Set();\n  while (stack.length > 0) {\n    const current = stack.pop();\n    if (!current || typeof current !== 'object' || seen.has(current)) continue;\n    seen.add(current);\n    for (const [key, nested] of Object.entries(current)) {\n      if (idKeys.has(key) && typeof nested === 'string' && /^[A-Za-z0-9_-]+$/.test(nested)) return nested;\n      if (nested && typeof nested === 'object') stack.push(nested);\n    }\n  }\n  const serialized = JSON.stringify(value ?? '');\n  const messageMatch = serialized.match(/Command running in background with ID:\\s*([A-Za-z0-9_-]+)/i);\n  if (messageMatch) return messageMatch[1];\n  const pathMatch = serialized.match(/[\\\\/]tasks[\\\\/]([A-Za-z0-9_-]+)\\.output/i);\n  return pathMatch ? pathMatch[1] : null;\n}\nconst taskId = findTaskId(input.tool_response);\nconst transcriptPath = typeof input.transcript_path === 'string' ? input.transcript_path : '';\nif (!taskId || !transcriptPath) process.exit(0);\nconst transcriptPaths = [transcriptPath];\nconst sessionDir = path.dirname(path.dirname(transcriptPath));\nif (typeof input.agent_id === 'string' && path.basename(path.dirname(transcriptPath)) === 'subagents' &&\n    typeof input.session_id === 'string' && path.basename(sessionDir) === input.session_id) {\n  transcriptPaths.push(sessionDir + '.jsonl');\n}\nconst transcripts = [...new Set(transcriptPaths)].map((transcript) => {\n  let position = 0;\n  try { position = Math.max(0, fs.statSync(transcript).size - 262144); } catch {}\n  return { path: transcript, position, carry: '' };\n});\nif (!transcripts.some((transcript) => fs.existsSync(transcript.path))) process.exit(0);\nfunction readMarkedResult(outputPath) {\n  if (!outputPath || !path.isAbsolute(outputPath) || path.basename(outputPath) !== taskId + '.output') return '';\n  if (path.basename(path.dirname(outputPath)) !== 'tasks') return '';\n  try {\n    const size = fs.statSync(outputPath).size;\n    const length = Math.min(size, MAX_RESULT_CHARS * 2);\n    const buffer = Buffer.allocUnsafe(length);\n    const fd = fs.openSync(outputPath, 'r');\n    const bytes = fs.readSync(fd, buffer, 0, length, size - length);\n    fs.closeSync(fd);\n    const text = buffer.subarray(0, bytes).toString('utf8');\n    const begin = text.lastIndexOf(RESULT_BEGIN);\n    const end = text.indexOf(RESULT_END, begin + RESULT_BEGIN.length);\n    if (begin < 0 || end < 0) return '';\n    let result = text.slice(begin + RESULT_BEGIN.length, end).trim();\n    if (!result) return '';\n    if (result.length > MAX_RESULT_CHARS) {\n      const half = Math.floor(MAX_RESULT_CHARS / 2);\n      result = result.slice(0, half) + '\\n\\n[report truncated by Reverie]\\n\\n' + result.slice(-half);\n    }\n    return '\\n\\nCompleted task report:\\n<reverie-background-result>\\n' + result + '\\n</reverie-background-result>';\n  } catch { return ''; }\n}\nfunction inspect(text) {\n  for (const line of text.split(/\\r?\\n/)) {\n    if (!line.includes(taskId)) continue;\n    let entry;\n    try { entry = JSON.parse(line); } catch { continue; }\n    if (entry.type !== 'queue-operation' || entry.operation !== 'enqueue' || typeof entry.content !== 'string') continue;\n    if (!entry.content.includes('<task-id>' + taskId + '</task-id>')) continue;\n    const status = entry.content.match(/<status>(completed|failed|killed|error)<\\/status>/i);\n    if (!status) continue;\n    const output = entry.content.match(/<output-file>([^<]+)<\\/output-file>/i);\n    const outputPath = output ? output[1].trim() : '';\n    const location = outputPath ? ' Read ' + outputPath + ' and' : '';\n    const result = readMarkedResult(outputPath);\n    console.error('Background command ' + taskId + ' ' + status[1].toLowerCase() + '.' + location + ' continue the task.' + result);\n    process.exit(2);\n  }\n}\nfunction pollTranscript(transcript) {\n  try {\n    const size = fs.statSync(transcript.path).size;\n    if (size < transcript.position) { transcript.position = 0; transcript.carry = ''; }\n    if (size > transcript.position) {\n      const length = Math.min(size - transcript.position, 1048576);\n      const buffer = Buffer.allocUnsafe(length);\n      const fd = fs.openSync(transcript.path, 'r');\n      const bytes = fs.readSync(fd, buffer, 0, length, transcript.position);\n      fs.closeSync(fd);\n      transcript.position += bytes;\n      transcript.carry = (transcript.carry + buffer.subarray(0, bytes).toString('utf8')).slice(-262144);\n      inspect(transcript.carry);\n    }\n  } catch {}\n}\nfunction poll() {\n  if (Date.now() > deadline || process.ppid === 1) process.exit(0);\n  for (const transcript of transcripts) pollTranscript(transcript);\n  setTimeout(poll, 1000);\n}\npoll();"
+            ],
+            "asyncRewake": true,
+            "timeout": 21600
+          }
+        ]
+      }
+    ]
+  }
+}

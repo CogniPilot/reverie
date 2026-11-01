@@ -397,9 +397,18 @@ async function withSafeSettingsWrite(
   });
 }
 
+/**
+ * The CLI Reverie's own hooks run. A laptop image names its own CLI in REVERIE_CLI (an absolute store path), so an
+ * older `reverie` earlier on PATH, such as a home install from before a release, cannot answer for the hooks; anywhere
+ * else the hooks use `reverie` from PATH as before.
+ */
+const HOOK_CLI = "const cli = (process.env.REVERIE_CLI || '').startsWith('/') ? process.env.REVERIE_CLI : 'reverie';";
+
 /** Bounded, fail-open summary hooks shared by Claude Code and Codex. */
 const TURN_SUMMARY_MARKER_PREFIX = 'REVERIE_TURN_SUMMARY_V';
-const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}2`;
+// V3: the hooks run the laptop image's CLI (REVERIE_CLI). Bumping the version is what makes refreshStaleReverieHooks
+// rewrite an existing V2 block, which would otherwise keep running `reverie` from PATH.
+const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}3`;
 export type TurnSummaryHookEvent = 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse';
 
 export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
@@ -411,7 +420,8 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
     // environment identifies the caller; tool arguments are never part of a summary.
     "const sessionId = process.env.REVERIE_SESSION_ID || '';",
     'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
-    `execFile('reverie', ['agent', 'chat', 'summary', '--hook-event', '${event}'],`,
+    HOOK_CLI,
+    `execFile(cli, ['agent', 'chat', 'summary', '--hook-event', '${event}'],`,
     "  { timeout: 2500, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout) => {",
     '  if (error) return;',
     '  try {',
@@ -454,13 +464,14 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
 }
 
 const MEMORY_BRIEF_MARKER_PREFIX = 'REVERIE_MEMORY_BRIEF_V';
-const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}2`;
+const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}3`;
 
 /**
  * The session-start memory brief, as its own handler with its own budget: the chat summary can fill its 3000 characters
  * on a busy inbox, and one oversized output would drop both. When the brief cannot be had (the CLI failed, timed out, or
  * predates the journal), the session is told so instead of starting as if it had no memory; outside a Reverie session, or
- * when the CLI answers with nothing (a session that is no employee's), nothing is printed.
+ * when the CLI answers with nothing (a session that is no employee's), nothing is printed. The fallback names the CLI the
+ * hook ran, so a laptop whose CLI drifted says which one.
  */
 export function generateMemoryBriefScript(): string {
   return [
@@ -469,10 +480,12 @@ export function generateMemoryBriefScript(): string {
     'process.stdin.resume();',
     "const sessionId = process.env.REVERIE_SESSION_ID || '';",
     'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
-    "execFile('reverie', ['agent', 'journal', 'brief', '--hook-event', 'SessionStart'],",
+    HOOK_CLI,
+    "execFile(cli, ['agent', 'journal', 'brief', '--hook-event', 'SessionStart'],",
     "  { timeout: 2500, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout, stderr) => {",
     '  if (error) {',
-    `    const text = error.code === 'ENOENT' || /unknown command 'journal'/i.test(String(stderr)) ? ${JSON.stringify(MEMORY_BRIEF_NO_CLI)} : ${JSON.stringify(MEMORY_BRIEF_UNREADABLE)};`,
+    `    const reason = error.code === 'ENOENT' || /unknown command 'journal'/i.test(String(stderr)) ? ${JSON.stringify(MEMORY_BRIEF_NO_CLI)} : ${JSON.stringify(MEMORY_BRIEF_UNREADABLE)};`,
+    "    const text = reason + ' (The hook ran ' + (cli === 'reverie' ? 'reverie from PATH' : cli) + '.)';",
     "    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));",
     '    return;',
     '  }',
@@ -984,6 +997,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // quote-free for the same reason.
     const hasPromptSubmit = hooksJson.includes('prompt_submitted');
     const hasTurnSummary = hooksJson.includes(TURN_SUMMARY_MARKER);
+    const hasMemoryBrief = hooksJson.includes(MEMORY_BRIEF_MARKER);
     // Compaction reporting (PreCompact / SessionStart "compact"); quote-free like the markers above.
     const hasCompaction = hooksJson.includes('compact_started');
     if (
@@ -994,6 +1008,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
         hasElicitationComplete &&
         hasPromptSubmit &&
         hasTurnSummary &&
+        hasMemoryBrief &&
         hasCompaction &&
         !hasTlsFlaglessCurl)
     )
