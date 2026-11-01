@@ -43,6 +43,8 @@ export interface SpawnBridgeOptions {
   mode: string;
   /** Internal, launch-only workspace trust resolved by Session for an authorized container Codex runtime. */
   codexTrustWorkspace?: string;
+  /** Internal, launch-only trust for Reverie's own Codex hooks, resolved by Session from the workspace's hooks.json. */
+  codexHookTrust?: string;
   sessionId: string;
   model?: string;
   claudeMode?: ClaudeMode;
@@ -236,6 +238,7 @@ export function buildSpawnCommandFromRegistry(entry: CliEntry, options: SpawnBri
 
   const command = renderLaunch(entry.launch, params, engineValues, gatesPassed);
   return entry.id === 'codex' && options.codexTrustWorkspace
-    ? `${command} --config ${codexTrustArgument(options.codexTrustWorkspace)}`
+    ? `${command} --config ${codexTrustArgument(options.codexTrustWorkspace)}` +
+      (options.codexHookTrust ? ` --config ${options.codexHookTrust}` : '')
     : command;
 }
