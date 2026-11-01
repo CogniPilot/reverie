@@ -92,6 +92,8 @@ export interface MuxSessionWithStats extends MuxSession {
 export interface CreateSessionOptions {
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
+  /** Internal, launch-only trust for Reverie's own Codex hooks (shell-escaped --config value). */
+  codexHookTrust?: string;
   /** Internal reconnect: the broker must never launch a new provider. */
   workerAttachOnly?: boolean;
   /** Process-local final admission (an owner stop holds the pane), checked right before the first process starts. */
@@ -149,6 +151,8 @@ export interface RespawnPaneOptions {
   admitted?: () => boolean;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
+  /** Internal, launch-only trust for Reverie's own Codex hooks (shell-escaped --config value). */
+  codexHookTrust?: string;
   sessionId: string;
   workingDir: string;
   mode: SessionMode;

@@ -2,6 +2,7 @@ import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
+import { codexHookTrustArgument, reverieCodexHookTrust } from './codex-hook-trust.js';
 import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
@@ -756,6 +757,8 @@ export class Session extends EventEmitter {
   // Claude CLI startup permission mode
   private _claudeMode: ClaudeMode = 'dangerously-skip-permissions';
   private _codexTrustWorkspace?: string;
+  /** Launch-only --config value trusting Reverie's own handlers in the workspace's Codex hooks.json. */
+  private _codexHookTrust?: string;
   private _allowedTools: string | undefined;
 
   // OpenCode configuration (only for mode === 'opencode')
@@ -2793,6 +2796,7 @@ export class Session extends EventEmitter {
     if (this.mode === 'codex' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
+    await this._prepareCodexHookTrust();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
     // Preparation above awaited: an owner stop may have been recorded meanwhile. Check now and at the tmux command.
@@ -2828,6 +2832,7 @@ export class Session extends EventEmitter {
   private _buildRespawnPaneOptions(): import('./mux-interface.js').RespawnPaneOptions {
     const options: import('./mux-interface.js').RespawnPaneOptions = {
       codexTrustWorkspace: this._codexTrustWorkspace,
+      codexHookTrust: this._codexHookTrust,
       sessionId: this.id,
       workingDir: this.workingDir,
       mode: this.mode,
@@ -2929,6 +2934,17 @@ export class Session extends EventEmitter {
       docker: this._docker,
       customModel: this._customModel,
     });
+  }
+
+  /**
+   * Only where the workspace itself is trusted at launch: Reverie's own hooks, as written to the workspace just before,
+   * are trusted by content hash so Codex does not stop on "Hooks need review" for them. Read after the write, so the
+   * hashes are of the file Codex will load.
+   */
+  private async _prepareCodexHookTrust(): Promise<void> {
+    this._codexHookTrust = this._codexTrustWorkspace
+      ? codexHookTrustArgument(await reverieCodexHookTrust(this.workingDir))
+      : undefined;
   }
 
   private async _prepareManagedCodexTrust(): Promise<void> {
@@ -3205,6 +3221,7 @@ export class Session extends EventEmitter {
     if (this.mode === 'codex' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
+    await this._prepareCodexHookTrust();
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
@@ -3310,6 +3327,7 @@ export class Session extends EventEmitter {
           respawnPaneOptions: this._buildRespawnPaneOptions(),
           createSessionOptions: {
             codexTrustWorkspace: this._codexTrustWorkspace,
+            codexHookTrust: this._codexHookTrust,
             workerAttachOnly: this._workerAttachOnly,
             workerResourceLaunch: this._workerResourceLaunch,
             sessionId: this.id,

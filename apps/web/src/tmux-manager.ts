@@ -1010,6 +1010,7 @@ export function buildCodexCommand(config?: CodexConfig): string {
 
 export function buildSpawnCommand(options: {
   codexTrustWorkspace?: string;
+  codexHookTrust?: string;
   mode: SessionMode;
   sessionId: string;
   model?: string;
@@ -2325,6 +2326,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     const baseCmd = buildSpawnCommand({
       codexTrustWorkspace: options.codexTrustWorkspace,
+      codexHookTrust: options.codexHookTrust,
       mode,
       sessionId,
       model,
@@ -2635,6 +2637,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     const baseCmd = buildSpawnCommand({
       codexTrustWorkspace: options.codexTrustWorkspace,
+      codexHookTrust: options.codexHookTrust,
       mode,
       sessionId,
       model,
