@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import copy
 import fcntl
 import json
+import select
 import os
 from pathlib import Path
 import socket
@@ -121,6 +122,20 @@ class PortTests(unittest.TestCase):
         self.server.start()
         client=P.PeerClient(self.backend.option['socket'],os.getuid())
         with self.assertRaises(ValueError):client.call(self.request())
+        self.assertEqual(self.backend.launched,0)
+
+    def test_refusal_decides_even_when_the_server_closes_before_the_client_sends(self):
+        # The server refuses a non-root peer without reading its request, then closes. On a loaded machine that close
+        # can land before the client's send, which then fails with EPIPE; the refusal already sent must still decide.
+        if os.getuid()==0:self.skipTest('denial case requires ordinary test user')
+        self.server.start();send=P.I.send_message
+        def after_server_closed(connection,value,deadline):
+            if 'method' in value:
+                poller=select.poll();poller.register(connection,select.POLLRDHUP)
+                self.assertTrue(poller.poll(5000),'server never closed the connection')
+            send(connection,value,deadline)
+        client=P.PeerClient(self.backend.option['socket'],os.getuid())
+        with patch.object(P.I,'send_message',after_server_closed),self.assertRaises(I.Refused):client.call(self.request())
         self.assertEqual(self.backend.launched,0)
 
     def test_closed_requests_do_not_launch_arbitrary_code_or_paths(self):
