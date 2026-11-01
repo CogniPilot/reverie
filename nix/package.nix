@@ -125,7 +125,7 @@ let
       # The console owns this Python/Node composition check after its TS build.
       npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
       npm test -- test/submit-settle.test.ts test/session-submit-verifier.test.ts \
-        test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts
+        test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts test/chatroom-delivery-held-seat.test.ts
       # Keep the input ownership and newly supported reply/media regressions in artifact checks.
       npm test -- test/capacity-stall.test.ts test/capacity-hold-control.test.ts test/late-verifier-hold-control.test.ts \
         test/pending-writer-control.test.ts test/verifier-gate-cleared.test.ts test/wake-claude-invariant-control.test.ts \

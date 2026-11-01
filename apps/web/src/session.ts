@@ -5254,6 +5254,11 @@ export class Session extends EventEmitter {
     return composerIsEmpty(this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
 
+  /** Idle and showing an empty composer on a harness whose composer glyph is verified; held input reads as not idle. */
+  composerProvablyIdle(): boolean {
+    return !this._inputHeldForRecovery() && !this._viewerInputHeld && this._idleForWake(null, true);
+  }
+
   canAcceptChatInput(): boolean {
     if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
     if (this.mode !== 'codex') return true;
