@@ -1752,7 +1752,7 @@ describe('per-turn message summary hooks', () => {
     );
     const run = (text: string, fail: boolean | 'old' = false) => {
       const result = spawnSync(process.execPath, ['-e', generateMemoryBriefScript()], {
-        env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(),
+        env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(), REVERIE_CLI: '',
           REVERIE_API_URL: 'http://office', BRIEF_TEXT: text, BRIEF_FAIL: fail === 'old' ? 'old' : fail ? '1' : '' },
         encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
       });
@@ -1765,10 +1765,40 @@ describe('per-turn message summary hooks', () => {
       expect(run('Your memory: you are Maple.')?.additionalContext).toBe('Your memory: you are Maple.'); // every start, no dedup
       expect(run('x'.repeat(2001))).toBeUndefined();
       // The CLI failed or timed out: the session is told its brief could not be read, not left to assume it has no memory.
-      expect(run('Your memory: you are Maple.', true)).toEqual({ hookEventName: 'SessionStart', additionalContext: MEMORY_BRIEF_UNREADABLE });
+      expect(run('Your memory: you are Maple.', true)).toEqual({ hookEventName: 'SessionStart', additionalContext: `${MEMORY_BRIEF_UNREADABLE} (The hook ran reverie from PATH.)` });
       // A laptop CLI from before the journal: the gap is named, not a command that is not there.
-      expect(run('Your memory: you are Maple.', 'old')).toEqual({ hookEventName: 'SessionStart', additionalContext: MEMORY_BRIEF_NO_CLI });
+      expect(run('Your memory: you are Maple.', 'old')).toEqual({ hookEventName: 'SessionStart', additionalContext: `${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)` });
       expect(run('  ')).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs the image CLI named in REVERIE_CLI, not an older reverie earlier on PATH, and names it when it fails', () => {
+    const dir = join(tmpdir(), `reverie-image-cli-hook-${randomUUID()}`);
+    mkdirSync(join(dir, 'home'), { recursive: true, mode: 0o700 });
+    mkdirSync(join(dir, 'image'), { mode: 0o700 });
+    // The stale home copy predates the journal and the summary; the image's copy answers both.
+    writeFileSync(join(dir, 'home', 'reverie'), `#!${process.execPath}\nprocess.stderr.write("error: unknown command '" + process.argv[3] + "'\\n");process.exit(1);\n`, { mode: 0o700 });
+    const image = join(dir, 'image', 'reverie');
+    writeFileSync(image, `#!${process.execPath}\nif(process.env.IMAGE_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:process.argv.at(-1),additionalContext:'from the image CLI'}}));\n`, { mode: 0o700 });
+    const run = (script: string, cli: string, fail = false) => {
+      const result = spawnSync(process.execPath, ['-e', script], {
+        env: { ...process.env, TMPDIR: dir, PATH: `${join(dir, 'home')}:${process.env.PATH}`, REVERIE_CLI: cli, REVERIE_SESSION_ID: randomUUID(),
+          REVERIE_API_URL: 'http://office', IMAGE_FAIL: fail ? '1' : '' },
+        encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
+      });
+      expect(result.status).toBe(0);
+      return result.stdout ? JSON.parse(result.stdout).hookSpecificOutput.additionalContext : undefined;
+    };
+    try {
+      expect(run(generateMemoryBriefScript(), image)).toBe('from the image CLI');
+      expect(run(generateTurnSummaryScript('UserPromptSubmit'), image)).toBe('from the image CLI');
+      expect(run(generateMemoryBriefScript(), image, true)).toBe(`${MEMORY_BRIEF_UNREADABLE} (The hook ran ${image}.)`);
+      // Unset or not an absolute path: PATH as before, so the stale copy answers and the fallback says so.
+      for (const cli of ['', 'reverie', 'image/reverie'])
+        expect(run(generateMemoryBriefScript(), cli)).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)`);
+      expect(run(generateTurnSummaryScript('UserPromptSubmit'), '')).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1790,6 +1820,7 @@ describe('per-turn message summary hooks', () => {
           ...process.env,
           TMPDIR: dir,
           PATH: `${dir}:${process.env.PATH}`,
+          REVERIE_CLI: '',
           REVERIE_SESSION_ID: sessionId,
           REVERIE_API_URL: 'http://office',
           SUMMARY_TEXT: text,
@@ -1875,7 +1906,7 @@ it('deduplicates actual zoned summary snapshots across clock ticks', () => {
     renderTurnSummary('ring', [{ ...candidate, excerpt }], { state: 'complete', rooms: [] }, zone, now);
   const run = (text: string, event: 'PostToolUse' | 'UserPromptSubmit' = 'PostToolUse') => {
     const result = spawnSync(process.execPath, ['-e', generateTurnSummaryScript(event)], {
-      env: { ...process.env, TMPDIR: dir, PATH: dir + ':' + process.env.PATH,
+      env: { ...process.env, TMPDIR: dir, PATH: dir + ':' + process.env.PATH, REVERIE_CLI: '',
         REVERIE_SESSION_ID: sessionId, REVERIE_API_URL: 'http://inert', SUMMARY_TEXT: text },
       input: '', encoding: 'utf8', timeout: 4000,
     });
