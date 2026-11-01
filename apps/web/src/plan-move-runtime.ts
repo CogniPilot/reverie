@@ -4,9 +4,10 @@ import type { PlanService } from './plan-accounts.js';
 import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
 import type { TerminalMultiplexer } from './mux-interface.js';
-import { PlanMoveError, type PlanMoveExecutor, type PlanMoveInput, type PlanMoveRecord } from './plan-move.js';
+import { PlanMoveError, PlanMoveComposerNotReady, type PlanMoveExecutor, type PlanMoveInput, type PlanMoveRecord } from './plan-move.js';
 import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
+import { claudeComposerIsReady } from './plan-move-composer.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
 import { submitRecoveryPrompt } from './company-recovery-prompt.js';
@@ -51,6 +52,12 @@ export interface PlanMoveRuntime {
   resourceReplacement?: PlanMoveResourceRuntime;
   capture?: typeof capturePlanProcesses;
   survivors?: typeof survivingPlanProcesses;
+}
+
+/** Preserve the configured marker; add only the strict native composer shape. */
+function nativeComposerReady(mode: string, text: string, mark: string): boolean {
+  return text.includes(mark) ||
+    (mode === 'claude' && claudeComposerIsReady(text));
 }
 
 export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): PlanMoveExecutor {
@@ -224,9 +231,12 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
              runtimeRefreshDigest(candidate.toState(), account, policy(candidate)) !== record.runtimeDigest))
           throw new PlanMoveError('The approved refresh runtime changed during recovery');
         assertAlive(record.newSession!);
-        if (!mark || !runtime.mux.capturePaneText || !candidate.muxName || candidate.isWorking || candidate.paneDialog ||
-          !runtime.mux.capturePaneText(candidate.muxName)?.includes(mark))
-          throw new PlanMoveError('The existing candidate is not at its verified composer');
+        if (!mark || typeof runtime.mux.capturePaneText !== 'function')
+          throw new PlanMoveError('This runtime does not support verified composer observation');
+        if (candidate.isWorking || candidate.paneDialog) throw new PlanMoveComposerNotReady();
+        const text = runtime.mux.capturePaneText(candidate.muxName!);
+        if (typeof text !== 'string') throw new PlanMoveError('The candidate composer observation is unavailable');
+        if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady();
       };
       fence();
       return fence;
@@ -384,7 +394,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           assertAuthorized();
           assertAlive(id);
           const text = runtime.mux.capturePaneText(current.muxName);
-          if (!current.isWorking && !current.paneDialog && text?.includes(mark)) break;
+          if (!current.isWorking && !current.paneDialog && typeof text === 'string' && nativeComposerReady(current.mode, text, mark)) break;
           if (Date.now() >= deadline) throw new PlanMoveError('The replacement did not reach its composer before the deadline');
           await delay(500);
         }
