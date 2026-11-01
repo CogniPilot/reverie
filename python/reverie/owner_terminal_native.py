@@ -271,23 +271,22 @@ class Installation:
         rows = inventory(self.engine)
         grants = [physical(config[name]) for name in ('stateRoot', 'companyRoot', 'scratchRoot', 'apiSocketRoot')]
         grants += [physical(row['source']) for row in config['mounts']]
+        from .owner_terminal_bind_sources import bound_mounts
+        selected=[]
         for row in rows:
             need(type(row) is dict and type(row.get('Mounts')) is list, 'LIVE_MOUNT_INVENTORY_REQUIRED')
-            if row.get('Id') == self.value['website']['containerId']:
-                continue
-            if row.get('State') in ('created', 'exited', 'dead'):
-                continue
-            for mount in row['Mounts']:
-                if mount.get('Type') == 'bind':
-                    grants.append(physical(mount['Source']))
-        # Detect same-device bind aliases through mountinfo's backing root,
-        # not just path spellings. Unknown/missing backing metadata refuses.
+            if row.get('Id') != self.value['website']['containerId'] and row.get('State') not in ('created','exited','dead'):
+                selected.append(row)
         table = read_mount_table()
-        for protected in [self.path, physical(self.value['workerConfig']), *self.roots.values()]:
-            for granted in grants:
-                need(not overlap(protected, granted), 'CONTROL_EXPOSED_TO_LAPTOP')
-                refuse_host_mount_aliases(protected, granted, table)
-        need(inventory(self.engine) == rows, 'LIVE_MOUNTS_CHANGED')
+        with bound_mounts(self.engine,selected) as bindings:
+            for protected in [self.path,physical(self.value['workerConfig']),*self.roots.values()]:
+                for granted in grants:
+                    need(not overlap(protected,granted),'CONTROL_EXPOSED_TO_LAPTOP')
+                    refuse_host_mount_aliases(protected,granted,table)
+                for item in bindings:
+                    need(not overlap(protected,item.path),'CONTROL_EXPOSED_TO_LAPTOP')
+                    item.exclude(protected,table)
+            need(inventory(self.engine)==rows and read_mount_table()==table,'LIVE_MOUNTS_CHANGED')
         self.engine.guard()
         require_disjoint_roots(config, self.roots.values())
 
@@ -298,11 +297,14 @@ class Installation:
         bootstrap = [m for m in item['Mounts'] if m['Destination'] == '/run/reverie-owner-terminal']
         need(len(bootstrap) == 1 and bootstrap[0]['Type'] == 'bind' and bootstrap[0]['RW'] is False
              and physical(bootstrap[0]['Source']) == self.roots['bootstrapRoot'], 'BOOTSTRAP_MOUNT_REQUIRED')
-        for mount in item['Mounts']:
-            if mount.get('Type') == 'bind':
-                need(not overlap(physical(mount['Source']), self.roots['ledgerRoot'])
-                     and not overlap(physical(mount['Source']), self.roots['controlRoot'])
-                     and not overlap(physical(mount['Source']), physical(self.value['workerConfig'])), 'PRIVATE_LEDGER_EXPOSED')
+        from .owner_terminal_bind_sources import bound_mounts,inspected_row
+        table=read_mount_table()
+        with bound_mounts(self.engine,[inspected_row(item)]) as bindings:
+            for binding in bindings:
+                for protected in (self.roots['ledgerRoot'],self.roots['controlRoot'],physical(self.value['workerConfig'])):
+                    need(not overlap(binding.path,protected),'PRIVATE_LEDGER_EXPOSED')
+                    binding.exclude(protected,table)
+            need(read_mount_table()==table,'LIVE_MOUNTS_CHANGED')
         self.guard()
         return item
 

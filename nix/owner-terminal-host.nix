@@ -4,6 +4,7 @@
 # time; no runtime, browser or worker field selects commands or startup arguments.
 assert builtins.isBool resourceReplacement;
 let
+  pythonSource = import ./owner-terminal-python-source.nix { inherit pkgs src; };
   auth = import ./service-auth-config.nix { inherit (pkgs) lib; } serviceAuthConfig;
   toolkit = import ./human-terminal-toolkit.nix { inherit pkgs src; };
   nodeInvocation = "${pkgs.nodejs_22}/bin/node";
@@ -18,7 +19,7 @@ let
     runtimeInputs = [ memory pkgs.docker-client ];
     text = ''
       unset PYTHONPATH PYTHONHOME NODE_OPTIONS NODE_PATH LD_PRELOAD LD_AUDIT
-      exec ${pythonInvocation} -I -B ${src}/scripts/reverie-owner-terminal-host "$@"
+      exec ${pythonInvocation} -I -B ${pythonSource}/scripts/reverie-owner-terminal-host "$@"
     '';
   };
   website = pkgs.writeTextFile {

@@ -218,6 +218,48 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         self.enterContext(patch.object(H, 'open_in_root', side_effect=guest))
         self.rebuild()
 
+    def rotate_auth_inspects(self, mutation=None):
+        original=self.initial.engine.get;calls=[0]
+        def get(route):
+            value=original(route)
+            if route=='/containers/'+W.OLD+'/json':
+                calls[0]+=1
+                value['Mounts']=value['Mounts'][calls[0]%len(value['Mounts']):]+value['Mounts'][:calls[0]%len(value['Mounts'])]
+                other=min((m for m in value['Mounts'] if m['Destination']!=self.auth_mount['Destination']),key=lambda m:m['Destination'])
+                other['Future']={'ordered':[1,2]}
+                if mutation and calls[0]%2==0:
+                    if mutation=='inner':other['Future']['ordered'].reverse()
+                    elif mutation=='duplicate':value['Mounts'].append(deepcopy(other))
+                    else:other['Future']['extra']='changed'
+            return value
+        self.initial.engine.get=get
+        return calls
+
+    def test_auth_held_descriptors_survive_outer_mount_permutations(self):
+        self.select_service_auth();calls=self.rotate_auth_inspects();self.rebuild()
+        held=list(self.profile.auth_fds)
+        self.profile.input_binding()
+        self.assertGreaterEqual(calls[0],4)
+        self.assertTrue(all(os.fstat(fd)for fd in held))
+        self.profile.close()
+        for fd in held:
+            with self.assertRaises(OSError):os.fstat(fd)
+        self.assertFalse(self.fixture.engine.mutations())
+
+    def test_auth_full_unknown_fields_inner_arrays_and_duplicates_still_refuse(self):
+        self.select_service_auth();original=self.initial.engine.get
+        for mutation in ('unknown','inner','duplicate'):
+            self.initial.engine.get=original;self.rotate_auth_inspects(mutation)
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):self.rebuild()
+            self.assertFalse(self.fixture.engine.mutations())
+        self.initial.engine.get=original
+
+    def test_link_description_already_canonicalizes_outer_mount_order(self):
+        self.select_service_auth();self.rotate_auth_inspects()
+        result=H.describe_link_facts(self.initial,W.website._link_codec(),W.OLD)
+        self.assertEqual(result['purpose'],H.LINK_PURPOSE)
+        self.assertFalse(self.fixture.engine.mutations())
+
     def test_selected_service_auth_survives_real_stage_and_readonly_mount(self):
         self.select_service_auth()
         plan = self.approve()
@@ -393,7 +435,7 @@ class TerminalWebsiteStageTests(unittest.TestCase):
             profile = SimpleNamespace(close=close)
             standard = SimpleNamespace(WebsiteStage=lambda *a, **k: SimpleNamespace(plan=lambda *a: plan),
                                        digest=W.website.digest)
-            native = SimpleNamespace(name='reverie', _time=lambda: None, http_ready=lambda *a: True)
+            native = SimpleNamespace(name='reverie', selection={'oldId':W.OLD}, _time=lambda: None, http_ready=lambda *a: True)
             with patch('reverie.website_image_provenance.immutable', side_effect=lambda path, *a: path), \
                  patch.object(Path, 'resolve', lambda path, strict=True: path), \
                  patch.object(L, 'RuntimeManifest', return_value=initial.runtime), \
@@ -437,6 +479,7 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         self.initial.runtime.value['profile'] = 'resource-terminal'
         with self.assertRaisesRegex(ValueError, 'H_ONLY'):self.rebuild()
         self.initial.runtime.value['profile'] = 'terminal'
+        self.rebuild()  # The preceding rejected construction closed the previous proof.
         self.fixture.engine.containers[W.OLD]['HostConfig']['CapAdd'] = ['SYS_ADMIN']
         with self.assertRaisesRegex(ValueError, 'SOURCE_AUTHORITY'):self.approve()
         self.assertFalse(self.fixture.engine.mutations())
@@ -575,6 +618,90 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         for invalid in (None, [None], [{}], [{'Type': 'bind', 'Source': '/data', 'Destination': '/data', 'RW': 'true'}]):
             with self.subTest(invalid=invalid), self.assertRaises(W.website.WebsiteRefusal):
                 W.website.canonical_mount_records(invalid)
+
+
+    def select_scratch_source(self):
+        from reverie import owner_terminal_bind_sources as B,worker_cold_tmp as C
+        f=self.fixture;scratch=f.root/'scratch-source';scratch.mkdir(mode=0o700)
+        alias=f.root/'scratch-alias';alias.symlink_to(scratch,target_is_directory=True)
+        old=f.engine.containers[W.OLD]
+        old['Mounts'].append({'Type':'bind','Source':str(alias),'Destination':'/scratch','RW':True,'Propagation':'rprivate'})
+        old['HostConfig']['Binds']=(old['HostConfig'].get('Binds') or [])+[str(alias)+':/scratch:rw']
+        original=self.engine
+        def engine(method,path,data=None):
+            result=original(method,path,data)
+            for row in f.engine.containers.values():
+                row['State'].update(Status='running' if row['State']['Running'] else 'exited',
+                                    Paused=False,Restarting=False,Dead=False)
+            return result
+        self.engine=engine
+        engine('GET','/containers/'+W.OLD+'/json')
+        source_maps={}
+        def source_map(pid):
+            if pid not in source_maps:
+                row=next(row for row in f.engine.containers.values() if row['State']['Pid']==pid)
+                source_maps[pid]={m['Destination']:Path(m['Source']).resolve(strict=True)
+                                  for m in row['Mounts'] if m['Type']=='bind'}
+            return source_maps[pid]
+        self.scratch_source_maps=source_maps
+        current=[None]
+        def root(pid):
+            current[0]=pid;source_map(pid)
+            return os.open(f.root,os.O_PATH|os.O_DIRECTORY)
+        def guest(fd,path,**kwargs):return os.open(source_map(current[0])[path],os.O_PATH|os.O_NOFOLLOW)
+        host=C.read_mount_table()
+        def table(pid='self'):
+            if pid=='self':return host
+            return host+[{'id':10**9+i,'device':C._mount_location(source,host)[0],
+                          'root':C._mount_location(source,host)[1],'point':Path(destination)}
+                         for i,(destination,source) in enumerate(source_map(pid).items())]
+        self.enterContext(patch.object(B,'read_proc',side_effect=lambda pid:{'pid':pid,'start':pid,'namespaces':(1,2,3)}))
+        self.enterContext(patch.object(B,'_root',side_effect=root))
+        self.enterContext(patch.object(B,'open_in_root',side_effect=guest))
+        self.enterContext(patch.object(B,'read_mount_table',side_effect=table))
+        self.profile.close()
+        with patch('reverie.resource_actor_install.artifact',return_value=deepcopy(self.provenance)):
+            self.profile=H.TerminalWebsiteProfile(self.initial,self.links,old_id=W.OLD)
+        self.addCleanup(self.profile.close)
+        self.stage=W.website.WebsiteStage(self.engine,f.state,f.deployment,f.policy,
+            guard=f.guard,ready=lambda cid,spec:self.ready(cid),terminal=self.profile)
+        return alias,scratch
+
+    def test_scratch_alias_real_stage_preserves_source_through_old_stop_and_ready(self):
+        alias,scratch=self.select_scratch_source();plan=self.approve()
+        selected=next(m for m in plan['spec']['HostConfig']['Mounts'] if m['Target']=='/scratch')
+        self.assertEqual(selected['Source'],str(alias))
+        held=[fd for item in self.profile.alias_held for fd in item.fds]
+        (scratch/'ordinary-build-directory').mkdir()
+        result=self.stage.apply(plan,W.website.digest(plan))
+        self.assertEqual(result['state'],'adopted')
+        self.assertTrue(self.profile.alias_held)
+        self.profile.close()
+        for fd in held:
+            with self.assertRaises(OSError):os.fstat(fd)
+        self.fixture.assert_no_old_restore()
+
+    def test_scratch_alias_rotation_after_prepare_refuses_before_any_effect(self):
+        alias,scratch=self.select_scratch_source();plan=self.approve()
+        other=self.fixture.root/'other-scratch';other.mkdir(mode=0o700)
+        alias.unlink();alias.symlink_to(other,target_is_directory=True)
+        with self.assertRaisesRegex(ValueError,'BIND_SOURCE_CHANGED'):
+            self.stage.apply(plan,W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.mutations())
+
+
+    def test_scratch_candidate_wrong_actual_guest_at_ready_never_adopts_or_restores(self):
+        alias,scratch=self.select_scratch_source();plan=self.approve()
+        other=self.fixture.root/'wrong-mounted-scratch';other.mkdir(mode=0o700)
+        ready=self.initial.await_ready
+        def wrong(fd):
+            result=ready(fd)
+            self.scratch_source_maps[420]['/scratch']=other
+            return result
+        self.initial.await_ready=wrong
+        with self.assertRaises(W.website.WebsiteRefusal):self.stage.apply(plan,W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.containers[W.OLD]['State']['Running'])
+        self.fixture.assert_no_old_restore()
 
 
 class FixedNativeWebsiteAPITests(unittest.TestCase):
