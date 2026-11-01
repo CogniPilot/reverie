@@ -31,7 +31,7 @@ describe('typed bot watch owner-only runtime integration', () => {
     await app.close();
     await fs.rm(root, { recursive: true, force: true });
   });
-  const setup = async () => {
+  const setup = async (extra: Partial<Parameters<typeof registerBotWatches>[1]> = {}) => {
     const room = { id: 'room', name: 'Room', members: [], messages: [] };
     return registerBotWatches(app, {
       dataPath: (n) => path.join(root, n),
@@ -49,6 +49,7 @@ describe('typed bot watch owner-only runtime integration', () => {
         alertMode: () => undefined,
         adminPhoneWakeEnabled: true,
       } as unknown as ChatroomService,
+      ...extra,
     });
   };
   it('unauthenticated/agent/limited requests cannot configure or inspect private task history', async () => {
@@ -104,6 +105,48 @@ describe('typed bot watch owner-only runtime integration', () => {
     });
     expect(res.statusCode).toBe(503);
     expect(JSON.parse(await fs.readFile(path.join(root, 'assignment-status-watch.json'), 'utf8'))).toEqual({});
+  });
+  it('only the verified owner configures the disk-space alarm, and it posts as a notice on change', async () => {
+    const room = { id: 'room', name: 'Room', members: [], messages: [] as unknown[] };
+    const posts: Array<{ text: string; to: unknown; deliver: unknown }> = [];
+    let used = 50;
+    const runtime = await setup({
+      chat: {
+        room: () => room,
+        rooms: () => [room],
+        auditEntry: async () => {},
+        alertMode: () => undefined,
+        adminPhoneWakeEnabled: true,
+        checkBotPost: () => {},
+        postDurableBotMessage: (_b: unknown, _r: unknown, text: string, _n: unknown, to: unknown, deliver: unknown) => {
+          posts.push({ text, to, deliver });
+          return { id: `m${posts.length}`, text };
+        },
+      } as unknown as ChatroomService,
+      disk: {
+        volumes: async () => [{ key: 'dev-1', labels: ['Workspace'], totalBytes: 1000, availableBytes: 1000 - used * 10, roots: [] }],
+        consumers: async () => ({ entries: [], partial: false }),
+      },
+    });
+    const disk = {
+      version: 1, type: 'disk-space', enabled: true, botId: 'status', roomId: 'room',
+      warnPercent: 90, criticalPercent: 99, rearmMarginPercent: 1, intervalMinutes: 5,
+    };
+    for (const headers of [{}, { 'x-reverie-parent-session': 'employee' }]) {
+      expect((await app.inject({ method: 'PUT', url: '/api/bot-watches/disk-space', headers, payload: disk })).statusCode).toBe(403);
+    }
+    const ok = await app.inject({ method: 'PUT', url: '/api/bot-watches/disk-space', headers: { 'x-fixture-owner': 'yes' }, payload: disk });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().data.disk.config.type).toBe('disk-space');
+    await runtime.tick();
+    expect(posts).toEqual([]);
+    used = 95;
+    await runtime.disk.store.update((s) => { s.nextPollAt = 0; });
+    await runtime.tick();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.text).toContain('Disk warning: Workspace is at 95% used');
+    expect(posts[0]!.to).toBe('all');
+    expect(posts[0]!.deliver).toBe(false);
   });
   it('multiuser refuses activation until Board partition is defined', async () => {
     multi = true;

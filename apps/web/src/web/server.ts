@@ -1964,8 +1964,9 @@ export class WebServer extends EventEmitter {
       coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
       verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
+      alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), title: 'Disk critical', timeoutMs: 5000 }),
     });
-    this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment and public issue watchers' });
+    this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment, public issue and disk-space watchers' });
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
       timeZone: owner => this.companyService.view(owner).settings.timeZone,
