@@ -165,7 +165,8 @@ describe('current holder own existing plan recovery', () => {
 
 describe('one explicitly queued busy-self recovery', () => {
   async function settled(queue: OwnPlanRecoveries): Promise<string | undefined> {
-    for (let n = 0; n < 100; n++) {
+    // Allow slow sandbox fsync; this changes only the fixture wait, not the production idle deadline.
+    for (let n = 0; n < 1000; n++) {
       const state = queue.status('existing', 'expert')?.state;
       if (state === 'completed' || state === 'refused') return state;
       await new Promise(resolve => setTimeout(resolve, 10));
