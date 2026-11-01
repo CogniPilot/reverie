@@ -39,6 +39,16 @@
         <p id="watch-status" role="status">Loading repository watchers…</p>
         <div id="github-watches" class="cards"></div>
       </section>
+      <section id="disk-alarm-section" aria-labelledby="disk-alarm-title">
+        <h2 id="disk-alarm-title">Disk alarm</h2>
+        <p class="hint">Posts in a channel when a disk Reverie can see passes the warning or critical level.</p>
+        <p id="disk-status" role="status">Loading the disk alarm…</p>
+        <div id="disk-volumes" class="cards"></div>
+        <div class="actions">
+          <button id="disk-edit" type="button" disabled>Set up the disk alarm</button
+          ><button id="disk-toggle" type="button" hidden>Turn off</button>
+        </div>
+      </section>
       <section aria-labelledby="routines-title">
         <h2 id="routines-title">Routines</h2>
         <p class="hint">Enabled routines run on their schedule. Execution status updates every 10 seconds.</p>
@@ -105,6 +115,34 @@
         <div class="actions">
           <button type="button" data-close="watch-dialog">Cancel</button
           ><button class="primary" type="submit">Save watcher</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="disk-dialog" aria-labelledby="disk-title">
+      <form id="disk-form">
+        <h2 id="disk-title">Disk alarm</h2>
+        <label>Channel<select name="roomId" aria-label="Disk alarm channel" required></select></label>
+        <label>Post as<select name="botId" aria-label="Disk alarm bot" required></select></label>
+        <label
+          >Warn at (% used)<input name="warnPercent" type="number" min="50" max="99" step="1" value="90" required
+        /></label>
+        <label
+          >Critical at (% used)<input name="criticalPercent" type="number" min="51" max="100" step="1" value="99" required
+        /></label>
+        <label
+          >Check every (minutes)<input name="intervalMinutes" type="number" min="1" max="1440" step="1" value="5" required
+        /></label>
+        <label
+          >Mention (optional)<input name="mention" maxlength="40" placeholder="Name to mention, without @" autocapitalize="none" spellcheck="false"
+        /></label>
+        <p class="hint">
+          It posts once when a disk crosses a level and again when it recovers. Critical also notifies the owner's
+          devices. Saving turns the alarm on; the first check runs within the interval.
+        </p>
+        <p id="disk-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="disk-dialog">Cancel</button
+          ><button class="primary" type="submit">Save and turn on</button>
         </div>
       </form>
     </dialog>
