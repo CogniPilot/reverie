@@ -1697,10 +1697,10 @@ Object.assign(ReverieApp.prototype, {
         // (measured against a real shell). See isTerminalFocusOrMouseReport.
         if (
           typeof KeyboardAccessoryBar !== 'undefined' &&
-          KeyboardAccessoryBar.isCtrlArmed?.() &&
+          KeyboardAccessoryBar.isModifierArmed?.() &&
           !window.ReverieTerminalInput?.isTerminalFocusOrMouseReport(data)
         ) {
-          data = KeyboardAccessoryBar.consumeCtrl(data);
+          data = KeyboardAccessoryBar.consumeModifiers(data);
         }
 
         this._lastTerminalData = { data, time: performance.now() };
@@ -4307,8 +4307,8 @@ Object.assign(ReverieApp.prototype, {
     // covers typed characters, IME flushes, Enter, backspace and arrows at once.
     // Same policy as the onData hook: the next single character is modified,
     // anything longer merely spends the modifier.
-    if (typeof KeyboardAccessoryBar !== 'undefined' && KeyboardAccessoryBar.isCtrlArmed?.()) {
-      text = KeyboardAccessoryBar.consumeCtrl(text);
+    if (typeof KeyboardAccessoryBar !== 'undefined' && KeyboardAccessoryBar.isModifierArmed?.()) {
+      text = KeyboardAccessoryBar.consumeModifiers(text);
     }
     // Bypasses onData (like insertTerminalText): predictions cannot see this
     if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
