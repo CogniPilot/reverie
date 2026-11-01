@@ -58,9 +58,11 @@ export interface DeliverySession {
   readonly pid: number | null;
   readonly mode: string;
   canAcceptChatInput?(): boolean;
+  /** Idle with a composer proven empty on screen (only harnesses whose composer glyph is verified); false when unsure. */
+  composerProvablyIdle?(): boolean;
   writeViaMux(
     data: string,
-    options?: { opencodeGuard?: boolean; requireIdle?: boolean; requireEmptyComposer?: boolean; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
+    options?: { opencodeGuard?: boolean; requireIdle?: boolean; requireEmptyComposer?: boolean; onIdleRefused?: () => void; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
   ): Promise<boolean>;
 }
 
@@ -776,7 +778,7 @@ export class ChatroomDelivery {
       return false;
     }
     const queue = this.queues.get(sessionId);
-    if (this.persistenceFailed || this.inspectionHolds.has(sessionId) || !queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
+    if (this.persistenceFailed || !queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
     const blocked = queue.filter((p) => this.deps.allowFragment?.(sessionId, p.roomId, p.messageId) === false);
     if (blocked.length) {
       this.discard(blocked);
@@ -800,6 +802,11 @@ export class ChatroomDelivery {
       return false;
     }
     if (session.pid === null || session.isWorking || session.paneDialog || session.canAcceptChatInput?.() === false) return false;
+    // Unconfirmed earlier lines are never typed again. While any is unread, a new line goes in only when the pane is idle and
+    // its composer is provably empty: an unsent earlier line cannot be sitting there to be submitted with it. Without that proof
+    // the session waits, as before. A seat that never gets a line could never learn to read what is held.
+    const held = this.inspectionHolds.get(sessionId)?.size ?? 0;
+    if (held && session.composerProvablyIdle?.() !== true) return false;
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;
@@ -820,16 +827,27 @@ export class ChatroomDelivery {
         this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + 1);
       }
     }
+    const notices: Pending[] = [];
+    if (held) {
+      const anchor = batch.find((p) => !p.passive) ?? batch[0];
+      notices.push({
+        roomId: anchor.roomId,
+        roomName: anchor.roomName,
+        text: `SYSTEM: ${held} earlier message${held === 1 ? '' : 's'} may not have reached you and ${held === 1 ? 'was' : 'were'} not pasted again (read them with reverie agent chat read)`,
+      });
+      batch.unshift(notices[0]!);
+    }
     // Say so when held messages were dropped, so the member does not act on a partial picture.
     const lost = this.omitted.get(sessionId) ?? 0;
     if (lost > 0) {
       this.omitted.delete(sessionId);
       const anchor = batch.find((p) => !p.passive) ?? batch[0];
-      batch.unshift({
+      notices.push({
         roomId: anchor.roomId,
         roomName: anchor.roomName,
         text: `SYSTEM: ${lost} earlier message${lost === 1 ? '' : 's'} not shown (read them with reverie agent chat read)`,
       });
+      batch.unshift(notices[notices.length - 1]!);
     }
     this.inFlight.add(sessionId);
     this.lastDelivered.set(sessionId, now);
@@ -892,10 +910,11 @@ export class ChatroomDelivery {
         for (const [roomId, read] of writing.reads) this.acknowledgeRead(sessionId, roomId, [...read]);
       };
       attempted = taken;
+      let refused = false;
       const ok = await session.writeViaMux(`${safe}\r`, {
         opencodeGuard: true,
         requireEmptyComposer: true,
-        ...(prepared.size ? { requireIdle: true } : {}),
+        ...(prepared.size || held ? { requireIdle: true, onIdleRefused: () => { refused = true; } } : {}),
         onOutcome: (outcome) => {
           if (finished || (carried.length && this.activeWrites.get(sessionId) !== writing)) return;
           outcomeSeen = true;
@@ -924,6 +943,16 @@ export class ChatroomDelivery {
       // Each room whose message was in the line has a turn starting for this member (the page shows "is thinking" there).
       if (ok) for (const roomId of new Set(chat.map((p) => p.roomId))) this.deps.onWoken?.(sessionId, roomId, now);
       if (ok) this.noteReceived(sessionId, batch.slice(0, taken));
+      if (!ok && refused && !submitted) {
+        // Refused at the write before any key (not idle, or the composer not provably empty): nothing reached the pane,
+        // so these identities are queued again rather than made uncertain.
+        this.durable((store) => store.state(ids, 'queued'));
+        this.releaseInspection(sessionId, carried);
+        // The notices are rebuilt on the next attempt; the dropped count they carried is kept for it.
+        if (lost > 0) this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + lost);
+        this.requeue(sessionId, batch.filter((p) => !notices.includes(p)));
+        return false;
+      }
       if (!ok) {
         // sendInput can type successfully and then fail Enter. Keep uncertainty unless a receipt
         // proves submission; no existing boolean return proves that the pane received no text.
