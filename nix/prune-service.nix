@@ -70,6 +70,12 @@ in {
       description = "Dedicated root-controlled state. Existing state is never adopted or upgraded; changed bindings require a fresh owner-declared directory.";
     };
     cadence = mkOption { type = types.enum [ "hourly" "daily" "half-hourly" ]; default = "hourly"; };
+    deploymentConfigFile = mkOption {
+      type = types.package;
+      internal = true;
+      readOnly = true;
+      description = "The declared deployment file this module generates; the initializer and lease acceptance read exactly this file.";
+    };
     report = {
       directory = mkOption {
         type = types.nullOr absolutePath;
@@ -123,6 +129,7 @@ in {
     };
   };
   config = lib.mkMerge [
+    { services.reverie.prune.deploymentConfigFile = settings; }
     { assertions = [
         { assertion = !cfg.timer.enable || cfg.enable; message = "services.reverie.prune.timer.enable requires services.reverie.prune.enable"; }
         { assertion = !live.enable || cfg.enable; message = "services.reverie.prune.live.enable requires services.reverie.prune.enable"; }
