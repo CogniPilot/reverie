@@ -45,6 +45,27 @@ export const SUBMIT_VERIFY_DELAYS_MS: readonly number[] = [
  * chip additionally requires an observed empty composer before this write.
  */
 const PASTE_PLACEHOLDER = /\[Pasted (?:Content|text)[^\]]*?(\d+) chars\]/gi;
+/**
+ * Claude Code folds a paste longer than 800 characters, or with more than two line breaks, into an indexed chip:
+ * `[Pasted text #1]`, or `[Pasted text #1 +3 lines]` where the count is the paste's line breaks (measured in Claude Code
+ * 2.1.308). The chip carries no length, so it binds a prompt only as the whole composer, after a write observed from an empty
+ * composer, and only by that count.
+ */
+const CLAUDE_PASTE_CHIP = /^\[Pasted text #\d+(?: \+(\d+) lines)?\]$/;
+const CLAUDE_PASTE_MIN_CHARS = 800;
+const CLAUDE_PASTE_MIN_BREAKS = 3;
+const lineBreaks = (text: string): number => (text.match(/\r\n|\r|\n/g) ?? []).length;
+
+/** Whether a composer holding only one Claude paste chip holds `prompt`; `undefined` when it is not such a composer. */
+export function claudeChipHoldsPrompt(composer: string, prompt: string, allowOpaque = false): boolean | undefined {
+  const chip = CLAUDE_PASTE_CHIP.exec(composer);
+  if (!chip) return undefined;
+  if (!allowOpaque) return false;
+  const breaks = Number(chip[1] ?? 0);
+  // Only an otherwise wholly opaque paste can include its terminal line ending.
+  const counts = [lineBreaks(prompt), lineBreaks(prompt.replace(/(?:\r\n|\r|\n)$/, ''))];
+  return counts.includes(breaks) && (prompt.length > CLAUDE_PASTE_MIN_CHARS || breaks >= CLAUDE_PASTE_MIN_BREAKS);
+}
 const PASTE_SLACK_CHARS = 4;
 /** After the last Enter of the schedule, how long to wait before the final look. */
 const FINAL_LOOK_MS = 2_000;
@@ -171,6 +192,8 @@ export function promptStillInComposer(screen: string, prompt: string, glyph: str
   const body = composerBody(screen, glyph);
   if (body === undefined) return undefined;
   if (!body) return false;
+  const chip = claudeChipHoldsPrompt(body, prompt, allowOpaque);
+  if (chip !== undefined) return chip ? true : undefined;
   if (body.match(PASTE_PLACEHOLDER)) {
     return placeholderHoldsPrompt(body, prompt, allowOpaque) ? true : undefined;
   }
