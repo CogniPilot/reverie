@@ -115,6 +115,8 @@ const BACKGROUND_WAKE_MARKER_PREFIX = 'REVERIE_BACKGROUND_REWAKE_V';
 const BACKGROUND_WAKE_MARKER = `${BACKGROUND_WAKE_MARKER_PREFIX}3`;
 const SUBAGENT_STOP_GUARD_MARKER_PREFIX = 'REVERIE_SUBAGENT_STOP_GUARD_V';
 const SUBAGENT_STOP_GUARD_MARKER = `${SUBAGENT_STOP_GUARD_MARKER_PREFIX}1`;
+const RM_SCOPE_MARKER_PREFIX = 'REVERIE_RM_SCOPE_V';
+const RM_SCOPE_MARKER = `${RM_SCOPE_MARKER_PREFIX}1`;
 const BACKGROUND_WAKE_TIMEOUT_SECONDS = 6 * 60 * 60;
 
 /**
@@ -321,6 +323,133 @@ export function generateSubagentStopGuardScript(): string {
     "  decision: 'block',",
     "  reason: 'You still own active background work (' + shown.join(', ') + suffix + '). Do not return an intermediate progress message as your final report. Process the task notifications or keep actively polling until every task completes, then return one complete summary.',",
     '}));',
+  ].join('\n');
+}
+
+/**
+ * Answer Claude Code's critical-path `rm` prompt for removals that stay inside the
+ * expert's own workspace or its own `/tmp/<name>-<task>` dirs.
+ *
+ * Claude Code checks `rm`/`rmdir` targets before running a Bash command, and no allow
+ * rule, sandbox setting or PreToolUse "allow" approves a removal it cannot rule out
+ * (e.g. `cd /tmp/x && rm -rf cache/*`); even bypass mode shows a prompt that an
+ * unattended seat lets time out into a denial. A PermissionRequest hook may answer it.
+ * This one only ever answers "allow", only in bypass mode (where the rest of the
+ * command is already approved), and only when every removal resolves, after symlinks,
+ * strictly inside CLAUDE_PROJECT_DIR or inside a /tmp/<name>-<task> dir of that
+ * expert. Anything it cannot read as plain literal words (expansions, substitutions,
+ * redirections, subshells, wrappers such as sudo/timeout/xargs) keeps the prompt.
+ */
+export function generateRmScopeScript(): string {
+  return [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    `const ${RM_SCOPE_MARKER} = true;`,
+    'let input;',
+    "try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }",
+    '// Only the prompt bypass mode still shows: every other part of the command is already approved there.',
+    "if (!input || input.permission_mode !== 'bypassPermissions' || input.tool_name !== 'Bash') process.exit(0);",
+    'const command = input.tool_input && input.tool_input.command;',
+    "const project = process.env.CLAUDE_PROJECT_DIR || '';",
+    "if (typeof command !== 'string' || command.length > 4000 || !path.isAbsolute(project)) process.exit(0);",
+    'function real(p) { try { return fs.realpathSync(p); } catch { return null; } }',
+    'const workspace = real(project);',
+    "if (!workspace || workspace === '/') process.exit(0);",
+    'const owner = (path.basename(workspace).match(/^expert-([a-z0-9][a-z0-9-]*)$/) || [])[1];',
+    "const taskDir = owner ? new RegExp('^/tmp/' + owner + '-[^/]+(/.*)?$') : null;",
+    "// Strictly inside the workspace, or inside (or equal to) one of the expert's own /tmp/<name>-<task> dirs.",
+    'function allowed(p) {',
+    "  return p.startsWith(workspace + '/') || (taskDir !== null && taskDir.test(p) && real('/tmp') === '/tmp');",
+    '}',
+    'function refuse() { process.exit(0); }',
+    '// Lex the command into steps of literal words joined by &&, so each step runs only after every earlier one',
+    '// succeeded. Anything the shell could expand, redirect, pipe, background or run conditionally is refused.',
+    'const steps = [];',
+    'let words = [];',
+    'let word = null;',
+    'let globbed = false;',
+    'function endWord() { if (word !== null) words.push({ text: word, globbed }); word = null; globbed = false; }',
+    'function endStep() {',
+    '  endWord();',
+    '  if (words.length === 0) refuse();',
+    '  steps.push(words);',
+    '  words = [];',
+    '}',
+    'for (let i = 0; i < command.length; i++) {',
+    '  const c = command[i];',
+    "  if (c === ' ' || c === '\\t') { endWord(); continue; }",
+    "  if (c === '&' && command[i + 1] === '&') { i++; endStep(); continue; }",
+    '  if (c === "\'") {',
+    '    const close = command.indexOf("\'", i + 1);',
+    '    if (close < 0) refuse();',
+    "    word = (word || '') + command.slice(i + 1, close);",
+    '    i = close;',
+    '    continue;',
+    '  }',
+    '  if (c === \'"\') {',
+    '    const close = command.indexOf(\'"\', i + 1);',
+    '    if (close < 0) refuse();',
+    '    const body = command.slice(i + 1, close);',
+    '    if (/[$`\\\\!]/.test(body)) refuse();',
+    "    word = (word || '') + body;",
+    '    i = close;',
+    '    continue;',
+    '  }',
+    "  if ('$`\\\\(){}<>!#;&|\\n'.includes(c)) refuse();",
+    "  if ('*?['.includes(c)) globbed = true;",
+    "  word = (word || '') + c;",
+    '}',
+    'endStep();',
+    '// A . or .. component would be resolved here lexically but by the kernel through symlinks, so it is refused.',
+    "function dotted(p) { return p.split('/').some((part) => part === '.' || part === '..'); }",
+    "let cwd = real(typeof input.cwd === 'string' ? input.cwd : '');",
+    'if (!cwd) refuse();',
+    'let removals = 0;',
+    '// Only cd to an absolute path and plain rm/rmdir are understood; any other step (an assignment, a wrapper, a',
+    '// path to some other rm) keeps the prompt, so no other part of the command is approved along with the removal.',
+    'for (const step of steps) {',
+    '  const name = step[0].text;',
+    '  if (step[0].globbed) refuse();',
+    "  if (name === 'cd') {",
+    '    // CDPATH and ~ never apply to an absolute target.',
+    '    if (step.length !== 2 || step[1].globbed || !path.isAbsolute(step[1].text) || dotted(step[1].text)) refuse();',
+    '    cwd = real(step[1].text);',
+    '    if (!cwd) refuse();',
+    '    continue;',
+    '  }',
+    "  if (name !== 'rm' && name !== 'rmdir') refuse();",
+    '  let targets = 0;',
+    '  let options = true;',
+    '  for (const arg of step.slice(1)) {',
+    "    if (options && arg.text === '--') { options = false; continue; }",
+    "    if (options && arg.text.startsWith('-')) {",
+    '      // rmdir -p would climb into the parents of its target.',
+    "      if (name === 'rmdir' || arg.text.includes('preserve-root') || arg.globbed) refuse();",
+    '      continue;',
+    '    }',
+    '    targets++;',
+    '    const target = arg.text;',
+    "    if (target === '' || target.startsWith('~') || dotted(target)) refuse();",
+    '    const full = path.resolve(cwd, target);',
+    '    const leaf = path.basename(full);',
+    '    const parentText = path.dirname(full);',
+    '    // A glob may only sit in the last component, so it expands inside one directory.',
+    '    if (arg.globbed && /[*?[]/.test(parentText)) refuse();',
+    "    if (arg.globbed && leaf.startsWith('.')) refuse();",
+    '    const parent = real(parentText);',
+    '    if (!parent) refuse();',
+    '    let resolved;',
+    '    if (arg.globbed) resolved = parent;',
+    "    else if (target.endsWith('/')) resolved = real(full);",
+    '    else resolved = path.join(parent, leaf);',
+    '    if (!resolved || !allowed(resolved)) refuse();',
+    '    if (arg.globbed && resolved === workspace) refuse();',
+    '  }',
+    '  if (targets === 0) refuse();',
+    '  removals++;',
+    '}',
+    'if (removals === 0) refuse();',
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));",
   ].join('\n');
 }
 
@@ -675,6 +804,15 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
           ],
         },
       ],
+      // Claude Code's critical-path rm prompt: approve removals inside the expert's own dirs, keep the prompt otherwise.
+      PermissionRequest: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            { type: 'command', command: 'node', args: ['-e', generateRmScopeScript()], timeout: HOOK_TIMEOUT_SECONDS },
+          ],
+        },
+      ],
       TeammateIdle: [
         {
           hooks: [{ type: 'command', command: curlCmd('teammate_idle'), timeout: HOOK_TIMEOUT_SECONDS }],
@@ -712,6 +850,7 @@ function isReverieHookHandler(value: unknown): boolean {
       serialized.includes('/api/hook-event') ||
       serialized.includes(BACKGROUND_WAKE_MARKER_PREFIX) ||
       serialized.includes(SUBAGENT_STOP_GUARD_MARKER_PREFIX) ||
+      serialized.includes(RM_SCOPE_MARKER_PREFIX) ||
       serialized.includes(TURN_SUMMARY_MARKER_PREFIX) ||
       serialized.includes(MEMORY_BRIEF_MARKER_PREFIX)
     );
@@ -988,6 +1127,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // on a self-signed HTTPS install.
     const hasTlsFlaglessCurl = hooksJson.includes('curl -s -X POST');
     const hasSubagentStopGuard = hooksJson.includes(SUBAGENT_STOP_GUARD_MARKER);
+    const hasRmScope = hooksJson.includes(RM_SCOPE_MARKER);
     // Approvals Inbox needs the elicitation_complete/elicitation_response
     // matchers; their absence marks a pre-inbox hooks block.
     const hasElicitationComplete = hooksJson.includes('elicitation_complete');
@@ -1008,6 +1148,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
       (hasSecret &&
         hasBackgroundWake &&
         hasSubagentStopGuard &&
+        hasRmScope &&
         hasElicitationComplete &&
         hasPromptSubmit &&
         hasTurnSummary &&
