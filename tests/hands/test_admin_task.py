@@ -8,12 +8,15 @@ import agent_loop as loop
 import admin_task
 import coding_chat
 from coding_tasks import Limits, reserve_chars, parse_call
-from test_coding_support import cfg_for
+from test_coding_support import cfg_for, without_seat_environment
 
 OWNER = {'kind': 'user', 'name': 'Owner', 'authenticatedOwner': True}
 DELEGATE = {'kind': 'agent', 'sessionId': 'delegate'}
 
 class NaturalAdminTaskTests(unittest.TestCase):
+    def setUp(self):
+        without_seat_environment(self)
+
     def test_small_context_profile_keeps_the_worst_case_reserve_and_argument_cap_consistent(self):
         limits = Limits(prompt_chars=30000, frame_chars=4000, argument_chars=3000, output_chars=3000)
         self.assertLess(reserve_chars(limits), 26000)
