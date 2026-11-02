@@ -71,7 +71,7 @@ beforeAll(() => {
 });
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-describe('memory restart drill (baseline 2026-11-02; case 2 closed by recall ordering)', () => {
+describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since)', () => {
   it('1. the latest owner decision survives the restart, and the replaced one is not briefed', () => {
     const brief = store.brief(OWNER, SELF).entries.map((e) => e.entryId);
     expect(brief).toContain(ids.d2);
@@ -109,10 +109,18 @@ describe('memory restart drill (baseline 2026-11-02; case 2 closed by recall ord
     expect(recall('do not press keys in a colleague terminal').map((e) => e.entryId)).toContain(ids.rule);
   });
 
-  // KNOWN GAP: the stray "s" of an apostrophe ("colleague's", "seat's") is a search token, so a question whose only
-  // shared token is that letter still "finds" the rule: a match by noise, not meaning.
-  it.fails('3b. a stray letter from an apostrophe is not enough to match', () => {
+  it('3b. a stray letter from an apostrophe is not enough to match', () => {
     expect(recall("a colleague's terminal").map((e) => e.entryId)).not.toContain(ids.rule);
+    expect(recall('a colleague\u2019s terminal').map((e) => e.entryId)).not.toContain(ids.rule);
+  });
+
+  it("3c. the word before an apostrophe still matches, written with or without one", () => {
+    expect(recall("the seat's pane").map((e) => e.entryId)).toContain(ids.rule);
+    expect(recall('seat\u2019s').map((e) => e.entryId)).toContain(ids.rule);
+    expect(recall("pane's").map((e) => e.entryId)).toContain(ids.rule);
+    expect(recall('seat').map((e) => e.entryId)).toContain(ids.rule);
+    // A one-character word on its own is still a word.
+    expect(recall('6').map((e) => e.entryId)).toContain(ids.f2);
   });
 
   // KNOWN GAP: no stemming; "decide" does not match "Decided".

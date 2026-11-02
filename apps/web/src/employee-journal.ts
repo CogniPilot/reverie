@@ -580,7 +580,13 @@ function projectIndexText(draft: JournalDraft): string {
   return [draft.text, ...draft.tags, ...draft.sources.filter(isRefSource).map(source => source.ref), ...(draft.annotations?.topics ?? [])].join(' ');
 }
 
+/**
+ * The query's words, OR-ed. The index splits "seat's" into "seat" and "s", so a word written with an apostrophe keeps only
+ * its parts longer than one character: a lone "s", "t" or "d" would match nearly every entry.
+ */
 function ftsExpression(query: string): string {
-  const tokens = (query.match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 12);
+  const tokens = (query.match(/[\p{L}\p{N}]+(?:['\u2019][\p{L}\p{N}]+)*/gu) ?? [])
+    .flatMap(word => { const parts = word.split(/['\u2019]/); return parts.length === 1 ? parts : parts.filter(part => part.length > 1); })
+    .slice(0, 12);
   return tokens.map(token => `"${token.replace(/"/g, '""')}"`).join(' OR ');
 }
