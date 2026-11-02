@@ -111,7 +111,9 @@ export interface JournalEntryView {
 export interface JournalImportItem { scope: string; legacyId: number; createdAt: number; kind: keyof typeof JOURNAL_IMPORT_KINDS; importance: 'important' | 'keystone'; text: string }
 export interface JournalImportOutcome { legacyId: number; scope: string; status: 'imported' | 'duplicate' | 'refused'; entryId?: number; reason?: string }
 export interface JournalBriefEntry { entryId: number; committedAt: string; tags: string[]; text: string; importance?: string; open?: true }
-export interface JournalHeader { entryId: number; committedAt: string; roomId: string; tags: string[]; topics: string[]; importance?: string; superseded: boolean; project?: string; authorEmployeeId?: string; state?: 'open' | 'done' | 'dropped'; overdue?: true }
+export interface JournalHeader { entryId: number; committedAt: string; roomId: string; tags: string[]; topics: string[]; importance?: string; superseded: boolean; project?: string; authorEmployeeId?: string;
+  /** A promise's state as this page sees it; `stateScope` "room" when the page is room-filtered. */
+  state?: 'open' | 'done' | 'dropped'; stateScope?: 'journal' | 'room'; overdue?: true }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 export const journalId = (value: unknown): value is string => typeof value === 'string' && ID.test(value);
@@ -567,7 +569,9 @@ export class EmployeeJournalStore {
       add(row);
       if (row.project != null) continue;
       const close = this.effectiveClose(Number(row.id), scope);
-      add(close ? entry.get(close.entryId) : newestResult.get(Number(row.id), ...jParams));
+      const outcome = close ? entry.get(close.entryId) : newestResult.get(Number(row.id), ...jParams);
+      // A corrected outcome is shown as its current correction, as recall shows any corrected entry.
+      if (outcome) add(this.correctionsFirst([outcome], j, jParams)[0]);
     }
     return out;
   }
@@ -693,7 +697,8 @@ export class EmployeeJournalStore {
       return { entryId: Number(row.id), committedAt: iso(Number(row.committed_ms)), roomId: String(row.room_id), tags: draft.tags,
         ...(row.project ? { project: String(row.project), authorEmployeeId: String(row.employee_id) } : {}),
         topics: draft.annotations?.topics ?? [], ...(draft.annotations?.importance ? { importance: draft.annotations.importance } : {}),
-        superseded: Boolean(row.superseded), ...(outcome?.state ? { state: outcome.state } : {}), ...(outcome?.overdue ? { overdue: true as const } : {}) };
+        superseded: Boolean(row.superseded), ...(outcome?.state ? { state: outcome.state, stateScope: outcome.stateScope } : {}),
+        ...(outcome?.overdue ? { overdue: true as const } : {}) };
     });
     return { entries, more: rows.length > MAP_PAGE };
   }
@@ -726,31 +731,43 @@ export class EmployeeJournalStore {
         AND j.id NOT IN (SELECT entry_id FROM journal_imports)
       ORDER BY j.id DESC LIMIT 200`).all(owner, employeeId);
     const rank = (importance?: string) => JOURNAL_IMPORTANCE.indexOf(importance as (typeof JOURNAL_IMPORTANCE)[number]);
-    const open = this.openPromises(owner, employeeId);
-    const openIds = new Set(open.map(promise => promise.entryId));
+    const open = this.openPromises(owner, employeeId, JOURNAL_OPEN_SHOWN);
     const entries = rows.map(row => {
       const draft = (JSON.parse(String(row.payload)) as { draft: JournalDraft }).draft;
       return { entryId: Number(row.id), committedAt: iso(Number(row.committed_ms)), tags: draft.tags, text: draft.text,
-        ...(draft.annotations?.importance ? { importance: draft.annotations.importance } : {}), ...(openIds.has(Number(row.id)) ? { open: true as const } : {}) };
+        ...(draft.annotations?.importance ? { importance: draft.annotations.importance } : {}), ...(open.isOpen(Number(row.id)) ? { open: true as const } : {}) };
     }).sort((a, b) => rank(b.importance) - rank(a.importance) || b.entryId - a.entryId);
-    return { total, entries: entries.slice(0, Math.max(0, Math.min(limit, 20))), open: open.slice(0, JOURNAL_OPEN_SHOWN), openTotal: open.length };
+    return { total, entries: entries.slice(0, Math.max(0, Math.min(limit, 20))), open: open.open, openTotal: open.total };
   }
 
-  /** Current private promises with no effective close, soonest due first, undated last, then oldest first. */
-  private openPromises(owner: string, employeeId: string): JournalOpenPromise[] {
-    const scope = { owner, employeeId };
-    const now = iso(this.now());
-    const rows = this.db.prepare(`SELECT j.id, j.committed_ms, j.payload FROM journal_entries j
-      WHERE j.owner = ? AND j.employee_id = ? AND j.project IS NULL
+  /**
+   * Current private promises with no effective close, chosen and counted over the whole journal in SQL: the first `limit`,
+   * soonest due first (canonical UTC sorts as text), undated last, then oldest; their total; and a membership test.
+   */
+  private openPromises(owner: string, employeeId: string, limit: number): { open: JournalOpenPromise[]; total: number; isOpen: (id: number) => boolean } {
+    // The same close as effectiveClose for the private journal: a done/dropped outcome no correction in that journal replaced.
+    const open = `j.owner = ? AND j.employee_id = ? AND j.project IS NULL
         AND EXISTS (SELECT 1 FROM json_each(json_extract(j.payload, '$.draft.tags')) WHERE value = 'promise')
         AND NOT EXISTS (SELECT 1 FROM journal_links l WHERE l.target_id = j.id AND l.kind = 'supersedes')
         AND j.id NOT IN (SELECT entry_id FROM journal_imports)
-      ORDER BY j.id LIMIT 500`).all(owner, employeeId);
-    return rows.filter(row => !this.effectiveClose(Number(row.id), scope)).map(row => {
-      const draft = (JSON.parse(String(row.payload)) as { draft: JournalDraft }).draft;
-      const due = draft.annotations?.due;
-      return { entryId: Number(row.id), committedAt: iso(Number(row.committed_ms)), text: draft.text, ...(due ? { due } : {}), overdue: due !== undefined && due < now };
-    }).sort((a, b) => (a.due === undefined ? 1 : 0) - (b.due === undefined ? 1 : 0) || (a.due ?? '').localeCompare(b.due ?? '') || a.entryId - b.entryId);
+        AND NOT EXISTS (SELECT 1 FROM journal_outcomes o JOIN journal_entries c ON c.id = o.entry_id
+          WHERE o.target_id = j.id AND o.status <> 'result' AND c.owner = j.owner AND c.employee_id = j.employee_id AND c.project IS NULL
+            AND NOT EXISTS (SELECT 1 FROM journal_links s JOIN journal_entries r ON r.id = s.entry_id WHERE s.target_id = o.entry_id
+              AND s.kind = 'supersedes' AND r.owner = j.owner AND r.employee_id = j.employee_id AND r.project IS NULL))`;
+    const due = "json_extract(j.payload, '$.draft.annotations.due')";
+    const now = iso(this.now());
+    const total = this.count(`SELECT COUNT(*) AS n FROM journal_entries j WHERE ${open}`, owner, employeeId);
+    const rows = this.db.prepare(`SELECT j.id, j.committed_ms, j.payload FROM journal_entries j WHERE ${open}
+      ORDER BY ${due} IS NULL, ${due}, j.id LIMIT ?`).all(owner, employeeId, limit);
+    const member = this.db.prepare(`SELECT 1 FROM journal_entries j WHERE ${open} AND j.id = ?`);
+    return {
+      open: rows.map(row => {
+        const draft = (JSON.parse(String(row.payload)) as { draft: JournalDraft }).draft;
+        const dueAt = draft.annotations?.due;
+        return { entryId: Number(row.id), committedAt: iso(Number(row.committed_ms)), text: draft.text, ...(dueAt ? { due: dueAt } : {}), overdue: dueAt !== undefined && dueAt < now };
+      }),
+      total, isOpen: id => member.get(owner, employeeId, id) !== undefined,
+    };
   }
 
   ownerPage(owner: string, employeeId: string, before?: number): { entries: JournalEntryView[]; more: boolean } {

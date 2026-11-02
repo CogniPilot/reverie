@@ -139,5 +139,9 @@ describe('journal CLI', () => {
       roomId: 'room-one', tags: ['promise'], topics: [], superseded: false, state: 'open', overdue: true }] } } });
     expect(await agentJournalMap(m.deps, [], {})).toBe(0);
     expect(m.output[0]).toMatch(/^#6 .* promise \[open\] \[overdue\]$/);
+    const room = fixture(false, { status: 200, json: { success: true, data: { more: false, entries: [{ entryId: 6, committedAt: '2026-10-30T04:00:00.000Z',
+      roomId: 'room-one', tags: ['promise'], topics: [], superseded: false, state: 'open', stateScope: 'room' }] } } });
+    expect(await agentJournalMap(room.deps, [], { room: 'room-one' })).toBe(0);
+    expect(room.output[0]).toMatch(/ \[open in this room\]$/);
   });
 });

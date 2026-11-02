@@ -129,7 +129,7 @@ export async function agentJournalMap(deps: AgentDeps, words: string[], options:
     const lines = data.entries.map(entry => `#${entry.entryId} ${entry.committedAt} (${elapsed(entry.committedAt, now)}) ${entry.tags.join(',')}` +
       `${entry.authorEmployeeId ? ` · by ${entry.authorEmployeeId}` : ''}` +
       `${entry.topics.length ? ` · ${entry.topics.join(', ')}` : ''}${entry.importance ? ` · ${entry.importance}` : ''}${entry.superseded ? ' [superseded]' : ''}`
-      + `${entry.state ? ` [${entry.state}]` : ''}${entry.overdue ? ' [overdue]' : ''}`);
+      + `${entry.state ? ` [${entry.state}${entry.stateScope === 'room' ? ' in this room' : ''}]` : ''}${entry.overdue ? ' [overdue]' : ''}`);
     const last = data.entries.at(-1);
     if (data.more && last) lines.push(`more: older entries exist (--before ${last.entryId})`);
     deps.io.out(lines.length ? lines.join('\n') : 'No journal entries.');
