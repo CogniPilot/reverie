@@ -351,6 +351,7 @@
               inherit nixpkgs system;
               pruneHostPackage = packages.pruneDeclared;
               prunePackage = packages.pruneR12;
+              legacyPrunePackage = packages.prune;
             };
           in pkgs.runCommand "reverie-prune-service-evaluation" {
             checks = builtins.toJSON evaluated.checks;

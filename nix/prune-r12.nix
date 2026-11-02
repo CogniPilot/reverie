@@ -8,7 +8,10 @@ let
   };
 in pkgs.runCommand "reverie-prune-r12-candidate" {
   nativeBuildInputs = [ pkgs.makeWrapper ];
-  passthru = { sourceHashes = hashes; dryRunOnly = true; hostQualified = false; };
+  # reverie-prune stays dry-run only. reverie-prune-live is the separate entry point used solely by the NixOS module
+  # when services.reverie.prune.live.enable passes its evaluation gates; r12 itself still needs --live AND
+  # live_enabled = true in the config, plus its root/registry admission, before it deletes anything.
+  passthru = { sourceHashes = hashes; dryRunOnly = true; liveEntry = "reverie-prune-live"; hostQualified = false; };
   meta = {
     description = "Dry-run-only r12 cleanup candidate for explicit host acceptance";
     mainProgram = "reverie-prune";
@@ -23,6 +26,9 @@ in pkgs.runCommand "reverie-prune-r12-candidate" {
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-prune" \
     --add-flags "-I -B $out/libexec/reverie/reverie_prune.py --dry-run" \
     --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git ]}
+  makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-prune-live" \
+    --add-flags "-I -B $out/libexec/reverie/reverie_prune.py" \
+    --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git ]}
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/lease" \
     --add-flags "-I -B $out/libexec/reverie/lease.py"
   cat > "$out/share/reverie-prune/README" <<'DOC'
@@ -36,6 +42,7 @@ in pkgs.runCommand "reverie-prune-r12-candidate" {
   refuses this candidate because its source pins intentionally remain unchanged.
   DOC
   "$out/bin/reverie-prune" --help > help.txt
+  "$out/bin/reverie-prune-live" --help > live-help.txt
   "$out/bin/lease" --help > lease-help.txt
   if "$out/bin/reverie-prune" --live > refused.txt 2>&1; then
     echo "candidate accepted live mode" >&2

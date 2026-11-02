@@ -1,5 +1,7 @@
 # Root cleanup authority is granted only by ordinary owner NixOS activation.
-# Both switches are opt-in; every executable and inventory command is fixed.
+# Every switch is opt-in; every executable and inventory command is fixed.
+# Live deletion is a third, separate switch: it needs the digest of an accepted clean dry-run report and a named
+# reviewer sign-off, and it is refused at evaluation unless the package is the pinned r12 live-capable candidate.
 { config, lib, pkgs, pruneHostPackage, prunePackage }:
 let
   cfg = config.services.reverie.prune;
@@ -19,7 +21,18 @@ let
   pathArgument = value: builtins.replaceStrings [ "%" ] [ "%%" ] (builtins.toJSON value);
   paths = lib.concatMapStringsSep " " pathArgument;
   d = cfg.deployment;
-  settings = pkgs.writeText "reverie-prune-declared-deployment.json" (builtins.toJSON {
+  live = cfg.live;
+  liveCandidate = "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed";
+  liveCapable = (prunePackage.passthru.sourceHashes.prune or null) == liveCandidate &&
+    (prunePackage.passthru.liveEntry or null) != null;
+  identity = types.submodule {
+    options = {
+      source = mkOption { type = types.strMatching "[^[:cntrl:][:space:]]{1,256}"; description = "Approved mount source, exactly as /proc/self/mountinfo reports it."; };
+      fstype = mkOption { type = types.strMatching "[a-z0-9._-]{1,32}"; description = "Approved filesystem type."; };
+      mountRoot = mkOption { type = types.addCheck types.str (value: value == "/" || canonical true value); default = "/"; description = "Approved root within the filesystem; the disposable mount must map the full root."; };
+    };
+  };
+  settings = pkgs.writeText "reverie-prune-declared-deployment.json" (builtins.toJSON ({
     version = 1;
     deployment = d.name;
     b_mount = d.disposableMount;
@@ -34,12 +47,20 @@ let
     high_water_pct = d.highWaterPercent;
     low_water_pct = d.lowWaterPercent;
     cadence = cfg.cadence;
-    live_enabled = false;
-  });
+    root_identities = lib.mapAttrs (_: v: { inherit (v) source fstype; mount_root = v.mountRoot; }) d.rootIdentities;
+    live_enabled = live.enable;
+  } // lib.optionalAttrs live.enable {
+    live_acceptance = {
+      dry_run_report_sha256 = live.acceptedDryRunReportSha256;
+      signoff = live.signoff;
+      selftest_receipt = live.selfTestReceipt;
+      selftest_receipt_sha256 = live.selfTestReceiptSha256;
+    };
+  }));
   leases = map (eid: "${d.laptopHomeRoot}/${eid}/home/${d.leaseSubdirectory}") d.employeeIds;
 in {
   options.services.reverie.prune = {
-    enable = lib.mkEnableOption "the NixOS-declared Reverie dry-run cleanup service";
+    enable = lib.mkEnableOption "the NixOS-declared Reverie cleanup service (dry-run unless live.enable)";
     timer.enable = lib.mkEnableOption "scheduled dry-run observations (only after owner host/lease acceptance)";
     stateDirectory = mkOption {
       type = absolutePath;
@@ -60,18 +81,62 @@ in {
       dockerSocket = mkOption { type = absolutePath; default = "/run/docker.sock"; };
       highWaterPercent = mkOption { type = types.ints.between 0 100; default = 70; };
       lowWaterPercent = mkOption { type = types.ints.between 0 100; default = 50; };
+      rootIdentities = mkOption {
+        type = types.attrsOf identity;
+        default = { };
+        description = "Operator-approved mount identity of disposableMount and of every checkout root (prune r12 admission, also in dry-run). Keyed by the exact configured path.";
+      };
+    };
+    live = {
+      enable = lib.mkEnableOption "live deletion (only after an accepted clean dry-run report and reviewer sign-off)";
+      acceptedDryRunReportSha256 = mkOption {
+        type = types.nullOr (types.strMatching "[0-9a-f]{64}");
+        default = null;
+        description = "sha256 of the accepted clean dry-run report that this live enablement is based on.";
+      };
+      signoff = mkOption {
+        type = types.nullOr (types.strMatching "[^[:cntrl:]]{1,256}");
+        default = null;
+        description = "Reviewer sign-off record for live enablement (who, and where the record is kept).";
+      };
+      selfTestReceipt = mkOption {
+        type = types.nullOr absolutePath;
+        default = null;
+        description = "Root-controlled module self-test receipt (status PASS for this exact prune and lease), outside the live stateDirectory; the initializer verifies it and keeps a digest-pinned copy.";
+      };
+      selfTestReceiptSha256 = mkOption {
+        type = types.nullOr (types.strMatching "[0-9a-f]{64}");
+        default = null;
+        description = "sha256 of that self-test receipt.";
+      };
     };
   };
   config = lib.mkMerge [
-    { assertions = [{ assertion = !cfg.timer.enable || cfg.enable; message = "services.reverie.prune.timer.enable requires services.reverie.prune.enable"; }]; }
+    { assertions = [
+        { assertion = !cfg.timer.enable || cfg.enable; message = "services.reverie.prune.timer.enable requires services.reverie.prune.enable"; }
+        { assertion = !live.enable || cfg.enable; message = "services.reverie.prune.live.enable requires services.reverie.prune.enable"; }
+        { assertion = !live.enable || (live.acceptedDryRunReportSha256 != null && live.signoff != null &&
+            live.selfTestReceipt != null && live.selfTestReceiptSha256 != null);
+          message = "services.reverie.prune.live.enable requires live.acceptedDryRunReportSha256, live.signoff, live.selfTestReceipt and live.selfTestReceiptSha256"; }
+        { assertion = !live.enable || live.selfTestReceipt == null || !(lib.hasPrefix (cfg.stateDirectory + "/") live.selfTestReceipt);
+          message = "services.reverie.prune.live.selfTestReceipt must be outside the (fresh) live stateDirectory"; }
+        { assertion = !live.enable || cfg.deployment.checkoutRoots == [ ];
+          message = "services.reverie.prune.live.enable does not yet cover checkout roots (registry approvals and write scope are a separate review)"; }
+        { assertion = !live.enable || liveCapable;
+          message = "services.reverie.prune.live.enable requires the pinned live-capable r12 package (55f26dee)"; }
+      ]; }
     (lib.mkIf cfg.enable {
       assertions = [
         { assertion = builtins.length d.employeeIds >= 1 && builtins.length d.employeeIds <= 256 && lib.unique d.employeeIds == d.employeeIds;
           message = "Reverie prune requires 1..256 unique reviewed employee UUIDs."; }
         { assertion = d.lowWaterPercent <= d.highWaterPercent; message = "Reverie prune low watermark must not exceed high watermark."; }
+        { assertion = (d.rootIdentities.${d.disposableMount} or null) != null && d.rootIdentities.${d.disposableMount}.mountRoot == "/";
+          message = "Reverie prune requires deployment.rootIdentities for disposableMount, mapping the full filesystem root."; }
+        { assertion = builtins.all (root: d.rootIdentities ? ${root}) d.checkoutRoots;
+          message = "Reverie prune requires deployment.rootIdentities for every checkout root."; }
       ];
       systemd.services.reverie-prune = {
-        description = "Reverie cleanup observation (declared dry-run only)";
+        description = if live.enable then "Reverie cleanup (declared, live deletion enabled)" else "Reverie cleanup observation (declared dry-run only)";
         after = [ "docker.service" ];
         # A host switch must not stop/restart a running cleanup oneshot.
         restartIfChanged = false;
@@ -86,7 +151,9 @@ in {
           # bind-mount sandbox. Only this fixed root initializer bypasses its
           # filesystem namespace; it also creates absent state after validation.
           ExecStartPre = "+" + arguments [ "${pruneHostPackage}/bin/reverie-prune-declared" "--state-dir" cfg.stateDirectory "--config" settings ];
-          ExecStart = arguments [ "${prunePackage}/bin/reverie-prune" "--config" "${cfg.stateDirectory}/prune.toml" "--dry-run" "--pass" "all" ];
+          ExecStart = if live.enable
+            then arguments [ "${prunePackage}/bin/${prunePackage.passthru.liveEntry}" "--config" "${cfg.stateDirectory}/prune.toml" "--live" "--pass" "all" ]
+            else arguments [ "${prunePackage}/bin/reverie-prune" "--config" "${cfg.stateDirectory}/prune.toml" "--dry-run" "--pass" "all" ];
           TimeoutStartSec = 600;
           MemoryMax = "1G";
           TasksMax = 64;
@@ -99,8 +166,9 @@ in {
           ProtectProc = "default";
           ProcSubset = "all";
           ProtectSystem = "strict";
-          ReadWritePaths = paths ([ cfg.stateDirectory ] ++ leases);
-          ReadOnlyPaths = paths [ d.disposableMount d.laptopHomeRoot ];
+          # Only live deletion may write the disposable filesystem; dry-run keeps it read-only.
+          ReadWritePaths = paths ([ cfg.stateDirectory ] ++ leases ++ lib.optional live.enable d.disposableMount);
+          ReadOnlyPaths = paths ([ d.laptopHomeRoot ] ++ lib.optional (!live.enable) d.disposableMount);
           StandardOutput = "journal";
           StandardError = "journal";
         };
