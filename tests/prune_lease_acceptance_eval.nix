@@ -22,7 +22,8 @@ let
   withoutPrune = evaluate { services.reverie.prune = { inherit deployment leaseAcceptance; }; };
   unit = on.systemd.services.reverie-prune-lease-acceptance;
   s = unit.serviceConfig;
-  gate = builtins.fromJSON on.services.reverie.prune.leaseAcceptance.gateFile.text;
+  # The text names store paths; reading it as JSON needs that context dropped (the values are only compared below).
+  gate = builtins.fromJSON (builtins.unsafeDiscardStringContext on.services.reverie.prune.leaseAcceptance.gateFile.text);
   checks = {
     defaultOff = !(off.systemd.services ? reverie-prune-lease-acceptance);
     declaredWhenEnabled = on.systemd.services ? reverie-prune-lease-acceptance;
