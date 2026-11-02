@@ -101,3 +101,100 @@ export const MOBILE_TEST_GLOBS = ['test/mobile/**'];
 
 /** Everything `npm test` skips. */
 export const NON_CI_TEST_GLOBS = [...MOBILE_TEST_GLOBS, ...PERF_TEST_GLOBS, ...BROWSER_TEST_GLOBS];
+
+/**
+ * Gate files the Nix console checks do NOT run, each with the reason why.
+ *
+ * Those checks (`checkPhase` in nix/package.nix) are what CI actually runs, and
+ * they run only the files named on their `npm test --` lines. A gate file named
+ * nowhere there was therefore tested by nothing in CI, silently: 755 of them
+ * had piled up before test/test-suite-partition.test.ts started requiring every
+ * gate file to be either named there or listed here. Register a new test file
+ * on one of those lines; list it here only with the reason it cannot run there.
+ */
+export const NIX_UNCHECKED_TESTS: Record<string, string> = {
+  'test/advisor-model.test.ts':
+    '8 of 31 fail: the spawn command now wraps its settings in a /bin/sh -c launcher, which this test\'s settings-JSON parser cannot read.',
+  'test/agent-skill-mode-lists.test.ts':
+    '3 of 4 fail: the skill docs do not list the hands mode that the stock catalogue now has.',
+  'test/audit-actor.test.ts':
+    '2 of 5 fail: spawn requests record no audit entries where the test expects two.',
+  'test/board-plan-members.test.ts':
+    '1 of 5 fails: the DOM test environment has an opaque origin, so localStorage throws a SecurityError.',
+  'test/chat-alert-mode.test.ts':
+    '1 of 2 fails: expects an ET end time, but the run printed a UTC time.',
+  'test/chat-app-css.test.ts':
+    '2 of 34 fail: --ca-menu-max-width has no :root definition, and the phone bottom-sheet rule check fails.',
+  'test/chatroom-owed-reply.test.ts':
+    '2 of 11 fail: the owed-reply notice text no longer matches the expected wording.',
+  'test/chatroom-restart-delivery.test.ts':
+    '1 of 74 fails: the paste-once-after-failed-Enter case records no delivery attempt.',
+  'test/chatroom-startup-availability.test.ts':
+    'History read after failed delivery recovery returns 403 where the test expects 200.',
+  'test/cli-capability-predicates.test.ts':
+    '1 of 15 fails: counts 11 enabled modes where the test expects 10.',
+  'test/cli-catalog-sync.test.ts':
+    '1 of 3 fails: config/clis.stock.json is stale against a fresh generate:cli-catalog run.',
+  'test/cli-registry-no-id-branching.test.ts':
+    '3 of 14 fail: 44 CLI-id branches outside the stock catalogue are not on the allowlist.',
+  'test/edge-cases.test.ts':
+    '1 of 27 fails: stopping an unknown scheduled run now answers with the owner-only refusal, not "not found".',
+  'test/frontend-cli-no-id-branching.test.ts':
+    '1 of 5 fails: the allowlisted frontend CLI-id branch counts no longer match.',
+  'test/frontend-public-tooling.test.ts':
+    '1 of 4 fails: the npm public-asset check script it runs exits non-zero.',
+  'test/i18n-exit-run-help.test.ts':
+    '1 of 12 fails: the zh-CN "Run" help check for the H entry fails.',
+  'test/mcp-chat.test.ts':
+    '1 of 16 fails: expects plan resets printed in ET, but the output does not contain them.',
+  'test/mobile-overview.test.ts':
+    '1 of 31 fails: the Run picker renders 11 stock CLIs, the static fallback table has 10.',
+  'test/name-flag-injection.test.ts':
+    '3 of 18 fail: the spawn command is now a /bin/sh -c launcher, so the --name flag is not found where the test looks.',
+  'test/routes/chatroom-conversation-routes.test.ts':
+    '1 of 25 fails: the capabilities object differs from the expected one.',
+  'test/routes/chatroom-employee-identity.test.ts':
+    'The author object carries one more field than the test expects.',
+  'test/routes/chatroom-roles-members.test.ts':
+    'All 7 fail: a member-add fixture returns undefined (TypeError reading id).',
+  'test/routes/chatroom-spoken-hint.test.ts':
+    '3 of 6 fail: the posts return 403 where the test expects 200.',
+  'test/routes/plans-routes.test.ts':
+    '6 of 7 fail: the plans list comes back empty.',
+  'test/routes/push-routes.test.ts':
+    '4 of 10 fail: subscription preference updates return 500.',
+  'test/routes/session-input-wait.test.ts':
+    '1 of 40 fails: the wait envelope has one more outcome than the test lists.',
+  'test/routes/session-routes-codex-defaults.test.ts':
+    '1 of 12 fails: Codex now launches with a --config update-check override where the test expects bare codex.',
+  'test/routes/session-routes-company.test.ts':
+    '2 of 23 fail: temporary workers get an "Agent <id>" name, not a random human name.',
+  'test/routes/subscription-profile-routes.test.ts':
+    '6 of 7 fail: the account list comes back empty.',
+  'test/routines-room-scope.test.ts':
+    '4 of 10 fail: the routine post fails with "authorFor is not defined".',
+  'test/run-menu-cli-logos.test.ts':
+    '3 of 15 fail: the hands mode has no Run-menu logo rule.',
+  'test/run-mode-launch-table-drift.test.ts':
+    '1 of 4 fails: the launch table lists 8 CLIs, the stock catalogue has 9.',
+  'test/scheduled-runs.test.ts':
+    '6 of 10 fail: creating a scheduled run does not succeed.',
+  'test/server-index-title.test.ts':
+    '1 of 8 fails: the served index differs from the template outside the title tag.',
+  'test/session-activity.test.ts':
+    '3 of 62 fail: the pi and opencode work-detection descriptors no longer set the expected submit field.',
+  'test/session-cleanup.test.ts':
+    '1 of 7 fails: stopping a scheduled run does not succeed.',
+  'test/session-custom-model-restart.test.ts':
+    '1 of 11 fails: the pinned conversation id is undefined where the test expects null.',
+  'test/session-model-recovery.test.ts':
+    '6 of 12 fail: the spawn command is now a /bin/sh -c launcher, so the model flag is not found where the test looks.',
+  'test/spreadsheet-assets.test.ts':
+    '1 of 9 fails: .gitignore does not list the vendor output path the test expects.',
+  'test/spreadsheet-preview-worker.test.ts':
+    'Its test worker runs out of JavaScript heap (about 1 GiB on a 2 GiB machine) in the bracketed-format cases, so 9 of 43 never finish.',
+  'test/statusline-cli-flag.test.ts':
+    '5 of 11 fail: the spawn command now wraps its settings in a /bin/sh -c launcher, which this test\'s settings-JSON parser cannot read.',
+  'test/tab-harness-logo.test.ts':
+    '1 of 7 fails: styles.css has no logo rule for the hands mode.',
+};
