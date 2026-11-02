@@ -24,6 +24,7 @@ import { cutQuoted, quoteForPane } from './pane-quote.js';
 import type { ChatMember, ChatMessage, ChatRoom } from './chatroom-store.js';
 import { USER_RECIPIENT, isDm, textMentions } from './chatroom-store.js';
 import { getCli } from './config/cli-registry/registry.js';
+import { findDeliveredTurn, markTranscript, type TranscriptMark } from './claude-delivery-evidence.js';
 import { STOCK_CLIS } from './config/cli-registry/stock.js';
 
 /**
@@ -60,6 +61,8 @@ export interface DeliverySession {
   canAcceptChatInput?(): boolean;
   /** Idle with a composer proven empty on screen (only harnesses whose composer glyph is verified); false when unsure. */
   composerProvablyIdle?(): boolean;
+  /** The session's own Claude transcript (claude-delivery-evidence.ts), when it has exactly one; otherwise undefined. */
+  claudeTranscript?(): Promise<string | undefined>;
   writeViaMux(
     data: string,
     options?: { opencodeGuard?: boolean; requireIdle?: boolean; requireEmptyComposer?: boolean; onIdleRefused?: () => void; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
@@ -73,6 +76,8 @@ export interface DeliveredMessage {
 }
 
 export interface DeliveryDeps {
+  /** When an unconfirmed Claude line is looked for in the session's transcript (TRANSCRIPT_CHECK_DELAYS_MS by default). */
+  transcriptCheckDelaysMs?: readonly number[];
   /** False while the server is restoring its session registry; missing entries are not gone yet. */
   isReady?: () => boolean;
   /** Opened before delivery starts; only message identities are persisted. */
@@ -282,6 +287,9 @@ export function buildDeliveryBatch(pending: Pending[], maxChars = MAX_DELIVERY_C
   }
   return { line: `${head}${parts.join(' | ')}${tail}`, taken };
 }
+
+/** When an unconfirmed line is looked for in the session's transcript, after its outcome; then it stays held. */
+export const TRANSCRIPT_CHECK_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 180_000];
 
 /** One line every briefing carries: how to read what arrives. */
 const QUOTING_NOTE =
@@ -568,6 +576,8 @@ export class ChatroomDelivery {
   private timer: ReturnType<typeof setInterval> | undefined;
   private persistenceFailed = false;
   private inspectionHolds = new Map<string, Map<string, DeliveredMessage>>();
+  /** Transcript turns that already confirmed a delivery, per session: one turn never confirms two. */
+  private confirmedTurns = new Map<string, Set<number>>();
   /** Reads racing pane IO stay durable until both the write and its submit verifier have settled. */
   /** Batch awaiting image I/O: reads, deletion and room removal still withdraw its identities. */
   private preparing = new Map<string, Pending[]>();
@@ -581,6 +591,39 @@ export class ChatroomDelivery {
     const held = this.inspectionHolds.get(sessionId) ?? new Map<string, DeliveredMessage>();
     for (const message of messages) held.set(JSON.stringify([message.roomId, message.messageId]), message);
     this.inspectionHolds.set(sessionId, held);
+  }
+
+  /**
+   * After a line the pane could not confirm, look for it in the session's own transcript a few times, never resending it.
+   * A new user turn after `mark` that contains the whole line confirms it like a seen submit; anything else leaves it held.
+   */
+  private watchTranscript(sessionId: string, mark: TranscriptMark, line: string, messages: DeliveredMessage[], ids: string[]): void {
+    const delays = [...(this.deps.transcriptCheckDelaysMs ?? TRANSCRIPT_CHECK_DELAYS_MS)];
+    const stillHeld = () => {
+      const held = this.inspectionHolds.get(sessionId);
+      return !!held && messages.every((m) => held.has(JSON.stringify([m.roomId, m.messageId])));
+    };
+    const check = async (): Promise<void> => {
+      if (!stillHeld()) return;
+      // One shared set per session, stored before the read: checks of two identical lines can run at once.
+      const consumed = this.confirmedTurns.get(sessionId) ?? new Set<number>();
+      this.confirmedTurns.set(sessionId, consumed);
+      let turn: number | undefined;
+      try { turn = await findDeliveredTurn(mark, line.trim(), consumed); } catch { turn = undefined; }
+      if (turn === undefined || !stillHeld() || consumed.has(turn)) { schedule(); return; }
+      consumed.add(turn);
+      if (consumed.size > 256) consumed.delete(consumed.values().next().value!);
+      try { this.durable((store) => store.remove(ids)); } catch { return; }
+      this.releaseInspection(sessionId, messages);
+      this.deps.onSubmitted?.(sessionId, messages);
+    };
+    const schedule = () => {
+      const delay = delays.shift();
+      if (delay === undefined) return;
+      const timer = setTimeout(() => { void check(); }, delay);
+      timer.unref?.();
+    };
+    schedule();
   }
 
   private releaseInspection(sessionId: string, messages: DeliveredMessage[]): void {
@@ -931,6 +974,15 @@ export class ChatroomDelivery {
     let ioDone = false;
     let writeOk = false;
     try {
+      // Mark the transcript before anything can be typed: only a turn written after this point can confirm the line. It is
+      // taken before the image awaits below, so the reads, deletions and pane checks that follow them also cover it.
+      let mark: TranscriptMark | undefined;
+      if (session.claudeTranscript) {
+        try {
+          const transcript = await session.claudeTranscript();
+          mark = transcript ? await markTranscript(transcript) : undefined;
+        } catch { mark = undefined; }
+      }
       const prepared = new Map<Pending, string>();
       let imageRequests = 0;
       for (const item of batch.slice(0, buildDeliveryBatch(batch).taken)) {
@@ -1004,6 +1056,7 @@ export class ChatroomDelivery {
           else if (carried.length) {
             this.deps.onUncertain?.(sessionId, carried);
           }
+          if (outcome !== 'submitted' && mark && carried.length) this.watchTranscript(sessionId, mark, safe, carried, ids);
           finishWrite();
         },
       });
@@ -1034,6 +1087,7 @@ export class ChatroomDelivery {
         // proves submission; no existing boolean return proves that the pane received no text.
         if (!submitted) {
           this.deps.onUncertain?.(sessionId, carried);
+          if (mark && carried.length && !outcomeSeen) this.watchTranscript(sessionId, mark, safe, carried, ids);
         }
         if (taken < batch.length) this.requeue(sessionId, batch.slice(taken));
       }

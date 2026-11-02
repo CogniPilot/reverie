@@ -75,6 +75,7 @@ import {
 } from './types.js';
 import { resolveAndClaimOmpSessionId } from './utils/omp-session-resolver.js';
 import { claudeTranscriptExists } from './utils/claude-transcript.js';
+import { locateClaudeTranscript } from './claude-delivery-evidence.js';
 import { resumeAlias } from './web/resume-guard.js';
 import { matchesPattern } from './config/cli-registry/patterns.js';
 import { probeDockerCliVersion } from './docker-hosts.js';
@@ -5273,6 +5274,15 @@ export class Session extends EventEmitter {
   }
 
   /** Idle and showing an empty composer on a harness whose composer glyph is verified; held input reads as not idle. */
+  /**
+   * This Claude session's own transcript, for delivery evidence: found only by the conversation id the CLI itself reported
+   * (never a guessed or restored one), on this host, and only when exactly one file carries it.
+   */
+  async claudeTranscript(): Promise<string | undefined> {
+    if (this.mode !== 'claude' || this._remote || !this._claudeSessionIdIsFirstHand || !this._claudeSessionId) return undefined;
+    return locateClaudeTranscript(this._claudeSessionId, this._claudeConfigDir());
+  }
+
   composerProvablyIdle(): boolean {
     return !this._inputHeldForRecovery() && !this._viewerInputHeld && this._idleForWake(null, true);
   }
