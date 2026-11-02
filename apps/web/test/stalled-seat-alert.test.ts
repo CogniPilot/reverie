@@ -111,5 +111,36 @@ describe('the stalled-seat notice', () => {
     expect(alerts).toContain(notice[0].text);
     expect(notice[0].text).not.toContain('please check the build');
     expect(writes.stuck.filter((w) => w.includes('waiting for'))).toEqual([]);
+    // It reaches the coordinator itself: listed in its pending summary as needing action, and typed into its pane through
+    // normal delivery. The stuck seat is never told.
+    expect(service.turnSummary('lead').messages.find((m) => m.messageId === notice[0].id)?.state).toBe('reply-pending');
+    expect(service.turnSummary('stuck').messages.some((m) => m.messageId === notice[0].id)).toBe(false);
+    await flush();
+    expect(writes.lead.some((w) => w.includes('waiting for 10 min'))).toBe(true);
+    // It needs action, so it stays in the coordinator's summary after delivery until the coordinator handles it.
+    expect(service.turnSummary('lead').messages.find((m) => m.messageId === notice[0].id)?.state).toBe('reply-pending');
+    expect(writes.stuck.filter((w) => w.includes('waiting for'))).toEqual([]);
+    // Room-wide system lines stay out of the summary, as before.
+    expect(service.turnSummary('lead').messages.every((m) => m.messageId === notice[0].id ||
+      service.room(room.id)!.messages.find((x) => x.id === m.messageId)?.from.kind !== 'system')).toBe(true);
+  });
+
+  it('without a coordinator, tells only the owner', async () => {
+    let clock = 1_000_000;
+    const alerts: string[] = [];
+    const sessions = new Map<string, ChatSessionLike & { isWorking: boolean; canAcceptChatInput?: () => boolean }>();
+    sessions.set('stuck', { id: 'stuck', name: 'Robin', status: 'idle', mode: 'claude', pid: 1, isWorking: false,
+      canAcceptChatInput: () => false, writeViaMux: async () => true });
+    const service = new ChatroomService({ file: join(mkdtempSync(join(tmpdir(), 'stall-')), 'chatrooms.json'),
+      getSession: (id) => sessions.get(id), broadcast: () => {}, now: () => clock, alert: (text) => { alerts.push(text); } });
+    await service.init(); services.push(service);
+    const room = service.createRoom('Lab', undefined);
+    service.addMember(room.id, 'stuck', {});
+    service.post(room.id, { kind: 'user', name: 'Owner' }, 'ping', ['stuck']);
+    const flush = async () => { (service.delivery as unknown as { lastDelivered: Map<string, number> }).lastDelivered.clear(); await service.delivery.flushAll(); };
+    await flush(); clock += STALLED_ALERT_MS; await flush();
+    const notice = service.room(room.id)!.messages.filter((m) => m.from.kind === 'system' && m.text.includes('waiting for'));
+    expect(notice.map((m) => m.to)).toEqual([['user']]);
+    expect(alerts).toHaveLength(1);
   });
 });

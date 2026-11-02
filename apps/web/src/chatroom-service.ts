@@ -370,7 +370,10 @@ export class ChatroomService {
           const room = this.store.get(roomId);
           if (!room || room.archivedAt) continue;
           const coordinator = room.members.find((m) => m.role === 'coordinator' && m.sessionId !== sessionId)?.sessionId;
-          this.system(room, text, sessionId, coordinator ? [coordinator, USER_RECIPIENT] : [USER_RECIPIENT]);
+          if (!coordinator) { this.system(room, text, sessionId, [USER_RECIPIENT]); continue; }
+          // Queued to the coordinator through the normal gated delivery, like noticeMember; never to the stuck seat.
+          const message = this.post(roomId, { kind: 'system', name: 'system', sessionId }, text, [coordinator, USER_RECIPIENT], { deliver: false });
+          this.delivery.deliverMessage(room, message, [coordinator], this.nameOf, new Set([coordinator]));
         }
         void this.raiseAlert(text);
       },
@@ -590,10 +593,12 @@ export class ChatroomService {
             (select && ((message.from.kind !== 'agent' && message.from.kind !== 'bot') || message.at >= select.before))) continue;
         if (
           message.deleted ||
-          message.from.kind === 'system' ||
+          // Room-wide system lines are not news; one addressed to this session (a stalled-seat notice, a failure notice) is.
+          (message.from.kind === 'system' && (message.to === 'all' || !message.to.includes(sessionId))) ||
           (message.from.kind === 'agent' &&
             (message.from.sessionId === sessionId || (employeeId && message.from.employeeId === employeeId))) ||
-          !messageRecipients(room, message).includes(sessionId) ||
+          !(message.from.kind === 'system' ? message.to !== 'all' && message.to.includes(sessionId)
+            : messageRecipients(room, message).includes(sessionId)) ||
           !phoneAlertAllows(mode, message, name, uniquelyNamed)
         )
           continue;
@@ -606,8 +611,11 @@ export class ChatroomService {
         if (attention.disposition !== 'pending' && !held.has(key)) continue;
         const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
         const direct = message.to !== 'all' || (uniquelyNamed && textMentions(message.text, name));
+        // A system notice about another seat addressed to this one (a stalled-seat report to its coordinator) needs action,
+        // so it stays listed until handled, like an owner request.
+        const aboutOther = message.from.kind === 'system' && !!message.from.sessionId && message.from.sessionId !== sessionId;
         const pendingVersion = attention.disposition === 'pending' &&
-          (!this.notices.available || records.length > 0 || ownReplies.has(message.id) || !!message.edited || owner);
+          (!this.notices.available || records.length > 0 || ownReplies.has(message.id) || !!message.edited || owner || aboutOther);
         const belowSeenCursor = !!seen &&
           (message.at < seen.at || (message.at === seen.at && seenIndex >= 0 && index <= seenIndex));
         const state = held.has(key)
