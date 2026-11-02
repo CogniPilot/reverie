@@ -105,7 +105,7 @@ beforeAll(() => {
 });
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-describe('memory restart drill (baseline 2026-11-02; cases 2, 3b and 4 closed since)', () => {
+describe('memory restart drill (baseline 2026-11-02; cases 2, 3b, 4 and 6d closed since)', () => {
   it('1. the latest owner decision survives the restart, and the replaced one is not briefed', () => {
     const brief = store.brief(OWNER, SELF).entries.map((e) => e.entryId);
     expect(brief).toContain(ids.d2);
@@ -209,16 +209,18 @@ describe('memory restart drill (baseline 2026-11-02; cases 2, 3b and 4 closed si
     expect(after.lines[0]).toMatch(/^committed #\d+/);
   });
 
-  // KNOWN GAP: the CLI does not carry "outcome unknown" into what it says next. The save message invites a retry once the
-  // receipt is checked, and the receipt miss reads the same as for a turn never attempted; neither says the save is
-  // still unresolved, so a reader can take the miss as "not saved".
-  it.fails('6d. after an unknown outcome, a receipt miss is reported as unresolved', async () => {
+  it('6d. after an unknown outcome, a receipt miss is reported as unresolved', async () => {
     const save = turn('unresolved', 'The unresolved case was written.');
     const lost = cli(async () => { throw new Error('timed out'); });
     await agentJournalSave(lost.deps, save);
     const check = cli(async () => { throw new Error('unused'); });
     await agentJournalReceipt(check.deps, save.turn);
     expect([...lost.lines, ...check.lines].join('\n')).toMatch(/unresolved|does not prove|not proof/i);
+    // Each message says it on its own, and a retry is only ever the identical save.
+    expect(lost.lines.join('\n')).toMatch(/unresolved/);
+    expect(lost.lines.join('\n')).toMatch(/repeat the identical save/);
+    expect(lost.lines.join('\n')).toContain(`receipt ${save.turn}`);
+    expect(check.lines[0]).toMatch(/does not prove the save failed/);
   });
 
   it('7. a topic never saved returns nothing (the agent can say it has no memory of it)', () => {

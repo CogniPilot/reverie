@@ -84,7 +84,10 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
     if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
     else deps.io.out(`${data.replayed ? 'Already saved' : 'Saved'} entry #${data.entryId} for turn ${data.turnId} (sha256 ${data.payloadSha256}). Sources checked; interpretation is not verified.`);
     return AGENT_EXIT.ok;
-  } catch { return refused(deps, 'Journal save outcome unknown; check `reverie agent journal receipt` before retrying.'); }
+  } catch {
+    return refused(deps, `Journal save outcome unknown: it may or may not have been written, so it is unresolved. Check \`reverie agent journal receipt ${options.turn}\`; `
+      + 'a not_found there does not prove the save failed. To retry, repeat the identical save, which replays; never a changed one.');
+  }
 }
 
 export async function agentJournalRecall(deps: AgentDeps, words: string[], room?: string, project?: string): Promise<number> {

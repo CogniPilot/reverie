@@ -543,7 +543,7 @@ export class EmployeeJournalStore {
       payloadSha256: String(row.payload_hash), payload: JSON.parse(String(row.payload)) as unknown } : undefined;
     return { turnId, status: entry ? 'committed' as const : 'not_found' as const, ...(entry ? { entry } : {}), attempts,
       evidence: entry ? 'durable write receipt; sources are checked at save and again on recall, interpretation is not verified'
-        : 'no saved entry for this turn at lookup time' };
+        : 'no saved entry for this turn at lookup time; after a save with an unknown outcome this is unresolved, it does not prove the save failed' };
   }
 
   /** Owner view: one page of full entries for an employee, newest first; sources are not re-checked here. */
