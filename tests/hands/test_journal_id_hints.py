@@ -26,9 +26,9 @@ class IdHintTests(unittest.TestCase):
         self.assertEqual(self.ops, ['journal_status'])  # no worker read for the bad ID
 
     def test_receipt_with_entry_number_names_it(self):
-        result = self.run_cli(self.turn(2, 'Did my save land?'), 'receipt 9')
-        self.assertTrue(result['reason'].startswith('receipt_needs_message_id; 9 looks like an entry_id.'), result)
-        self.assertIn('turn_id', result['reason'])
+        result = self.run_cli(self.turn(2, 'Did my save land?'), 'receipt 0')
+        self.assertTrue(result['reason'].startswith('receipt_needs_message_id; 0 looks like an entry_id.'), result)
+        self.assertIn('turn_id', result['reason'])  # 1-999999999 are entry_id lookups now (test_receipt_ids)
 
     def test_short_or_malformed_id_is_not_echoed(self):
         for bad in ('a1b2c3d4', 'a1b2c3d4-9444', '<script>', '12345678901234567890', '\u00b2'):
@@ -51,7 +51,7 @@ class IdHintTests(unittest.TestCase):
 
     def test_help_names_the_id_kind(self):
         self.assertIn('An entry_id number is not a message ID', journal.help_text('source', False))
-        self.assertIn('An entry_id number is not a turn ID', journal.help_text('receipt', False))
+        self.assertIn("The save's entry_id number also works", journal.help_text('receipt', False))
         for topic in ('source', 'receipt'):
             self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': journal.help_text(topic, False)})),
                                  journal.RESULT_CHARS)
