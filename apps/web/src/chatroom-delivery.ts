@@ -73,6 +73,8 @@ export interface DeliveredMessage {
 }
 
 export interface DeliveryDeps {
+  /** A seat's waking lines have waited STALLED_ALERT_MS for a reason other than a busy turn (checkStalled). */
+  onStalled?: (sessionId: string, stall: DeliveryStall) => void;
   /** False while the server is restoring its session registry; missing entries are not gone yet. */
   isReady?: () => boolean;
   /** Opened before delivery starts; only message identities are persisted. */
@@ -500,6 +502,14 @@ export const DELIVERY_WAIT_TEXT: Readonly<Record<DeliveryWaitReason, string>> = 
   not_idle: 'its terminal was not idle when the line was about to be typed',
 };
 
+/** A seat whose waking lines have waited this long, for any reason but a busy turn, is reported (once per wait). */
+export const STALLED_ALERT_MS = 10 * 60_000;
+/** At most one stalled-seat report per session in this window, so a reason that flips cannot repeat it. */
+export const STALLED_REPEAT_MS = 30 * 60_000;
+
+/** A stalled seat: why its waking lines wait, since when, from which rooms, and how many. */
+export interface DeliveryStall { reason: DeliveryWaitReason; since: number; roomIds: string[]; waiting: number }
+
 /**
  * Queues per session and flushes them into idle panes. Owns one interval timer;
  * `stop()` clears it.
@@ -513,6 +523,8 @@ export class ChatroomDelivery {
   private promptPauses = new Map<string, number>();
   /** The latest reason a session's queue was left untyped, and since when that reason has held; cleared by a written line. */
   private waits = new Map<string, { reason: DeliveryWaitReason; since: number }>();
+  /** The wait last reported as stalled for each session, and when. */
+  private stalledReported = new Map<string, { since: number; at: number }>();
 
   /** When the oldest line that would wake the session was queued; undefined when none is queued. */
   private oldestWaking(sessionId: string): number | undefined {
@@ -528,6 +540,23 @@ export class ChatroomDelivery {
       return;
     }
     if (this.waits.get(sessionId)?.reason !== reason) this.waits.set(sessionId, { reason, since: (this.deps.now ?? Date.now)() });
+    this.checkStalled(sessionId);
+  }
+
+  /**
+   * Report a seat whose waking lines have waited STALLED_ALERT_MS for anything but a busy turn: once per wait, and at most
+   * once per STALLED_REPEAT_MS. It only reports; nothing is typed, cleared or resent.
+   */
+  private checkStalled(sessionId: string): void {
+    const wait = this.waitingFor(sessionId);
+    if (!wait || wait.reason === 'working' || !this.deps.onStalled) return;
+    const now = (this.deps.now ?? Date.now)();
+    if (now - wait.since < STALLED_ALERT_MS) return;
+    const last = this.stalledReported.get(sessionId);
+    if (last && (last.since === wait.since || now - last.at < STALLED_REPEAT_MS)) return;
+    this.stalledReported.set(sessionId, { since: wait.since, at: now });
+    const waking = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive);
+    this.deps.onStalled(sessionId, { reason: wait.reason, since: wait.since, roomIds: [...new Set(waking.map((p) => p.roomId))], waiting: waking.length });
   }
 
   /**

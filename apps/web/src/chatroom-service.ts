@@ -360,6 +360,20 @@ export class ChatroomService {
         this.noticeDeliveryProblem(sessionId, rooms, 'Delivery to %s failed: the message is still unsent in its composer (held, not resent)');
         this.noteOwedDelivery(sessionId, messages, 'unconfirmed');
       },
+      // A stuck seat cannot read a notice queued to itself: tell each room's coordinator and the owner instead.
+      onStalled: (sessionId, stall) => {
+        const minutes = Math.max(1, Math.floor((this.now() - stall.since) / 60_000));
+        const text = `${this.nameOf(sessionId)} has had ${stall.waiting} message${stall.waiting === 1 ? '' : 's'} waiting for ${minutes} min: ${DELIVERY_WAIT_TEXT[stall.reason]}.`;
+        console.warn(`[chatroom] delivery to ${sessionId.slice(0, 8)} stalled ${minutes} min (${stall.reason})`);
+        void this.audit({ action: 'delivery-stalled', sessionId, reason: stall.reason, minutes, rooms: stall.roomIds, messages: stall.waiting }).catch(() => undefined);
+        for (const roomId of stall.roomIds) {
+          const room = this.store.get(roomId);
+          if (!room || room.archivedAt) continue;
+          const coordinator = room.members.find((m) => m.role === 'coordinator' && m.sessionId !== sessionId)?.sessionId;
+          this.system(room, text, sessionId, coordinator ? [coordinator, USER_RECIPIENT] : [USER_RECIPIENT]);
+        }
+        void this.raiseAlert(text);
+      },
       onUncertain: (sessionId, messages) => {
         const rooms = [...new Set(messages.map((m) => m.roomId))];
         console.warn(`[chatroom] delivery to ${sessionId.slice(0, 8)} may have been typed; inspect its pane before retrying`);
@@ -2484,9 +2498,9 @@ export class ChatroomService {
   }
 
   /** A room event shown in the feed. Not delivered to panes (deliveries above say what matters). */
-  private system(room: ChatRoom, text: string, sessionId?: string): void {
+  private system(room: ChatRoom, text: string, sessionId?: string, to: 'all' | ChatRecipient[] = 'all'): void {
     const from: ChatSender = { kind: 'system', name: 'system', ...(sessionId ? { sessionId } : {}) };
-    const message = this.store.post(room.id, from, text, 'all', this.now());
+    const message = this.store.post(room.id, from, text, to, this.now());
     // With the database, committed before it is shown (a JSON save stays with the caller's change).
     if (this.db) this.schedulePersist(room.id);
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message });
