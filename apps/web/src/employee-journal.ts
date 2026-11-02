@@ -38,6 +38,8 @@ const MAP_PAGE = 20;
 /** One recall returns at most this many entries and, past the first, this many bytes of entry JSON. */
 export const RECALL_MAX_ENTRIES = 2;
 export const RECALL_MAX_BYTES = 8 * 1024;
+/** How many word matches recall reads before ordering corrections ahead of what they replace. */
+export const RECALL_POOL = 20;
 const HOUR = 3_600_000;
 
 export class EmployeeJournalError extends Error {
@@ -444,11 +446,13 @@ export class EmployeeJournalStore {
     const [scope, fts] = project === undefined ? ['j.employee_id = ?', 'journal_fts'] : ['j.project = ?', 'journal_project_fts'];
     const rows = this.db.prepare(`SELECT j.* FROM ${fts} f JOIN journal_entries j ON j.id = f.rowid
       WHERE ${fts} MATCH ? AND j.owner = ? AND ${scope} ${roomId ? 'AND j.room_id = ?' : ''}
-      ORDER BY rank, j.id DESC LIMIT ${RECALL_MAX_ENTRIES}`).all(expression, owner, project ?? employeeId, ...(roomId ? [roomId] : []));
+      ORDER BY rank, j.id DESC LIMIT ${RECALL_POOL}`).all(expression, owner, project ?? employeeId, ...(roomId ? [roomId] : []));
+    const ordered = this.correctionsFirst(rows, `j.owner = ? AND ${scope} ${roomId ? 'AND j.room_id = ?' : ''}`,
+      [owner, project ?? employeeId, ...(roomId ? [roomId] : [])]).slice(0, RECALL_MAX_ENTRIES);
     // Bounded in bytes as well as entries: the best match always, then only what still fits.
     const views: JournalEntryView[] = [];
     let used = 0;
-    for (const row of rows) {
+    for (const row of ordered) {
       const view = this.view(row, read, employeeId);
       const size = Buffer.byteLength(JSON.stringify(view));
       if (views.length && used + size > RECALL_MAX_BYTES) break;
@@ -456,6 +460,34 @@ export class EmployeeJournalStore {
       used += size;
     }
     return views;
+  }
+
+  /**
+   * A correction never ranks below the entry it supersedes. Each superseded match is preceded by its current
+   * replacement: of every entry that replaces it, directly or through other corrections (any length, any branch, each
+   * step within the same scope), the newest one that is not itself replaced. That entry need not share words with the
+   * query. The old entry stays after it, marked supersededBy, so its history is still visible.
+   */
+  private correctionsFirst(rows: Record<string, unknown>[], scope: string, params: unknown[]): Record<string, unknown>[] {
+    // Links only point to earlier entries, so the walk ends, and the newest entry it reaches is not replaced in scope.
+    const replacement = this.db.prepare(`WITH RECURSIVE later(id) AS (
+        SELECT l.entry_id FROM journal_links l JOIN journal_entries j ON j.id = l.entry_id
+          WHERE l.target_id = ? AND l.kind = 'supersedes' AND ${scope}
+        UNION
+        SELECT l.entry_id FROM later JOIN journal_links l ON l.target_id = later.id AND l.kind = 'supersedes'
+          JOIN journal_entries j ON j.id = l.entry_id WHERE ${scope})
+      SELECT j.* FROM later JOIN journal_entries j ON j.id = later.id ORDER BY j.id DESC LIMIT 1`);
+    const out: Record<string, unknown>[] = [];
+    const seen = new Set<number>();
+    const add = (row: Record<string, unknown>) => {
+      if (!seen.has(Number(row.id))) { seen.add(Number(row.id)); out.push(row); }
+    };
+    for (const row of rows) {
+      const current = replacement.get(Number(row.id), ...params, ...params) as Record<string, unknown> | undefined;
+      if (current) add(current);
+      add(row);
+    }
+    return out;
   }
 
   /**
@@ -548,7 +580,13 @@ function projectIndexText(draft: JournalDraft): string {
   return [draft.text, ...draft.tags, ...draft.sources.filter(isRefSource).map(source => source.ref), ...(draft.annotations?.topics ?? [])].join(' ');
 }
 
+/**
+ * The query's words, OR-ed. The index splits "seat's" into "seat" and "s", so a word written with an apostrophe keeps only
+ * its parts longer than one character: a lone "s", "t" or "d" would match nearly every entry.
+ */
 function ftsExpression(query: string): string {
-  const tokens = (query.match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 12);
+  const tokens = (query.match(/[\p{L}\p{N}]+(?:['\u2019][\p{L}\p{N}]+)*/gu) ?? [])
+    .flatMap(word => { const parts = word.split(/['\u2019]/); return parts.length === 1 ? parts : parts.filter(part => part.length > 1); })
+    .slice(0, 12);
   return tokens.map(token => `"${token.replace(/"/g, '""')}"`).join(' OR ');
 }
