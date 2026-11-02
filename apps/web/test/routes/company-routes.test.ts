@@ -75,7 +75,7 @@ describe('company HTTP ownership and expert invites', () => {
   it('saves successive permission checkboxes without resetting other owner grants', async () => {
     const employee = await service.hire(hireBody);
     const url = `/api/company/employees/${employee.id}`;
-    const permissions = { recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: false,
+    const permissions = { recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: false, manageGoals: false,
       editBoardIssues: false, manageBoard: true, manageDecisions: false };
     await service.store.update(state => { state.employees[0].permissions = { ...permissions }; });
     const before = service.store.snapshot();
@@ -90,6 +90,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect(response.json().data.employee.permissions).toEqual(permissions);
       expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
     };
+    await save({ manageGoals: true });
     await save({ manageOffice: true });
     await save({ managePlans: true });
     await save({ recoverEmployees: true });
@@ -99,7 +100,7 @@ describe('company HTTP ownership and expert invites', () => {
     await save({ manageOffice: false });
     const reloaded = new CompanyStore(service.store.file); await reloaded.init();
     expect(reloaded.snapshot().employees[0].permissions).toEqual(permissions);
-    for (const patch of [{ managePlans: 'true' }, { unknownGrant: true }]) {
+    for (const patch of [{ manageGoals: 'true' }, { managePlans: 'true' }, { unknownGrant: true }]) {
       expect((await app.inject({ method: 'PUT', url, payload: { permissions: patch } })).statusCode).toBe(400);
       expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
     }
@@ -122,7 +123,7 @@ describe('company HTTP ownership and expert invites', () => {
     const updated = await app.inject({ method: 'PUT', url, payload });
     expect(updated.statusCode).toBe(200);
     expect(updated.json().data.employee).toMatchObject({
-      permissions: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, ...payload.permissions },
+      permissions: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, ...payload.permissions },
       effectiveBoardPermissions: { editBoardIssues: false, manageBoard: false, manageDecisions: false },
       boardPermissionSources: { editBoardIssues: 'explicit', manageBoard: 'explicit', manageDecisions: 'explicit' },
     });
@@ -596,7 +597,7 @@ describe('company HTTP ownership and expert invites', () => {
 
   it('only the owner grants or revokes employee recovery; an agent cannot grant itself permissions', async () => {
     const employee = await service.hire({ ...hireBody, position: 'CTO' });
-    expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false });
+    expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false });
     const url = `/api/company/employees/${employee.id}`;
     const payload = { permissions: { recoverEmployees: true } };
     for (const sessionId of ['expert-session', 'parent-session', 'stale-agent', '']) {
@@ -623,7 +624,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect.objectContaining({
         action: 'employee_update',
         detail: expect.objectContaining({
-          permissions: { from: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false }, to: { recoverEmployees: true, manageOffice: false, moveOwnPlan: false, managePlans: false } },
+          permissions: { from: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false }, to: { recoverEmployees: true, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false } },
         }),
       })
     );

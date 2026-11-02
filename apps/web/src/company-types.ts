@@ -33,6 +33,7 @@ export const EmployeePermissionsSchema = z
     manageOffice: z.boolean().default(false),
     moveOwnPlan: z.boolean().default(false),
     managePlans: z.boolean().default(false),
+    manageGoals: z.boolean().default(false),
     editBoardIssues: z.boolean().optional(),
     manageBoard: z.boolean().optional(),
     manageDecisions: z.boolean().optional(),
@@ -46,6 +47,7 @@ export const EmployeePermissionsPatchSchema = EmployeePermissionsSchema.extend({
   manageOffice: EmployeePermissionsSchema.shape.manageOffice.removeDefault(),
   moveOwnPlan: EmployeePermissionsSchema.shape.moveOwnPlan.removeDefault(),
   managePlans: EmployeePermissionsSchema.shape.managePlans.removeDefault(),
+  manageGoals: EmployeePermissionsSchema.shape.manageGoals.removeDefault(),
 }).partial();
 export const EmployeeSchema = z
   .object({
@@ -58,7 +60,7 @@ export const EmployeeSchema = z
     /** Owner-selected avatar background; absent retains the automatic identity color. */
     avatarBackground: z.union([z.string().regex(/^#[0-9a-fA-F]{6}$/), z.literal('transparent')]).optional(),
     position: text,
-    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false }),
+    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false }),
     /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
     pronouns: PronounsSchema.optional(),
     voice: EmployeeVoiceSchema.optional(),
@@ -149,7 +151,7 @@ export const GoalTransitionReceiptSchema = z
     generation: z.number().int().positive(),
     from: GoalStateSchema,
     to: GoalStateSchema,
-    actorKind: z.enum(['worker', 'verifier', 'owner']),
+    actorKind: z.enum(['worker', 'verifier', 'manager', 'owner']),
     actorEmployeeId: text.optional(),
     actorSessionId: text.optional(),
     actorSessionGeneration: z.number().int().positive().optional(),

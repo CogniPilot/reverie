@@ -307,4 +307,81 @@ describe('authenticated durable Goal lifecycle acceptance', () => {
     expect((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason.code).toBe('GOAL_CONFLICT');
     expect((await other.get(active.id, 'owner')).transitions).toHaveLength(3);
   });
+  const grantManagement = async () => f.store.update(state => {
+    state.employees.find(employee => employee.id === 'v')!.permissions.manageGoals = true;
+  });
+  it('defaults team goal management off and does not infer it from plan permission or title', async () => {
+    await f.store.update(state => { state.employees.find(employee => employee.id === 'v')!.permissions.managePlans = true; });
+    expect(f.store.snapshot().employees.find(employee => employee.id === 'v')!.permissions.manageGoals).toBe(false);
+    await expect(f.goals.create(f.createInput, 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+  });
+  it('persists owner-selected management and attributes exact operational manager receipts through reload', async () => {
+    await grantManagement();
+    const goal = await f.goals.create(f.createInput, 'verifier');
+    expect(await f.goals.get(goal.id, 'verifier')).toEqual(goal);
+    expect(await f.goals.list('verifier')).toEqual([goal]);
+    const command = f.command(goal, 'ASSIGNED');
+    const result = await f.goals.transition(command, 'verifier');
+    expect(result.visibility).toBe('full');
+    expect(result.receipt).toMatchObject({ actorKind: 'manager', actorEmployeeId: 'v', actorSessionId: 'vs', actorSessionGeneration: 1 });
+    const reopened = new CompanyStore(f.file); await reopened.init();
+    expect(await new GoalLifecycle(reopened, () => f.clock.now, f.auth).transition(command, 'verifier')).toEqual(result);
+    await f.store.update(state => { state.employees.find(employee => employee.id === 'v')!.permissions.manageGoals = false; });
+    await expect(f.goals.transition(command, 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+    await expect(f.goals.get(goal.id, 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+    expect(await f.goals.list('verifier')).toEqual([]);
+  });
+  it('rechecks manager permission after authentication yields and before the canonical transaction', async () => {
+    await grantManagement();
+    const authenticate = f.auth.authenticate;
+    f.auth.authenticate = async context => {
+      const principal = await authenticate(context);
+      await f.store.update(state => { state.employees.find(employee => employee.id === 'v')!.permissions.manageGoals = false; });
+      return principal;
+    };
+    await expect(f.goals.create(f.createInput, 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+    expect(f.store.snapshot().goals).toEqual([]);
+  });
+  it.each(['foreign-owner', 'stale-actor', 'stale-target', 'vacation', 'off', 'migration'])(
+    'refuses manager %s bindings without a write', async kind => {
+      await grantManagement();
+      await f.store.update(state => {
+        const actor = state.employees.find(employee => employee.id === 'v')!;
+        const target = state.employees.find(employee => employee.id === 'w')!;
+        if (kind === 'foreign-owner') actor.owner = 'b';
+        if (kind === 'stale-actor') actor.sessionGeneration++;
+        if (kind === 'stale-target') target.sessionGeneration++;
+        if (kind === 'vacation') target.onVacation = true;
+        if (kind === 'off') target.desiredRunning = false;
+        if (kind === 'migration') target.bindingMigration = { id: 'move', from: 's', to: 's2' };
+      });
+      const before = await readFile(f.file, 'utf8');
+      await expect(f.goals.create(f.createInput, 'verifier')).rejects.toBeDefined();
+      expect(await readFile(f.file, 'utf8')).toBe(before);
+    }
+  );
+  it('does not turn management into verification, cancellation, adoption, grants or unblocker authority', async () => {
+    await grantManagement();
+    const reviewed = await f.review();
+    for (const to of ['REVIEW', 'ACTIVE', 'DONE', 'NO_GO', 'CANCELLED'] as const)
+      await expect(f.goals.transition(f.command(reviewed, to), 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+    await expect(f.goals.adopt({ ...f.fence(reviewed), transitionId: 'manager-adopt', nextAction: 'Continue' }, 'verifier')).rejects.toBeDefined();
+    await expect(f.grant(reviewed, { employeeId: 'r' })).resolves.toBeDefined();
+    await expect(f.goals.issueGrant({ kind: 'METADATA_READ', employeeId: 'r', targetEmployeeId: 'w', expiresAt: 2000 }, 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+    const grant = await f.grant(reviewed);
+    const closed = await f.goals.transition(f.command(reviewed, 'DONE', { verifierGrantId: grant.id }), 'verifier');
+    expect(closed.receipt.actorKind).toBe('verifier');
+    await expect(f.goals.transition(f.command(closed.goal, 'ACTIVE'), 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+  });
+  it('keeps manager progress CAS and owner-attested HOLD resume proofs mandatory', async () => {
+    await grantManagement();
+    const goal = await f.active();
+    await expect(f.goals.transition(f.command(goal, 'ACTIVE', { expectedSequence: 0 }), 'verifier')).rejects.toMatchObject({ code: 'GOAL_CONFLICT' });
+    const held = await f.move(goal, 'HOLD', 'verifier', { blocker: { category: 'INPUT', summary: 'Needs input', unblocker: { kind: 'INPUT', id: 'input' } } });
+    await expect(f.goals.transition(f.command(held, 'ACTIVE'), 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+    expect((await f.goals.get(goal.id, 'owner')).state).toBe('HOLD');
+    const proof = await f.goals.attestUnblocker({ ...f.fence(held), blockerDigest: goalDigest(held.blocker), evidenceRef: 'evidence:sha256:' + 'a'.repeat(64), expiresAt: 2000 }, 'owner');
+    expect((await f.move(held, 'ACTIVE', 'verifier', { unblockProofId: proof.id })).state).toBe('ACTIVE');
+  });
+
 });

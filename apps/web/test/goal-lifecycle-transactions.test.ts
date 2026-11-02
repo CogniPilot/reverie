@@ -6,6 +6,7 @@ import { once } from 'node:events';
 import { build } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompanyService } from '../src/company-service.js';
+import type { CompanyState } from '../src/company-types.js';
 import { goalFixture } from './helpers/goal-test-fixture.js';
 
 describe('Goal canonical transactions and session fences', () => {
@@ -235,4 +236,38 @@ describe('Goal canonical transactions and session fences', () => {
     expect(adopted.goal).toMatchObject({ generation: 2, sessionGeneration: 4, sessionId: 's2' });
     expect((await f.move(adopted.goal, 'REVIEW', 'newWorker')).state).toBe('REVIEW');
   });
+  it.each(['create', 'create-replay', 'transition', 'transition-replay', 'target-rebind'])(
+    'retains manager permission and target fences after temp sync for %s', async operation => {
+      await f.store.update(state => { state.employees.find(employee => employee.id === 'v')!.permissions.manageGoals = true; });
+      const goal = operation.startsWith('create') ? undefined : await f.active();
+      if (operation === 'create-replay') await f.goals.create(f.createInput, 'verifier');
+      const command = goal ? f.command(goal, 'REVIEW') : undefined;
+      if (operation === 'transition-replay') await f.goals.transition(command!, 'verifier');
+      const before = await fs.readFile(f.file, 'utf8');
+      let pending: CompanyState | undefined;
+      const update = f.store.update.bind(f.store);
+      vi.spyOn(f.store, 'update').mockImplementation((mutate, validate, beforeSave) => update(state => {
+        pending = state;
+        return mutate(state);
+      }, validate, beforeSave));
+      const open = fs.open.bind(fs);
+      vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+        const handle = await open(...args);
+        if (String(args[0]).endsWith('.tmp')) {
+          const sync = handle.sync.bind(handle);
+          handle.sync = async () => {
+            await sync();
+            expect(pending).toBeDefined();
+            if (operation === 'target-rebind') pending!.employees.find(employee => employee.id === 'w')!.sessionGeneration++;
+            else pending!.employees.find(employee => employee.id === 'v')!.permissions.manageGoals = false;
+          };
+        }
+        return handle;
+      });
+      await expect(operation.startsWith('create') ? f.goals.create(f.createInput, 'verifier') :
+        f.goals.transition(command!, 'verifier')).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN' });
+      expect(await fs.readFile(f.file, 'utf8')).toBe(before);
+    }
+  );
+
 });
