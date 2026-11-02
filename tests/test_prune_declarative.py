@@ -44,6 +44,9 @@ class DeclaredTests(unittest.TestCase):
         target = patch.dict(D.DeclaredInstaller.check.__globals__, {'protected_chain': fixtures.H.protected_chain})
         target.start()
         self.addCleanup(target.stop)
+        # r12 admits only operator-approved roots, also in dry-run: the declared input names the disposable mount's identity.
+        self.fixture.settings['root_identities'] = {self.fixture.settings['b_mount']: {'source': '/dev/fixture', 'fstype': 'ext4', 'mount_root': '/'}}
+        self.fixture.write_input()
 
     def test_r12_initializer_accepts_exact_candidate_and_keeps_bootstrap_r8_pins(self):
         r8_pins = copy.deepcopy(fixtures.H.SOURCE_HASHES)
@@ -86,6 +89,125 @@ class DeclaredTests(unittest.TestCase):
         target.write_text('changed')
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(D.main(args, installer_type=lambda *unused: self.installer), 2)
+
+    def receipt(self, status='PASS', prune=D.DeclaredInstaller.source_hashes['reverie_prune.py'],
+                lease=D.DeclaredInstaller.source_hashes['lease.py']):
+        path = self.fixture.root / 'dry-state/selftest-receipt.json'
+        path.parent.mkdir(exist_ok=True)
+        data = json.dumps({'status': status, 'files': {'prune': ['/x/reverie_prune.py', prune], 'lease': ['/x/lease.py', lease],
+                                                        'runner': ['/x/r', '0' * 64], 'kit': ['/x/k', '0' * 64]}}).encode()
+        path.write_bytes(data)
+        return str(path), fixtures.H.digest(data)
+
+    def live(self, receipt=None, **acceptance):
+        path, digest = receipt or self.receipt()
+        self.fixture.settings['live_enabled'] = True
+        self.fixture.settings['live_acceptance'] = {'dry_run_report_sha256': 'ab' * 32, 'signoff': 'reviewer: record-1',
+                                                    'selftest_receipt': path, 'selftest_receipt_sha256': digest, **acceptance}
+        self.fixture.write_input()
+
+    def raw(self):
+        return json.loads(self.fixture.input.read_text())
+
+    def test_r12_root_identities_are_required_and_written(self):
+        self.select_r12()
+        self.initialize()
+        text = (self.fixture.state / 'prune.toml').read_text()
+        self.assertTrue(text.startswith('live_enabled = false\n'))
+        self.assertEqual(fixtures.H.tomllib.loads(text)['root_identities'],
+                         {self.fixture.settings['b_mount']: {'fstype': 'ext4', 'mount_root': '/', 'source': '/dev/fixture'}})
+        b = self.fixture.settings['b_mount']
+        for change in ({}, {b: {'source': '/dev/x', 'fstype': 'ext4', 'mount_root': '/sub'}},
+                       {b: {'source': '/dev/x', 'fstype': 'ext4'}}, {b: {'source': '/dev/x\n', 'fstype': 'ext4', 'mount_root': '/'}}):
+            with self.subTest(change=change):
+                self.fixture.settings['root_identities'] = change
+                self.fixture.write_input()
+                with self.assertRaisesRegex(ValueError, 'root identity|full filesystem root'):
+                    self.installer.policy(self.raw())
+
+    def test_r12_loads_the_declared_config_in_both_modes(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('r12', Path(D.__file__).parent / 'candidate/reverie_prune.py')
+        r12 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(r12)
+        self.select_r12()
+        for live in (False, True):
+            with self.subTest(live=live):
+                if live:
+                    self.live()
+                path = self.fixture.root / f'prune-{live}.toml'
+                path.write_text(self.installer.config_text(self.installer.policy(self.raw())))
+                cfg = r12.load_config(str(path), None)
+                self.assertIs(cfg['live_enabled'], live)
+                self.assertEqual(set(cfg['root_identities']), {self.fixture.settings['b_mount']})
+
+    def test_r12_live_needs_acceptance_record_and_fresh_state(self):
+        self.select_r12()
+        self.initialize()  # dry-run state exists
+        self.live()
+        with self.assertRaisesRegex(ValueError, 'fresh state'):
+            self.initialize()  # never upgraded in place to live
+        self.installer = D.DeclaredInstaller(self.fixture.root / 'protected-live-state', **self.fixture.installer.paths, run=self.run_tool)
+        result = self.initialize()
+        self.assertEqual(result['status'], 'CHECKED_DECLARED_LIVE_ENABLED')
+        self.assertTrue(result['live_prune_qualified'])
+        state = self.installer.state
+        self.assertTrue((state / 'prune.toml').read_text().startswith('live_enabled = true\n'))
+        self.assertEqual(json.loads((state / 'install.json').read_text())['mode'], 'live-enabled')
+        self.assertEqual(json.loads((state / 'deployment.json').read_text())['live_acceptance']['signoff'], 'reviewer: record-1')
+        self.assertIs(self.installer.check()['live_enabled'], True)
+        self.assertEqual(self.initialize()['status'], 'CHECKED_DECLARED_LIVE_ENABLED')  # exact state re-verified
+        self.assertIn(D.RECEIPT_COPY, json.loads((state / 'install.json').read_text())['files'])
+        for name, change in ((D.RECEIPT_COPY, lambda t: t.replace('PASS', 'FAIL')),
+                             ('prune.toml', lambda t: t.replace('live_enabled = true', 'live_enabled = false'))):
+            with self.subTest(tampered=name):
+                target = state / name
+                original = target.read_text()
+                target.chmod(0o644)
+                target.write_text(change(original))
+                with self.assertRaisesRegex(ValueError, 'changed'):
+                    self.installer.check()
+                target.write_text(original)
+        self.installer.check()
+
+    def test_r12_live_requires_a_pass_receipt_for_this_exact_package(self):
+        self.select_r12()
+        for make, why in ((lambda: self.receipt(status='FAIL'), 'PASS receipt'), (lambda: self.receipt(prune='e' * 64), 'PASS receipt'),
+                          (lambda: self.receipt(lease='e' * 64), 'PASS receipt'), (lambda: (self.receipt()[0], 'f' * 64), 'differs')):
+            with self.subTest(why=why):
+                self.live(receipt=make())
+                self.installer = D.DeclaredInstaller(self.fixture.root / 'protected-live-state', **self.fixture.installer.paths, run=self.run_tool)
+                with self.assertRaisesRegex(ValueError, why):
+                    self.initialize()
+                self.assertFalse(self.installer.state.exists())
+        inside = self.fixture.root / 'protected-live-state/selftest-receipt.json'
+        self.live(receipt=(str(inside), 'a' * 64))
+        self.installer = D.DeclaredInstaller(self.fixture.root / 'protected-live-state', **self.fixture.installer.paths, run=self.run_tool)
+        with self.assertRaisesRegex(ValueError, 'outside the fresh live state'):
+            self.installer.policy(self.raw())
+
+    def test_r12_live_refusals(self):
+        self.select_r12()
+        for acceptance in ({'dry_run_report_sha256': 'AB' * 32}, {'dry_run_report_sha256': 'ab'}, {'signoff': ''},
+                           {'signoff': 'x\ny'}, {'extra': 'field'}, {'selftest_receipt_sha256': 'x'}, {'selftest_receipt': ''}):
+            with self.subTest(acceptance=acceptance):
+                self.live(**acceptance)
+                with self.assertRaisesRegex(ValueError, 'Live enablement requires'):
+                    self.installer.policy(self.raw())
+        self.live()
+        self.fixture.settings['live_enabled'] = 'yes'
+        self.fixture.write_input()
+        with self.assertRaisesRegex(ValueError, 'boolean'):
+            self.installer.policy(self.raw())
+        self.fixture.settings['live_enabled'] = False
+        self.fixture.write_input()
+        with self.assertRaisesRegex(ValueError, 'only meaningful'):
+            self.installer.policy(self.raw())
+
+    def test_r8_declared_path_still_refuses_live_and_unknown_keys(self):
+        self.live()
+        with self.assertRaisesRegex(ValueError, 'Unknown deployment key|live_enabled=false'):
+            self.initialize()
 
     def test_initializes_custody_without_unit_writes_enablement_or_gc(self):
         result = self.initialize()
