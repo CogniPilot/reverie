@@ -38,6 +38,7 @@ import {
   generateBackgroundWakeScript,
   generateHooksConfig,
   generateStatusLineCommand,
+  generateRmScopeScript,
   generateSubagentStopGuardScript,
   readPlanUsageTelemetryEnabled,
   refreshStaleReverieHooks,
@@ -1956,4 +1957,146 @@ it('deduplicates actual zoned summary snapshots across clock ticks', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('rm scope permission hook', () => {
+  const owner = 'zq' + randomUUID().slice(0, 8);
+  const root = join(tmpdir(), 'reverie-rm-scope-test-' + Date.now());
+  const workspace = join(root, 'expert-' + owner);
+  const taskDir = '/tmp/' + owner + '-t1';
+  const outside = join(root, 'outside');
+
+  beforeAll(() => {
+    mkdirSync(join(workspace, 'sub', 'cache'), { recursive: true });
+    mkdirSync(join(taskDir, 'cache'), { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(taskDir, 'esc'));
+    symlinkSync(join(workspace, 'sub'), join(workspace, 'link')); // safe until something retargets it
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(taskDir, { recursive: true, force: true });
+  });
+
+  function decide(
+    command: string,
+    mode = 'bypassPermissions',
+    project: string | undefined = workspace,
+    cwd = workspace
+  ): boolean {
+    const result = spawnSync(process.execPath, ['-e', generateRmScopeScript()], {
+      input: JSON.stringify({ permission_mode: mode, tool_name: 'Bash', cwd, tool_input: { command } }),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: project ?? '' },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    if (result.stdout === '') return false;
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
+    });
+    return true;
+  }
+
+  it('is installed for Bash permission requests', () => {
+    const entries = generateHooksConfig().hooks.PermissionRequest as Array<{
+      matcher: string;
+      hooks: Array<{ type: string; command: string; args: string[] }>;
+    }>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].matcher).toBe('Bash');
+    expect(entries[0].hooks[0]).toMatchObject({
+      type: 'command',
+      command: 'node',
+      args: ['-e', generateRmScopeScript()],
+    });
+  });
+
+  it('is added to existing Reverie hooks once, without duplicating it', async () => {
+    const settingsPath = join(root, 'case', '.claude', 'settings.local.json');
+    mkdirSync(join(root, 'case', '.claude'), { recursive: true });
+    const oldHooks = generateHooksConfig().hooks;
+    delete oldHooks.PermissionRequest;
+    writeFileSync(settingsPath, JSON.stringify({ hooks: oldHooks }, null, 2));
+    await refreshStaleReverieHooks(join(root, 'case'));
+    await refreshStaleReverieHooks(join(root, 'case'));
+    const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    expect(parsed.hooks.PermissionRequest).toHaveLength(1);
+    expect(JSON.stringify(parsed.hooks.PermissionRequest)).toContain('REVERIE_RM_SCOPE_V1');
+  });
+
+  it.each([
+    'cd ' + taskDir + ' && rm -rf cache/*',
+    'rm -rf ' + taskDir + '/cache',
+    'rm -rf ' + taskDir,
+    'rm -rf sub/cache',
+    'rm -rf sub/*',
+    'rm -rf sub/cache && rm -rf ' + taskDir + '/cache',
+    'rm -rf ' + taskDir + '/esc',
+    "rm -r -- 'sub/cache'",
+    'rmdir sub/cache',
+  ])('allows %s', (command) => {
+    expect(decide(command)).toBe(true);
+  });
+
+  it.each([
+    'rm -rf ./*',
+    'rm -rf ' + workspace,
+    'rm -rf ../',
+    'rm -rf sub/.*',
+    'rm -rf ' + taskDir + '/esc/',
+    'cd ' + taskDir + '/esc && rm -rf *',
+    'cd ' + taskDir + ' ; rm -rf cache/*',
+    'cd ' + taskDir + ' || rm -rf cache/*',
+    'rm -rf $HOME/x',
+    'rm -rf "$HOME/x"',
+    'rm -rf ~/x',
+    'rm -rf sub/$(echo cache)',
+    'timeout 5 rm -rf sub',
+    'sudo rm -rf sub',
+    'bash -c "rm -rf sub"',
+    'rm -rf sub > /dev/null',
+    '(rm -rf sub)',
+    'rm -rf sub &',
+    'ls | rm -rf sub',
+    'rm -rf /tmp/other-t1/x',
+    'rm --no-preserve-root -rf sub',
+    'rm -rf',
+    'echo hi',
+    'rm -rf sub/cache && ls *.txt',
+    'rm -rf sub/cache ; ls',
+    'rm -rf sub/cache\nls',
+    'rm -rf sub/cache || ls',
+    'CDPATH=' + outside + ' cd sub && rm -rf *',
+    'LC_ALL=C rm -rf sub',
+    'cd sub && rm -rf cache',
+    'cd ' + taskDir + '/../' + owner + '-t1 && rm -rf cache',
+    'rm -rf ' + taskDir + '/esc/../victim',
+    'rm -rf sub/./cache',
+    'ln -sfn ' + outside + ' ' + workspace + '/link && rm -rf ' + workspace + '/link/victim',
+    './rm -rf sub',
+    '/bin/rm -rf sub',
+    'rmdir -p sub/cache',
+  ])('keeps the prompt for %s', (command) => {
+    expect(decide(command)).toBe(false);
+  });
+
+  it('does not follow a cd that a short circuit skips', () => {
+    // Bash skips the cd after a successful `true ||`, so rm runs in the outside cwd.
+    expect(decide('true || cd ' + workspace + ' && rm -rf victim', 'bypassPermissions', workspace, outside)).toBe(false);
+    expect(decide('cd ' + workspace + ' && rm -rf sub/cache', 'bypassPermissions', workspace, outside)).toBe(true);
+  });
+
+  it('only answers in bypass mode, for a seat with a project dir', () => {
+    expect(decide('rm -rf sub/cache', 'default')).toBe(false);
+    expect(decide('rm -rf sub/cache', 'auto')).toBe(false);
+    expect(decide('rm -rf sub/cache', 'bypassPermissions', '')).toBe(false);
+  });
+
+  it('allows /tmp task dirs only for an expert-<name> workspace', () => {
+    const plain = join(root, 'plain');
+    mkdirSync(join(plain, 'sub'), { recursive: true });
+    expect(decide('rm -rf sub', 'bypassPermissions', plain)).toBe(false); // cwd is outside this project
+    expect(decide('rm -rf ' + taskDir + '/cache', 'bypassPermissions', plain)).toBe(false);
+  });
 });
