@@ -44,6 +44,26 @@ describe('Codex echoed prompt above the composer', () => {
     expect(composerBody(restyle(26, `${ESC}[0;1m${ESC}[2m›${ESC}[0m `), '›')).toBeUndefined();
   });
 
+  it('carries style codes across rows and models every reset exactly; anything else is unknown', () => {
+    const withRow = (index: number, row: string, frame = FRAME) => frame.split('\n').map((line, i) => i === index ? row : line).join('\n');
+    const lower = (lead: string) => rows[26]!.replace(COMPOSER, `${lead}›${ESC}[0m `);
+    // 25 clears both blinks, so this composer is bold only again; 26 is not a reset and stays unknown.
+    expect(composerIsEmpty(withRow(26, lower(`${ESC}[0;1;6;25m`)), '›')).toBe(true);
+    expect(composerBody(withRow(26, lower(`${ESC}[0;1;6;26m`)), '›')).toBeUndefined();
+    // A row that leaves an attribute on carries it into the composer row's glyph unless that row resets.
+    expect(composerBody(withRow(26, lower(`${ESC}[1m`), withRow(25, `${ESC}[4m`)), '›')).toBeUndefined();
+    expect(composerIsEmpty(withRow(26, lower(`${ESC}[0;1m`), withRow(25, `${ESC}[4m`)), '›')).toBe(true);
+    // (The fixture's own faint status row never resets, so a row must reset before its italic is switched on and off.)
+    expect(composerIsEmpty(withRow(26, lower(`${ESC}[1m`), withRow(25, `${ESC}[0;3m x ${ESC}[23m`)), '›')).toBe(true);
+    expect(composerBody(withRow(26, lower(`${ESC}[1m`)), '›')).toBeUndefined();
+    // Codes this reader does not model (21), colon forms and other escapes make the state unknown until a reset.
+    for (const code of [`${ESC}[21m`, `${ESC}[38:2::1:2:3m`, `${ESC}]0;title${String.fromCharCode(7)}`, `${ESC}[38;5m`]) {
+      const row25 = `${ESC}[0m${code}`;
+      expect(composerBody(withRow(26, lower(`${ESC}[1m`), withRow(25, row25)), '›')).toBeUndefined();
+      expect(composerIsEmpty(withRow(26, lower(`${ESC}[0;1m`), withRow(25, row25)), '›')).toBe(true);
+    }
+  });
+
   it('keeps unknown for any other styling of the echo row', () => {
     for (const lead of [`${ESC}[1m› ${ESC}[0m`, `${ESC}[2m› ${ESC}[0m`, '› ', `${ESC}[1;2;7m› ${ESC}[0m`, `${ESC}[1;2;38;5;8m› ${ESC}[0m`])
       expect(composerBody(restyle(14, lead), '›')).toBeUndefined();
