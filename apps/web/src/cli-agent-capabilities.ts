@@ -131,6 +131,8 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       `Office attendance/restarts: ${capabilities.company.manageOffice === true ? 'allowed' : capabilities.company.manageOffice === false ? 'denied' : 'unknown (server does not report this grant)'}; recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
     );
     deps.io.out(`Plan preconditions: ${capabilities.company.planPreconditions}`);
+    deps.io.out(`Canonical team Goal management: ${capabilities.company.manageGoals === true ? 'allowed' : capabilities.company.manageGoals === false ? 'denied' : 'unknown (server does not report this grant)'}`);
+    deps.io.out(`Goal preconditions: ${capabilities.company.goalPreconditions ?? 'Requires the separately authenticated canonical Goal broker and current grants; not provider-native /goal or PAUSED control.'}`);
     deps.io.out(
       `Website restart: host grant must be checked. Redeploy: host operator required; restart does not install new code.`
     );

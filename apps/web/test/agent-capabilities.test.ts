@@ -62,6 +62,30 @@ function fixture() {
   };
 }
 describe('current agent capability command', () => {
+  it('reports fresh canonical Goal management, revocation and older-server uncertainty without writes', async () => {
+    const f = fixture();
+    f.deps.json = false;
+    const current = snapshot();
+    current.company.manageGoals = true;
+    current.company.goalPreconditions = 'Canonical Goal broker, current same-owner bindings and exact CAS required; not provider-native /goal.';
+    f.set(current);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Canonical team Goal management: allowed');
+    expect(f.output.join('\n')).toContain(current.company.goalPreconditions);
+    f.output.length = 0;
+    current.company.manageGoals = false;
+    f.set(current);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Canonical team Goal management: denied');
+    f.output.length = 0;
+    delete current.company.manageGoals;
+    delete current.company.goalPreconditions;
+    f.set(current);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Canonical team Goal management: unknown (server does not report this grant)');
+    expect(f.output.join('\n')).toContain('not provider-native /goal');
+    expect(f.calls.every(call => call.method === 'GET' && call.body === undefined)).toBe(true);
+  });
   it('uses the authenticated server snapshot, performs only GET, and sees a revoked grant on the next call', async () => {
     const f = fixture();
     expect(await agentCapabilities(f.deps, refs)).toBe(0);
