@@ -792,6 +792,9 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
 /* "<name> is typing…": one quiet line over the message box, three dots that bounce (still when motion is reduced). */
 .ca-root .ca-typing { display: flex; align-items: center; gap: 8px; min-height: 22px; padding: 2px 16px 4px; font-size: 13px; color: var(--text-dim); }
 .ca-root .ca-typing[hidden] { display: none; }
+/* Over the message box while the feed shows older messages: one click back to the newest. */
+.ca-root .ca-jump-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 16px; padding: 4px 4px 4px 12px; border-radius: 8px 8px 0 0; background: color-mix(in srgb, var(--accent, #5b8def) 85%, #000); color: #fff; font-size: 13px; }
+.ca-root .ca-jump-bar[hidden] { display: none; }
 .ca-root .ca-typing-dots { display: inline-flex; align-items: flex-end; gap: 3px; height: 10px; }
 .ca-root .ca-typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: ca-typing-bounce 1.2s ease-in-out infinite; }
 .ca-root .ca-typing-dots i:nth-child(2) { animation-delay: 0.15s; }
@@ -1707,8 +1710,6 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-search-form select { min-width: 0; }
 .ca-search-hit { margin: 10px 0; padding: 10px; border: 1px solid var(--ca-line); border-radius: 6px; overflow-wrap: anywhere; }
 .ca-search-excerpt { white-space: pre-wrap; margin: 8px 0; font-size: 13px; }
-.ca-search-hit.is-selected { border-color: var(--accent, #5b8def); outline: 1px solid var(--accent, #5b8def); }
-.ca-search-nav { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 900px) {
   .ca-message-search { position: absolute; right: 0; top: 0; bottom: 0; width: min(420px, 100%); box-sizing: border-box; z-index: 20; box-shadow: -4px 0 20px #0005; }
 }

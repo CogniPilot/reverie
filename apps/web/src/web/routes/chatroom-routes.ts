@@ -664,15 +664,16 @@ export function registerChatroomRoutes(
       return sendError(reply, error);
     }
   });
-  app.get('/api/chatrooms/:id/search-context/:messageId', async (req, reply) => {
+  const historyQuery = z.object({ page: z.enum(['around', 'older', 'newer']) }).strict();
+  app.get('/api/chatrooms/:id/history/:messageId', async (req, reply) => {
     if (!humanSearch(req)) return forbid(reply, 'Verified owner browser required for channel search');
+    const parsed = historyQuery.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected page=around, older or newer'));
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {
       const room = roomOrFail(req, id);
       if (isDm(room)) throw new ChatroomError('Channel not found', 'NOT_FOUND');
-      return { success: true, data: { roomId: id, roomName: room.name, messageId, timeZone: service.searchTimeZone(room.owner),
-        messages: service.searchContext(id, messageId).map(message => ({ id: message.id, at: message.at,
-          sender: message.from.name ?? '', text: message.text ?? '' })) } };
+      return { success: true, data: { roomId: id, messageId, ...service.historyPage(id, messageId, parsed.data.page) } };
     } catch (error) { return sendError(reply, error); }
   });
 
