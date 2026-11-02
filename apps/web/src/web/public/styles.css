@@ -22653,6 +22653,8 @@ html[data-header-stats='tiles'] .header-plan-usage:not(:has(.pu-row)) {
 }
 .chatroom-badge { color: var(--accent); border-color: var(--accent); }
 .chatroom-queued { color: var(--yellow); border-color: var(--yellow); }
+/* Queued lines held back by something other than a running turn: a dialog, closed input, an unconfirmed earlier line. */
+.chatroom-queued.chatroom-queued-stuck { color: var(--red); border-color: var(--red); }
 .chatroom-member-actions { margin-left: auto; display: inline-flex; gap: 6px; }
 .chatroom-link {
   padding: 0;

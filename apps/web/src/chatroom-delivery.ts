@@ -482,6 +482,25 @@ function wakeByRoom(
 }
 
 /**
+ * Why a session's queued lines are not being typed. A closed category, never pane, composer or message text, so it can be
+ * shown to the room and the owner.
+ */
+export type DeliveryWaitReason =
+  | 'paused' | 'delivery_unavailable' | 'not_running' | 'dialog_open' | 'working' | 'input_closed' | 'unconfirmed_unread' | 'not_idle';
+
+/** Plain words for each reason, as the member list and `agent chat who` show them. */
+export const DELIVERY_WAIT_TEXT: Readonly<Record<DeliveryWaitReason, string>> = {
+  paused: 'paused while its plan moves',
+  delivery_unavailable: 'chat delivery is unavailable on the server',
+  not_running: 'its runtime is not running',
+  dialog_open: 'a dialog is open in its terminal',
+  working: 'busy with a turn',
+  input_closed: 'its terminal is not taking chat input',
+  unconfirmed_unread: 'earlier lines are unconfirmed and its composer is not provably empty',
+  not_idle: 'its terminal was not idle when the line was about to be typed',
+};
+
+/**
  * Queues per session and flushes them into idle panes. Owns one interval timer;
  * `stop()` clears it.
  */
@@ -492,6 +511,45 @@ export class ChatroomDelivery {
   private lastRooms = new Map<string, { roomIds: string[]; at: number }>();
   private inFlight = new Set<string>();
   private promptPauses = new Map<string, number>();
+  /** The latest reason a session's queue was left untyped, and since when that reason has held; cleared by a written line. */
+  private waits = new Map<string, { reason: DeliveryWaitReason; since: number }>();
+
+  /** When the oldest line that would wake the session was queued; undefined when none is queued. */
+  private oldestWaking(sessionId: string): number | undefined {
+    const now = (this.deps.now ?? Date.now)();
+    const times = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive).map((p) => p.at ?? now);
+    return times.length ? Math.min(...times) : undefined;
+  }
+
+  /** A wait is only timed while a waking line is queued: a pause or a busy pane with nothing to type is not one. */
+  private noteWait(sessionId: string, reason: DeliveryWaitReason): void {
+    if (this.oldestWaking(sessionId) === undefined) {
+      this.waits.delete(sessionId);
+      return;
+    }
+    if (this.waits.get(sessionId)?.reason !== reason) this.waits.set(sessionId, { reason, since: (this.deps.now ?? Date.now)() });
+  }
+
+  /**
+   * Why the session's waking lines are still queued, while any are; nothing once they are written or gone. The start is never
+   * earlier than the oldest waking line still queued, so lines read, deleted or withdrawn with their room cannot lend their age
+   * to a later one held back for the same reason.
+   */
+  waitingFor(sessionId: string): { reason: DeliveryWaitReason; since: number } | undefined {
+    const oldest = this.oldestWaking(sessionId);
+    const wait = oldest === undefined ? undefined : this.waits.get(sessionId);
+    return wait && oldest !== undefined ? { reason: wait.reason, since: Math.max(wait.since, oldest) } : undefined;
+  }
+
+  /** The pane state that keeps a line from being typed now, in the order a person would fix it. */
+  private paneWait(session: { pid: number | null; isWorking?: boolean; paneDialog?: unknown; canAcceptChatInput?: () => boolean }):
+    DeliveryWaitReason | undefined {
+    if (session.pid === null) return 'not_running';
+    if (session.paneDialog) return 'dialog_open';
+    if (session.isWorking) return 'working';
+    if (session.canAcceptChatInput?.() === false) return 'input_closed';
+    return undefined;
+  }
 
   /** Keep queued chat durable while a migration owns a session's composer. */
   pauseForMigration(sessionId: string): () => void {
@@ -614,6 +672,7 @@ export class ChatroomDelivery {
     this.lastDelivered.delete(sessionId);
     this.lastRooms.delete(sessionId);
     this.omitted.delete(sessionId);
+    this.waits.delete(sessionId);
   }
 
   /**
@@ -770,8 +829,14 @@ export class ChatroomDelivery {
 
   /** Write the session's queue as one line if its pane is up and not mid-turn. */
   async flush(sessionId: string): Promise<boolean> {
-    if (this.promptPauses.has(sessionId)) return false;
-    if (this.persistenceFailed || this.deps.isReady?.() === false) return false;
+    if (this.promptPauses.has(sessionId)) {
+      this.noteWait(sessionId, 'paused');
+      return false;
+    }
+    if (this.persistenceFailed || this.deps.isReady?.() === false) {
+      this.noteWait(sessionId, 'delivery_unavailable');
+      return false;
+    }
     const session = this.deps.getSession(sessionId);
     if (!session) {
       this.forget(sessionId);
@@ -801,12 +866,19 @@ export class ChatroomDelivery {
       this.queues.delete(sessionId);
       return false;
     }
-    if (session.pid === null || session.isWorking || session.paneDialog || session.canAcceptChatInput?.() === false) return false;
+    const paneWait = this.paneWait(session);
+    if (paneWait) {
+      this.noteWait(sessionId, paneWait);
+      return false;
+    }
     // Unconfirmed earlier lines are never typed again. While any is unread, a new line goes in only when the pane is idle and
     // its composer is provably empty: an unsent earlier line cannot be sitting there to be submitted with it. Without that proof
     // the session waits, as before. A seat that never gets a line could never learn to read what is held.
     const held = this.inspectionHolds.get(sessionId)?.size ?? 0;
-    if (held && session.composerProvablyIdle?.() !== true) return false;
+    if (held && session.composerProvablyIdle?.() !== true) {
+      this.noteWait(sessionId, 'unconfirmed_unread');
+      return false;
+    }
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;
@@ -872,9 +944,11 @@ export class ChatroomDelivery {
       if (!batch.length) return false;
       // Image HTTP can yield to a read, room removal, plan move or another turn.
       // No pane attempt or uncertainty barrier exists yet, so a held batch stays queued.
-      if (this.promptPauses.has(sessionId) || this.deps.getSession(sessionId) !== session || session.pid !== originalPid ||
-          session.isWorking || session.paneDialog || session.canAcceptChatInput?.() === false) {
+      const lateWait = this.promptPauses.has(sessionId) ? 'paused'
+        : this.deps.getSession(sessionId) !== session || session.pid !== originalPid ? 'not_running' : this.paneWait(session);
+      if (lateWait) {
         this.requeue(sessionId, batch);
+        this.noteWait(sessionId, lateWait); // after the requeue: the batch is off the queue until then
         return false;
       }
       this.preparing.delete(sessionId);
@@ -943,6 +1017,7 @@ export class ChatroomDelivery {
       // Each room whose message was in the line has a turn starting for this member (the page shows "is thinking" there).
       if (ok) for (const roomId of new Set(chat.map((p) => p.roomId))) this.deps.onWoken?.(sessionId, roomId, now);
       if (ok) this.noteReceived(sessionId, batch.slice(0, taken));
+      if (ok) this.waits.delete(sessionId);
       if (!ok && refused && !submitted) {
         // Refused at the write before any key (not idle, or the composer not provably empty): nothing reached the pane,
         // so these identities are queued again rather than made uncertain.
@@ -951,6 +1026,7 @@ export class ChatroomDelivery {
         // The notices are rebuilt on the next attempt; the dropped count they carried is kept for it.
         if (lost > 0) this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + lost);
         this.requeue(sessionId, batch.filter((p) => !notices.includes(p)));
+        this.noteWait(sessionId, 'not_idle'); // after the requeue: the batch is off the queue until then
         return false;
       }
       if (!ok) {

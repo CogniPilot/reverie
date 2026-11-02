@@ -8,7 +8,9 @@ import { agentChatEmote, agentChatStatus, agentChatWho, type AgentDeps, type Req
 const ME = '0000002d-0035-4000-8000-000000000047';
 const member = (sessionId: string, name: string, extra: Record<string, unknown> = {}) => ({ sessionId, name, role: 'agent', goal: '', progress: '', ...extra });
 const ROOMS = [
-  { id: 'room-aaaa', name: 'Platform', members: [member(ME, 'Abe'), member('g-id', 'Grace', { away: 'back at 3' }), member('l-id', 'Linus')] },
+  { id: 'room-aaaa', name: 'Platform', members: [member(ME, 'Abe'), member('g-id', 'Grace', { away: 'back at 3' }), member('l-id', 'Linus'),
+    member('s-id', 'Sam', { pendingDeliveries: 3, deliveryWait: { reason: 'dialog_open', text: 'a dialog is open in its terminal', since: 1_000_000 } }),
+    member('w-id', 'Wren', { pendingDeliveries: 1 })] },
 ];
 
 function deps(json = false) {
@@ -34,10 +36,10 @@ describe('agent chat who', () => {
     const text = deps();
     expect(await agentChatWho(text.d, { room: 'Platform', names: true })).toBe(0);
     // Quoted like every name `who` prints, since a name is text another member wrote.
-    expect(text.out).toEqual(['"Abe"', '"Grace"', '"Linus"']);
+    expect(text.out).toEqual(['"Abe"', '"Grace"', '"Linus"', '"Sam"', '"Wren"']);
     const json = deps(true);
     await agentChatWho(json.d, { room: 'Platform', names: true });
-    expect(JSON.parse(json.out.join(''))).toEqual({ names: ['Abe', 'Grace', 'Linus'] });
+    expect(JSON.parse(json.out.join(''))).toEqual({ names: ['Abe', 'Grace', 'Linus', 'Sam', 'Wren'] });
   });
 
   it('shows a member\'s away note, and no line for a member who is here', async () => {
@@ -45,6 +47,16 @@ describe('agent chat who', () => {
     await agentChatWho(d, { room: 'Platform' });
     expect(plain(out).match(/away: /g)).toHaveLength(1);
     expect(plain(out)).toContain('away: "back at 3"');
+  });
+
+  it('shows queued lines and why they are not typed, so a silent member reads as held back, not as ignoring mentions', async () => {
+    const { d, out } = deps();
+    d.now = () => 1_000_000 + 23 * 60_000;
+    await agentChatWho(d, { room: 'Platform' });
+    const text = plain(out);
+    expect(text).toContain('queued: 3, waiting 23 min: "a dialog is open in its terminal"');
+    expect(text).toContain('queued: 1\n'); // queued with no known reason: the count alone
+    expect(text.match(/queued: /g)).toHaveLength(2);
   });
 });
 

@@ -967,7 +967,15 @@ Object.assign(ReverieApp.prototype, {
     }
     if (m.pendingDeliveries) {
       const q = this._chatEl('span', 'chatroom-queued', `${m.pendingDeliveries} queued`);
-      q.title = 'Messages waiting for this session to finish its turn';
+      // The server's fixed reason when it knows why the lines are not typed yet; never pane or message text.
+      const wait = m.deliveryWait;
+      // Elapsed time, not a clock: the browser's zone may differ from the office's.
+      const minutes = wait && Number.isFinite(wait.since) ? Math.max(0, Math.round((Date.now() - wait.since) / 60000)) : -1;
+      const elapsed = minutes < 0 ? '' : minutes < 1 ? ' for under a minute' : minutes < 120 ? ` for ${minutes} min` : ` for ${Math.round(minutes / 60)} h`;
+      q.title = wait && typeof wait.text === 'string'
+        ? `Not typed${elapsed}: ${wait.text}`
+        : 'Messages waiting to be typed into this session';
+      if (wait && wait.reason !== 'working') q.classList.add('chatroom-queued-stuck');
       top.append(q);
     }
     const actions = this._chatEl('span', 'chatroom-member-actions');
