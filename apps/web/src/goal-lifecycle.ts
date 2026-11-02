@@ -761,7 +761,8 @@ export class GoalLifecycle {
         });
       const manager = principal.kind === 'employee' && principal.employeeId !== goal.employeeId &&
         managesGoal(state, principal, goal.employeeId);
-      if (manager && !verifier)
+      // Management also authorizes the full response when VERIFY authorizes the decision.
+      if (manager)
         retain(managementFence(state, principal, goal.employeeId, goal.sessionId, goal.sessionGeneration));
       if (principal.kind !== 'owner' && !verifier && principal.employeeId !== goal.employeeId && !manager)
         refuse('A worker updates only its own Goal');
