@@ -47,6 +47,11 @@ let
     live = acceptance // { selfTestReceipt = "/var/lib/reverie-prune-declared/selftest-receipt.json"; }; }; }).config;
   noIdentity = (evaluate { services.reverie.prune = { enable = true; deployment = removeAttrs deployment [ "rootIdentities" ]; }; }).config;
   subtreeIdentity = (evaluate { services.reverie.prune = { enable = true; deployment = deployment // { rootIdentities."/disposable" = { source = "/dev/fixture"; fstype = "ext4"; mountRoot = "/sub"; }; }; }; }).config;
+  reportTo = directory: { inherit directory; uid = 1000; gid = 100; };
+  reportNoUser = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report.directory = "/var/lib/reverie-prune-reports"; }; }).config;
+  reported = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report = reportTo "/var/lib/reverie-prune-reports"; }; }).config;
+  reportInState = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report = reportTo "/var/lib/reverie-prune-declared/reports"; }; }).config;
+  reportOnDisposable = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report = reportTo "/disposable/reports"; }; }).config;
   disabled = (evaluate { }).config;
   enabled = (evaluate { services.reverie.prune = { enable = true; inherit deployment; }; }).config;
   scheduled = (evaluate { services.reverie.prune = { enable = true; timer.enable = true; inherit deployment; }; }).config;
@@ -92,6 +97,12 @@ let
     liveNeedsService = failing liveWithoutService;
     liveNeedsSelfTestReceipt = failing liveNoReceipt && failing liveReceiptInsideState;
     rootIdentityRequired = failing noIdentity && failing subtreeIdentity;
+    reportCopyOptIn = !(service.serviceConfig ? ExecStopPost);
+    reportCopyAfterEveryRun = let post = reported.systemd.services.reverie-prune.serviceConfig.ExecStopPost; in
+      lib.hasPrefix "+\"" post && lib.hasInfix "report_export.py\" \"--state\" \"/var/lib/reverie-prune-declared\" \"--out\" \"/var/lib/reverie-prune-reports\" \"--uid\" \"1000\" \"--gid\" \"100\"" post &&
+      !(failing reported) && reported.systemd.services.reverie-prune.serviceConfig.ExecStartPre == service.serviceConfig.ExecStartPre;
+    reportOutsideStateAndDisposable = failing reportInState && failing reportOnDisposable;
+    reportNeedsNonRootWriter = failing reportNoUser;
     pathEscaping = lib.hasInfix "prune %%$$ state" specialPaths.systemd.services.reverie-prune.serviceConfig.ExecStartPre &&
       lib.hasInfix "prune %%$ state" specialPaths.systemd.services.reverie-prune.serviceConfig.ReadWritePaths;
   };

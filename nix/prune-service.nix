@@ -21,6 +21,7 @@ let
   pathArgument = value: builtins.replaceStrings [ "%" ] [ "%%" ] (builtins.toJSON value);
   paths = lib.concatMapStringsSep " " pathArgument;
   d = cfg.deployment;
+  within = parent: child: child == parent || lib.hasPrefix "${parent}/" child;
   live = cfg.live;
   liveCandidate = "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed";
   liveCapable = (prunePackage.passthru.sourceHashes.prune or null) == liveCandidate &&
@@ -57,6 +58,7 @@ let
       selftest_receipt_sha256 = live.selfTestReceiptSha256;
     };
   }));
+  reportExport = ../python/reverie/cleanup/report_export.py;
   leases = map (eid: "${d.laptopHomeRoot}/${eid}/home/${d.leaseSubdirectory}") d.employeeIds;
 in {
   options.services.reverie.prune = {
@@ -68,6 +70,15 @@ in {
       description = "Dedicated root-controlled state. Existing state is never adopted or upgraded; changed bindings require a fresh owner-declared directory.";
     };
     cadence = mkOption { type = types.enum [ "hourly" "daily" "half-hourly" ]; default = "hourly"; };
+    report = {
+      directory = mkOption {
+        type = types.nullOr absolutePath;
+        default = null;
+        description = "Existing directory that receives an aggregate of every run (status, counts, space, duration; no paths or laptop ids), written as report.uid. Outside the state directory and the disposable filesystem.";
+      };
+      uid = mkOption { type = types.nullOr types.ints.positive; default = null; description = "Non-root user that owns report.directory and writes the reports."; };
+      gid = mkOption { type = types.nullOr types.ints.positive; default = null; description = "Group of that user."; };
+    };
     deployment = {
       name = mkOption { type = types.strMatching "[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}"; description = "Owner-reviewed worker deployment label."; };
       disposableMount = mkOption { type = absolutePath; description = "Existing disposable filesystem mount; runtime checks refuse / and symlink paths."; };
@@ -134,6 +145,11 @@ in {
           message = "Reverie prune requires deployment.rootIdentities for disposableMount, mapping the full filesystem root."; }
         { assertion = builtins.all (root: d.rootIdentities ? ${root}) d.checkoutRoots;
           message = "Reverie prune requires deployment.rootIdentities for every checkout root."; }
+        { assertion = cfg.report.directory == null || builtins.all (parent: !(within parent cfg.report.directory) && !(within cfg.report.directory parent))
+            [ cfg.stateDirectory d.disposableMount ];
+          message = "Reverie prune report.directory must be outside the state directory and the disposable filesystem."; }
+        { assertion = cfg.report.directory == null || (cfg.report.uid != null && cfg.report.gid != null);
+          message = "Reverie prune report.directory requires report.uid and report.gid (a non-root writer)."; }
       ];
       systemd.services.reverie-prune = {
         description = if live.enable then "Reverie cleanup (declared, live deletion enabled)" else "Reverie cleanup observation (declared dry-run only)";
@@ -155,6 +171,12 @@ in {
             then arguments [ "${prunePackage}/bin/${prunePackage.passthru.liveEntry}" "--config" "${cfg.stateDirectory}/prune.toml" "--live" "--pass" "all" ]
             else arguments [ "${prunePackage}/bin/reverie-prune" "--config" "${cfg.stateDirectory}/prune.toml" "--dry-run" "--pass" "all" ];
           TimeoutStartSec = 600;
+        } // lib.optionalAttrs (cfg.report.directory != null) {
+          # After success or failure, outside the sandbox like the initializer: reads only the newest run summary and
+          # writes its aggregate as report.uid.
+          ExecStopPost = "+" + arguments [ "${pkgs.python3}/bin/python3" "-I" "-B" reportExport "--state" cfg.stateDirectory
+            "--out" cfg.report.directory "--uid" cfg.report.uid "--gid" cfg.report.gid ];
+        } // {
           MemoryMax = "1G";
           TasksMax = 64;
           CPUQuota = "100%";
