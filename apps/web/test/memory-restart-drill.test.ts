@@ -12,6 +12,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EmployeeJournalStore, type JournalMessage, type ReadVisibleMessage } from '../src/employee-journal.js';
+import { agentJournalReceipt, agentJournalSave } from '../src/cli-agent-journal.js';
+import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 
 const ROOM = 'room-one';
 const OWNER = 'owner';
@@ -39,6 +41,34 @@ function remember(key: string, text: string, extra: { tags?: string[]; annotatio
   return saved.entryId;
 }
 const recall = (query: string) => store.recall(OWNER, SELF, query, read);
+
+/** What the server answers for the two journal calls the CLI makes here, from the real store. */
+function serve(request: RequestOptions): { status: number; json: never } {
+  const reply = (work: () => unknown) => {
+    try { return { status: 200, json: { success: true, data: work() } as never }; }
+    catch (err) { return { status: 400, json: { success: false, error: (err as Error).message } as never }; }
+  };
+  if (request.method === 'POST' && request.path === '/api/agent/journal/save')
+    return reply(() => store.save(OWNER, SELF, request.body as never, read));
+  const receipt = request.path.match(/^\/api\/agent\/journal\/receipt\/(.+)$/);
+  if (request.method === 'GET' && receipt) return reply(() => store.receipt(OWNER, SELF, decodeURIComponent(receipt[1])));
+  throw new Error(`unexpected ${request.method} ${request.path}`);
+}
+/** The journal CLI over a transport that answers the save call through `send`; text output, collected. */
+function cli(send: (request: RequestOptions) => Promise<{ status: number; json: never }>) {
+  const lines: string[] = [];
+  const deps: AgentDeps = { ctx: { selfId: 'self-session', apiUrl: 'http://synthetic.test' }, json: false, now: () => clock,
+    io: { out: (text) => lines.push(text), err: (text) => lines.push(text) },
+    request: async (_ctx, request) => (request.path.endsWith('/save') ? send(request) : serve(request)) as never };
+  return { deps, lines };
+}
+/** A "Remember this" turn and its source message, ready for a save through the CLI. */
+function turn(key: string, text: string) {
+  n += 1; clock += HOUR;
+  messages.set(`${ROOM}/s-${key}`, { id: `s-${key}`, roomId: ROOM, at: clock - 1000, text, fromSelf: false });
+  messages.set(`${ROOM}/t-${key}`, { id: `t-${key}`, roomId: ROOM, at: clock, text: `Remember this: ${text}`, fromSelf: false });
+  return { room: ROOM, turn: `t-${key}`, text, tag: ['decision'], source: [`s-${key}`], quote: [text.slice(0, 30)] };
+}
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'memory-drill-'));
@@ -146,6 +176,49 @@ describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since
     const receipt = store.receipt(OWNER, SELF, 't-refused');
     expect(JSON.stringify(receipt)).toContain('refused');
     expect(JSON.stringify(receipt)).not.toMatch(/"entryId":\s*\d/);
+  });
+
+  // Unknown transport outcomes, at the CLI boundary: the save call fails on the client's side, whatever the server did.
+  it('6b. a lost acknowledgement is reported as unknown, the receipt finds the write, and the same save replays', async () => {
+    const save = turn('lost-ack', 'The lost acknowledgement case was written.');
+    const lost = cli(async (request) => { serve(request); throw new Error('connection reset'); });
+    expect(await agentJournalSave(lost.deps, save)).not.toBe(0);
+    expect(lost.lines.join('\n')).toMatch(/outcome unknown/);
+    expect(lost.lines.join('\n')).not.toMatch(/\bSaved\b|not saved/i);
+    const check = cli(async () => { throw new Error('unused'); });
+    expect(await agentJournalReceipt(check.deps, save.turn)).toBe(0);
+    expect(check.lines[0]).toMatch(/^committed #\d+/);
+    const again = cli(async (request) => serve(request));
+    expect(await agentJournalSave(again.deps, save)).toBe(0);
+    expect(again.lines[0]).toMatch(/^Already saved entry #\d+/);
+  });
+
+  it('6c. after an unknown outcome, a receipt miss is not proof: the write can still land', async () => {
+    const save = turn('late-write', 'The late write case was written.');
+    let land = () => {};
+    const late = cli(async (request) => { land = () => { serve(request); }; throw new Error('timed out'); });
+    expect(await agentJournalSave(late.deps, save)).not.toBe(0);
+    expect(late.lines.join('\n')).toMatch(/outcome unknown/);
+    const before = cli(async () => { throw new Error('unused'); });
+    await agentJournalReceipt(before.deps, save.turn);
+    expect(before.lines[0]).toMatch(/^not_found: .*at lookup time/);
+    expect(before.lines.join('\n')).not.toMatch(/not saved|was not written|never saved/i);
+    land(); // the request that timed out on the client reaches the store after all
+    const after = cli(async () => { throw new Error('unused'); });
+    await agentJournalReceipt(after.deps, save.turn);
+    expect(after.lines[0]).toMatch(/^committed #\d+/);
+  });
+
+  // KNOWN GAP: the CLI does not carry "outcome unknown" into what it says next. The save message invites a retry once the
+  // receipt is checked, and the receipt miss reads the same as for a turn never attempted; neither says the save is
+  // still unresolved, so a reader can take the miss as "not saved".
+  it.fails('6d. after an unknown outcome, a receipt miss is reported as unresolved', async () => {
+    const save = turn('unresolved', 'The unresolved case was written.');
+    const lost = cli(async () => { throw new Error('timed out'); });
+    await agentJournalSave(lost.deps, save);
+    const check = cli(async () => { throw new Error('unused'); });
+    await agentJournalReceipt(check.deps, save.turn);
+    expect([...lost.lines, ...check.lines].join('\n')).toMatch(/unresolved|does not prove|not proof/i);
   });
 
   it('7. a topic never saved returns nothing (the agent can say it has no memory of it)', () => {
