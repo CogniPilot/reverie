@@ -1,6 +1,7 @@
 /**
  * A seat whose chat has waited 10 min for anything but a busy turn is reported once to each waiting room's coordinator and
- * the owner, with the fixed reason text. Nothing is typed, cleared or resent, and a stuck seat is never told about itself.
+ * the owner, with the fixed reason text. Nothing is typed, cleared or resent in the stuck seat's composer, and it is never
+ * told about itself.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
@@ -120,6 +121,15 @@ describe('the stalled-seat notice', () => {
     // It needs action, so it stays in the coordinator's summary after delivery until the coordinator handles it.
     expect(service.turnSummary('lead').messages.find((m) => m.messageId === notice[0].id)?.state).toBe('reply-pending');
     expect(writes.stuck.filter((w) => w.includes('waiting for'))).toEqual([]);
+    // The coordinator resolves it the normal way: an exact read, then handled. The stuck seat cannot resolve it.
+    expect(() => service.exactAgentRead('stuck', room.id, notice[0].id)).not.toThrow();
+    const read = service.exactAgentRead('lead', room.id, notice[0].id);
+    expect(service.resolveNotice('lead', { roomId: room.id, messageId: notice[0].id, readToken: read.readToken,
+      disposition: 'handled' }).attention.disposition).toBe('handled');
+    expect(service.turnSummary('lead').messages.some((m) => m.messageId === notice[0].id)).toBe(false);
+    const stuckRead = service.exactAgentRead('stuck', room.id, notice[0].id);
+    expect(() => service.resolveNotice('stuck', { roomId: room.id, messageId: notice[0].id, readToken: stuckRead.readToken,
+      disposition: 'handled' })).toThrow('No eligible notice');
     // Room-wide system lines stay out of the summary, as before.
     expect(service.turnSummary('lead').messages.every((m) => m.messageId === notice[0].id ||
       service.room(room.id)!.messages.find((x) => x.id === m.messageId)?.from.kind !== 'system')).toBe(true);

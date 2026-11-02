@@ -80,6 +80,16 @@ export interface ChatSessionLike extends DeliverySession {
 const CLOSED_ALERT = 'Chat is read-only: a change could not be saved or undone on disk. Fix the disk, then restart the console.';
 
 /** Canonical phone policy for an already selected message and recipient name. */
+/**
+ * Who a message is for, as attention (the pending summary and exact-read handling) sees it. A system line counts only for
+ * the members it is addressed to by name, such as a stalled-seat report to a coordinator; a room-wide one is news to no one.
+ */
+function attentionRecipients(room: ChatRoom, message: ChatMessage): string[] {
+  if (message.from.kind !== 'system') return messageRecipients(room, message);
+  if (message.to === 'all') return [];
+  return message.to.filter((id) => id !== USER_RECIPIENT && room.members.some((m) => m.sessionId === id));
+}
+
 function phoneAlertAllows(mode: AlertMode, message: ChatMessage | undefined, name: string, unique: boolean): boolean {
   if (mode === 'ring') return true;
   if (!message) return false;
@@ -593,12 +603,9 @@ export class ChatroomService {
             (select && ((message.from.kind !== 'agent' && message.from.kind !== 'bot') || message.at >= select.before))) continue;
         if (
           message.deleted ||
-          // Room-wide system lines are not news; one addressed to this session (a stalled-seat notice, a failure notice) is.
-          (message.from.kind === 'system' && (message.to === 'all' || !message.to.includes(sessionId))) ||
           (message.from.kind === 'agent' &&
             (message.from.sessionId === sessionId || (employeeId && message.from.employeeId === employeeId))) ||
-          !(message.from.kind === 'system' ? message.to !== 'all' && message.to.includes(sessionId)
-            : messageRecipients(room, message).includes(sessionId)) ||
+          !attentionRecipients(room, message).includes(sessionId) ||
           !phoneAlertAllows(mode, message, name, uniquelyNamed)
         )
           continue;
@@ -686,7 +693,7 @@ export class ChatroomService {
     const name = this.nameOf(sessionId);
     const unique = room.members.filter(m => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
     if (room.archivedAt || (isDm(room) && !room.dm.includes(sessionId)) ||
-        message.from.kind === 'system' || !messageRecipients(room, message).includes(sessionId) ||
+        !attentionRecipients(room, message).includes(sessionId) ||
         !phoneAlertAllows(mode, message, name, unique)) {
       throw new ChatroomError('No eligible notice for this recipient', 'NOT_FOUND');
     }
