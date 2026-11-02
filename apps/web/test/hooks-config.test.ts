@@ -472,7 +472,7 @@ describe('writeHooksConfig', () => {
     const hooks = JSON.stringify(parsed.hooks);
     expect(hooks).not.toMatch(/REVERIE_(TURN_SUMMARY|MEMORY_BRIEF)_V[23]/);
     expect(hooks).toContain('REVERIE_TURN_SUMMARY_V4');
-    expect(hooks).toContain('REVERIE_MEMORY_BRIEF_V4');
+    expect(hooks).toContain('REVERIE_MEMORY_BRIEF_V5');
     expect(hooks).toContain('process.env.REVERIE_CLI');
     expect(parsed.model).toBe('opus');
     expect(parsed.permissions).toEqual({ allow: ['Bash(ls:*)'] });
@@ -491,14 +491,30 @@ describe('writeHooksConfig', () => {
     mkdirSync(claudeDir, { recursive: true });
     const v3 = JSON.stringify({ hooks: generateHooksConfig().hooks })
       .replaceAll('REVERIE_TURN_SUMMARY_V4', 'REVERIE_TURN_SUMMARY_V3')
-      .replaceAll('REVERIE_MEMORY_BRIEF_V4', 'REVERIE_MEMORY_BRIEF_V3');
+      .replaceAll('REVERIE_MEMORY_BRIEF_V5', 'REVERIE_MEMORY_BRIEF_V3');
     writeFileSync(settingsPath, v3);
     await refreshStaleReverieHooks(testDir);
     await refreshStaleReverieHooks(testDir);
     const hooks = JSON.stringify(JSON.parse(readFileSync(settingsPath, 'utf-8')).hooks);
     expect(hooks).not.toMatch(/REVERIE_(TURN_SUMMARY|MEMORY_BRIEF)_V3/);
-    expect(hooks.split('REVERIE_MEMORY_BRIEF_V4').length - 1).toBe(1);
+    expect(hooks.split('REVERIE_MEMORY_BRIEF_V5').length - 1).toBe(1);
     expect(hooks).toContain('/bin/reverie'); // shell-quoted inside the node -e command
+  });
+
+  it('upgrades a V4 memory-brief hook to the /bin/reverie retry once, leaving the V4 summary hooks alone', async () => {
+    const claudeDir = join(testDir, '.claude');
+    const settingsPath = join(claudeDir, 'settings.local.json');
+    mkdirSync(claudeDir, { recursive: true });
+    const v4 = JSON.stringify({ hooks: generateHooksConfig().hooks }).replaceAll('REVERIE_MEMORY_BRIEF_V5', 'REVERIE_MEMORY_BRIEF_V4');
+    writeFileSync(settingsPath, v4);
+    await refreshStaleReverieHooks(testDir);
+    const once = readFileSync(settingsPath, 'utf-8');
+    await refreshStaleReverieHooks(testDir);
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(once);
+    const hooks = JSON.stringify(JSON.parse(once).hooks);
+    expect(hooks).not.toContain('REVERIE_MEMORY_BRIEF_V4');
+    expect(hooks.split('REVERIE_MEMORY_BRIEF_V5').length - 1).toBe(1);
+    expect(hooks).toContain('REVERIE_TURN_SUMMARY_V4');
   });
 
   it('should not add rewake hooks to a user-owned hook configuration', async () => {
@@ -1735,7 +1751,7 @@ describe('per-turn message summary hooks', () => {
   it('starts every session with the memory brief as its own bounded handler, before the summary, in both harnesses', () => {
     for (const config of [generateHooksConfig(), generateCodexTurnSummaryHooks()]) {
       const handlers = (config.hooks.SessionStart as Array<{ hooks: Array<{ command: string; timeout: number }> }>).flatMap((e) => e.hooks);
-      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V4'));
+      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V5'));
       const summary = handlers.findIndex((h) => h.command.includes('REVERIE_TURN_SUMMARY_V4'));
       expect(brief).toBeGreaterThanOrEqual(0);
       expect(brief).toBeLessThan(summary);
@@ -1745,7 +1761,8 @@ describe('per-turn message summary hooks', () => {
     }
     const script = generateMemoryBriefScript();
     expect(script).toContain("['agent', 'journal', 'brief', '--hook-event', 'SessionStart']");
-    expect(script).toContain('timeout: 2500');
+    expect(script).toContain('run(cli, 2500)'); // one 2.5 s budget, shared by the /bin/reverie retry
+    expect(script).toContain('left >= 500');
     expect(script).toContain('text.length > 2000');
   });
 
@@ -1796,8 +1813,11 @@ describe('per-turn message summary hooks', () => {
       `#!${process.execPath}\nif(process.env.BRIEF_FAIL==='old'){process.stderr.write("error: unknown command 'journal'\\n");process.exit(1)}if(process.argv.slice(2).join(' ')!=='agent journal brief --hook-event SessionStart'||process.env.BRIEF_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:process.env.BRIEF_TEXT}}));\n`,
       { mode: 0o700 }
     );
-    const run = (text: string, fail: boolean | 'old' = false) => {
-      const result = spawnSync(process.execPath, ['-e', generateMemoryBriefScript()], {
+    // The real /bin/reverie is replaced, so a seat that has one cannot answer for these stand-ins.
+    const image = join(dir, 'image-reverie');
+    writeFileSync(image, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:'from the image CLI'}}));\n`, { mode: 0o700 });
+    const run = (text: string, fail: boolean | 'old' = false, imageCli = join(dir, 'missing', 'reverie')) => {
+      const result = spawnSync(process.execPath, ['-e', generateMemoryBriefScript().replaceAll("'/bin/reverie'", JSON.stringify(imageCli))], {
         env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(), REVERIE_CLI: '', REVERIE_CONTAINER: '',
           REVERIE_API_URL: 'http://office', BRIEF_TEXT: text, BRIEF_FAIL: fail === 'old' ? 'old' : fail ? '1' : '' },
         encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
@@ -1814,6 +1834,9 @@ describe('per-turn message summary hooks', () => {
       expect(run('Your memory: you are Maple.', true)).toEqual({ hookEventName: 'SessionStart', additionalContext: `${MEMORY_BRIEF_UNREADABLE} (The hook ran reverie from PATH.)` });
       // A laptop CLI from before the journal: the gap is named, not a command that is not there.
       expect(run('Your memory: you are Maple.', 'old')).toEqual({ hookEventName: 'SessionStart', additionalContext: `${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)` });
+      // Only a CLI without the journal is retried with the image's; a real failure is reported, not retried.
+      expect(run('Your memory: you are Maple.', 'old', image)?.additionalContext).toBe('from the image CLI');
+      expect(run('Your memory: you are Maple.', true, image)?.additionalContext).toBe(`${MEMORY_BRIEF_UNREADABLE} (The hook ran reverie from PATH.)`);
       expect(run('  ')).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1828,9 +1851,9 @@ describe('per-turn message summary hooks', () => {
     writeFileSync(join(dir, 'home', 'reverie'), `#!${process.execPath}\nprocess.stderr.write("error: unknown command '" + process.argv[3] + "'\\n");process.exit(1);\n`, { mode: 0o700 });
     const image = join(dir, 'image', 'reverie');
     writeFileSync(image, `#!${process.execPath}\nif(process.env.IMAGE_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:process.argv.at(-1),additionalContext:'from the image CLI'}}));\n`, { mode: 0o700 });
-    const run = (script: string, cli: string, fail = false, container = '') => {
+    const run = (script: string, cli: string, fail = false, container = '', path = `${join(dir, 'home')}:${process.env.PATH}`) => {
       const result = spawnSync(process.execPath, ['-e', script], {
-        env: { ...process.env, TMPDIR: dir, PATH: `${join(dir, 'home')}:${process.env.PATH}`, REVERIE_CLI: cli, REVERIE_SESSION_ID: randomUUID(),
+        env: { ...process.env, TMPDIR: dir, PATH: path, REVERIE_CLI: cli, REVERIE_SESSION_ID: randomUUID(),
           REVERIE_API_URL: 'http://office', IMAGE_FAIL: fail ? '1' : '', REVERIE_CONTAINER: container },
         encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
       });
@@ -1841,17 +1864,27 @@ describe('per-turn message summary hooks', () => {
       expect(run(generateMemoryBriefScript(), image)).toBe('from the image CLI');
       expect(run(generateTurnSummaryScript('UserPromptSubmit'), image)).toBe('from the image CLI');
       expect(run(generateMemoryBriefScript(), image, true)).toBe(`${MEMORY_BRIEF_UNREADABLE} (The hook ran ${image}.)`);
-      // Unset or not an absolute path: PATH as before, so the stale copy answers and the fallback says so.
-      for (const cli of ['', 'reverie', 'image/reverie'])
-        expect(run(generateMemoryBriefScript(), cli)).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)`);
-      expect(run(generateTurnSummaryScript('UserPromptSubmit'), '')).toBeUndefined();
       // A container started from an image that predates REVERIE_CLI: the image's own /bin/reverie answers before PATH.
       expect(generateMemoryBriefScript()).toContain("existsSync('/bin/reverie')");
       const inImage = (script: string, path: string) => script.replaceAll("'/bin/reverie'", JSON.stringify(path));
+      const missing = join(dir, 'missing', 'reverie');
+      // Unset or not an absolute path: PATH as before, so the stale copy answers and, with no image CLI, the fallback says so.
+      for (const cli of ['', 'reverie', 'image/reverie'])
+        expect(run(inImage(generateMemoryBriefScript(), missing), cli)).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)`);
+      expect(run(generateTurnSummaryScript('UserPromptSubmit'), '')).toBeUndefined();
+      // Outside a container the stale PATH copy has no journal, so the image's CLI is tried once and answers.
+      expect(run(inImage(generateMemoryBriefScript(), image), '')).toBe('from the image CLI');
+      // No reverie on PATH at all (ENOENT) is the same gap.
+      expect(run(inImage(generateMemoryBriefScript(), image), '', false, '', join(dir, 'missing'))).toBe('from the image CLI');
+      // The image CLI fails or is just as old: the session is told, naming both CLIs the hook ran.
+      expect(run(inImage(generateMemoryBriefScript(), image), '', true)).toBe(`${MEMORY_BRIEF_UNREADABLE} (The hook ran reverie from PATH, then ${image}.)`);
+      const home = join(dir, 'home', 'reverie');
+      expect(run(inImage(generateMemoryBriefScript(), home), '')).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH, then ${home}.)`);
+      // Already on the image CLI: a missing journal there is not retried with the same CLI.
+      expect(run(inImage(generateMemoryBriefScript(), home), '', false, '1')).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran ${home}.)`);
       expect(run(inImage(generateMemoryBriefScript(), image), '', false, '1')).toBe('from the image CLI');
       expect(run(inImage(generateTurnSummaryScript('UserPromptSubmit'), image), '', false, '1')).toBe('from the image CLI');
       expect(run(inImage(generateMemoryBriefScript(), image), '', true, '1')).toBe(`${MEMORY_BRIEF_UNREADABLE} (The hook ran ${image}.)`);
-      const missing = join(dir, 'missing', 'reverie');
       expect(run(inImage(generateMemoryBriefScript(), missing), '', false, '1')).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)`);
       expect(run(inImage(generateMemoryBriefScript(), missing), image, false, '1')).toBe('from the image CLI'); // REVERIE_CLI still wins
     } finally {

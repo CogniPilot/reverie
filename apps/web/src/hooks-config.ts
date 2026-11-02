@@ -596,14 +596,16 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
 }
 
 const MEMORY_BRIEF_MARKER_PREFIX = 'REVERIE_MEMORY_BRIEF_V';
-const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}4`;
+// V5: a CLI without the journal (an older home copy on PATH) is retried once with the image's /bin/reverie.
+const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}5`;
 
 /**
  * The session-start memory brief, as its own handler with its own budget: the chat summary can fill its 3000 characters
  * on a busy inbox, and one oversized output would drop both. When the brief cannot be had (the CLI failed, timed out, or
  * predates the journal), the session is told so instead of starting as if it had no memory; outside a Reverie session, or
- * when the CLI answers with nothing (a session that is no employee's), nothing is printed. The fallback names the CLI the
- * hook ran, so a laptop whose CLI drifted says which one.
+ * when the CLI answers with nothing (a session that is no employee's), nothing is printed. A CLI that has no journal
+ * command (an older home copy earlier on PATH) is retried once with the image's /bin/reverie, within the same 2.5 s
+ * budget. The fallback names every CLI the hook ran, so a laptop whose CLI drifted says which one.
  */
 export function generateMemoryBriefScript(): string {
   return [
@@ -613,11 +615,16 @@ export function generateMemoryBriefScript(): string {
     "const sessionId = process.env.REVERIE_SESSION_ID || '';",
     'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
     HOOK_CLI,
-    "execFile(cli, ['agent', 'journal', 'brief', '--hook-event', 'SessionStart'],",
-    "  { timeout: 2500, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout, stderr) => {",
+    'const started = Date.now();',
+    'const ran = [];',
+    "const run = (command, timeout) => { ran.push(command); execFile(command, ['agent', 'journal', 'brief', '--hook-event', 'SessionStart'],",
+    "  { timeout, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout, stderr) => {",
     '  if (error) {',
-    `    const reason = error.code === 'ENOENT' || /unknown command 'journal'/i.test(String(stderr)) ? ${JSON.stringify(MEMORY_BRIEF_NO_CLI)} : ${JSON.stringify(MEMORY_BRIEF_UNREADABLE)};`,
-    "    const text = reason + ' (The hook ran ' + (cli === 'reverie' ? 'reverie from PATH' : cli) + '.)';",
+    "    const noJournal = error.code === 'ENOENT' || /unknown command 'journal'/i.test(String(stderr));",
+    '    const left = 2500 - (Date.now() - started);',
+    "    if (noJournal && left >= 500 && !ran.includes('/bin/reverie') && require('node:fs').existsSync('/bin/reverie')) return run('/bin/reverie', left);",
+    `    const reason = noJournal ? ${JSON.stringify(MEMORY_BRIEF_NO_CLI)} : ${JSON.stringify(MEMORY_BRIEF_UNREADABLE)};`,
+    "    const text = reason + ' (The hook ran ' + ran.map((c) => c === 'reverie' ? 'reverie from PATH' : c).join(', then ') + '.)';",
     "    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));",
     '    return;',
     '  }',
@@ -628,7 +635,8 @@ export function generateMemoryBriefScript(): string {
     '    if (!text || text.length > 2000) return;',
     "    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));",
     '  } catch {}',
-    '});',
+    '}); };',
+    'run(cli, 2500);',
   ].join('\n');
 }
 
