@@ -84,6 +84,10 @@ CHAT_LIMIT_LINE = "I reached my response limit before finishing. Please ask me t
 MARKUP = re.compile(r'</?tool_call\b|<\|tool_call|<function[=\s>]|<parameter[=\s>]|"name"\s*:\s*"web_(?:search|fetch)"', re.I)
 RECENT_LABEL = 'Recent messages in this room (oldest first):\n'
 ANSWER_LABEL = 'Answer this message:\n'
+NEWER_LABEL = ('Newer messages to you, sent after the one you are answering. Each gets its own turn; '
+               'check them before acting on anything they may have changed:\n')
+NEWER_MAX = 5
+NEWER_TEXT_CAP = 600  # a heads-up, not the full message: its own turn shows all of it
 IMAGE_MAGIC = {'image/png': (b'\x89PNG\r\n\x1a\n',), 'image/jpeg': (b'\xff\xd8\xff',), 'image/gif': (b'GIF87a', b'GIF89a'),
                'image/webp': (b'RIFF',)}
 SEARCH_TOOL = {'type': 'function', 'function': {
@@ -435,6 +439,12 @@ def framed(row):
     so only a real row can start with its time stamp and [msg <id>]."""
     return LINE_BREAKS.sub('\n  ', row)
 
+def row(cfg, m, now, cap=None):
+    """One history row: how long ago, the message's id tag, speaker and shown text, framed."""
+    cap = cfg['message_cap_chars'] if cap is None else min(cap, cfg['message_cap_chars'])
+    return framed(stamped(ago(m.get('at'), now), f'{id_tag(m)}{speaker(m)}: {shown(m.get("text") or "", cap)}'
+                          f'{attachment_note(m)}'))
+
 def room_line(room):
     """The room's exact id as the journal records it, or '' when the room id is not a canonical UUID."""
     try:
@@ -668,16 +678,28 @@ def build_prompt(cfg, history, msg, room=None, now=None, reserve=0, recalled="")
     budget = cfg['prompt_cap_chars'] - reserve - len(system) - len(wake) - len(ANSWER_LABEL) - len(RECENT_LABEL) - len(evidence) - 1
     if budget < 0:
         raise ValueError('fixed prompt and recalled evidence exceed available prompt budget')
+    # Answers go oldest first, so a later correction or "already done" addressed to the harness would stay invisible until its
+    # own turn. The newest few such messages are shown first and counted before older history.
+    newer = []
+    later = sorted((h for h in history if h.get('at', 0) > msg.get('at', 0) and h.get('id') != msg.get('id')),
+                   key=lambda h: h.get('at', 0))
+    for m in reversed([h for h in later if wakes(cfg, room, h, history)][-NEWER_MAX:]):
+        line = row(cfg, m, now, NEWER_TEXT_CAP)
+        if len(line) + 1 > budget - len(NEWER_LABEL) - 1:
+            break
+        newer.append(line)
+        budget -= len(line) + 1
+    newer_block = f'{NEWER_LABEL}' + '\n'.join(reversed(newer)) + '\n\n' if newer else ''
+    budget -= len(NEWER_LABEL) + 1 if newer else 0
     lines = []
     for m in reversed([h for h in history if h.get('id') != msg.get('id') and h.get('at', 0) <= msg.get('at', 0)]):
-        line = framed(stamped(ago(m.get('at'), now), f'{id_tag(m)}{speaker(m)}: {shown(m.get("text") or "", cfg["message_cap_chars"])}'
-                       f'{attachment_note(m)}'))
+        line = row(cfg, m, now)
         if len(line) + 1 > budget:
             break  # FIFO: the oldest lines are the ones dropped
         lines.append(line)
         budget -= len(line) + 1
     context = '\n'.join(reversed(lines))
-    user = evidence + (f'{RECENT_LABEL}{context}\n\n' if context else '') + f'{ANSWER_LABEL}{wake}'
+    user = evidence + (f'{RECENT_LABEL}{context}\n\n' if context else '') + newer_block + f'{ANSWER_LABEL}{wake}'
     content = [{'type': 'text', 'text': user}] + images if images else user
     messages = [{'role': 'system', 'content': system}, {'role': 'user', 'content': content}]
     return messages, len(system) + len(user)
