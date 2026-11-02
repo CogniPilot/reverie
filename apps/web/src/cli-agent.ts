@@ -1091,6 +1091,9 @@ interface ChatMemberRow {
   alive?: boolean;
   working?: boolean;
   updatedAt?: number;
+  /** Lines queued for it; with deliveryWait, why they are not typed yet (a fixed reason, never pane text). */
+  pendingDeliveries?: number;
+  deliveryWait?: { reason: string; text: string; since: number };
 }
 
 interface ChatMessageRow {
@@ -1953,6 +1956,12 @@ export async function agentChatPin(deps: AgentDeps, options: { room?: string; id
 }
 
 /** `agent chat who` — members with role, live state, goal and progress. */
+/** An elapsed time without a clock or zone: "under a minute", "12 min", "3 h". */
+function waitedFor(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60000));
+  return minutes < 1 ? 'under a minute' : minutes < 120 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+}
+
 export async function agentChatWho(deps: AgentDeps, options: { room?: string; names?: boolean }): Promise<number> {
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
@@ -1975,6 +1984,12 @@ export async function agentChatWho(deps: AgentDeps, options: { room?: string; na
     // Owner-set pronouns (your own too, so you know how you are referred to): use them when you write about a member.
     if (m.pronouns) deps.io.out(`    pronouns: ${quoteForPane(m.pronouns, 40)}`);
     if (m.away) deps.io.out(`    away: ${quoteForPane(m.away, 500)}`);
+    // Queued lines and why they are not typed yet, so a silent member is not mistaken for one that ignored its mentions.
+    if (m.pendingDeliveries) {
+      const wait = m.deliveryWait;
+      const why = wait ? `, waiting ${waitedFor((deps.now ?? Date.now)() - wait.since)}: ${quoteForPane(wait.text, 120)}` : '';
+      deps.io.out(`    queued: ${m.pendingDeliveries}${why}`);
+    }
     // A goal the member set itself wins; without one, its first 'doing' Board card stands in, marked as such.
     const first = m.focus?.[0];
     const goal = m.goal ? quoteForPane(m.goal, 500) : first ? `${quoteForPane(`${first.id} ${first.title}`, 160)} (from the Board)` : '-';

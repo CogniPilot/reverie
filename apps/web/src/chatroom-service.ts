@@ -52,7 +52,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -158,6 +158,8 @@ export interface ChatMemberView extends ChatMember {
   viewerHealth?: 'connected'|'disconnected'|'unknown';
   working: boolean;
   pendingDeliveries: number;
+  /** Why its queued lines are not being typed yet (a fixed category and its plain text), while any are queued. */
+  deliveryWait?: ChatDeliveryWait;
   /** Accent hue (0-359) derived from the session id; the avatar colour. */
   hue: number;
   /** The member's pronouns, from its employee record; absent when none are set. */
@@ -166,6 +168,13 @@ export interface ChatMemberView extends ChatMember {
   focus?: ChatFocusCard[];
   /** How many more 'doing' cards it has beyond `focus`. */
   focusMore?: number;
+}
+
+/** A member's queue wait: a closed reason, its fixed text and since when (epoch ms). Never pane or message text. */
+export interface ChatDeliveryWait {
+  reason: DeliveryWaitReason;
+  text: string;
+  since: number;
 }
 
 /** One 'doing' Board card shown on a member: read from the Board on every view, never stored on the membership. */
@@ -730,13 +739,22 @@ export class ChatroomService {
       ...(record.replacement ? { replacement: record.replacement } : {}) } };
   }
 
-  deliveryStatus(sessionId: string): { blocked: boolean; pending: number; held: Array<{ roomId: string; messageId: string }> } {
+  deliveryStatus(sessionId: string): {
+    blocked: boolean; pending: number; held: Array<{ roomId: string; messageId: string }>; deliveryWait?: ChatDeliveryWait;
+  } {
     const holds = this.delivery.inspectionFor(sessionId);
     return {
       blocked: holds.length > 0,
       pending: this.delivery.pendingFor(sessionId),
       held: holds.filter((item) => this.store.get(item.roomId)?.members.some((m) => m.sessionId === sessionId)),
+      ...this.deliveryWaitView(sessionId),
     };
+  }
+
+  /** `{ deliveryWait }` while the session's queued lines wait for a known reason; `{}` otherwise. */
+  private deliveryWaitView(sessionId: string): { deliveryWait?: ChatDeliveryWait } {
+    const wait = this.delivery.waitingFor(sessionId);
+    return wait ? { deliveryWait: { reason: wait.reason, text: DELIVERY_WAIT_TEXT[wait.reason], since: wait.since } } : {};
   }
 
   searchTimeZone(owner: string | undefined): string {
@@ -1409,6 +1427,7 @@ export class ChatroomService {
         viewerHealth: viewerHealth(s, this.deps.workerViewers),
         working: !!s?.isWorking,
         pendingDeliveries: this.delivery.pendingFor(m.sessionId),
+        ...this.deliveryWaitView(m.sessionId),
         hue: accentHue(m.sessionId),
         ...(pronouns ? { pronouns } : {}),
         ...focus.get(m.sessionId),
