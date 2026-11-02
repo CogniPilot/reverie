@@ -35,7 +35,8 @@ class LongMessageTests(unittest.TestCase):
         text = '\n'.join(lines)
         self.assertGreater(len(text), self.cfg['message_cap_chars'])
         messages, size = loop.build_prompt(self.cfg, [], message(text))
-        self.assertIn(text, user_text(messages))
+        # Whole, with each line break continued on an indented line so no line of it can pose as a message row.
+        self.assertIn(loop.framed(text), user_text(messages))
         self.assertEqual(missing(user_text(messages)), [])
         self.assertLessEqual(size, self.cfg['prompt_cap_chars'])
 
