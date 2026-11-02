@@ -164,7 +164,9 @@ export class ResourceReplacementController {
     let record = await this.#moves.get(operationId, owner);
     if (!record) {
       const attempts = await this.#store.resourceAttempts(owner);
-      const attempt = attempts.find(row => row.operationId === operationId);
+      // An aged-out not-started receipt still answers; an id with neither stays unavailable (absence proves nothing).
+      const attempt = attempts.find(row => row.operationId === operationId) ??
+        await this.#store.settledResourceAttempt(operationId, owner);
       need(attempt && this.#authority.requestOwner(request) === owner);
       return {id: operationId, employeeId: attempt.employeeId,
         phase: attempt.phase === 'not-started' ? 'not-started' :

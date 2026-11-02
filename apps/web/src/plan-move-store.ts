@@ -86,6 +86,12 @@ const ResourceAttempt = z.object({operationId: z.string().uuid().regex(/^[0-9a-f
 type ResourceAttemptRecord = z.infer<typeof ResourceAttempt>;
 const ResourceAttempts = z.array(ResourceAttempt).max(100).refine(rows =>
   new Set(rows.map(row => row.operationId)).size === rows.length);
+/** A not-started receipt that aged out of the attempt history. It is written before the row is removed, so the positive
+ * no-dispatch outcome survives the bound; it never authorizes native work. */
+const SETTLED_LIMIT = 4096;
+const SettledAttempt = ResourceAttempt.extend({phase: z.literal('not-started')}).strict();
+const SettledAttempts = z.array(SettledAttempt).max(SETTLED_LIMIT).refine(rows =>
+  new Set(rows.map(row => row.operationId)).size === rows.length);
 
 export class PlanMoveStore {
   private chain: Promise<void> = Promise.resolve();
@@ -125,14 +131,21 @@ export class PlanMoveStore {
   }
 
   /** Discovery only: these receipts never authorize native work or completion. */
-  private async readResourceAttempts(): Promise<ResourceAttemptRecord[]> {
-    const file = this.file + '.resource-attempts.json';
+  private readResourceAttempts(): Promise<ResourceAttemptRecord[]> {
+    return this.readPrivateList(this.file + '.resource-attempts.json', 65536, ResourceAttempts);
+  }
+
+  private readSettledAttempts(): Promise<z.infer<typeof SettledAttempts>> {
+    return this.readPrivateList(this.file + '.resource-settled.json', 1024 * 1024, SettledAttempts);
+  }
+
+  private async readPrivateList<T>(file: string, limit: number, schema: z.ZodType<T[]>): Promise<T[]> {
     let handle;
     try {handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);}
     catch (error) {if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error;}
     try {
       const before = await handle.stat({bigint: true});
-      if (!before.isFile() || before.nlink !== 1n || before.size > 65536n ||
+      if (!before.isFile() || before.nlink !== 1n || before.size > BigInt(limit) ||
           (before.mode & 0o777n) !== 0o600n || (process.getuid && before.uid !== BigInt(process.getuid())))
         throw new Error('Private resource attempts unavailable');
       const bytes = Buffer.alloc(Number(before.size) + 1); let offset = 0;
@@ -146,7 +159,7 @@ export class PlanMoveStore {
       if (offset !== Number(before.size) || stamp(before) !== stamp(after) || stamp(before) !== stamp(named))
         throw new Error('Private resource attempts changed');
       const text = new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(0, offset));
-      const value = ResourceAttempts.parse(JSON.parse(text));
+      const value = schema.parse(JSON.parse(text));
       if (JSON.stringify(value) !== text) throw new Error('Noncanonical resource attempts');
       return value;
     } finally {await handle.close();}
@@ -155,6 +168,12 @@ export class PlanMoveStore {
   async resourceAttempts(owner: string | undefined): Promise<ResourceAttemptRecord[]> {
     await this.chain;
     return (await this.readResourceAttempts()).filter(row => row.owner === (owner ?? null));
+  }
+
+  /** This owner's not-started receipt for an operation that aged out of the attempt history, if one was kept. */
+  async settledResourceAttempt(operationId: string, owner: string | undefined): Promise<ResourceAttemptRecord | undefined> {
+    await this.chain;
+    return (await this.readSettledAttempts()).find(row => row.operationId === operationId && row.owner === (owner ?? null));
   }
 
   resourceAttemptStart(operationId: string, employeeId: string, owner: string | undefined,
@@ -170,10 +189,20 @@ export class PlanMoveStore {
       if (rows.some(row => row.operationId === operationId ||
           row.employeeId === employeeId && row.owner === next.owner && row.phase !== 'not-started'))
         throw new Error('A resource attempt still requires inspection');
+      if ((await this.readSettledAttempts()).some(row => row.operationId === operationId))
+        throw new Error('A resource attempt still requires inspection');
       if (rows.length >= 100) {
-        const settled = rows.findIndex(row => row.phase === 'not-started');
-        if (settled < 0) throw new Error('Resource attempt history requires inspection');
-        rows.splice(settled, 1);
+        const index = rows.findIndex(row => row.phase === 'not-started');
+        if (index < 0) throw new Error('Resource attempt history requires inspection');
+        // Keep the evicted receipt's positive outcome first: a crash after this write leaves both copies, never neither.
+        // A full settled history refuses the new attempt rather than dropping a receipt a browser may still track.
+        const settled = await this.readSettledAttempts();
+        if (!settled.some(row => row.operationId === rows[index].operationId)) {
+          if (settled.length >= SETTLED_LIMIT) throw new Error('Resource attempt history requires inspection');
+          settled.push(SettledAttempt.parse(rows[index]));
+          await writeCompanyStateFile(this.file + '.resource-settled.json', JSON.stringify(SettledAttempts.parse(settled)));
+        }
+        rows.splice(index, 1);
       }
       rows.push(next);
       await writeCompanyStateFile(this.file + '.resource-attempts.json', JSON.stringify(ResourceAttempts.parse(rows)));

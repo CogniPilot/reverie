@@ -13,7 +13,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
-import {CompanyStore} from '../src/company-store.js';
+import {CompanyStore, writeCompanyStateFile} from '../src/company-store.js';
 import {CompanyService} from '../src/company-service.js';
 import {ChatroomService} from '../src/chatroom-service.js';
 import {PlanService, type PlanAccount} from '../src/plan-accounts.js';
@@ -426,4 +426,54 @@ it('keeps a known no-dispatch receipt discoverable when a later unrelated attemp
   await journal.resourceAttemptStart(randomUUID(), randomUUID(), undefined, []);
   await restartController();
   expect((await post('result', {operationId: id})).json().data).toEqual({id, employeeId: eid, phase: 'not-started'});
+});
+
+async function fillAttemptHistory(count: number): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = randomUUID(); ids.push(id);
+    await journal.resourceAttemptStart(id, randomUUID(), undefined, []);
+    await journal.resourceAttemptPhase(id, undefined, 'not-started');
+  }
+  return ids;
+}
+
+it('still answers not-started for a receipt that aged out of the attempt history, across a restart', async () => {
+  const id = String(draft.operationId);
+  await journal.resourceAttemptStart(id, eid, undefined, []);
+  await journal.resourceAttemptPhase(id, undefined, 'not-started');
+  await fillAttemptHistory(100);
+  expect((await journal.resourceAttempts(undefined)).some(row => row.operationId === id)).toBe(false);
+  await restartController();
+  expect((await post('result', {operationId: id})).json().data).toEqual({id, employeeId: eid, phase: 'not-started'});
+  expect((await post('operations', {employeeId: eid})).json().data).toEqual([]);
+  expect((await post('result', {operationId: randomUUID()})).statusCode).toBe(503);
+  expect(await journal.settledResourceAttempt(id, 'another-owner')).toBeUndefined();
+  await expect(journal.resourceAttemptStart(id, eid, undefined, [])).rejects.toThrow('requires inspection');
+  expect(verbs).toEqual([]);
+});
+
+it('never evicts an unknown attempt and keeps one settled copy when eviction was interrupted', async () => {
+  const [oldest] = await fillAttemptHistory(99);
+  const unknown = randomUUID();
+  await journal.resourceAttemptStart(unknown, randomUUID(), undefined, []);
+  // A crash after the settled write and before the history write leaves the receipt in both files.
+  await writeCompanyStateFile(journal.file + '.resource-settled.json', JSON.stringify([
+    {operationId: oldest, employeeId: (await journal.resourceAttempts(undefined))[0].employeeId, owner: null, phase: 'not-started'}]));
+  await journal.resourceAttemptStart(randomUUID(), randomUUID(), undefined, []);
+  const rows = await journal.resourceAttempts(undefined);
+  expect(rows.some(row => row.operationId === oldest)).toBe(false);
+  expect(rows.find(row => row.operationId === unknown)?.phase).toBe('preparing');
+  expect((await journal.settledResourceAttempt(oldest, undefined))?.phase).toBe('not-started');
+  await restartController();
+  expect((await post('result', {operationId: unknown})).json().data.phase).toBe('unknown');
+});
+
+it('refuses a new attempt rather than drop a receipt when the settled history is full', async () => {
+  const [oldest] = await fillAttemptHistory(100);
+  await writeCompanyStateFile(journal.file + '.resource-settled.json', JSON.stringify(Array.from({length: 4096}, () =>
+    ({operationId: randomUUID(), employeeId: randomUUID(), owner: null, phase: 'not-started'}))));
+  await expect(journal.resourceAttemptStart(randomUUID(), randomUUID(), undefined, [])).rejects.toThrow('requires inspection');
+  expect((await journal.resourceAttempts(undefined)).some(row => row.operationId === oldest)).toBe(true);
+  expect(await journal.settledResourceAttempt(oldest, undefined)).toBeUndefined();
 });
