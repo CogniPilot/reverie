@@ -228,6 +228,11 @@ export const MAX_DM_PARTICIPANTS = 10;
 export const MAX_PLACEMENT_CHARS = 40;
 export const MAX_MEMBERS = 50;
 export const MAX_MESSAGES_PER_ROOM = 1000;
+
+/** A message as the chat shows it: a tombstone keeps its file references in the store (so the upload sweep leaves the files for a restore) but never shows them. */
+export function shownMessage(m: ChatMessage): ChatMessage {
+  return m.deleted?.attachments ? { ...m, deleted: { at: m.deleted.at, by: m.deleted.by } } : m;
+}
 export const MAX_MESSAGE_CHARS = 8000;
 /** Pinned messages in one room. */
 export const MAX_PINS = 10;
@@ -909,8 +914,7 @@ export class ChatroomStore {
     const since = options.since ?? 0;
     const list = room.messages.filter((m) => m.at > since);
     const limit = options.limit ?? 200;
-    // A tombstone keeps its file references in the store (so the upload sweep leaves the files for a restore) but never shows them.
-    return list.slice(Math.max(0, list.length - limit)).map((m) => (m.deleted?.attachments ? { ...m, deleted: { at: m.deleted.at, by: m.deleted.by } } : m));
+    return list.slice(Math.max(0, list.length - limit)).map(shownMessage);
   }
 
   toJSON(): ChatRoom[] {

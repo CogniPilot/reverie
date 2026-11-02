@@ -38,6 +38,11 @@ function chatBadgeCount(n) {
 const CA_SHEET_MAX_WIDTH = 767;
 /** At most this many messages are picked for one group delete. */
 const CA_DELETE_SELECTION_MAX = 100;
+/** Rewound history (search's Jump) keeps at most this many messages drawn, and pages on within this distance of its end. */
+const CA_HISTORY_KEEP = 200;
+const CA_HISTORY_EDGE_PX = 240;
+/** A jump asks again at most this many times when the room reloads while its page is on its way. */
+const CA_HISTORY_RETRIES = 3;
 const CA_CARD_WIDTH = 280;
 
 /** Plain words for the reasons an owner's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
@@ -1282,6 +1287,11 @@ class ReverieChatApp {
     /** The Board page shown in place of the conversation, or null. */
     this.embed = null;
     this._embedRoom = null;
+    /** Rewound history (search's Jump), and a count of jumps and returns to the present that retires pending pages. */
+    this.history = null;
+    this.navigation = 0;
+    this.historyRefreshes = 0;
+    this.roomReloads = 0;
     // The rail follows the open room until the user picks a workspace by hand.
     this.workspace = 'home';
     this._wsPinned = false;
@@ -5393,7 +5403,11 @@ class ReverieChatApp {
     for (const hit of response.data.hits) {
       const item = this.el('article', 'ca-search-hit');
       item.append(this.el('strong', '', `# ${hit.roomName}`), this.el('div', 'ca-hint', `${hit.sender} · ${this.searchMessageTime(hit.at)}`), this.searchExcerpt(hit.text, q));
-      item.append(this.button('ca-btn', 'View message in context', () => this.openSearchContext(hit), { text: 'View context' }));
+      item.append(this.button('ca-btn', 'Show this message in the chat', async () => {
+        await this.jumpTo(hit.id, hit.roomId);
+        // On a narrow screen the results cover the chat they just moved.
+        if (this.doc.defaultView?.matchMedia?.('(max-width: 900px)').matches) this.closeMessageSearch(false);
+      }, { text: 'Jump' }));
       state.results.append(item);
     }
     state.status.textContent = state.results.children.length ? `${state.results.children.length} results shown · newest first${state.next ? ' · more available' : ''}` : 'No matching messages.';
@@ -5420,45 +5434,142 @@ class ReverieChatApp {
     catch { return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(at); }
   }
 
-  async openSearchContext(hit) {
-    const state = this.messageSearch;
-    if (!state) return;
-    const request = ++state.request;
-    state.abort?.abort(); state.abort = new AbortController(); state.more.hidden = true;
-    state.results.replaceChildren(); state.status.textContent = 'Loading original context…';
-    let response;
-    try { response = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(hit.roomId)}/search-context/${encodeURIComponent(hit.id)}`, { signal: state.abort.signal }); }
-    catch { response = { ok: false, error: 'Context unavailable. Search again.' }; }
-    if (this.messageSearch !== state || state.request !== request) return;
-    if (!response.ok) { state.status.textContent = response.error || 'Message unavailable or access changed.'; return; }
-    state.timeZone = response.data.timeZone || 'UTC';
-    state.status.textContent = `# ${response.data.roomName} · original message and nearby context`;
-    const nav = this.el('div', 'ca-search-nav');
-    nav.append(this.button('ca-btn', 'Back to search results', () => this.runMessageSearch(), { text: 'Back to results' }),
-      this.button('ca-btn', 'Open channel', async () => { await this.selectRoom(hit.roomId); if (this.messageSearch === state) this.jumpToVisibleSearchHit(hit.id); }, { text: 'Open channel' }));
-    state.results.append(nav);
-    for (const message of response.data.messages) {
-      const item = this.el('article', 'ca-search-hit'); item.dataset.sourceId = message.id;
-      if (message.id === hit.id) { item.classList.add('is-selected'); item.setAttribute('aria-label', 'Selected original message'); }
-      item.append(this.el('strong', '', `${message.sender} · ${this.searchMessageTime(message.at)}`), this.el('p', 'ca-search-excerpt', message.text));
-      state.results.append(item);
+  /**
+   * Show one message in the chat: in place when the feed draws it, else the feed rewinds to a page of the room's history
+   * around it (archived messages included), until the reader jumps or scrolls back to the present.
+   */
+  async jumpTo(id, roomId = this.roomId) {
+    const navigation = ++this.navigation;
+    if (roomId !== this.roomId) await this.selectRoom(roomId);
+    if (roomId !== this.roomId || navigation !== this.navigation || this.flashMessage(id)) return;
+    // History is served for channels by a server that searches; elsewhere an undrawn message stays out of reach.
+    if (!this.serverFeatures.search || caIsDm(this.room)) return this.toast('That message is no longer available', 'info');
+    // A later jump, a return to the present or another opening of a room (even this one) makes this answer stale. A
+    // reload of the room while it was on its way (a delete or edit here or in another tab) means asking again.
+    const load = this.app._chatLoadSeq;
+    let page;
+    for (let attempt = 0; ; attempt++) {
+      const reloads = this.roomReloads;
+      page = await this.historyPage(roomId, id, 'around');
+      if (!page || navigation !== this.navigation || load !== this.app._chatLoadSeq || roomId !== this.roomId) return;
+      if (reloads === this.roomReloads) break;
+      if (attempt === CA_HISTORY_RETRIES) return this.toast('The chat changed while loading. Try again.', 'info');
     }
-    state.results.querySelector('.is-selected')?.scrollIntoView?.({ block: 'nearest' });
+    if (!page.messages.some((m) => m.id === id && !m.deleted)) return this.toast('That message is no longer available', 'info');
+    this.history = { roomId, messages: page.messages, olderMore: page.olderMore, newerMore: page.newerMore, busy: false };
+    this.renderFeed();
+    // At once, not smoothly: the feed must not pass through its newest end, where scrolling pages on.
+    this.flashMessage(id, 'auto');
   }
 
-  jumpToVisibleSearchHit(id) {
-    const feed = this.app._chatEls?.feed;
-    if (feed && [...feed.querySelectorAll('[data-msg-id]')].some(node => node.dataset.msgId === id)) this.jumpTo(id);
-    // Older sources remain selected in the history context pane; never replace live conversation/drafts.
-  }
-
-  jumpTo(id) {
-    const feed = this.app._chatEls.feed;
-    const el = [...feed.querySelectorAll('[data-msg-id]')].find((n) => n.dataset.msgId === id);
-    if (!el) return this.toast('That message is no longer available', 'info');
-    el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  /** Scroll to a message the feed draws and flash it; false when it is not drawn. */
+  flashMessage(id, behavior = 'smooth') {
+    const el = this.feedMessage(id);
+    if (!el) return false;
+    el.scrollIntoView?.({ block: 'center', behavior });
     el.classList.add('is-flash');
     this.doc.defaultView?.setTimeout(() => el.classList.remove('is-flash'), 1600);
+    return true;
+  }
+
+  feedMessage(id) {
+    return [...this.app._chatEls.feed.querySelectorAll('[data-msg-id]')].find((n) => n.dataset.msgId === id);
+  }
+
+  /** One page of a room's history `around`, `older` or `newer` than a message; null once the reader is told why not. */
+  async historyPage(roomId, id, page) {
+    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/history/${encodeURIComponent(id)}?page=${page}`);
+    if (res.ok) return res.data;
+    this.toast(res.error || 'That message is no longer available', 'info');
+    return null;
+  }
+
+  /** The rewound history the feed shows instead of the live room, else null. It lapses once another room or the embassy opens. */
+  historyView() {
+    if (this.history && (this.history.roomId !== this.roomId || this.embassy?.selected)) this.history = null;
+    return this.history || null;
+  }
+
+  /** Near either end of rewound history: draw the next page that way. */
+  async extendHistory(direction) {
+    const history = this.historyView();
+    if (!history || history.busy) return;
+    const newer = direction === 'newer';
+    const edge = newer ? history.messages.at(-1) : history.messages[0];
+    if (!edge) return;
+    // Past the room's last stored message the live room is the rest: rejoin it with the reader's place kept.
+    if (newer && !history.newerMore) return this.leaveHistory(edge.id);
+    if (!newer && !history.olderMore) return;
+    history.busy = true;
+    const reloads = this.roomReloads;
+    const page = await this.historyPage(history.roomId, edge.id, direction);
+    history.busy = false;
+    // A reload while the page was on its way reloads the rewind itself; this page may predate it.
+    if (!page || this.history !== history || reloads !== this.roomReloads) return;
+    history.messages = newer ? [...history.messages, ...page.messages] : [...page.messages, ...history.messages];
+    if (newer) history.newerMore = page.newerMore; else history.olderMore = page.olderMore;
+    // A long read keeps a bounded window; what falls off the far end loads again on the way back.
+    if (history.messages.length > CA_HISTORY_KEEP) {
+      history.messages = newer ? history.messages.slice(-CA_HISTORY_KEEP) : history.messages.slice(0, CA_HISTORY_KEEP);
+      if (newer) history.olderMore = true; else history.newerMore = true;
+    }
+    this.redrawKeeping(edge.id);
+  }
+
+  /**
+   * The room was loaded again (a delete, edit, restore, pin or reaction, here or in another tab): load the rewound page
+   * again around the message the reader is looking at, so it shows what the room now holds. The latest refresh wins; a
+   * jump, a return to the present or another room retires it.
+   */
+  async refreshHistory() {
+    const history = this.historyView();
+    if (!history) return;
+    const anchor = this.readerMessageId(history);
+    const refresh = ++this.historyRefreshes, navigation = this.navigation, load = this.app._chatLoadSeq;
+    const page = await this.historyPage(history.roomId, anchor, 'around');
+    if (!page || refresh !== this.historyRefreshes || navigation !== this.navigation || load !== this.app._chatLoadSeq || !this.historyView()) return;
+    this.history = { roomId: history.roomId, messages: page.messages, olderMore: page.olderMore, newerMore: page.newerMore, busy: false };
+    this.redrawKeeping(anchor);
+  }
+
+  /** The first drawn message still on screen, else the middle of the rewound page. */
+  readerMessageId(history) {
+    const feed = this.app._chatEls.feed;
+    const top = feed.getBoundingClientRect().top;
+    const seen = [...feed.querySelectorAll('[data-msg-id]')].find((el) => el.getBoundingClientRect().bottom > top);
+    return seen?.dataset.msgId ?? history.messages[Math.floor(history.messages.length / 2)].id;
+  }
+
+  /** Back to the live room; with `keep`, that message stays where the reader sees it. */
+  leaveHistory(keep) {
+    this.navigation++;
+    this.history = null;
+    if (keep) this.redrawKeeping(keep); else this.renderFeed();
+  }
+
+  /** Redraw the feed leaving message `id` where it was on screen; the bottom when the feed no longer draws it. */
+  redrawKeeping(id) {
+    const feed = this.app._chatEls.feed;
+    const offset = () => { const el = this.feedMessage(id); return el ? el.getBoundingClientRect().top - feed.getBoundingClientRect().top : undefined; };
+    const before = offset();
+    this.renderFeed({ keepScroll: true });
+    const after = offset();
+    if (before === undefined || after === undefined) feed.scrollTop = feed.scrollHeight;
+    else feed.scrollTop += after - before;
+    this.renderJumpBar();
+  }
+
+  /** "You're viewing older messages": over the message box while the feed is rewound or scrolled a screen up from the newest. */
+  renderJumpBar() {
+    const feed = this.app._chatEls.feed;
+    let bar = this.els.jumpBar;
+    if (!bar) {
+      bar = this.els.jumpBar = this.el('div', 'ca-jump-bar');
+      bar.append(this.el('span', '', "You're viewing older messages"), this.button('ca-btn', 'Jump to the newest messages', () => this.leaveHistory(), { text: 'Jump to present' }));
+      feed.after(bar);
+    }
+    const away = feed.scrollHeight - feed.scrollTop - feed.clientHeight > feed.clientHeight;
+    bar.hidden = !!this.embassy?.selected || feed.hidden || !(this.historyView() || away);
   }
 
   /** `@` autocomplete: agents and authorized humans of this room, plus @everyone. */
@@ -10127,18 +10238,24 @@ class ReverieChatApp {
    * reader within a thumb's width of the bottom stays pinned to it, so they keep following new messages.
    */
   renderFeed({ keepScroll = false } = {}) {
-    if (this.embassy?.selected) return this.embassy.renderPosts();
+    const history = this.historyView();
+    if (this.embassy?.selected) { this.renderJumpBar(); return this.embassy.renderPosts(); }
     const feed = this.app._chatEls.feed;
     this.app._watchChatFeedTop?.(feed);
     if (!feed._caStick) {
       feed._caStick = true;
-      feed.addEventListener('scroll', () => (this._feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60), { passive: true });
+      feed.addEventListener('scroll', () => {
+        const fromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+        this._feedStick = fromBottom < 60;
+        if (fromBottom < CA_HISTORY_EDGE_PX) void this.extendHistory('newer');
+        this.renderJumpBar();
+      }, { passive: true });
     }
     const top = feed.scrollTop;
     const pinned = feed.scrollHeight - top - feed.clientHeight < 40;
     feed.replaceChildren();
-    const messages = this.room?.messages || [];
-    this._readMarkAt = this.serverFeatures.unread ? Number(this.room?.userReadAt) || 0 : 0;
+    const messages = (history || this.room)?.messages || [];
+    this._readMarkAt = this.serverFeatures.unread && !history ? Number(this.room?.userReadAt) || 0 : 0;
     if (!messages.length) {
       feed.append(this.el('p', 'ca-feed-empty', this.room?.historyAfter >= 0 ? 'History cleared from your view. New messages will appear here.' : this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
     }
@@ -10147,6 +10264,7 @@ class ReverieChatApp {
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
     this._feedStick = !(keepScroll && !pinned);
     this.renderSelectBar?.();
+    this.renderJumpBar();
     this.markReadSoon();
   }
 
@@ -10197,6 +10315,12 @@ class ReverieChatApp {
       if (this.room.messages.some((m) => m.id === data.message.id)) return true;
       this.room.messages.push(data.message);
       this.noteSeen(data);
+      // Rewound history keeps its place; the reader's own message brings them back to the present.
+      if (this.historyView()) {
+        if (this.isHumanMessageMine(data.message.from)) this.leaveHistory();
+        else this.countMessage(data, room);
+        return true;
+      }
       const feed = this.app._chatEls.feed;
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       this.appendMessage(data.message);
@@ -10308,7 +10432,7 @@ class ReverieChatApp {
   /** The user can see the newest message of the open room: move the server-side read cursor. */
   async markRead() {
     if (this.embassy?.selected) { this.embassy.markRead(); return; }
-    if (!this.active || !this.serverFeatures.unread) return;
+    if (!this.active || !this.serverFeatures.unread || this.historyView()) return;
     const entry = this.rooms.find((r) => r.id === this.roomId);
     const room = this.room;
     if (!room || !entry || this.doc.visibilityState === 'hidden') return;
@@ -10349,6 +10473,8 @@ function caInstall(proto) {
     _renderChatBadge: proto._renderChatBadge,
     _sendChatMessage: proto._sendChatMessage,
     _attachChatFiles: proto._attachChatFiles,
+    _loadOlderChat: proto._loadOlderChat,
+    _applyChatRoom: proto._applyChatRoom,
     _chatApi: proto._chatApi,
     setPendingHook: proto.setPendingHook,
     clearPendingHooks: proto.clearPendingHooks,
@@ -10553,6 +10679,17 @@ function caInstall(proto) {
     _renderChatFeed(opts) {
       if (this._chatApp?.built) return this._chatApp.renderFeed(opts);
       return undefined;
+    },
+    _loadOlderChat() {
+      if (this._chatApp?.built && this._chatApp.historyView()) return this._chatApp.extendHistory('older');
+      return original._loadOlderChat?.call(this);
+    },
+    // Whatever reloaded the room also changes what its rewound history should show.
+    async _applyChatRoom(id, data, opts) {
+      const applied = await original._applyChatRoom.call(this, id, data, opts);
+      if (this._chatApp?.built) this._chatApp.roomReloads++;
+      if (this._chatApp?.built && this._chatApp.history?.roomId === id) await this._chatApp.refreshHistory();
+      return applied;
     },
     _chatMessageEl(m) {
       if (this._chatApp?.built) return this._chatApp.messageEl(m, true);

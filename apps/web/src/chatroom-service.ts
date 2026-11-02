@@ -177,6 +177,8 @@ export interface ChatFocusCard {
 
 export const FOCUS_CARDS = 3;
 const FOCUS_TITLE_CHARS = 120;
+/** Messages per history page (search's jump into old messages), the same as a room's first window in the chat. */
+const HISTORY_PAGE = 50;
 
 /** A room's member focus as one comparable string ('' when nobody in it is doing a card). */
 function focusSignature(focus: ReadonlyMap<string, Pick<ChatMemberView, 'focus' | 'focusMore'>>): string {
@@ -748,12 +750,18 @@ export class ChatroomService {
     return this.db.searchMessages(roomIds, query, before);
   }
 
-  searchContext(roomId: string, messageId: string) {
+  /**
+   * One page of full messages from the room's whole history: centred on a message (`around`, the message included), or
+   * the page just before or after it. Lets the chat show an old message in place and scroll on from there.
+   */
+  historyPage(roomId: string, messageId: string, page: 'around' | 'older' | 'newer') {
     if (!this.db) throw new ChatroomError('History search requires the chat database', 'UNAVAILABLE');
     const room = this.store.require(roomId);
-    const messages = this.db.searchContext(roomId, messageId);
-    if (!messages) throw new ChatroomError('Message is no longer available', 'NOT_FOUND');
-    return messages.map(message => this.messageIdentity(room, message));
+    const half = HISTORY_PAGE / 2;
+    const window = this.db.historyWindow(roomId, messageId, page === 'around' ? { older: half, newer: half, include: true }
+      : page === 'older' ? { older: HISTORY_PAGE, newer: 0, include: false } : { older: 0, newer: HISTORY_PAGE, include: false });
+    if (!window) throw new ChatroomError('Message is no longer available', 'NOT_FOUND');
+    return { ...window, messages: window.messages.map(message => this.messageIdentity(room, message)) };
   }
 
   /** One indexed, room-scoped historical identity; never scans or restores the recent window. */
