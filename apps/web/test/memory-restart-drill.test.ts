@@ -105,7 +105,7 @@ beforeAll(() => {
 });
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since)', () => {
+describe('memory restart drill (baseline 2026-11-02; cases 2, 3b and 4 closed since)', () => {
   it('1. the latest owner decision survives the restart, and the replaced one is not briefed', () => {
     const brief = store.brief(OWNER, SELF).entries.map((e) => e.entryId);
     expect(brief).toContain(ids.d2);
@@ -160,9 +160,9 @@ describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since
     expect(recall('6').map((e) => e.entryId)).toContain(ids.f2);
   });
 
-  // KNOWN GAP: no stemming; "decide" does not match "Decided".
-  it.fails('4. another form of a word still matches', () => {
+  it('4. another form of a word still matches', () => {
     expect(recall('decide').map((e) => e.entryId).some((id) => id === ids.morph || id === ids.d3)).toBe(true);
+    expect(recall('deploying').map((e) => e.entryId)).toContain(ids.f1);
   });
 
   it('5. of two answers on the same topic, the newer comes first', () => {

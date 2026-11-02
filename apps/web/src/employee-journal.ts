@@ -178,14 +178,17 @@ export const withholdUnreadableQuotes = (checks: JournalSourceCheck[]): JournalS
   checks.map(check => check.status === 'checked' || isRefSource(check) ? check
     : { ...check, quote: '', quoteWithheld: true, detail: `${check.detail}; the author's quote is withheld because you cannot confirm it` });
 
+/** Porter stemming, so "decide" finds "Decided" and "decisions". */
+const FTS_TOKENIZE = "tokenize = 'porter unicode61'";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS journal_entries (
   id INTEGER PRIMARY KEY, owner TEXT NOT NULL, employee_id TEXT NOT NULL, room_id TEXT NOT NULL,
   turn_id TEXT NOT NULL, committed_ms INTEGER NOT NULL, payload_hash TEXT NOT NULL, payload TEXT NOT NULL,
   UNIQUE(owner, employee_id, turn_id));
 CREATE INDEX IF NOT EXISTS journal_entries_employee ON journal_entries(owner, employee_id, id);
-CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts USING fts5(text);
-CREATE VIRTUAL TABLE IF NOT EXISTS journal_project_fts USING fts5(text);
+CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts USING fts5(text, ${FTS_TOKENIZE});
+CREATE VIRTUAL TABLE IF NOT EXISTS journal_project_fts USING fts5(text, ${FTS_TOKENIZE});
 CREATE TABLE IF NOT EXISTS journal_links (
   entry_id INTEGER NOT NULL, target_id INTEGER NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('supersedes', 'related')),
   PRIMARY KEY(entry_id, target_id, kind));
@@ -220,6 +223,8 @@ export class EmployeeJournalStore {
     try {
       db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
       db.exec(SCHEMA);
+      // Search indexes made before stemming are rebuilt once from their own rows.
+      for (const table of ['journal_fts', 'journal_project_fts']) stemIndex(db, table);
       // Project scope came later: existing journals gain the column; every older entry stays private.
       if (!db.prepare('PRAGMA table_info(journal_entries)').all().some(column => column.name === 'project'))
         db.exec('ALTER TABLE journal_entries ADD COLUMN project TEXT');
@@ -568,6 +573,23 @@ export class EmployeeJournalStore {
     const rows = this.db.prepare(`SELECT * FROM journal_entries WHERE owner = ? AND employee_id = ? ${before ? 'AND id < ?' : ''} ORDER BY id DESC LIMIT ?`)
       .all(owner, employeeId, ...(before ? [before] : []), MAP_PAGE + 1);
     return { entries: rows.slice(0, MAP_PAGE).map(row => this.view(row)), more: rows.length > MAP_PAGE };
+  }
+}
+
+/** Replaces an unstemmed index with a stemmed copy of the same rows, in one transaction; a no-op once stemmed. */
+function stemIndex(db: SqlDatabase, table: string): void {
+  const stemmed = () => String(db.prepare('SELECT sql FROM sqlite_master WHERE name = ?').get(table)?.sql ?? '').includes('porter');
+  if (stemmed()) return;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (!stemmed()) db.exec(`CREATE VIRTUAL TABLE ${table}_stemmed USING fts5(text, ${FTS_TOKENIZE});
+      INSERT INTO ${table}_stemmed(rowid, text) SELECT rowid, text FROM ${table};
+      DROP TABLE ${table};
+      ALTER TABLE ${table}_stemmed RENAME TO ${table};`);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
   }
 }
 
