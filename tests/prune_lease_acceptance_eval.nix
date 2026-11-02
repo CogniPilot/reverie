@@ -13,6 +13,8 @@ let
   leaseAcceptance = { enable = true; peerSocket = "/host/state/lease-peer/peer.sock"; brokerUid = 1000; peerEmployeeId = employee;
     peerImageId = "sha256:" + lib.concatStrings (lib.genList (_: "ab") 32); generation = lib.concatStrings (lib.genList (_: "cd") 32);
     companyFile = "/host/state/company.json"; brokerConfig = "/host/state/broker.json"; };
+  # lib.hasInfix builds a regex from its pattern, and Nix refuses a regex that refers to a store path.
+  plain = builtins.unsafeDiscardStringContext;
   failing = c: builtins.any (entry: !entry.assertion && lib.hasInfix "reverie" (lib.toLower entry.message)) c.assertions;
   off = evaluate { services.reverie.prune = { enable = true; inherit deployment; }; };
   on = evaluate { services.reverie.prune = { enable = true; inherit deployment leaseAcceptance;
@@ -29,7 +31,7 @@ let
     declaredWhenEnabled = on.systemd.services ? reverie-prune-lease-acceptance;
     selftestPredecessorExists = builtins.elem "reverie-prune-lease-acceptance.service" on.systemd.services.reverie-prune-selftest.requires;
     noAutomaticStart = unit.wantedBy == [ ] && !(on.systemd.timers ? reverie-prune-lease-acceptance);
-    hostNamespaceRun = lib.hasPrefix "+" s.ExecStart && lib.hasInfix "${leaseAcceptancePackage}/bin/reverie-prune-acceptance" s.ExecStart
+    hostNamespaceRun = lib.hasPrefix "+" s.ExecStart && lib.hasInfix (plain "${leaseAcceptancePackage}/bin/reverie-prune-acceptance") s.ExecStart
       && lib.hasInfix "\"--config\"" s.ExecStart && lib.hasSuffix "\"--run\"" s.ExecStart && !(lib.hasInfix "--check" s.ExecStart);
     noOverriddenBindings = !(lib.hasInfix "--initializer" s.ExecStart) && !(lib.hasInfix "--docker" s.ExecStart) && !(lib.hasInfix "--peer-binary" s.ExecStart);
     boundedRootOneshot = s.Type == "oneshot" && s.User == "root" && s.KillMode == "control-group" && s.TimeoutStartSec == 600 && s.UMask == "0077";
@@ -38,7 +40,7 @@ let
     gateBindsModule = gate.version == 1 && gate.stateDirectory == on.services.reverie.prune.stateDirectory
       && gate.deploymentConfig == "${on.services.reverie.prune.deploymentConfigFile}"
       && gate.peerBinary == leaseAcceptancePackage.passthru.peerArtifactPath && gate.receiptLifetimeSeconds == 3600;
-    sameDeploymentAsInitializer = lib.hasInfix "${on.services.reverie.prune.deploymentConfigFile}" on.systemd.services.reverie-prune.serviceConfig.ExecStartPre;
+    sameDeploymentAsInitializer = lib.hasInfix (plain "${on.services.reverie.prune.deploymentConfigFile}") on.systemd.services.reverie-prune.serviceConfig.ExecStartPre;
     strangerPeerRejected = failing strangerPeer;
     requiresPruneModule = failing withoutPrune;
   };
