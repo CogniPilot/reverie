@@ -142,6 +142,20 @@ def read_capped(path, cap):
     return text[-cap:] if len(text) > cap else text
 
 
+class ChatNotFound(RuntimeError, ValueError):
+    """The chat server answered that the room has no such message: a definite answer, unlike a timeout or a failed
+    call. It is still the RuntimeError or ValueError that callers already treat as an unreadable message."""
+
+
+def not_found(stdout):
+    """Whether a failed CLI call printed the server's NOT_FOUND answer."""
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and data.get('success') is False and str(data.get('error', '')).startswith('NOT_FOUND')
+
+
 class Chat:
     """The reverie chat CLI (or a stand-in with the same arguments)."""
 
@@ -152,7 +166,8 @@ class Chat:
     def _run(self, args):
         r = subprocess.run(self.argv + args, capture_output=True, text=True, timeout=self.timeout)
         if r.returncode != 0:
-            raise RuntimeError(f'chat {args[0]} exit {r.returncode}: {r.stderr.strip()[:300]}')
+            failed = ChatNotFound if not_found(r.stdout) else RuntimeError
+            raise failed(f'chat {args[0]} exit {r.returncode}: {r.stderr.strip()[:300]}')
         return r.stdout
 
     def read(self, room, n):
@@ -174,6 +189,8 @@ class Chat:
     def exact_message(self, room, message_id):
         data = json.loads(self._run(['read', '--room', room, '--message', message_id, '--json']))
         message = data.get('message')
+        if message is None:
+            raise ChatNotFound('no such message in this room')
         if (not isinstance(message, dict) or message.get('id') != message_id or
                 message.get('roomId') != room or type(message.get('phoneWake')) is not bool):
             raise ValueError('No exact current phone acceptance')

@@ -11,7 +11,7 @@ from pathlib import Path
 # -I excludes the script directory. Only the explicitly deployed sibling modules
 # are imported; never a cwd, HOME or another instance's code.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_loop import Chat
+from agent_loop import Chat, ChatNotFound
 from agent_memory import RoomMemory
 import agent_journal
 import agent_journal_model
@@ -50,6 +50,22 @@ def checked_journal_recall(journal, chat, room, query, compact=False):
         entries.append(item)
     return {'status': 'available', **({'scope': room} if compact else {}),
             'entries': entries, 'omitted_or_source_changed': omitted}
+
+
+def source_refusal(chat, room, draft, captured, events):
+    """Why the cited sources no longer verify for this save, or None when every one does."""
+    selected = {s['id'] for s in draft['sources']} | {captured['end']['id']}
+    for source_id in sorted(selected):
+        try:
+            actual = chat.exact_message(room, source_id)
+        except ChatNotFound:  # the server says it is gone; a failed or timed-out read still raises
+            return {'status': 'refused', 'reason': 'source_unavailable'}
+        expected = captured['end'] if source_id == captured['end']['id'] else events[source_id]
+        if agent_journal.revision(actual, room) != expected:
+            return {'status': 'refused', 'reason': 'source_changed'}
+        if any(s['quote'] not in actual['text'] for s in draft['sources'] if s['id'] == source_id):
+            return {'status': 'refused', 'reason': 'quote_not_in_source'}
+    return None
 
 
 def perform(job, chat=None):
@@ -122,16 +138,13 @@ def perform(job, chat=None):
                 events = {e['id']: e for e in captured['events']}
                 # Verify current full source revisions and exact quotes. No model
                 # can nominate a different room, instance or coverage timestamp.
-                selected = {s['id'] for s in draft['sources']} | {captured['end']['id']}
-                for source_id in selected:
-                    actual = chat.exact_message(room, source_id)
-                    expected = captured['end'] if source_id == captured['end']['id'] else events[source_id]
-                    if agent_journal.revision(actual, room) != expected:
-                        raise ValueError('journal source revision changed')
-                    if any(s['quote'] not in actual['text'] for s in draft['sources'] if s['id'] == source_id):
-                        raise ValueError('journal quote not in source')
-                store._allowed(room)
-                result = journal.commit(draft, captured, job['previous_id'])
+                # A source that no longer verifies is refused before anything is written. It is returned, not
+                # raised: a raised error ends this worker like a crash, which the caller must report as an unknown
+                # write it can never retry.
+                result = source_refusal(chat, room, draft, captured, events)
+                if result is None:
+                    store._allowed(room)
+                    result = journal.commit(draft, captured, job['previous_id'])
             elif job['op'] == 'journal_recall':
                 result = checked_journal_recall(journal, chat, room, job['query'])
             else:

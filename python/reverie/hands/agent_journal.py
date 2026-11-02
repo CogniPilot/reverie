@@ -440,6 +440,13 @@ Bounded topic map of your source-checked journals in this room: topics, counts, 
 No entry text. Counts cover the examined page only. Importance and provenance are your own statements, not truth or authority. Use recall to read an account.""",
 }
 COMMANDS = ('save', 'recall', 'source', 'receipt', 'map')
+# What a worker that refused a save before writing reports, and what the model is told. Nothing was written, so a
+# corrected save may follow.
+SOURCE_REFUSALS = {
+    'quote_not_in_source': 'quote_not_in_source; nothing was saved. Copy each quote exactly from the cited message',
+    'source_changed': 'source_changed; nothing was saved. The cited message changed during this turn; read it again',
+    'source_unavailable': 'source_unavailable; nothing was saved. The cited message can no longer be read',
+}
 
 
 def help_text(topic, read_only):
@@ -763,6 +770,9 @@ class Turn:
                 turn_id = self.captured['end']['id']
                 expected_hash = digest(journal_payload(args, self.captured))
                 result = self.operation('journal_commit', draft=args, captured=self.captured, previous_id=self.previous_id)
+                if (isinstance(result, dict) and result.get('status') == 'refused' and
+                        result.get('reason') in SOURCE_REFUSALS):
+                    return {'status': 'refused', 'reason': SOURCE_REFUSALS[result['reason']], 'turn_id': turn_id}
                 if not result or result.get('status') == 'unknown':
                     # Read once after the existing worker boundary has settled.
                     # This is never a second journal_commit call.
@@ -784,8 +794,10 @@ class Turn:
                     elif isinstance(recovered, dict) and recovered.get('status') == 'conflict':
                         return {'status': 'refused', 'reason': 'operation_payload_conflict', 'turn_id': turn_id}
                     else:
+                        recent = self.failures[self.failure_mark:]
                         return {'status': 'unknown', 'turn_id': turn_id,
-                                'reason': 'write outcome unresolved; do not retry the write'}
+                                'reason': 'write outcome unresolved; do not retry the write',
+                                **({'failure': recent[-1]} if recent else {})}
                 if result and result.get('status') == 'committed':
                     self.previous_id = result['entry_id']
                     result = dict(result, turn_id=turn_id, check_with=f'receipt {turn_id}')
