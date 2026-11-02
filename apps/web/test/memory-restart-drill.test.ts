@@ -65,6 +65,10 @@ beforeAll(() => {
   // A correction saved while acting in another room.
   const r1 = remember('r1', 'The lab printer is on floor two.');
   remember('r2', 'Correction: it is on floor three.', { room: 'room-two', tags: ['decision', 'correction'], annotations: { supersedes: [r1], reason: 'moved' } });
+  // A chain whose second correction was saved in another room.
+  const p1 = remember('p1', 'The coffee machine is in the kitchen.');
+  const p2 = remember('p2', 'Correction: it is in the lounge.', { tags: ['decision', 'correction'], annotations: { supersedes: [p1], reason: 'moved' } });
+  remember('p3', 'Correction: it is in the lobby now.', { room: 'room-two', tags: ['decision', 'correction'], annotations: { supersedes: [p2], reason: 'moved again' } });
   // The restart: a new store on the same file, with nothing carried over in memory.
   store.close();
   store = EmployeeJournalStore.open(file, () => clock);
@@ -97,6 +101,9 @@ describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since
     // Filtered to the first room, the correction saved in another room is not pulled in; unfiltered, it leads.
     expect(store.recall(OWNER, SELF, 'lab printer', read, ROOM).map((e) => e.entryId)).toEqual([ids.r1]);
     expect(recall('lab printer').map((e) => e.entryId)).toEqual([ids.r2, ids.r1]);
+    // Every step of a chain stays inside the filter, not just the first.
+    expect(store.recall(OWNER, SELF, 'coffee machine', read, ROOM).map((e) => e.entryId)).toEqual([ids.p2, ids.p1]);
+    expect(recall('coffee machine').map((e) => e.entryId)).toEqual([ids.p3, ids.p1]);
   });
 
   it('2b. a superseded fact is at least marked as superseded when recalled', () => {

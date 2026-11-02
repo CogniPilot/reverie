@@ -40,8 +40,6 @@ export const RECALL_MAX_ENTRIES = 2;
 export const RECALL_MAX_BYTES = 8 * 1024;
 /** How many word matches recall reads before ordering corrections ahead of what they replace. */
 export const RECALL_POOL = 20;
-/** How far a chain of corrections is followed to its current entry. */
-const CORRECTION_DEPTH = 8;
 const HOUR = 3_600_000;
 
 export class EmployeeJournalError extends Error {
@@ -465,25 +463,27 @@ export class EmployeeJournalStore {
   }
 
   /**
-   * A correction never ranks below the entry it supersedes. Each superseded match is preceded by the newest entry that
-   * replaces it (followed through a chain of corrections, within the same scope), even when that entry shares no words
-   * with the query. The old entry stays after it, marked supersededBy, so its history is still visible.
+   * A correction never ranks below the entry it supersedes. Each superseded match is preceded by its current
+   * replacement: of every entry that replaces it, directly or through other corrections (any length, any branch, each
+   * step within the same scope), the newest one that is not itself replaced. That entry need not share words with the
+   * query. The old entry stays after it, marked supersededBy, so its history is still visible.
    */
   private correctionsFirst(rows: Record<string, unknown>[], scope: string, params: unknown[]): Record<string, unknown>[] {
-    const replacement = this.db.prepare(`SELECT j.* FROM journal_links l JOIN journal_entries j ON j.id = l.entry_id
-      WHERE l.target_id = ? AND l.kind = 'supersedes' AND ${scope} ORDER BY j.id DESC LIMIT 1`);
+    // Links only point to earlier entries, so the walk ends, and the newest entry it reaches is not replaced in scope.
+    const replacement = this.db.prepare(`WITH RECURSIVE later(id) AS (
+        SELECT l.entry_id FROM journal_links l JOIN journal_entries j ON j.id = l.entry_id
+          WHERE l.target_id = ? AND l.kind = 'supersedes' AND ${scope}
+        UNION
+        SELECT l.entry_id FROM later JOIN journal_links l ON l.target_id = later.id AND l.kind = 'supersedes'
+          JOIN journal_entries j ON j.id = l.entry_id WHERE ${scope})
+      SELECT j.* FROM later JOIN journal_entries j ON j.id = later.id ORDER BY j.id DESC LIMIT 1`);
     const out: Record<string, unknown>[] = [];
     const seen = new Set<number>();
     const add = (row: Record<string, unknown>) => {
       if (!seen.has(Number(row.id))) { seen.add(Number(row.id)); out.push(row); }
     };
     for (const row of rows) {
-      let current: Record<string, unknown> | undefined;
-      for (let id = Number(row.id), depth = 0; depth < CORRECTION_DEPTH; depth += 1) {
-        const next = replacement.get(id, ...params) as Record<string, unknown> | undefined;
-        if (!next) break;
-        current = next; id = Number(next.id);
-      }
+      const current = replacement.get(Number(row.id), ...params, ...params) as Record<string, unknown> | undefined;
       if (current) add(current);
       add(row);
     }
