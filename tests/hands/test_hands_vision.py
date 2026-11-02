@@ -5,10 +5,13 @@ import unittest
 from unittest.mock import patch
 
 import agent_loop as loop
-from test_coding_support import cfg_for
+from test_coding_support import cfg_for, without_seat_environment
 
 
 class FilesystemVisionTests(unittest.TestCase):
+    def setUp(self):
+        without_seat_environment(self)  # a seat's REVERIE_WORKER would switch load_images to scoped reads
+
     def test_reads_shared_room_image_without_an_attachment_api(self):
         with tempfile.TemporaryDirectory() as directory:
             room = '12345678-1234-1234-1234-123456789abc'

@@ -1,10 +1,21 @@
 import copy
 import os
+from unittest.mock import patch
 
 import agent_loop
 
 
 SELF = {'kind': 'agent', 'sessionId': 'session-worker', 'name': 'Worker'}
+
+
+def without_seat_environment(test):
+    """Run `test` without the REVERIE_* a live seat exports, restored afterwards. tests/__init__ strips them only when the
+    suite runs as the tests package; run from tests/hands, a seat's own session and worker flags would reach the code."""
+    environment = patch.dict(os.environ)
+    environment.start()
+    test.addCleanup(environment.stop)
+    for key in [key for key in os.environ if key.startswith('REVERIE_')]:
+        del os.environ[key]
 
 
 def cfg_for(root, **settings):
