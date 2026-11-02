@@ -130,7 +130,7 @@ describe('employee journal store', () => {
 
     it('keeps imports out of the brief and the save window; memories written after the first import count like saves', () => {
       expect(store.importLegacy(OWNER, SELF, batch(40, (i) => ({ importance: i % 2 ? 'keystone' : 'important' }))).results.every((r) => r.status === 'imported')).toBe(true);
-      expect(store.brief(OWNER, SELF)).toEqual({ total: 40, entries: [] });
+      expect(store.brief(OWNER, SELF)).toEqual({ total: 40, entries: [], open: [], openTotal: 0 });
       expect(store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft() }, read).status).toBe('committed');
       expect(store.brief(OWNER, SELF).entries).toHaveLength(1); // the native entry, not 40 imported ones
       clock += 60_000;
@@ -195,6 +195,39 @@ describe('employee journal store', () => {
     }
   });
 
+  it('rebuilds a search index made before stemming once, keeping its rows, so another word form matches', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'journal-unstemmed-'));
+    try {
+      const file = join(dir, 'journal.db');
+      const first = EmployeeJournalStore.open(file, () => clock);
+      expect(first.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', project: 'rumoca', draft: draft() }, read).status).toBe('committed');
+      first.close();
+      // Put both indexes back the way older journals made them: same rows, no stemmer.
+      const old = new (require('node:sqlite').DatabaseSync)(file);
+      for (const table of ['journal_fts', 'journal_project_fts'])
+        old.exec(`CREATE VIRTUAL TABLE ${table}_plain USING fts5(text); INSERT INTO ${table}_plain(rowid, text) SELECT rowid, text FROM ${table};
+          DROP TABLE ${table}; ALTER TABLE ${table}_plain RENAME TO ${table};`);
+      expect(old.prepare(`SELECT count(*) AS n FROM journal_fts WHERE journal_fts MATCH '"agree"'`).get().n).toBe(0);
+      const rows = (db: { prepare(sql: string): { all(): unknown[] } }) => ['journal_fts', 'journal_project_fts']
+        .map(table => db.prepare(`SELECT rowid, text FROM ${table} ORDER BY rowid`).all());
+      const before = rows(old);
+      old.close();
+      for (let open = 0; open < 2; open += 1) {
+        const reopened = EmployeeJournalStore.open(file, () => clock);
+        expect(reopened.recall(OWNER, SELF, 'agree', read).map(entry => entry.entryId)).toEqual([1]);
+        expect(reopened.recall(OWNER, 'employee-two', 'recording', read, undefined, 'rumoca').map(entry => entry.entryId)).toEqual([1]);
+        reopened.close();
+      }
+      const after = new (require('node:sqlite').DatabaseSync)(file);
+      expect(rows(after)).toEqual(before);
+      expect(after.prepare(`SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'journal%fts' AND sql LIKE '%porter%'`).get().n).toBe(2);
+      expect(after.prepare(`SELECT count(*) AS n FROM sqlite_master WHERE name LIKE '%_stemmed%'`).get().n).toBe(0);
+      after.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('caps recall at two entries and 8 KB, always keeping the best match', () => {
     for (const [i, at] of [[2, 300], [3, 400], [4, 500]] as const) message(`m-t${i}`, 'Remember this: records carry exact UTC times.', at);
     const long = 'exact UTC times ' + 'x'.repeat(1000);
@@ -218,7 +251,7 @@ describe('employee journal store', () => {
     expect(brief.entries.map((e) => [e.entryId, e.importance ?? null])).toEqual([[2, 'keystone'], [4, null], [3, null]]);
     expect(brief.entries[0]).toMatchObject({ text: 'Standing rule: James merges.', tags: ['decision'] });
     expect(store.brief(OWNER, SELF, 1).entries.map((e) => e.entryId)).toEqual([2]);
-    expect(store.brief(OWNER, 'employee-two')).toEqual({ total: 0, entries: [] });
+    expect(store.brief(OWNER, 'employee-two')).toEqual({ total: 0, entries: [], open: [], openTotal: 0 });
   });
 
   it('keeps the hands journal limits', () => {

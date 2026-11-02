@@ -8,7 +8,8 @@ import type { Command } from 'commander';
 import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import { agentJournalImportLegacy, type ImportLegacyOptions } from './cli-agent-journal-import.js';
-import { JOURNAL_INTERPRETATION, JOURNAL_PROJECT_SAVES_PER_DAY, type JournalEntryView, type JournalGate, type JournalHeader } from './employee-journal.js';
+import { JOURNAL_INTERPRETATION, JOURNAL_OUTCOME_STATUSES, JOURNAL_PROJECT_SAVES_PER_DAY, normalizeJournalDue, type JournalEntryView, type JournalGate,
+  type JournalHeader } from './employee-journal.js';
 
 const bounds = { maxBytes: 256 * 1024, deadlineMs: 10_000 };
 const repeat = (value: string, all: string[] = []) => [...all, value];
@@ -49,6 +50,11 @@ function entryText(entry: JournalEntryView, now: number): string {
       : `  source ${source.roomId}/${source.id}: ${source.status} (${source.detail})${source.quoteWithheld ? '' : ` "${source.quote}"`}`),
     `  interpretation: ${entry.interpretation ?? JOURNAL_INTERPRETATION}`];
   if (entry.supersededBy.length) lines.push(`  superseded by ${entry.supersededBy.map(id => `#${id}`).join(', ')}`);
+  const outcome = entry.outcome;
+  if (outcome?.state) lines.push(`  state: ${outcome.state}${entry.annotations?.due ? `, due ${entry.annotations.due}` : ''}${outcome.overdue ? ' (overdue)' : ''}`
+    + (outcome.stateScope === 'room' ? ' (from this room\'s entries only)' : ''));
+  for (const ref of outcome?.outcomes ?? []) lines.push(`  outcome #${ref.entryId} ${ref.status} ${ref.committedAt}`);
+  if (outcome?.outcomesTruncated) lines.push(`  +${outcome.outcomesTotal - outcome.outcomes.length} older outcomes`);
   return lines.join('\n');
 }
 
@@ -59,12 +65,22 @@ export interface JournalSaveOptions {
   project?: string;
   /** Non-chat sources (a commit, report or URL); saved and always shown as unverified. */
   ref?: string[];
+  /** On a promise: when it is due, with Z or an offset. */
+  due?: string;
+  /** This entry is the outcome of that earlier promise or decision, with --status. */
+  outcomeOf?: string; status?: string;
 }
 
 export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOptions): Promise<number> {
   const ids = options.source ?? []; const quotes = options.quote ?? []; const refs = options.ref ?? [];
   if (ids.length !== quotes.length) return refused(deps, 'Each --source needs one --quote, in the same order.');
   if (!ids.length && !refs.length) return refused(deps, 'Give at least one --source with --quote, or a --ref.');
+  const due = options.due === undefined ? undefined : normalizeJournalDue(options.due);
+  if (options.due !== undefined && !due) return refused(deps, '--due needs a real date and time with Z or an offset, such as 2026-11-03T15:00-05:00 (years 2000-2100).');
+  if ((options.outcomeOf === undefined) !== (options.status === undefined)) return refused(deps, '--outcome-of and --status go together.');
+  const outcomeEntry = Number(options.outcomeOf);
+  if (options.outcomeOf !== undefined && (!Number.isSafeInteger(outcomeEntry) || outcomeEntry < 1 || !(JOURNAL_OUTCOME_STATUSES as readonly string[]).includes(options.status!)))
+    return refused(deps, '--outcome-of takes an entry id and --status done, dropped or result.');
   const annotations = {
     ...(options.topic?.length ? { topics: options.topic } : {}),
     ...(options.importance ? { importance: options.importance } : {}),
@@ -72,6 +88,8 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
     ...(options.supersedes?.length ? { supersedes: options.supersedes } : {}),
     ...(options.related?.length ? { related: options.related } : {}),
     ...(options.reason ? { reason: options.reason } : {}),
+    ...(due ? { due } : {}),
+    ...(options.outcomeOf !== undefined ? { outcomeOf: { entry: outcomeEntry, status: options.status } } : {}),
   };
   const draft = { text: options.text, tags: options.tag,
     sources: [...ids.map((id, index) => ({ roomId: options.room, id, quote: quotes[index]! })), ...refs.map(ref => ({ ref }))],
@@ -84,7 +102,10 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
     if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
     else deps.io.out(`${data.replayed ? 'Already saved' : 'Saved'} entry #${data.entryId} for turn ${data.turnId} (sha256 ${data.payloadSha256}). Sources checked; interpretation is not verified.`);
     return AGENT_EXIT.ok;
-  } catch { return refused(deps, 'Journal save outcome unknown; check `reverie agent journal receipt` before retrying.'); }
+  } catch {
+    return refused(deps, `Journal save outcome unknown: it may or may not have been written, so it is unresolved. Check \`reverie agent journal receipt ${options.turn}\`; `
+      + 'a not_found there does not prove the save failed. To retry, repeat the identical save, which replays; never a changed one.');
+  }
 }
 
 export async function agentJournalRecall(deps: AgentDeps, words: string[], room?: string, project?: string): Promise<number> {
@@ -107,7 +128,8 @@ export async function agentJournalMap(deps: AgentDeps, words: string[], options:
     const now = (deps.now ?? Date.now)();
     const lines = data.entries.map(entry => `#${entry.entryId} ${entry.committedAt} (${elapsed(entry.committedAt, now)}) ${entry.tags.join(',')}` +
       `${entry.authorEmployeeId ? ` · by ${entry.authorEmployeeId}` : ''}` +
-      `${entry.topics.length ? ` · ${entry.topics.join(', ')}` : ''}${entry.importance ? ` · ${entry.importance}` : ''}${entry.superseded ? ' [superseded]' : ''}`);
+      `${entry.topics.length ? ` · ${entry.topics.join(', ')}` : ''}${entry.importance ? ` · ${entry.importance}` : ''}${entry.superseded ? ' [superseded]' : ''}`
+      + `${entry.state ? ` [${entry.state}${entry.stateScope === 'room' ? ' in this room' : ''}]` : ''}${entry.overdue ? ' [overdue]' : ''}`);
     const last = data.entries.at(-1);
     if (data.more && last) lines.push(`more: older entries exist (--before ${last.entryId})`);
     deps.io.out(lines.length ? lines.join('\n') : 'No journal entries.');
@@ -190,6 +212,9 @@ export function registerJournalCommands(
     .option('--related <entry-id>', 'An earlier related entry (repeat, 1-4)', repeatId)
     .option('--reason <why>', 'Why save now; required unless the turn message asks you to remember something')
     .option('--project <id>', 'Save to this project (readable by every employee, shown with your name) instead of your own journal')
+    .option('--due <time>', 'With --tag promise: when it is due, with Z or an offset (2026-11-03T15:00-05:00); a past time is fine')
+    .option('--outcome-of <entry-id>', 'This entry is how an earlier promise or decision turned out (with --status)')
+    .option('--status <status>', 'done or dropped (closes a promise; dropped needs --reason) or result (records how it turned out)')
     .option('--json', 'Machine-readable result and gate record')
     .action((options: JournalSaveOptions & { json?: boolean }) => run(Boolean(options.json), deps => agentJournalSave(deps, options)));
   journal.command('recall <words...>').description('Top two matching entries, with sources re-checked now')

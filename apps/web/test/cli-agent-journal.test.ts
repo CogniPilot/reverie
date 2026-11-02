@@ -107,4 +107,41 @@ describe('journal CLI', () => {
     expect(await agentJournalMap(map.deps, [], {})).toBe(0);
     expect(map.output[0]).toBe('#4 2026-10-30T04:00:00.000Z (10 h ago) lesson · Work [superseded]\nmore: older entries exist (--before 4)');
   });
+
+  it('sends a due time as canonical UTC and an outcome with its status, refusing malformed ones before any request', async () => {
+    const ok = { status: 200, json: { success: true, data: { entryId: 5, turnId: 'm-turn', replayed: false, payloadSha256: 'a'.repeat(64) } } };
+    const base = { room: 'room-one', turn: 'm-turn', text: 'T', ref: ['commit 0123abcd'], reason: 'why' };
+    const promise = fixture(true, ok);
+    expect(await agentJournalSave(promise.deps, { ...base, tag: ['promise'], due: '2026-11-03T15:00-05:00' })).toBe(0);
+    expect(promise.calls[0].body).toMatchObject({ draft: { annotations: { due: '2026-11-03T20:00:00.000Z' } } });
+    const outcome = fixture(true, ok);
+    expect(await agentJournalSave(outcome.deps, { ...base, tag: ['decision'], outcomeOf: '4', status: 'dropped' })).toBe(0);
+    expect(outcome.calls[0].body).toMatchObject({ draft: { annotations: { outcomeOf: { entry: 4, status: 'dropped' }, reason: 'why' } } });
+    for (const options of [{ tag: ['promise'], due: '2026-11-03T15:00' }, { tag: ['promise'], due: '2026-02-30T12:00Z' },
+      { tag: ['decision'], outcomeOf: '4' }, { tag: ['decision'], status: 'done' }, { tag: ['decision'], outcomeOf: 'four', status: 'done' },
+      { tag: ['decision'], outcomeOf: '4', status: 'finished' }]) {
+      const refused = fixture(false, ok);
+      expect(await agentJournalSave(refused.deps, { ...base, ...options })).not.toBe(0);
+      expect(refused.calls).toEqual([]);
+    }
+  });
+
+  it('prints a promise\'s state, due time and outcomes in recall, and its state in the map', async () => {
+    const promise = { ...entry, entryId: 6, tags: ['promise'], annotations: { due: '2026-10-30T12:00:00.000Z' },
+      outcome: { state: 'open', overdue: true, stateScope: 'room', outcomes: [], outcomesTotal: 0, outcomesTruncated: false } };
+    const decision = { ...entry, entryId: 7, tags: ['decision'], outcome: { stateScope: 'journal', outcomesTotal: 5, outcomesTruncated: true,
+      outcomes: [{ entryId: 9, status: 'result', committedAt: '2026-10-30T09:00:00.000Z' }] } };
+    const r = fixture(false, { status: 200, json: { success: true, data: { entries: [promise, decision] } } });
+    expect(await agentJournalRecall(r.deps, ['report'], 'room-one')).toBe(0);
+    expect(r.output[0]).toContain("  state: open, due 2026-10-30T12:00:00.000Z (overdue) (from this room's entries only)");
+    expect(r.output[0]).toContain('  outcome #9 result 2026-10-30T09:00:00.000Z\n  +4 older outcomes');
+    const m = fixture(false, { status: 200, json: { success: true, data: { more: false, entries: [{ entryId: 6, committedAt: '2026-10-30T04:00:00.000Z',
+      roomId: 'room-one', tags: ['promise'], topics: [], superseded: false, state: 'open', overdue: true }] } } });
+    expect(await agentJournalMap(m.deps, [], {})).toBe(0);
+    expect(m.output[0]).toMatch(/^#6 .* promise \[open\] \[overdue\]$/);
+    const room = fixture(false, { status: 200, json: { success: true, data: { more: false, entries: [{ entryId: 6, committedAt: '2026-10-30T04:00:00.000Z',
+      roomId: 'room-one', tags: ['promise'], topics: [], superseded: false, state: 'open', stateScope: 'room' }] } } });
+    expect(await agentJournalMap(room.deps, [], { room: 'room-one' })).toBe(0);
+    expect(room.output[0]).toMatch(/ \[open in this room\]$/);
+  });
 });

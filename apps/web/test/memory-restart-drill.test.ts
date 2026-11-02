@@ -12,11 +12,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EmployeeJournalStore, type JournalMessage, type ReadVisibleMessage } from '../src/employee-journal.js';
+import { agentJournalReceipt, agentJournalSave } from '../src/cli-agent-journal.js';
+import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 
 const ROOM = 'room-one';
 const OWNER = 'owner';
 const SELF = 'employee-one';
 const HOUR = 60 * 60_000;
+/** 3 PM EDT on Friday 2026-10-23, after the fixture's clock. */
+const PROMISE_DUE = '2026-10-23T19:00:00.000Z';
 
 let dir: string;
 let store: EmployeeJournalStore;
@@ -40,6 +44,34 @@ function remember(key: string, text: string, extra: { tags?: string[]; annotatio
 }
 const recall = (query: string) => store.recall(OWNER, SELF, query, read);
 
+/** What the server answers for the two journal calls the CLI makes here, from the real store. */
+function serve(request: RequestOptions): { status: number; json: never } {
+  const reply = (work: () => unknown) => {
+    try { return { status: 200, json: { success: true, data: work() } as never }; }
+    catch (err) { return { status: 400, json: { success: false, error: (err as Error).message } as never }; }
+  };
+  if (request.method === 'POST' && request.path === '/api/agent/journal/save')
+    return reply(() => store.save(OWNER, SELF, request.body as never, read));
+  const receipt = request.path.match(/^\/api\/agent\/journal\/receipt\/(.+)$/);
+  if (request.method === 'GET' && receipt) return reply(() => store.receipt(OWNER, SELF, decodeURIComponent(receipt[1])));
+  throw new Error(`unexpected ${request.method} ${request.path}`);
+}
+/** The journal CLI over a transport that answers the save call through `send`; text output, collected. */
+function cli(send: (request: RequestOptions) => Promise<{ status: number; json: never }>) {
+  const lines: string[] = [];
+  const deps: AgentDeps = { ctx: { selfId: 'self-session', apiUrl: 'http://synthetic.test' }, json: false, now: () => clock,
+    io: { out: (text) => lines.push(text), err: (text) => lines.push(text) },
+    request: async (_ctx, request) => (request.path.endsWith('/save') ? send(request) : serve(request)) as never };
+  return { deps, lines };
+}
+/** A "Remember this" turn and its source message, ready for a save through the CLI. */
+function turn(key: string, text: string) {
+  n += 1; clock += HOUR;
+  messages.set(`${ROOM}/s-${key}`, { id: `s-${key}`, roomId: ROOM, at: clock - 1000, text, fromSelf: false });
+  messages.set(`${ROOM}/t-${key}`, { id: `t-${key}`, roomId: ROOM, at: clock, text: `Remember this: ${text}`, fromSelf: false });
+  return { room: ROOM, turn: `t-${key}`, text, tag: ['decision'], source: [`s-${key}`], quote: [text.slice(0, 30)] };
+}
+
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'memory-drill-'));
   const file = join(dir, 'journal.sqlite');
@@ -53,10 +85,11 @@ beforeAll(() => {
   remember('morph', 'Decided to keep the capacity rule for scratch cleanup.');
   remember('t1', 'Release notes use the short template.', { tags: ['preference'] });
   remember('t2', 'Release notes use the long template.', { tags: ['preference'] });
-  remember('promise', 'I will send the coordinator the weekly report by 3 PM Friday.', { tags: ['promise'] });
+  remember('promise', 'I will send the coordinator the weekly report by 3 PM Friday.', { tags: ['promise'], annotations: { due: PROMISE_DUE } });
   const d3 = remember('d3', 'Decided to enable the nightly cleanup.');
-  remember('o3', 'Outcome: the nightly cleanup freed 40 GB on its first run.', { tags: ['lesson'], annotations: { related: [d3] } });
-  remember('done', 'Finished and merged the stalled-seat alert; done.', { tags: ['decision'] });
+  remember('o3', 'Outcome: the nightly cleanup freed 40 GB on its first run.', { tags: ['lesson'], annotations: { outcomeOf: { entry: d3, status: 'result' } } });
+  const task = remember('task', 'I will build the stuck-member alert.', { tags: ['promise'] });
+  remember('done', 'Finished and merged the stuck-member alert; done.', { tags: ['decision'], annotations: { outcomeOf: { entry: task, status: 'done' } } });
   remember('proj', 'Project note: the compiler baseline is green.', { project: 'rumoca', tags: ['decision'] });
   // A chain of corrections whose later links share no words with the first entry.
   const c1 = remember('c1', 'The standup meeting is at 9 AM daily.');
@@ -75,7 +108,7 @@ beforeAll(() => {
 });
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since)', () => {
+describe('memory restart drill (baseline 2026-11-02; cases 2, 3b, 4, 6d, 8, 9 and 10 closed since)', () => {
   it('1. the latest owner decision survives the restart, and the replaced one is not briefed', () => {
     const brief = store.brief(OWNER, SELF).entries.map((e) => e.entryId);
     expect(brief).toContain(ids.d2);
@@ -130,9 +163,9 @@ describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since
     expect(recall('6').map((e) => e.entryId)).toContain(ids.f2);
   });
 
-  // KNOWN GAP: no stemming; "decide" does not match "Decided".
-  it.fails('4. another form of a word still matches', () => {
+  it('4. another form of a word still matches', () => {
     expect(recall('decide').map((e) => e.entryId).some((id) => id === ids.morph || id === ids.d3)).toBe(true);
+    expect(recall('deploying').map((e) => e.entryId)).toContain(ids.f1);
   });
 
   it('5. of two answers on the same topic, the newer comes first', () => {
@@ -148,30 +181,77 @@ describe('memory restart drill (baseline 2026-11-02; cases 2 and 3b closed since
     expect(JSON.stringify(receipt)).not.toMatch(/"entryId":\s*\d/);
   });
 
+  // Unknown transport outcomes, at the CLI boundary: the save call fails on the client's side, whatever the server did.
+  it('6b. a lost acknowledgement is reported as unknown, the receipt finds the write, and the same save replays', async () => {
+    const save = turn('lost-ack', 'The lost acknowledgement case was written.');
+    const lost = cli(async (request) => { serve(request); throw new Error('connection reset'); });
+    expect(await agentJournalSave(lost.deps, save)).not.toBe(0);
+    expect(lost.lines.join('\n')).toMatch(/outcome unknown/);
+    expect(lost.lines.join('\n')).not.toMatch(/\bSaved\b|not saved/i);
+    const check = cli(async () => { throw new Error('unused'); });
+    expect(await agentJournalReceipt(check.deps, save.turn)).toBe(0);
+    expect(check.lines[0]).toMatch(/^committed #\d+/);
+    const again = cli(async (request) => serve(request));
+    expect(await agentJournalSave(again.deps, save)).toBe(0);
+    expect(again.lines[0]).toMatch(/^Already saved entry #\d+/);
+  });
+
+  it('6c. after an unknown outcome, a receipt miss is not proof: the write can still land', async () => {
+    const save = turn('late-write', 'The late write case was written.');
+    let land = () => {};
+    const late = cli(async (request) => { land = () => { serve(request); }; throw new Error('timed out'); });
+    expect(await agentJournalSave(late.deps, save)).not.toBe(0);
+    expect(late.lines.join('\n')).toMatch(/outcome unknown/);
+    const before = cli(async () => { throw new Error('unused'); });
+    await agentJournalReceipt(before.deps, save.turn);
+    expect(before.lines[0]).toMatch(/^not_found: .*at lookup time/);
+    expect(before.lines.join('\n')).not.toMatch(/not saved|was not written|never saved/i);
+    land(); // the request that timed out on the client reaches the store after all
+    const after = cli(async () => { throw new Error('unused'); });
+    await agentJournalReceipt(after.deps, save.turn);
+    expect(after.lines[0]).toMatch(/^committed #\d+/);
+  });
+
+  it('6d. after an unknown outcome, a receipt miss is reported as unresolved', async () => {
+    const save = turn('unresolved', 'The unresolved case was written.');
+    const lost = cli(async () => { throw new Error('timed out'); });
+    await agentJournalSave(lost.deps, save);
+    const check = cli(async () => { throw new Error('unused'); });
+    await agentJournalReceipt(check.deps, save.turn);
+    expect([...lost.lines, ...check.lines].join('\n')).toMatch(/unresolved|does not prove|not proof/i);
+    // Each message says it on its own, and a retry is only ever the identical save.
+    expect(lost.lines.join('\n')).toMatch(/unresolved/);
+    expect(lost.lines.join('\n')).toMatch(/repeat the identical save/);
+    expect(lost.lines.join('\n')).toContain(`receipt ${save.turn}`);
+    expect(check.lines[0]).toMatch(/does not prove the save failed/);
+  });
+
   it('7. a topic never saved returns nothing (the agent can say it has no memory of it)', () => {
     expect(recall('quarterly budget forecast spreadsheet')).toEqual([]);
   });
 
   // KNOWN GAP: a promise can be tagged 'promise', but it has no open/done status or due time, and the brief does not list
   // open ones as such.
-  it.fails('8. an unfinished promise is listed as open, with its due time', () => {
-    const entry = store.brief(OWNER, SELF).entries.find((e) => e.entryId === ids.promise) as Record<string, unknown> | undefined;
-    expect(entry?.status).toBe('open');
-    expect(entry?.due).toBeTruthy();
+  it('8. an unfinished promise is listed as open, with its due time', () => {
+    const open = store.brief(OWNER, SELF).open.find((p) => p.entryId === ids.promise);
+    expect(open).toMatchObject({ due: PROMISE_DUE, overdue: false });
+    // The closed task promise is not listed.
+    expect(store.brief(OWNER, SELF).open.map((p) => p.entryId)).not.toContain(ids.task);
   });
 
-  // KNOWN GAP: "done" is only text; no structured outcome or status on the task.
-  it.fails('9. finished work is recognisable as done, so it is not redone', () => {
-    const [task] = recall('stalled-seat alert');
-    expect((task?.annotations as Record<string, unknown> | undefined)?.status).toBe('done');
+  // The 2026-11-02 baseline expected a status field on the task entry itself. Entries are immutable, so "done" is a later
+  // outcome entry naming the task, and recall derives the state from it; the contract (not redoing finished work) holds.
+  it('9. finished work is recognisable as done, so it is not redone', () => {
+    const task = recall('build stuck-member alert').find((e) => e.entryId === ids.task);
+    expect(task?.outcome?.state).toBe('done');
+    expect(task?.outcome?.outcomes[0]).toMatchObject({ entryId: ids.done, status: 'done' });
   });
 
-  // KNOWN GAP: `related` points from the outcome back to the decision, but recalling the decision does not show it.
-  it.fails('10. recalling a decision shows its recorded outcome', () => {
-    const decision = recall('enable nightly cleanup').find((e) => e.entryId === ids.d3) as Record<string, unknown> | undefined;
-    expect(decision?.relatedBy ?? decision?.outcomes).toContain(ids.o3);
+  it('10. recalling a decision shows its recorded outcome', () => {
+    const top = recall('enable nightly cleanup');
+    expect(top.map((e) => e.entryId)).toEqual([ids.d3, ids.o3]);
+    expect(top[0]?.outcome?.outcomes).toEqual([expect.objectContaining({ entryId: ids.o3, status: 'result' })]);
   });
-
   it('11. project entries are shared by project, private ones stay private', () => {
     expect(store.recall(OWNER, 'employee-two', 'compiler baseline', read, undefined, 'rumoca').map((e) => e.entryId)).toEqual([ids.proj]);
     expect(store.recall(OWNER, 'employee-two', 'release Thursdays', read)).toEqual([]);
