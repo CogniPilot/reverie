@@ -77,6 +77,16 @@ describe('journal layout', () => {
     expect(distinct.size).toBe(points.length);
   });
 
+  it('never stacks circles on each other, with the taller map a larger journal gets', () => {
+    for (const n of [40, 120, 300]) {
+      const g = caJournalGraph(many.slice(0, n)), height = n <= 120 ? 600 : Math.round(600 * Math.sqrt(n / 120));
+      const p = caJournalLayout(g, { width: 900, height });
+      const pts = g.nodes.map((node: any) => ({ ...p.get(node.id), r: node.r }));
+      for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++)
+        expect(Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y)).toBeGreaterThanOrEqual(pts[i].r + pts[j].r);
+    }
+  });
+
   it('lays out nothing for an empty journal', () => {
     expect(caJournalLayout({ nodes: [], edges: [] }).size).toBe(0);
   });

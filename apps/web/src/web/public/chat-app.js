@@ -8923,9 +8923,9 @@ class ReverieChatApp {
     const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status'); status.textContent = 'Loading the journal…';
     const search = this.el('input', 'ca-field'); search.type = 'search'; search.placeholder = 'Find a word or tag';
     search.setAttribute('aria-label', 'Find a memory by word or tag');
-    const ns = 'http://www.w3.org/2000/svg', W = 900, H = 600;
+    const ns = 'http://www.w3.org/2000/svg', W = 900;
     const svg = this.doc.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-journal-map');
+    svg.setAttribute('class', 'ca-journal-map');
     svg.setAttribute('aria-label', `Memories of ${employee.name}`);
     const detail = this.el('section', 'ca-journal-detail'); detail.setAttribute('aria-live', 'polite');
     const close = this.button('ca-btn', 'Close journal map', () => dialog.close(), { text: 'Close' });
@@ -8956,8 +8956,13 @@ class ReverieChatApp {
     status.textContent = `${shown.length} ${shown.length === 1 ? 'memory' : 'memories'}${more || entries.length > LIMIT ? ` (the newest ${LIMIT})` : ''}.`;
 
     const byId = new Map(shown.map(e => [e.entryId, e]));
+    // A larger journal gets a taller map, so its memories still fit without overlapping.
+    const H = shown.length <= 120 ? 600 : Math.round(600 * Math.sqrt(shown.length / 120));
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     const graph = caJournalGraph(shown), pos = caJournalLayout(graph, { width: W, height: H });
-    const hue = (group) => { let h = 0; for (const c of group) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+    // Each topic gets its own hue, spread by the golden angle in order of first appearance, so neighbours never share one.
+    const groups = [...new Set(graph.nodes.map(node => node.group))];
+    const hue = (group) => Math.round((groups.indexOf(group) * 137.508 + 200) % 360);
     const edgeLayer = this.doc.createElementNS(ns, 'g'), nodeLayer = this.doc.createElementNS(ns, 'g');
     for (const edge of graph.edges) {
       const a = pos.get(edge.source), b = pos.get(edge.target), line = this.doc.createElementNS(ns, 'line');
@@ -8972,7 +8977,8 @@ class ReverieChatApp {
       if (!entry) return;
       for (const [nid, el] of nodeEls) el.classList.toggle('is-selected', nid === id);
       for (const line of edgeLayer.children) line.classList.toggle('is-active', line.dataset.source === String(id) || line.dataset.target === String(id));
-      const when = globalThis.ReverieTime?.format(Date.parse(entry.committedAt)) ?? entry.committedAt;
+      const at = Date.parse(entry.committedAt);
+      const when = Number.isFinite(at) ? (globalThis.ReverieTime?.format(at) ?? new Date(at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })) : '';
       const meta = [`#${entry.entryId}`, when, entry.annotations?.importance, entry.supersededBy?.length ? 'superseded' : ''].filter(Boolean).join(' · ');
       const body = this.el('p', 'ca-journal-text'); body.textContent = String(entry.text ?? '');
       detail.replaceChildren(this.el('h3', '', meta), body);
@@ -12163,7 +12169,7 @@ function caJournalGraph(entries) {
 function caJournalLayout(graph, { width = 900, height = 600, iterations } = {}) {
   const nodes = graph.nodes, n = nodes.length, pos = new Map();
   if (!n) return pos;
-  const cx = width / 2, cy = height / 2, k = Math.sqrt((width * height) / n) * 0.6;
+  const cx = width / 2, cy = height / 2, k = Math.sqrt((width * height) / n) * 0.4;
   const xs = new Float64Array(n), ys = new Float64Array(n), index = new Map(nodes.map((node, i) => [node.id, i]));
   const spread = Math.min(width, height) * 0.45;
   for (let i = 0; i < n; i++) {
@@ -12188,13 +12194,29 @@ function caJournalLayout(graph, { width = 900, height = 600, iterations } = {}) 
       dx[a] -= x * f; dy[a] -= y * f; dx[b] += x * f; dy[b] += y * f;
     }
     for (let i = 0; i < n; i++) {
-      dx[i] += (cx - xs[i]) * 0.02; dy[i] += (cy - ys[i]) * 0.02;
+      dx[i] += (cx - xs[i]) * 0.06; dy[i] += (cy - ys[i]) * 0.06;
       const d = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]) || 1, step = Math.min(d, temperature);
       const r = nodes[i].r + 2;
       xs[i] = Math.min(width - r, Math.max(r, xs[i] + (dx[i] / d) * step));
       ys[i] = Math.min(height - r, Math.max(r, ys[i] + (dy[i] / d) * step));
     }
     temperature = Math.max(0.5, temperature * 0.97);
+  }
+  // Then push overlapping circles apart (a 3 px gap), so a dense topic does not stack its memories on each other.
+  for (let pass = 0; pass < (n > 200 ? 120 : 40); pass++) {
+    let moved = false;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const x = xs[j] - xs[i], y = ys[j] - ys[i], d = Math.sqrt(x * x + y * y) || 0.01, need = nodes[i].r + nodes[j].r + 3;
+      if (d >= need) continue;
+      const push = (need - d) / 2, ux = x / d, uy = y / d;
+      xs[i] -= ux * push; ys[i] -= uy * push; xs[j] += ux * push; ys[j] += uy * push;
+      moved = true;
+    }
+    for (let i = 0; i < n; i++) {
+      const r = nodes[i].r + 2;
+      xs[i] = Math.min(width - r, Math.max(r, xs[i])); ys[i] = Math.min(height - r, Math.max(r, ys[i]));
+    }
+    if (!moved) break;
   }
   for (let i = 0; i < n; i++) pos.set(nodes[i].id, { x: Math.round(xs[i] * 10) / 10, y: Math.round(ys[i] * 10) / 10 });
   return pos;

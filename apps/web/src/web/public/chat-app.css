@@ -1741,8 +1741,8 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-root .ca-member.is-state-viewer-unavailable .ca-member-sub { color: var(--text-dim); }
 
 /* Journal map (openJournalMap): sized by importance, faded when superseded. */
-.ca-journal-dialog { width: min(96vw, 1000px); }
-.ca-journal-map { width: 100%; height: auto; max-height: 62vh; background: var(--ca-surface-2, transparent); border-radius: 8px; }
+.ca-dialog.ca-journal-dialog { width: min(96vw, 1000px); max-width: min(96vw, 1000px); }
+.ca-journal-map { display: block; width: 100%; height: auto; max-height: 62vh; background: var(--ca-surface-2, transparent); border-radius: 8px; }
 .ca-journal-edge { stroke: currentColor; opacity: .25; stroke-width: 1; }
 .ca-journal-edge.is-supersedes { stroke-width: 2.5; opacity: .55; }
 .ca-journal-edge.is-related { stroke-dasharray: 5 4; stroke-width: 1.5; opacity: .45; }
@@ -1754,3 +1754,4 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-journal-node.is-selected circle, .ca-journal-node:focus-visible circle { stroke-width: 4; }
 .ca-journal-node:focus { outline: none; }
 .ca-journal-text { white-space: pre-wrap; }
+.ca-journal-sources { margin: 4px 0; padding-left: 20px; }
