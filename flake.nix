@@ -265,6 +265,10 @@
             selftestPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneSelftest;
             prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
           })
+          (import ./nix/prune-lease-acceptance-service.nix {
+            inherit config lib pkgs;
+            leaseAcceptancePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.leaseAcceptance;
+          })
         ];
       };
       nixosModules.reverieCollect = { config, lib, pkgs, ... }: import ./nix/collect-service.nix {
@@ -354,6 +358,18 @@
               legacyPrunePackage = packages.prune;
             };
           in pkgs.runCommand "reverie-prune-service-evaluation" {
+            checks = builtins.toJSON evaluated.checks;
+          } ''
+            mkdir -p "$out"
+            printf '%s\n' "$checks" > "$out/checks.json"
+          '';
+          pruneLeaseAcceptanceService = let
+            evaluated = import ./tests/prune_lease_acceptance_eval.nix {
+              inherit nixpkgs system;
+              leaseAcceptancePackage = packages.leaseAcceptance;
+              pruneModule = self.nixosModules.reveriePrune;
+            };
+          in pkgs.runCommand "reverie-prune-lease-acceptance-evaluation" {
             checks = builtins.toJSON evaluated.checks;
           } ''
             mkdir -p "$out"

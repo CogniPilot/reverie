@@ -93,8 +93,14 @@ peerSocket, brokerUid, peerEmployeeId, peerBinary, peerImageId, generation,
 receiptLifetimeSeconds (60..86400), companyFile (canonical private registry), and brokerConfig (the current private broker declaration).
 Deployment and identity values remain instance-selected data outside source.
 
-The module unit `reverie-prune-lease-acceptance.service` runs the pinned package
-`--run` after declared initialization. Use the actual host namespace (`+` command
+The module unit `reverie-prune-lease-acceptance.service`
+(`services.reverie.prune.leaseAcceptance.enable`, with `peerSocket`, `brokerUid`,
+`peerEmployeeId`, `peerImageId`, `generation`, `companyFile`, `brokerConfig` and
+an optional `receiptLifetimeSeconds`, default 3600) runs the pinned package
+`--run` after declared initialization. Its immutable gate config takes
+`stateDirectory` and `deploymentConfig` from the declared cleanup module itself, and
+`peerBinary` from the package's own pinned peer artifact. It has no timer and no
+`wantedBy`; `checks.<system>.pruneLeaseAcceptanceService` evaluates it. Use the actual host namespace (`+` command
 prefix or no filesystem namespace), host PID visibility, and a bounded oneshot
 with control-group cleanup. Later observation preflight uses `--check` in the
 same actual host namespace before janitor sandboxing. Order is initialization ->

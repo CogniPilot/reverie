@@ -62,5 +62,7 @@ The flake exports the package as `pruneSelftest` and includes these disabled
 options in the existing `nixosModules.reveriePrune` module. The
 `checks.<system>.pruneSelftestService` check evaluates that actual exported module;
 it builds synthetic unit text and never installs accounts, runs either unit, or
-performs the kernel selftest. The real lease-acceptance predecessor is not
-provided by this export, so this source is not an activation-ready deployment.
+performs the kernel selftest. The same module now declares the real
+lease-acceptance predecessor (`services.reverie.prune.leaseAcceptance`, see
+docs/lease-acceptance.md). Declaring both is still not activation: each unit runs
+only when the owner starts it, and their receipts are reviewed before any live use.
