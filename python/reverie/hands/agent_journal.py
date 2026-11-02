@@ -59,6 +59,26 @@ PROVENANCE = ('direct', 'relayed', 'reconstructed', 'unknown')
 # Curated so the memory map does not fragment into near-duplicate topics; edit here, not per entry.
 TOPICS = ('Shared history', 'People', 'Work', 'Memory and harness', 'Games and play', 'Identity', 'Other')
 IMPORTANCE = ('notable', 'important', 'keystone')
+# Recall ranks a pool of text matches the way generative-agent memories do (Park et al. 2023): relevance + recency +
+# importance, each on a 0-1 scale, so a later decision is not buried under an older note that shares more words.
+# Relevance is divided by the pool's best match (FTS rank has no fixed scale), so a weaker real match keeps proportional
+# credit instead of dropping to zero; recency and importance are already 0-1, so entries saved minutes apart do not get
+# an artificial full-point recency gap.
+RECALL_POOL = 20
+RECALL_LIMIT = 2
+RECALL_HALF_LIFE_DAYS = 7
+IMPORTANCE_WEIGHT = {'notable': 1 / 3, 'important': 2 / 3, 'keystone': 1.0}
+
+
+def memory_scores(relevance, committed_ms, importance, now_ms):
+    """One score per candidate: relevance as a share of the pool's best match (no positive best: 0), plus recency as
+    a half-life decay (RECALL_HALF_LIFE_DAYS), plus the entry's own importance (unrated = 0)."""
+    def scaled(values):
+        best = max(values, default=0)
+        return [max(0.0, v) / best if best > 0 else 0.0 for v in values]
+    recency = [0.5 ** (max(0.0, now_ms - c) / 86400000 / RECALL_HALF_LIFE_DAYS) for c in committed_ms]
+    weight = [IMPORTANCE_WEIGHT.get(i, 0.0) for i in importance]
+    return [r + t + w for r, t, w in zip(scaled(relevance), recency, weight)]
 
 
 def capsule_context(value, room):
@@ -303,17 +323,22 @@ class Journal:
                 'committed_ms': row['committed_ms'], 'payload_sha256': row['payload_hash'],
                 'evidence': 'durable write receipt only; no semantic or current-source verification'}
 
-    def recall(self, query):
+    def recall(self, query, now_ms=None):
         if not isinstance(query, str) or not 1 <= len(query.strip()) <= 300:
             raise ValueError('bounded query required')
         tokens = re.findall(r'[^\W_]+', query, re.UNICODE)[:12]
         if not tokens:
             return []
         expression = ' OR '.join('"' + t.replace('"', '""') + '"' for t in tokens)
-        rows = self.db.execute('''SELECT j.id,j.committed_ms,j.payload FROM hands_journal_fts f
+        rows = self.db.execute('''SELECT j.id,j.committed_ms,j.payload,rank FROM hands_journal_fts f
              JOIN hands_journal j ON j.id=f.rowid WHERE hands_journal_fts MATCH ?
-             ORDER BY rank,j.id DESC LIMIT 2''', (expression,)).fetchall()
-        return [dict(id=r['id'], committed_ms=r['committed_ms'], **json.loads(r['payload'])) for r in rows]
+             ORDER BY rank,j.id DESC LIMIT ?''', (expression, RECALL_POOL)).fetchall()
+        entries = [dict(id=r['id'], committed_ms=r['committed_ms'], **json.loads(r['payload'])) for r in rows]
+        now_ms = time.time() * 1000 if now_ms is None else now_ms
+        scores = memory_scores([-r['rank'] for r in rows], [r['committed_ms'] for r in rows],
+                               [e['draft'].get('annotations', {}).get('importance') for e in entries], now_ms)
+        order = sorted(range(len(entries)), key=lambda i: (-scores[i], -entries[i]['id']))
+        return [entries[i] for i in order[:RECALL_LIMIT]]
 
 
 COMMIT_TOOL = {'type': 'function', 'function': {
