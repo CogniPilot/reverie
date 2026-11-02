@@ -78,6 +78,33 @@ const FINAL_LOOK_MS = 2_000;
 // eslint-disable-next-line no-control-regex
 const CODEX_DIM_PLACEHOLDER = /^((?:\x1b\[[0-9;]*m)*›(?:\x1b\[[0-9;]*m)* ?)\x1b\[2m[^\x1b\n]*\x1b\[(?:0|22)?m/gmu;
 
+/**
+ * The text attributes in effect at a row's leading glyph, from the style codes in front of it on that row: the sorted SGR
+ * attribute numbers (1 bold, 2 faint, 3 italic, 4 underline, 5 blink, 7 inverse, 8 hidden, 9 strike), with `colour` when a
+ * colour is set. Undefined when the row does not start with the glyph.
+ */
+function glyphStyle(row: string, glyph: string): string | undefined {
+  // eslint-disable-next-line no-control-regex
+  const lead = /^((?:\x1b\[[0-9;]*m)*)/u.exec(row)![1]!;
+  if (!row.slice(lead.length).startsWith(glyph)) return undefined;
+  const on = new Set<string>();
+  // eslint-disable-next-line no-control-regex
+  for (const [, params] of lead.matchAll(/\x1b\[([0-9;]*)m/gu)) {
+    const codes = (params || '0').split(';');
+    for (let i = 0; i < codes.length; i++) {
+      const code = Number(codes[i] || '0');
+      if (code === 0) on.clear();
+      else if (code === 38 || code === 48 || code === 58) { on.add('colour'); i += codes[i + 1] === '5' ? 2 : codes[i + 1] === '2' ? 4 : 0; }
+      else if ((code >= 30 && code <= 37) || (code >= 40 && code <= 47) || (code >= 90 && code <= 107)) on.add('colour');
+      else if (code === 39 || code === 49 || code === 59) continue;
+      else if (code === 22) { on.delete('1'); on.delete('2'); }
+      else if (code >= 23 && code <= 29) on.delete(String(code === 24 ? 4 : code === 27 ? 7 : code === 28 ? 8 : code - 20));
+      else on.add(String(code));
+    }
+  }
+  return [...on].sort().join(',');
+}
+
 /** The complete last composer, including wrapped text, ending before the CLI's chrome. */
 export function composerBody(screen: string, glyph: string): string | undefined {
   if (!glyph || screen.length > 1_048_576) return undefined;
@@ -106,7 +133,12 @@ export function composerBody(screen: string, glyph: string): string | undefined 
   // and `⚠` warning. Only the last pair counts. Higher up, two user rows in a row are plain history: a message steered into a
   // running turn is echoed right under the one that started it (codex-cli 0.163.0), and refusing there left every mid-turn
   // delivery unverified.
-  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻■⚠]/u.test(line))) return undefined;
+  // One such pair is read, from its styles: Codex (0.163.0) draws an echoed user prompt bold and faint, and its enabled composer
+  // bold only. Exactly that pair means the lower row is the composer; any other style, or none, stays ambiguous.
+  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻■⚠]/u.test(line))) {
+    const raw = screen.split('\n');
+    if (glyphStyle(raw[previous] ?? '', glyph) !== '1,2' || glyphStyle(raw[last] ?? '', glyph) !== '1') return undefined;
+  }
   const body = [lines[last].trimStart().slice(glyph.length).trimStart()];
   for (const line of lines.slice(last + 1, end)) {
     const text = line.trim();
