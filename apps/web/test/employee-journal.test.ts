@@ -130,7 +130,7 @@ describe('employee journal store', () => {
 
     it('keeps imports out of the brief and the save window; memories written after the first import count like saves', () => {
       expect(store.importLegacy(OWNER, SELF, batch(40, (i) => ({ importance: i % 2 ? 'keystone' : 'important' }))).results.every((r) => r.status === 'imported')).toBe(true);
-      expect(store.brief(OWNER, SELF)).toEqual({ total: 40, entries: [] });
+      expect(store.brief(OWNER, SELF)).toEqual({ total: 40, entries: [], open: [], openTotal: 0 });
       expect(store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-turn', draft: draft() }, read).status).toBe('committed');
       expect(store.brief(OWNER, SELF).entries).toHaveLength(1); // the native entry, not 40 imported ones
       clock += 60_000;
@@ -251,7 +251,7 @@ describe('employee journal store', () => {
     expect(brief.entries.map((e) => [e.entryId, e.importance ?? null])).toEqual([[2, 'keystone'], [4, null], [3, null]]);
     expect(brief.entries[0]).toMatchObject({ text: 'Standing rule: James merges.', tags: ['decision'] });
     expect(store.brief(OWNER, SELF, 1).entries.map((e) => e.entryId)).toEqual([2]);
-    expect(store.brief(OWNER, 'employee-two')).toEqual({ total: 0, entries: [] });
+    expect(store.brief(OWNER, 'employee-two')).toEqual({ total: 0, entries: [], open: [], openTotal: 0 });
   });
 
   it('keeps the hands journal limits', () => {

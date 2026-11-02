@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { KEYSTONE_CHARS, MEMORY_BRIEF_MAX, MEMORY_BRIEF_NEWEST, renderMemoryBrief } from '../src/memory-brief.js';
+import { KEYSTONE_CHARS, MEMORY_BRIEF_MAX, MEMORY_BRIEF_NEWEST, PROMISE_BRIEF_CHARS, renderMemoryBrief } from '../src/memory-brief.js';
 
 const entry = (entryId: number, extra: Record<string, unknown> = {}) => ({
   entryId, committedAt: '2026-10-27T14:02:31.000Z', tags: ['decision'], text: 'James merges; agents never merge.', ...extra,
@@ -51,5 +51,35 @@ describe('memory brief', () => {
     expect(KEYSTONE_CHARS).toBe(320);
     expect(kline.split(': ').pop()!.length).toBe(KEYSTONE_CHARS);
     expect(kline.endsWith('…')).toBe(true);
+  });
+
+  it('places open promises only in what keystone and important entries leave, never pushing one out, and says what it left out', () => {
+    const now = Date.parse('2026-11-02T18:00:00Z');
+    const open = [1, 2, 3].map((i) => ({ entryId: 100 + i, committedAt: '2026-10-27T14:02:31.000Z', text: 'p'.repeat(900),
+      due: `2026-11-0${i}T20:00:00.000Z`, overdue: i === 1 }));
+    const lines = (text: string) => text.split('\n').filter((line) => line.startsWith('- #'));
+    // Four long keystones already fill the brief: promises get no room, and every keystone line the brief showed
+    // without promises is still there, unchanged.
+    const keystones = [1, 2, 3, 4].map((i) => entry(i, { importance: 'keystone', text: 'k'.repeat(400) }));
+    const without = renderMemoryBrief('Maple', { total: 12, entries: keystones }, now);
+    const crowded = renderMemoryBrief('Maple', { total: 12, entries: keystones, open, openTotal: 5 }, now);
+    expect(lines(crowded)).toEqual(lines(without));
+    expect(crowded.length).toBeLessThanOrEqual(MEMORY_BRIEF_MAX);
+    expect(crowded).not.toContain('Open promises');
+    expect(crowded).toMatch(/\d+ more \(5 open promises\): reverie agent journal map\.$/);
+    // One short keystone leaves room: a capped block, soonest due first, rows cut, the overdue one marked, then the
+    // newest other entry, and the promises it could not fit counted in the last line.
+    const roomy = renderMemoryBrief('Maple', { total: 9, entries: [entry(1, { importance: 'keystone' }), entry(2)], open, openTotal: 5 }, now);
+    const all = roomy.split('\n');
+    const start = all.indexOf('Open promises (your own notes, unverified):');
+    const rows = all.slice(start + 1).filter((line) => line.startsWith('- #10'));
+    expect(start).toBeGreaterThan(all.findIndex((line) => line.startsWith('- #1 keystone')));
+    expect([all[start], ...rows].join('\n').length).toBeLessThanOrEqual(PROMISE_BRIEF_CHARS);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]).toMatch(/^- #101 due 2026-11-01 20:00 UTC, overdue: p+…$/);
+    expect(rows[0]!.split(': ').pop()!.length).toBe(80);
+    expect(all.findIndex((line) => line.startsWith('- #2,'))).toBeGreaterThan(start);
+    expect(roomy).toContain(`${9 - 2 - rows.length} more (${5 - rows.length} open promises): reverie agent journal map.`);
+    expect(roomy.length).toBeLessThanOrEqual(MEMORY_BRIEF_MAX);
   });
 });

@@ -19,6 +19,8 @@ const ROOM = 'room-one';
 const OWNER = 'owner';
 const SELF = 'employee-one';
 const HOUR = 60 * 60_000;
+/** 3 PM EDT on Friday 2026-10-23, after the fixture's clock. */
+const PROMISE_DUE = '2026-10-23T19:00:00.000Z';
 
 let dir: string;
 let store: EmployeeJournalStore;
@@ -83,10 +85,11 @@ beforeAll(() => {
   remember('morph', 'Decided to keep the capacity rule for scratch cleanup.');
   remember('t1', 'Release notes use the short template.', { tags: ['preference'] });
   remember('t2', 'Release notes use the long template.', { tags: ['preference'] });
-  remember('promise', 'I will send the coordinator the weekly report by 3 PM Friday.', { tags: ['promise'] });
+  remember('promise', 'I will send the coordinator the weekly report by 3 PM Friday.', { tags: ['promise'], annotations: { due: PROMISE_DUE } });
   const d3 = remember('d3', 'Decided to enable the nightly cleanup.');
-  remember('o3', 'Outcome: the nightly cleanup freed 40 GB on its first run.', { tags: ['lesson'], annotations: { related: [d3] } });
-  remember('done', 'Finished and merged the stalled-seat alert; done.', { tags: ['decision'] });
+  remember('o3', 'Outcome: the nightly cleanup freed 40 GB on its first run.', { tags: ['lesson'], annotations: { outcomeOf: { entry: d3, status: 'result' } } });
+  const task = remember('task', 'I will build the stuck-member alert.', { tags: ['promise'] });
+  remember('done', 'Finished and merged the stuck-member alert; done.', { tags: ['decision'], annotations: { outcomeOf: { entry: task, status: 'done' } } });
   remember('proj', 'Project note: the compiler baseline is green.', { project: 'rumoca', tags: ['decision'] });
   // A chain of corrections whose later links share no words with the first entry.
   const c1 = remember('c1', 'The standup meeting is at 9 AM daily.');
@@ -105,7 +108,7 @@ beforeAll(() => {
 });
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-describe('memory restart drill (baseline 2026-11-02; cases 2, 3b, 4 and 6d closed since)', () => {
+describe('memory restart drill (baseline 2026-11-02; cases 2, 3b, 4, 6d, 8, 9 and 10 closed since)', () => {
   it('1. the latest owner decision survives the restart, and the replaced one is not briefed', () => {
     const brief = store.brief(OWNER, SELF).entries.map((e) => e.entryId);
     expect(brief).toContain(ids.d2);
@@ -229,24 +232,26 @@ describe('memory restart drill (baseline 2026-11-02; cases 2, 3b, 4 and 6d close
 
   // KNOWN GAP: a promise can be tagged 'promise', but it has no open/done status or due time, and the brief does not list
   // open ones as such.
-  it.fails('8. an unfinished promise is listed as open, with its due time', () => {
-    const entry = store.brief(OWNER, SELF).entries.find((e) => e.entryId === ids.promise) as Record<string, unknown> | undefined;
-    expect(entry?.status).toBe('open');
-    expect(entry?.due).toBeTruthy();
+  it('8. an unfinished promise is listed as open, with its due time', () => {
+    const open = store.brief(OWNER, SELF).open.find((p) => p.entryId === ids.promise);
+    expect(open).toMatchObject({ due: PROMISE_DUE, overdue: false });
+    // The closed task promise is not listed.
+    expect(store.brief(OWNER, SELF).open.map((p) => p.entryId)).not.toContain(ids.task);
   });
 
-  // KNOWN GAP: "done" is only text; no structured outcome or status on the task.
-  it.fails('9. finished work is recognisable as done, so it is not redone', () => {
-    const [task] = recall('stalled-seat alert');
-    expect((task?.annotations as Record<string, unknown> | undefined)?.status).toBe('done');
+  // The 2026-11-02 baseline expected a status field on the task entry itself. Entries are immutable, so "done" is a later
+  // outcome entry naming the task, and recall derives the state from it; the contract (not redoing finished work) holds.
+  it('9. finished work is recognisable as done, so it is not redone', () => {
+    const task = recall('build stuck-member alert').find((e) => e.entryId === ids.task);
+    expect(task?.outcome?.state).toBe('done');
+    expect(task?.outcome?.outcomes[0]).toMatchObject({ entryId: ids.done, status: 'done' });
   });
 
-  // KNOWN GAP: `related` points from the outcome back to the decision, but recalling the decision does not show it.
-  it.fails('10. recalling a decision shows its recorded outcome', () => {
-    const decision = recall('enable nightly cleanup').find((e) => e.entryId === ids.d3) as Record<string, unknown> | undefined;
-    expect(decision?.relatedBy ?? decision?.outcomes).toContain(ids.o3);
+  it('10. recalling a decision shows its recorded outcome', () => {
+    const top = recall('enable nightly cleanup');
+    expect(top.map((e) => e.entryId)).toEqual([ids.d3, ids.o3]);
+    expect(top[0]?.outcome?.outcomes).toEqual([expect.objectContaining({ entryId: ids.o3, status: 'result' })]);
   });
-
   it('11. project entries are shared by project, private ones stay private', () => {
     expect(store.recall(OWNER, 'employee-two', 'compiler baseline', read, undefined, 'rumoca').map((e) => e.entryId)).toEqual([ids.proj]);
     expect(store.recall(OWNER, 'employee-two', 'release Thursdays', read)).toEqual([]);

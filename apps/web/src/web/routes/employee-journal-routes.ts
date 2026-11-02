@@ -116,7 +116,7 @@ export function registerEmployeeJournalRoutes(
       const self = current(request);
       const brief = deps.journal().brief(self.owner, self.employee.id);
       return { success: true, data: { total: brief.total, entries: brief.entries.map(({ text: _text, ...entry }) => entry),
-        text: renderMemoryBrief(self.employee.name, brief) } };
+        open: brief.open.map(({ text: _text, ...promise }) => promise), openTotal: brief.openTotal, text: renderMemoryBrief(self.employee.name, brief) } };
     } catch (error) { return failed(reply, error); }
   });
   app.get('/api/agent/journal/map', options, async (request, reply) => {
