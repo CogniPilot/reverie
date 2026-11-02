@@ -469,19 +469,35 @@ describe('writeHooksConfig', () => {
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     const hooks = JSON.stringify(parsed.hooks);
-    expect(hooks).not.toMatch(/REVERIE_(TURN_SUMMARY|MEMORY_BRIEF)_V2/);
-    expect(hooks).toContain('REVERIE_TURN_SUMMARY_V3');
-    expect(hooks).toContain('REVERIE_MEMORY_BRIEF_V3');
+    expect(hooks).not.toMatch(/REVERIE_(TURN_SUMMARY|MEMORY_BRIEF)_V[23]/);
+    expect(hooks).toContain('REVERIE_TURN_SUMMARY_V4');
+    expect(hooks).toContain('REVERIE_MEMORY_BRIEF_V4');
     expect(hooks).toContain('process.env.REVERIE_CLI');
     expect(parsed.model).toBe('opus');
     expect(parsed.permissions).toEqual({ allow: ['Bash(ls:*)'] });
     expect(parsed.hooks.PostToolUse).toContainEqual(userHook);
     for (const event of ['SessionStart', 'UserPromptSubmit', 'PostToolUse'])
-      expect(JSON.stringify(parsed.hooks[event]).split('REVERIE_TURN_SUMMARY_V3').length - 1).toBe(1);
+      expect(JSON.stringify(parsed.hooks[event]).split('REVERIE_TURN_SUMMARY_V4').length - 1).toBe(1);
     // Current now: the next launch leaves the file alone.
     const after = readFileSync(settingsPath, 'utf-8');
     await refreshStaleReverieHooks(testDir);
     expect(readFileSync(settingsPath, 'utf-8')).toBe(after);
+  });
+
+  it('upgrades V3 summary and memory-brief hooks to the image-CLI fallback once', async () => {
+    const claudeDir = join(testDir, '.claude');
+    const settingsPath = join(claudeDir, 'settings.local.json');
+    mkdirSync(claudeDir, { recursive: true });
+    const v3 = JSON.stringify({ hooks: generateHooksConfig().hooks })
+      .replaceAll('REVERIE_TURN_SUMMARY_V4', 'REVERIE_TURN_SUMMARY_V3')
+      .replaceAll('REVERIE_MEMORY_BRIEF_V4', 'REVERIE_MEMORY_BRIEF_V3');
+    writeFileSync(settingsPath, v3);
+    await refreshStaleReverieHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
+    const hooks = JSON.stringify(JSON.parse(readFileSync(settingsPath, 'utf-8')).hooks);
+    expect(hooks).not.toMatch(/REVERIE_(TURN_SUMMARY|MEMORY_BRIEF)_V3/);
+    expect(hooks.split('REVERIE_MEMORY_BRIEF_V4').length - 1).toBe(1);
+    expect(hooks).toContain('/bin/reverie'); // shell-quoted inside the node -e command
   });
 
   it('should not add rewake hooks to a user-owned hook configuration', async () => {
@@ -1704,11 +1720,11 @@ describe('per-turn message summary hooks', () => {
           hooks: Array<{ command: string; timeout: number }>;
         }>;
         const entry = entries.find((item) =>
-          item.hooks.some((hook) => hook.command.includes('REVERIE_TURN_SUMMARY_V3'))
+          item.hooks.some((hook) => hook.command.includes('REVERIE_TURN_SUMMARY_V4'))
         )!;
         expect(entry).toBeDefined();
         expect(entry.matcher).toBeUndefined();
-        const handler = entry.hooks.find((hook) => hook.command.includes('REVERIE_TURN_SUMMARY_V3'))!;
+        const handler = entry.hooks.find((hook) => hook.command.includes('REVERIE_TURN_SUMMARY_V4'))!;
         expect(handler.timeout).toBe(3);
         expect(handler.command).toContain(event);
       }
@@ -1718,8 +1734,8 @@ describe('per-turn message summary hooks', () => {
   it('starts every session with the memory brief as its own bounded handler, before the summary, in both harnesses', () => {
     for (const config of [generateHooksConfig(), generateCodexTurnSummaryHooks()]) {
       const handlers = (config.hooks.SessionStart as Array<{ hooks: Array<{ command: string; timeout: number }> }>).flatMap((e) => e.hooks);
-      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V3'));
-      const summary = handlers.findIndex((h) => h.command.includes('REVERIE_TURN_SUMMARY_V3'));
+      const brief = handlers.findIndex((h) => h.command.includes('REVERIE_MEMORY_BRIEF_V4'));
+      const summary = handlers.findIndex((h) => h.command.includes('REVERIE_TURN_SUMMARY_V4'));
       expect(brief).toBeGreaterThanOrEqual(0);
       expect(brief).toBeLessThan(summary);
       expect(handlers[brief].timeout).toBe(3);
@@ -1781,7 +1797,7 @@ describe('per-turn message summary hooks', () => {
     );
     const run = (text: string, fail: boolean | 'old' = false) => {
       const result = spawnSync(process.execPath, ['-e', generateMemoryBriefScript()], {
-        env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(), REVERIE_CLI: '',
+        env: { ...process.env, TMPDIR: dir, PATH: `${dir}:${process.env.PATH}`, REVERIE_SESSION_ID: randomUUID(), REVERIE_CLI: '', REVERIE_CONTAINER: '',
           REVERIE_API_URL: 'http://office', BRIEF_TEXT: text, BRIEF_FAIL: fail === 'old' ? 'old' : fail ? '1' : '' },
         encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
       });
@@ -1811,10 +1827,10 @@ describe('per-turn message summary hooks', () => {
     writeFileSync(join(dir, 'home', 'reverie'), `#!${process.execPath}\nprocess.stderr.write("error: unknown command '" + process.argv[3] + "'\\n");process.exit(1);\n`, { mode: 0o700 });
     const image = join(dir, 'image', 'reverie');
     writeFileSync(image, `#!${process.execPath}\nif(process.env.IMAGE_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:process.argv.at(-1),additionalContext:'from the image CLI'}}));\n`, { mode: 0o700 });
-    const run = (script: string, cli: string, fail = false) => {
+    const run = (script: string, cli: string, fail = false, container = '') => {
       const result = spawnSync(process.execPath, ['-e', script], {
         env: { ...process.env, TMPDIR: dir, PATH: `${join(dir, 'home')}:${process.env.PATH}`, REVERIE_CLI: cli, REVERIE_SESSION_ID: randomUUID(),
-          REVERIE_API_URL: 'http://office', IMAGE_FAIL: fail ? '1' : '' },
+          REVERIE_API_URL: 'http://office', IMAGE_FAIL: fail ? '1' : '', REVERIE_CONTAINER: container },
         encoding: 'utf8', input: 'untrusted hook payload', timeout: 4000,
       });
       expect(result.status).toBe(0);
@@ -1828,6 +1844,15 @@ describe('per-turn message summary hooks', () => {
       for (const cli of ['', 'reverie', 'image/reverie'])
         expect(run(generateMemoryBriefScript(), cli)).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)`);
       expect(run(generateTurnSummaryScript('UserPromptSubmit'), '')).toBeUndefined();
+      // A container started from an image that predates REVERIE_CLI: the image's own /bin/reverie answers before PATH.
+      expect(generateMemoryBriefScript()).toContain("existsSync('/bin/reverie')");
+      const inImage = (script: string, path: string) => script.replaceAll("'/bin/reverie'", JSON.stringify(path));
+      expect(run(inImage(generateMemoryBriefScript(), image), '', false, '1')).toBe('from the image CLI');
+      expect(run(inImage(generateTurnSummaryScript('UserPromptSubmit'), image), '', false, '1')).toBe('from the image CLI');
+      expect(run(inImage(generateMemoryBriefScript(), image), '', true, '1')).toBe(`${MEMORY_BRIEF_UNREADABLE} (The hook ran ${image}.)`);
+      const missing = join(dir, 'missing', 'reverie');
+      expect(run(inImage(generateMemoryBriefScript(), missing), '', false, '1')).toBe(`${MEMORY_BRIEF_NO_CLI} (The hook ran reverie from PATH.)`);
+      expect(run(inImage(generateMemoryBriefScript(), missing), image, false, '1')).toBe('from the image CLI'); // REVERIE_CLI still wins
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1849,7 +1874,7 @@ describe('per-turn message summary hooks', () => {
           ...process.env,
           TMPDIR: dir,
           PATH: `${dir}:${process.env.PATH}`,
-          REVERIE_CLI: '',
+          REVERIE_CLI: '', REVERIE_CONTAINER: '',
           REVERIE_SESSION_ID: sessionId,
           REVERIE_API_URL: 'http://office',
           SUMMARY_TEXT: text,
@@ -1905,7 +1930,7 @@ describe('per-turn message summary hooks', () => {
       const parsed = JSON.parse(once);
       expect(parsed.custom).toBe(true);
       expect(parsed.hooks.SessionStart).toContainEqual(userHook);
-      expect(JSON.stringify(parsed)).toContain('REVERIE_TURN_SUMMARY_V3');
+      expect(JSON.stringify(parsed)).toContain('REVERIE_TURN_SUMMARY_V4');
       await applyCodexTurnSummaryHooks(dir, true);
       expect(readFileSync(path, 'utf8')).toBe(once);
       writeFileSync(path, '{invalid');
@@ -1935,7 +1960,7 @@ it('deduplicates actual zoned summary snapshots across clock ticks', () => {
     renderTurnSummary('ring', [{ ...candidate, excerpt }], { state: 'complete', rooms: [] }, zone, now);
   const run = (text: string, event: 'PostToolUse' | 'UserPromptSubmit' = 'PostToolUse') => {
     const result = spawnSync(process.execPath, ['-e', generateTurnSummaryScript(event)], {
-      env: { ...process.env, TMPDIR: dir, PATH: dir + ':' + process.env.PATH, REVERIE_CLI: '',
+      env: { ...process.env, TMPDIR: dir, PATH: dir + ':' + process.env.PATH, REVERIE_CLI: '', REVERIE_CONTAINER: '',
         REVERIE_SESSION_ID: sessionId, REVERIE_API_URL: 'http://inert', SUMMARY_TEXT: text },
       input: '', encoding: 'utf8', timeout: 4000,
     });

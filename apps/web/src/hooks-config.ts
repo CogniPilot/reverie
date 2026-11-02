@@ -399,16 +399,19 @@ async function withSafeSettingsWrite(
 
 /**
  * The CLI Reverie's own hooks run. A laptop image names its own CLI in REVERIE_CLI (an absolute store path), so an
- * older `reverie` earlier on PATH, such as a home install from before a release, cannot answer for the hooks; anywhere
- * else the hooks use `reverie` from PATH as before.
+ * older `reverie` earlier on PATH, such as a home install from before a release, cannot answer for the hooks. A
+ * container started from an image that predates REVERIE_CLI still has the image's CLI at /bin/reverie, so inside a
+ * container that is used before PATH. Anywhere else the hooks use `reverie` from PATH as before.
  */
-const HOOK_CLI = "const cli = (process.env.REVERIE_CLI || '').startsWith('/') ? process.env.REVERIE_CLI : 'reverie';";
+const HOOK_CLI =
+  "const cli = (process.env.REVERIE_CLI || '').startsWith('/') ? process.env.REVERIE_CLI : " +
+  "process.env.REVERIE_CONTAINER === '1' && require('node:fs').existsSync('/bin/reverie') ? '/bin/reverie' : 'reverie';";
 
 /** Bounded, fail-open summary hooks shared by Claude Code and Codex. */
 const TURN_SUMMARY_MARKER_PREFIX = 'REVERIE_TURN_SUMMARY_V';
-// V3: the hooks run the laptop image's CLI (REVERIE_CLI). Bumping the version is what makes refreshStaleReverieHooks
-// rewrite an existing V2 block, which would otherwise keep running `reverie` from PATH.
-const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}3`;
+// V3: the hooks run the laptop image's CLI (REVERIE_CLI). V4: in a container without REVERIE_CLI, /bin/reverie before
+// PATH. Bumping the version is what makes refreshStaleReverieHooks rewrite an older block.
+const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}4`;
 export type TurnSummaryHookEvent = 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse';
 
 export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
@@ -464,7 +467,7 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
 }
 
 const MEMORY_BRIEF_MARKER_PREFIX = 'REVERIE_MEMORY_BRIEF_V';
-const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}3`;
+const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}4`;
 
 /**
  * The session-start memory brief, as its own handler with its own budget: the chat summary can fill its 3000 characters
