@@ -124,6 +124,8 @@ let
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
       # The console owns this Python/Node composition check after its TS build.
       npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
+      npm test -- test/employee-journal-outcomes.test.ts test/employee-journal-outcome-boundaries.test.ts \
+        test/employee-journal-map-state-scope.test.ts
       npm test -- test/submit-settle.test.ts test/session-submit-verifier.test.ts \
         test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts test/chatroom-delivery-held-seat.test.ts \
         test/chatroom-delivery-wait-reason.test.ts
