@@ -127,7 +127,9 @@ let
       npm test -- test/employee-journal-outcomes.test.ts test/employee-journal-outcome-boundaries.test.ts \
         test/employee-journal-map-state-scope.test.ts
       npm test -- test/submit-settle.test.ts test/session-submit-verifier.test.ts \
-        test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts test/chatroom-delivery-held-seat.test.ts \
+        test/chatroom-delivery-receipts.test.ts test/codex-chat-submit-ownership.test.ts test/codex-echoed-prompt-row.test.ts \
+        test/codex-echoed-prompt-style-witnesses.test.ts \
+        test/chatroom-delivery-held-seat.test.ts \
         test/chatroom-delivery-wait-reason.test.ts
       # Keep the input ownership and newly supported reply/media regressions in artifact checks.
       npm test -- test/capacity-stall.test.ts test/capacity-hold-control.test.ts test/late-verifier-hold-control.test.ts \
