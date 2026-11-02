@@ -8905,8 +8905,120 @@ class ReverieChatApp {
       this.employeeGpuFields(management, employee, dialog);
       this.publicationCredentialsFields(management, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
+      management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));
       if (company.data?.resourceReplacement === true) this.employeeMemoryFields(management, employee, dialog);
     }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });
+  }
+
+  /**
+   * Owner-only: an employee's journal as a map, read through the owner's existing GET /api/company/employees/:id/journal
+   * (nothing here writes). Larger circles are more important memories, faded ones were superseded by a later entry, and
+   * lines join supersedes, related and shared-topic entries (caJournalGraph). Selecting a memory shows its text, tags,
+   * sources and links. Entries are the employee's own account and are rendered with textContent only.
+   */
+  async openJournalMap(employee) {
+    this.doc.querySelector('.ca-journal-dialog')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-journal-dialog');
+    dialog.setAttribute('aria-label', `${employee.name}'s journal map`);
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status'); status.textContent = 'Loading the journal…';
+    const search = this.el('input', 'ca-field'); search.type = 'search'; search.placeholder = 'Find a word or tag';
+    search.setAttribute('aria-label', 'Find a memory by word or tag');
+    const ns = 'http://www.w3.org/2000/svg', W = 900, H = 600;
+    const svg = this.doc.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-journal-map');
+    svg.setAttribute('aria-label', `Memories of ${employee.name}`);
+    const detail = this.el('section', 'ca-journal-detail'); detail.setAttribute('aria-live', 'polite');
+    const close = this.button('ca-btn', 'Close journal map', () => dialog.close(), { text: 'Close' });
+    dialog.append(this.el('h2', '', `${employee.name}'s journal`),
+      this.el('p', 'ca-dialog-note', "Larger circles are more important memories; faded ones were superseded by a later entry. Solid lines: supersedes; dashed: related; thin: shared tags or topics. Entries are the employee's own account, not verified fact."),
+      search, status, svg, detail, close);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => dialog.remove());
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+
+    const LIMIT = 500, entries = [];
+    let before, more = false;
+    for (let page = 0; page < 50 && entries.length < LIMIT; page++) {
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/journal${before ? `?before=${before}` : ''}`);
+      if (!dialog.isConnected) return;
+      if (!result.ok) {
+        status.textContent = result.status === 403 ? 'Sign in as the owner to see this journal.' : 'The journal could not be loaded. Close and try again.';
+        return;
+      }
+      const got = Array.isArray(result.data?.entries) ? result.data.entries : [];
+      entries.push(...got);
+      more = result.data?.more === true && got.length > 0;
+      if (!more) break;
+      before = got[got.length - 1].entryId;
+    }
+    const shown = entries.slice(0, LIMIT);
+    if (!shown.length) { status.textContent = `${employee.name} has no journal entries yet.`; return; }
+    status.textContent = `${shown.length} ${shown.length === 1 ? 'memory' : 'memories'}${more || entries.length > LIMIT ? ` (the newest ${LIMIT})` : ''}.`;
+
+    const byId = new Map(shown.map(e => [e.entryId, e]));
+    const graph = caJournalGraph(shown), pos = caJournalLayout(graph, { width: W, height: H });
+    const hue = (group) => { let h = 0; for (const c of group) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+    const edgeLayer = this.doc.createElementNS(ns, 'g'), nodeLayer = this.doc.createElementNS(ns, 'g');
+    for (const edge of graph.edges) {
+      const a = pos.get(edge.source), b = pos.get(edge.target), line = this.doc.createElementNS(ns, 'line');
+      line.setAttribute('x1', a.x); line.setAttribute('y1', a.y); line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+      line.setAttribute('class', `ca-journal-edge is-${edge.kind}`);
+      line.dataset.source = String(edge.source); line.dataset.target = String(edge.target);
+      edgeLayer.append(line);
+    }
+    const nodeEls = new Map();
+    const select = (id) => {
+      const entry = byId.get(id);
+      if (!entry) return;
+      for (const [nid, el] of nodeEls) el.classList.toggle('is-selected', nid === id);
+      for (const line of edgeLayer.children) line.classList.toggle('is-active', line.dataset.source === String(id) || line.dataset.target === String(id));
+      const when = globalThis.ReverieTime?.format(Date.parse(entry.committedAt)) ?? entry.committedAt;
+      const meta = [`#${entry.entryId}`, when, entry.annotations?.importance, entry.supersededBy?.length ? 'superseded' : ''].filter(Boolean).join(' · ');
+      const body = this.el('p', 'ca-journal-text'); body.textContent = String(entry.text ?? '');
+      detail.replaceChildren(this.el('h3', '', meta), body);
+      const tags = [...(entry.annotations?.topics ?? []), ...(entry.tags ?? [])];
+      if (tags.length) detail.append(this.el('p', 'ca-hint', `Tags: ${tags.join(', ')}`));
+      const sources = this.el('ul', 'ca-journal-sources');
+      for (const source of entry.sources ?? []) {
+        const item = this.el('li');
+        item.textContent = source.ref !== undefined ? `${source.ref} (unverified reference)`
+          : `${source.roomId}/${source.id}${source.quote ? `: "${source.quote}"` : ''}`;
+        sources.append(item);
+      }
+      if (sources.children.length) detail.append(this.el('h4', '', 'Sources'), sources);
+      const links = this.el('div', 'ca-company-actions');
+      const link = (label, target) => {
+        if (!byId.has(target)) return links.append(this.el('span', 'ca-hint', `${label} #${target} (not shown)`));
+        links.append(this.button('ca-btn', `${label} memory ${target}`, () => { select(target); nodeEls.get(target)?.focus(); }, { text: `${label} #${target}` }));
+      };
+      for (const t of entry.annotations?.supersedes ?? []) link('Supersedes', t);
+      for (const t of entry.supersededBy ?? []) link('Superseded by', t);
+      for (const t of entry.annotations?.related ?? []) link('Related', t);
+      if (links.children.length) detail.append(links);
+    };
+    for (const node of graph.nodes) {
+      const p = pos.get(node.id), g = this.doc.createElementNS(ns, 'g'), circle = this.doc.createElementNS(ns, 'circle');
+      const title = this.doc.createElementNS(ns, 'title');
+      g.setAttribute('class', `ca-journal-node${node.superseded ? ' is-superseded' : ''}`);
+      g.setAttribute('transform', `translate(${p.x} ${p.y})`); g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', `Memory ${node.id}${node.importance ? `, ${node.importance}` : ''}${node.superseded ? ', superseded' : ''}: ${node.label}`);
+      g.style.setProperty('--hue', String(hue(node.group)));
+      circle.setAttribute('r', String(node.r)); title.textContent = node.label;
+      g.append(circle, title);
+      g.addEventListener('click', () => select(node.id));
+      g.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(node.id); } });
+      nodeEls.set(node.id, g); nodeLayer.append(g);
+    }
+    svg.append(edgeLayer, nodeLayer);
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      for (const [id, el] of nodeEls) {
+        const e = byId.get(id), hay = [e.text, ...(e.tags ?? []), ...(e.annotations?.topics ?? [])].join(' ').toLowerCase();
+        el.classList.toggle('is-dim', !!q && !hay.includes(q));
+      }
+    });
+    const top = [...shown].sort((a, b) => caJournalRadius(b.annotations?.importance) - caJournalRadius(a.annotations?.importance) || b.entryId - a.entryId)[0];
+    select(top.entryId);
   }
 
   /**
@@ -12001,8 +12113,98 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof R
   caBoot();
 }
 
+/** Circle radius for a journal entry by its importance: a keystone memory is drawn largest, an unrated one smallest. */
+function caJournalRadius(importance) {
+  return { keystone: 22, important: 16, notable: 12 }[importance] ?? 9;
+}
+
+/**
+ * A journal page (GET /api/company/employees/:id/journal) as a map: one node per entry, sized by importance and faded when
+ * a later entry supersedes it. Edges are the entry's own supersedes and related links, then shared tags and topics, at most
+ * three per entry by overlap so the map stays readable. Links to entries not on the page are left out.
+ */
+function caJournalGraph(entries) {
+  const list = Array.isArray(entries) ? entries.filter(e => e && Number.isSafeInteger(e.entryId)) : [];
+  const ids = new Set(list.map(e => e.entryId));
+  const words = (e) => new Set([...(e.annotations?.topics ?? []), ...(e.tags ?? [])].map(w => String(w).toLowerCase()));
+  const nodes = list.map(e => ({
+    id: e.entryId, r: caJournalRadius(e.annotations?.importance), importance: e.annotations?.importance ?? '',
+    superseded: (e.supersededBy ?? []).length > 0, group: String(e.annotations?.topics?.[0] ?? e.tags?.[0] ?? ''),
+    label: String(e.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 60), committedAt: e.committedAt ?? '',
+  }));
+  const edges = [], seen = new Set();
+  const add = (a, b, kind, weight) => {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (a === b || !ids.has(a) || !ids.has(b) || seen.has(key)) return;
+    seen.add(key); edges.push({ source: a, target: b, kind, weight });
+  };
+  for (const e of list) for (const t of e.annotations?.supersedes ?? []) add(e.entryId, t, 'supersedes', 3);
+  for (const e of list) for (const t of e.annotations?.related ?? []) add(e.entryId, t, 'related', 2);
+  const sets = list.map(words);
+  for (let i = 0; i < list.length; i++) {
+    const scored = [];
+    for (let j = 0; j < list.length; j++) {
+      if (i === j) continue;
+      let shared = 0;
+      for (const w of sets[i]) if (sets[j].has(w)) shared++;
+      if (shared) scored.push([shared, list[j].entryId]);
+    }
+    scored.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+    for (const [shared, id] of scored.slice(0, 3)) add(list[i].entryId, id, 'shared', Math.min(shared, 3) / 3);
+  }
+  return { nodes, edges };
+}
+
+/**
+ * A deterministic force layout (no randomness, so the same journal always draws the same map): nodes start on a sunflower
+ * spiral, repel each other, are pulled together along edges (harder for supersedes and related) and towards the centre,
+ * and stay inside the box. Returns a Map of entry id to {x, y}.
+ */
+function caJournalLayout(graph, { width = 900, height = 600, iterations } = {}) {
+  const nodes = graph.nodes, n = nodes.length, pos = new Map();
+  if (!n) return pos;
+  const cx = width / 2, cy = height / 2, k = Math.sqrt((width * height) / n) * 0.6;
+  const xs = new Float64Array(n), ys = new Float64Array(n), index = new Map(nodes.map((node, i) => [node.id, i]));
+  const spread = Math.min(width, height) * 0.45;
+  for (let i = 0; i < n; i++) {
+    const radius = spread * Math.sqrt((i + 0.5) / n), angle = i * 2.399963229728653;
+    xs[i] = cx + radius * Math.cos(angle); ys[i] = cy + radius * Math.sin(angle);
+  }
+  const rounds = iterations ?? (n > 200 ? 120 : 250);
+  let temperature = Math.min(width, height) / 8;
+  const dx = new Float64Array(n), dy = new Float64Array(n);
+  for (let round = 0; round < rounds; round++) {
+    dx.fill(0); dy.fill(0);
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      let x = xs[i] - xs[j], y = ys[i] - ys[j], d2 = x * x + y * y;
+      if (d2 < 0.01) { x = 0.1 * ((i % 3) - 1 || 1); y = 0.1; d2 = 0.02; }
+      const f = (k * k) / d2;
+      dx[i] += x * f; dy[i] += y * f; dx[j] -= x * f; dy[j] -= y * f;
+    }
+    for (const edge of graph.edges) {
+      const a = index.get(edge.source), b = index.get(edge.target);
+      const x = xs[a] - xs[b], y = ys[a] - ys[b], d = Math.sqrt(x * x + y * y) || 0.01;
+      const f = (d * edge.weight) / k;
+      dx[a] -= x * f; dy[a] -= y * f; dx[b] += x * f; dy[b] += y * f;
+    }
+    for (let i = 0; i < n; i++) {
+      dx[i] += (cx - xs[i]) * 0.02; dy[i] += (cy - ys[i]) * 0.02;
+      const d = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]) || 1, step = Math.min(d, temperature);
+      const r = nodes[i].r + 2;
+      xs[i] = Math.min(width - r, Math.max(r, xs[i] + (dx[i] / d) * step));
+      ys[i] = Math.min(height - r, Math.max(r, ys[i] + (dy[i] / d) * step));
+    }
+    temperature = Math.max(0.5, temperature * 0.97);
+  }
+  for (let i = 0; i < n; i++) pos.set(nodes[i].id, { x: Math.round(xs[i] * 10) / 10, y: Math.round(ys[i] * 10) / 10 });
+  return pos;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    caJournalRadius,
+    caJournalGraph,
+    caJournalLayout,
     chatBadgeFor,
     caChannelItems,
     caByPosition,
