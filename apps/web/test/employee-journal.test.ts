@@ -313,7 +313,10 @@ describe('employee journal store', () => {
       sources: [{ roomId: ROOM, id: 'm-fix', quote: 'it was 10 h' }], annotations: { supersedes: [1], topics: ['Memory and harness'] } } }, read);
     const page = store.map(OWNER, SELF);
     expect(page).toMatchObject({ more: false, entries: [{ entryId: 3, topics: ['Memory and harness'], superseded: false }, { entryId: 1, superseded: true }] });
-    expect(store.recall(OWNER, SELF, 'UTC', read)[0]!.supersededBy).toEqual([3]);
+    // The correction is recalled ahead of the entry it supersedes, which follows it, marked as superseded.
+    const recalled = store.recall(OWNER, SELF, 'UTC', read);
+    expect(recalled.map(entry => entry.entryId)).toEqual([3, 1]);
+    expect(recalled[1]!.supersededBy).toEqual([3]);
     expect(store.ownerPage(OWNER, SELF).entries.map(entry => entry.entryId)).toEqual([3, 1]);
   });
 

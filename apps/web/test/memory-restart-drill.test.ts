@@ -27,13 +27,13 @@ const ids: Record<string, number> = {};
 let n = 0;
 
 /** Save `text` as the answer to a "Remember this" turn, with the text itself as the checked chat source. */
-function remember(key: string, text: string, extra: { tags?: string[]; annotations?: Record<string, unknown>; project?: string } = {}) {
+function remember(key: string, text: string, extra: { tags?: string[]; annotations?: Record<string, unknown>; project?: string; room?: string } = {}) {
   n += 1; clock += HOUR;
-  const source = `s-${n}`, turn = `t-${n}`;
-  messages.set(`${ROOM}/${source}`, { id: source, roomId: ROOM, at: clock - 1000, text, fromSelf: false });
-  messages.set(`${ROOM}/${turn}`, { id: turn, roomId: ROOM, at: clock, text: `Remember this: ${text}`, fromSelf: false });
-  const saved = store.save(OWNER, SELF, { roomId: ROOM, turnId: turn, ...(extra.project ? { project: extra.project } : {}), draft: {
-    text, tags: extra.tags ?? ['decision'], sources: [{ roomId: ROOM, id: source, quote: text.slice(0, 40) }],
+  const source = `s-${n}`, turn = `t-${n}`, room = extra.room ?? ROOM;
+  messages.set(`${room}/${source}`, { id: source, roomId: room, at: clock - 1000, text, fromSelf: false });
+  messages.set(`${room}/${turn}`, { id: turn, roomId: room, at: clock, text: `Remember this: ${text}`, fromSelf: false });
+  const saved = store.save(OWNER, SELF, { roomId: room, turnId: turn, ...(extra.project ? { project: extra.project } : {}), draft: {
+    text, tags: extra.tags ?? ['decision'], sources: [{ roomId: room, id: source, quote: text.slice(0, 40) }],
     ...(extra.annotations ? { annotations: extra.annotations } : {}) } }, read);
   ids[key] = saved.entryId;
   return saved.entryId;
@@ -58,13 +58,20 @@ beforeAll(() => {
   remember('o3', 'Outcome: the nightly cleanup freed 40 GB on its first run.', { tags: ['lesson'], annotations: { related: [d3] } });
   remember('done', 'Finished and merged the stalled-seat alert; done.', { tags: ['decision'] });
   remember('proj', 'Project note: the compiler baseline is green.', { project: 'rumoca', tags: ['decision'] });
+  // A chain of corrections whose later links share no words with the first entry.
+  const c1 = remember('c1', 'The standup meeting is at 9 AM daily.');
+  const c2 = remember('c2', 'Correction: moved to 10.', { tags: ['decision', 'correction'], annotations: { supersedes: [c1], reason: 'moved' } });
+  remember('c3', 'Correction again: now 11.', { tags: ['decision', 'correction'], annotations: { supersedes: [c2], reason: 'moved again' } });
+  // A correction saved while acting in another room.
+  const r1 = remember('r1', 'The lab printer is on floor two.');
+  remember('r2', 'Correction: it is on floor three.', { room: 'room-two', tags: ['decision', 'correction'], annotations: { supersedes: [r1], reason: 'moved' } });
   // The restart: a new store on the same file, with nothing carried over in memory.
   store.close();
   store = EmployeeJournalStore.open(file, () => clock);
 });
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-describe('memory restart drill (baseline 2026-11-02)', () => {
+describe('memory restart drill (baseline 2026-11-02; case 2 closed by recall ordering)', () => {
   it('1. the latest owner decision survives the restart, and the replaced one is not briefed', () => {
     const brief = store.brief(OWNER, SELF).entries.map((e) => e.entryId);
     expect(brief).toContain(ids.d2);
@@ -72,11 +79,24 @@ describe('memory restart drill (baseline 2026-11-02)', () => {
     expect(brief[0]).toBe(ids.d2); // keystone first, newest first
   });
 
-  // KNOWN GAP: recall ranks by text match only and returns superseded entries; the replaced fact wins here.
-  it.fails('2. a correction beats the old fact it supersedes', () => {
+  it('2. a correction beats the old fact it supersedes', () => {
     const top = recall('deploy window');
     expect(top[0]?.entryId).toBe(ids.f2);
     expect(top.some((e) => e.entryId === ids.f1 && e.supersededBy.length === 0)).toBe(false);
+  });
+
+  it('2c. the newest correction in a chain comes first, even when only the oldest entry matches the words', () => {
+    const top = recall('standup meeting');
+    expect(top.map((e) => e.entryId)).toEqual([ids.c3, ids.c1]);
+    expect(top[1].supersededBy).toEqual([ids.c2]);
+  });
+
+  it("2d. a correction never crosses into another employee's journal or another room's filter", () => {
+    expect(store.recall(OWNER, 'employee-two', 'deploy window', read)).toEqual([]);
+    expect(store.recall(OWNER, SELF, 'deploy window', read, 'another-room')).toEqual([]);
+    // Filtered to the first room, the correction saved in another room is not pulled in; unfiltered, it leads.
+    expect(store.recall(OWNER, SELF, 'lab printer', read, ROOM).map((e) => e.entryId)).toEqual([ids.r1]);
+    expect(recall('lab printer').map((e) => e.entryId)).toEqual([ids.r2, ids.r1]);
   });
 
   it('2b. a superseded fact is at least marked as superseded when recalled', () => {
