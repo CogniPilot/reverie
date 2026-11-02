@@ -87,13 +87,13 @@ describe('the pronouns field on the employee record', () => {
           onVacation: false,
           sleepEnabled: false,
           dreamEnabled: false,
-          permissions: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false },
+          permissions: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false },
           wakeAttempts: [],
         },
       ]);
       expect(store.snapshot().retired[0]).not.toHaveProperty('pronouns');
       expect(store.snapshot().retired[0].permissions).toEqual({
-        recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false,
+        recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false,
       });
       expect(
         CompanyStateSchema.parse({ ...old, retired: [{ ...old.retired[0], pronouns: 'he/him' }] }).retired[0].pronouns

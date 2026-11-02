@@ -49,7 +49,7 @@ let
         test/goal-lifecycle.test.ts test/goal-lifecycle-transactions.test.ts test/goal-api-auth.test.ts \
         test/goal-response-privacy.test.ts test/goal-successor-independent.test.ts \
         test/goal-server-integration.test.ts test/goal-server-unavailable.test.ts test/goal-server-policy.test.ts \
-        test/goal-canonical-authority.test.ts \
+        test/goal-canonical-authority.test.ts test/goal-manager-verification.test.ts \
         test/goal-broker-auth.test.ts test/goal-nonce-store.test.ts test/goal-nonce-independent.test.ts test/goal-nonce-successor.test.ts \
         test/cli-goal.test.ts test/goal-canonical-transport.test.ts test/goal-combined-server.test.ts test/goal-server-assembly.test.ts \
         test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts test/goal-source-fixture.test.ts \

@@ -248,19 +248,42 @@ export type GoalCommandResult =
   | { visibility: 'full'; goal: GoalRecord; receipt: GoalTransitionReceipt }
   | { visibility: 'verification'; goal: GoalVerificationView; receipt: GoalVerificationReceipt };
 
-function canReadFull(goal: GoalRecord, principal: GoalPrincipal): boolean {
+/** Owner-selected operational authority, never verification or owner authority. */
+function managesGoal(state: CompanyState, principal: GoalPrincipal, employeeId: string): boolean {
+  if (principal.kind !== 'employee') return false;
+  const actor = employeeOf(state, principal.employeeId, principal.owner);
+  const target = employeeOf(state, employeeId, principal.owner);
+  return !!actor && !!target && actor.permissions.manageGoals === true &&
+    actor.sessionId === principal.sessionId && actor.sessionGeneration === principal.sessionGeneration &&
+    !actor.bindingMigration && !actor.onVacation && actor.desiredRunning !== false &&
+    !target.bindingMigration && !target.onVacation && target.desiredRunning !== false;
+}
+function managementFence(
+  state: CompanyState, principal: GoalPrincipal, employeeId: string, sessionId: string, sessionGeneration: number
+): () => void {
+  return () => {
+    const target = employeeOf(state, employeeId, principal.owner);
+    if (!managesGoal(state, principal, employeeId) || target?.sessionId !== sessionId ||
+        target.sessionGeneration !== sessionGeneration)
+      refuse('Team Goal permission or current target binding changed');
+  };
+}
+function canReadFull(state: CompanyState, goal: GoalRecord, principal: GoalPrincipal): boolean {
   return (
     goal.owner === principal.owner &&
     (principal.kind === 'owner' ||
       (goal.employeeId === principal.employeeId &&
         goal.sessionId === principal.sessionId &&
-        goal.sessionGeneration === principal.sessionGeneration))
+        goal.sessionGeneration === principal.sessionGeneration) ||
+      (managesGoal(state, principal, goal.employeeId) &&
+        state.employees.some(employee => employee.id === goal.employeeId && employee.owner === goal.owner &&
+          employee.sessionId === goal.sessionId && employee.sessionGeneration === goal.sessionGeneration)))
   );
 }
-function atReceipt(goal: GoalRecord, receipt: GoalTransitionReceipt, principal: GoalPrincipal): GoalCommandResult {
+function atReceipt(state: CompanyState, goal: GoalRecord, receipt: GoalTransitionReceipt, principal: GoalPrincipal): GoalCommandResult {
   // Construct the closed view directly: never spread a receipt/snapshot into a restricted response.
   // In particular receipt.after and requestDigest contain or fingerprint private worker input.
-  if (!canReadFull(goal, principal))
+  if (!canReadFull(state, goal, principal))
     return {
       visibility: 'verification',
       goal: {
@@ -305,7 +328,8 @@ function receipt(
   at: number,
   operation: 'TRANSITION' | 'ADOPT',
   authorityId?: string,
-  unblockProofId?: string
+  unblockProofId?: string,
+  manager = false
 ): GoalTransitionReceipt {
   const result: GoalTransitionReceipt = {
     transitionId,
@@ -314,7 +338,7 @@ function receipt(
     generation: goal.generation,
     from,
     to: goal.state,
-    actorKind: principal.kind === 'owner' ? 'owner' : authorityId ? 'verifier' : 'worker',
+    actorKind: principal.kind === 'owner' ? 'owner' : authorityId ? 'verifier' : manager ? 'manager' : 'worker',
     ...(principal.kind === 'employee'
       ? {
           actorEmployeeId: principal.employeeId,
@@ -381,7 +405,7 @@ export class GoalLifecycle {
   }
   async list(context?: unknown): Promise<GoalRecord[]> {
     return this.read(context, (state, principal) =>
-      state.goals.filter((g) => g.owner === principal.owner && canReadFull(g, principal))
+      state.goals.filter((g) => g.owner === principal.owner && canReadFull(state, g, principal))
     );
   }
   async get(goalId: string, context?: unknown): Promise<GoalRecord> {
@@ -389,7 +413,7 @@ export class GoalLifecycle {
     return this.read(context, (state, principal) => {
       const goal = findGoal(state, goalId, principal);
       if (principal.kind !== 'owner') {
-        if (!canReadFull(goal, principal)) refuse('No full-record read grant for this binding');
+        if (!canReadFull(state, goal, principal)) refuse('No full-record read grant for this binding');
         currentTarget(state, goal);
       }
       return goal;
@@ -398,7 +422,7 @@ export class GoalLifecycle {
   async forEmployee(employeeId: string, context?: unknown, metadataGrantId?: string) {
     parse(id, employeeId);
     return this.read(context, (state, principal) => {
-      if (principal.kind !== 'owner' && principal.employeeId !== employeeId)
+      if (principal.kind !== 'owner' && principal.employeeId !== employeeId && !managesGoal(state, principal, employeeId))
         this.grant(state, principal, metadataGrantId, 'METADATA_READ', employeeId);
       return state.goals
         .filter((g) => g.owner === principal.owner && g.employeeId === employeeId)
@@ -427,13 +451,16 @@ export class GoalLifecycle {
   }
   async create(raw: unknown, context?: unknown): Promise<GoalRecord> {
     const input = parse(CreateSchema, raw);
-    return this.update(context, (state, principal) => {
+    return this.update(context, (state, principal, retain) => {
       const employee = employeeOf(state, input.employeeId, principal.owner);
       active(employee);
       if (employee.sessionId !== input.sessionId || employee.sessionGeneration !== input.sessionGeneration)
         conflict('Create session fence changed');
-      if (principal.kind !== 'owner' && principal.employeeId !== employee.id)
-        refuse('A worker creates only its own Goal');
+      if (principal.kind !== 'owner' && principal.employeeId !== employee.id) {
+        const check = managementFence(state, principal, employee.id, input.sessionId, input.sessionGeneration);
+        check();
+        retain(check);
+      }
       const digest = goalDigest({ input, principal });
       const replay = state.goals.find((g) => g.owner === principal.owner && g.createId === input.createId);
       if (replay) {
@@ -705,7 +732,7 @@ export class GoalLifecycle {
         goal.updatedAt,
         'ADOPT'
       );
-      return atReceipt(goal, result, principal);
+      return atReceipt(state, goal, result, principal);
     });
   }
   async revokeUnblockProof(proofId: string, context?: unknown): Promise<void> {
@@ -732,7 +759,12 @@ export class GoalLifecycle {
         retain(() => {
           this.grant(state, principal, verifier.id, 'VERIFY', goal.employeeId, goal, input.expectedSequence);
         });
-      if (principal.kind !== 'owner' && !verifier && principal.employeeId !== goal.employeeId)
+      const manager = principal.kind === 'employee' && principal.employeeId !== goal.employeeId &&
+        managesGoal(state, principal, goal.employeeId);
+      // Management also authorizes the full response when VERIFY authorizes the decision.
+      if (manager)
+        retain(managementFence(state, principal, goal.employeeId, goal.sessionId, goal.sessionGeneration));
+      if (principal.kind !== 'owner' && !verifier && principal.employeeId !== goal.employeeId && !manager)
         refuse('A worker updates only its own Goal');
       const digest = goalDigest({ input, principal });
       const replay = goal.transitions.find((r) => r.transitionId === input.transitionId);
@@ -740,7 +772,7 @@ export class GoalLifecycle {
         if (replay.generation !== goal.generation) conflict('Receipt belongs to a superseded generation');
         if (replay.requestDigest !== digest)
           throw new GoalLifecycleError('Changed transitionId reuse', 'GOAL_IDEMPOTENCY_REUSE', 409);
-        return atReceipt(goal, replay, principal);
+        return atReceipt(state, goal, replay, principal);
       }
       checkFence(goal, input);
       if (principal.kind === 'employee' && !verifier && (goal.state === 'REVIEW' || terminal.has(goal.state)))
@@ -798,9 +830,10 @@ export class GoalLifecycle {
         at,
         'TRANSITION',
         verifier?.id,
-        input.unblockProofId
+        input.unblockProofId,
+        manager
       );
-      return atReceipt(goal, result, principal);
+      return atReceipt(state, goal, result, principal);
     });
   }
 }

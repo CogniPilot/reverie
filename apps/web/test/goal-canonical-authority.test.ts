@@ -469,4 +469,17 @@ describe('real canonical Goal binding and scoped current-action adapters', () =>
     );
     expect(unrelatedEffects).toBe(0);
   });
+  it('requires the explicit team permission at both the canonical action boundary and core', async () => {
+    expect((await actor('verifier', 'POST', '/api/goals', input('team'))).statusCode).toBe(403);
+    await store.update(state => { state.employees.find(employee => employee.id === verifier)!.permissions.manageGoals = true; });
+    const result = await actor('verifier', 'POST', '/api/goals', input('team'));
+    expect(result.statusCode, result.body).toBe(200);
+    const goal = result.json().data;
+    expect((await actor('verifier', 'GET', `/api/goals/${goal.id}`)).statusCode).toBe(200);
+    expect((await actor('verifier', 'POST', `/api/goals/${goal.id}/transitions`, transition('ASSIGNED', 'managed'))).json().data.receipt.actorKind).toBe('manager');
+    await store.update(state => { state.employees.find(employee => employee.id === verifier)!.permissions.manageGoals = false; });
+    expect((await actor('verifier', 'GET', `/api/goals/${goal.id}`)).statusCode).toBe(403);
+    expect((await actor('verifier', 'POST', '/api/goals', input('team'))).statusCode).toBe(403);
+  });
+
 });

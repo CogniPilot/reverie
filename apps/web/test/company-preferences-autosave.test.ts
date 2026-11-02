@@ -121,3 +121,16 @@ it('does not report a malformed or unrelated success as a saved permission', asy
   expect(profile().textContent).toContain('Save not confirmed');
   expect(profile().textContent).not.toContain('Preferences saved.');
 });
+
+it('saves the owner-only team Goal permission as an isolated patch and preserves it on reopen', async () => {
+  const { h, pending, input, finish, reopen } = await setup();
+  expect(input('Manage team goals for River').checked).toBe(false);
+  input('Manage team goals for River').click(); await h.flush();
+  expect(pending[0].body).toEqual({ permissions: { manageGoals: true } });
+  finish(0); await h.flush(); await reopen();
+  expect(input('Manage team goals for River').checked).toBe(true);
+  input('Manage team goals for River').click(); await h.flush();
+  expect(pending[1].body).toEqual({ permissions: { manageGoals: false } });
+  finish(1, false); await h.flush();
+  expect(input('Manage team goals for River').checked).toBe(true);
+});

@@ -307,6 +307,29 @@ describe('combined actual Goal server with synthetic proof transport, durable le
     expect(persisted.revision).toBe(persisted.entries.length);
     expect(persisted.entries.every((entry: { key: string }) => /^[a-f0-9]{64}$/.test(entry.key))).toBe(true);
   }, 30000);
+
+  it('uses the unchanged signed broker path for owner-selected team management and refuses revoked replay', async () => {
+    const command = create('team-managed');
+    expect((await inject(forward(verifierSession, { method: 'POST', path: '/api/goals', body: command }))).statusCode).toBe(403);
+    await company.store.update(state => { state.employees.find(employee => employee.id === verifier)!.permissions.manageGoals = true; });
+    try {
+      const response = await inject(forward(verifierSession, { method: 'POST', path: '/api/goals', body: command }));
+      expect(response.statusCode, response.body).toBe(200);
+      const goal = response.json().data;
+      expect((await cli(verifierSession, ['read', goal.id, '--full'])).code).toBe(0);
+      const update = { transitionId: 'managed-step', generation: goal.generation, expectedState: goal.state,
+        expectedSequence: goal.transitionSequence, sessionId: goal.sessionId, sessionGeneration: goal.sessionGeneration,
+        to: 'ASSIGNED', nextAction: 'Manager assigned work' };
+      const result = await inject(forward(verifierSession, { method: 'POST', path: `/api/goals/${goal.id}/transitions`, body: update }));
+      expect(result.statusCode, result.body).toBe(200);
+      expect(result.json().data.receipt).toMatchObject({ actorKind: 'manager', actorEmployeeId: verifier, actorSessionId: verifierSession });
+      await company.store.update(state => { state.employees.find(employee => employee.id === verifier)!.permissions.manageGoals = false; });
+      expect((await inject(forward(verifierSession, { method: 'POST', path: `/api/goals/${goal.id}/transitions`, body: update }))).statusCode).toBe(403);
+    } finally {
+      await company.store.update(state => { state.employees.find(employee => employee.id === verifier)!.permissions.manageGoals = false; });
+    }
+  });
+
   it('retains closed verifier results/replay, metadata grants and worker REVIEW freeze across every real layer', async () => {
     for (const to of ['ASSIGNED', 'ACTIVE', 'REVIEW'])
       expect((await cli(workerSession, ['transition', longGoal], transition(to, 'cli-' + to))).code).toBe(0);

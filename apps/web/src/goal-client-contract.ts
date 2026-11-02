@@ -79,7 +79,7 @@ export const GoalClosedReceipt = z
     generation: positive,
     from: GoalState,
     to: GoalState,
-    actorKind: z.enum(['worker', 'verifier', 'owner']),
+    actorKind: z.enum(['worker', 'verifier', 'manager', 'owner']),
     actorEmployeeId: recordId.optional(),
     actorSessionId: recordId.optional(),
     actorSessionGeneration: positive.optional(),

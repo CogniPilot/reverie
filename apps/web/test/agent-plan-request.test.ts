@@ -86,6 +86,7 @@ describe('explicit agent plan delegation', () => {
       manageOffice: false,
       moveOwnPlan: false,
       managePlans: false,
+      manageGoals: false,
     });
     const h = fixture();
     h.employees[0].permissions.moveOwnPlan = false;
