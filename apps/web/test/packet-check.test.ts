@@ -238,9 +238,21 @@ describe('openHolds', () => {
 
   it('lets the same sender lift the hold, not someone else', () => {
     const hold = msg('Alice', 'HOLD packet-publish: test fails');
-    expect(openHolds([hold, msg('Bob', 'GO packet-publish')], keys)).toEqual([hold]);
+    expect(openHolds([hold, msg('Bob', 'GO abcdef01')], keys)).toEqual([hold]);
     expect(openHolds([hold, msg('Alice', 'GO abcdef01')], keys)).toEqual([]);
     expect(openHolds([hold, msg('Alice', 'packet-publish hold lifted')], keys)).toEqual([]);
+  });
+
+  it('lifts only with a GO naming the exact head, and never a negated GO or lift', () => {
+    const hold = msg('Alice', 'HOLD packet-publish: hosted CI red');
+    expect(openHolds([hold, msg('Alice', 'GO packet-publish')], keys)).toEqual([hold]);
+    expect(openHolds([hold, msg('Alice', 'packet-publish: Source GO remains withheld')], keys)).toEqual([hold]);
+    expect(openHolds([hold, msg('Alice', 'packet-publish is not a GO until hosted CI passes')], keys)).toEqual([hold]);
+    expect(openHolds([hold, msg('Alice', 'abcdef01 approved, pending CI')], keys)).toEqual([hold]);
+    const restated = msg('Alice', "packet-publish hold isn't lifted yet");
+    expect(openHolds([hold, restated], keys)).toEqual([hold, restated]);
+    expect(openHolds([hold, msg('Alice', 'GO abcdef01: CI green')], keys)).toEqual([]);
+    expect(openHolds([hold, msg('Alice', 'packet-publish no longer blocked')], keys)).toEqual([]);
   });
 
   it('does not read a "go" inside a hold as a lift', () => {
@@ -264,7 +276,7 @@ describe('openHolds: NO-GO and short keys', () => {
     const hold = msg('b', 2, 'Alice', 'HOLD packet-publish');
     const still = msg('c', 3, 'Alice', 'packet-publish still NO-GO');
     expect(openHolds([hold, still], keys)).toEqual([hold, still]);
-    expect(openHolds([hold, still, msg('d', 4, 'Alice', 'GO packet-publish')], keys)).toEqual([]);
+    expect(openHolds([hold, still, msg('d', 4, 'Alice', 'GO abcdef01 packet-publish')], keys)).toEqual([]);
   });
 
   it('matches short slice names and full SHAs as whole tokens', () => {

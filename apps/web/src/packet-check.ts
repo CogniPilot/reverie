@@ -207,9 +207,22 @@ export interface HoldKeys {
 const HOLD_WORDS = /\b(hold|holds|holding|blocker|blocked|wait|do not merge|don't merge)\b|\bNO[- ]GO\b/i;
 /** A hold is lifted only in so many words; a bare "go" inside a hold ("hold, don't go yet") must not lift it. */
 const LIFT_WORDS =
-  /\b(hold|blocker)\s+(is\s+)?(lifted|released|closed|cleared|withdrawn|resolved)\b|\bunblocked\b|\bno longer (blocked|holding)\b/i;
+  /\b(hold|blocker)\s+(is\s+)?(lifted|released|closed|cleared|withdrawn|resolved)\b|\bunblocked\b|\bno longer (blocked|holding)\b/gi;
 /** GO as reviewers write it, never the GO inside NO-GO. */
-const GO_WORDS = /(?<!\bNO[- ])\bGO\b|\b(approved|lgtm)\b/;
+const GO_WORDS = /(?<!\bNO[- ])\bGO\b|\b(approved|lgtm)\b/g;
+/** Words that, near a GO or a lift, take it back: "GO remains withheld", "not a GO until CI passes". */
+const NEGATION = /\b(not|no|never|withheld|withhold|pending|until|without|unless)\b|n't\b/i;
+const NEGATION_REACH = 40;
+
+/** Whether `pattern` (global) occurs in `text` at least once with no negation within reach on either side. */
+function plainMatch(text: string, pattern: RegExp): boolean {
+  for (const m of text.matchAll(pattern)) {
+    const start = m.index ?? 0;
+    const around = `${text.slice(Math.max(0, start - NEGATION_REACH), start)} ${text.slice(start + m[0].length, start + m[0].length + NEGATION_REACH)}`;
+    if (!NEGATION.test(around)) return true;
+  }
+  return false;
+}
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -229,7 +242,8 @@ function packetMatchers(keys: HoldKeys): RegExp[] {
 
 /**
  * Open holds on this packet: a message that names it (head, branch, PR number, card or slice) and uses hold language,
- * NO-GO included, with no later message from the same sender that names the packet and lifts the hold or gives a GO.
+ * NO-GO included, with no later message from the same sender that names the packet and lifts the hold in so many
+ * words, or gives a GO naming the exact head; a lift or GO with a negation nearby ("GO remains withheld") is neither.
  * `overridden` holds message ids the publisher has explicitly accepted (`--hold-ok`). Messages come oldest first; the
  * caller makes sure they reach back far enough.
  */
@@ -243,7 +257,10 @@ export function openHolds(
   for (const message of messages) {
     if (!matchers.some((m) => m.test(message.text))) continue;
     const holds = HOLD_WORDS.test(message.text);
-    const lifts = LIFT_WORDS.test(message.text) || (!holds && GO_WORDS.test(message.text));
+    // A GO lifts only when it names this exact head and nothing near it takes it back.
+    const lifts =
+      plainMatch(message.text, LIFT_WORDS) ||
+      (!holds && matchers[0].test(message.text) && plainMatch(message.text, GO_WORDS));
     if (lifts) {
       for (let i = open.length - 1; i >= 0; i--) if (open[i].from === message.from) open.splice(i, 1);
     } else if (holds && !overridden.has(message.id)) open.push(message);
