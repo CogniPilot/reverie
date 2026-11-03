@@ -107,6 +107,7 @@ let
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bots-disk-alarm-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
       npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts test/resource-history.test.ts
       npm test -- test/browser-job-evidence.test.ts
+      npm test -- test/cli-plans-banked-resets.test.ts
       npm test -- test/routes/chatroom-clear-history.test.ts test/chat-dm-clear-history-ui.test.ts
       npm test -- test/plan-request-pending-employee.test.ts test/cli-plan-move-list-employee.test.ts
       npm test -- test/file-preview-source-reader.test.ts test/file-preview-sources-ui.test.ts \
