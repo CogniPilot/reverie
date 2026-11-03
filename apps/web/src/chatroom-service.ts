@@ -1968,10 +1968,9 @@ export class ChatroomService {
     this.schedulePersist(room.id);
     if (message.from.kind === 'agent' && message.replyTo) {
       const asked = deliveryRoom.messages.find(item => item.id === message.replyTo);
-      if (asked && isAddressedVoiceTurn(deliveryRoom, asked, message.from.sessionId, this.nameOf)) {
-        // The member answered during its current turn: no redundant wake remains.
-        this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
-      }
+      // The member answered it, so it reached the member: no redundant wake remains, and a hold on it (a line the pane
+      // could not confirm) is released, or the pointer to it repeats and new lines keep waiting on it.
+      if (asked) this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
     }
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message: this.messageIdentity(room, message) });
     // A spoken turn was already answered by the voice service: show it, never type it into a pane.
