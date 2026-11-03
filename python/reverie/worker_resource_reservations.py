@@ -527,7 +527,9 @@ class ReservationGate:
             from .resource_actor_bootstrap import owns_pending as actor_bootstrap_pending
             from .worker_image_switch import owns_pending as image_switch_pending
             from .worker_perf_access import owns_pending as perf_pending
-            need(owns_pending(self) or actor_bootstrap_pending(self) or image_switch_pending(self) or perf_pending(self),
+            from .worker_mount_relocation import owns_pending as mount_relocation_pending
+            need(owns_pending(self) or actor_bootstrap_pending(self) or image_switch_pending(self) or perf_pending(self)
+                 or mount_relocation_pending(self),
                  'RESERVATION_INSTALL_REQUIRES_RECONCILIATION')
         image_configuration = capture_current_image(self.broker)
         need(_file(marker(self.broker.config), self.broker.config['uid']) == self.binding,
