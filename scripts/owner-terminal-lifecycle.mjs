@@ -224,9 +224,9 @@ function defaultMountOptions(mount) {
 
 function supportedHostDefaults(host) {
   const explicit = new Set(['Memory', 'MemorySwap', 'PidsLimit', 'ReadonlyRootfs', 'Privileged', 'CapAdd', 'CapDrop', 'SecurityOpt', 'PidMode', 'IpcMode', 'Init', 'NetworkMode', 'PortBindings', 'Tmpfs', 'Mounts', 'Binds', 'LogConfig', 'RestartPolicy', 'MaskedPaths', 'ReadonlyPaths', 'ShmSize', 'Runtime', 'CgroupnsMode']);
-  const defaultOnly = new Set(['AutoRemove', 'ContainerIDFile', 'VolumesFrom', 'ConsoleSize', 'UTSMode', 'Cgroup', 'CgroupParent', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'ExtraHosts', 'Links', 'Dns', 'DnsOptions', 'DnsSearch', 'GroupAdd', 'Sysctls', 'Ulimits', 'StorageOpt', 'VolumeDriver', 'OomKillDisable', 'OomScoreAdj', 'PublishAllPorts', 'CpuShares', 'NanoCpus', 'CpuPeriod', 'CpuQuota', 'CpuRealtimePeriod', 'CpuRealtimeRuntime', 'CpusetCpus', 'CpusetMems', 'CpuCount', 'CpuPercent', 'MemoryReservation', 'KernelMemory', 'KernelMemoryTCP', 'MemorySwappiness', 'BlkioWeight', 'BlkioWeightDevice', 'BlkioDeviceReadBps', 'BlkioDeviceWriteBps', 'BlkioDeviceReadIOps', 'BlkioDeviceWriteIOps', 'IOMaximumIOps', 'IOMaximumBandwidth', 'Isolation', 'Annotations', 'MountLabel', 'SecurityLabelOpt']);
+  const defaultOnly = new Set(['AutoRemove', 'UsernsMode', 'ContainerIDFile', 'VolumesFrom', 'ConsoleSize', 'UTSMode', 'Cgroup', 'CgroupParent', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'ExtraHosts', 'Links', 'Dns', 'DnsOptions', 'DnsSearch', 'GroupAdd', 'Sysctls', 'Ulimits', 'StorageOpt', 'VolumeDriver', 'OomKillDisable', 'OomScoreAdj', 'PublishAllPorts', 'CpuShares', 'NanoCpus', 'CpuPeriod', 'CpuQuota', 'CpuRealtimePeriod', 'CpuRealtimeRuntime', 'CpusetCpus', 'CpusetMems', 'CpuCount', 'CpuPercent', 'MemoryReservation', 'KernelMemory', 'KernelMemoryTCP', 'MemorySwappiness', 'BlkioWeight', 'BlkioWeightDevice', 'BlkioDeviceReadBps', 'BlkioDeviceWriteBps', 'BlkioDeviceReadIOps', 'BlkioDeviceWriteIOps', 'IOMaximumIOps', 'IOMaximumBandwidth', 'Isolation', 'Annotations', 'MountLabel', 'SecurityLabelOpt']);
   const arrays = new Set(['VolumesFrom', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'ExtraHosts', 'Links', 'Dns', 'DnsOptions', 'DnsSearch', 'GroupAdd', 'Ulimits', 'BlkioWeightDevice', 'BlkioDeviceReadBps', 'BlkioDeviceWriteBps', 'BlkioDeviceReadIOps', 'BlkioDeviceWriteIOps', 'SecurityLabelOpt']);
-  const strings = new Set(['ContainerIDFile', 'UTSMode', 'Cgroup', 'CgroupParent', 'VolumeDriver', 'CpusetCpus', 'CpusetMems', 'Isolation', 'MountLabel']);
+  const strings = new Set(['ContainerIDFile', 'UsernsMode', 'UTSMode', 'Cgroup', 'CgroupParent', 'VolumeDriver', 'CpusetCpus', 'CpusetMems', 'Isolation', 'MountLabel']);
   const objects = new Set(['Sysctls', 'StorageOpt', 'Annotations']);
   const booleans = new Set(['AutoRemove', 'OomKillDisable', 'PublishAllPorts']);
   const noArray = value => value === undefined || value === null || Array.isArray(value) && value.length === 0;
@@ -273,13 +273,17 @@ function validateIntent(container, image, intent, stopped) {
   const optionString = value => typeof value === 'string' ? value.split(',').sort().join(',') : null;
   need(host.Tmpfs && Object.keys(host.Tmpfs).length === 2 && Object.entries(intent.tmpfs).every(([path, options]) => optionString(host.Tmpfs[path]) === optionString(options)), 'H private tmpfs differs');
   const mounts = container.Mounts;
-  need(Array.isArray(mounts) && mounts.length === intent.mounts.length + 2 && new Set(mounts.map(m => m.Destination)).size === mounts.length, 'H mount grants differ');
+  const temporary = Array.isArray(mounts) ? mounts.filter(m => m.Type === 'tmpfs') : [];
+  need(Array.isArray(mounts) && [0, 2].includes(temporary.length) && mounts.length === intent.mounts.length + temporary.length && new Set(mounts.map(m => m.Destination)).size === mounts.length, 'H mount grants differ');
   for (const expected of intent.mounts) {
     const actual = mounts.filter(m => m.Destination === expected.destination);
     need(actual.length === 1 && actual[0].Type === expected.type && actual[0].RW === !expected.readonly &&
       (expected.type === 'volume' ? actual[0].Name === expected.source : actual[0].Source === expected.source), 'H mount grant differs');
   }
-  for (const destination of ['/tmp', '/run']) need(mounts.some(m => m.Type === 'tmpfs' && m.Destination === destination && m.RW === true), 'H tmpfs grant differs');
+  // --tmpfs declarations live in HostConfig even when Docker omits Mounts.
+  // A supplied list must be complete and consistent; native PID mountinfo
+  // provides the separate running proof in the guarded website activation.
+  if (temporary.length) for (const destination of ['/tmp', '/run']) need(temporary.some(m => m.Destination === destination && m.RW === true), 'H tmpfs grant differs');
   supportedHostDefaults(host);
   if (intent.hostFloors !== undefined) {
     need(intent.hostFloors && same(Object.keys(intent.hostFloors).sort(), ['MaskedPaths', 'ReadonlyPaths']), 'H inherited floors are malformed');

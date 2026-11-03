@@ -450,6 +450,10 @@ class TerminalWebsiteProfile:
                                       for m in h['Mounts']]})
         return result
 
+    def verify_cold_abort(self, record, plan):
+        from .owner_terminal_cold_abort import verify
+        return verify(self.initial,record,plan)
+
     def exclusions(self):
         self.input_binding()
         return ['accounts', *sorted(link['path'] for link in self.links['links'])]
@@ -553,11 +557,16 @@ class TerminalWebsiteProfile:
                   for m in candidate['Mounts'] if m.get('Type') != 'tmpfs']
         need(sorted(actual, key=repr) == sorted([*old_mounts, bootstrap], key=repr), 'H_WEBSITE_MOUNT_GRANTS_CHANGED')
         temporary = [m for m in candidate['Mounts'] if m.get('Type') == 'tmpfs']
-        need(len(temporary) == 2 and {m['Destination'] for m in temporary} == {'/tmp', '/run'}
-             and all(m.get('RW') is True for m in temporary), 'H_WEBSITE_TMPFS_CHANGED')
+        # Docker --tmpfs is declared in HostConfig.Tmpfs and may never appear
+        # in Mounts, including while running. Any reported temporary grants
+        # must agree; the running namespace is qualified independently.
+        declared = candidate['HostConfig'].get('Tmpfs')
+        need(type(declared) is dict and set(declared) == {'/tmp', '/run'}
+             and (not temporary or len(temporary) == 2
+                  and {m['Destination'] for m in temporary} == {'/tmp', '/run'}
+                  and all(m.get('RW') is True for m in temporary)), 'H_WEBSITE_TMPFS_CHANGED')
 
-    def validate_created(self, candidate, plan, old_mounts):
-        self.verify_mounts(candidate, old_mounts)
+    def qualifier_intent(self, candidate, plan):
         # The shared qualifier validates ALL generated intent against actual
         # create readback before that readback becomes the H policy's spec.
         name = candidate['Name'][1:]
@@ -572,6 +581,11 @@ class TerminalWebsiteProfile:
                   'labels': spec['Labels'], 'environment': spec['Env'],
                   'mounts': [{'type': m['Type'], 'source': m['Source'], 'destination': m['Target'],
                               'readonly': m.get('ReadOnly', False)} for m in host['Mounts']]}
+        return intent
+
+    def validate_created(self, candidate, plan, old_mounts):
+        self.verify_mounts(candidate, old_mounts)
+        intent = self.qualifier_intent(candidate, plan)
         image = self.initial.engine.get('/images/' + plan['newImage'] + '/json')
         verify_image_spec(self.provenance, image)
         folder = self.operation / ('H-qualifier-' + uuid.uuid4().hex); folder.mkdir(mode=0o700)
@@ -600,6 +614,8 @@ class TerminalWebsiteProfile:
     def await_ready(self, candidate_id):
         need(candidate_id == self.created_id, 'H_WEBSITE_CREATED_CID_CHANGED')
         result = self.phase('await-ready', self.initial.await_ready)
+        current = self.initial.engine.get('/containers/' + candidate_id + '/json')
+        verify_private_tmpfs(current, self.plan['spec']['HostConfig']['Tmpfs'])
         if self.auth is not None:
             current = self.initial.engine.get('/containers/' + candidate_id + '/json')
             need(current.get('Id') == candidate_id, 'H_WEBSITE_CREATED_CID_CHANGED')
@@ -735,7 +751,7 @@ class _NativeControl:
             excluded = {self.selection['oldId'], self.new_id}
             retained = [row for row in rows if row['Id'] not in excluded]
             sources = sorted({m['Source'] for row in retained for m in row['Mounts'] if m.get('Type') == 'bind'})
-            return {'workerBindSources': sources, 'websiteControlBinding': self.binding,
+            result = {'workerBindSources': sources, 'websiteControlBinding': self.binding,
                     'workerConfigDigest': hashlib.sha256(worker_selection[0]).hexdigest(),
                     'workerConfigIdentity': worker_selection[1],
                     'companyDigest': hashlib.sha256(company).hexdigest(),
@@ -744,6 +760,8 @@ class _NativeControl:
                     'watchedProcessFacts': watched, 'broker': peer,
                     'resourceStoresDigest': self.standard.digest(resource),
                     'selectionDigest': self.standard.digest(self.selection), 'selectionIdentity': self.selection_identity}
+            self.last_snapshot = copy.deepcopy(result)
+            return result
         finally:
             if proof is not None:proof.close()
 
@@ -826,6 +844,16 @@ class _NativeControl:
             self.new_id = result['Id']
         return result
 
+    def select_retained_candidate(self, candidate_id, plan):
+        need(self.plan == plan and self.new_id is None and candidate_id != plan['oldId'],
+             'H_WEBSITE_RETAINED_SELECTION_CHANGED')
+        row = self.standard.container_metadata(self.initial.engine.get('/containers/' + candidate_id + '/json'))
+        need(row['Id'] == candidate_id and row['Image'] == plan['newImage']
+             and row['Name'] == '/' + self.name + '-candidate-' + plan['operationId']
+             and row['State']['Running'] is False and row['State']['Pid'] == 0,
+             'H_WEBSITE_RETAINED_CANDIDATE_CHANGED')
+        self.new_id = candidate_id
+
     def _post(self, path, value):
         from .website_peer_facts import _MetadataSocket, _remaining
         class MutationSocket(_MetadataSocket):
@@ -858,6 +886,172 @@ class _NativeControl:
             client.close()
 
 
+def verify_private_tmpfs(container, expected):
+    """Qualify Docker's omitted --tmpfs grants against the actual namespace."""
+    from .owner_terminal_channel import read_proc
+    pid = container['State'].get('Pid')
+    need(container['State'].get('Running') is True and type(pid) is int and pid > 1,
+         'H_WEBSITE_TMPFS_PROCESS_REQUIRED')
+    before = read_proc(pid)
+    root = os.open('/proc/' + str(pid) + '/root', os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        mount_path = Path('/proc') / str(pid) / 'mountinfo'
+        def read_mounts():
+            fd = os.open(mount_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            try: raw = os.read(fd, (4 << 20) + 1)
+            finally: os.close(fd)
+            need(len(raw) <= 4 << 20, 'H_WEBSITE_TMPFS_MOUNT_BOUND')
+            return raw
+        raw = read_mounts()
+        rows = [line.split() for line in raw.decode('ascii').splitlines()]
+        uid, gid = map(int, container['Config']['User'].split(':'))
+        for path, size, mode, owner in (('/tmp', 256 << 20, 0o1777, (0, 0)),
+                                         ('/run', 16 << 20, 0o755, (uid, gid))):
+            need(path in expected, 'H_WEBSITE_TMPFS_DECLARATION_CHANGED')
+            found = [row for row in rows if len(row) >= 10 and row[4] == path]
+            need(len(found) == 1, 'H_WEBSITE_TMPFS_NATIVE_MISSING')
+            row = found[0]; split = row.index('-')
+            options = set(row[5].split(',')); super_options = set(row[split + 3].split(','))
+            need(row[3] == '/' and row[split + 1] == 'tmpfs'
+                 and {'rw', 'nosuid', 'nodev'} <= options
+                 and (path != '/run' or 'noexec' in options)
+                 and 'size=' + str(size // 1024) + 'k' in super_options,
+                 'H_WEBSITE_TMPFS_NATIVE_OPTIONS')
+            fd = os.open(path[1:], os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=root)
+            try: info = os.fstat(fd)
+            finally: os.close(fd)
+            need(stat.S_IMODE(info.st_mode) == mode and (info.st_uid, info.st_gid) == owner
+                 and os.major(info.st_dev) == int(row[2].split(':')[0])
+                 and os.minor(info.st_dev) == int(row[2].split(':')[1]), 'H_WEBSITE_TMPFS_NATIVE_IDENTITY')
+        need(read_proc(pid) == before and read_mounts() == raw,
+             'H_WEBSITE_TMPFS_PROCESS_CHANGED')
+    finally: os.close(root)
+
+
+def qualify_provider_baseline(initial, raw, selected):
+    """Compare prior operator-observed incarnations, never infer old argv facts."""
+    rows = json.loads(raw)
+    need(type(rows) is list and 1 <= len(rows) <= 128, 'H_WEBSITE_PROVIDER_BASELINE_REQUIRED')
+    facts = []; seen = []
+    for row in rows:
+        need(type(row) is dict and set(row) == {'name','CID','initPid','providers','image'}
+             and type(row['providers']) is list and 1 <= len(row['providers']) <= 8
+             and type(row['CID']) is str and re.fullmatch('[a-f0-9]{64}',row['CID']),
+             'H_WEBSITE_PROVIDER_BASELINE_SCHEMA')
+        current = initial.engine.get('/containers/' + row['CID'] + '/json')
+        need(current['State']['Running'] is True and current['State']['Pid'] == row['initPid']
+             and current['Image'] == row['image'], 'H_WEBSITE_PROVIDER_LAPTOP_CHANGED')
+        for provider in row['providers']:
+            need(type(provider) is dict and set(provider) == {'pid','comm','cwd','exe','startTick'}
+                 and type(provider['pid']) is int and type(provider['startTick']) is int,
+                 'H_WEBSITE_PROVIDER_BASELINE_SCHEMA')
+            actual = _NativeControl._process(provider['pid'])
+            need(actual['start'] == provider['startTick']
+                 and os.readlink('/proc/' + str(provider['pid']) + '/exe') == provider['exe'],
+                 'H_WEBSITE_PROVIDER_INCARCATION_CHANGED')
+            seen.append(provider['pid']);facts.append({'containerId':row['CID'],'initPid':row['initPid'],
+                                                       'image':row['image'],'process':actual})
+    need(len(seen) == len(set(seen)) and sorted(seen) == sorted(selected),
+         'H_WEBSITE_PROVIDER_BASELINE_ROSTER_CHANGED')
+    return facts
+
+
+def _raw_sha(raw):return 'sha256:' + hashlib.sha256(raw).hexdigest()
+
+
+def prepare_continuation(initial, standard, ledger, args):
+    """Fresh owner review; does not claim the unavailable old witness matched."""
+    old_path = ledger / 'website-prepared' / args.operation / 'PLAN.json'
+    original, _ = L._data_bytes(old_path,1<<20,private=True); old = standard.strict(original)
+    need(standard.digest(old) == args.plan_sha256, 'H_WEBSITE_PARENT_PLAN_CHANGED')
+    selection_raw, _ = private_bytes(ledger/'website-selection.json')
+    selection = standard.strict(selection_raw)
+    need(type(selection) is dict and set(selection) == {'version','purpose','oldId','oldImage','newImage',
+         'providerPIDs','expiresAtEpoch'} and all(selection[k] == old[k] for k in ('oldId','oldImage','newImage')),
+         'H_WEBSITE_PARENT_SELECTION_CHANGED')
+    baseline_path=L.physical(args.provider_baseline)
+    baseline_raw,baseline_identity=private_bytes(baseline_path)
+    parent = ledger/'website-renewals'
+    if not parent.exists():parent.mkdir(mode=0o700);L._sync(ledger)
+    fd = L.open_directory(parent)
+    try:need(stat.S_IMODE(os.fstat(fd).st_mode)==0o700,'H_WEBSITE_RENEWAL_CUSTODY')
+    finally:os.close(fd)
+    folder=parent/args.continuation;folder.mkdir(mode=0o700);L._sync(parent)
+    # A new nonauthorizing observation window is explicitly selected by this
+    # owner command. The old expired bytes are retained without being amended.
+    fresh=copy.deepcopy(selection);fresh['expiresAtEpoch']=time.time()+1500
+    for name,raw in (('ORIGINAL_PLAN.json',original),('ORIGINAL_SELECTION.json',selection_raw),
+                     ('PROVIDER_BASELINE.json',baseline_raw),('selection.json',encoded(fresh))):
+        L.exclusive(folder/name,raw)
+    native=_NativeControl(initial,folder/'selection.json',ledger/'website-updates',ledger/'website-schema.json',standard)
+    profile=TerminalWebsiteProfile(initial,ledger/'website-links.json',old_id=selection['oldId'])
+    try:
+        stage=standard.WebsiteStage(native,ledger/'website-updates',initial.deployment_path,
+                                    ledger/'website-schema.json',guard=native,ready=native.http_ready,terminal=profile)
+        native.bind_plan(old)
+        record,receipt=stage._retained_unstarted(old,(args.continuation,args.receipt_sha256))
+        native.select_retained_candidate(record['newId'],old)
+        providers=qualify_provider_baseline(initial,baseline_raw,selection['providerPIDs'])
+        plan=stage.plan(native.name,old['newImage'],old['oldId'],old['oldImage'],
+                        _retained_plan=old,_continuation=(args.continuation,args.receipt_sha256))
+        need(standard.digest(native.last_snapshot)==plan['guardPin'],'H_WEBSITE_FULL_WITNESS_CHANGED')
+        need(qualify_provider_baseline(initial,baseline_raw,selection['providerPIDs'])==providers,
+             'H_WEBSITE_PROVIDER_CHANGED_DURING_RENEWAL')
+        need(private_bytes(ledger/'website-selection.json')[0]==selection_raw
+             and private_bytes(baseline_path)==(baseline_raw,baseline_identity)
+             and L._data_bytes(old_path,1<<20,private=True)[0]==original,'H_WEBSITE_RENEWAL_PARENT_CHANGED')
+        witness={'version':1,'purpose':'owner-terminal-cold-renewal-v1','continuation':args.continuation,
+                 'parentPlanDigest':standard.digest(old),'parentSelectionSHA256':_raw_sha(selection_raw),
+                 'parentReceiptSHA256':_raw_sha(receipt),'planDigest':standard.digest(plan),
+                 'selectionSHA256':_raw_sha(encoded(fresh)),'nativeSnapshotDigest':plan['guardPin'],
+                 'providerBaselineSHA256':_raw_sha(baseline_raw),'providerBaselinePath':str(baseline_path),
+                 'providerBaselineIdentity':baseline_identity,'providerFacts':providers,
+                 'oldNativeWitnessAvailable':False}
+        for name,value in (('PLAN.json',plan),('SNAPSHOT.json',native.last_snapshot),('WITNESS.json',witness)):
+            L.exclusive(folder/name,encoded(value))
+        return {'state':'H_WEBSITE_CONTINUATION_REVIEW_REQUIRED','continuation':args.continuation,
+                'planDigest':standard.digest(plan),'nativeSnapshotDigest':plan['guardPin'],
+                'changedPlanFields':[k for k in standard.PLAN_KEYS if plan[k]!=old[k]],
+                'providerIncarnations':len(providers),'oldNativeWitnessAvailable':False,'effects':False}
+    finally:profile.close()
+
+
+def load_continuation(initial,standard,ledger,args):
+    folder=ledger/'website-renewals'/args.continuation
+    fd=L.open_directory(folder)
+    try:
+        names=[]
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                names.append(entry.name);need(len(names)<=7,'H_WEBSITE_RENEWAL_INCOMPLETE')
+        need(set(names)=={'ORIGINAL_PLAN.json','ORIGINAL_SELECTION.json','PROVIDER_BASELINE.json',
+                         'selection.json','PLAN.json','SNAPSHOT.json','WITNESS.json'},
+             'H_WEBSITE_RENEWAL_INCOMPLETE')
+    finally:os.close(fd)
+    read=lambda name:private_bytes(folder/name)[0]
+    old=standard.strict(read('ORIGINAL_PLAN.json'));plan=standard.strict(read('PLAN.json'))
+    selection=read('selection.json');snapshot=standard.strict(read('SNAPSHOT.json'));witness=standard.strict(read('WITNESS.json'))
+    keys={'version','purpose','continuation','parentPlanDigest','parentSelectionSHA256','parentReceiptSHA256',
+          'planDigest','selectionSHA256','nativeSnapshotDigest','providerBaselineSHA256','providerBaselinePath',
+          'providerBaselineIdentity','providerFacts','oldNativeWitnessAvailable'}
+    need(type(witness) is dict and set(witness)==keys and witness['version']==1
+         and witness['purpose']=='owner-terminal-cold-renewal-v1' and witness['continuation']==args.continuation
+         and witness['oldNativeWitnessAvailable'] is False and witness['planDigest']==args.plan_sha256==standard.digest(plan)
+         and witness['parentPlanDigest']==standard.digest(old)
+         and witness['nativeSnapshotDigest']==plan['guardPin']==standard.digest(snapshot)
+         and witness['selectionSHA256']==_raw_sha(selection)
+         and witness['parentReceiptSHA256']==args.receipt_sha256,'H_WEBSITE_RENEWAL_REVIEW_CHANGED')
+    need(private_bytes(ledger/'website-selection.json')[0]==read('ORIGINAL_SELECTION.json')
+         and _raw_sha(read('ORIGINAL_SELECTION.json'))==witness['parentSelectionSHA256']
+         and private_bytes(L.physical(witness['providerBaselinePath']))==(read('PROVIDER_BASELINE.json'),tuple(witness['providerBaselineIdentity']))
+         and _raw_sha(read('PROVIDER_BASELINE.json'))==witness['providerBaselineSHA256']
+         and L._data_bytes(ledger/'website-prepared'/args.operation/'PLAN.json',1<<20,private=True)[0]==read('ORIGINAL_PLAN.json'),
+         'H_WEBSITE_RENEWAL_PARENT_CHANGED')
+    need(standard.digest(qualify_provider_baseline(initial,read('PROVIDER_BASELINE.json'),standard.strict(selection)['providerPIDs']))
+         ==standard.digest(witness['providerFacts']),'H_WEBSITE_RENEWAL_PROVIDERS_CHANGED')
+    return folder/'selection.json',plan,old
+
+
 def _standard_stage():
     path = Path(__file__).resolve().parents[2] / 'apps/host/website-update.py'
     loader = importlib.util.spec_from_file_location('_fixed_h_website_stage', path)
@@ -869,15 +1063,31 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
     """Only a Nix-generated optional launcher supplies immutable program facts."""
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--installation', type=Path, required=True)
-    parser.add_argument('action', choices=('describe-links', 'prepare', 'apply'))
+    parser.add_argument('action', choices=('describe-links', 'prepare', 'apply', 'resume-created', 'continue-created', 'prepare-continue', 'prepare-abort-ack', 'ack-abort'))
     parser.add_argument('--operation')
     parser.add_argument('--plan-sha256')
+    parser.add_argument('--continuation')
+    parser.add_argument('--receipt-sha256')
+    parser.add_argument('--provider-baseline',type=Path)
+    parser.add_argument('--operator-abort-evidence',type=Path)
     args = parser.parse_args(argv)
+    if args.action == 'prepare-abort-ack':
+        if args.operator_abort_evidence is None:parser.error('A private explicit owner cold-abort evidence directory is required')
+    elif args.operator_abort_evidence is not None:parser.error('Only prepare-abort-ack accepts operator abort evidence')
+    if args.action in ('prepare-continue','prepare-abort-ack'):
+        if args.provider_baseline is None:parser.error('prepare-continue requires the private prior provider baseline input')
+    elif args.provider_baseline is not None:parser.error('Only prepare-continue accepts a provider baseline input')
+    if args.action in ('continue-created','prepare-continue','prepare-abort-ack','ack-abort'):
+        if (type(args.continuation) is not str or UUID.fullmatch(args.continuation) is None
+                or type(args.receipt_sha256) is not str or re.fullmatch('sha256:[a-f0-9]{64}',args.receipt_sha256) is None):
+            parser.error('continue-created requires a fresh continuation UUID and exact previous receipt SHA256')
+    elif args.continuation is not None or args.receipt_sha256 is not None:
+        parser.error('Only continue-created accepts continuation/receipt SHA')
     if args.action == 'describe-links':
         if args.operation is not None or args.plan_sha256 is not None:parser.error('describe-links accepts no operation or plan')
     elif (type(args.operation) is not str or UUID.fullmatch(args.operation) is None
-          or (args.action == 'apply') != (args.plan_sha256 is not None)):
-        parser.error('Select one fresh UUID and only apply requires its exact plan SHA256')
+          or (args.action in ('apply', 'resume-created', 'continue-created', 'prepare-continue', 'prepare-abort-ack', 'ack-abort')) != (args.plan_sha256 is not None)):
+        parser.error('Select the prepared UUID and only apply/resume-created require its exact plan SHA256')
     if args.plan_sha256 is not None and re.fullmatch('sha256:[a-f0-9]{64}', args.plan_sha256) is None:
         parser.error('Select the exact prepared plan SHA256')
     os.umask(0o077)
@@ -897,6 +1107,41 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
         need(initial.runtime.value['profile'] == 'terminal', 'H_WEBSITE_H_ONLY_REQUIRED')
         standard = _standard_stage();ledger = initial.roots['ledgerBase']
         selection = ledger / 'website-selection.json'
+        if args.action in ('prepare-abort-ack','ack-abort'):
+            from . import owner_terminal_cold_abort as abort
+            state=ledger/'website-updates';policy=ledger/'website-schema.json'
+            record=standard.strict(abort.read(state/'website-active.json'))
+            need(abort.sha(abort.read(state/'website-active.json'))==args.receipt_sha256,'H_ABORT_PARENT_RECEIPT_CHANGED')
+            reference=standard.strict(abort.read(ledger/'website-prepared'/args.operation/'PLAN.json'))
+            need(reference['operationId']==record['operationId'],'H_ABORT_PARENT_OPERATION_CHANGED')
+            parent=ledger/'website-cold-aborts';folder=parent/args.continuation
+            if args.action=='prepare-abort-ack':
+                current=abort.read(state/('website-'+record['operationId'])/'plan.private.json')
+                need(standard.digest(standard.strict(current))==args.plan_sha256,'H_ABORT_PARENT_PLAN_CHANGED')
+                old_selection_raw=abort.read(selection)
+                old_selection=standard.strict(old_selection_raw)
+                need(old_selection['oldId']==record['oldId'] and old_selection['oldImage']==record['oldImage']
+                     and old_selection['newImage']==record['newImage'],'H_ABORT_PARENT_SELECTION_CHANGED')
+                old_selection['expiresAtEpoch']=time.time()+1500
+                if not parent.exists():parent.mkdir(mode=0o700);L._sync(ledger)
+                folder.mkdir(mode=0o700);L._sync(parent)
+                L.exclusive(folder/'ORIGINAL_SELECTION.json',old_selection_raw)
+                L.exclusive(folder/'selection.json',encoded(old_selection))
+            selection=folder/'selection.json'
+            native=_NativeControl(initial,selection,state,policy,standard)
+            profile=TerminalWebsiteProfile(initial,ledger/'website-links.json',old_id=record['oldId'])
+            stage=standard.WebsiteStage(native,state,initial.deployment_path,policy,
+                                       guard=native,ready=native.http_ready,terminal=profile)
+            result=(abort.prepare(initial,standard,native,stage,folder,args.operator_abort_evidence,args.provider_baseline)
+                    if args.action=='prepare-abort-ack' else abort.apply(initial,standard,native,stage,folder,args.plan_sha256))
+            profile.close();profile=None
+            print(json.dumps(result,sort_keys=True));return 0
+        if args.action == 'prepare-continue':
+            print(json.dumps(prepare_continuation(initial,standard,ledger,args),sort_keys=True))
+            return 0
+        renewed=None
+        if args.action == 'continue-created' and (ledger/'website-renewals'/args.continuation).exists():
+            selection,renewed,baseline=load_continuation(initial,standard,ledger,args)
         value, _ = private_document(selection)
         need(type(value) is dict and type(value.get('oldId')) is str, 'H_WEBSITE_SELECTION')
         if args.action == 'describe-links':
@@ -921,17 +1166,25 @@ def main(argv=None, *, runtime_manifest=None, service_binding=None):
             finally:os.close(fd)
             raw = encoded(plan);need(len(raw) <= 1 << 20, 'H_WEBSITE_PLAN_BOUND')
             operation.mkdir(mode=0o700);L._sync(prepared)
+            need(hasattr(native,'last_snapshot') and standard.digest(native.last_snapshot)==plan['guardPin'],
+                 'H_WEBSITE_FULL_WITNESS_CHANGED')
             L.exclusive(operation / 'PLAN.json', raw)
+            L.exclusive(operation / 'SNAPSHOT.json',encoded(native.last_snapshot))
             native._time()
             profile.close(); profile = None
             print(json.dumps({'version': 1, 'state': 'H_WEBSITE_PREPARED', 'operation': args.operation,
                               'planDigest': standard.digest(plan), 'specDigest': plan['specPin'],
                               'finalSpecApproval': plan['finalSpecApproval'], 'effects': False}, sort_keys=True))
             return 0
-        raw, _ = L._data_bytes(operation / 'PLAN.json', 1 << 20, private=True);plan = standard.strict(raw)
+        raw, _ = L._data_bytes(operation / 'PLAN.json', 1 << 20, private=True)
+        plan = renewed if renewed is not None else standard.strict(raw)
         need(standard.digest(plan) == args.plan_sha256, 'H_WEBSITE_PREPARED_PLAN_CHANGED')
         native.bind_plan(plan)
-        record = stage.apply(plan, args.plan_sha256)
+        if args.action == 'continue-created':
+            record = stage.continue_created(plan,args.plan_sha256,args.continuation,args.receipt_sha256,
+                                            baseline_plan=baseline if renewed is not None else None)
+        elif args.action == 'resume-created':record = stage.resume_created(plan,args.plan_sha256)
+        else:record = stage.apply(plan,args.plan_sha256)
         profile.close(); profile = None
         print(json.dumps({'version': 1, 'state': 'H_WEBSITE_ADOPTED', 'receipt': record,
                           'providerCompletenessQualified': False, 'ownerShellAcceptanceRequired': True}, sort_keys=True))

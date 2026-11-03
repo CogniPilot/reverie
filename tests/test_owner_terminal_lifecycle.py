@@ -333,6 +333,21 @@ class GenerationFlow(unittest.TestCase):
                 if child.stdin is not None:child.stdin.close()
                 if child.stdout is not None:child.stdout.close()
 
+    def test_prepare_publishes_private_empty_engine_configuration(self):
+        result=self.prepare();docker=Path(result['policyPath']).parent/'docker'
+        self.assertTrue(docker.is_dir());self.assertEqual(docker.stat().st_uid,os.getuid())
+        self.assertEqual(docker.stat().st_mode&0o777,0o700);self.assertEqual(list(docker.iterdir()),[])
+
+    def test_engine_configuration_insertion_before_finalization_refuses_and_retains_pending(self):
+        original=self.initial.install_unit
+        def insert(raw,old):
+            original(raw,old)
+            docker=next(self.control.glob('*/docker'))
+            self.write(docker/'config.json',b'{"changed":true}')
+        self.initial.install_unit=insert
+        with self.assertRaisesRegex(ValueError,'ENGINE_CONFIGURATION_CHANGED'):self.prepare()
+        self.assertTrue((self.control/L.CONTROL_PENDING).exists())
+
     def test_cold_prepare_then_actual_old_process_settlement_allows_fresh_same_CID_generation(self):
         first=self.prepare();selected,policy,_=self.initial.current()
         self.assertEqual(first['listenerState'],'NOT_STARTED')

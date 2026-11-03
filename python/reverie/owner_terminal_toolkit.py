@@ -20,6 +20,16 @@ MAX_PROGRAM = 16 * 1024**2
 
 
 def immutable_manifest(path):
+    # Lifecycle manifests carry an immutable artifact pair; legacy owner
+    # policies may still name only the canonical immutable path. Verify the
+    # pair before decoding rather than discarding its producer's byte binding.
+    expected = None
+    if type(path) is dict:
+        need(set(path) == {'path', 'sha256'} and type(path['path']) is str
+             and type(path['sha256']) is str and len(path['sha256']) == 64
+             and all(c in '0123456789abcdef' for c in path['sha256']), 'TOOLKIT_MANIFEST_ARTIFACT_REQUIRED')
+        expected = path['sha256']; path = path['path']
+    need(type(path) is str or isinstance(path, Path), 'TOOLKIT_MANIFEST_ARTIFACT_REQUIRED')
     path = Path(path)
     need(str(path).startswith('/nix/store/') and path.resolve(strict=True) == path, 'IMMUTABLE_TOOLKIT_MANIFEST_REQUIRED')
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
@@ -28,9 +38,10 @@ def immutable_manifest(path):
         need(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o222
              and info.st_size <= 8192, 'IMMUTABLE_TOOLKIT_MANIFEST_REQUIRED')
         raw = os.read(fd, 8193); need(len(raw) <= 8192, 'TOOLKIT_MANIFEST_BOUND')
+        need(expected is None or hashlib.sha256(raw).hexdigest() == expected, 'TOOLKIT_MANIFEST_ARTIFACT_CHANGED')
         value = json.loads(raw)
-        need(type(value) is dict and set(value) == {'version', 'static', 'files'} and value['version'] == 1
-             and value['static'] is True and set(value['files']) == set(FILES), 'STATIC_TOOLKIT_MANIFEST_REQUIRED')
+        need(type(value) is dict and set(value) == {'version', 'static', 'files'} and type(value['version']) is int and value['version'] == 1
+             and value['static'] is True and type(value['files']) is dict and set(value['files']) == set(FILES), 'STATIC_TOOLKIT_MANIFEST_REQUIRED')
         for row in value['files'].values():
             need(type(row) is dict and set(row) == {'sha256', 'bytes'} and type(row['bytes']) is int
                  and 4 <= row['bytes'] <= MAX_PROGRAM and type(row['sha256']) is str

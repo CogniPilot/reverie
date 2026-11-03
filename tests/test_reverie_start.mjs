@@ -228,6 +228,7 @@ test('full H native-spec qualifier refuses authority, malformed defaults, precis
     value => { value.HostConfig.Mounts[0].BindOptions = { CreateMountpoint: true }; },
     value => { value.HostConfig.Mounts[0].VolumeOptions = false; },
     value => { value.HostConfig.FutureAuthoritySurface = false; },
+    value => { value.HostConfig.UsernsMode = 'host'; },
     value => { value.Config.Cmd = ['caller-selected-command']; },
   ];
   for (const change of mutations) {
@@ -238,6 +239,14 @@ test('full H native-spec qualifier refuses authority, malformed defaults, precis
     const copy = structuredClone(container); change(copy);
     assert.throws(() => checkSourceHost(copy, intent.port));
   }
+  container.HostConfig.UsernsMode = '';
+  assert.equal(acceptedCreateSpec(container, image, intent).Image, image.Id);
+  const omitted = structuredClone(container); omitted.Mounts = omitted.Mounts.filter(m => m.Type !== 'tmpfs');
+  assert.equal(acceptedCreateSpec(omitted, image, intent).Image, image.Id);
+  const missingDeclaration = structuredClone(omitted); delete missingDeclaration.HostConfig.Tmpfs['/run'];
+  assert.throws(() => acceptedCreateSpec(missingDeclaration, image, intent));
+  const partial = structuredClone(container); partial.Mounts = partial.Mounts.filter(m => m.Destination !== '/run');
+  assert.throws(() => acceptedCreateSpec(partial, image, intent));
   const reversed = structuredClone(container); reversed.Mounts.reverse(); reversed.HostConfig.Mounts.reverse();
   assert.equal(acceptedCreateSpec(reversed, image, intent).Image, image.Id);
 });

@@ -531,9 +531,10 @@ class WebsiteStage:
         expected=custody_digests(binding,self.control_paths(),sources)
         require(all(proof[key]==value for key,value in expected.items()),'Custody proof binding differs')
         return copy.deepcopy(binding),digest(sources)
-    def plan(self,name,target_image,expected_container_id,expected_image):
+    def plan(self,name,target_image,expected_container_id,expected_image,*,_retained_plan=None,_continuation=None):
         require(exact(name,NAME) and exact(expected_container_id,CONTAINER) and exact(expected_image,IMAGE),'Exact website/container/image selectors required')
         require(target_image!=expected_image,'Same image uses explicit same-candidate recovery, not cutover')
+        prior=self._retained_unstarted(_retained_plan,_continuation) if _retained_plan is not None else None
         old=self._container(name)
         require(old['Id']==expected_container_id and old['Image']==expected_image and old['Name']=='/'+name and old['State']['Running'] and not old['State'].get('Paused') and not old['State'].get('Restarting'),'Website ID/image/running CAS failed')
         require(not (old['Config'].get('Labels') or {}).get('reverie.worker'),'Selected container is a laptop')
@@ -549,7 +550,10 @@ class WebsiteStage:
         spec_pin=digest(spec);approval='approved' if review['approvedSpecDigest']==spec_pin else 'required'
         result={'version':1,'operationId':operation,'name':name,'oldId':expected_container_id,'oldImage':expected_image,'newImage':target_image,'oldPin':digest(container_pin(old)),'oldImagePin':digest(image_pin(previous)),'newImagePin':digest(image_pin(target)),'inputPin':input_pin,'guardPin':digest(snapshot),'controlBinding':control_binding,'controlGrantDigest':grant_digest,'stateDirectory':str(self.state),'deploymentPath':str(self.deployment),'policyPath':str(self.policy),'backupScopes':scopes,'bindSources':source_pins,'spec':spec,'specPin':spec_pin,'finalSpecApproval':approval,'environmentInference':{'status':'ambiguous-legacy-values','equalOldImageDefaults':inherited_environment_keys(old,previous)},'schemaFloors':['GOAL','AUTH'],'automaticOldImageRollback':False}
         active=self.state/'website-active.json'
-        if os.path.lexists(active):self._adopted_history(active,result)
+        if prior is not None:
+            require(self._retained_unstarted(_retained_plan,_continuation)==prior,'Cold continuation changed during renewed plan')
+            require(all(result[k]==_retained_plan[k] for k in PLAN_KEYS-{'guardPin'}),'Renewal changed authority/spec/input/control/grant pins')
+        elif os.path.lexists(active):self._adopted_history(active,result)
         return result
     @contextlib.contextmanager
     def maintenance_lock(self):
@@ -603,6 +607,11 @@ class WebsiteStage:
     def _adopted_history(self,active,plan):
         """No filename or partial adopted object proves a durable prior success."""
         record=strict(private_read(active,1024*1024))
+        if type(record) is dict and record.get('state')=='unconfirmed' and self.terminal is not None:
+            try:self.terminal.verify_cold_abort(record,plan)
+            except (OSError,ValueError) as error:
+                raise WebsiteRefusal('Prior held website has no qualified owner cold-abort closure') from error
+            return record
         fields={'version','operationId','oldId','oldImage','newImage','phase','state','newId','oldStopped','newStartAttempted','automaticOldImageRollback','schemaState','planDigest','controlBinding','controlGrantDigest','retainedOldName','backup','checkpointDigest'}
         require(type(record) is dict and set(record)==fields,'Prior receipt is partial/unknown')
         require(type(record['version']) is int and record['version']==1 and record['state']=='adopted' and record['phase']=='complete' and record['schemaState']=='adopted-forward-only' and record['oldStopped'] is True and record['newStartAttempted'] is True and record['automaticOldImageRollback'] is False,'Prior forward-schema receipt is not complete')
@@ -657,7 +666,86 @@ class WebsiteStage:
         require(members==expected and count==checkpoint_manifest['files'],'Prior checkpoint contents differ')
         # Epoch/catalogue monotonicity is an additional required parent gate.
         return record
-    def apply(self,plan,expected_plan_digest):
+    def _retained_unstarted(self,plan,continuation=None):
+        """Only an exact pre-stop validation failure can continue once.
+
+        No unknown start, stop, H phase or engine response is inferred settled.
+        The initial failure remains immutable evidence beside the new attempt.
+        """
+        require(self.terminal is not None,'Retained continuation requires protected terminal profile')
+        operation=self.state/('website-'+plan['operationId']);private_directory(operation)
+        with os.scandir(operation) as entries:
+            names=[]
+            for entry in entries:
+                names.append(entry.name)
+                require(len(names)<=5,'Retained candidate has phase evidence or a consumed continuation')
+        expected={'receipt.private.json','plan.private.json'}
+        if continuation is not None:
+            qualifiers=[name for name in names if re.fullmatch('H-qualifier-[a-f0-9]{32}',name)]
+            require(len(qualifiers)==1,'One refused local qualifier required')
+            expected|={'initial-unconfirmed.private.json','resume-created-ATTEMPT.private.json',qualifiers[0]}
+        require(set(names)==expected,'Retained candidate has phase evidence or a consumed continuation')
+        raw=private_read(operation/'receipt.private.json',1<<20);record=strict(raw)
+        fields={'version','operationId','oldId','oldImage','newImage','phase','state','newId','oldStopped','newStartAttempted','automaticOldImageRollback','schemaState','planDigest','controlBinding','controlGrantDigest','failure'}
+        require(type(record) is dict and set(record)==fields and type(record['version']) is int and record['version']==1
+                and record['phase']=='candidate-created' and record['state']=='unconfirmed'
+                and record['oldStopped'] is False and record['newStartAttempted'] is False
+                and record['schemaState']=='not-started' and record['automaticOldImageRollback'] is False
+                and record['failure'] in ('WebsiteRefusal','ValueError'), 'Only pre-stop validation failure can continue')
+        require(private_read(self.state/'website-active.json',1<<20)==raw,'Retained active receipt changed')
+        require(strict(private_read(operation/'plan.private.json',1<<20))==plan
+                and record['planDigest']==digest(plan), 'Retained plan changed')
+        for key in ('operationId','oldId','oldImage','newImage','controlBinding','controlGrantDigest'):
+            require(record[key]==plan[key],'Retained receipt binding changed')
+        require(exact(record['newId'],CONTAINER) and record['newId']!=plan['oldId'],'Retained candidate identity required')
+        candidate=self._container(record['newId']);state=candidate['State']
+        require(candidate['Name']=='/'+plan['name']+'-candidate-'+plan['operationId']
+                and state.get('Running') is False and state.get('Pid')==0
+                and not state.get('Paused') and not state.get('Restarting') and not state.get('Dead')
+                and state.get('StartedAt') in ('','0001-01-01T00:00:00Z')
+                and state.get('FinishedAt','') in ('','0001-01-01T00:00:00Z')
+                and state.get('ExitCode',0)==0 and not state.get('Error','')
+                and candidate.get('RestartCount',0)==0,'Retained candidate was started or changed')
+        old=self._container(plan['name'])
+        require(digest(container_pin(old))==plan['oldPin'] and old['State']['Running'] is True,
+                'Original live website changed')
+        self._verify_created(candidate,plan,mounts(old))
+        if continuation is not None:
+            attempt,previous=continuation
+            require('sha256:'+hashlib.sha256(raw).hexdigest()==previous,'Previous refusal receipt CAS changed')
+            first_raw=private_read(operation/'initial-unconfirmed.private.json',1<<20)
+            first=strict(first_raw);latch=strict(private_read(operation/'resume-created-ATTEMPT.private.json',1<<20))
+            require(type(latch) is dict and set(latch)=={'version','state','candidateId','planDigest','initialReceiptDigest'}
+                    and type(latch['version']) is int and latch['version']==1 and latch['state']=='ATTEMPT_NO_REPLAY'
+                    and latch['candidateId']==record['newId'] and latch['planDigest']==digest(plan)
+                    and latch['initialReceiptDigest']==digest(first),'Prior continuation evidence changed')
+            require(type(first) is dict and set(first)==fields
+                    and all(first[k]==record[k] for k in fields-{'failure'})
+                    and first['failure'] in ('WebsiteRefusal','ValueError'),'Initial refusal changed')
+            folder=operation/qualifiers[0];private_directory(folder)
+            with os.scandir(folder) as entries:
+                present=[]
+                for entry in entries:
+                    present.append(entry.name);require(len(present)<=3,'Unknown qualifier effects')
+            require(set(present)=={'created.json','image.json','intent.json'},'Qualifier result/phase is unknown')
+            created=strict(private_read(folder/'created.json',8<<20))
+            image=strict(private_read(folder/'image.json',8<<20))
+            intent=strict(private_read(folder/'intent.json',1<<20))
+            require(digest(container_pin(created))==digest(container_pin(candidate))
+                    and image_pin(image)==image_pin(self._image(plan['newImage']))
+                    and intent==self.terminal.qualifier_intent(candidate,plan),'Refused qualifier inputs changed')
+        return record,raw
+
+    def resume_created(self,plan,expected_plan_digest):
+        return self.apply(plan,expected_plan_digest,_resume_created=True)
+
+    def continue_created(self,plan,expected_plan_digest,continuation,previous_receipt_digest,*,baseline_plan=None):
+        require(exact(continuation,re.compile('[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}'))
+                and exact(previous_receipt_digest,re.compile('sha256:[a-f0-9]{64}')),'Fresh continuation UUID and receipt SHA required')
+        return self.apply(plan,expected_plan_digest,_resume_created=True,
+                          _continuation=(continuation,previous_receipt_digest),_baseline_plan=baseline_plan)
+
+    def apply(self,plan,expected_plan_digest,*,_resume_created=False,_continuation=None,_baseline_plan=None):
         require(os.getuid()!=0,'Run as the ordinary owner, without sudo')
         keys=PLAN_KEYS
         require(type(plan) is dict and set(plan)==keys and digest(plan)==expected_plan_digest and type(plan.get('version')) is int and plan['version']==1 and plan.get('automaticOldImageRollback') is False and plan.get('schemaFloors')==['GOAL','AUTH'],'Reviewed exact closed plan digest required')
@@ -666,6 +754,17 @@ class WebsiteStage:
         require(plan['newImage']!=plan['oldImage'],'Same image is not a website cutover')
         require(digest(plan['spec'])==plan['specPin'] and plan['spec']['Image']==plan['newImage'] and plan['spec']['Labels'].get(LABEL)==plan['operationId'],'Plan spec changed')
         require(plan.get('finalSpecApproval')=='approved','Exact final-spec owner approval required')
+        baseline=plan if _baseline_plan is None else _baseline_plan
+        if _baseline_plan is not None:
+            require(_resume_created and _continuation is not None and type(baseline) is dict
+                    and set(baseline)==PLAN_KEYS and all(plan[k]==baseline[k] for k in PLAN_KEYS-{'guardPin'}),
+                    'Renewed plan changed authority/spec/input/control/grant pins')
+        resumed=None
+        if _resume_created:
+            resumed=self._retained_unstarted(baseline,_continuation)
+            select=getattr(self.api,'select_retained_candidate',None)
+            require(callable(select),'Protected retained-candidate native admission unavailable')
+            select(resumed[0]['newId'],plan)
         # Admission of canonical control location precedes any journal/lock creation.
         observed=self._container(plan['name']);snapshot=self.guard.snapshot()
         control,grants=self._admit_control(plan['name'],observed,snapshot)
@@ -676,9 +775,12 @@ class WebsiteStage:
             try:os.fsync(parent_fd)  # Persist registered state-directory reachability before effects.
             finally:os.close(parent_fd)
             active=self.state/'website-active.json'
-            if os.path.lexists(active):
+            if resumed is not None:
+                require(self._retained_unstarted(baseline,_continuation)==resumed,'Retained candidate changed under lock')
+            elif os.path.lexists(active):
                 self._adopted_history(active,plan)
-            operation=self.state/('website-'+plan['operationId']);operation.mkdir(mode=0o700)
+            operation=self.state/('website-'+plan['operationId'])
+            if resumed is None:operation.mkdir(mode=0o700)
             record={'version':1,'operationId':plan['operationId'],'oldId':plan['oldId'],'oldImage':plan['oldImage'],'newImage':plan['newImage'],'phase':'admission','state':'held','newId':None,'oldStopped':False,'newStartAttempted':False,'automaticOldImageRollback':False,'schemaState':'not-started','planDigest':expected_plan_digest,'controlBinding':copy.deepcopy(plan['controlBinding']),'controlGrantDigest':plan['controlGrantDigest']}
             def save():self._save(operation/'receipt.private.json',record);self._save(active,record)
             def stable():
@@ -700,13 +802,32 @@ class WebsiteStage:
             def sources_stable():require(bind_sources(old)==plan['bindSources'],'Bind source disappeared/replaced')
             estimate=validate_layout(plan['backupScopes'])
             require(__import__('shutil').disk_usage(self.state).free>estimate['bytes']+64*1024*1024,'Insufficient scoped checkpoint space')
-            save();self._save(operation/'plan.private.json',plan,exclusive=True)
+            if resumed is not None:
+                require(self._retained_unstarted(baseline,_continuation)==resumed,'Retained candidate changed before continuation')
+                require(resumed[1]==canonical(strict(resumed[1]))+b'\n','Prior raw receipt is not canonical; preserve without rewriting')
+                if _continuation is None:
+                    self._save(operation/'initial-unconfirmed.private.json',strict(resumed[1]),exclusive=True)
+                    latch='resume-created-ATTEMPT.private.json'
+                else:
+                    self._save(operation/('continued-refusal-'+_continuation[0]+'.private.json'),strict(resumed[1]),exclusive=True)
+                    latch='continue-created-'+_continuation[0]+'-ATTEMPT.private.json'
+                self._save(operation/latch,{'version':1,'state':'ATTEMPT_NO_REPLAY','candidateId':resumed[0]['newId'],'planDigest':expected_plan_digest,'initialReceiptDigest':digest(strict(resumed[1]))},exclusive=True)
+                if _baseline_plan is not None:
+                    original=private_read(operation/'plan.private.json',1<<20)
+                    require(strict(original)==baseline and original==canonical(baseline)+b'\n','Canonical parent plan CAS changed')
+                    self._save(operation/'initial-plan.private.json',baseline,exclusive=True)
+                    self._save(operation/'plan.private.json',plan)
+            save()
+            if resumed is None:self._save(operation/'plan.private.json',plan,exclusive=True)
             if self.terminal is not None:self.terminal.begin(self,operation,plan)
             candidate_name=plan['name']+'-candidate-'+plan['operationId'];old_name=plan['name']+'-before-'+plan['operationId'];new_id=None
             old_mounts=mounts(old)
             try:
-                record['phase']='create-attempt';save();sources_stable()
-                created=self.api('POST','/containers/create?name='+candidate_name,plan['spec']);new_id=created['Id'];require(exact(new_id,CONTAINER) and new_id!=plan['oldId'],'Invalid candidate identity')
+                sources_stable()
+                if resumed is None:
+                    record['phase']='create-attempt';save()
+                    created=self.api('POST','/containers/create?name='+candidate_name,plan['spec']);new_id=created['Id'];require(exact(new_id,CONTAINER) and new_id!=plan['oldId'],'Invalid candidate identity')
+                else:new_id=resumed[0]['newId']
                 record.update(newId=new_id,phase='candidate-created');save()
                 candidate=self._container(new_id);require(not candidate['State']['Running'],'Candidate unexpectedly running');self._verify_created(candidate,plan,old_mounts);sources_stable()
                 if self.terminal is not None:self.terminal.validate_created(candidate,plan,old_mounts)
