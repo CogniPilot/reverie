@@ -572,6 +572,22 @@ For separate root-controlled dry-run cleanup observations, see
 [NixOS module](docs/disk-cleanup-nixos.md). Production live cleanup remains
 unqualified.
 
+## Publishing review packets
+
+A review packet is a directory holding one git bundle, `PR-TITLE.txt`, `PR-BODY.md`
+(opening with a `## Branch Naming` section that holds the branch in backticks) and
+a `SHA256SUMS` covering them. From a checkout with push access, run
+`reverie agent publish <packet-dir> --repo OWNER/REPO --room <room> [--dry-run]`.
+It verifies the sums, the bundle's single head, every commit's author, committer
+and single sign-off, the absence of attribution trailers, team names and board ids
+in public text, symlinks and build output, a clean merge onto the base, and no open
+hold on the packet in the room. Only then does it push the head (an existing branch
+moves only by fast-forward, after its old head's runs are cancelled) and open a
+draft pull request whose body says the description is pending review. `--watch`
+follows its checks. Once the text is approved,
+`reverie agent publish-text <packet-dir> --repo OWNER/REPO` sets the body from
+`PR-BODY.md` without the Branch Naming section, and reads it back to confirm.
+
 ## Validation
 
 ```bash
