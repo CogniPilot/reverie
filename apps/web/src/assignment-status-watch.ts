@@ -94,6 +94,11 @@ export interface AssignmentWatchDeps {
   /** Must use current permission + phone policy; returns false for unknown delivery eligibility. */
   canDeliver(sessionId: string, roomId: string): boolean;
   canEdit(employeeId: string): boolean;
+  /**
+   * Board-lead authority (the permission that plans and assigns issues). Only a requester holding it is treated as the
+   * card's assigner for escalation; absent, escalations never go to the requester.
+   */
+  canManageBoard?(employeeId: string): boolean;
   coordinatorId?(owner: string | undefined): string | undefined;
   post(bot: ChatBot, roomId: string, text: string, recipients: string[], recent: number): ChatMessage;
   delivered(sessionId: string, roomId: string, messageId: string): boolean;
@@ -101,6 +106,11 @@ export interface AssignmentWatchDeps {
   now?: () => number;
 }
 const ended = (issue: Issue) => issue.status === 'done' || issue.status === 'wontdo';
+/** Cards a check-in is asked about; one that leaves this set (back to todo or triage, say) drops its check-in. */
+const checkedIn = (issue: Issue) => issue.status === 'doing' || issue.status === 'blocked';
+/** Whether `text` names the card id as a whole token (so "i-1" is not found in "i-12"). */
+const namesTask = (text: string | undefined, taskId: string) =>
+  !!text && new RegExp(`(?<![\\w-])${taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(text);
 const attentionId = (id: string) => 'attention-' + createHash('sha256').update(id).digest('hex').slice(0, 24);
 const marker = (entry: Entry) => `[assignment-checkin:${entry.id}]`;
 const safeName = (s: string) => s.replace(/[@\r\n`<>]/g, '').slice(0, 80);
@@ -109,9 +119,13 @@ const escalationReason = (entry: Entry) =>
   entry.response?.status === 'blocked' ? 'reported Blocked on'
     : entry.response?.status === 'new-eta' ? 'gave a new ETA that is not on the Board yet for'
       : 'did not answer the status check-in in time for';
-/** Why this reader gets it: the assignee's listed manager, the coordinator standing in for one, or the owner. */
-const escalationRole = (employee: AssignmentEmployee, manager: AssignmentEmployee | undefined) =>
+/**
+ * Why this reader gets it: whoever assigned the card, the assignee's listed manager, the coordinator standing in for
+ * one, or the owner.
+ */
+const escalationRole = (employee: AssignmentEmployee, manager: AssignmentEmployee | undefined, task: Issue) =>
   !manager ? `no manager is set for ${safeName(employee.name)}`
+    : task.requester === manager.id ? `you assigned this card to ${safeName(employee.name)}`
     : employee.reportsTo === manager.id ? `you are listed as ${safeName(employee.name)}'s manager`
       : `you coordinate ${safeName(employee.name)}'s work; no manager is set`;
 // Board reasons stay bounded; the exact explanation remains in its correlated
@@ -304,14 +318,18 @@ export class AssignmentStatusWatch {
     for (const saved of state.entries) {
       const entry = structuredClone(saved);
       const current = this.current(entry, observedTasks);
-      if (!current || ended(current.task)) {
+      if (!current || ended(current.task) || !checkedIn(current.task)) {
         if (entry.phase !== 'cancelled') {
           entry.phase = 'cancelled';
           await this.save(entry);
         }
         await this.resolveAttention(
           entry,
-          !current ? 'Assignment changed; check-in cancelled' : 'Assigned work completed'
+          !current
+            ? 'Assignment changed; check-in cancelled'
+            : ended(current.task)
+              ? 'Assigned work completed'
+              : `Card moved to ${current.task.status}; check-in cancelled`
         );
         continue;
       }
@@ -395,8 +413,18 @@ export class AssignmentStatusWatch {
         entry.phase === 'asked' &&
         this.now() >= entry.deadline &&
         this.deps.canDeliver(entry.sessionId, room.id)
-      )
-        await this.escalate(entry, bot, current.task, current.employee);
+      ) {
+        // Progress posted on the card in this room since the check-in counts as an answer: no page. It records only
+        // that the assignee spoke; the card's status, reason and dates are left as they are.
+        const post = this.progressPost(entry, current.task, current.employee);
+        if (post) {
+          await this.audit({ action: 'assignment-checkin-progress-post', by: `bot:${bot.id}`, checkinId: entry.id,
+            taskId: entry.taskId, messageId: post.id });
+          entry.phase = 'cancelled';
+          await this.save(entry);
+          await this.resolveAttention(entry, 'Assignee posted progress on the card');
+        } else await this.escalate(entry, bot, current.task, current.employee);
+      }
       else if (
         entry.response?.status === 'blocked' ||
         (entry.response?.status === 'new-eta' && !entry.response.planApplied)
@@ -764,6 +792,43 @@ export class AssignmentStatusWatch {
       await this.save(entry);
     }
   }
+  /** The assignee's own post in the check-in room, since the check-in was asked, that names the card. */
+  private progressPost(entry: Entry, task: Issue, employee: AssignmentEmployee) {
+    const since = entry.askedAt ?? entry.createdAt;
+    return this.deps.room(entry.roomId)?.messages.find(
+      (m) =>
+        !m.deleted &&
+        m.at >= since &&
+        m.from.kind === 'agent' &&
+        m.from.sessionId === employee.sessionId &&
+        m.id !== entry.promptId &&
+        namesTask(m.text, task.id)
+    );
+  }
+  /**
+   * Who an escalation goes to: the card's requester when they assigned it, meaning another employee of the same owner who
+   * holds board-lead authority and can be reached in the room now; otherwise the assignee's listed manager, the
+   * coordinator standing in for one, or the owner. The requester field records who FILED the card, and a peer may file
+   * into triage for someone, so filing alone never makes them the one paged. Both escalate() and routingCurrent() decide
+   * through here, so they always agree.
+   */
+  private expectedManager(task: Issue, employee: AssignmentEmployee, roomId: string): string {
+    const requester =
+      task.requester && task.requester !== employee.id
+        ? this.deps.employees().find((e) => e.id === task.requester && e.owner === employee.owner)
+        : undefined;
+    const room = this.deps.room(roomId);
+    if (
+      requester &&
+      this.deps.canManageBoard?.(requester.id) === true &&
+      this.active(requester) &&
+      !!room?.members.some((m) => m.sessionId === requester.sessionId) &&
+      this.deps.canDeliver(requester.sessionId, roomId)
+    )
+      return requester.id;
+    const coordinator = this.deps.coordinatorId?.(employee.owner);
+    return employee.reportsTo ?? (employee.id === coordinator ? 'owner' : (coordinator ?? 'owner'));
+  }
   private routingCurrent(entry: Entry, managerId: string | undefined) {
     const current = this.current(entry),
       cfg = this.store.snapshot().config;
@@ -771,9 +836,7 @@ export class AssignmentStatusWatch {
       return false;
     const room = this.roomFor(current.task, current.employee, entry.roomId);
     if (!room) return false;
-    const coordinator = this.deps.coordinatorId?.(current.employee.owner),
-      expected =
-        current.employee.reportsTo ?? (current.employee.id === coordinator ? 'owner' : (coordinator ?? 'owner'));
+    const expected = this.expectedManager(current.task, current.employee, entry.roomId);
     if (expected === 'owner') return managerId === undefined;
     const manager = this.deps.employees().find((e) => e.id === expected && e.owner === current.employee.owner);
     return (
@@ -788,8 +851,7 @@ export class AssignmentStatusWatch {
     // A historical Blocked report must not reopen attention for a newer check-in.
     if (this.store.snapshot().entries.some((other) =>
       other.taskId === entry.taskId && other.id !== entry.id && other.createdAt >= entry.createdAt)) return;
-    const coordinator = this.deps.coordinatorId?.(employee.owner);
-    const managerId = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : (coordinator ?? 'owner'));
+    const managerId = this.expectedManager(task, employee, entry.roomId);
     const manager = this.deps.employees().find((e) => e.id === managerId && e.owner === employee.owner);
     if (managerId !== 'owner' && !manager) return; // Unknown reporting links never become owner authority.
     const room = this.roomFor(task, employee, entry.roomId);
@@ -891,7 +953,7 @@ export class AssignmentStatusWatch {
         bot,
         room.id,
         `Assignment attention ${id} tracks task ${task.id}, check-in ${entry.id}. ${manager ? safeName(manager.name) : 'Owner'}: ` +
-          `${safeName(employee.name)} ${escalationReason(entry)} ${task.id} (${escalationRole(employee, manager)}). ` +
+          `${safeName(employee.name)} ${escalationReason(entry)} ${task.id} (${escalationRole(employee, manager, task)}). ` +
           'Please review the Board attention item. No work completion was inferred.',
         [recipient],
         recent.length

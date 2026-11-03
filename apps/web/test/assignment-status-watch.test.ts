@@ -23,6 +23,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     failPost: boolean,
     posts: ChatMessage[],
     audits: unknown[];
+  let leads: Set<string>;
   const cfg = {
     version: 1,
     type: 'assignment-status',
@@ -43,6 +44,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       room: (id) => (id === 'room' ? room : id === 'other' ? { ...room, id: 'other', messages: [] } : undefined),
       canDeliver: () => delivery,
       canEdit: () => canEdit,
+      canManageBoard: (id) => leads.has(id),
       delivered: () => delivery,
       post: (b, r, text, to) => {
         at += postDelay;
@@ -68,6 +70,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'assignment-watch-'));
     at = Date.parse('2026-10-26T12:00:00Z');
     canEdit = true;
+    leads = new Set(['lead']);
     delivery = true;
     failPost = false;
     posts = [];
@@ -824,5 +827,107 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     await watch.tick();
     expect(board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))?.status).toBe('done');
     expect(posts).toHaveLength(2);
+  });
+
+  describe('escalation routing, progress posts and cards leaving doing', () => {
+    const addLead = (inRoom = true) => {
+      employees.push({
+        id: 'lead',
+        name: 'Lead',
+        sessionId: 'lead-sid',
+        sessionGeneration: 1,
+        onVacation: false,
+        desiredRunning: true,
+      });
+      if (inRoom) room.members.push({ sessionId: 'lead-sid' } as ChatRoom['members'][number]);
+    };
+    const setTask = (change: Record<string, unknown>) =>
+      board.update({}, (s) => Object.assign(s.issues.find((i) => i.id === 'task')!, change));
+    const escalation = () => posts.find((p) => p.text.includes('Assignment attention'));
+    const post = (text: string, sessionId = 'sid') => {
+      room.messages.push({
+        id: 'progress' + room.messages.length,
+        at: at + 1,
+        from: { kind: 'agent', sessionId, name: 'Someone' },
+        text,
+        to: 'all',
+      } as ChatMessage);
+      at += 2;
+    };
+
+    it('pages whoever assigned the card first, saying why', async () => {
+      addLead();
+      await setTask({ requester: 'lead' });
+      await watch.tick();
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.to).toEqual(['lead-sid']);
+      expect(escalation()?.text).toContain(
+        'Lead: Worker did not answer the status check-in in time for task (you assigned this card to Worker).'
+      );
+      expect(board.snapshot().issues.find((i) => i.tags.includes('assignment-attention'))?.owner).toBe('lead');
+    });
+
+    it('falls back to the listed manager when the requester cannot be reached or is the assignee', async () => {
+      addLead(false);
+      await setTask({ requester: 'lead' });
+      await watch.tick();
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.to).toEqual(['mgr']);
+      expect(escalation()?.text).toContain("you are listed as Worker's manager");
+    });
+
+    it('never pages a peer who only filed the card: the requester needs board-lead authority', async () => {
+      addLead();
+      leads.delete('lead');
+      await setTask({ requester: 'lead' });
+      await watch.tick();
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.to).toEqual(['mgr']);
+      expect(escalation()?.text).not.toContain('you assigned this card');
+    });
+
+    it('treats an assignee requester as no requester', async () => {
+      await setTask({ requester: 'worker' });
+      await watch.tick();
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.to).toEqual(['mgr']);
+    });
+
+    it('counts the assignee posting progress on the card in the room as an answer, with no page', async () => {
+      await watch.tick();
+      post('task: reviewer GO on the first slice, starting the second');
+      at += 300001;
+      await watch.tick();
+      expect(escalation()).toBeUndefined();
+      expect(watch.status().entries[0]!.phase).toBe('cancelled');
+      expect(audits).toContainEqual(
+        expect.objectContaining({ action: 'assignment-checkin-progress-post', taskId: 'task' })
+      );
+      expect(board.snapshot().issues.find((i) => i.id === 'task')!.status).toBe('doing');
+    });
+
+    it("still pages when the post is someone else's or does not name the card", async () => {
+      await watch.tick();
+      post('task is moving', 'mgr');
+      post('general progress, no card named');
+      post('tasks are moving');
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.to).toEqual(['mgr']);
+    });
+
+    it('drops the check-in when the card leaves doing, and never pages for it', async () => {
+      await watch.tick();
+      expect(watch.status().entries[0]!.phase).toBe('asked');
+      await setTask({ status: 'todo' });
+      at += 300001;
+      await watch.tick();
+      expect(watch.status().entries[0]!.phase).toBe('cancelled');
+      expect(escalation()).toBeUndefined();
+    });
   });
 });
