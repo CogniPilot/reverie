@@ -463,7 +463,7 @@ test("Delivery-format contract, DM privacy, the turn clock and the web taint", a
       client: { app: { log: async () => {} }, session: { messages: async () => ({data: messages}) } } });
     const system = async () => { const out = {system: ["base"]}; await hooks["experimental.chat.system.transform"]({sessionID: "s1"}, out); return out.system[0]; };
     const first = await system();
-    assert.match(first, /Current time: .*EDT; .*UTC\./);
+    assert.match(first, /Current time: .*E[DS]T; .*UTC\./);
     globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : ["2027-01-04T09:00:00Z"])); } static now() { return new RealDate("2027-01-04T09:00:00Z").getTime(); } };
     assert.match(await system(), /Monday, 01\/04\/2027, 04:00 EST; Monday, 01\/04\/2027, 09:00 UTC/);   // fresh each turn
     globalThis.Date = RealDate;

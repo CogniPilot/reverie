@@ -88,8 +88,8 @@ function fixture(t) {
     writeFileSync(file, '#!' + process.execPath + '\n' +
       "const fs=require('node:fs'); let a=process.argv.slice(2); if(process.env.H_TEST&&a[0]==='--host'){if(process.env.DOCKER_CONTEXT||process.env.DOCKER_HOST)throw Error('Ambient context was retained');fs.appendFileSync(process.env.CALLS,JSON.stringify(['engine-endpoint',a[1]])+'\\n');a=a.slice(2)} fs.appendFileSync(process.env.CALLS,JSON.stringify([process.env.TOOL,a])+'\\n');" +
       `if(process.env.H_TEST&&require(process.env.H_TOOL)(${JSON.stringify(name)},a))process.exit(0);` +
-      (name === 'nix' ? "console.log('/nix/store/example-image.tar');" :
-        "if(a[0]==='inspect'){if(process.env.INSPECT){console.log(process.env.INSPECT)}else if(a.includes('--type'))process.exit(1);else console.log(JSON.stringify({Id:'existing-image',Config:{}}))}"));
+      (name === 'nix' ? "if(process.env.BUILD_TMP_LOG)fs.writeFileSync(process.env.BUILD_TMP_LOG,process.env.TMPDIR);if(process.env.FAIL_BUILD)process.exit(1);console.log('/nix/store/example-image.tar');" :
+        "if(a[0]==='load'&&process.env.FAIL_LOAD)process.exit(1);if(a[0]==='inspect'){if(process.env.REINSPECT&&a.at(-1)===JSON.parse(process.env.INSPECT).Id){console.log(process.env.REINSPECT)}else if(process.env.INSPECT){console.log(process.env.INSPECT)}else if(a.includes('--type'))process.exit(1);else console.log(JSON.stringify({Id:'existing-image',Config:{}}))}"));
     // Each stub embeds its own tool identity without invoking a shell.
     writeFileSync(file, readFileSync(file, 'utf8').replace('process.env.TOOL', JSON.stringify(name)));
     chmodSync(file, 0o755);
@@ -298,6 +298,119 @@ test('unknown config fields and mount syntax are rejected as data before build o
   delete config.arbitraryFlags; config.workspace = '/somewhere,readonly'; writeFileSync(file, JSON.stringify(config));
   before = f.calls().length; result = f.run();
   assert.equal(result.status, 1); assert.equal(f.calls().length, before);
+});
+
+test('--force and -f rebuild before removing the exact stopped container and retain data', t => {
+  for (const flag of ['--force', '-f']) {
+    const f = fixture(t);
+    assert.equal(f.run().status, 0);
+    const data = join(f.deploy, 'companies/default/data/keep'), home = join(f.deploy, 'companies/default/home/keep');
+    writeFileSync(data, 'company state'); writeFileSync(home, 'provider login');
+    const prior = { Id: 'b'.repeat(64), Config: { Labels: { 'reverie.deployment': 'old' } }, State: { Running: false } };
+    const before = f.calls().length;
+    const result = f.run([flag, '--project', 'reverie=' + f.root], { INSPECT: JSON.stringify(prior) });
+    assert.equal(result.status, 0, result.stderr);
+    const calls = f.calls().slice(before);
+    const build = calls.findIndex(([tool]) => tool === 'nix');
+    const load = calls.findIndex(([tool, a]) => tool === 'docker' && a[0] === 'load');
+    const remove = calls.findIndex(([tool, a]) => tool === 'docker' && a[0] === 'rm');
+    const create = calls.findIndex(([tool, a]) => tool === 'docker' && a[0] === 'run');
+    assert.ok(build >= 0 && load > build && remove > load && create > remove);
+    assert.deepEqual(calls[remove], ['docker', ['rm', prior.Id]]);
+    assert.equal(calls[remove - 1][1].at(-1), prior.Id);
+    assert.ok(calls[create][1].includes('type=bind,src=' + f.root + ',dst=/projects/reverie'));
+    assert.equal(readFileSync(data, 'utf8'), 'company state');
+    assert.equal(readFileSync(home, 'utf8'), 'provider login');
+  }
+});
+
+test('--force works on first run without trying to remove a missing container', t => {
+  const f = fixture(t), result = f.run(['--force']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!f.calls().some(([tool, a]) => tool === 'docker' && a[0] === 'rm'));
+  assert.ok(f.calls().some(([tool, a]) => tool === 'docker' && a[0] === 'run'));
+});
+
+test('--scratch mounts and persists the selected directory and keeps build temporaries there on later starts', t => {
+  const f = fixture(t), scratch = join(f.root, 'another disk/scratch'), buildLog = join(f.root, 'build-tmp');
+  const result = f.run(['--scratch', scratch], { BUILD_TMP_LOG: buildLog });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(readFileSync(join(f.deploy, 'deployment.json'))).scratch, scratch);
+  const command = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  assert.ok(command.includes('type=bind,src=' + scratch + ',dst=/scratch'));
+  assert.equal(readFileSync(buildLog, 'utf8'), join(scratch, 'build/tmp'));
+  assert.ok(!existsSync(join(f.deploy, 'scratch')));
+  assert.equal(f.run([], { BUILD_TMP_LOG: buildLog }).status, 0);
+  assert.equal(readFileSync(buildLog, 'utf8'), join(scratch, 'build/tmp'));
+});
+
+test('changing --scratch requires replacement and saves the new path without moving existing files', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  writeFileSync(join(config.scratch, 'keep'), 'existing scratch');
+  const command = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  const signature = command[command.indexOf('--label') + 1].split('=')[1];
+  const prior = { Id: 'b'.repeat(64), Config: { Labels: { 'reverie.deployment': signature } }, State: { Running: false } };
+  const scratch = join(f.root, 'new-scratch'), env = { INSPECT: JSON.stringify(prior) };
+  assert.equal(f.run(['--scratch', scratch], env).status, 1);
+  assert.equal(JSON.parse(readFileSync(file)).scratch, config.scratch);
+  assert.equal(f.run(['--force', '--scratch', scratch], { ...env, FAIL_BUILD: '1' }).status, 1);
+  assert.equal(JSON.parse(readFileSync(file)).scratch, config.scratch);
+  const result = f.run(['--force', '--scratch', scratch], env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(readFileSync(file)).scratch, scratch);
+  assert.equal(readFileSync(join(config.scratch, 'keep'), 'utf8'), 'existing scratch');
+  assert.ok(!existsSync(join(scratch, 'keep')));
+});
+
+test('--scratch rejects missing arguments and invalid mount paths before engine access', t => {
+  for (const args of [['--scratch'], ['--scratch', '/scratch,readonly'], ['--scratch', '/scratch\ninvalid']]) {
+    const f = fixture(t), result = f.run(args);
+    assert.equal(result.status, 1);
+    assert.equal(f.calls().length, 0);
+  }
+});
+
+test('--force leaves the old container alone if image build, load or mount validation fails', t => {
+  for (const failure of ['FAIL_BUILD', 'FAIL_LOAD', 'REVERIE_GPU_PUBLISHED_DIR']) {
+    const f = fixture(t);
+    const prior = { Id: 'b'.repeat(64), Config: {}, State: { Running: false } };
+    const result = f.run(['--force'], { INSPECT: JSON.stringify(prior), [failure]: '/missing-fixture-path' });
+    assert.equal(result.status, 1);
+    assert.ok(!f.calls().some(([tool, a]) => tool === 'docker' && ['rm', 'run', 'start', 'stop'].includes(a[0])));
+  }
+});
+
+test('--force refuses running containers and coordinated runtimes before building or removing', t => {
+  const stopped = { Id: 'b'.repeat(64), Config: {}, State: { Running: false } };
+  for (const prior of [
+    { ...stopped, State: { Running: true } },
+    { ...stopped, Config: { Env: ['REVERIE_WORKER_SOCKET=/run/reverie-workers/broker.sock'] } },
+    { ...stopped, Config: { Labels: { 'org.reverie.website.runtime': 'terminal' } } },
+    { ...stopped, Config: { Labels: { 'org.reverie.website.runtime': 'resource' } } },
+  ]) {
+    const f = fixture(t), result = f.run(['--force'], { INSPECT: JSON.stringify(prior) });
+    assert.equal(result.status, 1); assert.match(result.stderr, /stopped container|coordinated update/);
+    assert.equal(f.calls().length, 1); // inspect only
+  }
+  const f = fixture(t), hEnv = f.enableH('terminal'), before = f.calls().length;
+  assert.match(f.run(['--force'], hEnv).stderr, /coordinated update/);
+  assert.equal(f.calls().length, before);
+});
+
+test('--force rechecks identity, running state and settings after the build', t => {
+  const prior = { Id: 'b'.repeat(64), Config: {}, State: { Running: false } };
+  for (const changed of [
+    { ...prior, Id: 'c'.repeat(64) },
+    { ...prior, State: { Running: true } },
+    { ...prior, HostConfig: { RestartPolicy: { Name: 'always' } } },
+    { ...prior, Config: { Env: ['REVERIE_WORKER_SOCKET=/run/reverie-workers/broker.sock'] } },
+  ]) {
+    const f = fixture(t), result = f.run(['--force'], { INSPECT: JSON.stringify(prior), REINSPECT: JSON.stringify(changed) });
+    assert.equal(result.status, 1);
+    assert.ok(f.calls().some(([tool]) => tool === 'nix'));
+    assert.ok(!f.calls().some(([tool, a]) => tool === 'docker' && ['rm', 'run', 'start', 'stop'].includes(a[0])));
+  }
 });
 
 test('only a validated durable boolean enables Admin Harness phone wake', t => {
