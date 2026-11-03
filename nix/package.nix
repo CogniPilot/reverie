@@ -123,6 +123,7 @@ let
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
         test/company-board-permissions-ui.test.ts test/company-publication-ui.test.ts \
         test/company-reporting-ui.test.ts test/company-core-context-ui.test.ts
+      npm test -- test/board-track.test.ts test/routes/board-track-routes.test.ts test/cli-board-track.test.ts
       NIX_REVERIE_TEST_ROOT_CUSTODY=1 npm test -- test/cli-agent-credentials.test.ts
       npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts
       npm test -- test/chatroom-mentions.test.ts test/routes/chat-mentions.test.ts test/cli-agent-chat-mentions.test.ts \
