@@ -63,6 +63,7 @@ from .worker_storage import storage_paths, storage_guard, prepare_storage, priva
 from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
 from .worker_storage_labels import hostname as employee_hostname
 from .goal_assertion import goal_forward_headers
+from .worker_recovery_auth import recovery_forward_headers
 from .goal_bootstrap import GoalBrokerBootstrap
 from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
 
@@ -405,7 +406,13 @@ class OfficeAPI:
     """A laptop's office phone: fixed identity and upstream, bounded HTTP only."""
     slots = threading.BoundedSemaphore(32)
 
-    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None, command_telemetry=None, browser_jobs=None):
+    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None, command_telemetry=None, browser_jobs=None, recovery_auth=None):
+        recovery_signer = None
+        if recovery_auth is not None:
+            try:
+                recovery_signer = recovery_auth.bind(session_id)
+            except (OSError, ValueError, RuntimeError):
+                pass  # Only scoped recovery is unavailable; ordinary office requests retain their policy.
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink():
             raise ValueError('Invalid office connection directory')
@@ -546,6 +553,8 @@ class OfficeAPI:
                     try:
                         forwarded = goal_forward_headers(session_id, self.command, self.path, body,
                                                          dict(self.headers.items()), None)
+                        forwarded = recovery_forward_headers(session_id, self.command, self.path, body,
+                                                             forwarded, recovery_signer)
                     except ValueError:
                         self.send_error(403); return
                     env = dict(line.split('=', 1) for line in (company_root/'console/.env').read_text().splitlines() if '=' in line)
@@ -1225,6 +1234,9 @@ class Broker:
             options['browser_jobs'] = self.browser_jobs.dispatch
         if self.command_telemetry.enabled:
             options['command_telemetry'] = self.command_telemetry
+        from .worker_recovery_auth import paths, RecoveryRequestSigner
+        if os.path.lexists(paths(self.config)[1]):
+            options['recovery_auth'] = RecoveryRequestSigner(self.config, self.run_engine)
         return options
 
     def office(self, session_id):
