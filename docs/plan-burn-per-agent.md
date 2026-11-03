@@ -106,7 +106,9 @@ The estimates are checked against what actually happened, from the stored histor
 1. **Rate backtest.** For each plan and each sample time `t` over the last 24 hours, predict `weekly(t + 60 min)` from
    `weekly(t)` plus 1 hour times the rate, both for the realtime rate and the 6-hour slope. Compare with the reading
    actually taken then. The Plans API reports the mean absolute error of each (`burnCheck: { realtime, steady, n }`),
-   so it is visible whether the faster rate is also the more accurate one.
+   so it is visible whether the faster rate is also the more accurate one. The factor, the cost rates and the slope at
+   each `t` use only data up to `t`. A reading lower than the one at `t` (a foreign or reset reading) is not scored, and
+   a session that moved plans inside the 24 hours counts for the plan it is on now.
 2. **Move check.** For each completed plan move in the move history, compare the predicted rate changes on both plans
    with the observed change: the realtime rate 15 to 75 minutes after the move minus the 60 minutes before. The error
    is shown with that move in "Recent plan moves".
@@ -118,15 +120,16 @@ The estimates are checked against what actually happened, from the stored histor
 In this change: per-session cost samples from the status line (`plan-agent-cost-history.json`); the 30-minute agent
 cost rate; the per-plan factor with its provider and tier prior, update from the plan's own readings and band; per-agent
 burn and the realtime plan rate on `/api/plans` rows and the board's plan burn, shown on each Claude plan card; and
-`moveImpact`, its route `GET /api/plans/move-impact` and its display in the plan-move dialog; and each factor's hourly fit error against the plan's own
-readings.
+`moveImpact`, its route `GET /api/plans/move-impact` and its display in the plan-move dialog; each factor's hourly fit error against the plan's own
+readings; and the rate backtest (`burnCheck` on each plan's burn in `/api/plans`), recomputed at most once per 10 minutes per plan.
 
 Remaining:
 
 1. The five-hour side: store five-hour percent in the usage samples and add `c5_P`.
 2. Persisting the factor's posterior across windows and restarts. Today each read recomputes it from the kept history.
 3. An explicit tier field on subscription profiles instead of reading the label.
-4. The out-of-sample accuracy report (`burnCheck`) and the per-move check. The in-sample hourly fit is already shown.
+4. The per-move check, and showing `burnCheck` on the plan card. The rate backtest is in the API; the in-sample hourly fit is
+   already shown.
 5. A work-unit source for Codex sessions (no per-session cost today).
 6. Pooling factors across plans of one tier.
 

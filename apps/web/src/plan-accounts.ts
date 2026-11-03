@@ -32,7 +32,15 @@ import type { SubscriptionUsage } from './subscription-usage.js';
 import { getLatestAccountPlanUsage } from './web/plan-usage-latest.js';
 import type { BankedResets } from './usage-telemetry.js';
 import { addSample, planPace, suggestAccount, toMs, type PlanPace, type UsageSample } from './plan-pace.js';
-import { moveImpact, planAgentBurn, planConversion, type PlanAgentBurn, type PlanCostTracker } from './plan-agent-burn.js';
+import {
+  cachedBurnCheck,
+  moveImpact,
+  planAgentBurn,
+  planConversion,
+  type BurnCheck,
+  type PlanAgentBurn,
+  type PlanCostTracker,
+} from './plan-agent-burn.js';
 
 export interface PlanAccount {
   /** The profile id when there is one, else `acct-<provider>-<name>`. */
@@ -279,6 +287,8 @@ export interface PlanServiceDeps {
 export class PlanService {
   private history: Record<string, UsageSample[]> | null = null;
   private saving: Promise<void> = Promise.resolve();
+  /** Each plan's last `burnCheck` from this service's own history, by account id (see `cachedBurnCheck`). */
+  private readonly burnChecks = new Map<string, { at: number; weekReset: number | null; check: BurnCheck | null }>();
 
   constructor(private readonly deps: PlanServiceDeps) {}
 
@@ -433,14 +443,20 @@ export class PlanService {
         changed = true;
       }
       const sessions = sessionsByAccount.get(a.id) ?? [];
-      const agentBurn = costs && a.provider === 'anthropic'
-        ? planAgentBurn({
+      const burnInput = costs && a.provider === 'anthropic'
+        ? {
             provider: a.provider,
             label: a.label,
             usage: history[a.id] ?? [],
             sessions: sessions.map((s) => ({ id: s.id, name: s.name, costs: costs[s.id] ?? [] })),
             weekReset: toMs(reading.usage?.sevenDay?.resetAt),
             now,
+          }
+        : null;
+      const agentBurn = burnInput
+        ? planAgentBurn({
+            ...burnInput,
+            check: cachedBurnCheck(this.burnChecks, a.id, { ...burnInput, sessionCosts: burnInput.sessions.map((s) => s.costs) }),
           })
         : null;
       return {
