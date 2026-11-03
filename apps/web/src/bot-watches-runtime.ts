@@ -80,6 +80,10 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
       const e = d.employees().find((e) => e.id === id);
       return effectiveBoardPermissions(e, e ? isBoardCoordinator(d.chat.rooms(), e.sessionId) : false).editBoardIssues;
     },
+    canManageBoard: (id) => {
+      const e = d.employees().find((e) => e.id === id);
+      return !!e && effectiveBoardPermissions(e, isBoardCoordinator(d.chat.rooms(), e.sessionId)).manageBoard;
+    },
     post,
     delivered: (sid, rid, id) => d.chat.phoneAccepts(sid, rid, id),
     audit: (entry) => d.chat.auditEntry(entry),

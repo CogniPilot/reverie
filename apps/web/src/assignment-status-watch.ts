@@ -94,6 +94,11 @@ export interface AssignmentWatchDeps {
   /** Must use current permission + phone policy; returns false for unknown delivery eligibility. */
   canDeliver(sessionId: string, roomId: string): boolean;
   canEdit(employeeId: string): boolean;
+  /**
+   * Board-lead authority (the permission that plans and assigns issues). Only a requester holding it is treated as the
+   * card's assigner for escalation; absent, escalations never go to the requester.
+   */
+  canManageBoard?(employeeId: string): boolean;
   coordinatorId?(owner: string | undefined): string | undefined;
   post(bot: ChatBot, roomId: string, text: string, recipients: string[], recent: number): ChatMessage;
   delivered(sessionId: string, roomId: string, messageId: string): boolean;
@@ -801,9 +806,11 @@ export class AssignmentStatusWatch {
     );
   }
   /**
-   * Who an escalation goes to: whoever assigned the card (its requester), when that is another employee of the same
-   * owner who can be reached in the room now; otherwise the assignee's listed manager, the coordinator standing in for
-   * one, or the owner. Both escalate() and routingCurrent() decide through here, so they always agree.
+   * Who an escalation goes to: the card's requester when they assigned it, meaning another employee of the same owner who
+   * holds board-lead authority and can be reached in the room now; otherwise the assignee's listed manager, the
+   * coordinator standing in for one, or the owner. The requester field records who FILED the card, and a peer may file
+   * into triage for someone, so filing alone never makes them the one paged. Both escalate() and routingCurrent() decide
+   * through here, so they always agree.
    */
   private expectedManager(task: Issue, employee: AssignmentEmployee, roomId: string): string {
     const requester =
@@ -813,6 +820,7 @@ export class AssignmentStatusWatch {
     const room = this.deps.room(roomId);
     if (
       requester &&
+      this.deps.canManageBoard?.(requester.id) === true &&
       this.active(requester) &&
       !!room?.members.some((m) => m.sessionId === requester.sessionId) &&
       this.deps.canDeliver(requester.sessionId, roomId)

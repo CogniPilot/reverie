@@ -23,6 +23,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     failPost: boolean,
     posts: ChatMessage[],
     audits: unknown[];
+  let leads: Set<string>;
   const cfg = {
     version: 1,
     type: 'assignment-status',
@@ -43,6 +44,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       room: (id) => (id === 'room' ? room : id === 'other' ? { ...room, id: 'other', messages: [] } : undefined),
       canDeliver: () => delivery,
       canEdit: () => canEdit,
+      canManageBoard: (id) => leads.has(id),
       delivered: () => delivery,
       post: (b, r, text, to) => {
         at += postDelay;
@@ -68,6 +70,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'assignment-watch-'));
     at = Date.parse('2026-10-26T12:00:00Z');
     canEdit = true;
+    leads = new Set(['lead']);
     delivery = true;
     failPost = false;
     posts = [];
@@ -873,6 +876,17 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       await watch.tick();
       expect(escalation()?.to).toEqual(['mgr']);
       expect(escalation()?.text).toContain("you are listed as Worker's manager");
+    });
+
+    it('never pages a peer who only filed the card: the requester needs board-lead authority', async () => {
+      addLead();
+      leads.delete('lead');
+      await setTask({ requester: 'lead' });
+      await watch.tick();
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.to).toEqual(['mgr']);
+      expect(escalation()?.text).not.toContain('you assigned this card');
     });
 
     it('treats an assignee requester as no requester', async () => {
