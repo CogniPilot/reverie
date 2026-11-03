@@ -84,6 +84,59 @@ describe('company identities and genuine research lifecycle', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('serializes normalized permanent-name collisions under the store transaction', async () => {
+    const input = { icon: 'A', position: 'Engineer', expertise: ['systems'], researchEnabled: false };
+    const results = await Promise.allSettled([
+      service.hire({ ...input, name: 'Ａｄａ', sessionId: 'expert-main' }),
+      service.hire({ ...input, name: 'ada', sessionId: 'parent-agent' }),
+    ]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409 } });
+    expect(store.snapshot().employees).toHaveLength(1);
+  });
+
+  it('refuses self-renames that collide by name or portable case slug and preserves the saved working directory', async () => {
+    const first = await hire();
+    const second = await service.hire({ name: 'Bea', icon: 'B', position: 'Engineer', expertise: ['systems'],
+      sessionId: 'parent-agent', researchEnabled: false });
+    await store.update(state => { state.employees.find(e => e.id === first.id)!.runtimeRecipe = {
+      mode: 'codex', workingDir: '/cases/expert-abe', configs: {},
+    }; });
+    for (const name of ['ＡＢＥ', 'Ábe', 'Abe!'])
+      await expect(service.updateSelf(second.sessionId, undefined, { name })).rejects.toMatchObject({ status: 409 });
+    expect(store.snapshot().employees.find(e => e.id === second.id)?.name).toBe('Bea');
+    await service.updateSelf(first.sessionId, undefined, { name: 'ＡＢＥ' });
+    expect(store.snapshot().employees.find(e => e.id === first.id)).toMatchObject({ name: 'ＡＢＥ',
+      runtimeRecipe: { workingDir: '/cases/expert-abe' } });
+  });
+
+  it('keeps name uniqueness scoped to each owner', async () => {
+    await hire();
+    await expect(service.hire({ name: 'ＡＢＥ', icon: 'A', position: 'Engineer', expertise: ['systems'],
+      sessionId: 'other-main', owner: 'another-owner', researchEnabled: false })).resolves.toMatchObject({ name: 'ＡＢＥ' });
+    await expect(service.updateSelf('other-main', 'another-owner', { name: 'Abe!' })).resolves.toMatchObject({ name: 'Abe!' });
+  });
+
+  it('refuses a normalized retired-name collision when restoring', async () => {
+    const first = await hire();
+    const original = sessions.get(first.sessionId)!;
+    sessions.delete(first.sessionId);
+    try { await service.retire(first.id, undefined); }
+    finally { sessions.set(first.sessionId, original); }
+    await service.hire({ name: 'Ábe', icon: 'A', position: 'Engineer', expertise: ['systems'],
+      sessionId: 'parent-agent', researchEnabled: false });
+    await expect(service.restore(first.id, undefined)).rejects.toMatchObject({ status: 409 });
+    expect(store.snapshot().retired[0].id).toBe(first.id);
+  });
+
+  it('rechecks a prepared anonymous spawn against newly hired normalized employee names', async () => {
+    const plan = service.prepareSpawn({ name: 'ＡＢＥ' });
+    await hire();
+    expect(() => service.prepareSpawn({ name: 'Ábe' })).toThrow('existing employee');
+    await expect(service.completeSpawn('parent-agent', plan)).rejects.toMatchObject({ status: 409 });
+    expect(store.snapshot().temporaryAgents).toEqual([]);
+  });
+
   it('preserves other grants when changing a single permission through the service', async () => {
     const employee = await hire();
     expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false });

@@ -17,16 +17,18 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
  * Port: N/A (app.inject()).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
-import { mkdir, rm, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, rm, readFile, writeFile, symlink } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { createMockRouteContext, createMockSession, type MockRouteContext } from '../mocks/index.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import { registerSessionRoutes } from '../../src/web/routes/session-routes.js';
 import { registerCaseRoutes } from '../../src/web/routes/case-routes.js';
 import { getCasesDir } from '../../src/config/cases-dir.js';
+import { dataPath } from '../../src/config/instance.js';
+import { Session } from '../../src/session.js';
 import { AGENT_CASE_MARKER_FILE } from '../../src/agent-case-marker.js';
 import type { AgentCaseSummary, CaseInfo } from '../../src/types.js';
 
@@ -94,6 +96,63 @@ describe('agent-created case marker', () => {
     for (const name of created.splice(0)) {
       await rm(join(getCasesDir(), name), { recursive: true, force: true });
     }
+  });
+
+  it('new employee cases refuse an existing directory without changing its files', async () => {
+    const name = 'expert-kept';
+    await mkdir(join(getCasesDir(), name), { recursive: true });
+    await writeFile(join(getCasesDir(), name, 'keep.txt'), 'unique owner work');
+    const response = await quickStart(name, { payload: { newCaseOnly: true } });
+    expect(response.json()).toMatchObject({ success: false });
+    expect(response.body).toContain('already exists');
+    expect(await readFile(join(getCasesDir(), name, 'keep.txt'), 'utf8')).toBe('unique owner work');
+    expect(await readMarker(name)).toBeNull();
+  });
+
+  it('new employee cases never scaffold through an existing dangling symlink', async () => {
+    const name = 'expert-link';
+    await mkdir(getCasesDir(), { recursive: true });
+    await symlink(join(getCasesDir(), 'absent-owner-project'), join(getCasesDir(), name));
+    const response = await quickStart(name, { payload: { newCaseOnly: true } });
+    expect(response.json()).toMatchObject({ success: false });
+    expect(await readMarker(name)).toBeNull();
+    await expect(readFile(join(getCasesDir(), 'absent-owner-project', 'CLAUDE.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('new employee cases refuse a linked project without changing its files', async () => {
+    const name = 'expert-linked';
+    const target = join(getCasesDir(), 'kept-linked-project');
+    created.push('kept-linked-project');
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'keep.txt'), 'existing linked work');
+    const linkedCasesFile = dataPath('linked-cases.json');
+    const previous = await readFile(linkedCasesFile).catch(() => undefined);
+    await mkdir(dirname(linkedCasesFile), { recursive: true });
+    await writeFile(linkedCasesFile, JSON.stringify({ [name]: target }));
+    try {
+      const response = await quickStart(name, { payload: { newCaseOnly: true } });
+      expect(response.json()).toMatchObject({ success: false });
+      expect(response.body).toContain('already linked');
+      expect(await readFile(join(target, 'keep.txt'), 'utf8')).toBe('existing linked work');
+    } finally {
+      if (previous) await writeFile(linkedCasesFile, previous);
+      else await rm(linkedCasesFile);
+    }
+  });
+
+  it('exclusive new-case creation admits only one concurrent hire into a directory', async () => {
+    const name = 'expert-concurrent';
+    const start = vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
+    try {
+    const responses = await Promise.all([
+      quickStart(name, { payload: { newCaseOnly: true } }),
+      quickStart(name, { payload: { newCaseOnly: true } }),
+    ]);
+    expect(responses.filter(response => typeof response.json().sessionId === 'string')).toHaveLength(1);
+    expect(responses.filter(response => response.json().success === false)).toHaveLength(1);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(await readFile(join(getCasesDir(), name, 'CLAUDE.md'), 'utf8')).toBeTruthy();
+    } finally { start.mockRestore(); }
   });
 
   it('labels a case directory created for a spawn carrying the skill origin header', async () => {

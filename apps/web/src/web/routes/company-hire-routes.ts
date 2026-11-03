@@ -2,8 +2,8 @@ import type { RuntimeRecipe } from '../../expert-runtime-recipe.js';
 /** Owner hiring: create a fresh runtime, then bind a persistent expert identity. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
 import { CompanyError, type CompanyService } from '../../company-service.js';
+import { employeeCaseName, employeeNamesConflict } from '../../company-names.js';
 import { EmployeeSchema } from '../../company-types.js';
 import { COMPANY_ROLE_TEMPLATES } from '../../company-role-templates.js';
 import { getCli, listClis } from '../../config/cli-registry/registry.js';
@@ -63,6 +63,7 @@ export interface CompanyHireDeps {
 }
 
 export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHireDeps): void {
+  const hiringCases = new Set<string>();
   const authorize = (req: FastifyRequest) => {
     if (req.headers['x-reverie-parent-session'] !== undefined || !deps.verifiedOwner(req))
       throw new CompanyError('Only the verified owner may hire an expert', 403);
@@ -83,7 +84,8 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
       const harnesses = listClis().filter((c) => c.enabled && c.kind === 'agent');
       const [profiles, endpoints] = await Promise.all([deps.profiles(), deps.endpoints()]);
       const localHarnesses = harnesses.filter((c) => c.capabilities.customModelInjection.kind !== 'unsupported');
-      const localDefault = localHarnesses.find((c) => c.id === 'opencode') ?? localHarnesses.find((c) => !c.stock) ?? localHarnesses[0];
+      const localDefault =
+        localHarnesses.find((c) => c.id === 'opencode') ?? localHarnesses.find((c) => !c.stock) ?? localHarnesses[0];
       return {
         roles: COMPANY_ROLE_TEMPLATES,
         harnesses: harnesses.map((c) => ({ id: c.id, label: c.label, efforts: hireEffort(c.id).values })),
@@ -97,12 +99,12 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
               ...compatible.filter((c) => subscriptionBinding(c.id, p.provider) !== 'native'),
             ].map((c) => c.id);
             return {
-            kind: 'subscription',
-            id: p.id,
-            label: p.label,
-            modes,
-            defaultMode: modes[0],
-            models: [],
+              kind: 'subscription',
+              id: p.id,
+              label: p.label,
+              modes,
+              defaultMode: modes[0],
+              models: [],
             };
           }),
           ...endpoints.map((p) => ({
@@ -128,75 +130,86 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
       if (body.effort && !effort.values.includes(body.effort))
         throw new CompanyError('Choose an effort supported by this harness');
       const owner = ownerFor(req);
-      if (deps.company.view(owner).employees.some(e => e.name.normalize('NFKC').toLowerCase() === body.name.trim().normalize('NFKC').toLowerCase()))
+      if (deps.company.view(owner).employees.some((e) => employeeNamesConflict(e.name, body.name)))
         throw new CompanyError('That name is already used in this company. Choose a distinct name.', 409);
-      const profile =
-        source.kind === 'subscription' ? (await deps.profiles()).find((p) => p.id === source.profileId) : undefined;
-      if (source.kind === 'subscription' && (!profile || !subscriptionBinding(body.mode, profile.provider)))
-        throw new CompanyError('Choose a plan compatible with this harness');
-      let customModel: { endpointId: string; modelId: string } | undefined;
-      if (source.kind === 'local') {
-        if (entry.capabilities.customModelInjection.kind === 'unsupported')
-          throw new CompanyError('This harness cannot use a local model profile');
-        try {
-          customModel = resolveLocalModelProfile(await deps.endpoints(), source.endpointId, body.model).customModel;
-        } catch (error) {
-          throw new CompanyError(error instanceof Error ? error.message : 'Invalid local model profile');
-        }
-      }
-      const launch = sessionCreateBody({
-        workingDir: '/',
-        name: body.name,
-        icon: body.icon,
-        mode: body.mode,
-        ...(!customModel && body.model ? { model: body.model } : {}),
-        ...(profile ? { accountProfileId: profile.id } : {}),
-      });
-      delete launch.workingDir;
-      delete launch.name;
-      if (launch.model) {
-        launch.modelOverride = launch.model;
-        delete launch.model;
-      }
-      if (body.effort) {
-        if (effort.field && entry.launch.legacyConfigField) {
-          const field = entry.launch.legacyConfigField;
-          launch[field] = { ...((launch[field] as object) ?? {}), [effort.field]: body.effort };
-        } else launch.effort = body.effort;
-      }
-      const sessionId = await deps.start(req, {
-        ...launch,
-        pinned: true,
-        caseName: 'expert-' + randomUUID(),
-        sessionName: body.name,
-        ...(customModel ? { customModel } : {}),
-      });
+      const caseName = employeeCaseName(body.name);
+      if (!caseName) throw new CompanyError('Choose a shorter name for this expert’s case folder.');
+      const claim = JSON.stringify([owner ?? null, caseName]);
+      if (hiringCases.has(claim))
+        throw new CompanyError('That name is already being hired. Choose a distinct name.', 409);
+      hiringCases.add(claim);
       try {
-        const employee = await deps.company.hire({
+        const profile =
+          source.kind === 'subscription' ? (await deps.profiles()).find((p) => p.id === source.profileId) : undefined;
+        if (source.kind === 'subscription' && (!profile || !subscriptionBinding(body.mode, profile.provider)))
+          throw new CompanyError('Choose a plan compatible with this harness');
+        let customModel: { endpointId: string; modelId: string } | undefined;
+        if (source.kind === 'local') {
+          if (entry.capabilities.customModelInjection.kind === 'unsupported')
+            throw new CompanyError('This harness cannot use a local model profile');
+          try {
+            customModel = resolveLocalModelProfile(await deps.endpoints(), source.endpointId, body.model).customModel;
+          } catch (error) {
+            throw new CompanyError(error instanceof Error ? error.message : 'Invalid local model profile');
+          }
+        }
+        const launch = sessionCreateBody({
+          workingDir: '/',
           name: body.name,
           icon: body.icon,
-          position: body.position,
-          expertise: body.expertise,
-          responsibilities: body.responsibilities,
-          personality: body.personality,
-          permissions: body.permissions,
-          reportsTo: body.reportsTo,
-          pronouns: body.pronouns,
-          voice: body.voice,
-          sessionId,
-          runtimeRecipe: deps.captureRuntime?.(sessionId),
-          owner,
-          researchEnabled: false,
-          sleepEnabled: body.sleepEnabled,
-          dreamEnabled: body.dreamEnabled,
-          desiredRunning: true,
+          mode: body.mode,
+          ...(!customModel && body.model ? { model: body.model } : {}),
+          ...(profile ? { accountProfileId: profile.id } : {}),
         });
-        return { employee, sessionId };
-      } catch (error) {
-        // Never leave a running anonymous replacement when durable registration fails.
-        await deps.stop(sessionId);
-        await deps.forget(owner, sessionId);
-        throw error;
+        delete launch.workingDir;
+        delete launch.name;
+        if (launch.model) {
+          launch.modelOverride = launch.model;
+          delete launch.model;
+        }
+        if (body.effort) {
+          if (effort.field && entry.launch.legacyConfigField) {
+            const field = entry.launch.legacyConfigField;
+            launch[field] = { ...((launch[field] as object) ?? {}), [effort.field]: body.effort };
+          } else launch.effort = body.effort;
+        }
+        const sessionId = await deps.start(req, {
+          ...launch,
+          pinned: true,
+          caseName,
+          newCaseOnly: true,
+          sessionName: body.name,
+          ...(customModel ? { customModel } : {}),
+        });
+        try {
+          const employee = await deps.company.hire({
+            name: body.name,
+            icon: body.icon,
+            position: body.position,
+            expertise: body.expertise,
+            responsibilities: body.responsibilities,
+            personality: body.personality,
+            permissions: body.permissions,
+            reportsTo: body.reportsTo,
+            pronouns: body.pronouns,
+            voice: body.voice,
+            sessionId,
+            runtimeRecipe: deps.captureRuntime?.(sessionId),
+            owner,
+            researchEnabled: false,
+            sleepEnabled: body.sleepEnabled,
+            dreamEnabled: body.dreamEnabled,
+            desiredRunning: true,
+          });
+          return { employee, sessionId };
+        } catch (error) {
+          // Never leave a running anonymous replacement when durable registration fails.
+          await deps.stop(sessionId);
+          await deps.forget(owner, sessionId);
+          throw error;
+        }
+      } finally {
+        hiringCases.delete(claim);
       }
     })
   );

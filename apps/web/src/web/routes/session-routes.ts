@@ -4161,6 +4161,7 @@ export function registerSessionRoutes(
 
     const {
       pinned,
+      newCaseOnly,
       caseName = 'testcase',
       sessionName,
       icon,
@@ -4260,6 +4261,8 @@ export function registerSessionRoutes(
       : (await readDockerCases(REVERIE_CONFIG_DIR)).find(
           (item) => item.name === caseName && canAccessOwned(getAuthUser(req), item.owner)
         );
+    if (newCaseOnly && (remoteCase || dockerCase))
+      return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'That case already exists. Choose a distinct expert name.');
     if (remoteCase) {
       const host = (await readRemoteHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === remoteCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
@@ -4472,6 +4475,8 @@ export function registerSessionRoutes(
       // resolve a name to an arbitrary linked path. A non-admin resolves inside their
       // OWN case space only (single-user: isAdmin true, so linked cases still honoured).
       const linked = isAdmin(req) ? linkedCases[caseName] : undefined;
+      if (newCaseOnly && linked)
+        return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'That case is already linked. Choose a distinct expert name.');
       casePath = linked || validatePathWithinBase(caseName, resolveCasesDir(getAuthUser(req)));
       if (!casePath) {
         return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid case path');
@@ -4502,12 +4507,19 @@ export function registerSessionRoutes(
         describeUnknownPath('Case folder', resolvedCasePath, { pastCap: true })
       );
     }
+    if (newCaseOnly && localCaseState !== 'absent')
+      return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'That case folder already exists. Choose a distinct expert name.');
 
     // Create case folder and CLAUDE.md if it doesn't exist (only for non-linked, non-remote,
     // non-docker cases — docker workspaces are scaffolded in their own block below)
     if (localCaseState === 'absent') {
       try {
-        mkdirSync(resolvedCasePath, { recursive: true });
+        if (newCaseOnly) {
+          mkdirSync(dirname(resolvedCasePath), { recursive: true });
+          // Exclusive creation also refuses a directory or dangling symlink that
+          // appeared after the bounded probe; never scaffold somebody else's files.
+          mkdirSync(resolvedCasePath);
+        } else mkdirSync(resolvedCasePath, { recursive: true });
         mkdirSync(join(resolvedCasePath, 'src'), { recursive: true });
 
         // Read settings to get custom template path
