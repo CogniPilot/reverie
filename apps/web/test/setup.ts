@@ -12,7 +12,7 @@
  * between tests.
  */
 
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, vi } from 'vitest';
@@ -48,6 +48,14 @@ if (originalPlaywrightBrowsersPath === undefined && originalHome) {
 }
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+// Temp dirs too: tests make their own with mkdtemp(tmpdir()) and many never remove them (about 12k dirs, 1.9 GB on
+// one laptop in six days). With the temp dir inside the per-file HOME, the teardown below removes them all with it.
+// os.tmpdir() reads these on every call, so this covers every test file and helper without touching each one.
+const testTmp = join(testHome, 'tmp');
+mkdirSync(testTmp);
+process.env.TMPDIR = testTmp;
+process.env.TMP = testTmp;
+process.env.TEMP = testTmp;
 process.env.VITEST = 'true';
 
 for (const key of Object.keys(process.env)) {
