@@ -309,6 +309,17 @@ describe('self-service pending discovery', () => {
     await expect(h.service.decide('request', 'source', h.nonce(), 'approve', 'handoff', 'owner')).rejects.toThrow();
     expect(h.port.moves.begin).not.toHaveBeenCalled();
   });
+
+  it('lists one employee’s pending requests by employee, scoped to the owner, without credentials', async () => {
+    const h = requestHarness(); await h.service.create(h.input, 'owner', h.execution);
+    const theirs = await h.service.pendingForEmployee('alex', 'owner');
+    expect(theirs.map((r) => r.id)).toEqual(['request']); expect(theirs[0]).not.toHaveProperty('nonceHash');
+    expect(await h.service.pendingForEmployee('someone-else', 'owner')).toEqual([]);
+    expect(await h.service.pendingForEmployee('alex', 'other-owner')).toEqual([]);
+    expect(h.service.bindingOf('alex', 'owner')).toBe('source');
+    h.clock(1_800_100);
+    expect(await h.service.pendingForEmployee('alex', 'owner')).toEqual([]);
+  });
 });
 
 it('expires a queued notification when its authorization predicate reaches the deadline', async () => {

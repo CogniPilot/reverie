@@ -346,6 +346,22 @@ export class PlanMoveRequests {
       return result;
     });
   }
+  /** The session an employee is bound to now, if any: who a manager's listing is checked against. */
+  bindingOf(employeeId: string, owner?: string): string | undefined {
+    return this.port.binding(employeeId, owner);
+  }
+  /** Pending requests filed for one employee, whoever filed them; the caller has already been authorized for it. */
+  async pendingForEmployee(employeeId: string, owner?: string): Promise<PlanRequestView[]> {
+    return this.serial(async () => {
+      const result: PlanRequestView[] = [];
+      for (const record of this.records.values()) {
+        if (record.owner !== owner || record.employeeId !== employeeId) continue;
+        await this.current(record);
+        if (['pending', 'reauthorize-required'].includes(record.phase)) result.push(view(record));
+      }
+      return result;
+    });
+  }
   async get(id: string, owner?: string): Promise<PlanRequestView> {
     return this.serial(async () => {
       const record = this.owned(id, owner);

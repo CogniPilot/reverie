@@ -2686,8 +2686,10 @@ export function registerAgentCommands(program: Command): Command {
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
-  planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
-    .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
+  planMove.command('list').description('List this expert’s pending plan requests, or with --employee another expert’s')
+    .option('--employee <id-or-name>', 'Another team expert, by employee id or name (requires Manage team plans)')
+    .option('--json', 'Machine-readable result')
+    .action((options: { employee?: string; json?: boolean }) => run(Boolean(options.json), deps => agentPendingPlanMoves(deps, options.employee)));
   planMove.command('blocked').description('Inspect your unresolved existing moves without creating or replaying one').option('--json', 'Machine-readable result')
     .action((options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps)));
   planMove.command('recovery-status <id>').description('Inspect an existing move held for recovery (not a new plan request)').option('--json', 'Machine-readable result')

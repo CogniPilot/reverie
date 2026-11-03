@@ -117,17 +117,41 @@ export async function agentPlanRequest(
 }
 
 /** List only this session's pending owner-authorized requests, never credentials. */
-export async function agentPendingPlanMoves(deps: AgentDeps): Promise<number> {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** An employee id from an id or a unique roster name; a name that matches no one, or several, is an error. */
+async function employeeIdOf(deps: AgentDeps, ref: string): Promise<string | { error: string }> {
+  if (UUID.test(ref)) return ref.toLowerCase();
+  const company = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
+  const employees = (company.json?.data as { employees?: Array<{ id?: unknown; name?: unknown }> } | undefined)?.employees;
+  if (!company.json?.success || !Array.isArray(employees)) return { error: 'The company roster could not be read to resolve --employee' };
+  const hits = employees.filter((e) => typeof e.name === 'string' && e.name.toLowerCase() === ref.trim().toLowerCase());
+  if (hits.length !== 1 || typeof hits[0].id !== 'string')
+    return { error: hits.length ? `"${ref}" names ${hits.length} experts; use the employee id` : `No expert is called "${ref}"` };
+  return hits[0].id;
+}
+
+/** Pending plan requests for this session, or with `employee` (id or name) those filed for another expert. */
+export async function agentPendingPlanMoves(deps: AgentDeps, employee?: string): Promise<number> {
   try {
-    const response = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests/pending', body: {} });
-    const body = response.json as { success?: boolean; data?: Array<{ id: string; phase: string; toAccount: string; expiresAt: number; notified: boolean }> };
+    let employeeId: string | undefined;
+    if (employee !== undefined) {
+      const resolved = await employeeIdOf(deps, employee);
+      if (typeof resolved !== 'string') { deps.io.err(resolved.error); return 1; }
+      employeeId = resolved;
+    }
+    const response = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests/pending', body: employeeId ? { employeeId } : {} });
+    const body = response.json as { success?: boolean; error?: string; data?: Array<{ id: string; phase: string; toAccount: string; expiresAt: number; notified: boolean }> };
+    if (response.status === 403 || response.status === 404) { deps.io.err(body?.error ?? 'Refused'); return 4; }
     if (response.status >= 400 || !body?.success || !Array.isArray(body.data)) throw new Error('Refused');
     const requests = body.data.map(({ id, phase, toAccount, expiresAt, notified }) => ({ id, phase, toAccount, expiresAt, notified }));
-    if (deps.json) deps.io.out(JSON.stringify({ success: true, requests }));
-    else if (!requests.length) deps.io.out('No pending plan requests for this session.');
-    else for (const r of requests) deps.io.out(`${r.id}: ${r.phase}, destination ${r.toAccount}, expires ${new Date(r.expiresAt).toISOString()}. Prepare a handoff, then use plan-move approve or reject.`);
+    if (deps.json) deps.io.out(JSON.stringify({ success: true, ...(employeeId ? { employeeId } : {}), requests }));
+    else if (!requests.length) deps.io.out(employeeId ? `No pending plan requests for ${employee}.` : 'No pending plan requests for this session.');
+    else for (const r of requests)
+      deps.io.out(`${r.id}: ${r.phase}, destination ${r.toAccount}, expires ${new Date(r.expiresAt).toISOString()}.` +
+        (employeeId ? ` That expert prepares the handoff and approves or rejects it.` : ' Prepare a handoff, then use plan-move approve or reject.'));
     return 0;
-  } catch { deps.io.err('Could not read this session’s pending plan requests.'); return 1; }
+  } catch { deps.io.err(employee !== undefined ? `Could not read the pending plan requests for ${employee}.` : 'Could not read this session’s pending plan requests.'); return 1; }
 }
 
 /** Inspect and explicitly adopt only the current holder's existing move. Never submits a new move. */

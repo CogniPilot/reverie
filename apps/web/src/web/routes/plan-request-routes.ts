@@ -40,12 +40,19 @@ export function registerPlanRequestRoutes(
     if (!execution?.authorized()) throw new PlanMoveError('This expert needs Move own plan or Manage team plans permission from the owner', 403);
     return execution;
   };
+  // Own pending requests, or with employeeId another expert's: that needs the same Manage team plans permission a
+  // manager's move request does, checked against the expert's current session.
   app.post('/api/plans/agent-requests/pending', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
-    parseBody(z.object({}).strict(), request.body ?? {});
+    const { employeeId } = parseBody(z.object({ employeeId: PlanRequestId.optional() }).strict(), request.body ?? {});
     const caller = selfCaller?.(request);
     if (!caller) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the exact agent may list its own pending requests'));
-    return { success: true, data: await requests.pendingForSession(caller.sessionId, caller.owner) };
+    if (!employeeId) return { success: true, data: await requests.pendingForSession(caller.sessionId, caller.owner) };
+    const sessionId = requests.bindingOf(employeeId, caller.owner);
+    if (!sessionId) return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'That expert has no current session'));
+    if (!agentCapture?.(request, { employeeId, sessionId })?.authorized())
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, "Listing another expert's plan requests needs Manage team plans"));
+    return { success: true, data: await requests.pendingForEmployee(employeeId, caller.owner) };
   });
   app.post('/api/plans/agent-requests', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
