@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { writeCompanyStateFile } from './company-store.js';
-import { BoardStateSchema, emptyBoard, type BoardState } from './board-types.js';
+import { BoardStateSchema, emptyBoard, type BoardState, type Issue } from './board-types.js';
 
 export class BoardError extends Error {
   constructor(
@@ -41,6 +41,12 @@ export class BoardStore {
 
   snapshot(): BoardState {
     return structuredClone(this.state);
+  }
+
+  /** Read one committed issue without copying unrelated cards, decisions or history. */
+  issue(id: string): Issue | undefined {
+    const issue = this.state.issues.find((row) => row.id === id);
+    return issue && structuredClone(issue);
   }
 
   update<T>(
