@@ -2723,6 +2723,14 @@ export class Session extends EventEmitter {
   }
 
   /** Repair only the disposable viewer. Never run provider setup, hooks or normal J. */
+  /** Bounded viewer diagnostics; reveals no transport internals or provider authority. */
+  get workerViewerReconnectBlocker(): 'viewer-closing' | 'lifecycle-in-progress' | 'input-in-progress' | undefined {
+    if (this._closing) return 'viewer-closing';
+    if (this.paneLifecycleInFlight) return 'lifecycle-in-progress';
+    if (this._muxWritesInFlight > 0) return 'input-in-progress';
+    return undefined;
+  }
+
   async reconnectWorkerViewer(stillCurrent: () => boolean): Promise<boolean> {
     if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
     if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;

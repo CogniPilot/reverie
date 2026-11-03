@@ -13,6 +13,8 @@ import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
+import { WorkerRecoveryAuthentication } from '../worker-recovery-auth.js';
+import { agentPlanJournalRecovery } from '../agent-plan-journal-recovery.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
 import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall } from '../company-types.js';
@@ -2283,7 +2285,9 @@ export class WebServer extends EventEmitter {
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
       },
     });
-    registerWorkerViewerReconnect(this.app, this.workerViewerReconnect, verifiedOwner);
+    const recoveryAuthentication = new WorkerRecoveryAuthentication(getDataDir(), () => this.companyService.registeredEmployees());
+    recoveryAuthentication.register(this.app);
+    registerWorkerViewerReconnect(this.app, this.workerViewerReconnect, verifiedOwner, recoveryAuthentication);
     const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(
         {
@@ -2339,6 +2343,27 @@ export class WebServer extends EventEmitter {
         const caller = callerOf(request, { service: ownerAuth, ctx });
         return caller.kind === 'agent' && request.headers['x-reverie-parent-session'] === caller.session
           ? ownPlanRecovery(request, planMoveRuntime) : undefined;
+      },
+      async (request, input) => {
+        let authority;
+        try { authority = await recoveryAuthentication.authenticate(request); } catch { return undefined; }
+        return agentPlanRequestExecution(request, input, planMoveRuntime, async (method, url, payload) => {
+          const result = await this.app.inject({ method, url, headers: {
+            ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
+            'x-reverie-parent-session': input.sessionId,
+            ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+          }, ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }) });
+          const body = result.json();
+          if (result.statusCode >= 400 || body?.success === false)
+            throw new PlanMoveError(body?.error ?? 'The delegated migration request was refused', result.statusCode >= 400 ? result.statusCode : 409);
+          return body;
+        }, authority);
+      },
+      async (request, employeeId) => {
+        try {
+          const authority = await recoveryAuthentication.authenticate(request);
+          return agentPlanJournalRecovery(authority, employeeId, planMoveRuntime);
+        } catch { return undefined; }
       }
     );
     const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));

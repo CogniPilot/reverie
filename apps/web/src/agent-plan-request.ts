@@ -7,23 +7,28 @@ import { PlanMoveError } from './plan-move.js';
 import { ownerFor, resolveParentSessionId } from './web/route-helpers.js';
 import { isMultiUserMode } from './config/multiuser.js';
 import { withDelegatedSessionCreate, withDelegatedSessionStart } from './owner-auth/delegated-session-create.js';
+import type { RecoveryAuthority } from './worker-recovery-auth.js';
+import { expertRuntimeRecipe } from './expert-runtime-recipe.js';
 
 export interface AgentPlanInput {
   employeeId: string;
   sessionId: string;
+  sessionGeneration?: number;
   purpose?: 'runtime-refresh';
 }
 export function agentPlanRequestExecution(
   request: FastifyRequest,
   input: AgentPlanInput,
   runtime: Omit<PlanMoveRuntime, 'authorized' | 'request'>,
-  invoke: PlanMoveRuntime['request'] // transport retains the authenticated caller's credentials
+  invoke: PlanMoveRuntime['request'], // transport retains the authenticated caller's credentials
+  native?: RecoveryAuthority
 ): PlanRequestExecution | undefined {
   // Shared provider accounts have no per-user ownership model yet. Never turn a member login into account authority.
   if (isMultiUserMode()) return undefined;
   const owner = ownerFor(request);
-  const callerId = resolveParentSessionId({ sessions: runtime.sessions }, request, undefined, owner);
-  if (!callerId || request.headers['x-reverie-parent-session'] !== callerId) return undefined;
+  if (native) { try { native.assertCurrent(); } catch { return undefined; } }
+  const callerId = native?.sessionId ?? resolveParentSessionId({ sessions: runtime.sessions }, request, undefined, owner);
+  if (!callerId || (!native && request.headers['x-reverie-parent-session'] !== callerId)) return undefined;
   const caller = runtime.sessions.get(callerId);
   const source = runtime.sessions.get(input.sessionId);
   const employees = () => runtime.company.view(owner).employees;
@@ -36,6 +41,8 @@ export function agentPlanRequestExecution(
     !source ||
     !delegate ||
     !target ||
+    (native && (native.owner !== owner || native.employeeId !== delegate.id || native.sessionGeneration !== delegate.sessionGeneration ||
+      input.sessionGeneration !== target.sessionGeneration)) ||
     (input.purpose === 'runtime-refresh' && delegate?.id !== target?.id) ||
     caller.owner !== owner ||
     source.owner !== owner ||
@@ -45,8 +52,14 @@ export function agentPlanRequestExecution(
   let candidate: string | undefined;
   let candidateSession: typeof source | undefined;
   let sourceStopped = false;
+  let candidateGeneration: number | undefined;
+  let candidateRecipe: string | undefined;
+  const sourceRecipe = native ? JSON.stringify(expertRuntimeRecipe(source)) : undefined;
+  const originalRecipe = JSON.stringify(target.runtimeRecipe);
+  const originalGeneration = target.sessionGeneration;
   const deadline = Date.now() + 30 * 60_000;
   const authorized = () => {
+    if (native) { try { native.assertIssued(); } catch { return false; } }
     const current = employees().find((employee) => employee.id === delegate.id);
     const employee = employees().find((employee) => employee.id === target.id);
     const validBinding = (id: string | undefined) => id === input.sessionId || (!!candidate && id === candidate);
@@ -60,10 +73,17 @@ export function agentPlanRequestExecution(
       (!candidate || (!!candidateSession && runtime.sessions.get(candidate) === candidateSession && candidateSession.owner === owner)) &&
       !!current &&
       !!employee &&
+      (!native || (JSON.stringify(expertRuntimeRecipe(source)) === sourceRecipe &&
+        (employee.sessionId === input.sessionId
+          ? employee.sessionGeneration === originalGeneration && JSON.stringify(employee.runtimeRecipe) === originalRecipe
+          : employee.sessionGeneration === candidateGeneration && JSON.stringify(employee.runtimeRecipe) === candidateRecipe) &&
+        (delegate.id === target.id || current.sessionGeneration === native.sessionGeneration))) &&
       current.owner === owner &&
       employee.owner === owner &&
       !current.onVacation &&
       !employee.onVacation &&
+      !current.bindingMigration &&
+      !employee.bindingMigration &&
       current.desiredRunning !== false &&
       employee.desiredRunning !== false &&
       validBinding(employee.sessionId) &&
@@ -111,6 +131,9 @@ export function agentPlanRequestExecution(
             throw new PlanMoveError('The move did not create an owned candidate');
           candidate = id;
           candidateSession = created;
+          const bound = employees().find(employee => employee.id === target.id && employee.sessionId === id);
+          candidateGeneration = bound?.sessionGeneration;
+          candidateRecipe = JSON.stringify(bound?.runtimeRecipe);
           return response;
         }
         if (candidate && method === 'POST' && url === `/api/sessions/${encodeURIComponent(candidate)}/interactive`)

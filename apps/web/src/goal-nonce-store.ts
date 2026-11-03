@@ -40,6 +40,8 @@ export interface GoalNonceStoreOptions {
   /** Explicit trusted absolute packaged flock executable; no PATH lookup/default. */
   readonly flockExecutable: string;
   readonly authorityNamespace: string;
+  /** Trusted purpose composition only. Goal proofs retain the default ten seconds. */
+  readonly maxLifetimeMs?: number;
   /** Must establish the WHOLE scope outside worker-writable/shared namespaces,
    * repeated before EVERY storage read/write/metadata operation. Not a caller boolean. */
   assertPrivateCustody(scope: GoalNonceCustodyScope): void;
@@ -91,6 +93,7 @@ export class GoalNonceStore implements NoncePort {
       !integer(options.capacity) ||
       options.capacity < 1 ||
       options.capacity > MAX_CAPACITY ||
+      (options.maxLifetimeMs !== undefined && (!integer(options.maxLifetimeMs) || options.maxLifetimeMs < 1 || options.maxLifetimeMs > 300_000)) ||
       typeof options.assertPrivateCustody !== 'function'
     )
       throw new GoalNonceStoreError();
@@ -364,7 +367,7 @@ export class GoalNonceStore implements NoncePort {
           fd = this.openLock();
           await this.acquire(fd);
           const accepted = this.transaction(fd, (state, now) => {
-            if (supplied.expiresAt <= now || supplied.expiresAt - now > 10_000) throw new GoalNonceStoreError();
+            if (supplied.expiresAt <= now || supplied.expiresAt - now > (this.config.maxLifetimeMs ?? 10_000)) throw new GoalNonceStoreError();
             state.entries = state.entries.filter((entry) => entry.expiresAt > now);
             if (state.entries.some((entry) => entry.key === hash) || state.entries.length >= state.capacity)
               return undefined;

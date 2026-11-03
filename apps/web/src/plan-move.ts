@@ -328,8 +328,9 @@ export class PlanMoves {
     }
   }
 
-  async cancel(id: string, owner?: string): Promise<void> {
+  async cancel(id: string, owner?: string, authorized: () => boolean = () => true): Promise<void> {
     const record = await this.get(id, owner);
+    if (!authorized()) throw new PlanMoveError('The move cancellation permission changed', 403);
     if (!record) throw new PlanMoveError('Unknown move', 404);
     if (record.phase !== 'waiting' || !this.aborts.has(id))
       throw new PlanMoveError('Only a move still waiting for idle can be cancelled');

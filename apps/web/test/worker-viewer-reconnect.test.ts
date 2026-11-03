@@ -157,6 +157,9 @@ it('continues eligible attach-only failures at a capped minute interval and keep
   expect(f.mux.respawnPane.mock.calls.every(([options]) => options.workerAttachOnly && options.onlyIfDead)).toBe(true);
   f.health(false);
   await f.controller.reconnect(f.employee.id, f.expected, undefined);
+  expect(f.mux.respawnPane).toHaveBeenCalledTimes(calls);
+  f.health(true);
+  await f.controller.reconnect(f.employee.id, f.expected, undefined);
   expect(f.mux.respawnPane).toHaveBeenCalledTimes(calls + 1);
   expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
@@ -395,4 +398,68 @@ it('carries independent native health through the real server SSE projection and
  expect(h.document.querySelector('.ca-member').classList.contains('is-state-dead')).toBe(true);
  expect(f.session.canAcceptChatInput()).toBe(false);expect(shell.room.members[0].alive).toBe(false);
  expect(h.app._chatEls.input.value).toBe('retained unsent draft');expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('reports bounded native-health, retry, readiness and exact-binding diagnostics', async () => {
+  const f = await fixture();
+  f.health(false); expect(f.controller.status(f.employee.id, f.expected)).toMatchObject({reason:'native-health-unavailable',attempts:0});
+  f.health(true); f.mux.readPaneLiveness.mockResolvedValue({state:'unreadable'} as never);
+  await f.controller.reconnect(f.employee.id, f.expected, undefined);
+  expect(f.controller.status(f.employee.id, f.expected)).toMatchObject({reason:'readiness-unconfirmed',attempts:1,retryAfterMs:2000});
+  f.advance(1999.5); expect(f.controller.status(f.employee.id, f.expected).retryAfterMs).toBe(1);
+  expect(f.controller.status(f.employee.id, {...f.expected,sessionGeneration:999}).reason).toBe('stale-binding');
+});
+it('rechecks owner authority and healthy provider after asynchronous admission before touching a viewer', async () => {
+  for (const kind of ['owner','native-health']) {
+    const f = await fixture(); let allowed = true;
+    f.deps.moveGuard.mockImplementationOnce(async () => { if(kind === 'owner') allowed=false; else f.health(false); return () => true; });
+    expect(await f.controller.reconnect(f.employee.id, f.expected, undefined, false, () => allowed)).toBe('changed');
+    expect(f.mux.respawnPane).not.toHaveBeenCalled(); expect(f.deps.pause).not.toHaveBeenCalled();
+  }
+});
+it('rechecks an explicit recovery grant after asynchronous admission and during attach readiness', async () => {
+  for (const during of ['admission','readback']) {
+    const f = await fixture(); await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:true}} as never);
+    const principal = {employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,
+      owner:undefined,assertCurrent:()=>{},assertIssued:()=>{}};
+    const authorized = f.controller.delegated(principal);
+    if(during==='admission') f.deps.moveGuard.mockImplementationOnce(async () => {
+      await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:false}} as never); return () => true;
+    });
+    else f.mux.readPaneLiveness.mockImplementationOnce(async () => {
+      await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:false}} as never); return {state:'dead'};
+    });
+    expect(await f.controller.reconnect(f.employee.id,f.expected,undefined,false,authorized)).not.toBe('connected');
+    expect(f.deps.publish).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
+  }
+});
+it('status distinguishes a current move hold without attempting repair and rechecks target binding after awaits', async()=>{
+  const f=await fixture();f.block();
+  expect((await f.controller.diagnostics(f.employee.id,f.expected)).reason).toBe('move-in-progress');
+  expect(f.mux.respawnPane).not.toHaveBeenCalled();
+  f.deps.moveGuard.mockImplementationOnce(async()=>{await f.company.setDesiredRunning(f.session.id,false);return()=>true;});
+  expect((await f.controller.diagnostics(f.employee.id,f.expected)).reason).toBe('not-running');
+});
+it('a native-authenticated delegate can repair its own missing website client while the provider stays healthy',async()=>{
+  const f=await fixture();await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}});
+  Object.assign(f.session,{ptyProcess:null,_pid:null,_viewerClientLost:true});
+  const authority={employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,owner:undefined,
+    assertCurrent:()=>{},assertIssued:()=>{}};
+  expect(await f.controller.reconnect(f.employee.id,f.expected,undefined,false,f.controller.delegated(authority))).toBe('connected');
+  expect(f.mux.respawnPane).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({workerAttachOnly:true}));
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+it('native recovery HTTP status rechecks revoked grants after read-only move inspection',async()=>{
+  const f=await fixture();await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}});
+  const app=Fastify();cleanups.push(()=>app.close());
+  const authority={employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,owner:undefined,
+    assertCurrent:()=>{},assertIssued:()=>{}};
+  registerWorkerViewerReconnect(app,f.controller,()=>false,{authenticate:async()=>authority} as never);
+  const req={method:'POST' as const,url:`/api/company/employees/${f.employee.id}/reconnect/status`,
+    headers:{'x-reverie-recovery-assertion':'fixture-authenticated-by-private-adapter'},payload:f.expected};
+  expect((await app.inject(req)).statusCode).toBe(200);
+  f.deps.moveGuard.mockImplementationOnce(async()=>{
+    await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:false}});return()=>true;
+  });
+  expect((await app.inject(req)).statusCode).toBe(403);expect(f.mux.respawnPane).not.toHaveBeenCalled();
 });

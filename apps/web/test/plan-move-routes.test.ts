@@ -165,3 +165,47 @@ describe('explicit owner recovery endpoint', () => {
     expect(resolve).not.toHaveBeenCalled(); await app.close();
   });
 });
+
+describe('purpose-authenticated delegated recovery routes',()=>{
+  async function setup() {
+    const app=Fastify(); const moves={get:vi.fn(async()=>({id:'held',employeeId:'expert',oldSession:'old',newSession:'new',toAccount:'plan'})),
+      cancel:vi.fn(async(_id,_owner,check)=>{check?.();}),resolve:vi.fn(async()=>({phase:'completed'})),begin:vi.fn(),list:vi.fn()};
+    let valid=true; const actor={employeeId:'manager',sessionId:'manager-session',owner:undefined,
+      assertCurrent:()=>{if(!valid)throw new PlanMoveError('grant revoked',403);},inspect:vi.fn(()=>({verifyRecovery:vi.fn()}))};
+    const auth=vi.fn(async()=>actor);
+    registerPlanMoveRoutes(app,moves as any,{authSessions:new Map() as any},undefined,()=>({}) as any,undefined,undefined,undefined,auth);
+    const send=(action:string,payload:unknown={employeeId:'expert'},headers={ 'x-reverie-recovery-assertion':'synthetic-proof'})=>
+      app.inject({method:'POST',url:'/api/plans/moves/held/'+action,headers,payload});
+    return{app,moves,actor,auth,send,revoke:()=>{valid=false;}};
+  }
+  it('exposes only the named same-owner record and rechecks permission after journal reads',async()=>{
+    const f=await setup();try{
+      expect((await f.send('status')).statusCode).toBe(200);
+      f.moves.get.mockImplementationOnce(async()=>{f.revoke();return{id:'held',employeeId:'expert'} as any;});
+      expect((await f.send('status')).statusCode).toBe(403);
+      expect(f.moves.resolve).not.toHaveBeenCalled();expect(f.moves.cancel).not.toHaveBeenCalled();
+    }finally{await f.app.close();}
+  });
+  it('does not treat raw parent headers or an invalid proof as recovery authority',async()=>{
+    const f=await setup();try{
+      expect((await f.send('status',{employeeId:'expert'},{'x-reverie-parent-session':'manager-session'} as any)).statusCode).toBe(403);
+      f.auth.mockResolvedValueOnce(undefined as any);expect((await f.send('cancel')).statusCode).toBe(403);
+      expect(f.moves.cancel).not.toHaveBeenCalled();
+    }finally{await f.app.close();}
+  });
+  it('rejects another employee journal and passes exact adoption tuple to native-only executor',async()=>{
+    const f=await setup();try{
+      expect((await f.send('status',{employeeId:'other'})).statusCode).toBe(404);
+      const input={employeeId:'expert',action:'adopt-existing',oldSession:'old',newSession:'new',toAccount:'plan'};
+      expect((await f.send('resolve',input)).statusCode).toBe(200);
+      expect(f.actor.inspect).toHaveBeenCalledOnce();expect(f.moves.resolve).toHaveBeenCalledWith('held',
+        {action:'adopt-existing',oldSession:'old',newSession:'new',toAccount:'plan'},undefined,expect.any(Object));
+    }finally{await f.app.close();}
+  });
+  it('rechecks authority inside asynchronous cancellation and preserves the hold on revocation',async()=>{
+    const f=await setup();try{
+      f.moves.cancel.mockImplementationOnce(async(_id,_owner,check)=>{f.revoke();check();});
+      expect((await f.send('cancel')).statusCode).toBe(403);
+    }finally{await f.app.close();}
+  });
+});
