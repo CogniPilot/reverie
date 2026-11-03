@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 import { Command } from 'commander';
-import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueTag, boardScheduleSet, boardShow, memberRef, registerBoardCommands, wallTime } from '../src/cli-board.js';
+import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueSet, boardIssueTag, boardScheduleSet, boardShow, memberRef, registerBoardCommands, wallTime } from '../src/cli-board.js';
 
 const board = {
   rev: 7,
@@ -178,5 +178,39 @@ describe('reverie board', () => {
   it('helpers', () => {
     expect(memberRef(board as never, 'e-reviewer')).toBe('e-reviewer');
     expect(wallTime('2026-10-17', 'start', 'America/New_York')).toBe(Date.UTC(2026, 9, 17, 11));
+  });
+});
+
+describe('board issue set', () => {
+  it('sends one PATCH with exactly the given fields, names and times resolved', async () => {
+    const { deps, calls } = fake();
+    expect(await boardIssueSet(deps, { id: 'i-1', status: 'doing', reason: 'resumed', owner: 'Builder', end: '2026-11-03T04:15' })).toBe(0);
+    const writes = calls.filter((c) => c.method === 'PATCH');
+    expect(writes).toHaveLength(1);
+    expect(writes[0].path).toBe('/api/board/issues/i-1');
+    expect(writes[0].body).toEqual({ status: 'doing', reason: 'resumed', owner: 'e-builder', end: wallTime('2026-11-03T04:15', 'end', board.timeZone) });
+  });
+
+  it('reads the board only when a name or a time needs it', async () => {
+    const { deps, calls } = fake();
+    expect(await boardIssueSet(deps, { id: 'i-1', reason: '' })).toBe(0);
+    expect(calls.map((c) => [c.method, c.path])).toEqual([['PATCH', '/api/board/issues/i-1']]);
+    expect(calls[0].body).toEqual({ reason: '' });
+  });
+
+  it('refuses nothing to change, a bad status and an over-long title before any request', async () => {
+    for (const options of [{ id: 'i-1' }, { id: 'i-1', status: 'in_progress' }, { id: 'i-1', title: 'x'.repeat(301) }]) {
+      const { deps, calls, out } = fake();
+      expect(await boardIssueSet(deps, options), JSON.stringify(options).slice(0, 60)).not.toBe(0);
+      expect(calls).toHaveLength(0);
+      expect(out.join('\n')).toMatch(/at least one|status is one of|301 characters/);
+    }
+  });
+
+  it('refuses an over-long title on add as well, saying how long it is', async () => {
+    const { deps, calls, out } = fake();
+    expect(await boardIssueAdd(deps, { title: 'y'.repeat(320) })).not.toBe(0);
+    expect(calls).toHaveLength(0);
+    expect(out.join('\n')).toContain('320 characters; the board keeps at most 300');
   });
 });
