@@ -142,7 +142,7 @@ export async function agentPendingPlanMoves(deps: AgentDeps, employee?: string):
     }
     const response = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests/pending', body: employeeId ? { employeeId } : {} });
     const body = response.json as { success?: boolean; error?: string; data?: Array<{ id: string; phase: string; toAccount: string; expiresAt: number; notified: boolean }> };
-    if (response.status === 403 || response.status === 404) { deps.io.err(body?.error ?? 'Refused'); return 4; }
+    if (response.status === 403) { deps.io.err(body?.error ?? 'Refused'); return 4; }
     if (response.status >= 400 || !body?.success || !Array.isArray(body.data)) throw new Error('Refused');
     const requests = body.data.map(({ id, phase, toAccount, expiresAt, notified }) => ({ id, phase, toAccount, expiresAt, notified }));
     if (deps.json) deps.io.out(JSON.stringify({ success: true, ...(employeeId ? { employeeId } : {}), requests }));

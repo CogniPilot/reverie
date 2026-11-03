@@ -48,10 +48,12 @@ export function registerPlanRequestRoutes(
     const caller = selfCaller?.(request);
     if (!caller) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the exact agent may list its own pending requests'));
     if (!employeeId) return { success: true, data: await requests.pendingForSession(caller.sessionId, caller.owner) };
+    // One answer for "not permitted" and "no current session": the permission is checked against that session, and a
+    // caller without it must not learn whether the expert has one.
     const sessionId = requests.bindingOf(employeeId, caller.owner);
-    if (!sessionId) return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'That expert has no current session'));
-    if (!agentCapture?.(request, { employeeId, sessionId })?.authorized())
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, "Listing another expert's plan requests needs Manage team plans"));
+    if (!sessionId || !agentCapture?.(request, { employeeId, sessionId })?.authorized())
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN,
+        "Listing another expert's plan requests needs Manage team plans and a current session for that expert"));
     return { success: true, data: await requests.pendingForEmployee(employeeId, caller.owner) };
   });
   app.post('/api/plans/agent-requests', async (request, reply) => {

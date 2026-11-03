@@ -65,12 +65,14 @@ it('lets a manager list another expert’s requests, checked against that expert
   expect(forEmployee).toHaveBeenCalledWith('emp-target', undefined);
 });
 
-it('refuses without Manage team plans, and for an expert with no current session, listing nothing', async () => {
+it('refuses without Manage team plans, and for an expert with no current session, with one identical answer', async () => {
   const denied = await list('session-member', { employeeId: 'emp-target' });
   expect(denied.statusCode).toBe(403);
   expect(denied.json().error).toContain('Manage team plans');
+  // No current session gets the same answer as no permission, so a caller cannot probe for live sessions.
   const absent = await list('session-manager', { employeeId: 'emp-gone' });
-  expect(absent.statusCode).toBe(404);
+  expect(absent.statusCode).toBe(403);
+  expect(absent.json()).toEqual(denied.json());
   expect(forEmployee).not.toHaveBeenCalled();
   expect((await list('session-manager', { employeeId: '../x' })).statusCode).toBe(400);
 });
