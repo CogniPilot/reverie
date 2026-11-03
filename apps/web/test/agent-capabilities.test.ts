@@ -207,3 +207,39 @@ describe('current agent capability command', () => {
     expect(f.output.join('\n')).toContain('/handbook/operations');
   });
 });
+
+describe('seat CLI compatibility', () => {
+  it('lists the real registered command paths, parents included', async () => {
+    const { agentCommandPaths, commandPaths } = await import('../src/cli-command-list.js');
+    const paths = await agentCommandPaths();
+    for (const path of ['agent', 'agent journal', 'agent journal save', 'agent chat read', 'plans', 'plans show']) expect(paths).toContain(path);
+    const { Command } = await import('commander');
+    const root = new Command('x');
+    root.command('a').command('b');
+    expect(commandPaths(root)).toEqual(['a', 'a b']);
+  });
+
+  it('names the commands the server CLI has and this one lacks, in JSON and in the summary', async () => {
+    const { agentCommandPaths } = await import('../src/cli-command-list.js');
+    const local = await agentCommandPaths();
+    const f = fixture();
+    f.set({ ...snapshot(), cli: { commands: [...local, 'agent publish', 'agent seal'] } });
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(JSON.parse(f.output.at(-1)!).cliCompatibility.missing).toEqual(['agent publish', 'agent seal']);
+    const human = fixture();
+    human.deps.json = false;
+    human.set({ ...snapshot(), cli: { commands: [...local, 'agent publish'] } });
+    expect(await agentCapabilities(human.deps, refs)).toBe(0);
+    expect(human.output.join('\n')).toContain('lacks 1 command: agent publish. Ask the operator to refresh the seat CLI.');
+  });
+
+  it('reports nothing missing when the lists match or the server predates the check', async () => {
+    const { agentCommandPaths } = await import('../src/cli-command-list.js');
+    for (const value of [{ ...snapshot(), cli: { commands: await agentCommandPaths() } }, snapshot()]) {
+      const f = fixture();
+      f.set(value);
+      expect(await agentCapabilities(f.deps, refs)).toBe(0);
+      expect(JSON.parse(f.output.at(-1)!).cliCompatibility.missing).toEqual([]);
+    }
+  });
+});

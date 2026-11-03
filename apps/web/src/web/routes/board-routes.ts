@@ -1,3 +1,4 @@
+import { agentCommandPaths } from '../../cli-command-list.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview The server's board (board-types.ts): GET /api/board and its audited writes.
@@ -386,6 +387,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         roster,
         capabilities: {
           checkedAt: at,
+          // The agent commands of the CLI built from this server's source, so a seat CLI can name what it lacks.
+          cli: { commands: await agentCommandPaths().catch(() => [] as string[]) },
           identity: { kind: c.kind, name: nameOf(c), ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}) },
           board: { read: true, fileIssue: boardAccess.editBoardIssues, editBoardIssues: boardAccess.editBoardIssues,
             createDecision: structuredDecisionWrites && boardAccess.manageDecisions,
