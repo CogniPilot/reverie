@@ -4,6 +4,11 @@ let
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
   goalPythonFixture = lib.cleanSource (src + "/python/reverie");
+  # Copy individual fixture files into the store. Interpolating ${src}/path
+  # otherwise makes every repository edit an input to the console derivation.
+  # Use the original snapshot for the selected files so read-only flake check
+  # evaluation never has to materialize the intermediate filtered root first.
+  consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -21,15 +26,19 @@ let
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
       mkdir -p test/fixtures/recovery-ledger/reverie
-      cp ${src}/python/reverie/{__init__,resume_ledger,resume_ledger_rpc}.py test/fixtures/recovery-ledger/reverie/
+      cp ${consoleFixture "python/reverie/__init__.py"} test/fixtures/recovery-ledger/reverie/__init__.py
+      cp ${consoleFixture "python/reverie/resume_ledger.py"} test/fixtures/recovery-ledger/reverie/resume_ledger.py
+      cp ${consoleFixture "python/reverie/resume_ledger_rpc.py"} test/fixtures/recovery-ledger/reverie/resume_ledger_rpc.py
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
       mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
       cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
-      cp ${src}/tests/__init__.py ${src}/tests/goal_private_fixture.py ${src}/tests/goal_broker_fixture.py test/fixtures/goal-source/tests/
+      cp ${consoleFixture "tests/__init__.py"} test/fixtures/goal-source/tests/__init__.py
+      cp ${consoleFixture "tests/goal_private_fixture.py"} test/fixtures/goal-source/tests/goal_private_fixture.py
+      cp ${consoleFixture "tests/goal_broker_fixture.py"} test/fixtures/goal-source/tests/goal_broker_fixture.py
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
-      cp ${src}/nix/package.nix test/fixtures/nix-package/package.nix
+      cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
