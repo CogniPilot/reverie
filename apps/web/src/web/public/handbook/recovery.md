@@ -34,13 +34,13 @@ reverie agent reconnect-viewer EMPLOYEE_ID --json
 
 Both commands first read the current company binding. They POST `{sessionId,sessionGeneration}` to `/api/company/employees/EMPLOYEE_ID/reconnect/status` or `/reconnect` respectively, through the normal scoped client. They never accept an owner flag, provider command, replacement session or arbitrary identity header. `reverie agent capabilities --json` lists these commands and the current recovery grant.
 
-Status reports `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`. Reasons distinguish unavailable native health, stale binding, a move or lifecycle flight, readiness failure, changed authority and backoff. A status read starts nothing. In Company or an employee profile, **Status** reads the same bounded diagnostic; **Reconnect** requests only attachment to the existing provider. A browser terminal reconnect and this server-viewer repair are separate operations.
+Status reports `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`. Reasons distinguish unavailable native health, stale binding, a move or lifecycle flight, readiness failure, changed authority and backoff. A status read starts nothing. In the signed-in owner's Company page or an employee profile, **Status** reads the same bounded diagnostic; **Reconnect** requests only attachment to the existing provider. A browser terminal reconnect and this server-viewer repair are separate operations.
 
 An HTTP reconnect acknowledgement does not prove provider continuity or chat acceptance. Verify the current provider and request an ordinary chat acknowledgement. Unknown deliveries, drafts and stop fences remain retained; these actions never replay Enter, clear working state blindly or fall back to provider restart. Inspect status after an unconfirmed response instead of repeating the action automatically.
 
 Read `recovery.awakened` and `recovery.skipped` (`data.recovery` in HTTP). Skipped entries include employeeId and reason. Ordinary wake preserves OFF/vacation intent, saved runtime and conversation; `intentionally-ended` preserves a deliberate stop. HTTP success alone does not prove recovery.
 
-The automatic recovery budget is three attempts per employee in fifteen minutes, additionally governed by office settings. For recovery-in-progress, wait within a bounded deadline. Never loop after persistent errors or automatically repeat an unconfirmed response.
+The ordinary wake recovery budget is three attempts per employee in fifteen minutes, additionally governed by office settings. Viewer attachment retries use the bounded status backoff instead. For recovery-in-progress, wait within a bounded deadline. Never loop after persistent errors or automatically repeat an unconfirmed response.
 
 ## Explicit office management
 
