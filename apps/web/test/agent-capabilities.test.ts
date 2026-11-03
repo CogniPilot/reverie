@@ -223,14 +223,15 @@ describe('seat CLI compatibility', () => {
     const { agentCommandPaths } = await import('../src/cli-command-list.js');
     const local = await agentCommandPaths();
     const f = fixture();
-    f.set({ ...snapshot(), cli: { commands: [...local, 'agent publish', 'agent seal'] } });
+    const absent = ['agent absent-a', 'agent absent-b'];
+    f.set({ ...snapshot(), cli: { commands: [...local, ...absent] } });
     expect(await agentCapabilities(f.deps, refs)).toBe(0);
-    expect(JSON.parse(f.output.at(-1)!).cliCompatibility.missing).toEqual(['agent publish', 'agent seal']);
+    expect(JSON.parse(f.output.at(-1)!).cliCompatibility.missing).toEqual(absent);
     const human = fixture();
     human.deps.json = false;
-    human.set({ ...snapshot(), cli: { commands: [...local, 'agent publish'] } });
+    human.set({ ...snapshot(), cli: { commands: [...local, 'agent absent-a'] } });
     expect(await agentCapabilities(human.deps, refs)).toBe(0);
-    expect(human.output.join('\n')).toContain('lacks 1 command: agent publish. Ask the operator to refresh the seat CLI.');
+    expect(human.output.join('\n')).toContain('lacks 1 command: agent absent-a. Ask the operator to refresh the seat CLI.');
   });
 
   it('reports nothing missing when the lists match or the server predates the check', async () => {
