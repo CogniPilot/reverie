@@ -3,9 +3,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, createHmac } from 'node:crypto';
 import Fastify from 'fastify';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { WorkerRecoveryAuthentication, RECOVERY_HEADER, recoveryRequestTarget } from '../src/worker-recovery-auth.js';
 import type { CompanyEmployee } from '../src/company-types.js';
+const hostRoot = vi.hoisted(() => ({ uid: 0, mode: undefined as number | undefined }));
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>();
+  return {
+    ...actual,
+    lstatSync: ((file, options) => {
+      const entry = actual.lstatSync(file, options as any);
+      // A Nix sandbox maps / to UID65534 (observed mode0750); production requires
+      // an ordinary trusted host root. Simulate ONLY that host metadata edge.
+      // Every fixture ancestor below /, private file, opened FD and inode stays real.
+      if (file === '/')
+        return Object.assign(entry, {
+          uid: typeof entry.uid === 'bigint' ? BigInt(hostRoot.uid) : hostRoot.uid,
+          ...(hostRoot.mode === undefined
+            ? {}
+            : { mode: typeof entry.mode === 'bigint' ? BigInt(hostRoot.mode) : hostRoot.mode }),
+        });
+      return entry;
+    }) as typeof actual.lstatSync,
+  };
+});
 const fixture = JSON.parse(
   fs.readFileSync(new URL('./fixtures/worker-recovery-request.json', import.meta.url), 'utf8')
 );
@@ -18,6 +39,8 @@ const flock = fs.realpathSync(
 const clean: Array<() => unknown> = [];
 afterEach(async () => {
   for (const f of clean.splice(0).reverse()) await f();
+  hostRoot.uid = 0;
+  hostRoot.mode = undefined;
 });
 async function setup() {
   const root = fs.mkdtempSync(join(tmpdir(), 'recovery-auth-'));
@@ -115,6 +138,12 @@ it('accepts the Python-produced proof once and pins issuer/caller custody after 
   f.principal().assertCurrent();
   f.write('worker-recovery-auth.json', { ...fixture.config, epoch: 'replaced' });
   expect(() => f.principal().assertIssued()).toThrow('issuer changed');
+});
+it.each(['foreign-owner', 'writable'] as const)('refuses an untrusted host-root %s metadata edge', async (kind) => {
+  const f = await setup();
+  if (kind === 'foreign-owner') hostRoot.uid = process.getuid!() + 1000;
+  else hostRoot.mode = 0o40777;
+  expect((await f.send()).statusCode).toBe(403);
 });
 it.each(['body', 'target', 'purpose', 'generation', 'signature', 'expired', 'service', 'parent-only'])(
   'refuses %s substitution without consuming authority',

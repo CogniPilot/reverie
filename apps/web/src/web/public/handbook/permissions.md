@@ -4,13 +4,13 @@ Titles describe duties, not authority. Run `reverie agent capabilities` for curr
 
 ## Board
 
-Open **Company → People → click name or avatar → Edit profile**. Offline experts remain editable. Reporting dropdowns and drag/drop change hierarchy, not permissions.
+Open **Company → People → employee → Edit profile**, including offline experts. Reporting-line edits change hierarchy, not permissions.
 
 - **Update own board work** permits triage filing, updates to the expert's own cards, and their wins and focus.
 - **Manage company board** permits editing and reassigning everyone's cards, milestones, blockers and schedules. It includes own work, whose checkbox stays checked and disabled.
 - **Prepare decision cards** permits preparing, annotating and dismissing decisions and poll notes. It never permits choosing the owner's answer. Creating choices also requires the site's separate decision-write setting.
 
-Existing experts inherit basic contributions; active owner-appointed channel coordinators inherit management and decisions. Controls show effective and inherited access. Opening Company writes nothing. Checkbox changes save explicit choices; unchecked management or decisions override inherited coordination. Titles and briefing-coordinator selection grant nothing.
+Existing experts inherit basic contributions; active owner-appointed channel coordinators inherit management and decisions. Controls show inherited access. Opening Company writes nothing. Checkboxes save explicit overrides, including disabling inherited access. Titles and briefing-coordinator selection grant nothing.
 
 For read-only access, disable all three grants; history remains. New hires default to explicit own-work access, management and decisions off. Human roles remain separate; only authenticated owners manage grants and choose owner answers.
 
@@ -18,9 +18,9 @@ For read-only access, disable all three grants; history remains. New hires defau
 
 **Recover employees** permits scoped employee wake and attach-only terminal-viewer recovery. Viewer repair requires a compatible authenticated native office connection and fresh provider health; it cannot restart the provider or replay uncertain input. Website restart is a separate host-maintainer grant. Check current records rather than titles or old messages.
 
-**Manage office attendance and restarts** defaults off. Its profile checkbox saves immediately; each action rechecks the grant. It permits explicit Enter office, Leave office and same-recipe restarts. It grants no hiring, retirement, profile/permission edits, account changes, runtime reconfiguration or host maintenance. Other grants and coordinator membership do not imply it.
+**Manage office attendance and restarts** defaults off and saves immediately. Each action rechecks the grant. It permits Enter, Leave and same-recipe restarts, without hiring, retirement, profile edits, account changes, runtime reconfiguration or host maintenance. Coordination grants do not imply it.
 
-**Move own plan** permits self transfers; **Manage team plans** permits colleague transfers. Ordinary requests require the affected expert's handoff and approval. With a compatible authenticated native office connection, these grants also permit explicit forced transfers of stuck experts and guarded recovery of their existing transfer journals, within the same self/team scope. Forced transfers require the caller's truthful handoff and a stable operation ID; they can interrupt active work. Neither grant permits provider sign-in, account administration, permission changes or arbitrary session creation.
+**Move own plan** permits self transfers; **Manage team plans** permits colleague transfers. Ordinary requests require expert approval. Compatible authenticated native office connections also permit forced transfers and existing-journal recovery within that scope. Forced transfers can interrupt work and require a truthful handoff and stable operation ID. Neither grant permits provider sign-in, account administration, permission changes or arbitrary session creation.
 
 These grants also allow explicit self refresh on the same account with `plan-move request ACCOUNT_ID --restart`. Refresh remains self-only, with one-time approval and safe handoff. It grants no installation, arbitrary session creation or vacation wake.
 
@@ -46,4 +46,4 @@ Older releases require **Save preferences**. Verify grants by reopening Company 
 
 See [Recover a stuck expert](/handbook/recovery).
 
-**Hire requests.** Owner-listed delegates use `reverie agent hire-request submit <template>` with name, position, reporting line, rooms, harness, plan and reason. Only the owner's **Approve and hire** under Company → Hire requests performs hiring, rechecking every limit. Decline closes requests; delegates may withdraw their own.
+**Hire requests.** Owner-listed delegates use `reverie agent hire-request submit <template>` with identity, reporting line, rooms, runtime and reason. Only owner **Approve and hire** performs hiring and rechecks limits. Delegates may withdraw their own requests.
