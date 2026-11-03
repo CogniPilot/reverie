@@ -253,7 +253,7 @@ export class AssignmentStatusWatch {
   private current(entry: Entry, observed?: ReadonlyMap<string, Issue>) {
     const task = observed
       ? observed.get(entry.taskId)
-      : this.deps.board.snapshot().issues.find((t) => t.id === entry.taskId);
+      : this.deps.board.issue(entry.taskId);
     const employee = this.deps.employees().find((e) => e.id === entry.employeeId);
     if (
       !task ||
@@ -765,7 +765,7 @@ export class AssignmentStatusWatch {
   private async resolveAttention(entry: Entry, reason: string) {
     if (!entry.attentionId && !entry.attentionPending) return;
     const id = attentionId(entry.taskId);
-    const issue = this.deps.board.snapshot().issues.find((t) => t.id === id);
+    const issue = this.deps.board.issue(id);
     if (
       issue &&
       !ended(issue) &&
@@ -878,8 +878,8 @@ export class AssignmentStatusWatch {
     )
       return;
     const id = attentionId(task.id);
-    const observedBoard = this.deps.board.snapshot();
-    const existing = observedBoard.issues.find((i) => i.id === id);
+    const observedRev = this.deps.board.rev;
+    const existing = this.deps.board.issue(id);
     if (existing && !existing.tags.includes('assignment-attention')) throw Error('Attention identity conflict');
     if (existing && ended(existing) && existing.source?.roomId === entry.roomId && existing.source.messageId === entry.promptId) {
       // Closing this check-in's attention does not complete the work. It remains
@@ -897,7 +897,7 @@ export class AssignmentStatusWatch {
     if (!existing || ended(existing)) {
       await this.deps.board.update(
         {
-          ifRev: observedBoard.rev,
+          ifRev: observedRev,
           beforeSave: () =>
             this.audit({
               action: 'assignment-attention-opened',

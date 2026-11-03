@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -142,6 +142,48 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     } as ChatMessage);
     at += 2;
   };
+  it('returns detached issue reads and immediately observes committed changes', async () => {
+    const issue = board.issue('task')!;
+    issue.owner = 'caller mutation';
+    issue.tags.push('caller mutation');
+    expect(board.issue('task')).toMatchObject({ owner: 'worker', tags: [] });
+    expect(board.issue('missing')).toBeUndefined();
+
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const change = board.update({ beforeSave: async () => { enter(); await gate; } }, (state) => {
+      state.issues[0]!.owner = 'manager';
+    });
+    await entered;
+    expect(board.issue('task')!.owner).toBe('worker');
+    release();
+    await change;
+    expect(board.issue('task')!.owner).toBe('manager');
+    await board.update({}, (state) => { state.issues = []; });
+    expect(board.issue('task')).toBeUndefined();
+  });
+
+  it('bounds full Board snapshots independently of retained check-in history', async () => {
+    await watch.tick();
+    await watch.store.update((state) => {
+      const original = state.entries[0]!;
+      for (let i = 0; i < 750; i++) {
+        state.entries.push({ ...structuredClone(original), id: randomUUID(), taskId: `removed-${i}`,
+          phase: 'cancelled', attentionId: `previous-attention-${i}`, attentionPending: false });
+      }
+    });
+    const snapshot = vi.spyOn(board, 'snapshot');
+    try {
+      await watch.tick();
+      // One observed assignment scan and one fresh scheduling scan, never one full copy per old entry.
+      expect(snapshot).toHaveBeenCalledTimes(2);
+    } finally { snapshot.mockRestore(); }
+    expect(posts).toHaveLength(1);
+    expect(board.issue('task')!.owner).toBe('worker');
+  });
+
   it('asks actual assigned doing work once and restart preserves deadline/dedup', async () => {
     await watch.tick();
     const state = watch.status();
