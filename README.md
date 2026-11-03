@@ -572,6 +572,38 @@ For separate root-controlled dry-run cleanup observations, see
 [NixOS module](docs/disk-cleanup-nixos.md). Production live cleanup remains
 unqualified.
 
+## Publishing review packets
+
+A review packet is a directory holding one git bundle, `PR-TITLE.txt`, `PR-BODY.md`
+(opening with a `## Branch Naming` section that holds the branch in backticks) and
+a `SHA256SUMS` covering them. From a checkout with push access, configure the
+identity commits must carry once, then publish:
+
+```sh
+git config reverie.publishIdentity "James Goppert <473772+jgoppert@users.noreply.github.com>"
+reverie agent publish <packet-dir> --repo OWNER/REPO --room <room> [--dry-run]
+```
+
+It verifies the sums, the bundle's single head, every commit's author, committer
+and single sign-off (`--identity` overrides the configured form), the absence of
+attribution trailers, team names and board ids in public text, symlinks and build
+output, a clean merge onto the base, and no open hold on the packet in the room.
+A hold is any message naming the head, branch, PR number or a `--card`/`--slice`
+with hold, blocker, wait or NO-GO wording. Only its sender lifts it, in so many
+words or with a GO naming the exact head, and a negation near either ("GO remains
+withheld", "not a GO until CI passes") does not count. `--hold-ok <message-id>`
+publishes past one hold and says so. Pass `--hold-since <message-id>` with the seal
+post: the scan then refuses unless it reaches back to that post. Without it, the
+scan only refuses when no message names the head or the oldest message read already
+names the packet, which is a heuristic: an older hold on the same branch can fall
+outside the window. Only then does it push the head
+and open a draft pull request whose body says the description is pending review.
+An existing branch moves only by fast-forward, and runs on its old head are
+cancelled after the push. A bundle stacked on another open branch needs
+`--prereq <branch>`. `--watch` follows the checks. Once the text is approved,
+`reverie agent publish-text <packet-dir> --repo OWNER/REPO` sets the body from
+`PR-BODY.md` without the Branch Naming section, and reads it back to confirm.
+
 ## Validation
 
 ```bash
