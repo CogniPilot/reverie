@@ -201,3 +201,49 @@ for (const viewportWidth of [1905, 390, 320])
       await context.close();
     }
   });
+
+for (const width of [1280, 390])
+  it(`opens a named chat file link in the authenticated Drive folder at ${width}px`, async () => {
+    const context = await browser.newContext({ viewport:{width,height:844} });
+    await context.addCookies([{name:OWNER_COOKIE,value:fixture.ownerCookie,url:origin}]);
+    const page=await context.newPage();page.setDefaultTimeout(8000);
+    const requests:string[]=[];page.on('request',request=>requests.push(new URL(request.url()).pathname));
+    const absolute=join(fixture.root,'Projects','hello λ.txt');
+    const text=`Read [API fixture source review](<${absolute}>) and [CI run](https://example.com/run).`;
+    try {
+      await page.goto(origin);
+      for(const name of ['styles.css','chat-app.css']) await page.addStyleTag({content:read(name)});
+      await page.addScriptTag({content:`
+        ${member.toString()} ${room.toString()} ${message.toString()} ${createServer.toString()}
+        const user={kind:'user',name:'Owner'};
+        window.ReverieBase={url:path=>path};
+        window.ReverieUrlSession={sessionIdFromFragment:()=>null};
+        window.__server=createServer([room('r1','General',[],{messages:[message('linked','r1',user,${JSON.stringify(text)},1000)]})]);
+        ${appStub}
+      `});
+      for(const name of ['chatroom-ui.js','chat-media.js','panels-ui.js']) await page.addScriptTag({content:read(name)});
+      await page.addScriptTag({content:'window.app=new ReverieApp();app.activeSessionId="unrelated-fixture-session";'});
+      await page.addScriptTag({content:read('chat-app.js')});
+      const composer=page.locator('.chatroom-input');await composer.fill('Unsent draft stays here');
+      const link=page.getByRole('link',{name:'API fixture source review',exact:true});
+      expect(await link.textContent()).toBe('API fixture source review');
+      expect(await page.getByRole('link',{name:'CI run',exact:true}).getAttribute('href')).toBe('https://example.com/run');
+      await link.click();
+      const frame=page.frameLocator('iframe[title="Workspace"]');
+      await frame.locator('#files button[aria-pressed="true"]').waitFor();
+      expect(await frame.locator('#files button[aria-pressed="true"]').getAttribute('data-path')).toBe('Projects/hello λ.txt');
+      expect(await frame.locator('#breadcrumbs').textContent()).toContain('Projects');
+      await frame.locator('#preview pre').waitFor();
+      expect(await frame.locator('#preview pre').textContent()).toContain('Hello λ');
+      expect(requests.some(path=>path.startsWith('/api/sessions/'))).toBe(false);
+      expect(requests).toContain('/api/workspace/resolve');
+      if(process.env.WORKSPACE_SCREENSHOT_DIR)
+        await page.screenshot({path:join(process.env.WORKSPACE_SCREENSHOT_DIR,`chat-drive-link-${width}.png`)});
+      await page.goBack();
+      await composer.waitFor({state:'visible'});expect(await composer.inputValue()).toBe('Unsent draft stays here');
+      // The copied/native link also resolves through fresh owner authorization on the Drive page.
+      await page.goto(origin+'/workspace?'+new URLSearchParams({file:absolute}));
+      await page.locator('#files button[aria-pressed="true"]').waitFor();
+      expect(await page.locator('#files button[aria-pressed="true"]').getAttribute('data-path')).toBe('Projects/hello λ.txt');
+    } finally {await context.close();}
+  });

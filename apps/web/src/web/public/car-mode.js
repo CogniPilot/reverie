@@ -81,10 +81,11 @@ function carModeUtterances(text, max = CAR_MAX_UTTERANCE_CHARS) {
  * spoken as a short stand-in; markdown markers are dropped. The written reply is never changed.
  */
 function carModeSpeakable(text) {
-  return (
-    String(text || '')
+  const plain = String(text || '')
       .replace(/```[\s\S]*?(```|$)/g, ' (code in chat) ')
-      .replace(/`([^`\n]*)`/g, (_, inner) => (inner.length <= 24 && !/[/\\]/.test(inner) ? inner : ' (see chat) '))
+      .replace(/`([^`\n]*)`/g, (_, inner) => (inner.length <= 24 && !/[/\\]/.test(inner) ? inner : ' (see chat) '));
+  const links = typeof chatMarkdownLinkSegments === 'function' ? chatMarkdownLinkSegments(plain) : [{ text: plain }];
+  return links.map(part => part.href || part.path ? part.text.replace(/\*+|__/g, '') : part.text
       .replace(/\b(?:https?|wss?):\/\/\S+/gi, ' a link ')
       // A path starts a word: /etc, ~/x, ./y, ../z (one segment is enough). "and/or" and "1/2" do not start one.
       .replace(/(^|[\s("'])(?:~|\.{1,2})?\/[^\s"')]+?(?=[.,;:!?]*(?:[\s"')]|$))/g, (_, pre) =>
@@ -102,11 +103,9 @@ function carModeSpeakable(text) {
       .replace(/\*+|__/g, '')
       // A run of stand-ins with only spaces between them is said once; a list ("x, y and z") keeps each one.
       .replace(/( (?:a file path|a file|an id|a link|\(see chat\)|\(code in chat\)) )(?:[ \t]*\1)+/g, '$1')
-      .replace(/[ \t]+/g, ' ')
       // Only punctuation that ends a word loses the space before it: " ./y" keeps its space.
       .replace(/ ([,.;:!?)"'])(?=[\s,.;:!?)"']|$)/g, '$1')
-      .trim()
-  );
+  ).join('').replace(/[ \t]+/g, ' ').trim();
 }
 
 /** Pure: a stable 32-bit FNV-1a hash, so a member keeps the same default voice. */

@@ -268,6 +268,67 @@ function chatLinkTextHost(raw) {
   return (host.startsWith('[') ? host.replace(/\](?::\d*)?$/, ']') : host.replace(/:\d*$/, '')).toLowerCase();
 }
 
+/** The same address/host admission for bare URLs and named Markdown links. */
+function chatLinkHref(raw) {
+  if (!raw || raw.length > CHAT_LINK_MAX_LENGTH || new RegExp(`[${CHAT_LINK_STOP}]`, 'u').test(raw)) return null;
+  try {
+    const url = new URL(raw);
+    const written = chatLinkTextHost(raw);
+    return /^https?:$/.test(url.protocol) && !url.username && !url.password && url.hostname &&
+      /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])$/.test(written) && !written.includes('xn--') &&
+      url.hostname.replace(/\.$/, '') === written.replace(/\.$/, '') ? url.href : null;
+  } catch { return null; }
+}
+
+/** Bounded named links; all other Markdown/HTML remains ordinary text. Never parses code spans. */
+function chatMarkdownLinkSegments(text) {
+  const out = [];
+  let last = 0, cursor = 0, count = 0;
+  while (cursor < text.length && count < CHAT_LINK_MAX_COUNT) {
+    const start = text.indexOf('[', cursor);
+    if (start < 0) break;
+    cursor = start + 1;
+    if (text[start - 1] === '\\' || text[start - 1] === '!') continue;
+    let end = cursor;
+    while (end < text.length && end - cursor <= 512 && text[end] !== '\n' && text[end] !== '[') {
+      if (text[end] === '\\' && end + 1 < text.length) { end += 2; continue; }
+      if (text[end] === ']') break;
+      end++;
+    }
+    if (end === cursor || end - cursor > 512 || text[end] !== ']' || text[end + 1] !== '(') continue;
+    const targetStart = end + 2;
+    let targetEnd = targetStart, depth = 1, angle = text[targetStart] === '<';
+    if (angle) targetEnd++;
+    while (targetEnd < text.length && targetEnd - targetStart <= CHAT_LINK_MAX_LENGTH && text[targetEnd] !== '\n') {
+      const ch = text[targetEnd];
+      if (ch === '\\' && targetEnd + 1 < text.length) { targetEnd += 2; continue; }
+      if (angle ? ch === '>' : ch === ')' && --depth === 0) break;
+      if (!angle && ch === '(') depth++;
+      targetEnd++;
+    }
+    if (targetEnd - targetStart > CHAT_LINK_MAX_LENGTH ||
+      (angle ? text[targetEnd] !== '>' || text[targetEnd + 1] !== ')' : text[targetEnd] !== ')' || depth !== 0)) continue;
+    const finish = targetEnd + (angle ? 2 : 1);
+    const unescape = value => value.replace(/\\([\\\[\]()<>])/g, '$1');
+    const label = unescape(text.slice(cursor, end));
+    const target = unescape(text.slice(targetStart + (angle ? 1 : 0), targetEnd));
+    let path = null;
+    if (!label.trim() || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(label)) { cursor = finish; continue; }
+    if (target.startsWith('/') && !target.startsWith('//')) {
+      try { path = decodeURIComponent(target); } catch { /* malformed escapes stay text */ }
+      if (path && (/[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(path) || path.startsWith('//'))) path = null;
+    }
+    const href = path ? null : chatLinkHref(target);
+    if (!path && !href) { cursor = finish; continue; }
+    if (start > last) out.push({ text: text.slice(last, start) });
+    out.push({ text: label, ...(path ? { path } : { href }), source: text.slice(start, finish) });
+    last = cursor = finish;
+    count++;
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
+}
+
 /**
  * Pure: split plain text into text runs and web links. Only http(s) links count; the link text stays exactly what was written
  * (the href is the parsed form of it), trailing sentence punctuation and an unmatched closing bracket stay outside the link, and
@@ -305,28 +366,13 @@ function chatLinkSegments(text) {
         raw = raw.slice(0, -1);
       } else break;
     }
-    let url = null;
-    try {
-      url = new URL(raw);
-    } catch {
-      url = null;
-    }
-    const written = chatLinkTextHost(raw);
-    const safe =
-      url &&
-      /^https?:$/.test(url.protocol) &&
-      !url.username &&
-      !url.password &&
-      url.hostname &&
-      /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])$/.test(written) &&
-      !written.includes('xn--') &&
-      url.hostname.replace(/\.$/, '') === written.replace(/\.$/, '');
-    if (!safe) {
+    const href = chatLinkHref(raw);
+    if (!href) {
       re.lastIndex = m.index + m[0].length;
       continue;
     }
     plain(m.index, last);
-    out.push({ href: url.href, text: raw });
+    out.push({ href, text: raw });
     last = m.index + raw.length;
     re.lastIndex = last;
     links++;
@@ -563,11 +609,15 @@ Object.assign(ReverieApp.prototype, {
   /** A download card that opens the read-only preview on a plain click. */
   _chatFileCard(m, a, url) {
     const card = this._chatEl('a', 'chatroom-file');
-    card.href = url;
-    card.setAttribute('aria-label', `Preview ${a.name}`);
+    card.href = a.linked ? this._chatUrl('/workspace?file=' + encodeURIComponent(a.path)) : url;
+    card.setAttribute('aria-label', a.linked ? `Open ${a.name} in Drive` : `Preview ${a.name}`);
     card.onclick = event => {
       if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
+      if (a.linked) {
+        void this.openWorkspaceFileInDrive(a.path);
+        return;
+      }
       void this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, card);
     };
     // A linked file is read live from the shared drive: its size is whatever the file is now, so it is not shown.
@@ -697,14 +747,29 @@ Object.assign(ReverieApp.prototype, {
         el.append(this._chatInlineCode(piece.inline));
         continue;
       }
-      for (const run of chatBoldSegments(piece.text)) {
-        if (run.bold === undefined) {
-          this._chatAppendPlain(el, run.text, names);
+      for (const link of chatMarkdownLinkSegments(piece.text)) {
+        if (link.path || link.href) {
+          const a = this._chatEl('a', 'chatroom-link', link.text);
+          a.title = link.path ? 'Open in Drive: ' + link.path : link.href;
+          a.href = link.path ? this._chatUrl('/workspace?file=' + encodeURIComponent(link.path)) : link.href;
+          if (link.path) a.onclick = event => {
+            if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            void this.openWorkspaceFileInDrive(link.path);
+          };
+          else { a.target = '_blank'; a.rel = 'noopener noreferrer nofollow'; }
+          el.append(a);
           continue;
         }
-        const strong = this._chatEl('strong', 'chatroom-bold');
-        this._chatAppendPlain(strong, run.bold, names);
-        el.append(strong);
+        for (const run of chatBoldSegments(link.text)) {
+          if (run.bold === undefined) {
+            this._chatAppendPlain(el, run.text, names);
+            continue;
+          }
+          const strong = this._chatEl('strong', 'chatroom-bold');
+          this._chatAppendPlain(strong, run.bold, names);
+          el.append(strong);
+        }
       }
     }
   },

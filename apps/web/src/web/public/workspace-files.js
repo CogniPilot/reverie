@@ -248,7 +248,8 @@
           : `${entries.length} ${entries.length === 1 ? 'item' : 'items'}`
     );
   }
-  async function load(target, push = false) {
+  async function load(target, push = false, selection = null) {
+    if (push) locationEpoch++;
     const turn = ++epoch;
     clearPreview();
     loading = true;
@@ -268,12 +269,30 @@
       uploadAllowed = !!data.upload?.enabled;
       $('uploadReason').textContent =
         data.upload?.reason || (uploadAllowed ? 'Uploads are available in Workspace.' : 'Uploads are unavailable.');
-      if (path !== target) $('search').value = '';
+      if (path !== target || selection) $('search').value = '';
       path = target;
       entries = data.entries;
       limited = !!data.limited;
+      // The bounded folder listing may not contain the linked file. Its separately authorized
+      // resolver metadata can add exactly that entry without walking the rest of the directory.
+      if (limited && selection?.entry && !entries.some(row => row.path === selection.path))
+        entries.push(selection.entry);
       if (push) history.pushState({}, '', `?${new URLSearchParams({ path })}`);
+      const selected = selection && entries.find(row => row.path === selection.path && row.kind === 'file' &&
+        (!selection.binding || row.binding === selection.binding));
+      if (selected) selectedPath = selected.path;
       renderFiles();
+      if (selection) {
+        if (!selected) {
+          status('Linked file is unavailable or changed. Refresh the folder to find its current version.', true);
+          return;
+        }
+        const button = [...$('files').querySelectorAll('button.file')].find(row => row.dataset.path === selectedPath);
+        button?.focus({ preventScroll: true });
+        button?.scrollIntoView?.({ block: 'nearest' });
+        if (selected.size <= 32 * 1024 * 1024) void preview(selected, button);
+        else status('File selected in Drive. It is too large for an inline preview.');
+      }
     } catch (error) {
       if (turn === epoch) {
         entries = [];
@@ -471,9 +490,42 @@
       $('upload').value = '';
     }
   };
-  addEventListener('popstate', () => void load(new URLSearchParams(location.search).get('path') || ''));
+  let locationEpoch = 0;
+  async function loadLocation() {
+    const turn = ++locationEpoch;
+    const query = new URLSearchParams(location.search);
+    const absolute = query.get('file');
+    if (absolute) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      try {
+        const response = await fetch(url('api/workspace/resolve', { path: absolute, locate: '1' }), {
+          credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal,
+        });
+        if (!response.ok || response.redirected || response.status === 206) throw new Error('Linked file is unavailable.');
+        const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await previewBytes(response, 65536, controller.signal)));
+        if (turn !== locationEpoch) return;
+        const item = raw.data;
+        if (raw.success !== true || item?.kind !== 'workspace' || item.absolutePath !== absolute ||
+          typeof item.path !== 'string' || !item.path || item.path.length > 2048 ||
+          item.path.split('/').some(part => !part || part.startsWith('.') || /[\\\x00-\x1f\x7f]/.test(part)) ||
+          item.name !== item.path.split('/').at(-1) || !/^[a-f0-9]{64}$/.test(item.binding) ||
+          !Number.isSafeInteger(item.size) || item.size < 0 || typeof item.modified !== 'string' ||
+          (query.has('binding') && query.get('binding') !== item.binding))
+          throw new Error('Linked file is unavailable or changed.');
+        const folder = item.path.split('/').slice(0, -1).join('/');
+        await load(folder, false, { path: item.path, binding: item.binding, entry: { ...item, kind: 'file' } });
+      } catch (error) {
+        if (turn === locationEpoch) status(controller.signal.aborted ? 'Opening the linked file timed out.' : error.message, true);
+      } finally { clearTimeout(timer); }
+      return;
+    }
+    const selected = query.get('select');
+    await load(query.get('path') || '', false, selected ? { path: selected, binding: query.get('binding') } : null);
+  }
+  addEventListener('popstate', loadLocation);
   addEventListener('pagehide', () => {
     if (imageUrl) URL.revokeObjectURL(imageUrl);
   });
-  void load(new URLSearchParams(location.search).get('path') || '');
+  loadLocation();
 })();

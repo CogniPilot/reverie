@@ -197,6 +197,11 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   /** The caller's display name, for "recommended by". */
   const nameOf = (c: Caller) =>
     c.kind === 'owner' ? deps.company(c.owner).settings.ownerName || 'owner' : (deps.company(c.owner).employees.find((e) => e.id === c.memberId)?.name ?? c.by);
+  const identityOf = (c: Caller) => ({
+    kind: c.kind,
+    name: nameOf(c),
+    ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}),
+  });
   /** Apply a card note to a target: a field given as null is removed, one left out is kept. */
   const applyNote = (c: Caller, target: { summary?: string; recommendation?: Recommendation; tradeoff?: string }, note: z.infer<typeof CardNote>) => {
     for (const key of ['summary', 'tradeoff'] as const) {
@@ -321,6 +326,10 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   };
 
   // ---- read ----
+  // Identity-only consumers must not load Board contents or depend on their size.
+  app.get('/api/board/identity', async (req, reply) =>
+    run(reply, async () => ({ identity: identityOf(caller(req)) }))
+  );
   // What waits on the owner: open decisions and open polls without an owner vote. Backs the Board badge and the push.
   app.get('/api/board/waiting', async (req, reply) =>
     run(reply, async () => {
@@ -399,7 +408,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
           checkedAt: at,
           // The agent commands of the CLI built from this server's source, so a seat CLI can name what it lacks.
           cli: { commands: await agentCommandPaths().catch(() => [] as string[]) },
-          identity: { kind: c.kind, name: nameOf(c), ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}) },
+          identity: identityOf(c),
           board: { read: true, fileIssue: boardAccess.editBoardIssues, editBoardIssues: boardAccess.editBoardIssues,
             createDecision: structuredDecisionWrites && boardAccess.manageDecisions,
             clearDecision: boardAccess.manageDecisions, manageBoard: boardAccess.manageBoard,
@@ -423,6 +432,15 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         pace: boardPace(state, at, ownerIds),
       };
       return view;
+    })
+  );
+  app.get('/api/board/issues/:id', async (req, reply) =>
+    run(reply, async () => {
+      caller(req);
+      const { id } = parse(z.object({ id: IssueSchema.shape.id }), req.params);
+      const item = deps.store.issue(id);
+      if (!item) throw new BoardError(`No issue ${id}`, 404);
+      return { rev: deps.store.rev, item };
     })
   );
   // The same issues GET /api/board shows this caller, narrowed and projected here so a client never filters the whole

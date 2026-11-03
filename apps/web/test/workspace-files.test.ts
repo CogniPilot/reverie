@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { writeFile, readFile, symlink, link, readdir } from 'node:fs/promises';
+import { writeFile, readFile, symlink, link, readdir, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -46,6 +46,14 @@ const upload = (name: string, bytes: Buffer, path = '') =>
   });
 
 describe('owner workspace boundary', () => {
+  it('refuses every C0 character, DEL and backslash in both relative and absolute paths', async () => {
+    const bad = [...Array.from({ length: 32 }, (_, code) => String.fromCharCode(code)), '\x7f', '\\'];
+    for (const character of bad) {
+      await expect(fixture.files.resolve(join(fixture.root, 'bad' + character + '.txt'), true)).rejects.toMatchObject({ status: 400 });
+      await expect(fixture.files.list('bad' + character)).rejects.toMatchObject({ status: 400 });
+    }
+    expect((await fixture.files.resolve(join(fixture.root, 'Projects', 'hello λ.txt'), true)).name).toBe('hello λ.txt');
+  });
   it('requires a verified unrestricted owner cookie for page/list/download/upload and rejects agent or cross-origin requests', async () => {
     for (const url of [
       '/workspace',
@@ -54,6 +62,7 @@ describe('owner workspace boundary', () => {
       '/workspace-files.css',
       '/api/workspace/files',
       '/api/workspace/file?path=picture.png',
+      '/api/workspace/resolve?' + new URLSearchParams({ path:join(fixture.root, 'picture.png'), locate:'1' }),
     ]) {
       for (const cookies of [{}, { [OWNER_COOKIE]: 'forged' }, { [OWNER_COOKIE]: fixture.restricted }])
         expect((await fixture.app.inject({ url, cookies })).statusCode).toBe(403);
@@ -108,6 +117,23 @@ describe('owner workspace boundary', () => {
       const response = await fixture.app.inject({ url, cookies: fixture.cookies });
       expect(response.statusCode).toBe(200);
       expect(response.headers['cache-control']).toBe('no-store');
+    }
+  });
+  it('locates an authorized large file without widening byte or path access', async () => {
+    const absolute = join(fixture.root, 'large.bin');
+    await writeFile(absolute, ''); await truncate(absolute, WORKSPACE_MAX_FILE + 1);
+    const query = new URLSearchParams({ path:absolute });
+    expect((await fixture.app.inject({url:'/api/workspace/resolve?' + query,cookies:fixture.cookies})).statusCode).toBe(413);
+    query.set('locate','1');
+    const located = await fixture.app.inject({url:'/api/workspace/resolve?' + query,cookies:fixture.cookies});
+    expect(located.statusCode).toBe(200);
+    expect(located.json().data).toMatchObject({kind:'workspace',name:'large.bin',path:'large.bin',absolutePath:absolute,size:WORKSPACE_MAX_FILE + 1});
+    expect((await get('large.bin')).statusCode).toBe(413);
+    for (const path of [join(fixture.task,'outside.txt'),join(fixture.root,'.env')]) {
+      await writeFile(path,'synthetic-private');
+      const denied = await fixture.app.inject({url:'/api/workspace/resolve?' + new URLSearchParams({path,locate:'1'}),cookies:fixture.cookies});
+      expect(denied.statusCode).toBeGreaterThanOrEqual(400);
+      expect(denied.body).not.toContain('synthetic-private');
     }
   });
   it('rejects absolute, traversal, hidden, control, symlink, hardlink and sensitive files without exposing metadata', async () => {

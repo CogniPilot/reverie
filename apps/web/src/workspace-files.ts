@@ -51,9 +51,15 @@ function contained(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + sep));
 }
+function hasUnsafePathCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127 || code === 92) return true;
+  }
+  return false;
+}
 function segments(path: unknown): string[] {
-  // eslint-disable-next-line no-control-regex -- Reject NUL and all control characters in untrusted names.
-  if (typeof path !== 'string' || path.length > 2048 || isAbsolute(path) || /[\\\x00-\x1f\x7f]/.test(path))
+  if (typeof path !== 'string' || path.length > 2048 || isAbsolute(path) || hasUnsafePathCharacter(path))
     fail(400, 'Use a contained relative workspace path.');
   if (path === '') return [];
   const parts = path.split('/');
@@ -179,10 +185,10 @@ export class WorkspaceFiles {
       await op.close(located.handle);
     }
   }
-  async resolve(path: unknown) {
+  async resolve(path: unknown, locateOnly = false) {
     return workspaceOperation(this.timeoutMs, async (op) => {
       if (typeof path !== 'string' || path.length > 4096 || !isAbsolute(path) ||
-        /[\\\x00-\x1f\x7f]/.test(path) || resolve(path) !== path)
+        hasUnsafePathCharacter(path) || resolve(path) !== path)
         fail(400, 'Use an absolute shared workspace file path.');
       const configured = this.root();
       if (!configured) fail(503, 'The shared workspace is not configured.');
@@ -195,9 +201,10 @@ export class WorkspaceFiles {
         if (located.configured !== selectedRoot) fail(409, 'Workspace configuration changed. Refresh and try again.');
         const { stat, binding } = await this.snapshot(op, located);
         if (!stat.isFile()) fail(400, 'Select a file.');
-        if (stat.size > BigInt(WORKSPACE_MAX_FILE)) fail(413, 'Files are limited to 32 MiB.');
+        // Drive navigation returns metadata only. Byte transfers retain their independent size gates.
+        if (!locateOnly && stat.size > BigInt(WORKSPACE_MAX_FILE)) fail(413, 'Files are limited to 32 MiB.');
         await this.current(op, relativePath, binding);
-        return { kind: 'workspace', path: relativePath, name: basename(relativePath), size: Number(stat.size),
+        return { kind: 'workspace', path: relativePath, name: basename(relativePath), size: Number(stat.size), modified: stat.mtime.toISOString(),
           absolutePath: resolve(selectedRoot, relativePath), binding,
           crumbs: [{ name: selectedRoot, path: '' }, ...parts.slice(0, -1).map((name, i) =>
             ({ name, path: parts.slice(0, i + 1).join('/') }))] };

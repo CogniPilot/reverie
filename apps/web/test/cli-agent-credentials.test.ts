@@ -87,14 +87,14 @@ function client(
     request: async (_ctx, req) => {
       calls.push(req);
       if (options.requestError) throw Error(options.requestError);
-      if (req.path === '/api/board')
+      if (req.path === '/api/board/identity')
         return {
           status: 200,
           text: '',
           json: {
             success: true,
             data: {
-              capabilities: { identity: options.identity ?? { kind: 'agent', employeeId: EID, sessionId: SID } },
+              identity: options.identity ?? { kind: 'agent', employeeId: EID, sessionId: SID },
             },
           },
         };
@@ -123,6 +123,18 @@ function client(
 }
 
 describe('explicit named PAT CLI', () => {
+  it('refuses every C0 character in metadata labels while preserving printable and Unicode labels', async () => {
+    for (let code = 0; code < 32; code++) {
+      const c = client({ list: { employeeId: EID, sessionId: SID, credentials: [{ ...row, label: 'before' + String.fromCharCode(code) + 'after' }] } });
+      expect(await agentCredentialsList(c.deps), `C0 ${code}`).toBe(4);
+      expect(c.calls.some(request => request.path.endsWith('/material'))).toBe(false);
+    }
+    for (const label of ['space label', 'résumé λ', 'a'.repeat(120)]) {
+      const c = client({ list: { employeeId: EID, sessionId: SID, credentials: [{ ...row, label }] } });
+      expect(await agentCredentialsList(c.deps)).toBe(0);
+      expect(JSON.parse(c.out[0]).credentials[0].label).toBe(label);
+    }
+  });
   it('refuses an unknown root owner outside the trusted sandbox fixture adaptation', async () => {
     const h = await home(), c = client();
     const previous = rootFixture.normalizeNixRoot;
@@ -160,16 +172,41 @@ describe('explicit named PAT CLI', () => {
     const c = client({ list: { employeeId: EID, sessionId: SID, credentials: [{ ...row, material: SECRET }] } });
     expect(await agentCredentialsList(c.deps)).toBe(0);
     expect(JSON.parse(c.out[0]).credentials).toEqual([row]);
-    expect(c.calls.map((x) => x.path)).toEqual(['/api/board', '/api/publication/credentials']);
+    expect(c.calls.map((x) => x.path)).toEqual(['/api/board/identity', '/api/publication/credentials']);
     expect(c.out.join('')).not.toContain(SECRET);
   });
   it.each([
     { kind: 'owner', employeeId: EID, sessionId: SID },
     { kind: 'agent', employeeId: EID, sessionId: 'another' },
+    { kind: 'agent', sessionId: SID },
   ])('refuses mismatched independent caller identity', async (identity) => {
     const c = client({ identity });
     expect(await agentCredentialsList(c.deps)).toBe(4);
     expect(c.calls).toHaveLength(1);
+  });
+  it.each([false, true])('uses bounded identity IO even when the full Board exceeds 1 MiB (oversized identity: %s)', async (oversizedIdentity) => {
+    const paths: string[] = [];
+    const server = createServer((req, res) => {
+      paths.push(req.url!);
+      res.setHeader('content-type', 'application/json');
+      const data = req.url === '/api/board/identity'
+        ? { identity: { kind: 'agent', employeeId: EID, sessionId: SID }, ...(oversizedIdentity ? { extra: 'x'.repeat(20000) } : {}) }
+        : req.url === '/api/publication/credentials'
+          ? { employeeId: EID, sessionId: SID, credentials: [] }
+          : { capabilities: { identity: { kind: 'agent', employeeId: EID, sessionId: SID } }, issues: 'x'.repeat(2 * 1024 * 1024) };
+      res.end(JSON.stringify({ success: true, data }));
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const c = client();
+      c.deps.ctx.apiUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      c.deps.request = httpRequest;
+      expect(await agentCredentialsList(c.deps)).toBe(oversizedIdentity ? 4 : 0);
+      expect(paths).toEqual(oversizedIdentity ? ['/api/board/identity'] : ['/api/board/identity', '/api/publication/credentials']);
+      if (!oversizedIdentity) expect(JSON.parse(c.out[0]).credentials).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   });
   it.each([
     { employeeId: 'another', sessionId: SID, credentials: [row] },

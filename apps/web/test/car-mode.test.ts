@@ -7,13 +7,21 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const context = vm.createContext({ ReverieApp: class {} });
+const context = vm.createContext({ ReverieApp: class {}, URL });
+vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chat-media.js'), 'utf8'), context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), context);
 const get = (name: string) => vm.runInContext(name, context);
 const carModeEngine = get('carModeEngine') as (w: unknown) => string;
 const carModeUtterances = get('carModeUtterances') as (t: string, max?: number) => string[];
 const carModeSpeakable = get('carModeSpeakable') as (t: string) => string;
+it('speaks named link labels without their destinations or Markdown delimiters', () => {
+  expect(carModeSpeakable('Read [API fixture source review](/reverie_workspace/cases/example/REVIEW.txt) and [CI run](https://example.com/run).'))
+    .toBe('Read API fixture source review and CI run.');
+  expect(carModeSpeakable('See [résumé λ](</reverie_workspace/My Project/report (2).txt>).'))
+    .toBe('See résumé λ.');
+  expect(carModeSpeakable('```\n[label](https://example.com)\n```')).toBe('(code in chat)');
+});
 const carModePickVoice = get('carModePickVoice') as (
   v: unknown[],
   saved?: string | null,

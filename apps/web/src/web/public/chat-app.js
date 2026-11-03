@@ -5821,12 +5821,12 @@ class ReverieChatApp {
   decorateWorkspaceFiles(root) {
     const makePreviewLink = (path) => {
       const link = this.el('a', 'chatroom-link ca-workspace-download', path);
-      link.href = '/api/filesystem/download?path=' + encodeURIComponent(path);
-      link.title = 'Preview ' + path.split('/').pop();
+      link.href = (this.doc.defaultView.__REVERIE_BASE__ || '') + '/workspace?file=' + encodeURIComponent(path);
+      link.title = 'Open in Drive: ' + path.split('/').pop();
       link.onclick = (event) => {
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        void this.app.openWorkspaceFilePreview(path, link);
+        void this.app.openWorkspaceFileInDrive(path);
       };
       return link;
     };

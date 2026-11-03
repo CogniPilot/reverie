@@ -40,6 +40,62 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+it('loads a file deep link into its Drive folder and selects and previews that exact entry', async () => {
+  const binding = 'a'.repeat(64);
+  const entry = { ...item('notes.md', 'file', 'reports/notes.md'), binding };
+  const fetcher = vi.fn(async (input: string) => input.includes('/file?') ? new Response('Linked contents', { headers: { 'X-Reverie-File-Binding': binding } }) : listing([entry]));
+  const { win, doc } = setup(fetcher, win => win.history.replaceState({}, '', '?'+new URLSearchParams({ path:'reports', select:entry.path, binding })));
+  await vi.waitFor(() => expect(doc.querySelector('#preview pre')?.textContent).toBe('Linked contents'));
+  expect(doc.querySelector('#files button.selected')?.getAttribute('data-path')).toBe(entry.path);
+  expect(doc.getElementById('breadcrumbs')?.textContent).toContain('reports');
+  expect(fetcher.mock.calls[0][0]).toBe('api/workspace/files?path=reports');
+  expect(win.location.search).toContain('select=reports%2Fnotes.md');
+});
+
+it('keeps the folder visible and refuses a missing or changed deep-linked file without reading it', async () => {
+  const fetcher = vi.fn(async () => listing([{ ...item('report.txt'), binding:'b'.repeat(64) }]));
+  const { doc } = setup(fetcher, win => win.history.replaceState({}, '', '?select=report.txt&binding='+'a'.repeat(64)));
+  await vi.waitFor(() => expect(doc.getElementById('status')?.textContent).toContain('unavailable or changed'));
+  expect(doc.querySelectorAll('#files button')).toHaveLength(1);
+  expect(doc.querySelector('#files button.selected')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('clears an existing folder search when history opens a linked file in the same folder', async () => {
+  const binding='a'.repeat(64), entry={...item('report.txt'),binding};
+  const {win,doc}=setup(async input=>input.includes('/file?')?new Response('report',{headers:{'X-Reverie-File-Binding':binding}}):listing([entry]));
+  await vi.waitFor(()=>expect(doc.querySelectorAll('#files button')).toHaveLength(1));
+  const search=doc.getElementById('search') as HTMLInputElement;search.value='missing';search.dispatchEvent(new win.Event('input'));
+  expect(doc.querySelectorAll('#files button')).toHaveLength(0);
+  win.history.replaceState({},'','?select=report.txt&binding='+binding);win.dispatchEvent(new win.PopStateEvent('popstate'));
+  await vi.waitFor(()=>expect(doc.querySelector('#files button.selected')?.getAttribute('data-path')).toBe('report.txt'));
+  expect(search.value).toBe('');
+});
+
+it('resolves a copied file link and includes its authorized entry when the folder listing is limited', async () => {
+  const binding = 'a'.repeat(64);
+  const resolved = { kind:'workspace', name:'notes.txt', path:'reports/notes.txt', absolutePath:'/drive/reports/notes.txt',
+    size:8, modified:new Date(0).toISOString(), binding };
+  const fetcher = vi.fn(async (input: string) => input.includes('/resolve?') ? Response.json({success:true,data:resolved}) :
+    input.includes('/file?') ? new Response('Linked contents',{headers:{'X-Reverie-File-Binding':binding}}) : listing([], false, true));
+  const { doc } = setup(fetcher, win => win.history.replaceState({}, '', '?file='+encodeURIComponent(resolved.absolutePath)));
+  await vi.waitFor(() => expect(doc.querySelector('#preview pre')?.textContent).toBe('Linked contents'));
+  expect(doc.querySelector('#files button.selected')?.getAttribute('data-path')).toBe(resolved.path);
+  expect(fetcher.mock.calls[0][0]).toBe('api/workspace/resolve?path=%2Fdrive%2Freports%2Fnotes.txt&locate=1');
+});
+
+it('selects a large linked file without weakening the byte-preview size limit', async () => {
+  const binding = 'a'.repeat(64);
+  const resolved = { kind:'workspace', name:'large.bin', path:'large.bin', absolutePath:'/drive/large.bin',
+    size:33*1024*1024, modified:new Date(0).toISOString(), binding };
+  const fetcher = vi.fn(async (input: string) => input.includes('/resolve?') ? Response.json({success:true,data:resolved}) :
+    listing([{...resolved,kind:'file'}]));
+  const { doc } = setup(fetcher, win => win.history.replaceState({}, '', '?file='+encodeURIComponent(resolved.absolutePath)));
+  await vi.waitFor(() => expect(doc.getElementById('status')?.textContent).toContain('too large for an inline preview'));
+  expect(doc.querySelector('#files button.selected')?.getAttribute('data-path')).toBe(resolved.path);
+  expect(fetcher.mock.calls.some(([url]) => url.includes('/file?'))).toBe(false);
+});
+
 it('starts without an empty preview, waits for upload authority, and searches literal names without another request', async () => {
   const first = deferred<Response>();
   const fetcher = vi.fn(() => first.promise);
