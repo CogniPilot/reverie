@@ -26,11 +26,17 @@ function directory(path) {
 }
 function main() {
   const args = process.argv.slice(2);
-  let root = process.env.REVERIE_ROOT || join(homedir(), 'reverie'), source = null, updates = false, restart = false;
+  let root = process.env.REVERIE_ROOT || join(homedir(), 'reverie'), source = null, scratch = null, updates = false, restart = false, force = false;
   const projects = [];
   while (args.length) {
     const flag = args.shift();
-    if (flag === '--help') { console.log('reverie-start [--root DIR] [--project NAME=PATH] [--source PATH] [--allow-updates] [--restart]'); return; }
+    if (flag === '--help') {
+      console.log('reverie-start [--root DIR] [--scratch DIR] [--project NAME=PATH] [--source PATH] [--allow-updates] [--restart] [-f|--force]\n' +
+        '  --scratch DIR  Use this host directory for scratch and image-build temporaries; save it in deployment.json.\n' +
+        '  -f, --force  Recreate a stopped ordinary website container using current settings; mounted data is retained.');
+      return;
+    }
+    if (flag === '-f' || flag === '--force') { force = true; continue; }
     if (flag === '--restart') { restart = true; continue; }
     if (flag === '--allow-updates') { updates = true; continue; }
     if (flag === '--project') {
@@ -41,9 +47,9 @@ function main() {
       if (!statSync(projects.at(-1).path).isDirectory()) fail('--project must select a directory.');
       continue;
     }
-    if (!['--root', '--source'].includes(flag) || !args.length) fail('Unknown or incomplete option: ' + flag);
+    if (!['--root', '--source', '--scratch'].includes(flag) || !args.length) fail('Unknown or incomplete option: ' + flag);
     const value = resolve(args.shift());
-    if (flag === '--root') root = value; else source = value;
+    if (flag === '--root') root = value; else if (flag === '--scratch') scratch = directory(value); else source = value;
   }
   directory(root);
   mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -51,7 +57,7 @@ function main() {
   if (!existsSync(configPath)) {
     const defaults = { version: 1, containerName: 'reverie', port: 3000,
       adminPhoneWake: false, companyRoot: join(root, 'companies', 'default'), workspace: join(root, 'workspace'),
-      scratch: join(root, 'scratch', 'agents'), memoryMiB: Math.max(2048, Math.min(16384, Math.floor(totalmem() / 2 / 1048576))), pidsLimit: 512 };
+      scratch: scratch || join(root, 'scratch', 'agents'), memoryMiB: Math.max(2048, Math.min(16384, Math.floor(totalmem() / 2 / 1048576))), pidsLimit: 512 };
     writeFileSync(configPath, JSON.stringify(defaults, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
   }
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -71,6 +77,7 @@ function main() {
   const runtime = config.websiteRuntime ?? 'default';
   if (typeof runtime !== 'string' || !Object.hasOwn(websiteRuntimes, runtime)) fail('Unknown websiteRuntime.');
   if (runtime !== 'default' && config.protectedWebsite !== true) fail('Optional website runtimes require protectedWebsite.');
+  if (force && (runtime !== 'default' || registeredTerminal())) fail('--force is only for ordinary website containers. Use the existing coordinated update workflow for optional runtimes.');
   if ('ownerTerminalConfig' in config) directory(config.ownerTerminalConfig);
   if ((hasTerminal(runtime) || registeredTerminal()) && !config.ownerTerminalConfig) fail('Protected H needs its existing private ownerTerminalConfig; a registered unit cannot be ignored.');
   if (hasTerminal(runtime) || registeredTerminal()) terminalSocket = terminalEngineSocket(config.ownerTerminalConfig);
@@ -80,6 +87,8 @@ function main() {
     if (!Number.isInteger(config[key]) || config[key] < min || config[key] > max) fail('Invalid ' + key + '.');
   }
   for (const key of ['companyRoot', 'workspace', 'scratch']) directory(config[key]);
+  const scratchChanged = scratch !== null && scratch !== config.scratch;
+  if (scratch !== null) config.scratch = scratch;
   if (source) {
     source = realpathSync(directory(source));
     if (!statSync(source).isDirectory()) fail('--source must select a directory.');
@@ -138,9 +147,17 @@ function main() {
     if (entry && (!entry.isSymbolicLink() || readlinkSync(link) !== target)) fail('Project link already exists with different contents: ' + link);
   }
   const inspected = run('docker', ['inspect', '--type', 'container', '--format', '{{json .}}', config.containerName], true);
-  if (inspected.status === 0) {
-    const container = JSON.parse(inspected.stdout);
-    if (container.Config?.Labels?.['reverie.deployment'] !== signature) fail('Existing container differs from this deployment. Preserve it and choose another containerName; nothing was replaced.');
+  const container = inspected.status === 0 ? JSON.parse(inspected.stdout) : null;
+  function checkReplacement(candidate) {
+    if (!/^[a-f0-9]{64}$/.test(candidate.Id) || candidate.State?.Running !== false || candidate.State?.Paused || candidate.State?.Restarting)
+      fail('--force requires a stopped container. Stop Reverie and its agents first; nothing was replaced.');
+    if ((candidate.Config?.Labels?.['org.reverie.website.runtime'] ?? 'default') !== 'default' ||
+        candidate.Config?.Env?.some(value => value.startsWith('REVERIE_WORKER_SOCKET=')))
+      fail('--force cannot replace isolated-worker or optional website runtimes. Use the existing coordinated update workflow.');
+  }
+  if (container && force) checkReplacement(container);
+  if (container && !force) {
+    if (container.Config?.Labels?.['reverie.deployment'] !== signature) fail('Existing container differs from this deployment. Choose another containerName or use --force to recreate a stopped ordinary website container; nothing was replaced.');
     const phoneValues = (container.Config?.Env || []).filter(value => value.startsWith('REVERIE_ADMIN_PHONE_WAKE='));
     const phoneMatches = config.adminPhoneWake === true
       ? phoneValues.length === 1 && phoneValues[0] === 'REVERIE_ADMIN_PHONE_WAKE=enabled'
@@ -206,7 +223,7 @@ function main() {
     const link = join(config.workspace, project.name);
     if (!lstatSync(link, { throwIfNoEntry: false })) symlinkSync('/projects/' + project.name, link);
   }
-  const scratchRoot = join(root, 'scratch');
+  const scratchRoot = config.scratch === join(root, 'scratch', 'agents') ? join(root, 'scratch') : config.scratch;
   mkdirSync(scratchRoot, { recursive: true, mode: 0o700 });
   mkdirSync(config.scratch, { recursive: true, mode: 0o700 });
   const buildTmp = join(scratchRoot, 'build', 'tmp');
@@ -259,6 +276,7 @@ function main() {
   if (lifecycle) mount(lifecycle.description.bootstrapMount.Source, '/run/reverie-owner-terminal', true);
   command.push(websiteRuntimes[runtime].image);
   if (lifecycle) {
+    if (scratchChanged) writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
     try {
       lifecycle.phase('settle');
       const cid = run('docker', command).stdout.trim();
@@ -272,7 +290,20 @@ function main() {
       lifecycle.phase('start-listener'); run('docker', ['start', cid]); lifecycle.phase('await-ready'); lifecycle.refreshResource();
     } catch (error) { lifecycle.recordUnknown('start'); throw error; }
     finally { lifecycle.close(); }
-  } else run('docker', command);
+  } else {
+    if (container && force) {
+      // Build/load and validate all new mounts before retiring the exact stopped
+      // container observed above. Never force-remove a container or its volumes.
+      const current = JSON.parse(run('docker', ['inspect', '--type', 'container', '--format', '{{json .}}', container.Id]).stdout);
+      checkReplacement(current);
+      if (current.Id !== container.Id || JSON.stringify(current.Config) !== JSON.stringify(container.Config) ||
+          JSON.stringify(current.HostConfig) !== JSON.stringify(container.HostConfig) || JSON.stringify(current.Mounts) !== JSON.stringify(container.Mounts))
+        fail('Existing container changed during the build; nothing was replaced.');
+      run('docker', ['rm', container.Id]);
+    }
+    if (scratchChanged) writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+    run('docker', command);
+  }
   console.log('Reverie: http://127.0.0.1:' + config.port);
   console.log('Deployment settings: ' + configPath);
   console.log('Open the address above to create your owner account or sign in.');

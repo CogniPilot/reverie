@@ -154,14 +154,15 @@ def main(argv=None):
     driver = Path('/run/opengl-driver/lib')
     if driver.is_dir():
         os.environ['LD_LIBRARY_PATH'] = str(driver) + (':' + os.environ['LD_LIBRARY_PATH'] if os.environ.get('LD_LIBRARY_PATH') else '')
-    runtime_root = Path.home() / '.local/state/reverie/local-model-runtime'
+    reverie_root = Path(os.environ.get('REVERIE_ROOT') or Path.home() / 'reverie').expanduser()
+    runtime_root = reverie_root / 'runtime/local-model/runtime'
     runtime_root.parent.mkdir(parents=True, exist_ok=True)
     command = ['nix', 'build', '--out-link', str(runtime_root), '--print-out-paths', '--file', os.environ['REVERIE_MODEL_BUILD_EXPR'],
                '--argstr', 'nixpkgs', os.environ['REVERIE_MODEL_NIXPKGS'], '--argstr', 'system', os.environ['REVERIE_MODEL_SYSTEM'],
                '--argstr', 'capability', capability, '--option', 'build-dir', str(build_dir)]
     print(f'Preparing Nix llama.cpp for {"CUDA " + capability if capability else "CPU"}; first build may take time.', flush=True)
     runtime = Path(run(command, stdout=subprocess.PIPE).stdout.strip())
-    control = container_control(args.container) if args.container else Path.home() / '.local/share/reverie/local-model'
+    control = container_control(args.container) if args.container else reverie_root / 'runtime/local-model/control'
     private = control / 'models'
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     private.chmod(0o700)

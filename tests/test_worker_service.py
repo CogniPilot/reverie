@@ -15,6 +15,15 @@ from tests import test_worker as fixture
 
 
 class WorkerServiceTests(unittest.TestCase):
+    def test_service_roots_use_selected_reverie_root_or_injected_owner_home(self):
+        with patch.dict(os.environ, {'REVERIE_ROOT': ''}):
+            self.assertEqual(WorkerService(home=self.home).gcroot,
+                             self.home / 'reverie/runtime/services/worker-broker/root')
+        selected = self.root / 'selected-office'
+        with patch.dict(os.environ, {'REVERIE_ROOT': str(selected)}):
+            self.assertEqual(WorkerService(home=self.home).gcroot,
+                             selected / 'runtime/services/worker-broker/root')
+
     def setUp(self):
         f = fixture.WorkerTests(); f.setUp(); self.addCleanup(f.doCleanups)
         self.root, self.config = f.root, copy.deepcopy(f.config)

@@ -21,7 +21,7 @@ instances/
 .fleet-instance
 opencode.json
 .opencode/
-node_modules/
+node_modules
 result
 result-*
 .direnv/

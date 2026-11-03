@@ -62,7 +62,8 @@ class WorkerService:
         self.run = run
         self.unit = self.home / '.config/systemd/user' / UNIT
         self.environment = self.home / '.config/reverie/worker-broker.env'
-        self.gcroot = self.home / '.local/state/reverie/services/worker-broker/root'
+        reverie_root = Path(os.environ.get('REVERIE_ROOT') or self.home / 'reverie').expanduser()
+        self.gcroot = reverie_root / 'runtime/services/worker-broker/root'
 
     def manager(self, *args, required=True):
         result = self.run(['systemctl', '--user', *args])
