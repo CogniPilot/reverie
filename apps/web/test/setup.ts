@@ -20,6 +20,7 @@ import { afterAll, afterEach, vi } from 'vitest';
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const originalVitest = process.env.VITEST;
+const originalTemp = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
 const originalPlaywrightBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
 // Refuse to run against a live instance. A data dir holding `state.json` belongs
 // to a running Reverie, so this run shares that instance's memory limit and can
@@ -48,6 +49,15 @@ if (originalPlaywrightBrowsersPath === undefined && originalHome) {
 }
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+// Temp dirs too: tests make their own with mkdtemp(tmpdir()) and many never remove them (about 12k dirs, 1.9 GB on
+// one laptop in six days). Point the temp dir at one per-file directory that the teardown below removes, so it takes
+// them all with it; os.tmpdir() reads these on every call, so this covers every test file and helper. It is a short
+// sibling of the HOME, not nested inside it: tests bind Unix sockets under it, and macOS allows only 103 characters
+// for a socket path, which a longer prefix would push past.
+const testTmp = mkdtempSync(join(tmpdir(), 'rvt-'));
+process.env.TMPDIR = testTmp;
+process.env.TMP = testTmp;
+process.env.TEMP = testTmp;
 process.env.VITEST = 'true';
 
 for (const key of Object.keys(process.env)) {
@@ -136,7 +146,13 @@ afterAll(async () => {
   if (originalPlaywrightBrowsersPath === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
   else process.env.PLAYWRIGHT_BROWSERS_PATH = originalPlaywrightBrowsersPath;
 
+  for (const [key, value] of Object.entries(originalTemp)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
   rmSync(testHome, { recursive: true, force: true });
+  rmSync(testTmp, { recursive: true, force: true });
 });
 
 // afterAll never fires for a fully-skipped test file (no tests execute), which
@@ -144,4 +160,5 @@ afterAll(async () => {
 // with force is a no-op when afterAll already removed it.
 process.on('exit', () => {
   rmSync(testHome, { recursive: true, force: true });
+  rmSync(testTmp, { recursive: true, force: true });
 });
