@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   addCostSample,
+  burnCheck,
+  cachedBurnCheck,
   conversionFit,
   costRate,
   costUsed,
@@ -160,6 +162,103 @@ describe('per-agent burn', () => {
     expect(burn.realtimeHigh).toBeGreaterThanOrEqual(burn.realtimePerHour);
     expect(burn.agents.reduce((sum, a) => sum + (a.pctPerHour ?? 0), 0)).toBeCloseTo(burn.realtimePerHour, 1);
     expect(burn.fit?.n).toBe(6);
+  });
+});
+
+describe('rate backtest (burnCheck)', () => {
+  it('scores the realtime rate better than the 6-hour slope when the work rate changes', () => {
+    // 1 point/h for 20 hours, then the plan's sessions triple their spend: the 30-minute rate sees it, the slope lags.
+    const turn = NOW - 4 * H;
+    const usage = [...weekly(1, NOW - 24 * H, turn, 20), ...weekly(3, turn + 5 * M, NOW, 20 + 20 + 3 / 12).map((s) => s)];
+    const costs = [[...spend(2, NOW - 24 * H, turn), ...spend(6, turn + M, NOW, 40)]];
+    const check = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage, sessionCosts: costs, weekReset: RESET, now: NOW })!;
+    expect(check.n).toBeGreaterThan(20);
+    expect(check.realtime).toBeLessThan(check.steady);
+  });
+
+  it('predicts each time from earlier data only: a late change in the plan rate does not leak into earlier predictions', () => {
+    // Steady spend; the plan rose 1 point/h for 18 h, then 3 points/h (other usage joined). Predictions made in the first
+    // 17 h must use the 1 point/h slope and the factor learned so far, so they are nearly exact there.
+    const usage = [...weekly(1, NOW - 24 * H, NOW - 6 * H, 20), ...weekly(3, NOW - 6 * H + 5 * M, NOW, 38)];
+    const check = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage, sessionCosts: [spend(2, NOW - 24 * H, NOW)],
+      weekReset: RESET, now: NOW })!;
+    expect(check.steady).toBeLessThan(1);
+    expect(check.realtime).toBeLessThan(1);
+  });
+
+  it('uses only data before each prediction time (a later change does not improve an earlier prediction)', () => {
+    const usage = weekly(1, NOW - 24 * H, NOW);
+    const costs = [spend(2, NOW - 24 * H, NOW)];
+    const before = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage, sessionCosts: costs, weekReset: RESET, now: NOW - 6 * H })!;
+    // Data after NOW - 6 h cannot change the predictions made before it: the same times score the same.
+    const later = burnCheck({ provider: 'anthropic', label: 'Claude 5x',
+      usage: [...usage, ...weekly(9, NOW + 5 * M, NOW + 2 * H, 50)], sessionCosts: [[...costs[0], ...spend(20, NOW + M, NOW + 2 * H, 50)]],
+      weekReset: RESET, now: NOW - 6 * H })!;
+    expect(later).toEqual(before);
+  });
+
+  it('skips readings from another weekly period, misattributed readings and times without both rates', () => {
+    // The other period's readings sit far above this one's: scoring them would show.
+    const usage = weekly(1, NOW - 24 * H, NOW).map((s, i) => (i % 3 === 1 ? { ...s, resetAt: RESET - WEEK_MS, weekly: 90 } : s));
+    const costs = [spend(2, NOW - 24 * H, NOW)];
+    const mixed = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage, sessionCosts: costs, weekReset: RESET, now: NOW });
+    const clean = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: usage.filter((s) => s.resetAt === RESET), sessionCosts: costs,
+      weekReset: RESET, now: NOW });
+    expect(mixed).toEqual(clean);
+    const flagged = weekly(1, NOW - 24 * H, NOW).map((s) => ({ ...s, misattributed: true }));
+    expect(burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: flagged, sessionCosts: costs, weekReset: RESET, now: NOW })).toBeNull();
+    const someFlagged = weekly(1, NOW - 24 * H, NOW).map((s, i) => (i % 3 === 1 ? { ...s, misattributed: true, weekly: 90 } : s));
+    expect(burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: someFlagged, sessionCosts: costs, weekReset: RESET, now: NOW }))
+      .toEqual(burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: someFlagged.filter((s) => !s.misattributed), sessionCosts: costs,
+        weekReset: RESET, now: NOW }));
+    // Readings spanning under an hour give no 6-hour slope (and no target an hour later): nothing can be scored.
+    expect(burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: weekly(1, NOW - 50 * M, NOW), sessionCosts: costs,
+      weekReset: RESET, now: NOW })).toBeNull();
+  });
+
+  it('does not score against a reading lower than the starting one (a foreign or reset reading)', () => {
+    const usage = weekly(1, NOW - 24 * H, NOW);
+    const costs = [spend(2, NOW - 24 * H, NOW)];
+    const base = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage, sessionCosts: costs, weekReset: RESET, now: NOW })!;
+    // One unflagged reading far below the run, an hour after a prediction time.
+    const dipped = usage.map((s) => (s.at === NOW - 10 * H ? { ...s, weekly: 0 } : s));
+    const check = burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: dipped, sessionCosts: costs, weekReset: RESET, now: NOW })!;
+    expect(check.n).toBeLessThan(base.n);
+    // Scored against the dip, one error of about 30 points would lift both means well past the clean run's.
+    expect(check.realtime).toBeCloseTo(base.realtime, 1);
+    expect(check.steady).toBeCloseTo(base.steady, 1);
+  });
+
+  it('is recomputed at most once per 10 minutes per plan, and at once in a new weekly period', () => {
+    const usage = weekly(1, NOW - 24 * H, NOW + H);
+    const costs = [spend(2, NOW - 24 * H, NOW + H)];
+    const cache = new Map();
+    const input = { provider: 'anthropic', label: 'Claude 5x', usage, sessionCosts: costs, weekReset: RESET, now: NOW };
+    const first = cachedBurnCheck(cache, 'a', input)!;
+    expect(first).toEqual(burnCheck(input));
+    expect(cachedBurnCheck(cache, 'a', { ...input, now: NOW + 9 * M })).toBe(first);
+    expect(cachedBurnCheck(cache, 'b', { ...input, now: NOW + 9 * M })).not.toBe(first);
+    expect(cachedBurnCheck(cache, 'a', { ...input, now: NOW + 9 * M, weekReset: RESET + WEEK_MS })).toBeNull();
+    const fresh = cachedBurnCheck(cache, 'a', { ...input, now: NOW + 20 * M })!;
+    expect(fresh).toEqual(burnCheck({ ...input, now: NOW + 20 * M }));
+    expect(cachedBurnCheck(cache, 'a', { ...input, now: NOW + 29 * M })).toBe(fresh);
+    const later = cachedBurnCheck(cache, 'a', { ...input, now: NOW + 30 * M })!;
+    expect(later).not.toBe(fresh);
+    // A clock that went back never reuses a check from its future.
+    const back = cachedBurnCheck(cache, 'a', { ...input, now: NOW + 25 * M })!;
+    expect(back).not.toBe(later);
+    expect(back).toEqual(burnCheck({ ...input, now: NOW + 25 * M }));
+    // The plan burn takes a check it is given instead of computing one.
+    const burn = planAgentBurn({ provider: 'anthropic', label: 'Claude 5x', usage, sessions: [{ id: 'a', name: 'A', costs: costs[0] }],
+      weekReset: RESET, now: NOW, check: null });
+    expect(burn.burnCheck).toBeNull();
+  });
+
+  it('is reported on the plan burn, and is null without readings', () => {
+    const burn = planAgentBurn({ provider: 'anthropic', label: 'Claude 5x', usage: weekly(1, NOW - 24 * H, NOW),
+      sessions: [{ id: 'a', name: 'A', costs: spend(2, NOW - 24 * H, NOW) }], weekReset: RESET, now: NOW });
+    expect(burn.burnCheck?.n).toBeGreaterThan(20);
+    expect(burnCheck({ provider: 'anthropic', label: 'Claude 5x', usage: [], sessionCosts: [], weekReset: RESET, now: NOW })).toBeNull();
   });
 });
 

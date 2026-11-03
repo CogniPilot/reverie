@@ -14,7 +14,7 @@
  * Pure apart from `PlanCostTracker`'s file IO; time is always a parameter. See docs/plan-burn-per-agent.md.
  */
 import { promises as fs } from 'node:fs';
-import { BURN_WINDOW_MS, WEEK_MS, type UsageSample } from './plan-pace.js';
+import { BURN_WINDOW_MS, burnRate, WEEK_MS, type UsageSample } from './plan-pace.js';
 
 export interface CostSample {
   at: number;
@@ -233,6 +233,82 @@ export function conversionFit(
   return { maePerHour: round(mean(errors), 2), biasPerHour: round(mean(biases), 2), n: errors.length };
 }
 
+/** How far back the rate backtest looks, its prediction horizon and the spacing of its prediction times. */
+export const BURN_CHECK_MS = 24 * HOUR_MS;
+export const BURN_CHECK_HORIZON_MS = HOUR_MS;
+const BURN_CHECK_STEP_MS = 10 * 60 * 1000;
+/** The reading a prediction is scored against must fall this close to the horizon. */
+const BURN_CHECK_SLACK_MS = 10 * 60 * 1000;
+
+export interface BurnCheck {
+  /** Mean absolute error, weekly points, of the 1-hour prediction from the realtime rate (factor × the sessions' cost rate). */
+  realtime: number;
+  /** The same for the existing 6-hour weekly slope. */
+  steady: number;
+  /** Prediction times scored; both rates are scored at the same times. */
+  n: number;
+}
+
+/**
+ * Out-of-sample check of the two plan rates: at each prediction time t over the last 24 hours of this weekly period,
+ * predict the reading an hour later from weekly(t) plus each rate, with the factor, the cost rates and the slope taken from
+ * data up to t only, and score it against the reading actually taken then. Null without a time where both rates exist.
+ * The sessions are those on the plan now: a session that moved plans inside the window is attributed to this one.
+ */
+export function burnCheck(input: {
+  provider: string;
+  label: string;
+  usage: UsageSample[];
+  sessionCosts: CostSample[][];
+  weekReset: number | null;
+  now: number;
+}): BurnCheck | null {
+  const weekStart = input.weekReset === null ? null : input.weekReset - WEEK_MS;
+  const samePeriod = (s: UsageSample) =>
+    input.weekReset === null || s.resetAt === undefined || !Number.isFinite(s.resetAt) || Math.abs(s.resetAt - input.weekReset) <= SAME_RESET_MS;
+  const readings = input.usage
+    .filter((s) => s.at >= Math.max(input.now - BURN_CHECK_MS, weekStart ?? -Infinity) && s.at <= input.now && !s.misattributed && samePeriod(s))
+    .sort((a, b) => a.at - b.at);
+  const realtime: number[] = [];
+  const steady: number[] = [];
+  let last = -Infinity;
+  for (const start of readings) {
+    if (start.at - last < BURN_CHECK_STEP_MS) continue;
+    const target = readings
+      .filter((s) => Math.abs(s.at - (start.at + BURN_CHECK_HORIZON_MS)) <= BURN_CHECK_SLACK_MS)
+      .sort((a, b) => Math.abs(a.at - start.at - BURN_CHECK_HORIZON_MS) - Math.abs(b.at - start.at - BURN_CHECK_HORIZON_MS))[0];
+    if (!target || target.weekly < start.weekly) continue;
+    const slope = burnRate(input.usage, start.at, weekStart, input.weekReset);
+    const rates = input.sessionCosts.map((costs) => costRate(costs, start.at));
+    if (slope === null || rates.some((r) => r === null)) continue;
+    const factor = planConversion({ ...input, now: start.at }).pctPerUsd;
+    const hours = (target.at - start.at) / HOUR_MS;
+    const usdPerHour = rates.reduce<number>((sum, r) => sum + (r ?? 0), 0);
+    realtime.push(Math.abs(start.weekly + hours * usdPerHour * factor - target.weekly));
+    steady.push(Math.abs(start.weekly + hours * slope - target.weekly));
+    last = start.at;
+  }
+  if (!realtime.length) return null;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  return { realtime: round(mean(realtime), 2), steady: round(mean(steady), 2), n: realtime.length };
+}
+
+/**
+ * `burnCheck` through `cache`: it scores a prediction every 10 minutes and costs about 15 times the rest of a plan's burn,
+ * so a plan polled every 30 seconds recomputes it at most once per 10 minutes, and at once when the weekly period changes.
+ */
+export function cachedBurnCheck(
+  cache: Map<string, { at: number; weekReset: number | null; check: BurnCheck | null }>,
+  key: string,
+  input: Parameters<typeof burnCheck>[0],
+): BurnCheck | null {
+  const hit = cache.get(key);
+  if (hit && hit.weekReset === input.weekReset && input.now >= hit.at && input.now - hit.at < BURN_CHECK_STEP_MS) return hit.check;
+  const check = burnCheck(input);
+  cache.set(key, { at: input.now, weekReset: input.weekReset, check });
+  return check;
+}
+
 export interface AgentBurn {
   sessionId: string;
   name: string;
@@ -249,6 +325,8 @@ export interface PlanAgentBurn {
   conversion: PlanConversion;
   /** Hourly fit of factor × session cost against the plan's observed rise (see `conversionFit`). */
   fit: ConversionFit | null;
+  /** Out-of-sample 1-hour prediction error of the realtime rate and of the 6-hour slope (see `burnCheck`). */
+  burnCheck: BurnCheck | null;
   /** The plan's weekly points per hour from its sessions' last 30 minutes, with the conversion's band. */
   realtimePerHour: number;
   realtimeLow: number;
@@ -266,6 +344,8 @@ export function planAgentBurn(input: {
   sessions: { id: string; name: string; costs: CostSample[] }[];
   weekReset: number | null;
   now: number;
+  /** This plan's `burnCheck` when the caller already has it (see `cachedBurnCheck`); computed here when absent. */
+  check?: BurnCheck | null;
 }): PlanAgentBurn {
   const conversion = planConversion({ ...input, sessionCosts: input.sessions.map((s) => s.costs) });
   const pctPerUsd = conversion.pctPerUsd;
@@ -282,6 +362,7 @@ export function planAgentBurn(input: {
   return {
     conversion,
     fit: conversionFit(input.usage, input.sessions.map((s) => s.costs), pctPerUsd, input.now, input.weekReset),
+    burnCheck: input.check !== undefined ? input.check : burnCheck({ ...input, sessionCosts: input.sessions.map((s) => s.costs) }),
     realtimePerHour: round(usdPerHour * pctPerUsd, 2),
     realtimeLow: round(usdPerHour * conversion.low, 2),
     realtimeHigh: round(usdPerHour * conversion.high, 2),
