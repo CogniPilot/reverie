@@ -576,8 +576,13 @@ unqualified.
 
 A review packet is a directory holding one git bundle, `PR-TITLE.txt`, `PR-BODY.md`
 (opening with a `## Branch Naming` section that holds the branch in backticks) and
-a `SHA256SUMS` covering them. From a checkout with push access, configure the
-identity commits must carry once, then publish:
+a `SHA256SUMS` covering them. An author writes the title and body in a new
+directory and runs `reverie agent seal <packet-dir> --branch <branch>`. That runs
+the same checks publish will (Branch Naming against the branch, every commit's
+identity and sign-off, names, ids and paths, a clean merge), cuts a full bundle
+from the remote base, writes `SHA256SUMS` and reads the packet back. It never
+reseals a directory that already holds a packet. From a checkout with push access,
+configure the identity commits must carry once, then publish:
 
 ```sh
 git config reverie.publishIdentity "James Goppert <473772+jgoppert@users.noreply.github.com>"
