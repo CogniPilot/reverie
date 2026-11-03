@@ -204,6 +204,18 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
     };
   const baseRef = `refs/remotes/${remote}/${base}`;
 
+  // An increment on an open branch is a bundle whose prerequisite is that branch's remote head, so fetch it first.
+  const listed = await git('ls-remote', '--heads', remote, `refs/heads/${packet.branch}`);
+  if (listed.code !== 0)
+    return {
+      findings: [
+        ...findings,
+        { check: 'branch', detail: `could not list ${remote} branches: ${listed.stderr.trim()}` },
+      ],
+    };
+  const remoteHead = /^([0-9a-f]{40})\s/.exec(listed.stdout)?.[1];
+  if (remoteHead) await git('fetch', '--quiet', remote, `refs/heads/${packet.branch}`);
+
   const verified = await git('bundle', 'verify', '--quiet', packet.bundlePath);
   if (verified.code !== 0)
     return {
@@ -211,7 +223,7 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
         ...findings,
         {
           check: 'bundle',
-          detail: `the bundle does not verify here (a thin bundle needs its predecessor fetched first): ${verified.stderr.trim()}`,
+          detail: `the bundle does not verify against the base or the branch (a bundle stacked on an unpublished packet needs that packet published first): ${verified.stderr.trim()}`,
         },
       ],
     };
@@ -253,12 +265,7 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
   if (merge.code !== 0)
     findings.push({ check: 'merge', detail: `${head.slice(0, 8)} does not merge cleanly onto ${remote}/${base}` });
 
-  const listed = await git('ls-remote', '--heads', remote, `refs/heads/${packet.branch}`);
-  if (listed.code !== 0)
-    findings.push({ check: 'branch', detail: `could not list ${remote} branches: ${listed.stderr.trim()}` });
-  const remoteHead = /^([0-9a-f]{40})\s/.exec(listed.stdout)?.[1];
   if (remoteHead && remoteHead !== head) {
-    await git('fetch', '--quiet', remote, `refs/heads/${packet.branch}`);
     const ancestor = await git('merge-base', '--is-ancestor', remoteHead, head);
     if (ancestor.code !== 0)
       findings.push({

@@ -203,7 +203,8 @@ describe('agent publish', () => {
   it('moves an existing branch only by fast-forward, cancelling the old head runs first', async () => {
     git(author, ['switch', '-q', BRANCH]);
     const next = commit('feature.txt', 'feature 2\n', signedMessage('feat: more'));
-    const ff = seal(BRANCH);
+    // A thin increment: its only prerequisite is the published branch head, which the publisher must fetch.
+    const ff = seal(`${goodHead}..${BRANCH}`);
     const f = fake({
       gh: (args) =>
         args[0] === 'pr' && args[1] === 'list'
