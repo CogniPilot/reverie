@@ -12,7 +12,7 @@ import type { Command } from 'commander';
 import { EXIT, describeFailure, resolveChatRoom, runAgentVerb, type AgentDeps, type RequestOptions } from './cli-agent.js';
 import { GLYPH, palette } from './cli-style.js';
 import { zonedMs, zonedStamp } from './board-logic.js';
-import { DecisionOptionsSchema, ISSUE_STATUSES, type BoardView, type Issue } from './board-types.js';
+import { DecisionOptionsSchema, ISSUE_STATUSES, ISSUE_TITLE_MAX, type BoardView, type Issue } from './board-types.js';
 
 type Result = { ok: true; data: unknown } | { ok: false; code: number };
 
@@ -70,7 +70,17 @@ export interface IssueAddOptions {
   from?: string;
 }
 
+/** A title the board would refuse, said plainly before anything is sent. */
+function titleProblem(title: string): string | undefined {
+  const length = title.trim().length;
+  if (!length) return '--title is empty';
+  if (length > ISSUE_TITLE_MAX) return `--title is ${length} characters; the board keeps at most ${ISSUE_TITLE_MAX}`;
+  return undefined;
+}
+
 export async function boardIssueAdd(deps: AgentDeps, options: IssueAddOptions): Promise<number> {
+  const problem = titleProblem(options.title);
+  if (problem) return fail(deps, problem);
   const body: Record<string, unknown> = { title: options.title };
   if (options.status) body.status = options.status;
   if (options.reason) body.reason = options.reason;
@@ -112,6 +122,52 @@ export async function boardIssueMove(deps: AgentDeps, options: { id: string; sta
   if (options.reason !== undefined) body.reason = options.reason;
   const result = await call(deps, { method: 'PATCH', path: `/api/board/issues/${encodeURIComponent(options.id)}`, body });
   return done(deps, result, (i) => `${i.id} is now ${i.status}`);
+}
+
+export interface IssueSetOptions {
+  id: string;
+  status?: string;
+  reason?: string;
+  title?: string;
+  owner?: string;
+  start?: string;
+  end?: string;
+}
+
+/**
+ * Change several fields of one issue in a single PATCH, so a card never sits half-updated (new dates with an old
+ * reason, say). Only the fields given are sent; the server keeps every other field as it is.
+ */
+export async function boardIssueSet(deps: AgentDeps, options: IssueSetOptions): Promise<number> {
+  const body: Record<string, unknown> = {};
+  if (options.status !== undefined) {
+    if (!(ISSUE_STATUSES as readonly string[]).includes(options.status)) return fail(deps, `status is one of ${ISSUE_STATUSES.join('|')}`);
+    body.status = options.status;
+  }
+  if (options.reason !== undefined) body.reason = options.reason;
+  if (options.title !== undefined) {
+    const problem = titleProblem(options.title);
+    if (problem) return fail(deps, problem);
+    body.title = options.title;
+  }
+  if (options.owner !== undefined || options.start !== undefined || options.end !== undefined) {
+    const board = await view(deps);
+    if (!board) return EXIT.error;
+    if (options.owner !== undefined) {
+      const owner = memberRef(board, options.owner);
+      if (typeof owner !== 'string') return fail(deps, owner.error);
+      body.owner = owner;
+    }
+    try {
+      if (options.start !== undefined) body.start = wallTime(options.start, 'start', board.timeZone);
+      if (options.end !== undefined) body.end = wallTime(options.end, 'end', board.timeZone);
+    } catch (err) {
+      return fail(deps, (err as Error).message);
+    }
+  }
+  if (!Object.keys(body).length) return fail(deps, 'Give at least one of --status, --reason, --title, --owner, --start or --end');
+  const result = await call(deps, { method: 'PATCH', path: `/api/board/issues/${encodeURIComponent(options.id)}`, body });
+  return done(deps, result, (i) => `${i.id} set: ${Object.keys(body).join(', ')} (now ${i.status})`);
 }
 
 /** Add (or with `remove`, drop) tags; sends the whole tag list with the rev it was read at, so a race is a 409. */
@@ -284,6 +340,17 @@ filter are alternatives; different filters must all match.`)
     .action((id: string, status: string, o: { reason?: string; json?: boolean }) =>
       runAgentVerb(json(o), (d) => boardIssueMove(d, { id, status, reason: o.reason }))
     );
+  issue
+    .command('set <id>')
+    .description('Change status, reason, title, owner and dates of one issue in a single update; omitted fields are kept')
+    .option('--status <status>', ISSUE_STATUSES.join('|'))
+    .option('--reason <text>', 'Reason (required with blocked and wontdo); an empty string clears it')
+    .option('--title <text>', `Title, at most ${ISSUE_TITLE_MAX} characters`)
+    .option('--owner <member>', 'Owner: member id or name (coordinators)')
+    .option('--start <when>', 'YYYY-MM-DD or YYYY-MM-DDTHH:MM, company time')
+    .option('--end <when>', 'YYYY-MM-DD or YYYY-MM-DDTHH:MM, company time')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, o: Omit<IssueSetOptions, 'id'> & { json?: boolean }) => runAgentVerb(json(o), (d) => boardIssueSet(d, { id, ...o })));
   issue
     .command('tag <id> <tags...>')
     .description('Add tags to an issue (--remove drops them)')

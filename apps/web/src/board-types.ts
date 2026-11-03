@@ -23,10 +23,13 @@ const ms = z.number().int().nonnegative();
 const httpUrl = z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'A link is an http(s) URL');
 export const LinkSchema = z.object({ url: httpUrl, kind: z.enum(LINK_KINDS).default('other') }).strict();
 
+/** The longest issue title the board stores; the CLI checks it before sending. */
+export const ISSUE_TITLE_MAX = 300;
+
 export const IssueSchema = z
   .object({
     id,
-    title: text(300),
+    title: text(ISSUE_TITLE_MAX),
     /** Member (employee) id; unset while the issue waits in triage. */
     owner: z.string().max(100).optional(),
     /** Set only by an import when no employee matched the name. */
