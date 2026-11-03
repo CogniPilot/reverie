@@ -202,6 +202,36 @@ deployments use the paired [prepare/activate workflow](#agent-workstations).
 
 ## Agent workstations
 
+### Delegate stuck-agent recovery
+
+The owner can grant **Recover employees** for viewer reconnects, **Move own plan**
+for self transfers, or **Manage team plans** for colleague transfers and recovery
+of existing transfer journals. **Manage office attendance and restarts** separately
+controls entry, exit and same-recipe restarts. Titles confer none of these grants.
+
+Delegated viewer and forced-transfer recovery requires compatible website, broker
+and laptop CLI versions plus an explicitly prepared private recovery connection.
+On the owner host, select the existing private broker configuration:
+
+```bash
+nix run .#worker-service -- --config "$broker_config" prepare-recovery-auth
+```
+
+This creates a private, purpose-specific issuer and durable replay ledger beside
+the console's canonical data. It grants no employee permissions and starts or
+restarts nothing. Load it through the normal coordinated broker transport upgrade;
+preparation alone does not change already-open office connections. Never mount
+these files into laptops or a shared development container. Missing, changed or
+partially prepared state refuses delegated recovery; do not delete a pending
+ledger update or retained history to bypass a refusal. Set the grants in the
+employee profile, then use `reverie agent capabilities --json` and the
+[recovery handbook](../apps/web/src/web/public/handbook/recovery.md) for commands.
+
+Viewer recovery attaches to the existing provider. Forced transfers can interrupt
+active work and require a truthful caller handoff and stable operation ID. Inspect
+the same journal after an unconfirmed reply; recovery never treats HTTP success as
+proof of chat acceptance or clears unknown deliveries blindly.
+
 For a deployment running autonomous agents, use a separate worker container for
 each employee. Think of these as the experts' office laptops: each has its own
 running tools, private home and restart boundary. Explicit project mounts are
