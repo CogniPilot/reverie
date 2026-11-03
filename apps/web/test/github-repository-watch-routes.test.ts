@@ -89,6 +89,7 @@ async function fixture(multi = false) {
   };
   return {
     app,
+    runtime,
     auth,
     vault,
     token,
@@ -135,6 +136,68 @@ it('actual unrestricted owner can configure/read CAS status; agents/services/coo
     payload: { version: 1, expectedRevision: 0, watches: [f.cfg] },
   });
   expect(stale.statusCode).toBe(409);
+});
+
+async function recoveryFixture() {
+  const f = await fixture();
+  await f.runtime.github.configure({ version: 1, expectedRevision: 0, watches: [f.cfg] });
+  await f.runtime.github.store.update((s) => {
+    const slot = s.slots.repo!;
+    slot.pending = { id: 'a'.repeat(32), text: 'Uncertain notification <img src=x>',
+      phase: 'unknown', generation: slot.generation, next: slot.scan };
+  });
+  const preview = f.runtime.github.previewRecovery('repo');
+  const { version, expectedRevision, generation, batchId, pendingDigest } = preview;
+  return { ...f, preview, input: { version, expectedRevision, generation, batchId, pendingDigest, acknowledgePossibleGap: true } };
+}
+it('recovery preview and acknowledgement require actual owner authority; agent and service claims cannot act', async () => {
+  const f = await recoveryFixture(), before = f.runtime.github.store.snapshot();
+  for (const options of [
+    {}, { headers: { 'x-reverie-parent-session': 'agent' } },
+    { headers: { [SERVICE_HEADER]: f.serviceToken } },
+    { cookies: f.cookies, headers: { 'x-reverie-parent-session': 'agent' } },
+  ]) {
+    for (const method of ['GET', 'POST'] as const) {
+      const r = await f.app.inject({ method, url: '/api/bot-watches/github/repo/recovery', ...options,
+        ...(method === 'POST' ? { payload: f.input } : {}) });
+      expect(r.statusCode).toBe(403);
+      expect(r.headers['cache-control']).toBe('no-store');
+      expect(r.body).not.toContain(f.preview.notification);
+    }
+  }
+  expect(f.runtime.github.store.snapshot()).toEqual(before);
+  const preview = await f.app.inject({ url: '/api/bot-watches/github/repo/recovery', cookies: f.cookies });
+  expect(preview.statusCode).toBe(200);
+  expect(preview.json().data).toEqual(f.preview);
+  expect(preview.body).not.toContain('issueSeen');
+  const saved = await f.app.inject({ method: 'POST', url: '/api/bot-watches/github/repo/recovery',
+    cookies: f.cookies, headers: f.headers, payload: f.input });
+  expect(saved.statusCode).toBe(200);
+  expect(saved.json().data.watches[0].status.lastRecovery.batchId).toBe(f.input.batchId);
+  expect(f.runtime.github.store.snapshot().slots.repo!.pending).toBeUndefined();
+  const stale = await f.app.inject({ method: 'POST', url: '/api/bot-watches/github/repo/recovery',
+    cookies: f.cookies, headers: f.headers, payload: f.input });
+  expect(stale.statusCode).toBe(409);
+});
+it('recovery rejects malformed, unacknowledged and stale descriptors without echoing arbitrary submitted data', async () => {
+  const f = await recoveryFixture(), before = f.runtime.github.store.snapshot();
+  const secret = 'synthetic-input-must-not-be-echoed';
+  for (const payload of [{ ...f.input, acknowledgePossibleGap: false }, { ...f.input, expectedRevision: 99 },
+    { ...f.input, token: secret }, '{"token":"' + secret + '" invalid}', 'x'.repeat(4097)]) {
+    const response = await f.app.inject({ method: 'POST', url: '/api/bot-watches/github/repo/recovery',
+      cookies: f.cookies, headers: { ...f.headers, 'content-type': 'application/json' }, payload });
+    expect([400, 409]).toContain(response.statusCode);
+    expect(response.body).not.toContain(secret);
+    expect(f.runtime.github.store.snapshot()).toEqual(before);
+  }
+});
+it('multi-user recovery remains unavailable even with a verified owner', async () => {
+  const f = await fixture(true);
+  for (const method of ['GET', 'POST'] as const) {
+    const r = await f.app.inject({ method, url: '/api/bot-watches/github/repo/recovery', cookies: f.cookies,
+      ...(method === 'POST' ? { payload: {} } : {}) });
+    expect(r.statusCode).toBe(403);
+  }
 });
 it('malformed JSON and rejected extra command/token fields never echo submitted secret text', async () => {
   const f = await fixture(),

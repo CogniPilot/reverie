@@ -33,6 +33,14 @@ const scanSchema = z
       .optional(),
   })
   .strict();
+const recoveryReceiptSchema = z
+  .object({
+    at: z.number().int().nonnegative(),
+    batchId: z.string().length(32),
+    pendingDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    scannedAt: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
 const slotSchema = z
   .object({
     config: GithubWatchConfig,
@@ -47,6 +55,7 @@ const slotSchema = z
     baselineAt: z.number().int().optional(),
     ciCreatedSince: z.number().int().optional(),
     posts: z.array(z.number().int()).max(120),
+    lastRecovery: recoveryReceiptSchema.optional(),
     pending: z
       .object({
         id: z.string().length(32),
@@ -66,6 +75,7 @@ const slotSchema = z
           .optional(),
         scannedAt: z.number().int().nonnegative().optional(),
         createdSince: z.number().int().nonnegative().optional(),
+        continuedAfterUnknown: z.literal(true).optional(),
       })
       .strict()
       .optional(),
@@ -85,6 +95,25 @@ type PreparedCancellation = {
   generation: number;
   pending: NonNullable<z.infer<typeof slotSchema>['pending']>;
 };
+type UnknownRecoveryIntent = {
+  kind: 'github-watch-unknown-continuation-proposed';
+  id: string;
+  generation: number;
+  at: number;
+  expectedRevision: number;
+  pendingDigest: string;
+  pending: NonNullable<z.infer<typeof slotSchema>['pending']>;
+};
+export const GithubUnknownRecoveryInput = z
+  .object({
+    version: z.literal(1),
+    expectedRevision: z.number().int().nonnegative(),
+    generation: z.number().int().positive(),
+    batchId: z.string().length(32),
+    pendingDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    acknowledgePossibleGap: z.literal(true),
+  })
+  .strict();
 export const GithubWatchCollectionInput = z
   .object({
     version: z.literal(1),
@@ -269,6 +298,8 @@ export class GithubRepositoryWatches {
           failures: x.failures,
           pendingCount: x.pending ? 1 + (x.pending.remaining?.length ?? 0) : 0,
           lastError: x.lastError ?? null,
+          canRecoverUnknown: x.pending?.phase === 'unknown',
+          lastRecovery: x.lastRecovery ?? null,
           legacyAdopted: x.legacyAdopted,
           ciCoverage: {
             createdSince: x.ciCreatedSince ?? null,
@@ -331,7 +362,7 @@ export class GithubRepositoryWatches {
       throw new GithubWatchError('AUTH_REQUIRED');
     }
   }
-  private async archiveCancellation(record: PreparedCancellation) {
+  private async archiveCancellation(record: PreparedCancellation | UnknownRecoveryIntent) {
     const bytes = Buffer.from(JSON.stringify(record));
     // Preserve small legacy records exactly; the generic archive's per-call/line cap stays 2MiB.
     if (Buffer.byteLength(JSON.stringify({ version: 1, record }) + '\n') <= 2 * 1024 * 1024) {
@@ -345,7 +376,10 @@ export class GithubRepositoryWatches {
     for (let partIndex = 0; partIndex < partCount; partIndex++)
       await this.store.archive([
         {
-          kind: 'github-watch-prepared-cancelled-fragment',
+          kind:
+            record.kind === 'github-watch-prepared-cancelled'
+              ? 'github-watch-prepared-cancelled-fragment'
+              : 'github-watch-unknown-continuation-fragment',
           version: 1,
           id: record.id,
           generation: record.generation,
@@ -357,6 +391,104 @@ export class GithubRepositoryWatches {
         },
       ]);
     // Init validates framing only. A partial frame group never replaces the original primary pending record.
+  }
+  /** Owner preview only: never reads credentials, posts a message, or changes a delivery outcome. */
+  previewRecovery(id: string) {
+    GithubWatchConfig.shape.id.parse(id);
+    const state = this.store.snapshot(),
+      slot = own(state.slots, id);
+    need(slot && !slot.removed && slot.pending?.phase === 'unknown', 'RECOVERY_CHANGED');
+    const pending = slot!.pending!;
+    return {
+      version: 1 as const,
+      expectedRevision: state.revision,
+      generation: slot!.generation,
+      batchId: pending.id,
+      pendingDigest: fingerprint([slot!.config, slot!.generation, pending]),
+      repository: `${slot!.config.owner}/${slot!.config.repo}`,
+      enabled: slot!.config.enabled,
+      notification: pending.text,
+      scannedAt: pending.scannedAt ?? null,
+      remainingBatches: pending.remaining?.length ?? 0,
+    };
+  }
+  private adoptAcknowledgedScan(slot: z.infer<typeof slotSchema>) {
+    if (!slot.pending?.continuedAfterUnknown) return;
+    slot.scan = slot.pending.next;
+    if (slot.pending.createdSince !== undefined) slot.ciCreatedSince = slot.pending.createdSince;
+  }
+  /**
+   * Explicit owner acknowledgement of a possible missed notification. Preserve the whole original unknown batch before
+   * advancing its scan; do not call it delivered, repost it, reset the watch, enable a disabled watch, or run a manual poll.
+   * Other prepared batches remain queued for ordinary delivery. The revision makes an already committed request stale.
+   */
+  async recoverUnknown(id: string, raw: unknown, validate: () => void = () => {}) {
+    const input = GithubUnknownRecoveryInput.parse(raw);
+    const check = () => {
+      need(validate() === undefined, 'SYNCHRONOUS_AUTHORITY_REQUIRED');
+      const preview = this.previewRecovery(id);
+      need(preview.expectedRevision === input.expectedRevision, 'REVISION_CONFLICT');
+      need(
+        preview.generation === input.generation &&
+          preview.batchId === input.batchId &&
+          preview.pendingDigest === input.pendingDigest,
+        'RECOVERY_CHANGED'
+      );
+    };
+    check();
+    need(!this.configuring, 'CONFIGURATION_BUSY');
+    this.configuring = true;
+    try {
+      // A flight that already saw the unknown batch may find its original post. Let that flight settle, then revalidate.
+      if (this.tickFlight) await this.tickFlight;
+      check();
+      const slot = own(this.store.snapshot().slots, id)!;
+      const intent: UnknownRecoveryIntent = {
+        kind: 'github-watch-unknown-continuation-proposed',
+        id,
+        generation: slot.generation,
+        at: this.now(),
+        expectedRevision: input.expectedRevision,
+        pendingDigest: input.pendingDigest,
+        pending: slot.pending!,
+      };
+      await this.archiveCancellation(intent);
+      check();
+      await this.store.update((state) => {
+        check();
+        need(state.revision === input.expectedRevision, 'REVISION_CONFLICT');
+        const current = own(state.slots, id)!;
+        need(
+          current.pending?.phase === 'unknown' &&
+            fingerprint([current.config, current.generation, current.pending]) === input.pendingDigest,
+          'RECOVERY_CHANGED'
+        );
+        const pending = current.pending!;
+        current.lastRecovery = {
+          at: intent.at,
+          batchId: pending.id,
+          pendingDigest: input.pendingDigest,
+          scannedAt: pending.scannedAt ?? null,
+        };
+        const remaining = [...(pending.remaining ?? [])],
+          following = remaining.shift();
+        if (following) {
+          // Keep the scan once, in pending.next: duplicating its page cache can exceed the 4MiB state cap.
+          // A later explicit configuration cancellation must also adopt these acknowledged observations.
+          current.pending = { ...pending, ...following, remaining, phase: 'prepared', continuedAfterUnknown: true };
+          delete current.pending.messageId;
+        } else {
+          current.scan = pending.next;
+          if (pending.createdSince !== undefined) current.ciCreatedSince = pending.createdSince;
+          delete current.pending;
+        }
+        state.revision++;
+      }, check);
+      need(validate() === undefined, 'SYNCHRONOUS_AUTHORITY_REQUIRED');
+      return this.status();
+    } finally {
+      this.configuring = false;
+    }
   }
   async configure(raw: unknown, validate: () => void = () => {}) {
     const check = () => {
@@ -484,6 +616,7 @@ export class GithubRepositoryWatches {
             x.config.enabled = false;
             x.removed = true;
             x.generation++;
+            this.adoptAcknowledgedScan(x);
             delete x.pending;
           }
         for (const c of input.watches) {
@@ -491,7 +624,10 @@ export class GithubRepositoryWatches {
           if (x) {
             if (fingerprint(x.config) !== fingerprint(c) || x.removed) {
               x.generation++;
-              if (x.pending?.phase === 'prepared') delete x.pending;
+              if (x.pending?.phase === 'prepared') {
+                this.adoptAcknowledgedScan(x);
+                delete x.pending;
+              }
               delete x.lastError;
               delete x.lastSuccessAt;
               x.nextPollAt = 0;

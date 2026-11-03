@@ -214,13 +214,44 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
         return { success: true, data: await github.configure(req.body, validate) };
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-        return reply
-          .code(code === 'REVISION_CONFLICT' ? 409 : 400)
-          .send({
-            success: false,
-            error: 'Watch configuration refused; refresh status and retain pending delivery evidence',
-            errorCode: code === 'REVISION_CONFLICT' ? 'REVISION_CONFLICT' : 'WATCH_CONFIGURATION_REFUSED',
-          });
+        return reply.code(code === 'REVISION_CONFLICT' ? 409 : 400).send({
+          success: false,
+          error: 'Watch configuration refused; refresh status and retain pending delivery evidence',
+          errorCode: code === 'REVISION_CONFLICT' ? 'REVISION_CONFLICT' : 'WATCH_CONFIGURATION_REFUSED',
+        });
+      }
+    }
+  );
+  app.get<{ Params: { id: string } }>('/api/bot-watches/github/:id/recovery', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (!allowed(req)) return reply.code(403).send({ success: false, error: 'Verified owner required' });
+    try {
+      return { success: true, data: github.previewRecovery(req.params.id) };
+    } catch {
+      return reply.code(409).send({ success: false, error: 'Recovery unavailable; refresh watcher status' });
+    }
+  });
+  app.post<{ Params: { id: string } }>(
+    '/api/bot-watches/github/:id/recovery',
+    {
+      bodyLimit: 4096,
+      errorHandler: (_error, _request, reply) =>
+        reply.code(400).send({ success: false, error: 'Invalid recovery acknowledgement' }),
+    },
+    async (req, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      if (!allowed(req)) return reply.code(403).send({ success: false, error: 'Verified owner required' });
+      const validate = () => {
+        if (!allowed(req)) throw Error('OWNER_REQUIRED');
+      };
+      try {
+        return { success: true, data: await github.recoverUnknown(req.params.id, req.body, validate) };
+      } catch {
+        // A lost reply/write may follow a commit. Never imply that a failed response permits a blind retry.
+        return reply.code(409).send({
+          success: false,
+          error: 'Recovery not confirmed; refresh watcher status before reviewing again',
+        });
       }
     }
   );
