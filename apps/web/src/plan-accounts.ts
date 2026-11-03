@@ -65,9 +65,6 @@ export interface PlanSession {
 /** Status-line numbers older than this are shown as stale, with their as-of time. */
 export const USAGE_STALE_MS = 30 * 60 * 1000;
 
-/** Each plan's last `burnCheck`, by account id (see `cachedBurnCheck`). */
-const burnChecks = new Map<string, { at: number; weekReset: number | null; check: BurnCheck | null }>();
-
 export interface PlanRow {
   id: string;
   label: string;
@@ -290,6 +287,8 @@ export interface PlanServiceDeps {
 export class PlanService {
   private history: Record<string, UsageSample[]> | null = null;
   private saving: Promise<void> = Promise.resolve();
+  /** Each plan's last `burnCheck` from this service's own history, by account id (see `cachedBurnCheck`). */
+  private readonly burnChecks = new Map<string, { at: number; weekReset: number | null; check: BurnCheck | null }>();
 
   constructor(private readonly deps: PlanServiceDeps) {}
 
@@ -457,7 +456,7 @@ export class PlanService {
       const agentBurn = burnInput
         ? planAgentBurn({
             ...burnInput,
-            check: cachedBurnCheck(burnChecks, a.id, { ...burnInput, sessionCosts: burnInput.sessions.map((s) => s.costs) }),
+            check: cachedBurnCheck(this.burnChecks, a.id, { ...burnInput, sessionCosts: burnInput.sessions.map((s) => s.costs) }),
           })
         : null;
       return {
