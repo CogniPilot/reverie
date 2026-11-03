@@ -10,6 +10,7 @@
  * through an injected `exec` (argv arrays, never a shell), so tests need no repository or network.
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -148,7 +149,7 @@ async function roomMessages(
 }
 
 /** The identities commits must carry: `--identity`, else the checkout's `git config reverie.publishIdentity`. */
-async function publishIdentities(deps: PublishDeps, o: PublishOptions): Promise<string[]> {
+async function publishIdentities(deps: PublishDeps, o: { identities?: string[]; cwd?: string }): Promise<string[]> {
   if (o.identities?.length) return o.identities;
   const configured = await deps.exec('git', ['config', '--get-all', 'reverie.publishIdentity'], { cwd: o.cwd });
   return configured.stdout
@@ -200,6 +201,46 @@ function report(deps: AgentDeps, findings: Finding[], extra: Record<string, unkn
     for (const f of findings) deps.io.err(`  ${f.check}: ${f.detail}`);
   }
   return AGENT_EXIT.refused;
+}
+
+type Git = (...args: string[]) => Promise<ExecResult>;
+
+/**
+ * The checks on what a packet carries, shared by publish and seal: every commit in base..head (identity, one sign-off,
+ * no attribution, no team names or board ids in its message), the diff (no symlinks or build output, no names or ids in
+ * added lines) and a clean merge onto the base.
+ */
+async function checkRange(
+  git: Git,
+  o: { baseRef: string; label: string; head: string; identities: string[]; names: string[] }
+): Promise<{ findings: Finding[]; revs: string[]; paths: string[] }> {
+  const { baseRef, head, identities, names } = o;
+  const findings: Finding[] = [];
+  const revs = (await git('rev-list', '--reverse', `${baseRef}..${head}`)).stdout.split('\n').filter(Boolean);
+  if (!revs.length) findings.push({ check: 'commits', detail: `${head.slice(0, 8)} adds nothing to ${o.label}` });
+  for (const sha of revs) {
+    const commit = parseCommit(sha, (await git('cat-file', 'commit', sha)).stdout);
+    findings.push(
+      ...checkCommit(commit, identities),
+      ...scanPublicText(`commit ${sha.slice(0, 8)}`, commit.message, names)
+    );
+  }
+
+  const raw = (await git('diff', '--raw', '--no-renames', '--no-abbrev', `${baseRef}...${head}`)).stdout;
+  const changes = raw
+    .split('\n')
+    .map((line) => /^:\d{6} (\d{6}) \S+ \S+ ([A-Z])\t(.+)$/.exec(line))
+    .filter((m): m is RegExpExecArray => !!m && m[2] !== 'D')
+    .map((m) => ({ mode: m[1], path: m[3] }));
+  findings.push(...checkPaths(changes));
+  const patch = (await git('diff', '--no-renames', '--no-color', '-U0', `${baseRef}...${head}`)).stdout;
+  for (const [path, added] of addedLinesByFile(patch)) findings.push(...scanPublicText(path, added, names));
+
+  const merge = await git('merge-tree', '--write-tree', baseRef, head);
+  if (merge.code !== 0)
+    findings.push({ check: 'merge', detail: `${head.slice(0, 8)} does not merge cleanly onto ${o.label}` });
+
+  return { findings, revs, paths: changes.map((c) => c.path) };
 }
 
 /** Every check, in order; returns the plan only when nothing failed. */
@@ -284,30 +325,9 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
       findings: [...findings, { check: 'bundle', detail: `fetching the bundle failed: ${loaded.stderr.trim()}` }],
     };
 
-  const revs = (await git('rev-list', '--reverse', `${baseRef}..${head}`)).stdout.split('\n').filter(Boolean);
-  if (!revs.length)
-    findings.push({ check: 'commits', detail: `${head.slice(0, 8)} adds nothing to ${remote}/${base}` });
-  for (const sha of revs) {
-    const commit = parseCommit(sha, (await git('cat-file', 'commit', sha)).stdout);
-    findings.push(
-      ...checkCommit(commit, identities),
-      ...scanPublicText(`commit ${sha.slice(0, 8)}`, commit.message, names)
-    );
-  }
-
-  const raw = (await git('diff', '--raw', '--no-renames', '--no-abbrev', `${baseRef}...${head}`)).stdout;
-  const changes = raw
-    .split('\n')
-    .map((line) => /^:\d{6} (\d{6}) \S+ \S+ ([A-Z])\t(.+)$/.exec(line))
-    .filter((m): m is RegExpExecArray => !!m && m[2] !== 'D')
-    .map((m) => ({ mode: m[1], path: m[3] }));
-  findings.push(...checkPaths(changes));
-  const patch = (await git('diff', '--no-renames', '--no-color', '-U0', `${baseRef}...${head}`)).stdout;
-  for (const [path, added] of addedLinesByFile(patch)) findings.push(...scanPublicText(path, added, names));
-
-  const merge = await git('merge-tree', '--write-tree', baseRef, head);
-  if (merge.code !== 0)
-    findings.push({ check: 'merge', detail: `${head.slice(0, 8)} does not merge cleanly onto ${remote}/${base}` });
+  const range = await checkRange(git, { baseRef, label: `${remote}/${base}`, head, identities, names });
+  findings.push(...range.findings);
+  const { revs, paths } = range;
 
   if (remoteHead && remoteHead !== head) {
     const ancestor = await git('merge-base', '--is-ancestor', remoteHead, head);
@@ -347,7 +367,6 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
       });
   }
 
-  const paths = changes.map((c) => c.path);
   return {
     plan: findings.length
       ? undefined
@@ -619,6 +638,107 @@ export async function agentPublishText(deps: PublishDeps, o: PublishTextOptions)
   return AGENT_EXIT.ok;
 }
 
+export interface SealOptions {
+  packetDir: string;
+  /** The local branch whose commits the packet carries. */
+  branch: string;
+  cwd?: string;
+  remote?: string;
+  base?: string;
+  identities?: string[];
+}
+
+/** The files a sealed packet holds, in SHA256SUMS order. */
+export const PACKET_FILES = ['source.bundle', 'PR-TITLE.txt', 'PR-BODY.md'] as const;
+
+/**
+ * Seal a packet to the standard publish checks: the author has written PR-TITLE.txt and PR-BODY.md in the directory;
+ * seal checks them and every commit in base..branch exactly as publish will, writes a full bundle from the remote base
+ * (its only prerequisite is the base tip, never another unpublished packet), writes SHA256SUMS, and reads the packet
+ * back. A directory already holding a bundle or SHA256SUMS is refused: a sealed packet is never resealed in place.
+ */
+export async function agentSeal(deps: PublishDeps, o: SealOptions): Promise<number> {
+  const remote = o.remote ?? 'origin';
+  const base = o.base ?? 'main';
+  const git = (...args: string[]) => deps.exec('git', args, { cwd: o.cwd });
+  const read = deps.readFile ?? readOrNull;
+  for (const name of ['source.bundle', 'SHA256SUMS', 'SUMS.txt'])
+    if (read(join(o.packetDir, name)))
+      return report(deps, [{ check: 'parts', detail: `${name} already exists: seal into a new directory` }]);
+  const titleText = read(join(o.packetDir, 'PR-TITLE.txt'));
+  const bodyText = read(join(o.packetDir, 'PR-BODY.md'));
+  if (!titleText || !bodyText)
+    return report(deps, [
+      { check: 'parts', detail: 'write PR-TITLE.txt and PR-BODY.md in the packet directory first' },
+    ]);
+  const title = checkTitle(titleText.toString('utf8'));
+  const body = splitBranchNaming(bodyText.toString('utf8'));
+  const findings = [...title.findings, ...body.findings];
+  if (body.branch && body.branch !== o.branch)
+    findings.push({ check: 'branch', detail: `PR-BODY.md names \`${body.branch}\`, but the packet seals ${o.branch}` });
+  const identities = await publishIdentities(deps, o);
+  if (!identities.length)
+    findings.push({
+      check: 'identity',
+      detail: 'no publish identity: pass --identity "Name <email>" or set git config reverie.publishIdentity',
+    });
+  const names = await teamNames(deps);
+  if (!Array.isArray(names)) return report(deps, [...findings, { check: 'names', detail: names.error }]);
+  findings.push(...checkBranchName(o.branch, names));
+  if (title.title) findings.push(...scanPublicText('PR title', title.title, names));
+  findings.push(...scanPublicText('PR body', body.publicBody, names));
+
+  const fetched = await git('fetch', '--quiet', remote, base);
+  if (fetched.code !== 0)
+    return report(deps, [
+      ...findings,
+      { check: 'git', detail: `fetching ${remote}/${base} failed: ${fetched.stderr.trim()}` },
+    ]);
+  const baseRef = `refs/remotes/${remote}/${base}`;
+  const resolved = await git('rev-parse', '--verify', '--quiet', `refs/heads/${o.branch}^{commit}`);
+  const head = resolved.stdout.trim();
+  if (resolved.code !== 0 || !/^[0-9a-f]{40}$/.test(head))
+    return report(deps, [...findings, { check: 'branch', detail: `no local branch ${o.branch}` }]);
+  if (identities.length) {
+    const range = await checkRange(git, { baseRef, label: `${remote}/${base}`, head, identities, names });
+    findings.push(...range.findings);
+  }
+  if (findings.length) return report(deps, findings);
+
+  const bundlePath = join(o.packetDir, 'source.bundle');
+  const created = await git('bundle', 'create', '--quiet', bundlePath, `${baseRef}..refs/heads/${o.branch}`);
+  if (created.code !== 0)
+    return report(deps, [{ check: 'bundle', detail: created.stderr.trim() || 'git bundle create failed' }]);
+  const sums = PACKET_FILES.map(
+    (name) =>
+      `${createHash('sha256')
+        .update(read(join(o.packetDir, name))!)
+        .digest('hex')}  ${name}`
+  ).join('\n');
+  writeFileSync(join(o.packetDir, 'SHA256SUMS'), `${sums}\n`);
+
+  // Read it back as publish will: sums, parts, title and Branch Naming, then the bundle's single head.
+  const back = readPacket(o.packetDir, read);
+  const heads = (await git('bundle', 'list-heads', bundlePath)).stdout.match(/^[0-9a-f]{40}/gm) ?? [];
+  if (
+    back.findings.length ||
+    heads.length !== 1 ||
+    heads[0] !== head ||
+    (await git('bundle', 'verify', '--quiet', bundlePath)).code !== 0
+  )
+    return report(deps, [
+      ...back.findings,
+      { check: 'bundle', detail: 'the sealed packet did not read back as written' },
+    ]);
+  const sumsDigest = createHash('sha256')
+    .update(read(join(o.packetDir, 'SHA256SUMS'))!)
+    .digest('hex');
+  if (deps.json) deps.io.out(JSON.stringify({ success: true, head, branch: o.branch, sha256sums: sumsDigest }));
+  else
+    deps.io.out(`✓ sealed ${o.branch} at ${head.slice(0, 8)} in ${o.packetDir} (SHA256SUMS ${sumsDigest.slice(0, 8)})`);
+  return AGENT_EXIT.ok;
+}
+
 const repeat = (value: string, all: string[] = []) => [...all, value];
 
 export function registerPublishCommands(
@@ -689,6 +809,40 @@ export function registerPublishCommands(
               watch: o.watch,
               minChecks: Number(o.minChecks) || 1,
               watchTimeoutMinutes: Number(o.watchTimeout) || 120,
+            }
+          )
+        )
+    );
+  agent
+    .command('seal <packet-dir>')
+    .description(
+      'Seal a packet to the publish standard: check PR-TITLE/PR-BODY and every commit, write a full bundle from the base and SHA256SUMS'
+    )
+    .requiredOption('--branch <name>', 'Local branch to seal; must match the Branch Naming section in PR-BODY.md')
+    .option('-C, --cwd <dir>', 'Git checkout holding the branch (default: the current directory)')
+    .option('--remote <name>', 'Git remote', 'origin')
+    .option('--base <branch>', 'Base branch the bundle is cut from', 'main')
+    .option(
+      '--identity <name-email>',
+      'Identity commits must carry, "Name <email>" (repeat); default: git config reverie.publishIdentity',
+      repeat
+    )
+    .option('--json', 'Machine-readable result')
+    .action(
+      (
+        packetDir: string,
+        o: { branch: string; cwd?: string; remote: string; base: string; identity?: string[]; json?: boolean }
+      ) =>
+        run(Boolean(o.json), (deps) =>
+          agentSeal(
+            { ...deps, exec: spawnExec },
+            {
+              packetDir: resolve(packetDir),
+              branch: o.branch,
+              cwd: o.cwd,
+              remote: o.remote,
+              base: o.base,
+              identities: o.identity,
             }
           )
         )

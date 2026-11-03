@@ -5,7 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -13,6 +13,7 @@ import {
   HELD_DRAFT_BODY,
   addedLinesByFile,
   agentPublish,
+  agentSeal,
   agentPublishText,
   spawnExec,
   watchChecks,
@@ -329,6 +330,73 @@ describe('agent publish', () => {
     const f = fake({ gh: ghNoPr });
     expect(await agentPublish(f.deps, { ...options(tampered), dryRun: true })).toBe(4);
     expect(f.err.join('\n')).toContain('PR-TITLE.txt does not match its digest');
+  });
+});
+
+describe('agent seal', () => {
+  /** A new packet directory holding only the author's title and body. */
+  const draft = (branch: string, body = '## Summary\n\nSealed.\n', title = 'feat: sealed') => {
+    const dir = mkdtempSync(join(root, 'seal-'));
+    writeFileSync(join(dir, 'PR-TITLE.txt'), `${title}\n`);
+    writeFileSync(join(dir, 'PR-BODY.md'), `## Branch Naming\n\n\`${branch}\`\n\n${body}`);
+    return dir;
+  };
+  const sealOptions = (packetDir: string, branch: string) => ({ packetDir, branch, cwd: author });
+
+  it('seals a packet that publish then accepts, with a bundle cut from the base', async () => {
+    git(author, ['config', 'reverie.publishIdentity', ID]);
+    git(author, ['switch', '-q', '-c', 'seal-one', 'origin/main']);
+    const head = commit('seal.txt', 'one\n', signedMessage('feat: seal one'));
+    const dir = draft('seal-one');
+    const f = fake();
+    expect(await agentSeal(f.deps, sealOptions(dir, 'seal-one'))).toBe(0);
+    expect(f.out.at(-1)).toContain(`sealed seal-one at ${head.slice(0, 8)}`);
+    expect(
+      readFileSync(join(dir, 'SHA256SUMS'), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => l.split('  ')[1])
+    ).toEqual(['source.bundle', 'PR-TITLE.txt', 'PR-BODY.md']);
+    // The only prerequisite is the base tip, so a main-only publisher verifies it with no --prereq.
+    const lean = clonePublisher('lean-seal', true);
+    const publish = fake({ gh: ghNoPr });
+    expect(await agentPublish(publish.deps, { ...options(dir), cwd: lean, dryRun: true })).toBe(0);
+  });
+
+  it('cuts a stacked branch from the base too, so it never depends on an unpublished packet', async () => {
+    git(author, ['switch', '-q', '-c', 'seal-lower', 'origin/main']);
+    commit('stack.txt', 'lower\n', signedMessage('feat: lower'));
+    git(author, ['switch', '-q', '-c', 'seal-upper']);
+    commit('stack.txt', 'upper\n', signedMessage('feat: upper'));
+    const dir = draft('seal-upper');
+    expect(await agentSeal(fake().deps, sealOptions(dir, 'seal-upper'))).toBe(0);
+    const lean = clonePublisher('lean-stack', true);
+    const publish = fake({ gh: ghNoPr });
+    expect(await agentPublish(publish.deps, { ...options(dir), cwd: lean, dryRun: true })).toBe(0);
+    expect(publish.out[0]).toContain('2 commits');
+  });
+
+  it('refuses, writing nothing, when the text or the commits fail a check', async () => {
+    git(author, ['switch', '-q', '-c', 'seal-bad', 'origin/main']);
+    commit('bad.txt', 'x\n', signedMessage('feat: bad', 'Co-Authored-By: Helper <h@example.com>\n'));
+    const cases: Array<[string, string, string]> = [
+      [draft('seal-bad'), 'seal-bad', 'attribution trailer'],
+      [draft('other-branch'), 'seal-bad', 'PR-BODY.md names `other-branch`'],
+      [draft('seal-bad', 'Reviewed by Dana.\n'), 'seal-bad', 'PR body names "Dana"'],
+      [draft('seal-missing'), 'seal-missing', 'no local branch seal-missing'],
+    ];
+    for (const [dir, branch, expected] of cases) {
+      const f = fake();
+      expect(await agentSeal(f.deps, sealOptions(dir, branch)), expected).toBe(4);
+      expect(f.err.join('\n')).toContain(expected);
+      expect(existsSync(join(dir, 'source.bundle')) || existsSync(join(dir, 'SHA256SUMS')), expected).toBe(false);
+    }
+  });
+
+  it('never reseals a directory that already holds a sealed packet', async () => {
+    const f = fake();
+    expect(await agentSeal(f.deps, sealOptions(good, BRANCH))).toBe(4);
+    expect(f.err.join('\n')).toContain('already exists');
   });
 });
 
