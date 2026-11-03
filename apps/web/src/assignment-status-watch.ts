@@ -91,6 +91,11 @@ export interface AssignmentWatchDeps {
   running(sessionId: string): boolean;
   bot(id: string): ChatBot | undefined;
   room(id: string): ChatRoom | undefined;
+  /**
+   * The rooms this session is a member of now. A progress post naming the card counts in any of them; absent, only the
+   * check-in room is read.
+   */
+  roomsFor?(sessionId: string): readonly ChatRoom[];
   /** Must use current permission + phone policy; returns false for unknown delivery eligibility. */
   canDeliver(sessionId: string, roomId: string): boolean;
   canEdit(employeeId: string): boolean;
@@ -414,12 +419,12 @@ export class AssignmentStatusWatch {
         this.now() >= entry.deadline &&
         this.deps.canDeliver(entry.sessionId, room.id)
       ) {
-        // Progress posted on the card in this room since the check-in counts as an answer: no page. It records only
-        // that the assignee spoke; the card's status, reason and dates are left as they are.
-        const post = this.progressPost(entry, current.task, current.employee);
-        if (post) {
+        // Progress posted on the card since the check-in, in any room the assignee is in, counts as an answer: no page.
+        // It records only that the assignee spoke; the card's status, reason and dates are left as they are.
+        const found = this.progressPost(entry, current.task, current.employee);
+        if (found) {
           await this.audit({ action: 'assignment-checkin-progress-post', by: `bot:${bot.id}`, checkinId: entry.id,
-            taskId: entry.taskId, messageId: post.id });
+            taskId: entry.taskId, roomId: found.roomId, messageId: found.post.id });
           entry.phase = 'cancelled';
           await this.save(entry);
           await this.resolveAttention(entry, 'Assignee posted progress on the card');
@@ -792,18 +797,27 @@ export class AssignmentStatusWatch {
       await this.save(entry);
     }
   }
-  /** The assignee's own post in the check-in room, since the check-in was asked, that names the card. */
+  /**
+   * The assignee's own post, since the check-in was asked, that names the card: in the check-in room first, then in any
+   * other room the assignee is a member of now (a checkpoint is often posted where the work is discussed).
+   */
   private progressPost(entry: Entry, task: Issue, employee: AssignmentEmployee) {
     const since = entry.askedAt ?? entry.createdAt;
-    return this.deps.room(entry.roomId)?.messages.find(
-      (m) =>
-        !m.deleted &&
-        m.at >= since &&
-        m.from.kind === 'agent' &&
-        m.from.sessionId === employee.sessionId &&
-        m.id !== entry.promptId &&
-        namesTask(m.text, task.id)
-    );
+    const checkinRoom = this.deps.room(entry.roomId);
+    const others = (this.deps.roomsFor?.(employee.sessionId) ?? []).filter((r) => r.id !== entry.roomId);
+    for (const room of checkinRoom ? [checkinRoom, ...others] : others) {
+      const post = room.messages.find(
+        (m) =>
+          !m.deleted &&
+          m.at >= since &&
+          m.from.kind === 'agent' &&
+          m.from.sessionId === employee.sessionId &&
+          m.id !== entry.promptId &&
+          namesTask(m.text, task.id)
+      );
+      if (post) return { post, roomId: room.id };
+    }
+    return undefined;
   }
   /**
    * Who an escalation goes to: the card's requester when they assigned it, meaning another employee of the same owner who

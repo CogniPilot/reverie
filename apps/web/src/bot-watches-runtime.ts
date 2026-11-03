@@ -61,6 +61,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
     running: d.running,
     bot: (id) => d.bots.get(id),
     room: (id) => d.chat.room(id),
+    roomsFor: (sid) => d.chat.roomsFor(sid),
     canDeliver: (sid, rid) => {
       const r = d.chat.room(rid);
       return (
