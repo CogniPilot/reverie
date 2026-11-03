@@ -69,6 +69,15 @@ describe('bankedResetAdvice', () => {
     expect(bankedResetAdvice(row(), NOW).some((l) => l.includes('expires'))).toBe(false);
   });
 
+  it('gives no timing advice from a stale reading: signed out, or a weekly reset already past', () => {
+    const signedOut = { ...row(), signedIn: false };
+    expect(bankedResetAdvice(signedOut, NOW)[0]).toContain('signed out: the last reading may be stale');
+    expect(bankedResetAdvice(row({ weekReset: NOW - HOUR }), NOW)[0]).toContain('the recorded weekly reset has passed');
+    // The expiry warning still shows: a reset expires whatever the reading says.
+    const expiring = { ...signedOut, bankedResets: { availableCount: 1, earliestExpiresAt: NOW + 2 * HOUR } };
+    expect(bankedResetAdvice(expiring, NOW)[0]).toContain('expires in 2 h');
+  });
+
   it('says nothing without banked resets, when they are unknown, or for other providers', () => {
     expect(bankedResetAdvice(row({ banked: { availableCount: 0, earliestExpiresAt: null } }), NOW)).toEqual([]);
     expect(bankedResetAdvice(row({ banked: null }), NOW)).toEqual([]);

@@ -2302,7 +2302,11 @@ export function bankedResetAdvice(a: PlanRowView, now: number, timeZone?: string
     lines.push(`  ! a banked reset expires in ${hours(b.earliestExpiresAt - now)} (${planEt(b.earliestExpiresAt, timeZone)})`);
   const weekly = a.pace.weekly;
   const untilReset = a.pace.weekReset !== null ? a.pace.weekReset - now : null;
-  if (weekly === null || !Number.isFinite(weekly)) lines.push('  apply one only at 100% of the week; current use is unknown');
+  // A signed-out account, or one whose recorded weekly reset has already passed, is judged from a stale reading.
+  if (!a.signedIn) lines.push('  signed out: the last reading may be stale; sign in before judging whether to apply one');
+  else if (untilReset !== null && untilReset <= 0)
+    lines.push('  the recorded weekly reset has passed, so this reading is stale; check current use before applying one');
+  else if (weekly === null || !Number.isFinite(weekly)) lines.push('  apply one only at 100% of the week; current use is unknown');
   else if (weekly < 100) lines.push(`  not now: the week is at ${planPct(weekly)}; apply one only at 100%`);
   else if (untilReset !== null && untilReset <= BANKED_RESET_NEAR_WEEKLY_MS)
     lines.push(`  not now: the week resets in ${hours(untilReset)} anyway; keep the banked reset`);
