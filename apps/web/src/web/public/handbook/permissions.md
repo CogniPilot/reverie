@@ -16,11 +16,11 @@ For read-only access, disable all three grants; history remains. New hires defau
 
 ## Recovery and plans
 
-**Recover employees** permits scoped employee wake. Website restart is a separate host-maintainer grant. Check current records rather than titles or old messages.
+**Recover employees** permits scoped employee wake and attach-only terminal-viewer recovery. Viewer repair requires a compatible authenticated native office connection and fresh provider health; it cannot restart the provider or replay uncertain input. Website restart is a separate host-maintainer grant. Check current records rather than titles or old messages.
 
 **Manage office attendance and restarts** defaults off. Its profile checkbox saves immediately; each action rechecks the grant. It permits explicit Enter office, Leave office and same-recipe restarts. It grants no hiring, retirement, profile/permission edits, account changes, runtime reconfiguration or host maintenance. Other grants and coordinator membership do not imply it.
 
-**Move own plan** permits self move requests; **Manage team plans** permits colleague requests. Both require the affected expert's handoff and approval. Neither grants provider sign-in or account administration.
+**Move own plan** permits self transfers; **Manage team plans** permits colleague transfers. Ordinary requests require the affected expert's handoff and approval. With a compatible authenticated native office connection, these grants also permit explicit forced transfers of stuck experts and guarded recovery of their existing transfer journals, within the same self/team scope. Forced transfers require the caller's truthful handoff and a stable operation ID; they can interrupt active work. Neither grant permits provider sign-in, account administration, permission changes or arbitrary session creation.
 
 These grants also allow explicit self refresh on the same account with `plan-move request ACCOUNT_ID --restart`. Refresh remains self-only, with one-time approval and safe handoff. It grants no installation, arbitrary session creation or vacation wake.
 

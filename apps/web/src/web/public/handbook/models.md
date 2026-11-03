@@ -34,6 +34,25 @@ reverie agent plan-move reject REQUEST_ID
 
 The CLI reads the private approval credential itself; do not print or copy it. Approval reserves the replacement metadata, verifies source cleanup, then starts and checks the replacement before delivering the handoff. A request alone does not prove that a move completed. Model choice does not grant provider sign-in or account administration. Never paste an endpoint API key into chat or a public handbook page.
 
+## Transfer a stuck expert
+
+When an expert cannot complete the normal approval workflow, an owner can force
+the transfer. An agent with **Manage team plans**, or **Move own plan** for itself,
+can use the same guarded recovery through its authenticated native office connection:
+
+```bash
+reverie agent plan-move force ACCOUNT_ID --employee EMPLOYEE_ID --id STABLE_OPERATION_ID --handoff-file /path/to/handoff.md --json
+```
+
+Write a truthful handoff preserving current work, completed checks, unfinished work
+and durable recovery locations. This explicit action can interrupt the expert;
+it does not record approval on their behalf. Permissions and current bindings are
+rechecked during the operation. A returned operation is not completion: inspect its
+existing journal after a lost reply, then use the guarded status, cancellation or
+adoption actions as appropriate. Retain uncertain deliveries and stop fences;
+never create a new operation to bypass an existing hold. See
+[Recover a stuck expert](/handbook/recovery) for installation and CLI details.
+
 ## Refresh your current runtime
 
 A Codex or Claude expert with Move own plan (or Manage team plans) can request its
