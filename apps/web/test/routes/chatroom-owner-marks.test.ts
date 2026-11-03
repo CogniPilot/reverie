@@ -28,6 +28,7 @@ import * as admin from '../../src/owner-auth/admin.js';
 import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { goalFixtureRepository } from '../goal-source-fixture.js';
 
 const USER = 'owner-test';
 const NEW_PASSWORD = 'synthetic-correct-horse-42';
@@ -152,7 +153,7 @@ describe('chatroom owner marks', () => {
     expect(service.room(roomId)!.messages.find(m => m.id === posted.id)!.from).not.toHaveProperty('authenticatedOwner');
     const python = spawnSync('python3', ['-I', '-c',
       'import json,sys; sys.path.insert(0,sys.argv[1]); from coding_tasks import permitted_sender; m=json.load(sys.stdin); print(json.dumps(permitted_sender({"tasks":{"workspace":{"rooms":[m["roomId"]]}}},m["roomId"],"workspace",m)))',
-      fileURLToPath(new URL('../../../../python/reverie/hands', import.meta.url))],
+      join(goalFixtureRepository(fileURLToPath(new URL('..', import.meta.url))), 'python/reverie/hands')],
       { input: JSON.stringify(message), encoding: 'utf8', timeout: 5000 });
     expect(python.status, python.stderr).toBe(0);
     expect(JSON.parse(python.stdout)).toBe(true);
