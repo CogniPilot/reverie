@@ -39,6 +39,17 @@ function deps(approved = true) {
 }
 
 describe('board track', () => {
+  it('passes a late write refusal through as an error', async () => {
+    const { d, err } = deps();
+    d.request = async () => ({
+      status: 409,
+      text: '',
+      json: { success: false, error: `The latest head is ${'b'.repeat(40)}, not ${HEAD}; checking a gate is for an older head` },
+    });
+    expect(await boardTrackGate(d, { id: 'i-1', head: HEAD, name: 'nix', state: 'covered' })).toBe(EXIT.error);
+    expect(err.join('\n')).toContain('older head');
+  });
+
   it('a text review sends the sha256 of --body-file and the resolved --from room', async () => {
     const file = join(dir, 'PR-BODY.md');
     writeFileSync(file, '## Branch Naming\n\n`feature`\n');
@@ -66,9 +77,9 @@ describe('board track', () => {
       (d: AgentDeps) => boardTrackReview(d, { id: 'i-1', head: HEAD, kind: 'source', verdict: 'GO', bodySha: '1'.repeat(64) }),
       (d: AgentDeps) => boardTrackReview(d, { id: 'i-1', head: HEAD, kind: 'style', verdict: 'GO' }),
       (d: AgentDeps) => boardTrackReview(d, { id: 'i-1', head: HEAD, kind: 'source', verdict: 'maybe' }),
-      (d: AgentDeps) => boardTrackApplied(d, { id: 'i-1', bodySha: 'abc' }),
-      (d: AgentDeps) => boardTrackApplied(d, { id: 'i-1', bodySha: '1'.repeat(64), bodyFile: 'x' }),
-      (d: AgentDeps) => boardTrackGate(d, { id: 'i-1', name: 'nix', state: 'done' }),
+      (d: AgentDeps) => boardTrackApplied(d, { id: 'i-1', head: HEAD, bodySha: 'abc' }),
+      (d: AgentDeps) => boardTrackApplied(d, { id: 'i-1', head: HEAD, bodySha: '1'.repeat(64), bodyFile: 'x' }),
+      (d: AgentDeps) => boardTrackGate(d, { id: 'i-1', head: HEAD, name: 'nix', state: 'done' }),
     ]) {
       const { d, calls } = deps();
       expect(await run(d)).toBe(EXIT.error);
@@ -78,18 +89,21 @@ describe('board track', () => {
 
   it('applied exits 4 when the body is not the approved one, 0 when it is', async () => {
     const unapproved = deps(false);
-    expect(await boardTrackApplied(unapproved.d, { id: 'i-1', bodySha: '1'.repeat(64) })).toBe(EXIT.refused);
+    expect(await boardTrackApplied(unapproved.d, { id: 'i-1', head: HEAD, bodySha: '1'.repeat(64) })).toBe(EXIT.refused);
     expect(unapproved.err.join('\n')).toContain('is not the body a current text GO approved');
     const approved = deps(true);
-    expect(await boardTrackApplied(approved.d, { id: 'i-1', bodySha: '1'.repeat(64) })).toBe(EXIT.ok);
-    expect(approved.out).toContain('  body applied 11111111: matches the approved body');
+    expect(await boardTrackApplied(approved.d, { id: 'i-1', head: HEAD, bodySha: '1'.repeat(64) })).toBe(EXIT.ok);
+    expect(approved.out).toContain('  body applied 11111111: approved when applied');
+    expect(approved.calls.at(-1)!.body).toEqual({ op: 'applied', head: HEAD, bodySha256: '1'.repeat(64) });
   });
 
   it('head and gate send their fields', async () => {
     const { d, calls } = deps();
     expect(await boardTrackHead(d, { id: 'i-1', sha: HEAD.toUpperCase(), branch: 'feature' })).toBe(EXIT.ok);
     expect(calls.at(-1)!.body).toEqual({ op: 'head', sha: HEAD, branch: 'feature' });
-    expect(await boardTrackGate(d, { id: 'i-1', name: 'nix test registration', state: 'covered', note: 'green' })).toBe(EXIT.ok);
-    expect(calls.at(-1)!.body).toEqual({ op: 'gate', name: 'nix test registration', state: 'covered', note: 'green' });
+    expect(
+      await boardTrackGate(d, { id: 'i-1', head: HEAD.toUpperCase(), name: 'nix test registration', state: 'covered', note: 'green' })
+    ).toBe(EXIT.ok);
+    expect(calls.at(-1)!.body).toEqual({ op: 'gate', head: HEAD, name: 'nix test registration', state: 'covered', note: 'green' });
   });
 });

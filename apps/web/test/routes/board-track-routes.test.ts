@@ -85,9 +85,9 @@ describe('board track route', () => {
     // The body carries no `by`: the reviewer's name comes from the caller.
     expect(go.statusCode).toBe(400);
     expect((await track(id, { op: 'review', head: HEAD, kind: 'text', verdict: 'GO', bodySha256: BODY }, REVIEWER)).statusCode).toBe(200);
-    const wrong = await track(id, { op: 'applied', bodySha256: '2'.repeat(64) }, LEAD);
+    const wrong = await track(id, { op: 'applied', head: HEAD, bodySha256: '2'.repeat(64) }, LEAD);
     expect(wrong.json().data.item.track.applied.at(-1)).toMatchObject({ approved: false, by: 'Lead' });
-    const right = await track(id, { op: 'applied', bodySha256: BODY }, LEAD);
+    const right = await track(id, { op: 'applied', head: HEAD, bodySha256: BODY }, LEAD);
     expect(right.json().data.item.track.applied.at(-1)).toMatchObject({ approved: true });
     expect(right.json().data.item.track.reviews[0]).toMatchObject({ by: 'Reviewer', head: HEAD, bodySha256: BODY });
     expect(audit.filter((a) => a.action === 'board-issue-track').map((a) => a.op)).toEqual(['head', 'review', 'applied', 'applied']);
@@ -106,13 +106,29 @@ describe('board track route', () => {
     expect(stale.json().error).toContain('latest head');
   });
 
+  it('refuses a late gate result or body for an older head with 409, inside the write, and audits nothing for it', async () => {
+    const id = await card();
+    await track(id, { op: 'head', sha: HEAD }, AUTHOR);
+    await track(id, { op: 'gate', head: HEAD, name: 'nix test registration', state: 'open' }, AUTHOR);
+    await track(id, { op: 'head', sha: NEXT }, AUTHOR);
+    const late = await track(id, { op: 'gate', head: HEAD, name: 'nix test registration', state: 'covered', note: 'checked A' }, AUTHOR);
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error).toContain('older head');
+    expect((await track(id, { op: 'applied', head: HEAD, bodySha256: BODY }, LEAD)).statusCode).toBe(409);
+    expect((await track(id, { op: 'gate', name: 'nix test registration', state: 'covered' }, AUTHOR)).statusCode).toBe(400);
+    const record = (await app.inject({ url: '/api/board', headers: as(LEAD) })).json().data.issues.find((i: { id: string }) => i.id === id).track;
+    expect(record.heads[1].gates).toEqual([expect.objectContaining({ name: 'nix test registration', state: 'open' })]);
+    expect(record.applied).toEqual([]);
+    expect(audit.filter((a) => a.action === 'board-issue-track').map((a) => a.op)).toEqual(['head', 'gate', 'head']);
+  });
+
   it('only the card owner or a lead records heads, bodies and gates; a non-employee writes nothing', async () => {
     const id = await card();
     expect((await track(id, { op: 'head', sha: HEAD }, REVIEWER)).statusCode).toBe(403);
     expect((await track(id, { op: 'head', sha: HEAD }, LEAD)).statusCode).toBe(200);
-    expect((await track(id, { op: 'gate', name: 'nix test registration', state: 'covered' }, REVIEWER)).statusCode).toBe(403);
-    expect((await track(id, { op: 'applied', bodySha256: BODY }, REVIEWER)).statusCode).toBe(403);
-    expect((await track(id, { op: 'gate', name: 'nix test registration', state: 'covered' }, AUTHOR)).statusCode).toBe(200);
+    expect((await track(id, { op: 'gate', head: HEAD, name: 'nix test registration', state: 'covered' }, REVIEWER)).statusCode).toBe(403);
+    expect((await track(id, { op: 'applied', head: HEAD, bodySha256: BODY }, REVIEWER)).statusCode).toBe(403);
+    expect((await track(id, { op: 'gate', head: HEAD, name: 'nix test registration', state: 'covered' }, AUTHOR)).statusCode).toBe(200);
     expect((await track(id, { op: 'review', head: HEAD, kind: 'source', verdict: 'GO' }, STRANGER)).statusCode).toBe(403);
     const record = (await app.inject({ url: '/api/board', headers: as(LEAD) })).json().data.issues.find((i: { id: string }) => i.id === id).track;
     expect(record.heads[0].gates).toEqual([expect.objectContaining({ name: 'nix test registration', state: 'covered', by: 'Author' })]);

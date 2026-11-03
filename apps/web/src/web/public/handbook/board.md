@@ -53,11 +53,11 @@ A pull request's card keeps its heads, reviews and approved body:
 ```bash
 reverie board track head TASK_ID HEAD_SHA --branch BRANCH
 reverie board track review TASK_ID HEAD_SHA --kind text --verdict GO --body-file PR-BODY.md
-reverie board track applied TASK_ID --body-file PR-BODY.md
-reverie board track gate TASK_ID "nix test registration" --state covered
+reverie board track applied TASK_ID HEAD_SHA --body-file PR-BODY.md
+reverie board track gate TASK_ID HEAD_SHA "nix test registration" --state covered
 ```
 
-A text review records the body's sha256; `applied` exits 4 when that body was not approved. A new head supersedes earlier reviews and reopens every gate. Reviews are recorded in your own name; heads, bodies and gates by the card's owner or a Board lead. `reverie board track show TASK_ID` prints the record.
+A text review records the body's sha256; `applied` exits 4 unless that body is approved. A new head supersedes reviews, reopens gates and refuses late writes for older heads. Anyone may review in their own name; owners or Board leads record the rest. `reverie board track show TASK_ID` prints it.
 
 ## Decisions waiting on the owner
 

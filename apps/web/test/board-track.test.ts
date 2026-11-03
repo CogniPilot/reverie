@@ -18,12 +18,14 @@ describe('track record', () => {
       { op: 'head', sha: A, branch: 'feature' },
       { op: 'review', head: A, kind: 'source', verdict: 'GO' },
       { op: 'review', head: A, kind: 'text', verdict: 'GO', bodySha256: BODY },
-      { op: 'applied', bodySha256: OTHER },
-      { op: 'applied', bodySha256: BODY },
+      { op: 'applied', head: A, bodySha256: OTHER },
+      { op: 'applied', head: A, bodySha256: BODY },
     ]);
     expect(approvedBody(track)).toBe(BODY);
     expect(track.applied.map((a) => a.approved)).toEqual([false, true]);
-    expect(describeTrack(track)).toContain('body applied 11111111: matches the approved body');
+    expect(describeTrack(track)).toEqual(
+      expect.arrayContaining(['body applied 11111111: approved when applied', 'body 11111111: approved now'])
+    );
   });
 
   it('refuses a text review with no body digest and a source review with one', () => {
@@ -39,7 +41,7 @@ describe('track record', () => {
       { op: 'head', sha: A },
       { op: 'review', head: A, kind: 'text', verdict: 'GO', bodySha256: BODY },
       { op: 'review', head: A, kind: 'text', verdict: 'HOLD', bodySha256: BODY },
-      { op: 'applied', bodySha256: BODY },
+      { op: 'applied', head: A, bodySha256: BODY },
     ]);
     expect(approvedBody(track)).toBeUndefined();
     expect(track.applied[0]!.approved).toBe(false);
@@ -51,7 +53,7 @@ describe('track record', () => {
       { op: 'review', head: A, kind: 'source', verdict: 'GO' },
       { op: 'review', head: A, kind: 'text', verdict: 'GO', bodySha256: BODY },
       { op: 'head', sha: B },
-      { op: 'applied', bodySha256: BODY },
+      { op: 'applied', head: B, bodySha256: BODY },
     ]);
     expect(track.reviews.every((r) => r.supersededAt !== undefined)).toBe(true);
     expect(currentReviews(track)).toEqual([]);
@@ -71,8 +73,8 @@ describe('track record', () => {
   it('each head starts every gate named so far as open, never carried forward as covered', () => {
     const track = run([
       { op: 'head', sha: A },
-      { op: 'gate', name: 'nix test registration', state: 'covered', note: 'partition test green' },
-      { op: 'gate', name: 'legacy backend freeze', state: 'n/a' },
+      { op: 'gate', head: A, name: 'nix test registration', state: 'covered', note: 'partition test green' },
+      { op: 'gate', head: A, name: 'legacy backend freeze', state: 'n/a' },
       { op: 'head', sha: B },
     ]);
     expect(track.heads[0]!.gates.map((g) => g.state)).toEqual(['covered', 'n/a']);
@@ -80,16 +82,62 @@ describe('track record', () => {
       ['nix test registration', 'open'],
       ['legacy backend freeze', 'open'],
     ]);
-    const updated = applyTrackOp(track, { op: 'gate', name: 'nix test registration', state: 'covered' }, 'R', 9);
+    const updated = applyTrackOp(track, { op: 'gate', head: B, name: 'nix test registration', state: 'covered' }, 'R', 9);
     expect(updated.heads[1]!.gates[0]!.state).toBe('covered');
     expect(track.heads[1]!.gates[0]!.state).toBe('open');
+  });
+
+  it('keeps approval-when-applied as history and computes current approval: a later HOLD shows', () => {
+    const track = run([
+      { op: 'head', sha: A },
+      { op: 'review', head: A, kind: 'text', verdict: 'GO', bodySha256: BODY },
+      { op: 'applied', head: A, bodySha256: BODY },
+      { op: 'review', head: A, kind: 'text', verdict: 'HOLD', bodySha256: BODY },
+    ]);
+    expect(track.applied[0]!.approved).toBe(true);
+    const lines = describeTrack(track);
+    expect(lines).toContain('body applied 11111111: approved when applied');
+    expect(lines).toContain('body 11111111: NOT approved now (no current text GO)');
+    expect(lines.join('\n')).not.toMatch(/approved now$/m);
+  });
+
+  it('a GO for another body after the old one was applied says the applied body is not approved now', () => {
+    const track = run([
+      { op: 'head', sha: A },
+      { op: 'review', head: A, kind: 'text', verdict: 'GO', bodySha256: BODY },
+      { op: 'applied', head: A, bodySha256: BODY },
+      { op: 'review', head: A, kind: 'text', verdict: 'GO', bodySha256: OTHER },
+    ]);
+    expect(describeTrack(track)).toEqual(
+      expect.arrayContaining([
+        'body applied 11111111: approved when applied',
+        'body 11111111: NOT approved now (the current text GO is for body 22222222)',
+      ])
+    );
+  });
+
+  it('refuses a gate result or applied body meant for an older head, leaving the latest head unchanged', () => {
+    const track = run([
+      { op: 'head', sha: A },
+      { op: 'gate', head: A, name: 'nix test registration', state: 'open' },
+      { op: 'head', sha: B },
+    ]);
+    // A check started on A finishes after B landed: it must not mark B.
+    expect(() =>
+      applyTrackOp(track, { op: 'gate', head: A, name: 'nix test registration', state: 'covered', note: 'checked A' }, 'R', 9)
+    ).toThrow(/older head/);
+    expect(() => applyTrackOp(track, { op: 'applied', head: A.slice(0, 8), bodySha256: BODY }, 'R', 9)).toThrow(/older head/);
+    expect(track.heads[1]!.gates).toEqual([expect.objectContaining({ name: 'nix test registration', state: 'open' })]);
+    expect(track.applied).toEqual([]);
+    expect(applyTrackOp(track, { op: 'gate', head: B.slice(0, 8), name: 'nix test registration', state: 'covered' }, 'R', 9)
+      .heads[1]!.gates[0]!.state).toBe('covered');
   });
 
   it('needs a head before a review, a body or a gate', () => {
     for (const op of [
       { op: 'review', head: A, kind: 'source', verdict: 'GO' },
-      { op: 'applied', bodySha256: BODY },
-      { op: 'gate', name: 'g', state: 'open' },
+      { op: 'applied', head: A, bodySha256: BODY },
+      { op: 'gate', head: A, name: 'g', state: 'open' },
     ] as TrackOp[])
       expect(() => applyTrackOp(undefined, op, 'R', 1)).toThrow(/Record the head/);
   });

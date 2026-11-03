@@ -264,10 +264,13 @@ export async function boardTrackReview(deps: AgentDeps, options: TrackReviewOpti
  * Record the PR body actually applied. Exits 4 (refused) when it is not the body a current text GO approved, so a
  * publish script stops there; the record keeps the mismatch either way.
  */
-export async function boardTrackApplied(deps: AgentDeps, options: { id: string; bodyFile?: string; bodySha?: string }): Promise<number> {
+export async function boardTrackApplied(
+  deps: AgentDeps,
+  options: { id: string; head: string; bodyFile?: string; bodySha?: string }
+): Promise<number> {
   const digest = await bodyDigest(options);
   if (typeof digest !== 'string') return fail(deps, digest.error);
-  const result = await trackWrite(deps, options.id, { op: 'applied', bodySha256: digest });
+  const result = await trackWrite(deps, options.id, { op: 'applied', head: options.head.toLowerCase(), bodySha256: digest });
   const code = trackDone(deps, result);
   if (code !== EXIT.ok || !result.ok) return code;
   const applied = (result.data as { item: Issue }).item.track?.applied.at(-1);
@@ -278,9 +281,12 @@ export async function boardTrackApplied(deps: AgentDeps, options: { id: string; 
   return EXIT.ok;
 }
 
-export async function boardTrackGate(deps: AgentDeps, options: { id: string; name: string; state?: string; note?: string }): Promise<number> {
+export async function boardTrackGate(
+  deps: AgentDeps,
+  options: { id: string; head: string; name: string; state?: string; note?: string }
+): Promise<number> {
   if (!(GATE_STATES as readonly string[]).includes(options.state ?? '')) return fail(deps, `--state is ${GATE_STATES.join('|')}`);
-  const body: Record<string, unknown> = { op: 'gate', name: options.name, state: options.state };
+  const body: Record<string, unknown> = { op: 'gate', head: options.head.toLowerCase(), name: options.name, state: options.state };
   if (options.note) body.note = options.note;
   return trackDone(deps, await trackWrite(deps, options.id, body));
 }
@@ -420,13 +426,14 @@ filter are alternatives; different filters must all match.`)
     .description("A pull request's track record on its card: heads, reviews, the applied body, and per-head gates")
     .addHelpText('after', `
 Rules the server keeps: a text GO names the body sha256 it read; a new head supersedes every earlier review;
-each head starts every gate named so far as open, so a pass on an earlier head is never carried forward.
+each head starts every gate named so far as open, so a pass on an earlier head is never carried forward; a gate
+result or applied body names its head and is refused once a newer head has landed.
 
 Examples:
   reverie board track head TASK_ID HEAD_SHA --branch BRANCH
   reverie board track review TASK_ID HEAD_SHA --kind text --verdict GO --body-file PR-BODY.md --from ROOM:MESSAGE_ID
-  reverie board track applied TASK_ID --body-file PR-BODY.md     # exits 4 if not the approved body
-  reverie board track gate TASK_ID "nix test registration" --state covered --note "partition test passes"`);
+  reverie board track applied TASK_ID HEAD_SHA --body-file PR-BODY.md     # exits 4 if not the approved body
+  reverie board track gate TASK_ID HEAD_SHA "nix test registration" --state covered --note "partition test passes"`);
   track
     .command('show <id>')
     .description('Print the latest head, its current reviews, the applied body and its gates')
@@ -453,22 +460,22 @@ Examples:
       runAgentVerb(json(o), (d) => boardTrackReview(d, { id, head, ...o }))
     );
   track
-    .command('applied <id>')
-    .description('Record the PR body applied; exits 4 when it is not the approved body (card owner or board lead)')
+    .command('applied <id> <head>')
+    .description('Record the PR body applied to this head; exits 4 when it is not the approved body (card owner or board lead)')
     .option('--body-file <path>', 'The body applied (hashed here)')
     .option('--body-sha <sha256>', 'The sha256 of the body applied')
     .option('--json', 'Machine-readable output')
-    .action((id: string, o: { bodyFile?: string; bodySha?: string; json?: boolean }) =>
-      runAgentVerb(json(o), (d) => boardTrackApplied(d, { id, bodyFile: o.bodyFile, bodySha: o.bodySha }))
+    .action((id: string, head: string, o: { bodyFile?: string; bodySha?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackApplied(d, { id, head, bodyFile: o.bodyFile, bodySha: o.bodySha }))
     );
   track
-    .command('gate <id> <name>')
-    .description('Set a gate on the latest head, e.g. a check hosted CI runs differently (card owner or board lead)')
+    .command('gate <id> <head> <name>')
+    .description('Set a gate on this head, which must be the latest, e.g. a check hosted CI runs differently (owner or lead)')
     .option('--state <state>', GATE_STATES.join('|'))
     .option('--note <text>', 'What showed it')
     .option('--json', 'Machine-readable output')
-    .action((id: string, name: string, o: { state?: string; note?: string; json?: boolean }) =>
-      runAgentVerb(json(o), (d) => boardTrackGate(d, { id, name, state: o.state, note: o.note }))
+    .action((id: string, head: string, name: string, o: { state?: string; note?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackGate(d, { id, head, name, state: o.state, note: o.note }))
     );
 
   const issue = board.command('issue').alias('card').description('File, move and tag issues');

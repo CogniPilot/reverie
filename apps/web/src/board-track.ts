@@ -5,10 +5,13 @@
  *
  * Three rules hold here, not in callers:
  * - A text GO names the exact body (sha256) it approved, and recording an applied body says whether a current text GO
- *   approved that exact body.
+ *   approved that exact body. That answer is kept as history; whether the body is approved now is always computed
+ *   from the current reviews, so a later HOLD or a GO for another body shows.
  * - A new head supersedes every review of an earlier head, so an old approval never reads as current.
  * - Each head starts its checklist with every gate named so far set to `open`: a pass on an earlier head is never
  *   carried forward as covered.
+ * - A gate result and an applied body name the head they are for, and are refused unless it is the latest head, so a
+ *   check that finishes after a new head lands cannot mark the new head.
  *
  * Pure: the board route applies these inside its serialized write, and stamps who and when from the caller.
  */
@@ -46,7 +49,14 @@ const ReviewSchema = z
   })
   .strict();
 const AppliedSchema = z
-  .object({ head: sha, bodySha256: sha256, approved: z.boolean(), at: ms, by: label(100) })
+  .object({
+    head: sha,
+    bodySha256: sha256,
+    /** Whether a current text GO approved this body when it was applied: history, not the current state. */
+    approved: z.boolean(),
+    at: ms,
+    by: label(100),
+  })
   .strict();
 
 export const TrackRecordSchema = z
@@ -72,8 +82,10 @@ export const TrackOpSchema = z.discriminatedUnion('op', [
       source: ref.optional(),
     })
     .strict(),
-  z.object({ op: z.literal('applied'), bodySha256: sha256 }).strict(),
-  z.object({ op: z.literal('gate'), name: label(80), state: z.enum(GATE_STATES), note: label(300).optional() }).strict(),
+  z.object({ op: z.literal('applied'), head: sha, bodySha256: sha256 }).strict(),
+  z
+    .object({ op: z.literal('gate'), head: sha, name: label(80), state: z.enum(GATE_STATES), note: label(300).optional() })
+    .strict(),
 ]);
 export type TrackOp = z.infer<typeof TrackOpSchema>;
 
@@ -89,6 +101,14 @@ export class TrackError extends Error {
 const empty = (): TrackRecord => ({ heads: [], reviews: [], applied: [] });
 /** Two spellings of one commit (a short and a full id) are the same head. */
 const sameCommit = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+
+/** Refuse a write meant for a head that is no longer the latest (a check or body that arrived late). */
+function requireLatest<H extends { sha: string }>(head: H | undefined, intended: string, what: string): H {
+  if (!head) throw new TrackError(`Record the head before ${what}`, 409);
+  if (!sameCommit(head.sha, intended))
+    throw new TrackError(`The latest head is ${head.sha}, not ${intended}; ${what} is for an older head`, 409);
+  return head;
+}
 
 export function latestHead(track: TrackRecord | undefined) {
   return track?.heads.at(-1);
@@ -143,21 +163,37 @@ export function applyTrackOp(current: TrackRecord | undefined, op: TrackOp, by: 
       return track;
     }
     case 'applied': {
-      if (!head) throw new TrackError('Record the head before applying a body', 409);
+      const latest = requireLatest(head, op.head, 'applying a body');
       if (track.applied.length >= TRACK_LIMITS.applied) throw new TrackError('This track has the most bodies it can hold', 409);
-      track.applied.push({ head: head.sha, bodySha256: op.bodySha256, approved: approvedBody(track) === op.bodySha256, at, by });
+      track.applied.push({ head: latest.sha, bodySha256: op.bodySha256, approved: approvedBody(track) === op.bodySha256, at, by });
       return track;
     }
     case 'gate': {
-      if (!head) throw new TrackError('Record the head before checking a gate', 409);
+      const latest = requireLatest(head, op.head, 'checking a gate');
       const gate = { name: op.name, state: op.state, ...(op.note ? { note: op.note } : {}), at, by };
-      const i = head.gates.findIndex((g) => g.name === op.name);
-      if (i >= 0) head.gates[i] = gate;
-      else if (head.gates.length >= TRACK_LIMITS.gates) throw new TrackError('This head has the most gates it can hold', 409);
-      else head.gates.push(gate);
+      const i = latest.gates.findIndex((g) => g.name === op.name);
+      if (i >= 0) latest.gates[i] = gate;
+      else if (latest.gates.length >= TRACK_LIMITS.gates) throw new TrackError('This head has the most gates it can hold', 409);
+      else latest.gates.push(gate);
       return track;
     }
   }
+}
+
+/**
+ * The applied body on two lines: whether it was approved when applied (history), and whether it is approved now
+ * (computed from the current reviews, so a later HOLD or a GO for another body shows).
+ */
+function describeApplied(track: TrackRecord, applied: TrackRecord['applied'][number]): string[] {
+  const body = applied.bodySha256.slice(0, 8);
+  const current = approvedBody(track);
+  const now =
+    current === applied.bodySha256
+      ? 'approved now'
+      : current
+        ? `NOT approved now (the current text GO is for body ${current.slice(0, 8)})`
+        : 'NOT approved now (no current text GO)';
+  return [`body applied ${body}: ${applied.approved ? 'approved when applied' : 'NOT approved when applied'}`, `body ${body}: ${now}`];
 }
 
 /** Plain lines for `reverie board track show`: the latest head, its current reviews and body, and its gates. */
@@ -173,8 +209,7 @@ export function describeTrack(track: TrackRecord | undefined): string[] {
   const superseded = track.reviews.filter((r) => r.supersededAt).length;
   if (superseded) lines.push(`${superseded} earlier review(s) superseded by a later head`);
   const applied = track.applied.filter((a) => sameCommit(a.head, head.sha)).at(-1);
-  if (applied)
-    lines.push(`body applied ${applied.bodySha256.slice(0, 8)}: ${applied.approved ? 'matches the approved body' : 'NOT the approved body'}`);
+  if (applied) lines.push(...describeApplied(track, applied));
   for (const gate of head.gates) lines.push(`gate ${gate.name}: ${gate.state}${gate.note ? ` (${gate.note})` : ''}`);
   return lines;
 }
