@@ -20,7 +20,9 @@ permissions:
 
 concurrency:
   group: image-${{ github.ref }}
-  cancel-in-progress: false
+  # A newer PR commit supersedes its previous image build. Keep main and
+  # release builds running so accepted artifacts are still produced.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   image:
