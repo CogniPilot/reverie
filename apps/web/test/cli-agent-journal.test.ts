@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentJournalBrief, agentJournalMap, agentJournalRecall, agentJournalSave, agentJournalSource, elapsed } from '../src/cli-agent-journal.js';
+import { agentJournalBrief, agentJournalMap, agentJournalRecall, agentJournalSave, elapsed, journalRoom } from '../src/cli-agent-journal.js';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 import { MEMORY_BRIEF_UNREADABLE } from '../src/memory-brief.js';
 
@@ -150,17 +150,15 @@ describe('journal CLI', () => {
     expect(room.output[0]).toMatch(/ \[open in this room\]$/);
   });
 
-  it('resolves a --room name to its id on save, recall, map and source; an id or an unknown value passes through', async () => {
-    const ok = { status: 200, json: { success: true, data: { entryId: 1, turnId: 'm-turn', replayed: false, payloadSha256: 'a'.repeat(64), entries: [], more: false } } };
-    const f = fixture(false, ok);
-    await agentJournalSave(f.deps, { room: 'rumoca', turn: 'm-turn', text: 'T', tag: ['lesson'], ref: ['commit 0123abcd'], reason: 'why' });
-    await agentJournalRecall(f.deps, ['x'], 'rumoca');
-    await agentJournalMap(f.deps, [], { room: 'rumoca' });
-    await agentJournalSource(f.deps, 'rumoca', 'm-source');
-    expect(f.calls.map((c) => (c.body as { roomId?: string } | undefined)?.roomId ?? c.query?.roomId)).toEqual(Array(4).fill(ROOMS[0].id));
-    const g = fixture(false, ok);
-    await agentJournalRecall(g.deps, ['x'], ROOMS[0].id);
-    await agentJournalRecall(g.deps, ['x'], 'no-such-room');
-    expect(g.calls.map((c) => c.query?.roomId)).toEqual([ROOMS[0].id, 'no-such-room']);
+  it('resolves a typed --room name to its id; an id or an unknown value passes through, and the library calls do not look up', async () => {
+    const f = fixture(false, { status: 200, json: { success: true, data: {} } });
+    expect(await journalRoom(f.deps, 'rumoca')).toBe(ROOMS[0].id);
+    expect(await journalRoom(f.deps, ROOMS[0].id)).toBe(ROOMS[0].id);
+    expect(await journalRoom(f.deps, 'no-such-room')).toBe('no-such-room');
+    expect(await journalRoom(f.deps, undefined)).toBeUndefined();
+    // The journal functions themselves send the room as given, so a caller holding the exact id (MCP) makes one request.
+    const g = fixture(false, { status: 200, json: { success: true, data: { entries: [] } } });
+    await agentJournalRecall(g.deps, ['x'], 'rumoca');
+    expect(g.calls.map((c) => c.query?.roomId)).toEqual(['rumoca']);
   });
 });
