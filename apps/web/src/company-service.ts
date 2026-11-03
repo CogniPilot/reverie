@@ -183,6 +183,10 @@ export class CompanyService {
     return this.store.snapshot().employees;
   }
 
+  employeeForSession(sessionId: string, owner: string | undefined) {
+    return this.store.employeeForSession(sessionId, owner);
+  }
+
   /** A route-selected actor, not a caller-supplied identity or title. Every effect rechecks this closure. */
   officeAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
     const initial = this.store.snapshot();

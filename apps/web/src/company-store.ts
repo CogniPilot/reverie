@@ -3,7 +3,7 @@ import { constants, readFileSync, lstatSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { CompanyStateSchema, type CompanyState } from './company-types.js';
+import { CompanyStateSchema, type CompanyEmployee, type CompanyState } from './company-types.js';
 import { restMetadataId, restMetadataSessionId, type RestEmployeeMetadata } from './rest-canonical-metadata.js';
 
 /** Commit sensitive state and launch intent across process crashes and power loss. */
@@ -75,6 +75,7 @@ export class CompanyStore {
   private chain: Promise<unknown> = Promise.resolve();
   private queued = 0;
   private existed = false;
+  private readStamp?: string;
   // Metadata may use only a state already observed by ordinary canonical I/O.
   // A changed/missing file refuses; a health read never reloads/clones private state.
   private healthWitness?: { state: CompanyState; stamp: string };
@@ -175,8 +176,11 @@ export class CompanyStore {
     return metadata;
   }
 
-  snapshot(): CompanyState {
+  /** Revalidate only when the canonical file changes; never use a time-based authority cache. */
+  private refreshState(): void {
     const before = this.possibleHealthStamp();
+    if (before !== undefined && before === this.readStamp) return;
+    this.readStamp = undefined;
     // This is an internal private canonical file, never a user-selected remote workspace path.
     try {
       this.state = CompanyStateSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
@@ -185,7 +189,20 @@ export class CompanyStore {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.existed) throw error;
     }
     this.rememberHealth(before);
+    this.readStamp = this.healthWitness?.stamp;
+  }
+
+  snapshot(): CompanyState {
+    this.refreshState();
     return structuredClone(this.state);
+  }
+
+  /** Fresh, unambiguous binding without cloning other employees, goals or memories. */
+  employeeForSession(sessionId: string, owner: string | undefined): CompanyEmployee | undefined {
+    this.refreshState();
+    const matches = this.state.employees.filter((employee) => employee.sessionId === sessionId);
+    if (matches.length !== 1 || matches[0].owner !== owner) return;
+    return structuredClone(matches[0]);
   }
 
   /** Internal scalar selector: no profile/objective/memory copy and no authority or generation synthesis. */
@@ -309,6 +326,8 @@ export class CompanyStore {
           await writeCompanyStateFile(this.file, JSON.stringify(current), validateAuthority);
           this.state = current;
           this.existed = true;
+          // The transaction callback has seen `current`; reload a private copy on the next read.
+          this.readStamp = undefined;
           // This transaction still owns the canonical cross-process writer lock.
           this.rememberHealth(this.possibleHealthStamp());
           return structuredClone(result);
