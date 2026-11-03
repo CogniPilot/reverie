@@ -27,7 +27,7 @@ DOMAIN = b'reverie-worker-recovery-request-v1\n'
 UUID = r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
 SESSION = re.compile(UUID + r'\Z', re.ASCII)
 ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}\Z', re.ASCII)
-ROUTE = re.compile(rf'(?:/api/company/employees/{UUID}/reconnect(?:/status)?|/api/plans/moves/(?:force|[A-Za-z0-9_-]{{1,100}}/status))\Z', re.ASCII)
+ROUTE = re.compile(rf'(?:/api/company/employees/{UUID}/reconnect(?:/status)?|/api/plans/moves/(?:force|[A-Za-z0-9_-]{{1,100}}/(?:status|resolve|cancel)))\Z', re.ASCII)
 
 
 def is_recovery_request(method, target):

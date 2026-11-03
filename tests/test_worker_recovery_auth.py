@@ -103,7 +103,9 @@ class WorkerRecoveryAuthenticationTests(unittest.TestCase):
         self.assertEqual(signature, hmac.new(bytes.fromhex(value['key']), DOMAIN + encoded.encode(), hashlib.sha256).hexdigest())
         self.assertTrue(is_recovery_request('POST', '/api/plans/moves/force'))
         self.assertTrue(is_recovery_request('POST', '/api/plans/moves/stable-move-1/status'))
-        self.assertFalse(is_recovery_request('POST', '/api/plans/moves/stable-move-1/resolve'))
+        self.assertTrue(is_recovery_request('POST', '/api/plans/moves/stable-move-1/resolve'))
+        self.assertTrue(is_recovery_request('POST', '/api/plans/moves/stable-move-1/cancel'))
+        self.assertFalse(is_recovery_request('POST', '/api/plans/moves/stable-move-1/start'))
         self.assertTrue(is_recovery_request('POST', TARGET + '/status'))
 
     def test_cross_language_fixture_matches_actual_host_signer(self):
