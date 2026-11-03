@@ -16,6 +16,13 @@ import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, t
 import { randomUUID, createHash } from 'node:crypto';
 import { displayTime, displayTimeZone } from './display-time.js';
 import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
+import { buildMentionFeed, type MentionCursor, type MentionFeed, type MentionRoomScan } from './chatroom-mentions.js';
+
+/** How old a notice must be before its recipient may set it aside as stale (the digest's owner window). */
+export const STALE_MIN_AGE_MS = 72 * 60 * 60 * 1000;
+
+/** Messages the mention feed reads per room per request; the cursor carries it past the rest. */
+const MENTION_SCAN_PER_ROOM = 2000;
 import { ChatroomNoticeState, noticeDigest, type NoticeAttention, type NoticeRecipient, type NoticeSource } from './chatroom-notice-state.js';
 import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
 import { isOwnerMark } from './owner-auth/marks.js';
@@ -509,13 +516,45 @@ export class ChatroomService {
     return [...cards.values()];
   }
 
+  /**
+   * The caller's mention feed after `cursor` across its visible rooms (or one), read from the chat database when there
+   * is one and from the in-memory window otherwise. Read-only: no seen mark, delivery or attention changes.
+   */
+  mentionFeed(
+    sessionId: string,
+    options: { roomId?: string; cursor: MentionCursor; limit: number; holds: boolean }
+  ): MentionFeed & { source: 'database' | 'recent-only'; timeZone: string } {
+    const session = this.deps.getSession(sessionId);
+    if (!session || session.pid === null) throw new ChatroomError('A live own session is required for the mention feed', 'NOT_FOUND');
+    const visible = this.store
+      .roomsFor(sessionId)
+      .filter((room) => !room.archivedAt && room.owner === session.owner && (!isDm(room) || room.dm.includes(sessionId)));
+    const rooms = options.roomId ? visible.filter((room) => room.id === options.roomId) : visible;
+    if (options.roomId && !rooms.length) throw new ChatroomError('No visible room for the mention feed', 'NOT_FOUND');
+    const scans: MentionRoomScan[] = rooms.map((room) => {
+      const name = isDm(room) ? 'DM' : room.name;
+      if (this.db) {
+        const messages = this.db.messagesAfter(room.id, options.cursor, MENTION_SCAN_PER_ROOM + 1);
+        const capped = messages.length > MENTION_SCAN_PER_ROOM;
+        return { id: room.id, name, messages: capped ? messages.slice(0, MENTION_SCAN_PER_ROOM) : messages, capped };
+      }
+      const messages = room.messages.filter((m) => m.at > options.cursor.at || (m.at === options.cursor.at && m.id > options.cursor.id));
+      return { id: room.id, name, messages, capped: false };
+    });
+    const feed = buildMentionFeed(scans, { sessionId, name: this.nameOf(sessionId) }, options);
+    return { ...feed, source: this.db ? 'database' : 'recent-only', timeZone: this.displayTimeZone(session.owner) };
+  }
+
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
   /**
    * `select`: one visible room's recent window, agent and bot senders only, and every notice still pending before `before`
    * returned as sourceReferences (for an explicit bulk "handle before"); owner and other human messages are never selected.
    */
-  turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } },
-    select?: { roomId: string; before: number }, scan?: DigestScan): TurnSummary {
+  turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string }; stale?: boolean },
+    select?: { roomId: string; before: number; humans?: boolean }, scan?: DigestScan): TurnSummary {
+    // Human senders are only ever selected to be set aside as stale, and only past the stale age.
+    if (select?.humans && select.before > this.now() - STALE_MIN_AGE_MS)
+      throw new ChatroomError('Human notices can be set aside only when older than 72 hours', 'INVALID_INPUT');
     const session = this.deps.getSession(sessionId);
     const mode = this.alertMode(sessionId)?.mode ?? 'ring';
     if (!session || session.pid === null) {
@@ -600,7 +639,8 @@ export class ChatroomService {
       for (const [index, message] of messages.entries()) {
         if ((!recentIds.has(message.id) && !ownerHistoryIds.has(message.id)) ||
             (historyPage && (message.from.kind !== 'user' || !isOwnerMark(message.from.mark))) ||
-            (select && ((message.from.kind !== 'agent' && message.from.kind !== 'bot') || message.at >= select.before))) continue;
+            (select && ((message.from.kind !== 'agent' && message.from.kind !== 'bot' &&
+              !(select.humans && (message.from.kind === 'user' || message.from.kind === 'human'))) || message.at >= select.before))) continue;
         if (
           message.deleted ||
           (message.from.kind === 'agent' &&
@@ -615,7 +655,8 @@ export class ChatroomService {
         const attention = this.noticeAttention(sessionId, room, message, records, ownReplies.get(message.id) ?? [], identity);
         // A notice its recipient already handled stays listed only while its delivery is uncertain (do not resend it); one
         // merely still queued for the pane is not news, and listing it after every command buried the requests still open.
-        if (attention.disposition !== 'pending' && !held.has(key)) continue;
+        // A stale listing shows only what was set aside; it is the one place those notices stay visible.
+        if (historyPage?.stale ? attention.disposition !== 'stale' : attention.disposition !== 'pending' && !held.has(key)) continue;
         const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
         const direct = message.to !== 'all' || (uniquelyNamed && textMentions(message.text, name));
         // A system notice about another seat addressed to this one (a stalled-seat report to its coordinator) needs action,
@@ -634,7 +675,8 @@ export class ChatroomService {
               : 'unread';
         if (
           state === 'unread' &&
-          belowSeenCursor
+          belowSeenCursor &&
+          !historyPage?.stale
         )
           continue;
         const senderId = message.from.kind === 'agent' ? message.from.sessionId : undefined;
@@ -730,11 +772,13 @@ export class ChatroomService {
 
   /** Explicit own intent supported by exact reads. Does not consume/ACK any transport receipt. */
   resolveNotice(sessionId: string, input: { roomId: string; messageId: string; readToken: string;
-    disposition: 'handled' | 'superseded'; replacement?: { roomId: string; messageId: string; readToken: string } }):
+    disposition: 'handled' | 'superseded' | 'stale'; replacement?: { roomId: string; messageId: string; readToken: string } }):
     { source: NoticeSource; attention: NoticeAttention } {
     if (this.writesClosed) throw new ChatroomError('Chat writes are unavailable', 'UNAVAILABLE');
-    if ((input.disposition === 'superseded') !== !!input.replacement || !['handled', 'superseded'].includes(input.disposition))
+    if ((input.disposition === 'superseded') !== !!input.replacement || !['handled', 'superseded', 'stale'].includes(input.disposition))
       throw new ChatroomError('Superseded requires exactly one replacement', 'INVALID_INPUT');
+    if (input.disposition === 'stale' && this.noticeSource(sessionId, input.roomId, input.messageId).at > this.now() - STALE_MIN_AGE_MS)
+      throw new ChatroomError('Only a notice older than 72 hours can be set aside as stale', 'INVALID_INPUT');
     const recipient = this.noticeRecipient(sessionId);
     const checkRead = (ref: { roomId: string; messageId: string; readToken: string }): NoticeSource => {
       const receipt = this.exactReadReceipts.get(ref.readToken);

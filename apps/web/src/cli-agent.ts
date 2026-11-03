@@ -1725,7 +1725,7 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
 }
 
 /** One bounded read-only owner-attention history page; never advances seen or ACKs. */
-export async function agentChatPending(deps: AgentDeps, options: { room?: string; beforeAt?: string; beforeId?: string }): Promise<number> {
+export async function agentChatPending(deps: AgentDeps, options: { room?: string; beforeAt?: string; beforeId?: string; stale?: boolean }): Promise<number> {
   if ((options.beforeAt === undefined) !== (options.beforeId === undefined) ||
       (options.beforeAt !== undefined && (!/^\d{1,16}$/.test(options.beforeAt) || !Number.isSafeInteger(Number(options.beforeAt)))) ||
       (options.beforeId !== undefined && (!options.beforeId || options.beforeId.length > 200)))
@@ -1733,7 +1733,8 @@ export async function agentChatPending(deps: AgentDeps, options: { room?: string
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/notices/history',
-    query: { roomId: target.room.id, ...(options.beforeAt !== undefined ? { beforeAt: options.beforeAt, beforeId: options.beforeId! } : {}) } });
+    query: { roomId: target.room.id, ...(options.beforeAt !== undefined ? { beforeAt: options.beforeAt, beforeId: options.beforeId! } : {}),
+      ...(options.stale ? { stale: '1' } : {}) } });
   const data = result.json?.data as { text?: string; historyCoverage?: unknown; sourceReferences?: Array<{ roomId?: string; messageId?: string }> } | undefined;
   if (!result.json?.success || typeof data?.text !== 'string' || !data.historyCoverage ||
       !Array.isArray(data.sourceReferences) || data.sourceReferences.length > 1000 ||
@@ -1744,23 +1745,66 @@ export async function agentChatPending(deps: AgentDeps, options: { room?: string
   return EXIT.ok;
 }
 
+/**
+ * `agent chat mentions`: messages across your rooms that @-mention you, address you, say @everyone or (--holds) use
+ * hold wording, after a cursor or time; prints the next cursor. Read-only: no seen mark, delivery or attention change.
+ */
+export async function agentChatMentions(
+  deps: AgentDeps,
+  options: { room?: string; since?: string; limit?: number; holds?: boolean }
+): Promise<number> {
+  let since = options.since?.trim();
+  if (since !== undefined && !/^m1\./.test(since)) {
+    const at = /^\d{1,16}$/.test(since) ? Number(since)
+      : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(since) ? Date.parse(since) : NaN;
+    if (!Number.isSafeInteger(at)) return fail(deps, 'Use --since with a cursor printed by an earlier call, epoch ms, or ISO 8601 with Z or an offset');
+    since = String(at);
+  }
+  let roomId: string | undefined;
+  if (options.room) {
+    const target = await resolveChatRoom(deps, options.room);
+    if ('error' in target) return fail(deps, target.error, target.code);
+    roomId = target.room.id;
+  }
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/mentions', query: {
+    ...(roomId ? { roomId } : {}), ...(since ? { since } : {}), limit: String(options.limit ?? 50), holds: options.holds ? '1' : '0' } });
+  const data = result.json?.data as { items?: Array<{ room: string; messageId: string; at: number; from: string; reasons: string[]; excerpt: string }>;
+    next?: string; complete?: boolean; source?: string; timeZone?: string } | undefined;
+  if (!result.json?.success || !Array.isArray(data?.items) || typeof data.next !== 'string') return fail(deps, describeFailure(result));
+  if (deps.json) {
+    emitJson(deps, data);
+    return EXIT.ok;
+  }
+  for (const item of data.items)
+    deps.io.out(`${displayTime(item.at, data.timeZone)} ${quoteForPane(item.room, 60)} ${quoteForPane(item.from, 60)} [${item.reasons.join(',')}] ${item.messageId.slice(0, 8)}: ${quoteForPane(item.excerpt, 240)}`);
+  if (!data.items.length) deps.io.out('No new mentions.');
+  deps.io.out(`${data.complete ? 'next' : 'more after'}: --since ${data.next}${data.source === 'recent-only' ? ' (recent window only: no chat database)' : ''}`);
+  return EXIT.ok;
+}
+
+/** The server's age floor for setting a notice aside as stale (STALE_MIN_AGE_MS); checked here first for a clear error. */
+const STALE_AGE_MS = 72 * 60 * 60 * 1000;
+
 /** Explicit own attention resolution; exact reads support intent but never ACK delivery here. */
 /**
  * Explicit bulk resolution of your own notices from agents and bots in one room posted before a time (epoch ms, or ISO 8601
  * with Z or an offset). Owner and other human messages are never included. Each is resolved like `handle <id>`: an exact
  * read, then the same checked resolution; delivery and task state are unchanged.
  */
-export async function agentChatHandleBefore(deps: AgentDeps, options: { room?: string; before: string }): Promise<number> {
+export async function agentChatHandleBefore(deps: AgentDeps, options: { room?: string; before: string; stale?: boolean; owner?: boolean }): Promise<number> {
   const raw = options.before.trim();
   const before = /^\d{1,16}$/.test(raw) ? Number(raw)
     : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(raw) ? Date.parse(raw) : NaN;
   if (!Number.isSafeInteger(before) || before > (deps.now ?? Date.now)())
     return fail(deps, 'Use --before with a past time: epoch milliseconds, or ISO 8601 with Z or an offset');
   if (!options.room) return fail(deps, '--before needs an explicit --room');
+  if (options.owner && !options.stale) return fail(deps, '--owner only sets owner and human notices aside with --stale; they are never bulk-handled');
+  if (options.owner && before > (deps.now ?? Date.now)() - STALE_AGE_MS)
+    return fail(deps, '--owner --stale needs a --before at least 72 hours ago');
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   const listing = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/notices/pending-before',
-    query: { roomId: target.room.id, before: String(before) } });
+    query: { roomId: target.room.id, before: String(before), ...(options.owner ? { humans: '1' } : {}) } });
   const refs = (listing.json?.data as { sourceReferences?: Array<{ roomId?: string; messageId?: string }> } | undefined)?.sourceReferences;
   if (!listing.json?.success || !Array.isArray(refs) || refs.length > 1000 ||
       refs.some(ref => ref.roomId !== target.room.id || typeof ref.messageId !== 'string'))
@@ -1768,16 +1812,19 @@ export async function agentChatHandleBefore(deps: AgentDeps, options: { room?: s
   const quiet: AgentDeps = { ...deps, json: true, io: { ...deps.io, out: () => {}, err: () => {} } };
   const handled: string[] = [], failed: string[] = [];
   for (const ref of refs) {
-    const code = await agentChatHandle(quiet, { room: target.room.id, message: ref.messageId! });
+    const code = await agentChatHandle(quiet, { room: target.room.id, message: ref.messageId!, stale: options.stale });
     (code === EXIT.ok ? handled : failed).push(ref.messageId!);
   }
   if (deps.json) emitJson(deps, { roomId: target.room.id, before, handled, failed });
+  else if (options.stale)
+    deps.io.out(`Set aside ${handled.length} of ${refs.length} pending ${options.owner ? '' : 'agent/bot '}notices before ${new Date(before).toISOString()} as stale` +
+      (failed.length ? `; ${failed.length} not confirmed: ${failed.join(', ')}` : '') + '. Not handled: list them with chat pending --stale.');
   else deps.io.out(`Handled ${handled.length} of ${refs.length} pending agent/bot notices before ${new Date(before).toISOString()}` +
     (failed.length ? `; ${failed.length} not confirmed: ${failed.join(', ')}` : '') + '. Owner messages are never bulk-handled.');
   return failed.length ? EXIT.error : EXIT.ok;
 }
 
-export async function agentChatHandle(deps: AgentDeps, options: { room?: string; message: string; supersededBy?: string }): Promise<number> {
+export async function agentChatHandle(deps: AgentDeps, options: { room?: string; message: string; supersededBy?: string; stale?: boolean }): Promise<number> {
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   if (!options.message || options.message.length > 200 ||
@@ -1794,7 +1841,8 @@ export async function agentChatHandle(deps: AgentDeps, options: { room?: string;
   if (!source) return fail(deps, 'Exact source read failed; attention unchanged');
   const replacement = options.supersededBy ? await exact(options.supersededBy) : undefined;
   if (options.supersededBy && !replacement) return fail(deps, 'Exact replacement read failed; attention unchanged');
-  const disposition = replacement ? 'superseded' : 'handled';
+  if (options.stale && replacement) return fail(deps, 'Use --stale or --superseded-by, not both');
+  const disposition = replacement ? 'superseded' : options.stale ? 'stale' : 'handled';
   const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/v1/chatrooms/notices/resolve',
     body: { ...source, disposition, ...(replacement ? { replacement } : {}) } });
   const data = result.json?.data as { source?: { roomId?: string; messageId?: string }; attention?: { disposition?: string; replacement?: { messageId?: string } } } | undefined;
@@ -3154,9 +3202,24 @@ export function registerAgentCommands(program: Command): Command {
     .option('-r, --room <room>', 'Room id or name')
     .option('--before-at <epoch-ms>', 'Older-page cursor timestamp, paired with --before-id')
     .option('--before-id <id>', 'Older-page cursor message identity, paired with --before-at')
+    .option('--stale', 'List only the notices you set aside as stale')
     .option('--json', 'Machine-readable output including source references and coverage')
-    .action((options: { room?: string; beforeAt?: string; beforeId?: string; json?: boolean }) =>
+    .action((options: { room?: string; beforeAt?: string; beforeId?: string; stale?: boolean; json?: boolean }) =>
       run(Boolean(options.json), deps => agentChatPending(deps, options))
+    );
+
+  chat
+    .command('mentions')
+    .description('Messages across your rooms that @-mention or address you, or say @everyone, after a cursor or time; read-only, nothing expires')
+    .option('-r, --room <room>', 'Only this room (id or name)')
+    .option('--since <cursor-or-time>', 'Cursor printed by the last call, epoch ms, or ISO 8601 with Z or an offset (default: the last 24 h)')
+    .option('--holds', 'Also any message using hold, blocker or NO-GO wording')
+    .option('-n, --limit <n>', 'At most this many (1-200)', '50')
+    .option('--json', 'Machine-readable output')
+    .action((options: { room?: string; since?: string; holds?: boolean; limit?: string; json?: boolean }) =>
+      run(Boolean(options.json), (deps) =>
+        agentChatMentions(deps, { room: options.room, since: options.since, holds: options.holds, limit: Math.min(200, parsePositiveInt(options.limit, 50, '--limit')) })
+      )
     );
 
   chat
@@ -3165,14 +3228,16 @@ export function registerAgentCommands(program: Command): Command {
     .option('-r, --room <room>', 'Room id or name')
     .option('--superseded-by <id>', 'Visible replacement message in the same room')
     .option('--before <time>', 'Bulk: your pending notices from agents and bots in --room before this time (epoch ms or ISO 8601 with offset); never the owner\'s')
+    .option('--stale', 'Set aside as stale instead of handled: too old to act on, never marked done, listed by chat pending --stale (notices older than 72 h)')
+    .option('--owner', 'With --stale --before: include owner and other human notices (the --before time must be at least 72 h ago)')
     .option('--json', 'Machine-readable output')
-    .action((message: string | undefined, options: { room?: string; supersededBy?: string; before?: string; json?: boolean }) =>
+    .action((message: string | undefined, options: { room?: string; supersededBy?: string; before?: string; stale?: boolean; owner?: boolean; json?: boolean }) =>
       run(Boolean(options.json), async deps => {
         if ((message === undefined) === (options.before === undefined) || (options.before !== undefined && options.supersededBy !== undefined))
           return fail(deps, 'Give either an exact message id or --before <time> (not both, and --superseded-by only with an id)');
         return options.before !== undefined
-          ? agentChatHandleBefore(deps, { room: options.room, before: options.before })
-          : agentChatHandle(deps, { message: message!, room: options.room, supersededBy: options.supersededBy });
+          ? agentChatHandleBefore(deps, { room: options.room, before: options.before, stale: options.stale, owner: options.owner })
+          : agentChatHandle(deps, { message: message!, room: options.room, supersededBy: options.supersededBy, stale: options.stale });
       })
     );
 
