@@ -23,6 +23,21 @@ reverie agent wake-employee EMPLOYEE_ID --json
 
 Use the full employee UUID, not a session ID or PID. This calls `POST /api/company/employees/EMPLOYEE_ID/wake` with `{}`. Separate `agent wake SESSION_ID` only nudges an idle session.
 
+### Repair a terminal viewer without restarting the provider
+
+The same explicit `recoverEmployees` permission permits viewer-only recovery through the employee's own authenticated office connection. `manageOffice` alone and organizational titles do not grant it. Current native office proof, same-company ownership, employee/session/generation binding and permission checks remain required throughout asynchronous repair. A copied parent-session header is not authentication; missing proof fails closed. Existing laptops may need a compatible installed CLI and broker before delegated commands work.
+
+```bash
+reverie agent viewer-status EMPLOYEE_ID --json
+reverie agent reconnect-viewer EMPLOYEE_ID --json
+```
+
+Both commands first read the current company binding. They POST `{sessionId,sessionGeneration}` to `/api/company/employees/EMPLOYEE_ID/reconnect/status` or `/reconnect` respectively, through the normal scoped client. They never accept an owner flag, provider command, replacement session or arbitrary identity header. `reverie agent capabilities --json` lists these commands and the current recovery grant.
+
+Status reports `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`. Reasons distinguish unavailable native health, stale binding, a move or lifecycle flight, readiness failure, changed authority and backoff. A status read starts nothing. In Company or an employee profile, **Status** reads the same bounded diagnostic; **Reconnect** requests only attachment to the existing provider. A browser terminal reconnect and this server-viewer repair are separate operations.
+
+An HTTP reconnect acknowledgement does not prove provider continuity or chat acceptance. Verify the current provider and request an ordinary chat acknowledgement. Unknown deliveries, drafts and stop fences remain retained; these actions never replay Enter, clear working state blindly or fall back to provider restart. Inspect status after an unconfirmed response instead of repeating the action automatically.
+
 Read `recovery.awakened` and `recovery.skipped` (`data.recovery` in HTTP). Skipped entries include employeeId and reason. Ordinary wake preserves OFF/vacation intent, saved runtime and conversation; `intentionally-ended` preserves a deliberate stop. HTTP success alone does not prove recovery.
 
 The automatic recovery budget is three attempts per employee in fifteen minutes, additionally governed by office settings. For recovery-in-progress, wait within a bounded deadline. Never loop after persistent errors or automatically repeat an unconfirmed response.
@@ -48,6 +63,18 @@ Existing laptops keep their installed CLI after a website update. Use the [older
 Inspect the returned employee binding and startup/recovery result. Attendance can save while startup is blocked; report the reason. Obtain a chat acknowledgement before assigning work.
 
 ## Interrupted plan moves
+
+An owner may explicitly delegate forced plan/provider transfers through **Manage plans** (team moves) or **Move own plan** (only the caller's own employee). Recovery and office-management grants do not imply plan authority. The delegated path requires the same current native office proof and asynchronous permission/binding checks as its protected server action; arbitrary session headers or an owner cookie borrowed from somebody else are not substitutes.
+
+```bash
+reverie agent plan-move force ACCOUNT_ID --employee EMPLOYEE_ID --id STABLE_OPERATION_ID --handoff-file DURABLE_HANDOFF_PATH --json
+reverie agent plan-move recovery-status STABLE_OPERATION_ID --employee EMPLOYEE_ID --json
+reverie agent plan-move recover-existing STABLE_OPERATION_ID --employee EMPLOYEE_ID --json
+# Cancellation applies only to a waiting transfer:
+reverie agent plan-move cancel-recovery STABLE_OPERATION_ID --employee EMPLOYEE_ID --json
+```
+
+Preserve unique source and results first. The owned UTF-8 handoff file must truthfully describe current work, completed checks, unfinished work and durable recovery locations. This explicit command does not pretend that the target agent approved a handoff. It reads the current employee/session/generation, then posts the same owner-grade forced-transfer operation with a stable ID. The native executor still verifies source cleanup, account/runtime selection, destination readiness and unknown stop/delivery fences. A 202 or returned journal phase is not proof of completion. An unconfirmed request is never automatically repeated or replaced with a new operation ID; inspect and reconcile its existing record.
 
 Blocked moves open the employee’s existing move. **Refresh status** reads its journal. **Adopt existing destination** verifies the stopped source and current destination without launching sessions or replaying a handoff. Active, ambiguous, resource or unconfirmed moves stay held. Lost replies require status inspection, never new or forced moves.
 

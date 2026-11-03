@@ -200,6 +200,61 @@ it('keeps an unknown reconnect acknowledgement unconfirmed and does not automati
  expect(h.app.toasts.some((t:any)=>t.text.includes('Terminal reconnected'))).toBe(false);
 });
 
+it('does not infer native viewer authority from a title, target permission or company JSON flag',async()=>{
+ const{h,employee,session,posts}=await fixture({health:'disconnected',scope:'terminal',owner:false});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2,position:'CTO',permissions:{recoverEmployees:true}});
+ Object.assign(session,{workerViewerReconnect:true});
+ h.shell.renderMembers();expect(h.document.querySelector('.ca-reconnect-viewer')).toBeNull();
+ h.shell.company.canReconnectViewers=true;h.shell.renderMembers();
+ expect(h.document.querySelector('.ca-reconnect-viewer')).toBeNull();
+ expect(h.document.querySelector('.ca-dead-pane-restart')).toBeNull();expect(posts).toHaveLength(0);
+ h.shell.company.canReconnectViewers=false;h.shell.renderMembers();
+ expect(h.document.querySelector('.ca-reconnect-viewer')).toBeNull();
+});
+
+it('reads bounded viewer reason/backoff on demand without repairing or changing activity',async()=>{
+ const{h,employee,session}=await fixture({health:'disconnected',scope:'terminal'});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ const calls:any[]=[];const original=h.app._chatApi.bind(h.app);
+ h.app._chatApi=async(path:string,options:any)=>{
+  if(path.endsWith('/reconnect/status')){calls.push({path,...options});return{ok:true,data:{reconnect:{state:'blocked',reason:'native-health-unavailable',attempts:2,retryAfterMs:5000}}};}
+  return original(path,options);
+ };
+ await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-viewer-status').click();await h.flush(80);
+ expect(calls).toEqual([{path:'/api/company/employees/expert/reconnect/status',method:'POST',body:{sessionId:SID,sessionGeneration:2}}]);
+ expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('native health unavailable');
+ expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('retry in 5s');
+ expect(session.isWorking).toBe(true);expect(session.runtimeHealth).toBe('disconnected');
+ expect(h.document.querySelector('.ca-company-state').textContent).toContain('Viewer unavailable');
+});
+
+it('shows a refused reconnect status without replaying or treating it as provider health',async()=>{
+ const{h,employee,session}=await fixture({health:'disconnected',scope:'terminal'});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ const calls:any[]=[];const original=h.app._chatApi.bind(h.app);
+ h.app._chatApi=async(path:string,options:any)=>{
+  if(path.endsWith('/reconnect')){calls.push({path,...options});return{ok:false,status:409,reconnect:{state:'blocked',reason:'backoff',attempts:3,retryAfterMs:5000}};}
+  return original(path,options);
+ };
+ await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-reconnect-viewer').click();await h.flush(80);
+ expect(calls).toHaveLength(1);expect(h.app.toasts.at(-1).text).toContain('backoff');
+ expect(h.app.toasts.at(-1).text).toContain('retry in 5s');expect(session.runtimeHealth).toBe('disconnected');
+ expect(h.app.toasts.some((t:any)=>t.text.includes('Terminal reconnected'))).toBe(false);
+});
+
+it('does not paint a stale status after the binding or browser permission changes during a read',async()=>{
+ const{h,employee,session}=await fixture({health:'disconnected',scope:'terminal'});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ let finish!:(value:any)=>void;const original=h.app._chatApi.bind(h.app);
+ h.app._chatApi=async(path:string,options:any)=>path.endsWith('/reconnect/status')?new Promise(resolve=>{finish=resolve;}):original(path,options);
+ await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-viewer-status').click();await h.flush();
+ h.shell.phoneStatus={self:'human',canSetOwn:false};employee.sessionGeneration=3;
+ finish({ok:true,data:{reconnect:{state:'connected',reason:'connected',attempts:1,retryAfterMs:0}}});await h.flush(80);
+ expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('changed');
+ expect(h.document.querySelector('.ca-viewer-status-report').textContent).not.toContain('connected:');
+ expect(session.runtimeHealth).toBe('disconnected');
+});
+
 function nativeProof(employee:any,state='healthy',extra={}){
  return {binding:JSON.stringify([employee.id,employee.owner,employee.sessionId,employee.sessionGeneration??1,employee.desiredRunning,employee.onVacation,employee.bindingMigration,employee.runtimeRecipe,employee.permissions],(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])):value),employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration??1,
   state,observedAtEpochMs:Date.now(),reason:state==='healthy'?'LIVE_NATIVE_COMMAND':'COMMAND_EXITED',...extra};

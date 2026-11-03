@@ -33,6 +33,8 @@ import http from 'node:http';
 import { displayTime, displayTimeZone } from './display-time.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
 import { agentEmployeeOffice } from './cli-agent-office.js';
+import { agentViewerRecovery } from './cli-agent-viewer.js';
+import { agentForcePlanMove, agentMoveJournal } from './cli-agent-force.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
 import { agentCredentialStatus } from './cli-agent-credential-status.js';
 import { agentContext, agentContextReceipt } from './cli-agent-context.js';
@@ -2769,16 +2771,37 @@ export function registerAgentCommands(program: Command): Command {
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
+  planMove.command('force <account-id>')
+    .description('Explicitly force a permitted provider/plan transfer with a durable operator handoff; preserves unknown outcome fences')
+    .requiredOption('--employee <employee-id>', 'Full target employee UUID; current binding is read before dispatch')
+    .requiredOption('--id <operation-id>', 'Stable unique operation ID; inspect this ID after an unconfirmed result')
+    .requiredOption('--handoff-file <path>', 'Owned UTF-8 file with truthful work/results/source preservation handoff')
+    .option('--json', 'Print the existing forced-transfer record; acknowledgement is not native readiness')
+    .action((accountId: string, options: { employee: string; id: string; handoffFile: string; json?: boolean }) =>
+      run(Boolean(options.json), deps => agentForcePlanMove(deps, {
+        employeeId: options.employee, accountId, id: options.id, handoffFile: options.handoffFile,
+      })));
   planMove.command('list').description('List this expert’s pending plan requests, or with --employee another expert’s')
     .option('--employee <id-or-name>', 'Another team expert, by employee id or name (requires Manage team plans)')
     .option('--json', 'Machine-readable result')
     .action((options: { employee?: string; json?: boolean }) => run(Boolean(options.json), deps => agentPendingPlanMoves(deps, options.employee)));
   planMove.command('blocked').description('Inspect your unresolved existing moves without creating or replaying one').option('--json', 'Machine-readable result')
     .action((options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps)));
-  planMove.command('recovery-status <id>').description('Inspect an existing move held for recovery (not a new plan request)').option('--json', 'Machine-readable result')
-    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps, id)));
-  planMove.command('recover-existing <id>').description('Explicitly adopt your verified existing destination; never launch or replay').option('--json', 'Machine-readable result')
-    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps, id, true)));
+  planMove.command('recovery-status <id>').description('Inspect an existing transfer journal; --employee selects the scoped native team/self path')
+    .option('--employee <employee-id>', 'Full target UUID; requires current Manage team plans or self Move own plan grant')
+    .option('--json', 'Machine-readable result')
+    .action((id: string, options: { employee?: string; json?: boolean }) => run(Boolean(options.json), deps => options.employee
+      ? agentMoveJournal(deps, { employeeId: options.employee, id, action: 'status' }) : agentPlanRecovery(deps, id)));
+  planMove.command('recover-existing <id>').description('Explicitly adopt a verified existing destination; never launch or replay')
+    .option('--employee <employee-id>', 'Full target UUID; requires current Manage team plans or self Move own plan grant')
+    .option('--json', 'Machine-readable result')
+    .action((id: string, options: { employee?: string; json?: boolean }) => run(Boolean(options.json), deps => options.employee
+      ? agentMoveJournal(deps, { employeeId: options.employee, id, action: 'resolve' }) : agentPlanRecovery(deps, id, true)));
+  planMove.command('cancel-recovery <id>').description('Cancel an existing waiting transfer within current plan grants; preserves held outcomes')
+    .requiredOption('--employee <employee-id>', 'Full target employee UUID')
+    .option('--json', 'Machine-readable result')
+    .action((id: string, options: { employee: string; json?: boolean }) => run(Boolean(options.json), deps =>
+      agentMoveJournal(deps, { employeeId: options.employee, id, action: 'cancel' })));
   planMove.command('request <account-id>')
     .description('Prepare a permitted plan move or same-account runtime refresh for safe handoff')
     .option('--restart', 'Refresh this expert on its current account through handoff and approval')
@@ -2921,6 +2944,17 @@ export function registerAgentCommands(program: Command): Command {
     .action((employeeId: string, options: { json?: boolean }) =>
       run(Boolean(options.json), (deps) => agentWakeEmployee(deps, { employeeId }))
     );
+
+  agent.command('reconnect-viewer <employee-id>')
+    .description('Repair only an existing worker terminal viewer using recoverEmployees; never restarts its provider or replays input')
+    .option('--json', 'Print the bounded recovery status; an acknowledgement does not prove chat acceptance')
+    .action((employeeId: string, options: { json?: boolean }) =>
+      run(Boolean(options.json), deps => agentViewerRecovery(deps, { employeeId })));
+  agent.command('viewer-status <employee-id>')
+    .description('Read current viewer recovery reason, attempt count and retry delay; starts nothing')
+    .option('--json', 'Print the bounded current status')
+    .action((employeeId: string, options: { json?: boolean }) =>
+      run(Boolean(options.json), deps => agentViewerRecovery(deps, { employeeId, statusOnly: true })));
 
   agent.command('office <employee-id>').description('Explicitly enter or leave office using your owner-granted manageOffice permission; saved identity and conversations remain')
     .option('--in', 'Enter office and request normal startup, including a deliberately stopped employee')
