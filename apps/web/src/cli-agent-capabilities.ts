@@ -6,6 +6,7 @@ import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT as EXIT } from './agent-exit-codes.js';
 import type { AgentCapabilities } from './agent-capabilities.js';
 import { fetchGrantedCredentials, type GrantedCredentialMetadata } from './cli-agent-credentials.js';
+import { agentCommandPaths, missingCommands } from './cli-command-list.js';
 
 export const GITHUB_CREDENTIAL_DIRECTORY = '.config/reverie/credentials/github';
 
@@ -75,8 +76,17 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     publication = { status: 'unavailable', credentials: [],
       note: 'Current named PAT grants could not be verified. Local credential files do not establish a current grant.' };
   }
+  // A seat CLI older than the server lacks commands the server's own CLI has; say which, since the version string cannot.
+  const missing = missingCommands(capabilities.cli?.commands, await agentCommandPaths());
+  const cliCompatibility = {
+    missing,
+    note: missing.length
+      ? 'This CLI is older than the server: it lacks the commands listed. Ask the operator to refresh the seat CLI; meanwhile /bin/reverie or the handbook API may have them.'
+      : 'This CLI has every command the server CLI has (or the server predates this check).',
+  };
   const report = {
     ...capabilities,
+    cliCompatibility,
     website: {
       restart: {
         status: 'unknown',
@@ -119,6 +129,8 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
   if (deps.json) deps.io.out(JSON.stringify(report, null, 2));
   else {
     deps.io.out(`${capabilities.identity.name} · current session ${capabilities.identity.sessionId}`);
+    if (missing.length)
+      deps.io.out(`! This CLI is older than the server and lacks ${missing.length} command${missing.length === 1 ? '' : 's'}: ${missing.slice(0, 12).join(', ')}${missing.length > 12 ? ', ...' : ''}. Ask the operator to refresh the seat CLI.`);
     deps.io.out(
       `Board decision cards: ${capabilities.board.createDecision ? 'allowed' : 'denied'}; clear: ${capabilities.board.clearDecision ? 'allowed' : 'denied'} — ${capabilities.board.reason}`
     );
