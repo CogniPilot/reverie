@@ -11,7 +11,9 @@ import { decodeMentionCursor, encodeMentionCursor } from '../../chatroom-mention
 const ref = z
   .object({ roomId: z.string().min(1).max(200), messageId: z.string().min(1).max(200), readToken: z.string().uuid() })
   .strict();
-const resolution = ref.extend({ disposition: z.enum(['handled', 'superseded']), replacement: ref.optional() }).strict();
+const resolution = ref
+  .extend({ disposition: z.enum(['handled', 'superseded', 'stale']), replacement: ref.optional() })
+  .strict();
 const historyQuery = z
   .object({
     roomId: z.string().min(1).max(200),
@@ -20,6 +22,8 @@ const historyQuery = z
       .regex(/^\d{1,16}$/)
       .optional(),
     beforeId: z.string().min(1).max(200).optional(),
+    // Only the notices this caller set aside as stale.
+    stale: z.literal('1').optional(),
   })
   .strict();
 // GET continues from the stored cursor, or shows everything with since=all; an explicit cursor is POSTed (see DIGEST_CURSOR_MAX).
@@ -39,8 +43,13 @@ const mentionsQuery = z
   .strict();
 /** Without `since`, the feed starts this long ago. */
 export const MENTION_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+// humans=1 also lists owner and other human notices: only to set them aside as stale, and only past the stale age.
 const pendingBeforeQuery = z
-  .object({ roomId: z.string().min(1).max(200), before: z.string().regex(/^\d{1,16}$/) })
+  .object({
+    roomId: z.string().min(1).max(200),
+    before: z.string().regex(/^\d{1,16}$/),
+    humans: z.literal('1').optional(),
+  })
   .strict();
 
 export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, service: ChatroomService): void {
@@ -172,7 +181,8 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
   });
 
   // The caller's own notices from agents and bots in one room, still pending before a time: what an explicit bulk
-  // "handle before" resolves one exact read at a time. Owner and other human messages are never listed.
+  // "handle before" resolves one exact read at a time. Owner and other human messages are listed only with humans=1, for
+  // setting them aside as stale, and only before the stale age (the service refuses a later time).
   app.get('/api/chatrooms/notices/pending-before', async (req, reply) => {
     const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
     if (
@@ -189,11 +199,13 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
       const summary = service.turnSummary(self, undefined, {
         roomId: parsed.data.roomId,
         before: Number(parsed.data.before),
+        humans: parsed.data.humans === '1',
       });
       return { success: true, data: { sourceReferences: summary.sourceReferences ?? [] } };
     } catch (error) {
       if (!(error instanceof ChatroomError)) throw error;
-      return reply.code(error.code === 'NOT_FOUND' ? 404 : 503).send({ success: false, error: error.message });
+      const code = error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503;
+      return reply.code(code).send({ success: false, error: error.message });
     }
   });
 
@@ -223,6 +235,7 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
           ...(parsed.data.beforeAt !== undefined
             ? { before: { at: Number(parsed.data.beforeAt), id: parsed.data.beforeId! } }
             : {}),
+          stale: parsed.data.stale === '1',
         }),
       };
     } catch (error) {
