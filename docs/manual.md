@@ -53,6 +53,20 @@ source mount does not automatically deploy edits to the running office.
 
 ## Build from source with Nix (development)
 
+The image and voice workflows reuse the Nix store through
+`nix-community/cache-nix-action`, backed by GitHub Actions cache storage. Only
+main saves caches; pull requests restore the accessible main cache without
+creating large copies scoped to each PR. Before saving, garbage collection
+targets an 8 GiB image store or a 4 GiB voice store, retaining rooted application
+and development outputs. These are collection targets, not hard limits: rooted
+closures cannot be removed. The image transport tar is uploaded as an artifact
+and is not kept as a cache root.
+
+Nix still runs the complete acceptance checks for changed inputs. The console
+depends on its web source and explicit Python, skill and test fixtures; unrelated
+documentation or workflow changes reuse its checked output. GitHub's cache is
+available to workflows, while local builds reuse the workstation's own Nix store.
+
 Reverie does not require NixOS or changes to a personal host configuration.
 The flake provides the application, tools and launchers. The native service runs
 as your user; container mode uses an existing container engine. Privileged host
