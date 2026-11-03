@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { agentJournalBrief, agentJournalMap, agentJournalRecall, agentJournalSave, elapsed } from '../src/cli-agent-journal.js';
+import { agentJournalBrief, agentJournalMap, agentJournalRecall, agentJournalSave, agentJournalSource, elapsed } from '../src/cli-agent-journal.js';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 import { MEMORY_BRIEF_UNREADABLE } from '../src/memory-brief.js';
+
+const ROOMS = [{ id: '00000000-0000-4000-8000-000000000a01', name: 'rumoca', members: [] }];
 
 function fixture(json: boolean, reply: { status: number; json: Record<string, unknown> }) {
   const output: string[] = [], errors: string[] = [], calls: RequestOptions[] = [];
   const deps: AgentDeps = { ctx: { selfId: 'self-session', apiUrl: 'http://synthetic.test' }, json, now: () => Date.parse('2026-10-30T14:00:00Z'),
     io: { out: text => output.push(text), err: text => errors.push(text) },
-    request: async (_ctx, request) => { calls.push(request); return { status: reply.status, text: '', json: reply.json as never }; } };
+    request: async (_ctx, request) => {
+      // The room listing --room names are resolved against; only journal requests are recorded.
+      if (request.path === '/api/v1/chatrooms') return { status: 200, text: '', json: { success: true, data: { rooms: ROOMS } } as never };
+      calls.push(request); return { status: reply.status, text: '', json: reply.json as never }; } };
   return { deps, output, errors, calls };
 }
 const entry = { entryId: 4, turnId: 'm-turn', roomId: 'room-one', committedAt: '2026-10-30T04:00:00.000Z', text: 'Re-test ran.', tags: ['lesson'],
@@ -143,5 +148,19 @@ describe('journal CLI', () => {
       roomId: 'room-one', tags: ['promise'], topics: [], superseded: false, state: 'open', stateScope: 'room' }] } } });
     expect(await agentJournalMap(room.deps, [], { room: 'room-one' })).toBe(0);
     expect(room.output[0]).toMatch(/ \[open in this room\]$/);
+  });
+
+  it('resolves a --room name to its id on save, recall, map and source; an id or an unknown value passes through', async () => {
+    const ok = { status: 200, json: { success: true, data: { entryId: 1, turnId: 'm-turn', replayed: false, payloadSha256: 'a'.repeat(64), entries: [], more: false } } };
+    const f = fixture(false, ok);
+    await agentJournalSave(f.deps, { room: 'rumoca', turn: 'm-turn', text: 'T', tag: ['lesson'], ref: ['commit 0123abcd'], reason: 'why' });
+    await agentJournalRecall(f.deps, ['x'], 'rumoca');
+    await agentJournalMap(f.deps, [], { room: 'rumoca' });
+    await agentJournalSource(f.deps, 'rumoca', 'm-source');
+    expect(f.calls.map((c) => (c.body as { roomId?: string } | undefined)?.roomId ?? c.query?.roomId)).toEqual(Array(4).fill(ROOMS[0].id));
+    const g = fixture(false, ok);
+    await agentJournalRecall(g.deps, ['x'], ROOMS[0].id);
+    await agentJournalRecall(g.deps, ['x'], 'no-such-room');
+    expect(g.calls.map((c) => c.query?.roomId)).toEqual([ROOMS[0].id, 'no-such-room']);
   });
 });
