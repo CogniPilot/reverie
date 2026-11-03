@@ -1,14 +1,11 @@
 /**
  * @fileoverview Checks for a sealed review packet before it is published: the parts every packet carries (SHA256SUMS,
  * one bundle, PR-TITLE.txt, PR-BODY.md opening with a `## Branch Naming` section), the commits it carries (the
- * maintainer's noreply identity, exactly one sign-off, no attribution), the public text (no team names or board ids), and
+ * configured publish identities, exactly one sign-off, no attribution), the public text (no team names or board ids), and
  * the room (no open hold). Pure functions over strings, so the publish command and the seal-time check share them and
  * tests need no repository or network.
  */
 import { createHash } from 'node:crypto';
-
-/** The identity every published commit is authored, committed and signed off by. */
-export const PUBLISH_IDENTITY = 'James Goppert <jgoppert@users.noreply.github.com>';
 
 export interface Finding {
   check: string;
@@ -136,18 +133,22 @@ export function parseCommit(sha: string, raw: string): CommitInfo {
 
 const ATTRIBUTION = /^(co-authored-by:|generated with\b|🤖)/im;
 
-export function checkCommit(commit: CommitInfo, identity = PUBLISH_IDENTITY): Finding[] {
+/**
+ * Author and committer must each be one of `identities` (`Name <email>`, configured per repository: the canonical form
+ * is the maintainer's choice), with exactly one `Signed-off-by` line, naming the author, and no attribution trailer.
+ */
+export function checkCommit(commit: CommitInfo, identities: readonly string[]): Finding[] {
   const at = commit.sha.slice(0, 8);
   const findings: Finding[] = [];
-  if (commit.author !== identity)
+  if (!identities.includes(commit.author))
     findings.push({ check: 'identity', detail: `${at} author is ${commit.author || 'missing'}` });
-  if (commit.committer !== identity)
+  if (!identities.includes(commit.committer))
     findings.push({ check: 'identity', detail: `${at} committer is ${commit.committer || 'missing'}` });
   const signoffs = commit.message.split('\n').filter((line) => /^Signed-off-by:/i.test(line.trim()));
   if (signoffs.length !== 1)
     findings.push({ check: 'dco', detail: `${at} has ${signoffs.length} Signed-off-by lines` });
-  else if (signoffs[0].trim() !== `Signed-off-by: ${identity}`)
-    findings.push({ check: 'dco', detail: `${at} is signed off by someone else` });
+  else if (signoffs[0].trim() !== `Signed-off-by: ${commit.author}`)
+    findings.push({ check: 'dco', detail: `${at} is not signed off by its author` });
   if (ATTRIBUTION.test(commit.message))
     findings.push({ check: 'attribution', detail: `${at} carries an attribution trailer` });
   return findings;
@@ -199,34 +200,48 @@ export interface HoldKeys {
   head: string;
   branch: string;
   pr?: string;
-  card?: string;
-  slice?: string;
+  /** Card ids and slice names the room also uses for this packet (T1, C2, a card id). */
+  names?: string[];
 }
 
-const HOLD_WORDS = /\b(hold|holds|holding|blocker|blocked|wait|do not merge|don't merge)\b/i;
+const HOLD_WORDS = /\b(hold|holds|holding|blocker|blocked|wait|do not merge|don't merge)\b|\bNO[- ]GO\b/i;
 /** A hold is lifted only in so many words; a bare "go" inside a hold ("hold, don't go yet") must not lift it. */
 const LIFT_WORDS =
   /\b(hold|blocker)\s+(is\s+)?(lifted|released|closed|cleared|withdrawn|resolved)\b|\bunblocked\b|\bno longer (blocked|holding)\b/i;
-const GO_WORDS = /\bGO\b|\b(approved|lgtm)\b/;
+/** GO as reviewers write it, never the GO inside NO-GO. */
+const GO_WORDS = /(?<!\bNO[- ])\bGO\b|\b(approved|lgtm)\b/;
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * Open holds on this packet: a message whose text names the head (first 8 characters), branch, PR number, card or slice
- * and uses hold language, with no later message from the same sender that names the packet and lifts the hold or gives
- * a GO. Reviewers rarely write a hold with a SHA, so every key counts. `overridden` holds message ids the publisher has
- * explicitly accepted (`--hold-ok`). The caller passes about 200 recent messages, oldest first.
+ * Matchers for the ways a message names this packet. A head matches by its first 8 hex digits (a longer SHA too); every
+ * other key matches as a whole token, so "T1" is found in "T1 HOLD" but not in "T12" or "ST1".
+ */
+function packetMatchers(keys: HoldKeys): RegExp[] {
+  const tokens = [keys.branch, keys.pr && `#${keys.pr}`, ...(keys.names ?? [])].filter(
+    (key): key is string => !!key && key.trim().length >= 2
+  );
+  return [
+    new RegExp(`(?<![0-9a-f])${escapeRegExp(keys.head.slice(0, 8))}`, 'i'),
+    ...tokens.map((key) => new RegExp(`(?<![A-Za-z0-9_])${escapeRegExp(key.trim())}(?![A-Za-z0-9_])`, 'i')),
+  ];
+}
+
+/**
+ * Open holds on this packet: a message that names it (head, branch, PR number, card or slice) and uses hold language,
+ * NO-GO included, with no later message from the same sender that names the packet and lifts the hold or gives a GO.
+ * `overridden` holds message ids the publisher has explicitly accepted (`--hold-ok`). Messages come oldest first; the
+ * caller makes sure they reach back far enough.
  */
 export function openHolds(
   messages: RoomMessage[],
   keys: HoldKeys,
   overridden: ReadonlySet<string> = new Set()
 ): RoomMessage[] {
-  const patterns = [keys.head.slice(0, 8), keys.branch, keys.pr && `#${keys.pr}`, keys.card, keys.slice]
-    .filter((key): key is string => !!key && key.length >= 3)
-    .map((key) => key.toLowerCase());
-  const names = (text: string) => patterns.some((key) => text.toLowerCase().includes(key));
+  const matchers = packetMatchers(keys);
   const open: RoomMessage[] = [];
   for (const message of messages) {
-    if (!names(message.text)) continue;
+    if (!matchers.some((m) => m.test(message.text))) continue;
     const holds = HOLD_WORDS.test(message.text);
     const lifts = LIFT_WORDS.test(message.text) || (!holds && GO_WORDS.test(message.text));
     if (lifts) {
@@ -234,4 +249,38 @@ export function openHolds(
     } else if (holds && !overridden.has(message.id)) open.push(message);
   }
   return open;
+}
+
+/**
+ * Whether the scanned messages provably reach back far enough, judged only by server timestamps and the messages
+ * themselves, never by commit dates (whoever makes a commit sets those). `complete` means the room's whole kept history
+ * was read. Otherwise the scan must hold the anchor: `anchorId` when the publisher names one (the seal post), else a
+ * message naming the head, and the oldest message read must not already name the packet, or earlier ones may be cut off.
+ */
+export function checkHoldReach(
+  messages: RoomMessage[],
+  complete: boolean,
+  keys: HoldKeys,
+  anchorId?: string
+): Finding[] {
+  const fail = (detail: string): Finding[] => [{ check: 'hold', detail }];
+  const matchers = packetMatchers(keys);
+  if (anchorId) {
+    const index = messages.findIndex((m) => m.id === anchorId);
+    if (index < 0)
+      return fail(`the --hold-since message ${anchorId.slice(0, 8)} is not among the ${messages.length} messages read`);
+    if (!complete && index === 0)
+      return fail(`the --hold-since message is the oldest one read, so the scan may stop short of it`);
+    return [];
+  }
+  if (complete) return [];
+  if (messages[0] && matchers.some((m) => m.test(messages[0].text)))
+    return fail(
+      `the oldest of the ${messages.length} messages read already names this packet, so earlier ones may be cut off; pass --hold-since <seal post id>`
+    );
+  if (!messages.some((m) => matchers[0].test(m.text)))
+    return fail(
+      `none of the last ${messages.length} messages names ${keys.head.slice(0, 8)}; post the packet in this room or pass --hold-since <seal post id>`
+    );
+  return [];
 }

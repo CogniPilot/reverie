@@ -20,6 +20,7 @@ import { AGENT_EXIT } from './agent-exit-codes.js';
 import {
   checkBranchName,
   checkCommit,
+  checkHoldReach,
   checkPacketParts,
   checkPaths,
   checkTitle,
@@ -36,8 +37,8 @@ import {
 
 /** The body a held draft carries until its text is approved. */
 export const HELD_DRAFT_BODY = 'Draft for CI. Description pending review.';
-/** How far back the hold scan reads the room. */
-export const HOLD_SCAN_MESSAGES = 200;
+/** How far back the hold scan reads the room: everything the server keeps. */
+export const HOLD_SCAN_MESSAGES = 1000;
 
 export interface ExecResult {
   code: number;
@@ -120,8 +121,11 @@ async function teamNames(deps: AgentDeps): Promise<string[] | { error: string }>
     .filter((name): name is string => typeof name === 'string' && name.trim().length > 1);
 }
 
-/** The last messages of a room, oldest first, as the hold scan reads them. */
-async function roomMessages(deps: AgentDeps, room: string): Promise<RoomMessage[] | { error: string }> {
+/** The last messages of a room, oldest first, and whether that is its whole kept history. */
+async function roomMessages(
+  deps: AgentDeps,
+  room: string
+): Promise<{ messages: RoomMessage[]; complete: boolean } | { error: string }> {
   const target = await resolveChatRoom(deps, room);
   if ('error' in target) return { error: target.error };
   const res = await deps.request(deps.ctx, {
@@ -136,10 +140,21 @@ async function roomMessages(deps: AgentDeps, room: string): Promise<RoomMessage[
   )?.messages;
   if (!res.json?.success || !Array.isArray(rows))
     return { error: `the messages of "${room}" could not be read for the hold scan` };
-  return rows
+  const messages = rows
     .filter((m) => !m.deleted && typeof m.text === 'string')
     .map((m) => ({ id: m.id, at: m.at, from: m.from?.name ?? '', text: m.text! }))
     .sort((a, b) => a.at - b.at);
+  return { messages, complete: rows.length < HOLD_SCAN_MESSAGES };
+}
+
+/** The identities commits must carry: `--identity`, else the checkout's `git config reverie.publishIdentity`. */
+async function publishIdentities(deps: PublishDeps, o: PublishOptions): Promise<string[]> {
+  if (o.identities?.length) return o.identities;
+  const configured = await deps.exec('git', ['config', '--get-all', 'reverie.publishIdentity'], { cwd: o.cwd });
+  return configured.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 export interface PublishOptions {
@@ -150,8 +165,14 @@ export interface PublishOptions {
   cwd?: string;
   remote?: string;
   base?: string;
-  card?: string;
-  slice?: string;
+  /** `Name <email>` forms commits may carry (`--identity`); default: git config `reverie.publishIdentity`. */
+  identities?: string[];
+  /** Card ids and slice names the room uses for this packet; the hold scan matches them too. */
+  names?: string[];
+  /** The seal post's message id: the hold scan must reach back to it. */
+  holdSince?: string;
+  /** Other remote branches an increment's bundle is stacked on, fetched before it is verified. */
+  prereqs?: string[];
   holdOk?: string[];
   dryRun?: boolean;
   watch?: boolean;
@@ -188,6 +209,16 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
   const git = (...args: string[]) => deps.exec('git', args, { cwd: o.cwd });
   const { packet, findings } = readPacket(o.packetDir, deps.readFile);
   if (!packet) return { findings };
+  const identities = await publishIdentities(deps, o);
+  if (!identities.length)
+    return {
+      findings: [
+        {
+          check: 'identity',
+          detail: 'no publish identity: pass --identity "Name <email>" or set git config reverie.publishIdentity',
+        },
+      ],
+    };
 
   const names = await teamNames(deps);
   if (!Array.isArray(names)) return { findings: [{ check: 'names', detail: names.error }] };
@@ -215,6 +246,16 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
     };
   const remoteHead = /^([0-9a-f]{40})\s/.exec(listed.stdout)?.[1];
   if (remoteHead) await git('fetch', '--quiet', remote, `refs/heads/${packet.branch}`);
+  for (const prereq of o.prereqs ?? []) {
+    const got = await git('fetch', '--quiet', remote, `refs/heads/${prereq}`);
+    if (got.code !== 0)
+      return {
+        findings: [
+          ...findings,
+          { check: 'bundle', detail: `fetching --prereq ${prereq} failed: ${got.stderr.trim()}` },
+        ],
+      };
+  }
 
   const verified = await git('bundle', 'verify', '--quiet', packet.bundlePath);
   if (verified.code !== 0)
@@ -223,7 +264,7 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
         ...findings,
         {
           check: 'bundle',
-          detail: `the bundle does not verify against the base or the branch (a bundle stacked on an unpublished packet needs that packet published first): ${verified.stderr.trim()}`,
+          detail: `the bundle does not verify against the base or the branch (one stacked on another branch needs --prereq <branch>): ${verified.stderr.trim()}`,
         },
       ],
     };
@@ -248,7 +289,10 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
     findings.push({ check: 'commits', detail: `${head.slice(0, 8)} adds nothing to ${remote}/${base}` });
   for (const sha of revs) {
     const commit = parseCommit(sha, (await git('cat-file', 'commit', sha)).stdout);
-    findings.push(...checkCommit(commit), ...scanPublicText(`commit ${sha.slice(0, 8)}`, commit.message, names));
+    findings.push(
+      ...checkCommit(commit, identities),
+      ...scanPublicText(`commit ${sha.slice(0, 8)}`, commit.message, names)
+    );
   }
 
   const raw = (await git('diff', '--raw', '--no-renames', '--no-abbrev', `${baseRef}...${head}`)).stdout;
@@ -290,14 +334,12 @@ async function verify(deps: PublishDeps, o: PublishOptions): Promise<{ plan?: Pl
   if (prs.code !== 0) findings.push({ check: 'gh', detail: `gh pr list failed: ${prs.stderr.trim()}` });
   else pr = (JSON.parse(prs.stdout || '[]') as Array<{ number: number }>)[0]?.number;
 
-  const messages = await roomMessages(deps, o.room);
-  if (!Array.isArray(messages)) findings.push({ check: 'hold', detail: messages.error });
+  const room = await roomMessages(deps, o.room);
+  if ('error' in room) findings.push({ check: 'hold', detail: room.error });
   else {
-    const holds = openHolds(
-      messages,
-      { head, branch: packet.branch, pr: pr ? String(pr) : undefined, card: o.card, slice: o.slice },
-      new Set(o.holdOk ?? [])
-    );
+    const keys = { head, branch: packet.branch, pr: pr ? String(pr) : undefined, names: o.names };
+    findings.push(...checkHoldReach(room.messages, room.complete, keys, o.holdSince));
+    const holds = openHolds(room.messages, keys, new Set(o.holdOk ?? []));
     for (const h of holds)
       findings.push({
         check: 'hold',
@@ -376,16 +418,17 @@ export async function agentPublish(deps: PublishDeps, o: PublishOptions): Promis
 
   const remote = o.remote ?? 'origin';
   if (plan.remoteHead !== plan.head) {
-    if (plan.remoteHead) {
-      const cancelled = await cancelRunsFor(deps, o.repo, plan.branch, plan.remoteHead);
-      if (cancelled)
-        say(`  cancelled ${cancelled} run${cancelled === 1 ? '' : 's'} on the old head ${plan.remoteHead.slice(0, 8)}`);
-    }
     const pushed = await deps.exec('git', ['push', '--quiet', remote, `${plan.head}:refs/heads/${plan.branch}`], {
       cwd: o.cwd,
     });
     if (pushed.code !== 0) return report(deps, [{ check: 'push', detail: pushed.stderr.trim() || 'git push failed' }]);
     say(`✓ pushed ${plan.branch}`);
+    // Only once the new head is up: a refused push must leave the old head's runs alone.
+    if (plan.remoteHead) {
+      const cancelled = await cancelRunsFor(deps, o.repo, plan.branch, plan.remoteHead);
+      if (cancelled)
+        say(`  cancelled ${cancelled} run${cancelled === 1 ? '' : 's'} on the old head ${plan.remoteHead.slice(0, 8)}`);
+    }
   }
 
   let pr = plan.pr;
@@ -590,8 +633,15 @@ export function registerPublishCommands(
     .option('-C, --cwd <dir>', 'Git checkout to work in (default: the current directory)')
     .option('--remote <name>', 'Git remote', 'origin')
     .option('--base <branch>', 'Base branch', 'main')
-    .option('--card <id>', 'Board card the hold scan also matches')
-    .option('--slice <name>', 'Slice name the hold scan also matches')
+    .option(
+      '--identity <name-email>',
+      'Identity commits must carry, "Name <email>" (repeat); default: git config reverie.publishIdentity',
+      repeat
+    )
+    .option('--card <id>', 'Board card the hold scan also matches (repeat)', repeat)
+    .option('--slice <name>', 'Slice name the hold scan also matches, e.g. T1 (repeat)', repeat)
+    .option('--hold-since <message-id>', "The packet's seal post; the hold scan must reach back to it")
+    .option('--prereq <branch>', 'Another remote branch the bundle is stacked on (repeat)', repeat)
     .option('--hold-ok <message-id>', 'Publish past this hold message (repeat); recorded in the output', repeat)
     .option('--dry-run', 'Run every check and stop before pushing')
     .option('--watch', 'Watch the checks after opening the draft')
@@ -607,8 +657,11 @@ export function registerPublishCommands(
           cwd?: string;
           remote: string;
           base: string;
-          card?: string;
-          slice?: string;
+          identity?: string[];
+          card?: string[];
+          slice?: string[];
+          holdSince?: string;
+          prereq?: string[];
           holdOk?: string[];
           dryRun?: boolean;
           watch?: boolean;
@@ -627,8 +680,10 @@ export function registerPublishCommands(
               cwd: o.cwd,
               remote: o.remote,
               base: o.base,
-              card: o.card,
-              slice: o.slice,
+              identities: o.identity,
+              names: [...(o.card ?? []), ...(o.slice ?? [])],
+              holdSince: o.holdSince,
+              prereqs: o.prereq,
               holdOk: o.holdOk,
               dryRun: o.dryRun,
               watch: o.watch,

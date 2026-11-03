@@ -6,9 +6,9 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
-  PUBLISH_IDENTITY,
   checkBranchName,
   checkCommit,
+  checkHoldReach,
   checkPacketParts,
   checkPaths,
   checkTitle,
@@ -22,6 +22,7 @@ import {
   type RoomMessage,
 } from '../src/packet-check.js';
 
+const ID = 'James Goppert <473772+jgoppert@users.noreply.github.com>';
 // Built at runtime so this file's own text passes the board-id scan it tests.
 const CARD = ['i', '0000beef'].join('-');
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -136,35 +137,49 @@ describe('checkBranchName', () => {
 });
 
 const signed = (subject: string, extra = '') =>
-  `tree 1\nparent 2\nauthor ${PUBLISH_IDENTITY} 1793680000 -0500\ncommitter ${PUBLISH_IDENTITY} 1793680000 -0500\n\n${subject}\n\n${extra}Signed-off-by: ${PUBLISH_IDENTITY}\n`;
+  `tree 1\nparent 2\nauthor ${ID} 1793680000 -0500\ncommitter ${ID} 1793680000 -0500\n\n${subject}\n\n${extra}Signed-off-by: ${ID}\n`;
 
 describe('parseCommit / checkCommit', () => {
   it('passes a commit by the publish identity with one sign-off', () => {
     const commit = parseCommit('0123456789abcdef', signed('feat(cli): publish'));
-    expect(commit.author).toBe(PUBLISH_IDENTITY);
-    expect(commit.committer).toBe(PUBLISH_IDENTITY);
-    expect(checkCommit(commit)).toEqual([]);
+    expect(commit.author).toBe(ID);
+    expect(commit.committer).toBe(ID);
+    expect(checkCommit(commit, [ID])).toEqual([]);
   });
 
   it('reports another author or committer', () => {
-    const raw = signed('x').replace(`committer ${PUBLISH_IDENTITY}`, 'committer Someone <s@example.com>');
-    expect(checkCommit(parseCommit('0123456789abcdef', raw)).map((f) => f.detail)).toEqual([
+    const raw = signed('x').replace(`committer ${ID}`, 'committer Someone <s@example.com>');
+    expect(checkCommit(parseCommit('0123456789abcdef', raw), [ID]).map((f) => f.detail)).toEqual([
       '01234567 committer is Someone <s@example.com>',
     ]);
   });
 
   it('needs exactly one sign-off, by the publish identity', () => {
-    const twice = signed('x', `Signed-off-by: ${PUBLISH_IDENTITY}\n`);
-    expect(checkCommit(parseCommit('aaaaaaaa', twice)).map((f) => f.check)).toEqual(['dco']);
-    const other = signed('x').replace(`Signed-off-by: ${PUBLISH_IDENTITY}`, 'Signed-off-by: Other <o@example.com>');
-    expect(checkCommit(parseCommit('aaaaaaaa', other))[0].detail).toBe('aaaaaaaa is signed off by someone else');
-    const none = signed('x').replace(`Signed-off-by: ${PUBLISH_IDENTITY}\n`, '');
-    expect(checkCommit(parseCommit('aaaaaaaa', none))[0].detail).toBe('aaaaaaaa has 0 Signed-off-by lines');
+    const twice = signed('x', `Signed-off-by: ${ID}\n`);
+    expect(checkCommit(parseCommit('aaaaaaaa', twice), [ID]).map((f) => f.check)).toEqual(['dco']);
+    const other = signed('x').replace(`Signed-off-by: ${ID}`, 'Signed-off-by: Other <o@example.com>');
+    expect(checkCommit(parseCommit('aaaaaaaa', other), [ID])[0].detail).toBe(
+      'aaaaaaaa is not signed off by its author'
+    );
+    const none = signed('x').replace(`Signed-off-by: ${ID}\n`, '');
+    expect(checkCommit(parseCommit('aaaaaaaa', none), [ID])[0].detail).toBe('aaaaaaaa has 0 Signed-off-by lines');
+  });
+
+  it('accepts any configured identity, and needs the sign-off to name the author', () => {
+    const other = 'James Goppert <jgoppert@users.noreply.github.com>';
+    const raw = signed('x').replace(`author ${ID}`, `author ${other}`);
+    expect(checkCommit(parseCommit('aaaaaaaa', raw), [ID, other]).map((f) => f.detail)).toEqual([
+      'aaaaaaaa is not signed off by its author',
+    ]);
+    expect(checkCommit(parseCommit('aaaaaaaa', signed('x')), [other]).map((f) => f.check)).toEqual([
+      'identity',
+      'identity',
+    ]);
   });
 
   it('refuses attribution trailers', () => {
     const raw = signed('x', 'Co-Authored-By: Helper <h@example.com>\n');
-    expect(checkCommit(parseCommit('aaaaaaaa', raw)).map((f) => f.check)).toEqual(['attribution']);
+    expect(checkCommit(parseCommit('aaaaaaaa', raw), [ID]).map((f) => f.check)).toEqual(['attribution']);
   });
 });
 
@@ -206,7 +221,7 @@ describe('checkPaths / templateChanges', () => {
 });
 
 describe('openHolds', () => {
-  const keys = { head: 'abcdef0123456789', branch: 'packet-publish', pr: '240', card: CARD };
+  const keys = { head: 'abcdef0123456789', branch: 'packet-publish', pr: '240', names: [CARD, 'T1'] };
   let n = 0;
   const msg = (from: string, text: string): RoomMessage => ({ id: `m${++n}`, at: n, from, text });
 
@@ -236,5 +251,50 @@ describe('openHolds', () => {
   it('skips holds the publisher accepted by id', () => {
     const hold = msg('Alice', 'HOLD packet-publish');
     expect(openHolds([hold], keys, new Set([hold.id]))).toEqual([]);
+  });
+});
+
+describe('openHolds: NO-GO and short keys', () => {
+  const keys = { head: 'abcdef0123456789', branch: 'packet-publish', names: ['T1'] };
+  const msg = (id: string, at: number, from: string, text: string): RoomMessage => ({ id, at, from, text });
+
+  it('treats NO-GO as a hold, and a later NO-GO does not lift an earlier hold', () => {
+    const nogo = msg('a', 1, 'Alice', 'NO-GO on abcdef01: the test fails');
+    expect(openHolds([nogo], keys)).toEqual([nogo]);
+    const hold = msg('b', 2, 'Alice', 'HOLD packet-publish');
+    const still = msg('c', 3, 'Alice', 'packet-publish still NO-GO');
+    expect(openHolds([hold, still], keys)).toEqual([hold, still]);
+    expect(openHolds([hold, still, msg('d', 4, 'Alice', 'GO packet-publish')], keys)).toEqual([]);
+  });
+
+  it('matches short slice names and full SHAs as whole tokens', () => {
+    expect(openHolds([msg('a', 1, 'Alice', 'T1 HOLD until the rerun')], keys)).toHaveLength(1);
+    expect(openHolds([msg('a', 1, 'Alice', 'T12 HOLD'), msg('b', 2, 'Alice', 'ST1 hold')], keys)).toEqual([]);
+    expect(openHolds([msg('a', 1, 'Alice', 'HOLD abcdef0123456789aaaa')], keys)).toHaveLength(1);
+    expect(openHolds([msg('a', 1, 'Alice', 'HOLD 1abcdef01')], keys)).toEqual([]);
+  });
+});
+
+describe('checkHoldReach', () => {
+  const keys = { head: 'abcdef0123456789', branch: 'packet-publish' };
+  const msg = (id: string, text: string): RoomMessage => ({ id, at: 0, from: 'Alice', text });
+  const filler = Array.from({ length: 5 }, (_, i) => msg(`f${i}`, 'unrelated'));
+
+  it('passes a complete history, or a window holding a head mention newer than its oldest message', () => {
+    expect(checkHoldReach([], true, keys)).toEqual([]);
+    expect(checkHoldReach([...filler, msg('s', 'sealed abcdef01')], false, keys)).toEqual([]);
+  });
+
+  it('fails closed when the window may cut the packet off', () => {
+    expect(checkHoldReach([msg('o', 'HOLD packet-publish'), ...filler], false, keys)[0].detail).toContain(
+      'oldest of the'
+    );
+    expect(checkHoldReach(filler, false, keys)[0].detail).toContain('names abcdef01');
+  });
+
+  it('checks an explicit anchor is inside the window and not at its edge', () => {
+    expect(checkHoldReach(filler, false, keys, 'f2')).toEqual([]);
+    expect(checkHoldReach(filler, false, keys, 'f0')[0].detail).toContain('oldest one read');
+    expect(checkHoldReach(filler, false, keys, 'zz')[0].detail).toContain('is not among');
   });
 });

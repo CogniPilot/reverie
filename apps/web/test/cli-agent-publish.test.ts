@@ -19,10 +19,10 @@ import {
   type Exec,
   type PublishDeps,
 } from '../src/cli-agent-publish.js';
-import { PUBLISH_IDENTITY } from '../src/packet-check.js';
 
 const NAME = 'James Goppert';
-const EMAIL = 'jgoppert@users.noreply.github.com';
+const EMAIL = '473772+jgoppert@users.noreply.github.com';
+const ID = `${NAME} <${EMAIL}>`;
 const BRANCH = 'packet-publish';
 
 let root: string;
@@ -52,7 +52,7 @@ function commit(file: string, text: string, message: string, env: Record<string,
   return git(author, ['rev-parse', 'HEAD']);
 }
 
-const signedMessage = (subject: string, extra = '') => `${subject}\n\n${extra}Signed-off-by: ${PUBLISH_IDENTITY}\n`;
+const signedMessage = (subject: string, extra = '') => `${subject}\n\n${extra}Signed-off-by: ${ID}\n`;
 
 /** A sealed packet for `ref` in a new directory. */
 function seal(
@@ -108,16 +108,19 @@ function fake(
         status: 200,
         json: { success: true, data: { rooms: [{ id: 'room-0001-aaaa', name: 'reviews', kind: 'room' }] } },
       };
-    if (req.path.endsWith('/messages'))
+    if (req.path.endsWith('/messages')) {
+      const limit = Number((req as { query?: { limit?: number } }).query?.limit ?? 30);
+      const rows = (options.messages ?? []).slice(-limit);
       return {
         status: 200,
         json: {
           success: true,
           data: {
-            messages: (options.messages ?? []).map((m) => ({ ...m, from: { kind: 'agent', name: m.from }, to: 'all' })),
+            messages: rows.map((m) => ({ ...m, from: { kind: 'agent', name: m.from }, to: 'all' })),
           },
         },
       };
+    }
     return { status: 404, json: { success: false, error: 'not found' } };
   }) as unknown as PublishDeps['request'];
   return {
@@ -153,7 +156,6 @@ beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'publish-test-'));
   remote = join(root, 'remote.git');
   author = join(root, 'author');
-  publisher = join(root, 'publisher');
   git(root, ['init', '-q', '--bare', '-b', 'main', remote]);
   git(root, ['clone', '-q', remote, author]);
   commit('README.md', 'base\n', 'base');
@@ -161,8 +163,16 @@ beforeAll(() => {
   git(author, ['switch', '-q', '-c', BRANCH]);
   goodHead = commit('feature.txt', 'feature\n', signedMessage('feat: add a thing'));
   good = seal(BRANCH);
-  git(root, ['clone', '-q', remote, publisher]);
+  publisher = clonePublisher('publisher');
 });
+
+/** A publisher checkout with the publish identity configured. `--no-local` copies only reachable objects; `lean` clones main only, as a fresh seat might. */
+function clonePublisher(name: string, lean = false): string {
+  const dir = join(root, name);
+  git(root, ['clone', '-q', '--no-local', ...(lean ? ['--single-branch', '--branch', 'main'] : []), remote, dir]);
+  git(dir, ['config', 'reverie.publishIdentity', ID]);
+  return dir;
+}
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -205,6 +215,7 @@ describe('agent publish', () => {
     const next = commit('feature.txt', 'feature 2\n', signedMessage('feat: more'));
     // A thin increment: its only prerequisite is the published branch head, which the publisher must fetch.
     const ff = seal(`${goodHead}..${BRANCH}`);
+    const lean = clonePublisher('lean', true);
     const f = fake({
       gh: (args) =>
         args[0] === 'pr' && args[1] === 'list'
@@ -218,7 +229,7 @@ describe('agent publish', () => {
               }
             : {},
     });
-    expect(await agentPublish(f.deps, options(ff))).toBe(0);
+    expect(await agentPublish(f.deps, { ...options(ff), cwd: lean })).toBe(0);
     expect(remoteBranch()).toBe(next);
     expect(f.gh.filter((a) => a[1] === 'cancel')).toEqual([['run', 'cancel', '11', '--repo', 'o/r']]);
     expect(f.gh.some((a) => a[1] === 'create')).toBe(false);
@@ -228,7 +239,7 @@ describe('agent publish', () => {
     commit('other.txt', 'x\n', signedMessage('feat: rewritten'));
     const rewritten = seal('rewrite', undefined, undefined, BRANCH);
     const r = fake({ gh: ghNoPr });
-    expect(await agentPublish(r.deps, options(rewritten))).toBe(4);
+    expect(await agentPublish(r.deps, { ...options(rewritten), cwd: lean })).toBe(4);
     expect(r.err.join('\n')).toContain('does not fast-forward');
     expect(remoteBranch()).toBe(next);
   });
@@ -251,6 +262,65 @@ describe('agent publish', () => {
       'a.txt names "Dana"',
     ])
       expect(text).toContain(expected);
+  });
+
+  it('needs a configured identity, and --identity overrides the checkout config', async () => {
+    const bare = join(root, 'no-identity');
+    git(root, ['clone', '-q', remote, bare]);
+    const f = fake({ gh: ghNoPr });
+    expect(await agentPublish(f.deps, { ...options(good), cwd: bare, dryRun: true })).toBe(4);
+    expect(f.err.join('\n')).toContain('no publish identity');
+    const other = fake({ gh: ghNoPr });
+    expect(
+      await agentPublish(other.deps, { ...options(good), dryRun: true, identities: ['Someone <s@example.com>'] })
+    ).toBe(4);
+    expect(other.err.join('\n')).toContain(`author is ${ID}`);
+  });
+
+  it('verifies a bundle stacked on another branch only with --prereq', async () => {
+    git(author, ['switch', '-q', '-c', 'base-track', 'origin/main']);
+    const baseTip = commit('track.txt', 'one\n', signedMessage('feat: track one'));
+    git(author, ['push', '-q', 'origin', 'base-track']);
+    git(author, ['switch', '-q', '-c', 'track-two']);
+    commit('track.txt', 'two\n', signedMessage('feat: track two'));
+    const packet = seal(`${baseTip}..track-two`, undefined, undefined, 'track-two');
+    const lean = clonePublisher('lean-prereq', true);
+    const without = fake({ gh: ghNoPr });
+    expect(await agentPublish(without.deps, { ...options(packet), cwd: lean, dryRun: true })).toBe(4);
+    expect(without.err.join('\n')).toContain('--prereq');
+    const withPrereq = fake({ gh: ghNoPr });
+    expect(
+      await agentPublish(withPrereq.deps, { ...options(packet), cwd: lean, dryRun: true, prereqs: ['base-track'] })
+    ).toBe(0);
+  });
+
+  it('anchors the hold scan on room messages, never on commit dates', async () => {
+    git(author, ['switch', '-q', '-c', 'future', 'origin/main']);
+    const head = commit('future.txt', 'x\n', signedMessage('feat: future'), {
+      GIT_AUTHOR_DATE: '2099-01-01T00:00:00Z',
+      GIT_COMMITTER_DATE: '2099-01-01T00:00:00Z',
+    });
+    const packet = seal('future', undefined, undefined, 'future');
+    const filler = Array.from({ length: 1000 }, (_, i) => ({
+      id: `f${i}`,
+      at: 10 + i,
+      from: 'Bot',
+      text: 'unrelated',
+    }));
+    // The hold and the seal post sit inside a full window: found and refused, whatever the commit claims its date is.
+    const held = [
+      ...filler.slice(0, 500),
+      { id: 'seal', at: 600, from: 'Author', text: `sealed ${head.slice(0, 8)}` },
+      { id: 'hold', at: 601, from: 'Reviewer', text: 'NO-GO future: fails' },
+      ...filler.slice(502),
+    ];
+    const f = fake({ messages: held, gh: ghNoPr });
+    expect(await agentPublish(f.deps, { ...options(packet), dryRun: true })).toBe(4);
+    expect(f.err.join('\n')).toContain('open hold from Reviewer');
+    // A full window that never names the head cannot prove there is no hold.
+    const blind = fake({ messages: filler, gh: ghNoPr });
+    expect(await agentPublish(blind.deps, { ...options(packet), dryRun: true })).toBe(4);
+    expect(blind.err.join('\n')).toContain(`names ${head.slice(0, 8)}`);
   });
 
   it('refuses a packet whose files do not match SHA256SUMS', async () => {
