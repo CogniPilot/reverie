@@ -54,6 +54,7 @@ export function agentPlanRequestExecution(
   let sourceStopped = false;
   let candidateGeneration: number | undefined;
   let candidateRecipe: string | undefined;
+  let candidateRuntimeRecipe: string | undefined;
   const sourceRecipe = native ? JSON.stringify(expertRuntimeRecipe(source)) : undefined;
   const originalRecipe = JSON.stringify(target.runtimeRecipe);
   const originalGeneration = target.sessionGeneration;
@@ -74,6 +75,7 @@ export function agentPlanRequestExecution(
       !!current &&
       !!employee &&
       (!native || (JSON.stringify(expertRuntimeRecipe(source)) === sourceRecipe &&
+        (!candidate || (!!candidateSession && JSON.stringify(expertRuntimeRecipe(candidateSession)) === candidateRuntimeRecipe)) &&
         (employee.sessionId === input.sessionId
           ? employee.sessionGeneration === originalGeneration && JSON.stringify(employee.runtimeRecipe) === originalRecipe
           : employee.sessionGeneration === candidateGeneration && JSON.stringify(employee.runtimeRecipe) === candidateRecipe) &&
@@ -131,6 +133,7 @@ export function agentPlanRequestExecution(
             throw new PlanMoveError('The move did not create an owned candidate');
           candidate = id;
           candidateSession = created;
+          candidateRuntimeRecipe = native ? JSON.stringify(expertRuntimeRecipe(created)) : undefined;
           const bound = employees().find(employee => employee.id === target.id && employee.sessionId === id);
           candidateGeneration = bound?.sessionGeneration;
           candidateRecipe = JSON.stringify(bound?.runtimeRecipe);
