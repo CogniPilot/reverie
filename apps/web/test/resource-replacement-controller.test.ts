@@ -359,7 +359,9 @@ it.each(['preparing', 'dispatching'] as const)('retains %s crash uncertainty wit
 it('the real profile keeps a lost Apply reply fenced and discovers its server record after reload', async () => {
   rejectAt = 'verify';
   const screens: Awaited<ReturnType<typeof createHarness>>[] = [];
-  const open = async (loseReply = false) => {
+  let releaseDiscovery!: () => void;
+  const discovery = new Promise<void>(resolve => {releaseDiscovery = resolve;});
+  const open = async (loseReply = false, discoveryReady: Promise<void> = Promise.resolve()) => {
     const employee = {...company.view().employees[0], available: true};
     const data = {canManage: true, settings: {ownerName: 'Owner'}, employees: [employee], resourceReplacement: true};
     const h = await createHarness({sessions: [{id: source.id, name: 'Worker', mode: 'codex'}],
@@ -375,6 +377,7 @@ it('the real profile keeps a lost Apply reply fenced and discovers its server re
         return {ok: response.statusCode < 400, status: response.statusCode, ...response.json()};
       }
       if (!url.startsWith('/api/company/resources/')) return previous(url, opts);
+      if (url.endsWith('/operations')) await discoveryReady;
       const response = await app.inject({method: 'POST', url, headers: headers(), payload: opts.body});
       if (loseReply && url.endsWith('/apply')) throw new Error('HTTP reply lost AFTER real Apply');
       return {ok: response.statusCode < 400, status: response.statusCode, ...response.json()};
@@ -385,8 +388,14 @@ it('the real profile keeps a lost Apply reply fenced and discovers its server re
     return h;
   };
   try {
-    const h = await open(true);
+    const h = await open(true, discovery);
     const button = (screen: typeof h, name: string) => screen.document.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
+    // Initial owner/operation discovery uses real asynchronous store reads.
+    // A fixed harness flush can finish while Preview is still disabled.
+    expect(button(h, 'Preview laptop memory for Worker').disabled).toBe(true);
+    releaseDiscovery();
+    await until(async () => {await h.flush(); return button(h, 'Preview laptop memory for Worker').disabled;},
+      disabled => !disabled);
     h.document.querySelector<HTMLInputElement>('.ca-profile-memory input')!.value = '3072';
     button(h, 'Preview laptop memory for Worker').click();
     await until(async () => {await h.flush(); return h.document.querySelector('.ca-profile-memory textarea');}, Boolean);
@@ -402,7 +411,7 @@ it('the real profile keeps a lost Apply reply fenced and discovers its server re
     expect(fresh.document.querySelector('.ca-profile-memory')!.textContent).toContain('needs recovery');
     expect(verbs.filter(verb => verb === 'claim')).toHaveLength(1);
     expect(verbs.filter(verb => verb === 'source-stop')).toHaveLength(1);
-  } finally {for (const h of screens) h.dom.window.close();}
+  } finally {releaseDiscovery(); for (const h of screens) h.dom.window.close();}
 }, 20_000);
 
 it('a live pre-begin attempt cannot be mistaken for not-started or overtaken by a second preview', async () => {
