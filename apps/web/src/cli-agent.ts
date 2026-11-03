@@ -2204,7 +2204,7 @@ export async function agentChatVoice(
 // Plans (read-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface PlanRowView {
+export interface PlanRowView {
   id: string;
   label: string;
   provider: string;
@@ -2283,6 +2283,34 @@ function planLines(a: PlanRowView, timeZone?: string): string[] {
   return lines;
 }
 
+/** A banked reset expiring within this long gets a warning in `plans show`. */
+export const BANKED_RESET_EXPIRY_WARN_MS = 72 * 3600_000;
+/** Applying a banked reset this close to the weekly reset wastes it: the week resets on its own anyway. */
+export const BANKED_RESET_NEAR_WEEKLY_MS = 24 * 3600_000;
+
+/**
+ * Advice for an account's banked resets, for `plans show`. Reverie only reads them (the provider exposes no redeem call
+ * here), so this says where to apply one, warns when one is about to expire, and says whether now is a sensible time:
+ * only with the week fully used, and not when the weekly reset is close.
+ */
+export function bankedResetAdvice(a: PlanRowView, now: number, timeZone?: string): string[] {
+  const b = a.bankedResets;
+  if (a.provider !== 'openai' || !b || b.availableCount < 1) return [];
+  const hours = (ms: number) => `${Math.max(0, Math.round(ms / 3600_000))} h`;
+  const lines: string[] = [];
+  if (b.earliestExpiresAt && b.earliestExpiresAt > now && b.earliestExpiresAt - now <= BANKED_RESET_EXPIRY_WARN_MS)
+    lines.push(`  ! a banked reset expires in ${hours(b.earliestExpiresAt - now)} (${planEt(b.earliestExpiresAt, timeZone)})`);
+  const weekly = a.pace.weekly;
+  const untilReset = a.pace.weekReset !== null ? a.pace.weekReset - now : null;
+  if (weekly === null || !Number.isFinite(weekly)) lines.push('  apply one only at 100% of the week; current use is unknown');
+  else if (weekly < 100) lines.push(`  not now: the week is at ${planPct(weekly)}; apply one only at 100%`);
+  else if (untilReset !== null && untilReset <= BANKED_RESET_NEAR_WEEKLY_MS)
+    lines.push(`  not now: the week resets in ${hours(untilReset)} anyway; keep the banked reset`);
+  else lines.push(`  the week is at 100%${untilReset !== null ? ` with ${hours(untilReset)} to its reset` : ''}: a banked reset can be applied now`);
+  lines.push("  Reverie never redeems one: apply it from the provider's own account page for this login");
+  return lines;
+}
+
 async function loadPlans(deps: AgentDeps): Promise<{ rows: PlanRowView[]; timeZone: string } | { error: string }> {
   const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/plans' });
   if (!res.json?.success) return { error: describeFailure(res) };
@@ -2315,6 +2343,7 @@ export async function agentPlansShow(deps: AgentDeps, options: { name: string })
     return EXIT.ok;
   }
   for (const line of planLines(hit, loaded.timeZone)) deps.io.out(line);
+  for (const line of bankedResetAdvice(hit, (deps.now ?? Date.now)(), loaded.timeZone)) deps.io.out(line);
   return EXIT.ok;
 }
 
@@ -2723,7 +2752,7 @@ export function registerAgentCommands(program: Command): Command {
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentPlans));
   plans
     .command('show <name>')
-    .description('One account by label or id')
+    .description('One account by label or id, with advice on its banked resets (when to apply one, and where)')
     .option('--json', 'Machine-readable output')
     .action((name: string, options: { json?: boolean }, cmd: Command) =>
       run(Boolean(options.json ?? cmd.parent?.opts().json), (deps) => agentPlansShow(deps, { name }))
