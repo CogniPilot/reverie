@@ -14,8 +14,9 @@
  * and this file checks the arithmetic actually works out on the files on disk.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   BROWSER_TEST_GLOBS,
@@ -56,17 +57,41 @@ function matches(glob: string, file: string): boolean {
 const claims = (globs: string[], file: string) => globs.some((g) => matches(g, file));
 
 /**
- * The test files the Nix console checks run: every path on an `npm test --`
- * line of nix/package.nix, including its backslash continuations. A path
- * mentioned anywhere else in that file (a comment, say) runs nothing.
+ * nix/package.nix, from the copy the Nix build supplies (the web derivation is
+ * flattened to apps/web, so the repository file is not there) or else from this
+ * checkout. Never a path chosen by the environment.
  */
-function nixCheckedFiles(): string[] {
+function nixPackageSource(testDirectory: string): string {
+  const packaged = resolve(testDirectory, 'fixtures/nix-package/package.nix');
+  const repository = resolve(testDirectory, '../../../nix/package.nix');
+  if (existsSync(packaged)) return readFileSync(packaged, 'utf8');
+  if (resolve(testDirectory, '../../../apps/web/test') === resolve(testDirectory) && existsSync(repository))
+    return readFileSync(repository, 'utf8');
+  throw new Error('Trusted nix/package.nix was not supplied');
+}
+
+const TEST_FILES = String.raw`((?:test\/[\w./-]+\.test\.ts\s*)+)(\\?)\s*$`;
+/** `npm test -- <files>`, optionally after plain `NAME=value` assignments, and nothing else on the line. */
+const NPM_TEST = new RegExp(String.raw`^\s*(?:[A-Z][A-Z0-9_]*=[\w./-]*\s+)*npm test -- ` + TEST_FILES, 'u');
+const CONTINUATION = new RegExp(String.raw`^\s+` + TEST_FILES, 'u');
+
+/**
+ * The test files the console checkPhase runs: the files of each `npm test --`
+ * command in it, with their backslash continuations. Anything else that names a
+ * test file (a comment, an `echo`, a piped or other derivation's command) runs
+ * nothing, so it registers nothing.
+ */
+function nixCheckedFiles(source: string): string[] {
+  const start = source.indexOf("    checkPhase = ''\n");
+  const end = source.indexOf('runHook postCheck', start);
+  if (start === -1 || end === -1) throw new Error('no console checkPhase in nix/package.nix');
   const out: string[] = [];
   let continued = false;
-  for (const line of readFileSync(resolve(ROOT, '../../nix/package.nix'), 'utf8').split('\n')) {
-    const command = continued || /\bnpm test -- /u.test(line);
-    if (command) out.push(...(line.replace(/#.*/u, '').match(/\btest\/[\w./-]+\.test\.ts\b/gu) ?? []));
-    continued = command && line.trimEnd().endsWith('\\');
+  for (const line of source.slice(start, end).split('\n')) {
+    const match = (continued ? CONTINUATION : NPM_TEST).exec(line);
+    if (continued && !match) throw new Error(`an npm test command continues into a line that is not test files: ${line.trim()}`);
+    if (match) out.push(...match[1]!.trim().split(/\s+/u));
+    continued = !!match?.[2];
   }
   return out;
 }
@@ -112,7 +137,7 @@ describe('test suite partition', () => {
   it('runs every gate file in the Nix console checks, or names why it cannot', () => {
     const files = new Set(allTestFiles());
     const gate = [...files].filter((file) => !claims(NON_CI_TEST_GLOBS, file));
-    const checked = nixCheckedFiles();
+    const checked = nixCheckedFiles(nixPackageSource(resolve(ROOT, 'test')));
     const registered = new Set(checked);
     const unchecked = Object.entries(NIX_UNCHECKED_TESTS);
 
@@ -131,10 +156,50 @@ describe('test suite partition', () => {
   it('reads the Nix registration it guards', () => {
     // A parser that found nothing would make the check above demand the impossible, not pass; but a parser that
     // dropped continuation lines would pass a file that only looks registered. Pin both ends of a known command.
-    const checked = nixCheckedFiles();
+    const checked = nixCheckedFiles(nixPackageSource(resolve(ROOT, 'test')));
     expect(checked).toContain('test/fixed-resume-message.test.ts');
     expect(checked).toContain('test/recovery-transaction.test.ts');
     expect(checked).toContain('test/cli-agent-credentials.test.ts');
+  });
+
+  it('registers only files an npm test command in the console checkPhase runs', () => {
+    const phase = (body: string) => `    checkPhase = ''\n      runHook preCheck\n${body}\n      runHook postCheck\n    '';\n`;
+    expect(nixCheckedFiles("    buildPhase = ''\n      npm test -- test/z.test.ts\n    '';\n" + phase([
+      '      npm test -- test/a.test.ts \\',
+      '        test/b.test.ts',
+      '      NIX_CUSTODY=1 npm test -- test/c.test.ts',
+      '      echo npm test -- test/d.test.ts \\',
+      '        test/e.test.ts',
+      '      # npm test -- test/f.test.ts',
+      '      npm test -- test/g.test.ts || true',
+      '      npm test -- test/h.test.ts | tee log',
+      '      npm test -- $EXTRA test/i.test.ts',
+      '      FLAGS="$PWD/x" npm test -- test/j.test.ts',
+    ].join('\n')) + '      npm test -- test/k.test.ts\n')).toEqual(['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts']);
+    expect(() => nixCheckedFiles(phase('      npm test -- test/a.test.ts \\\n      echo done'))).toThrow(/not test files/);
+    expect(() => nixCheckedFiles('npm test -- test/a.test.ts\n')).toThrow(/no console checkPhase/);
+  });
+
+  it('reads nix/package.nix from the copy the build supplies, else only from this checkout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'nix-package-layout-'));
+    try {
+      const flattened = join(root, 'source/test');
+      mkdirSync(join(flattened, 'fixtures/nix-package'), { recursive: true });
+      expect(() => nixPackageSource(flattened)).toThrow(/not supplied/);
+      writeFileSync(join(flattened, 'fixtures/nix-package/package.nix'), 'supplied copy');
+      expect(nixPackageSource(flattened)).toBe('supplied copy');
+      const checkout = join(root, 'repo/apps/web/test');
+      mkdirSync(join(root, 'repo/nix'), { recursive: true });
+      mkdirSync(checkout, { recursive: true });
+      writeFileSync(join(root, 'repo/nix/package.nix'), 'checkout copy');
+      expect(nixPackageSource(checkout)).toBe('checkout copy');
+      // Three levels up from a test directory that is not apps/web/test is not this repository.
+      const elsewhere = join(root, 'repo/other/web/test');
+      mkdirSync(elsewhere, { recursive: true });
+      expect(() => nixPackageSource(elsewhere)).toThrow(/not supplied/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('points every excluded glob at files that exist', () => {

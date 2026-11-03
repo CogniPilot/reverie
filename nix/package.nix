@@ -27,6 +27,9 @@ let
       mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
       cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
       cp ${src}/tests/__init__.py ${src}/tests/goal_private_fixture.py ${src}/tests/goal_broker_fixture.py test/fixtures/goal-source/tests/
+      # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
+      mkdir -p test/fixtures/nix-package
+      cp ${src}/nix/package.nix test/fixtures/nix-package/package.nix
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
