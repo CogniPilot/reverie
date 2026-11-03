@@ -13,6 +13,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { BoardError, type BoardStore } from '../../board-store.js';
+import { applyTrackOp, TrackError, TrackOpSchema } from '../../board-track.js';
 import { boardOwnerIds, boardPace, importContent, importSchedule, upsertById, type ContentFile, type ScheduleFile } from '../../board-logic.js';
 import {
   BlockerSchema,
@@ -234,6 +235,15 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         throw new BoardError('A member sets only its own focus', 403);
       if (op === 'win-add' && !access.manageBoard && detail.who !== nameOf(c))
         throw new BoardError('A member records only its own wins', 403);
+    } else if (op === 'issue-track') {
+      // Anyone who may edit issues records a review in its own name; the head, the applied body and the gates belong
+      // to the card's owner (the author) and to the board's leads (who publish).
+      if (!access.editBoardIssues) throw new BoardError('Board issue editing permission required', 403);
+      if (detail.op !== 'review' && !access.manageBoard) {
+        const issue = state.issues.find(i => i.id === detail.id);
+        if (!issue || c.kind !== 'agent' || issue.owner !== c.memberId)
+          throw new BoardError("Only the card's owner or a board lead records heads, bodies and gates", 403);
+      }
     } else {
       requireLead(c, 'manage the board');
       if (op === 'import' && Number(detail.decisions) > 0) requireDecisionManager(c, 'import decision cards');
@@ -548,6 +558,28 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         else if (owner !== undefined) issue.owner = owner;
         stampDone(issue, previous, at);
         checkIssue(s, issue);
+        return issue;
+      });
+    })
+  );
+
+  // One change to a PR card's track record. The rules (a text GO binds its body, a new head supersedes earlier reviews,
+  // each head's gates start open) live in board-track.ts; who and when come from the caller, never the body.
+  app.post<{ Params: { id: string } }>('/api/board/issues/:id/track', async (req, reply) =>
+    run(reply, async () => {
+      const c = caller(req);
+      const { ifRev, ...body } = parse(z.object({ ifRev: IfRev.shape.ifRev }).passthrough(), req.body);
+      const op = parse(TrackOpSchema, body);
+      const at = now();
+      return write(c, 'issue-track', ifRev, { id: req.params.id, ...op }, (s) => {
+        const issue = findIssue(s, req.params.id);
+        try {
+          issue.track = applyTrackOp(issue.track, op, nameOf(c), at);
+        } catch (error) {
+          if (error instanceof TrackError) throw new BoardError(error.message, error.status);
+          throw error;
+        }
+        issue.updatedAt = at;
         return issue;
       });
     })

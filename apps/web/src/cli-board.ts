@@ -7,12 +7,14 @@
  *
  * @module cli-board
  */
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Command } from 'commander';
 import { EXIT, describeFailure, resolveChatRoom, runAgentVerb, type AgentDeps, type RequestOptions } from './cli-agent.js';
 import { GLYPH, palette } from './cli-style.js';
 import { zonedMs, zonedStamp } from './board-logic.js';
 import { DecisionOptionsSchema, ISSUE_STATUSES, ISSUE_TITLE_MAX, type BoardView, type Issue } from './board-types.js';
+import { describeTrack, GATE_STATES, REVIEW_KINDS, REVIEW_VERDICTS, type TrackRecord } from './board-track.js';
 
 type Result = { ok: true; data: unknown } | { ok: false; code: number };
 
@@ -185,6 +187,104 @@ export async function boardIssueTag(deps: AgentDeps, options: { id: string; tags
   return done(deps, result, (i) => `${i.id} tags: ${(i.tags as string[]).join(', ') || '(none)'}`);
 }
 
+/** `--body-file` (hashed here) or `--body-sha`, exactly one; the digest is what a text GO and an applied body bind. */
+async function bodyDigest(o: { bodyFile?: string; bodySha?: string }): Promise<string | { error: string }> {
+  if (Boolean(o.bodyFile) === Boolean(o.bodySha)) return { error: 'give exactly one of --body-file and --body-sha' };
+  if (o.bodySha) return /^[0-9a-f]{64}$/.test(o.bodySha) ? o.bodySha : { error: '--body-sha is 64 lowercase hex characters' };
+  try {
+    return createHash('sha256').update(await readFile(o.bodyFile!)).digest('hex');
+  } catch (err) {
+    return { error: `cannot read --body-file: ${(err as Error).message}` };
+  }
+}
+
+async function trackWrite(deps: AgentDeps, id: string, body: Record<string, unknown>): Promise<Result> {
+  return call(deps, { method: 'POST', path: `/api/board/issues/${encodeURIComponent(id)}/track`, body });
+}
+
+/** Print the record after a write, as JSON or as the `track show` lines. */
+function trackDone(deps: AgentDeps, result: Result): number {
+  if (!result.ok) return result.code;
+  const data = result.data as { rev: number; item: Issue };
+  if (deps.json) deps.io.out(JSON.stringify(data, null, 2));
+  else {
+    deps.io.out(palette.ok(`${GLYPH.ok} ${data.item.id} track updated (rev ${data.rev})`));
+    for (const line of describeTrack(data.item.track as TrackRecord | undefined)) deps.io.out(`  ${line}`);
+  }
+  return EXIT.ok;
+}
+
+export async function boardTrackShow(deps: AgentDeps, options: { id: string }): Promise<number> {
+  const board = await view(deps);
+  if (!board) return EXIT.error;
+  const issue = board.issues.find((i: Issue) => i.id === options.id);
+  if (!issue) return fail(deps, `no issue ${options.id}`);
+  if (deps.json) deps.io.out(JSON.stringify(issue.track ?? null, null, 2));
+  else for (const line of describeTrack(issue.track)) deps.io.out(line);
+  return EXIT.ok;
+}
+
+export async function boardTrackHead(deps: AgentDeps, options: { id: string; sha: string; branch?: string }): Promise<number> {
+  const body: Record<string, unknown> = { op: 'head', sha: options.sha.toLowerCase() };
+  if (options.branch) body.branch = options.branch;
+  return trackDone(deps, await trackWrite(deps, options.id, body));
+}
+
+export interface TrackReviewOptions {
+  id: string;
+  head: string;
+  kind?: string;
+  verdict?: string;
+  bodyFile?: string;
+  bodySha?: string;
+  from?: string;
+}
+
+export async function boardTrackReview(deps: AgentDeps, options: TrackReviewOptions): Promise<number> {
+  if (!(REVIEW_KINDS as readonly string[]).includes(options.kind ?? '')) return fail(deps, `--kind is ${REVIEW_KINDS.join('|')}`);
+  const verdict = options.verdict?.toUpperCase();
+  if (!(REVIEW_VERDICTS as readonly string[]).includes(verdict ?? '')) return fail(deps, `--verdict is ${REVIEW_VERDICTS.join('|')}`);
+  const body: Record<string, unknown> = { op: 'review', head: options.head.toLowerCase(), kind: options.kind, verdict };
+  if (options.kind === 'text') {
+    const digest = await bodyDigest(options);
+    if (typeof digest !== 'string') return fail(deps, `a text review binds the body it read: ${digest.error}`);
+    body.bodySha256 = digest;
+  } else if (options.bodyFile || options.bodySha) return fail(deps, 'a source review takes no body');
+  if (options.from) {
+    const at = options.from.lastIndexOf(':');
+    if (at <= 0 || at === options.from.length - 1) return fail(deps, '--from takes ROOM:MESSAGE_ID');
+    const room = await resolveChatRoom(deps, options.from.slice(0, at));
+    if ('error' in room) return fail(deps, room.error);
+    body.source = { roomId: room.room.id, messageId: options.from.slice(at + 1) };
+  }
+  return trackDone(deps, await trackWrite(deps, options.id, body));
+}
+
+/**
+ * Record the PR body actually applied. Exits 4 (refused) when it is not the body a current text GO approved, so a
+ * publish script stops there; the record keeps the mismatch either way.
+ */
+export async function boardTrackApplied(deps: AgentDeps, options: { id: string; bodyFile?: string; bodySha?: string }): Promise<number> {
+  const digest = await bodyDigest(options);
+  if (typeof digest !== 'string') return fail(deps, digest.error);
+  const result = await trackWrite(deps, options.id, { op: 'applied', bodySha256: digest });
+  const code = trackDone(deps, result);
+  if (code !== EXIT.ok || !result.ok) return code;
+  const applied = (result.data as { item: Issue }).item.track?.applied.at(-1);
+  if (applied && !applied.approved) {
+    if (!deps.json) deps.io.err(palette.err(`${GLYPH.fail} body ${digest.slice(0, 8)} is not the body a current text GO approved`));
+    return EXIT.refused;
+  }
+  return EXIT.ok;
+}
+
+export async function boardTrackGate(deps: AgentDeps, options: { id: string; name: string; state?: string; note?: string }): Promise<number> {
+  if (!(GATE_STATES as readonly string[]).includes(options.state ?? '')) return fail(deps, `--state is ${GATE_STATES.join('|')}`);
+  const body: Record<string, unknown> = { op: 'gate', name: options.name, state: options.state };
+  if (options.note) body.note = options.note;
+  return trackDone(deps, await trackWrite(deps, options.id, body));
+}
+
 export interface BoardShowOptions {
   mine?: boolean;
   owner?: string[];
@@ -314,6 +414,62 @@ Examples:
 Filters run on the server: only matching issues (and only --fields) come back. Values within one
 filter are alternatives; different filters must all match.`)
     .action((o: BoardShowOptions & { json?: boolean }) => runAgentVerb(json(o), (d) => boardShow(d, o)));
+
+  const track = board
+    .command('track')
+    .description("A pull request's track record on its card: heads, reviews, the applied body, and per-head gates")
+    .addHelpText('after', `
+Rules the server keeps: a text GO names the body sha256 it read; a new head supersedes every earlier review;
+each head starts every gate named so far as open, so a pass on an earlier head is never carried forward.
+
+Examples:
+  reverie board track head TASK_ID HEAD_SHA --branch BRANCH
+  reverie board track review TASK_ID HEAD_SHA --kind text --verdict GO --body-file PR-BODY.md --from ROOM:MESSAGE_ID
+  reverie board track applied TASK_ID --body-file PR-BODY.md     # exits 4 if not the approved body
+  reverie board track gate TASK_ID "nix test registration" --state covered --note "partition test passes"`);
+  track
+    .command('show <id>')
+    .description('Print the latest head, its current reviews, the applied body and its gates')
+    .option('--json', 'The whole record')
+    .action((id: string, o: { json?: boolean }) => runAgentVerb(json(o), (d) => boardTrackShow(d, { id })));
+  track
+    .command('head <id> <sha>')
+    .description('Record a new head; every earlier review becomes superseded (card owner or board lead)')
+    .option('--branch <name>', 'The branch the head is on')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, sha: string, o: { branch?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackHead(d, { id, sha, branch: o.branch }))
+    );
+  track
+    .command('review <id> <head>')
+    .description('Record your review of the latest head, in your own name')
+    .option('--kind <kind>', REVIEW_KINDS.join('|'))
+    .option('--verdict <verdict>', REVIEW_VERDICTS.join('|'))
+    .option('--body-file <path>', 'Text review: the PR body you read (hashed here)')
+    .option('--body-sha <sha256>', 'Text review: the sha256 of the PR body you read')
+    .option('--from <room:msg>', 'The chat message carrying the verdict')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, head: string, o: Omit<TrackReviewOptions, 'id' | 'head'> & { json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackReview(d, { id, head, ...o }))
+    );
+  track
+    .command('applied <id>')
+    .description('Record the PR body applied; exits 4 when it is not the approved body (card owner or board lead)')
+    .option('--body-file <path>', 'The body applied (hashed here)')
+    .option('--body-sha <sha256>', 'The sha256 of the body applied')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, o: { bodyFile?: string; bodySha?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackApplied(d, { id, bodyFile: o.bodyFile, bodySha: o.bodySha }))
+    );
+  track
+    .command('gate <id> <name>')
+    .description('Set a gate on the latest head, e.g. a check hosted CI runs differently (card owner or board lead)')
+    .option('--state <state>', GATE_STATES.join('|'))
+    .option('--note <text>', 'What showed it')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, name: string, o: { state?: string; note?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackGate(d, { id, name, state: o.state, note: o.note }))
+    );
 
   const issue = board.command('issue').alias('card').description('File, move and tag issues');
   issue

@@ -46,6 +46,19 @@ Blocked: need the operator's source pin
 
 Choose the one that matches your task. A recorded status response does not mark the card complete. If the bot reports an attention item, follow that task and check-in's IDs rather than answering for a different assignment. See [Channels and memory](/handbook/memory) for reading the current conversation.
 
+## Keep a pull request's track record
+
+A pull request's card keeps its heads, reviews and approved body:
+
+```bash
+reverie board track head TASK_ID HEAD_SHA --branch BRANCH
+reverie board track review TASK_ID HEAD_SHA --kind text --verdict GO --body-file PR-BODY.md
+reverie board track applied TASK_ID --body-file PR-BODY.md
+reverie board track gate TASK_ID "nix test registration" --state covered
+```
+
+A text review records the body's sha256; `applied` exits 4 when that body was not approved. A new head supersedes earlier reviews and reopens every gate. Reviews are recorded in your own name; heads, bodies and gates by the card's owner or a Board lead. `reverie board track show TASK_ID` prints the record.
+
 ## Decisions waiting on the owner
 
 Waiting on you contains decision and poll cards. Read the named recommendation, trade-off and expandable full text before choosing. A decision button records your choice; it does not execute a deployment, restart or other proposed action. Dismiss without choosing closes the request without selecting an option. Poll votes and decided history remain separate from task completion.

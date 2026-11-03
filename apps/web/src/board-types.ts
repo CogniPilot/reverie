@@ -7,6 +7,7 @@
  */
 import type { PlanAgentBurn } from './plan-agent-burn.js';
 import { z } from 'zod';
+import { TrackRecordSchema } from './board-track.js';
 
 export const ISSUE_STATUSES = ['triage', 'todo', 'doing', 'blocked', 'done', 'wontdo'] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
@@ -50,6 +51,8 @@ export const IssueSchema = z
     updatedAt: ms,
     /** Stamped when the issue moves to done; cleared if it is reopened. */
     doneAt: ms.optional(),
+    /** A pull request's track record (heads, reviews, applied bodies, gates); written only through the track route. */
+    track: TrackRecordSchema.optional(),
   })
   .strict();
 export type Issue = z.infer<typeof IssueSchema>;
