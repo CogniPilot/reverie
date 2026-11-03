@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CompanyStore } from '../src/company-store.js';
@@ -10,6 +10,7 @@ import {
   type ResearchHandle,
 } from '../src/company-service.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
+import { CompanyStateSchema } from '../src/company-types.js';
 
 describe('company identities and genuine research lifecycle', () => {
   let directory: string;
@@ -708,6 +709,100 @@ describe('company identities and genuine research lifecycle', () => {
     const prompt = vi.mocked(backend.start).mock.calls[0][0].prompt;
     expect(prompt).toContain('Useful owner note');
     expect(prompt).not.toContain('PRIVATE_DREAM_MARKER');
+  });
+
+  it('reuses validation for unchanged state while keeping returned snapshots detached', async () => {
+    const employee = await hire();
+    store.snapshot();
+    const parse = vi.spyOn(CompanyStateSchema, 'parse');
+    try {
+      for (let i = 0; i < 20; i++) {
+        const snapshot = store.snapshot();
+        snapshot.employees[0].name = 'Caller mutation';
+        snapshot.employees[0].permissions.managePlans = true;
+      }
+      expect(parse).not.toHaveBeenCalled();
+      expect(store.snapshot().employees[0]).toMatchObject({
+        id: employee.id, name: 'Abe', permissions: { managePlans: false },
+      });
+    } finally { parse.mockRestore(); }
+  });
+
+  it('observes another writer permission revocation and session rebind on the next read', async () => {
+    const employee = await hire();
+    await service.update(employee.id, undefined, { permissions: { managePlans: true } });
+    expect(service.employeeForSession(employee.sessionId, undefined)?.permissions.managePlans).toBe(true);
+    const other = new CompanyStore(store.file);
+    await other.init();
+    await other.update((state) => {
+      state.employees[0].permissions.managePlans = false;
+      state.employees[0].sessionId = 'expert-rebound';
+    });
+    expect(service.employeeForSession(employee.sessionId, undefined)).toBeUndefined();
+    expect(service.employeeForSession('expert-rebound', undefined)?.permissions.managePlans).toBe(false);
+    expect(store.snapshot().employees[0].sessionId).toBe('expert-rebound');
+  });
+
+  it('detects same-size in-place edits even when the writer restores modification time', async () => {
+    await hire();
+    store.snapshot();
+    const original = await stat(store.file);
+    const json = await readFile(store.file, 'utf8');
+    await writeFile(store.file, json.replace('"name":"Abe"', '"name":"Ada"'));
+    await utimes(store.file, original.atime, original.mtime);
+    expect((await stat(store.file)).size).toBe(original.size);
+    expect(store.snapshot().employees[0].name).toBe('Ada');
+  });
+
+  it('detects atomic replacement and rejects corrupted or removed state after a cached read', async () => {
+    await hire();
+    const saved = store.snapshot();
+    const replacement = `${store.file}.replacement`;
+    await writeFile(replacement, JSON.stringify({ ...saved, employees: [] }));
+    await rename(replacement, store.file);
+    expect(store.snapshot().employees).toEqual([]);
+    await writeFile(store.file, 'corrupted');
+    expect(() => store.snapshot()).toThrow();
+    expect(() => service.employeeForSession('expert-main', undefined)).toThrow();
+    await writeFile(store.file, JSON.stringify(saved));
+    expect(store.snapshot().employees).toHaveLength(1);
+    await rm(store.file);
+    expect(() => store.snapshot()).toThrow();
+    expect(() => service.employeeForSession('expert-main', undefined)).toThrow();
+  });
+
+  it('reads one owned employee without building the full company view and returns detached data', async () => {
+    const employee = await hire();
+    const snapshot = vi.spyOn(store, 'snapshot').mockImplementation(() => { throw new Error('Full company read'); });
+    try {
+      expect(service.employeeForSession(employee.sessionId, 'foreign')).toBeUndefined();
+      const selected = service.employeeForSession(employee.sessionId, undefined)!;
+      selected.permissions.managePlans = true;
+      selected.name = 'Caller mutation';
+      expect(service.employeeForSession(employee.sessionId, undefined)).toMatchObject({
+        name: 'Abe', permissions: { managePlans: false },
+      });
+      expect(service.employeeForSession('missing', undefined)).toBeUndefined();
+    } finally { snapshot.mockRestore(); }
+    await store.update((state) => {
+      state.employees.push({ ...state.employees[0], id: 'duplicate', owner: 'foreign' });
+    });
+    expect(service.employeeForSession(employee.sessionId, undefined)).toBeUndefined();
+    expect(service.employeeForSession(employee.sessionId, 'foreign')).toBeUndefined();
+  });
+
+  it('never caches a transaction callback reference as canonical read state', async () => {
+    await hire();
+    store.snapshot();
+    let mutateCallbackReference = () => {};
+    await store.update((state) => {
+      state.employees[0].name = 'Ada';
+      mutateCallbackReference = () => { state.employees[0].name = 'Uncommitted'; };
+    });
+    mutateCallbackReference();
+    expect(store.snapshot().employees[0].name).toBe('Ada');
+    mutateCallbackReference();
+    expect(service.employeeForSession('expert-main', undefined)?.name).toBe('Ada');
   });
 
   it('does not reset corrupted durable state or commit a partial failing mutation', async () => {

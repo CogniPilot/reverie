@@ -1466,18 +1466,10 @@ export class WebServer extends EventEmitter {
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
-        const employees =
-          this.companyService
-            ?.view(this.sessions.get(sessionId)?.owner)
-            .employees.filter((e) => e.sessionId === sessionId) ?? [];
-        return employees.length === 1 ? employees[0].id : undefined;
+        return this.companyService?.employeeForSession(sessionId, this.sessions.get(sessionId)?.owner)?.id;
       },
       pronounsOf: (sessionId) => {
-        const employees =
-          this.companyService
-            ?.view(this.sessions.get(sessionId)?.owner)
-            .employees.filter((e) => e.sessionId === sessionId) ?? [];
-        return employees.length === 1 ? employees[0].pronouns : undefined;
+        return this.companyService?.employeeForSession(sessionId, this.sessions.get(sessionId)?.owner)?.pronouns;
       },
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
@@ -1490,7 +1482,10 @@ export class WebServer extends EventEmitter {
       deferDeliveryRecovery: true,
       files: chatroomFiles,
       getSession: (id) => this.sessions.get(id),
-      providerHealth: (id, owner) => this.workerProviderHealth?.read(id, { owner }),
+      providerHealth: (id, owner) => {
+        const employee = this.companyService?.employeeForSession(id, owner);
+        return employee ? this.workerProviderHealth?.read(employee, { owner }) : undefined;
+      },
       workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       broadcast: (event, data) => this.broadcast(event, data),
       // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.

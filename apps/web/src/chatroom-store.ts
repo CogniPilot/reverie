@@ -251,6 +251,7 @@ export const MAX_ICON_CHARS = 16;
  * sequences) and tag characters (U+E0020-E007F, subdivision flags).
  */
 const HIDDEN_ICON_CHARS = /[\p{Cc}\p{Zl}\p{Zp}]|(?![\u200d\u{e0020}-\u{e007f}])\p{Cf}/u;
+const ICON_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /**
  * Normalise an avatar icon: trimmed, at most two user-perceived characters (an
@@ -263,7 +264,7 @@ export function normalizeIcon(raw: string): string | undefined {
   const text = raw.trim();
   if (!text) return '';
   if (text.length > MAX_ICON_CHARS) return undefined;
-  const graphemes = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)];
+  const graphemes = [...ICON_SEGMENTER.segment(text)];
   return graphemes.length <= MAX_ICON_GRAPHEMES ? text : undefined;
 }
 
