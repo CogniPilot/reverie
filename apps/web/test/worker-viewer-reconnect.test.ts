@@ -463,3 +463,19 @@ it('native recovery HTTP status rechecks revoked grants after read-only move ins
   });
   expect((await app.inject(req)).statusCode).toBe(403);expect(f.mux.respawnPane).not.toHaveBeenCalled();
 });
+it.each(['applyFullAccessDefault','_prepareSelectedClaudeProfile','_prepareManagedCodexTrust','_prepareCodexHookTrust'])(
+  'delegated interactive start rechecks authority after awaited %s preparation before any mux or PTY effect',async preparation=>{
+    const f=await fixture();Object.assign(f.session,{ptyProcess:null,_pid:null});let allowed=true;
+    for(const method of ['applyFullAccessDefault','_prepareSelectedClaudeProfile','_prepareManagedCodexTrust','_prepareCodexHookTrust'])
+      vi.spyOn(f.session as any,method).mockImplementation(async()=>{if(method===preparation)allowed=false;});
+    await expect(f.session.startInteractive(()=>allowed)).rejects.toThrow('authorization changed');
+    expect(f.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.sendInput).not.toHaveBeenCalled();expect(f.session.pid).toBeNull();
+  });
+it('delegated admission survives mux setup awaits and a revocation cannot fall back to a direct provider',async()=>{
+  const f=await fixture();Object.assign(f.session,{ptyProcess:null,_pid:null});let allowed=true;
+  for(const method of ['applyFullAccessDefault','_prepareSelectedClaudeProfile','_prepareManagedCodexTrust','_prepareCodexHookTrust'])
+    vi.spyOn(f.session as any,method).mockResolvedValue(undefined);
+  f.mux.respawnPane.mockImplementationOnce(async options=>{allowed=false;expect(options.admitted!()).toBe(false);return null as never;});
+  await expect(f.session.startInteractive(()=>allowed)).rejects.toThrow('authorization changed');
+  expect(f.mux.respawnPane).toHaveBeenCalledOnce();expect(f.session.pid).toBeNull();expect(f.mux.sendInput).not.toHaveBeenCalled();
+});

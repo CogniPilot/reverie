@@ -2504,6 +2504,7 @@ export class Session extends EventEmitter {
     respawnPaneOptions: import('./mux-interface.js').RespawnPaneOptions;
     createSessionOptions: import('./mux-interface.js').CreateSessionOptions;
     spawnErrLabel: string;
+    admitted?: () => boolean;
   }): Promise<{ isRestored: boolean; respawnedResumeId?: string; respawnedDeadPane: boolean }> {
     return this._withPaneLifecycle(() => this._doSetupOrAttachMuxSession(options));
   }
@@ -2512,8 +2513,12 @@ export class Session extends EventEmitter {
     respawnPaneOptions: import('./mux-interface.js').RespawnPaneOptions;
     createSessionOptions: import('./mux-interface.js').CreateSessionOptions;
     spawnErrLabel: string;
+    admitted?: () => boolean;
   }): Promise<{ isRestored: boolean; respawnedResumeId?: string; respawnedDeadPane: boolean }> {
     const mux = this._mux!;
+    const admitted = () => !ownerStopPending(this.id) && (!options.admitted || options.admitted());
+    const assertAdmission = () => { if (options.admitted && !options.admitted()) throw new Error('Session launch authorization changed'); };
+    assertAdmission();
     // An unsettled owner stop (owner-stop-journal) could still signal whatever holds this agent's pane, so until the
     // laptop settles it no new process goes there: only an existing live pane may be attached to.
     if (ownerStopPending(this.id) && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName) || mux.isPaneDead(this._muxSession.muxName)))
@@ -2543,10 +2548,13 @@ export class Session extends EventEmitter {
       // check ran, so it still carries the pre-pin ompConfig; rebuild it.
       this._pinOmpRespawnId();
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
+      assertAdmission();
       // The pane may have read live at the guard above and dead here: check again, now and at the tmux command.
       this._refuseNewProcessWhileStopHeld();
       this._beginClaudeConversationSelection();
-      const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => !ownerStopPending(this.id) });
+      assertAdmission();
+      const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => admitted() && (!respawnOptions.admitted || respawnOptions.admitted()) });
+      assertAdmission();
       if (!newPid) {
         console.error('[Session] Failed to respawn pane, will create new session');
         needsNewSession = true;
@@ -2556,6 +2564,7 @@ export class Session extends EventEmitter {
         this._pendingEnvUnsets.clear();
         // Wait a moment for the respawned process to fully start
         await new Promise((resolve) => setTimeout(resolve, MUX_STARTUP_DELAY_MS));
+        assertAdmission();
       }
     }
 
@@ -2590,6 +2599,7 @@ export class Session extends EventEmitter {
       // same reason and takes the same pin.
       if (needsNewSession || muxSessionVanished) {
         const launch = await this._buildRespawnPaneOptionsWithResumePin();
+        assertAdmission();
         options.createSessionOptions.claudeResumeCandidates = launch.claudeResumeCandidates;
         const pinned = launch.resumeSessionId;
         if (pinned && !launch.claudeResumeCandidates) {
@@ -2599,11 +2609,15 @@ export class Session extends EventEmitter {
       }
       this._refuseNewProcessWhileStopHeld();
       this._beginClaudeConversationSelection();
-      this._muxSession = await mux.createSession({ ...options.createSessionOptions, admitted: () => !ownerStopPending(this.id) });
+      assertAdmission();
+      this._muxSession = await mux.createSession({ ...options.createSessionOptions,
+        admitted: () => admitted() && (!options.createSessionOptions.admitted || options.createSessionOptions.admitted()) });
+      assertAdmission();
       console.log('[Session] Created mux session:', this._muxSession.muxName);
       // No extra sleep — createSession() already waits for tmux readiness
     }
 
+    assertAdmission();
     this._attachExistingMuxClient(options.spawnErrLabel);
 
     return { isRestored, respawnedResumeId, respawnedDeadPane };
@@ -2813,7 +2827,7 @@ export class Session extends EventEmitter {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused after preparation: an unsettled owner stop holds this pane`);
       return false;
     }
-    const admitted = () => !ownerStopPending(this.id);
+    const admitted = () => !ownerStopPending(this.id) && stillCurrent();
     this._beginClaudeConversationSelection();
     const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
     if (!newPid) {
@@ -3185,7 +3199,9 @@ export class Session extends EventEmitter {
     this.emit('output', data);
   }
 
-  async startInteractive(): Promise<void> {
+  async startInteractive(admitted?: () => boolean): Promise<void> {
+    const assertAdmission = () => { if (admitted && !admitted()) throw new Error('Session launch authorization changed'); };
+    assertAdmission();
     if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
       throw new Error('Resource replacement requires the normal local native worker multiplexer');
     if (this._closing) {
@@ -3217,7 +3233,7 @@ export class Session extends EventEmitter {
       await this._withPaneLifecycle(async () => {
         // onlyIfDead makes the final tmux respawn refuse a pane that came alive
         // after the observation above. No process is killed by pid or pattern.
-        if (!(await this._doRestartCli(true))) {
+        if (!(await this._doRestartCli(true, admitted))) {
           throw new Error('The exited pane could not be restarted; its process may already be running');
         }
       });
@@ -3225,12 +3241,17 @@ export class Session extends EventEmitter {
     }
     this._ensurePaneDialogScan();
     await this.applyFullAccessDefault();
+    assertAdmission();
     await this._prepareSelectedClaudeProfile();
+    assertAdmission();
     await this._prepareManagedCodexTrust();
+    assertAdmission();
     if (this.mode === 'codex' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
+      assertAdmission();
     }
     await this._prepareCodexHookTrust();
+    assertAdmission();
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
@@ -3332,6 +3353,7 @@ export class Session extends EventEmitter {
     if (this._useMux && this._mux) {
       try {
         const { isRestored, respawnedResumeId, respawnedDeadPane } = await this._setupOrAttachMuxSession({
+          admitted,
           // Single source of truth shared with reattachRemote() (COD-108).
           respawnPaneOptions: this._buildRespawnPaneOptions(),
           createSessionOptions: {
@@ -3458,6 +3480,7 @@ export class Session extends EventEmitter {
           this._armPaneSettle(true);
         }
       } catch (err) {
+        assertAdmission();
         if (this._workerResourceLaunch) throw err;
         // Held by an unsettled owner stop: keep the pane as it is (no fallback process, no forgotten mux session).
         if (ownerStopPending(this.id)) throw err;
@@ -3502,16 +3525,18 @@ export class Session extends EventEmitter {
           this._advisorModel
         );
         this._refuseNewProcessWhileStopHeld();
-        this.ptyProcess = spawnPtyWithHelperRepair(() =>
-          pty.spawn(getClaudeBinaryPath(), args, {
+        assertAdmission();
+        this.ptyProcess = spawnPtyWithHelperRepair(() => {
+          assertAdmission();
+          return pty.spawn(getClaudeBinaryPath(), args, {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
             // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
             env: { ...buildClaudeEnv(this.id), ...(this._envOverrides ?? {}) },
-          })
-        );
+          });
+        });
         this._notePtySpawnGeometry(120, 40);
       } catch (spawnErr) {
         console.error('[Session] Failed to spawn Claude PTY:', spawnErr);

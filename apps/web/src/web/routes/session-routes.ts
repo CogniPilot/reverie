@@ -1,4 +1,5 @@
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
+import { delegatedSessionStartAdmission } from '../../owner-auth/delegated-session-create.js';
 import { runtimeSwitches } from './session-runtime-routes.js';
 import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
 /**
@@ -2019,8 +2020,12 @@ export function registerSessionRoutes(
       // session-create/boot-recovery paths ran setupSessionListeners before this fix —
       // without this, a re-attached session's SSE/terminal/trip events go unobserved.
       // setupSessionListeners is idempotent (no-op while refs are still attached).
+      const admitted = delegatedSessionStartAdmission(req);
       await ctx.setupSessionListeners(session);
-      await session.startInteractive();
+      if (admitted && !admitted()) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated start authorization changed');
+      if (admitted) await session.startInteractive(admitted);
+      else await session.startInteractive();
+      if (admitted && !admitted()) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated start outcome requires inspection');
       getLifecycleLog().log({
         event: 'started',
         sessionId: id,

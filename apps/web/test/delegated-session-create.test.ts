@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { registerOwnerPolicy } from '../src/owner-auth/policy.js';
-import { withDelegatedSessionCreate, withDelegatedSessionStart } from '../src/owner-auth/delegated-session-create.js';
+import { withDelegatedSessionCreate, withDelegatedSessionStart, claimDelegatedSessionCreate, consumeDelegatedSessionCreate, delegatedSessionStartAdmission } from '../src/owner-auth/delegated-session-create.js';
+import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
 
 const id = '00000001-0001-4000-8000-000000000001';
 const other = '00000002-0002-4000-8000-000000000002';
@@ -92,5 +93,50 @@ describe('private delegated session-create authority', () => {
     let pending!: Promise<any>;
     await grant(async () => { pending = new Promise<void>(resolve => { later = resolve; }).then(() => request()); });
     later(); expect((await pending).statusCode).toBe(403); expect(handled).toBe(0);
+  });
+
+  it('keeps launch admission bound to the exact consumed request and private grant lifetime', async () => {
+    const req: any = { method: 'POST', url: `/api/sessions/${other}/interactive`, routeOptions: { url: '/api/sessions/:id/interactive' }, headers: { 'x-reverie-parent-session': id }, body: undefined };
+    let admitted!: () => boolean;
+    expect(delegatedSessionStartAdmission(req)).toBeUndefined();
+    await withDelegatedSessionStart({ sessionId: id, owner: undefined, targetSessionId: other, authorized: () => authorized }, async () => {
+      admitted = delegatedSessionStartAdmission(req)!;
+      expect(admitted()).toBe(false);
+      expect(claimDelegatedSessionCreate(req, id)).toBe(true);
+      expect(admitted()).toBe(false);
+      expect(consumeDelegatedSessionCreate(req)).toBe(true);
+      expect(admitted()).toBe(true);
+      expect(delegatedSessionStartAdmission({ ...req })!()).toBe(false);
+      req.body = { clearBreaker: true };
+      expect(admitted()).toBe(false);
+      req.body = undefined;
+      authorized = false;
+      expect(admitted()).toBe(false);
+      authorized = true;
+      expect(admitted()).toBe(true);
+    });
+    expect(admitted()).toBe(false);
+  });
+
+  it('refuses the real interactive route when listener setup revokes the consumed start grant', async () => {
+    const routes = new Map<string, (...args: any[]) => any>();
+    const registration: any = new Proxy({}, { get: (_target, method) => (url: string, ...args: any[]) => {
+      if (method === 'post') routes.set(url, args.at(-1));
+    } });
+    const startInteractive = vi.fn(async () => { throw new Error('provider start must not be reached'); });
+    const session = { id: other, owner: undefined, mode: 'codex', isBusy: () => false, startInteractive };
+    const context: any = {
+      sessions: new Map([[other, session]]), store: { getConfig: () => ({ ralphEnabled: false }) }, mux: {},
+      setupSessionListeners: async () => { await Promise.resolve(); authorized = false; },
+    };
+    registerSessionRoutes(registration, context, { remoteWake: {} as any });
+    const req: any = { method: 'POST', url: `/api/sessions/${other}/interactive`, routeOptions: { url: '/api/sessions/:id/interactive' }, params: { id: other }, headers: { 'x-reverie-parent-session': id }, body: undefined };
+    await withDelegatedSessionStart({ sessionId: id, owner: undefined, targetSessionId: other, authorized: () => authorized }, async () => {
+      expect(claimDelegatedSessionCreate(req, id)).toBe(true);
+      expect(consumeDelegatedSessionCreate(req)).toBe(true);
+      const result = await routes.get('/api/sessions/:id/interactive')!(req);
+      expect(result).toMatchObject({ success: false, errorCode: 'FORBIDDEN' });
+    });
+    expect(startInteractive).not.toHaveBeenCalled();
   });
 });
