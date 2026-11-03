@@ -17,6 +17,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
     watch: AssignmentStatusWatch,
     employees: AssignmentEmployee[],
     room: ChatRoom,
+    elsewhere: ChatRoom[],
     at: number,
     canEdit: boolean,
     delivery: boolean,
@@ -42,6 +43,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       running: () => true,
       bot: () => ({ id: 'status', name: 'Status', rooms: ['room', 'other'], maxPerHour: 30 }),
       room: (id) => (id === 'room' ? room : id === 'other' ? { ...room, id: 'other', messages: [] } : undefined),
+      roomsFor: (sid) => [room, ...elsewhere].filter((r) => r.members.some((m) => m.sessionId === sid)),
       canDeliver: () => delivery,
       canEdit: () => canEdit,
       canManageBoard: (id) => leads.has(id),
@@ -104,6 +106,7 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       members: [{ sessionId: 'sid' }, { sessionId: 'mgr' }],
       messages: [],
     } as ChatRoom;
+    elsewhere = [];
     board = new BoardStore(path.join(root, 'board.json'));
     await board.init();
     await board.update({}, (s) =>
@@ -908,6 +911,57 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
         expect.objectContaining({ action: 'assignment-checkin-progress-post', taskId: 'task' })
       );
       expect(board.snapshot().issues.find((i) => i.id === 'task')!.status).toBe('doing');
+    });
+
+    describe('progress posted in another room', () => {
+      const otherRoom = (id: string, members: string[]) => {
+        const roster = members.map((sessionId) => ({ sessionId }));
+        const r = { id, name: id, members: roster, messages: [] } as unknown as ChatRoom;
+        elsewhere.push(r);
+        return r;
+      };
+      const postIn = (r: ChatRoom, text: string, sessionId = 'sid', when = at + 1) => {
+        r.messages.push({
+          id: `${r.id}-${r.messages.length}`,
+          at: when,
+          from: { kind: 'agent', sessionId, name: 'Someone' },
+          text,
+          to: 'all',
+        } as ChatMessage);
+        at += 2;
+      };
+
+      it('counts the assignee naming the card in another room they are in, and records which room', async () => {
+        const work = otherRoom('work', ['sid', 'mgr']);
+        await watch.tick();
+        postIn(work, 'Checkpoint on task: slice two is under review');
+        at += 300001;
+        await watch.tick();
+        expect(escalation()).toBeUndefined();
+        expect(watch.status().entries[0]!.phase).toBe('cancelled');
+        expect(audits).toContainEqual(
+          expect.objectContaining({
+            action: 'assignment-checkin-progress-post',
+            taskId: 'task',
+            roomId: 'work',
+            messageId: 'work-0',
+          })
+        );
+        expect(board.snapshot().issues.find((i) => i.id === 'task')!.status).toBe('doing');
+      });
+
+      it("still pages for a room they are not in, another's post, no card named, a post before the ask", async () => {
+        const notMember = otherRoom('not-member', ['mgr']);
+        const member = otherRoom('member', ['sid', 'mgr']);
+        postIn(member, 'task: done before the ask', 'sid', at - 1);
+        await watch.tick();
+        postIn(notMember, 'task: progress');
+        postIn(member, 'task is moving', 'mgr');
+        postIn(member, 'tasks are moving');
+        at += 300001;
+        await watch.tick();
+        expect(escalation()?.to).toEqual(['mgr']);
+      });
     });
 
     it("still pages when the post is someone else's or does not name the card", async () => {
