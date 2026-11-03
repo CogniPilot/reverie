@@ -9,7 +9,7 @@ const doms: JSDOM[] = [];
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 20));
 };
-function fixture({ fail = false, runs = true, live = true, linked = true } = {}) {
+function fixture({ fail = false, runs = true, live = true, linked = true, watch = false } = {}) {
   const dom = new JSDOM(read('bots.html'), { url: 'http://example.test/bots', runScripts: 'outside-only' });
   doms.push(dom);
   const w = dom.window;
@@ -38,6 +38,13 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
     { id: 'job2', name: 'Quiet routine', scheduleType: 'interval', intervalMinutes: 20, enabled: false },
   ];
   const data: Record<string, unknown> = {
+    'bot-watches/github': { version: 1, revision: 2, watches: watch ? [{ config: {
+      id: 'repo', owner: 'owner', repo: 'repo', botId: 'build', roomId: 'r1', enabled: false,
+      intervalMinutes: 30, events: { issues: true },
+    }, status: { state: 'hold', pendingCount: 1, canRecoverUnknown: true } }] : [] },
+    'bot-watches/github/repo/recovery': { version: 1, expectedRevision: 2, generation: 1,
+      batchId: 'a'.repeat(32), pendingDigest: 'b'.repeat(64), repository: 'owner/repo', enabled: false,
+      notification: 'Uncertain <img src=x onerror=unsafe()>', scannedAt: 100, remainingBatches: 0 },
     'cron/active': { jobs: live ? [{ id: 'job1', name: 'Build Watch' }] : [] },
     company: { success: true, data: { employees: [{ id: 'expert1', name: 'Example expert' }] } },
     'chat-bots': {
@@ -93,6 +100,14 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
     async (url: URL, options: { method?: string; body?: string; headers?: Record<string, string> }) => {
       if (new URL(url).pathname === '/assets/avatars/pack-manifest.json') return { ok: true, json: async () => ({ withheld: ['pack-101'], avatars: [...Array.from({ length: 50 }, (_, i) => i + 1), ...Array.from({ length: 50 }, (_, i) => i + 102), 101].map((id) => ({ id: `pack-${String(id).padStart(2, '0')}`, name: id === 151 ? 'Merry Dragon' : id === 101 ? 'Sly Jester' : `Avatar ${id}`, src: `/assets/avatars/pack-${String(id).padStart(2, '0')}.png` + (id === 1 ? '?v=' + 'a'.repeat(64) : '') })) }) };
       const path = new URL(url).pathname.slice('/api/'.length);
+      if (path === 'bot-watches/github/repo/recovery' && options.method === 'POST') {
+        const result = { version: 1, revision: 3, watches: [{ config: {
+          id: 'repo', owner: 'owner', repo: 'repo', botId: 'build', roomId: 'r1', enabled: false,
+          intervalMinutes: 30, events: { issues: true },
+        }, status: { state: 'disabled', pendingCount: 0, canRecoverUnknown: false, lastRecovery: { at: 100 } } }] };
+        data['bot-watches/github'] = result;
+        return { ok: true, json: async () => ({ success: true, data: result }) };
+      }
       if (options.method === 'DELETE') return { ok: true, json: async () => ({ success: true, data: {} }) };
       if (options.method === 'PUT' || options.method === 'POST') {
         const body = JSON.parse(options.body!);
@@ -113,10 +128,84 @@ function fixture({ fail = false, runs = true, live = true, linked = true } = {})
   );
   Object.assign(w, { fetch });
   w.eval(read('bots.js'));
-  return { w, fetch, get: (id: string) => w.document.getElementById(id)! };
+  return { w, fetch, data, get: (id: string) => w.document.getElementById(id)! };
 }
 afterEach(() => {
   for (const dom of doms.splice(0)) dom.window.close();
+});
+function recoveryButton(p: ReturnType<typeof fixture>) {
+  return p.get('github-watches').querySelector<HTMLButtonElement>('[aria-label="Review uncertain notification for owner/repo"]')!;
+}
+const recoveryPosts = (p: ReturnType<typeof fixture>) => p.fetch.mock.calls.filter(([url, options]) =>
+  new URL(url).pathname.endsWith('/recovery') && options.method === 'POST');
+it('requires explicit gap acknowledgement, sends only the reviewed descriptor, and retains a visible gap receipt', async () => {
+  const p = fixture({ watch: true });
+  await tick();
+  recoveryButton(p).click();
+  await tick();
+  expect(recoveryPosts(p)).toHaveLength(0);
+  expect(p.get('watch-recovery-notification').textContent).toContain('<img src=x onerror=unsafe()>');
+  expect(p.get('watch-recovery-notification').querySelector('img')).toBeNull();
+  expect(p.get('watch-recovery-summary').textContent).toContain('stay disabled');
+  const go = p.get('watch-recovery-go') as HTMLButtonElement;
+  expect(go.disabled).toBe(true);
+  const form = p.get('watch-recovery-form');
+  form.dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+  expect(recoveryPosts(p)).toHaveLength(0);
+  (p.get('watch-recovery-ack') as HTMLInputElement).click();
+  expect(go.disabled).toBe(false);
+  form.dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+  form.dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+  await tick();
+  expect(recoveryPosts(p)).toHaveLength(1);
+  const [, options] = recoveryPosts(p)[0]!;
+  expect(JSON.parse(options.body!)).toEqual({ version: 1, expectedRevision: 2, generation: 1,
+    batchId: 'a'.repeat(32), pendingDigest: 'b'.repeat(64), acknowledgePossibleGap: true });
+  expect(p.get('watch-recovery-dialog').hasAttribute('open')).toBe(false);
+  expect(p.get('github-watches').textContent).toContain('Possible notification gap acknowledged');
+  expect(recoveryButton(p)).toBeNull();
+});
+it.each([403, 409, 503, 'timeout'] as const)('never automatically retries recovery after %s or re-enables its submitted preview', async (failure) => {
+  const p = fixture({ watch: true });
+  await tick();
+  const original = p.fetch.getMockImplementation()!;
+  p.fetch.mockImplementation(async (url, options) => {
+    if (new URL(url).pathname.endsWith('/recovery') && options.method === 'POST') {
+      if (failure === 'timeout') throw Error('Timeout');
+      return { ok: false, status: failure, json: async () => ({ success: false, error: 'Not confirmed' }) };
+    }
+    return original(url, options);
+  });
+  recoveryButton(p).click(); await tick();
+  (p.get('watch-recovery-ack') as HTMLInputElement).click();
+  p.get('watch-recovery-form').dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+  await tick();
+  expect(recoveryPosts(p)).toHaveLength(1);
+  expect(p.get('watch-recovery-error').textContent).toContain('refresh');
+  (p.get('watch-recovery-ack') as HTMLInputElement).click();
+  (p.get('watch-recovery-ack') as HTMLInputElement).click();
+  expect((p.get('watch-recovery-go') as HTMLButtonElement).disabled).toBe(true);
+  p.get('watch-recovery-form').dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+  await tick();
+  expect(recoveryPosts(p)).toHaveLength(1);
+});
+it('does not let an earlier recovery preview paint a reopened dialog or act after pagehide', async () => {
+  const p = fixture({ watch: true });
+  await tick();
+  const original = p.fetch.getMockImplementation()!;
+  let finish!: (value: Awaited<ReturnType<typeof original>>) => void;
+  p.fetch.mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+  recoveryButton(p).click();
+  (p.get('watch-recovery-dialog') as HTMLDialogElement).close();
+  recoveryButton(p).click(); await tick();
+  finish({ ok: true, status: 200, json: async () => ({ ...p.data['bot-watches/github/repo/recovery'] as object,
+    notification: 'late stale text', pendingDigest: 'c'.repeat(64) }) });
+  await tick();
+  expect(p.get('watch-recovery-notification').textContent).not.toContain('late stale');
+  p.w.dispatchEvent(new p.w.Event('pagehide'));
+  (p.get('watch-recovery-ack') as HTMLInputElement).click();
+  p.get('watch-recovery-form').dispatchEvent(new p.w.Event('submit', { cancelable: true }));
+  expect(recoveryPosts(p)).toHaveLength(0);
 });
 describe('Bots overview behavior', () => {
   it('does not label stale unfinished run history as currently running', async () => {

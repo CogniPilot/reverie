@@ -16,6 +16,14 @@ State permits 6,000 seen issue/run keys and 256 outstanding nonterminal runs per
 
 A durable reservation precedes posting. A lost acknowledgement stays unknown across restart and is not blindly retried. Exactly one matching current bot message can reconcile it; otherwise owner status remains held. Disabling an unknown watch retains its fence; removing or changing it requires reconciliation. Retiring an ordinary watch preserves history. Bot deletion is refused while a current watch or configuration publication references it; retired history alone does not prevent deletion.
 
+### Continue after an uncertain post
+
+In **Bots**, an unknown delivery offers **Review uncertain notification**. The owner reviews the original notification and explicitly acknowledges that it may be missing from the channel. **Retain evidence and continue** saves the complete original pending batch in private durable history before adopting that scan's observations. It never resends the uncertain notification or marks it delivered. Later updates can be announced normally; other prepared notifications from the same scan stay queued. A disabled watch stays disabled. Normal later configuration changes can still cancel prepared notices, preserving them in history as before.
+
+The watcher keeps a visible possible-gap receipt after recovery and subsequent successful checks. Its original last-success time, failure count, post quota, configuration and saved polling schedule are not reset by this action. If the response is lost, close the dialog and refresh status before reviewing again; do not repeat a saved request or edit the ledger by hand.
+
+Recovery uses owner-only `GET /api/bot-watches/github/:id/recovery` for a read-only preview, then `POST` to that same path with `{version:1,expectedRevision,generation,batchId,pendingDigest,acknowledgePossibleGap:true}`. Copy those exact fields from a fresh preview. The server binds the acknowledgement to the whole pending batch and configuration, waits for an existing poll to settle, and rechecks owner authority before publication. A stale, changed or unconfirmed request returns 409. Preview and status expose no credentials or raw scan cache. Multi-user instances, employees and service identities cannot authorize this action.
+
 The existing single public-issue watcher is projected as `github-issues` until the owner first saves the collection. That save disables its old dispatcher and adopts its latest cursor/seen state under the single writer; it does not start a duplicate poller. Its unchanged ten-minute configuration is grandfathered, including an enabled toggle. Expanding or changing it requires at least 15 minutes. Newly selected streams otherwise begin from the collection's retained cursor; initial quiet baseline applies to a fresh collection stream.
 
 ## Owner API and offline activation

@@ -30,6 +30,7 @@
     credentialBusy = false;
   let credentialEpoch = 0;
   let watchCadenceEdited = false;
+  let watchRecovery = null;
   /** The disk-space watch status from GET /api/bot-watches (data.disk), or null while unavailable. */
   let disk = null,
     diskError = '',
@@ -113,7 +114,8 @@
       const type = repeat.value;
       if (type === 'interval') {
         const value = Number(minutes.value);
-        if (!Number.isInteger(value) || value < 5 || value > 525600) return new Error('Repeat every 5 to 525600 minutes.');
+        if (!Number.isInteger(value) || value < 5 || value > 525600)
+          return new Error('Repeat every 5 to 525600 minutes.');
         return { scheduleType: 'interval', intervalMinutes: value };
       }
       if (!/^\d{2}:\d{2}$/.test(at.value)) return new Error('Choose a time.');
@@ -144,11 +146,20 @@
       }
       preview.textContent = 'Next runs: working them out…';
       try {
-        const { runs } = await api('cron/schedule-preview', { method: 'POST', body: JSON.stringify({ ...schedule, count: 3 }) });
+        const { runs } = await api('cron/schedule-preview', {
+          method: 'POST',
+          body: JSON.stringify({ ...schedule, count: 3 }),
+        });
         if (mine !== asked) return;
         const shown = new Intl.DateTimeFormat('en-US', {
-          weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-          timeZoneName: 'short', ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23',
+          timeZoneName: 'short',
+          ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
         });
         preview.textContent = runs.length
           ? `Next runs${schedule.scheduleType === 'interval' ? ' if saved now' : ''}: ${runs.map((at) => shown.format(at)).join(' · ')}`
@@ -361,6 +372,14 @@
         element.append(
           node('p', `${status.pendingCount} update(s) awaiting delivery confirmation.`, 'github-watch-detail')
         );
+      if (status.lastRecovery)
+        element.append(
+          node(
+            'p',
+            `Possible notification gap acknowledged ${time(status.lastRecovery.at)}. Original evidence retained; the uncertain post was not replayed.`,
+            'github-watch-detail'
+          )
+        );
       if (config.events?.workflowFailures && status.ciCoverage)
         element.append(
           node(
@@ -400,6 +419,14 @@
           );
       });
       actions.append(edit, toggle, remove);
+      if (status.canRecoverUnknown) {
+        const recover = node('button', 'Review uncertain notification');
+        recover.type = 'button';
+        recover.disabled = watchBusy;
+        recover.setAttribute('aria-label', `Review uncertain notification for ${title}`);
+        recover.addEventListener('click', () => void openWatchRecovery(config.id));
+        actions.append(recover);
+      }
       element.append(actions);
       list.append(element);
     }
@@ -411,6 +438,89 @@
     });
     acceptWatchSnapshot(await api('bot-watches/github'));
   }
+  async function openWatchRecovery(id) {
+    if (closed || watchBusy || byId('watch-recovery-dialog').open) return;
+    const opening = { id, preview: null, submitted: false };
+    watchRecovery = opening;
+    byId('watch-recovery-form').reset();
+    byId('watch-recovery-title').textContent = 'Review uncertain notification';
+    byId('watch-recovery-summary').textContent = 'Loading the current pending notification…';
+    byId('watch-recovery-notification').textContent = '';
+    byId('watch-recovery-error').textContent = '';
+    byId('watch-recovery-go').disabled = true;
+    byId('watch-recovery-dialog').showModal();
+    try {
+      const preview = await api('bot-watches/github/' + encodeURIComponent(id) + '/recovery');
+      if (closed || watchRecovery !== opening) return;
+      opening.preview = preview;
+      byId('watch-recovery-title').textContent = 'Review · ' + preview.repository;
+      byId('watch-recovery-notification').textContent = preview.notification;
+      byId('watch-recovery-summary').textContent =
+        `Scanned ${time(preview.scannedAt)}. ${preview.remainingBatches} following notification(s) remain queued. ` +
+        (preview.enabled
+          ? 'After acknowledgement, future checks continue on the saved schedule.'
+          : 'This watcher will stay disabled.');
+      byId('watch-recovery-go').disabled = !byId('watch-recovery-ack').checked;
+    } catch (error) {
+      if (closed || watchRecovery !== opening) return;
+      byId('watch-recovery-summary').textContent = 'Recovery preview unavailable.';
+      byId('watch-recovery-error').textContent = error.message;
+    }
+  }
+  byId('watch-recovery-ack').addEventListener('change', () => {
+    byId('watch-recovery-go').disabled =
+      !watchRecovery?.preview || watchRecovery.submitted || !byId('watch-recovery-ack').checked;
+  });
+  byId('watch-recovery-dialog').addEventListener('close', () => {
+    watchRecovery = null;
+  });
+  byId('watch-recovery-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const opening = watchRecovery;
+    if (closed || watchBusy || !opening?.preview || opening.submitted || !byId('watch-recovery-ack').checked) return;
+    opening.submitted = true;
+    watchBusy = true;
+    byId('watch-recovery-go').disabled = true;
+    byId('watch-recovery-error').textContent = '';
+    renderWatchers();
+    const { version, expectedRevision, generation, batchId, pendingDigest } = opening.preview;
+    try {
+      const result = await api('bot-watches/github/' + encodeURIComponent(opening.id) + '/recovery', {
+        method: 'POST',
+        body: JSON.stringify({
+          version,
+          expectedRevision,
+          generation,
+          batchId,
+          pendingDigest,
+          acknowledgePossibleGap: true,
+        }),
+      });
+      if (closed) return;
+      acceptWatchSnapshot(result);
+      if (watchRecovery === opening) byId('watch-recovery-dialog').close();
+    } catch (error) {
+      if (closed) return;
+      if (watchRecovery === opening) {
+        byId('watch-recovery-summary').textContent = 'Recovery was not confirmed.';
+        byId('watch-recovery-error').textContent =
+          error.status === 403
+            ? 'Sign in as the owner. Close this dialog and refresh before reviewing again.'
+            : 'The change may already be saved. Close this dialog and refresh watcher status before reviewing again.';
+      }
+      // Never retry the POST or allow this preview to be submitted again after an uncertain result.
+      if (error.status === 403) watchSnapshot = null;
+      else
+        try {
+          acceptWatchSnapshot(await api('bot-watches/github'));
+        } catch {
+          watchSnapshot = null;
+        }
+    } finally {
+      watchBusy = false;
+      if (!closed && snapshot) render();
+    }
+  });
   async function changeWatchers(revision, configs) {
     if (watchBusy || !watchSnapshot || closed) return;
     watchBusy = true;
@@ -530,7 +640,13 @@
   // Preview, then an explicit Run once: the preview writes and posts nothing; the run is the real thing, shown as it lands.
   let trial;
   let trialGeneration = 0;
-  const runLabels = { post: 'Post now', 'dry-run': 'Record a dry run', skip: 'Run once', launch: 'Start session', 'not-previewed': 'Run once' };
+  const runLabels = {
+    post: 'Post now',
+    'dry-run': 'Record a dry run',
+    skip: 'Run once',
+    launch: 'Start session',
+    'not-previewed': 'Run once',
+  };
   function list(id, items) {
     const element = byId(id);
     element.replaceChildren(...items.map(([text, className]) => node('li', text, className)));
@@ -563,20 +679,27 @@
     }
     if (!current() || !preview) return;
     const where = preview.roomId ? ' in #' + roomName(preview.roomId) : '';
-    byId('trial-summary').textContent = {
-      post: `Run once would post this as ${preview.sender}${where}:`,
-      'dry-run': `This routine is in dry-run mode: Run once records a dry run and posts nothing. It would post as ${preview.sender}${where}:`,
-      skip: `Run once would post nothing now: ${preview.reason}`,
-      launch: 'Run once would start a session with this prompt:',
-      blocked: 'Run once would fail now' + (preview.reason ? ': ' + preview.reason : '; see the checks.'),
-      'not-previewed': preview.reason,
-    }[preview.outcome] || 'Unknown outcome.';
+    byId('trial-summary').textContent =
+      {
+        post: `Run once would post this as ${preview.sender}${where}:`,
+        'dry-run': `This routine is in dry-run mode: Run once records a dry run and posts nothing. It would post as ${preview.sender}${where}:`,
+        skip: `Run once would post nothing now: ${preview.reason}`,
+        launch: 'Run once would start a session with this prompt:',
+        blocked: 'Run once would fail now' + (preview.reason ? ': ' + preview.reason : '; see the checks.'),
+        'not-previewed': preview.reason,
+      }[preview.outcome] || 'Unknown outcome.';
     if (typeof preview.text === 'string' && preview.outcome !== 'skip') {
       byId('trial-text').textContent = preview.text || '(empty)';
       byId('trial-text').hidden = false;
     }
-    list('trial-checks', preview.checks.map((c) => [c.label + (c.detail ? ': ' + c.detail : ''), c.ok ? 'ok' : 'fail']));
-    list('trial-effects', preview.effects.map((e) => [e]));
+    list(
+      'trial-checks',
+      preview.checks.map((c) => [c.label + (c.detail ? ': ' + c.detail : ''), c.ok ? 'ok' : 'fail'])
+    );
+    list(
+      'trial-effects',
+      preview.effects.map((e) => [e])
+    );
     byId('trial-note').textContent =
       'This preview posted nothing and recorded nothing' +
       (preview.readsSource ? `; it read the data source “${preview.readsSource}”.` : '.');
@@ -665,9 +788,12 @@
           ` as ${bot?.name || config.botId}${config.mention ? `, mentioning @${config.mention}` : ''}.`);
     const volumes = Object.values(disk?.volumes || {});
     const notes = [];
-    if (disk?.failures) notes.push(node('p', `Disk readings failed ${disk.failures} time(s) in a row.`, 'github-watch-error'));
+    if (disk?.failures)
+      notes.push(node('p', `Disk readings failed ${disk.failures} time(s) in a row.`, 'github-watch-error'));
     if (disk && disk.durable === false)
-      notes.push(node('p', 'Alarm state is not being saved; alarms continue until the server restarts.', 'github-watch-error'));
+      notes.push(
+        node('p', 'Alarm state is not being saved; alarms continue until the server restarts.', 'github-watch-error')
+      );
     byId('disk-volumes').replaceChildren(
       ...volumes.map((volume) => {
         const element = node('article', undefined, 'card');
@@ -1060,7 +1186,9 @@
   byId('new-bot').addEventListener('click', () => openBot());
   byId('new-watch').addEventListener('click', () => openWatcher());
   byId('disk-edit').addEventListener('click', () => openDisk());
-  byId('disk-form').elements.roomId.addEventListener('change', () => fillDiskBots(byId('disk-form').elements.botId.value));
+  byId('disk-form').elements.roomId.addEventListener('change', () =>
+    fillDiskBots(byId('disk-form').elements.botId.value)
+  );
   byId('disk-toggle').addEventListener('click', async () => {
     const config = disk?.config;
     if (!config) return;
@@ -1092,9 +1220,17 @@
         if (botId === DISK_BOT.id && !bot?.rooms.includes(roomId)) {
           // The dedicated bot is created for this channel, or allowed in it as well; nothing else about it changes.
           const body = bot
-            ? { name: bot.name, ...(bot.icon ? { icon: bot.icon } : {}), rooms: [...bot.rooms, roomId], maxPerHour: bot.maxPerHour }
+            ? {
+                name: bot.name,
+                ...(bot.icon ? { icon: bot.icon } : {}),
+                rooms: [...bot.rooms, roomId],
+                maxPerHour: bot.maxPerHour,
+              }
             : { name: DISK_BOT.name, icon: DISK_BOT.icon, rooms: [roomId], maxPerHour: DISK_BOT.maxPerHour };
-          bot = (await api('chat-bots/' + DISK_BOT.id, { method: 'PUT', body: JSON.stringify(body) })).bot || { id: DISK_BOT.id, ...body };
+          bot = (await api('chat-bots/' + DISK_BOT.id, { method: 'PUT', body: JSON.stringify(body) })).bot || {
+            id: DISK_BOT.id,
+            ...body,
+          };
           snapshot.bots = [...snapshot.bots.filter((b) => b.id !== DISK_BOT.id), bot];
         }
         if (!bot?.rooms.includes(roomId)) throw new Error('Choose a bot that may post in this channel.');
@@ -1339,7 +1475,10 @@
     submit.disabled = true;
     byId('schedule-error').textContent = '';
     try {
-      await api('cron/jobs/' + encodeURIComponent(editingSchedule.id), { method: 'PUT', body: JSON.stringify(schedule) });
+      await api('cron/jobs/' + encodeURIComponent(editingSchedule.id), {
+        method: 'PUT',
+        body: JSON.stringify(schedule),
+      });
       byId('schedule-dialog').close();
       await refresh();
     } catch (error) {

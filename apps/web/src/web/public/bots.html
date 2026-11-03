@@ -118,6 +118,26 @@
         </div>
       </form>
     </dialog>
+    <dialog id="watch-recovery-dialog" aria-labelledby="watch-recovery-title">
+      <form id="watch-recovery-form">
+        <h2 id="watch-recovery-title">Review uncertain notification</h2>
+        <p id="watch-recovery-summary" role="status"></p>
+        <p>
+          The previous post may or may not have reached the channel. Its evidence will be retained. This action does not
+          resend it or mark it delivered.
+        </p>
+        <pre id="watch-recovery-notification" class="watch-recovery-notification"></pre>
+        <label class="check"
+          ><input id="watch-recovery-ack" type="checkbox" required />I understand this notification may be missing from
+          the channel.</label
+        >
+        <p id="watch-recovery-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="watch-recovery-dialog">Close</button>
+          <button id="watch-recovery-go" class="primary" type="submit" disabled>Retain evidence and continue</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="disk-dialog" aria-labelledby="disk-title">
       <form id="disk-form">
         <h2 id="disk-title">Disk alarm</h2>
@@ -127,13 +147,32 @@
           >Warn at (% used)<input name="warnPercent" type="number" min="50" max="99" step="1" value="90" required
         /></label>
         <label
-          >Critical at (% used)<input name="criticalPercent" type="number" min="51" max="100" step="1" value="99" required
+          >Critical at (% used)<input
+            name="criticalPercent"
+            type="number"
+            min="51"
+            max="100"
+            step="1"
+            value="99"
+            required
         /></label>
         <label
-          >Check every (minutes)<input name="intervalMinutes" type="number" min="1" max="1440" step="1" value="5" required
+          >Check every (minutes)<input
+            name="intervalMinutes"
+            type="number"
+            min="1"
+            max="1440"
+            step="1"
+            value="5"
+            required
         /></label>
         <label
-          >Mention (optional)<input name="mention" maxlength="40" placeholder="Name to mention, without @" autocapitalize="none" spellcheck="false"
+          >Mention (optional)<input
+            name="mention"
+            maxlength="40"
+            placeholder="Name to mention, without @"
+            autocapitalize="none"
+            spellcheck="false"
         /></label>
         <p class="hint">
           It posts once when a disk crosses a level and again when it recovers. Critical also notifies the owner's
@@ -227,9 +266,9 @@
         <label>Name<input name="name" required maxlength="100" /></label
         ><label>Bot<select name="botId" aria-label="Bot" required></select></label
         ><label>Channel<select name="roomId" aria-label="Channel" required></select></label
-        ><label>Message<textarea name="postText" required maxlength="2000" rows="4"></textarea></label
-        ><div id="routine-schedule" class="schedule"></div
-        ><label class="check"><input type="checkbox" name="enabled" />Enable schedule immediately</label>
+        ><label>Message<textarea name="postText" required maxlength="2000" rows="4"></textarea></label>
+        <div id="routine-schedule" class="schedule"></div>
+        <label class="check"><input type="checkbox" name="enabled" />Enable schedule immediately</label>
         <p class="hint">Saved disabled by default. Saving does not post a message immediately.</p>
         <p id="routine-error" class="error" role="alert"></p>
         <div class="actions">

@@ -106,6 +106,7 @@ async function fixture(legacy = false) {
     advance: (n = 1800001) => (now += n),
     requests: () => requests,
     postFail: () => (postThrows = true),
+    postWorks: () => (postThrows = false),
     setFetch: (f: typeof fetcher) => (fetcher = f),
     setIssues: (a: unknown[]) => (issueRows = a),
     setRuns: (a: unknown[]) => (ciRows = a),
@@ -147,6 +148,210 @@ it('creates a quiet baseline then announces issues, PRs and each new CI attempt 
   f.advance();
   await f.service.tick();
   expect(f.messages).toHaveLength(1);
+});
+
+async function unknownFixture() {
+  const f = await fixture();
+  await f.configure();
+  await f.service.tick();
+  f.advance();
+  f.setIssues([f.issue(1, 'Unknown original')]);
+  f.postFail();
+  await f.service.tick();
+  expect(f.service.store.snapshot().slots.repo!.pending!.phase).toBe('unknown');
+  const preview = f.service.previewRecovery('repo');
+  const { version, expectedRevision, generation, batchId, pendingDigest } = preview;
+  return { ...f, preview, input: { version, expectedRevision, generation, batchId, pendingDigest, acknowledgePossibleGap: true } };
+}
+it('archives the complete unknown outcome before continuation, retains the gap, and never replays it', async () => {
+  const f = await unknownFixture(), before = f.service.store.snapshot();
+  const pending = before.slots.repo!.pending!;
+  const requests = f.requests();
+  const archive = f.service.store.archive.bind(f.service.store);
+  vi.spyOn(f.service.store, 'archive').mockImplementation(async (records) => {
+    expect(f.service.store.snapshot()).toEqual(before);
+    await archive(records);
+  });
+  await f.service.recoverUnknown('repo', f.input);
+  const after = f.service.store.snapshot(), slot = after.slots.repo!;
+  const history = (await readFile(f.service.store.file + '.history.jsonl', 'utf8')).trim().split('\n').map((line) => JSON.parse(line).record);
+  expect(history.filter((record) => record.kind === 'github-watch-unknown-continuation-proposed')).toEqual([{
+    kind: 'github-watch-unknown-continuation-proposed', id: 'repo', generation: f.input.generation,
+    at: f.now(), expectedRevision: before.revision, pendingDigest: f.input.pendingDigest, pending,
+  }]);
+  expect(after.revision).toBe(before.revision + 1);
+  expect(slot).toEqual({ ...before.slots.repo, pending: undefined, scan: pending.next,
+    ...(pending.createdSince === undefined ? {} : { ciCreatedSince: pending.createdSince }),
+    lastRecovery: { at: f.now(), batchId: pending.id, pendingDigest: f.input.pendingDigest, scannedAt: pending.scannedAt ?? null } });
+  expect(f.requests()).toBe(requests);
+  expect(f.messages).toHaveLength(0);
+  const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+  await reopened.init();
+  expect(reopened.status().watches[0]!.status.lastRecovery).toEqual(slot.lastRecovery);
+  await expect(reopened.recoverUnknown('repo', f.input)).rejects.toThrow();
+  f.postWorks();
+  f.advance();
+  await reopened.tick();
+  expect(f.messages).toHaveLength(0);
+  f.advance();
+  f.setIssues([f.issue(1, 'Future new update')]);
+  await reopened.tick();
+  expect(f.messages).toHaveLength(1);
+  expect(f.messages[0]!.text).toContain('Future new update');
+  expect(f.messages[0]!.text).not.toContain('Unknown original');
+  expect(reopened.status().watches[0]!.status.lastRecovery).toEqual(slot.lastRecovery);
+});
+it('keeps a disabled watcher disabled and works without consulting unavailable rooms or credentials', async () => {
+  const f = await unknownFixture();
+  await f.configure([{ ...f.cfg, enabled: false }]);
+  const preview = f.service.previewRecovery('repo');
+  const before = f.service.store.snapshot().slots.repo!;
+  f.deps.room = () => undefined;
+  vi.spyOn(f.vault, 'metadata').mockRejectedValue(Error('Unavailable'));
+  await f.service.recoverUnknown('repo', { ...f.input, expectedRevision: preview.expectedRevision, generation: preview.generation, pendingDigest: preview.pendingDigest });
+  const after = f.service.store.snapshot().slots.repo!;
+  expect(after.config).toEqual(before.config);
+  expect(after.generation).toBe(before.generation);
+  expect(after.posts).toEqual(before.posts);
+  expect(after.nextPollAt).toBe(before.nextPollAt);
+  await f.service.tick();
+  expect(f.messages).toHaveLength(0);
+});
+it.each(['expectedRevision', 'generation', 'batchId', 'pendingDigest', 'acknowledgePossibleGap', 'extra'])(
+  'refuses changed or unacknowledged recovery %s without changing durable bytes', async (field) => {
+    const f = await unknownFixture(), bytes = await readFile(f.service.store.file);
+    const history = await readFile(f.service.store.file + '.history.jsonl');
+    const invalid = { ...f.input, [field]: ({ expectedRevision: 999, generation: 999, batchId: 'b'.repeat(32),
+      pendingDigest: 'b'.repeat(64), acknowledgePossibleGap: false, extra: 'not-allowed' } as Record<string, unknown>)[field] };
+    await expect(f.service.recoverUnknown('repo', invalid)).rejects.toThrow();
+    expect(await readFile(f.service.store.file)).toEqual(bytes);
+    expect(await readFile(f.service.store.file + '.history.jsonl')).toEqual(history);
+  }
+);
+it('retains remaining prepared notifications rather than dropping the rest of a scan', async () => {
+  const f = await unknownFixture();
+  await f.service.store.update((s) => { s.slots.repo!.pending!.remaining = [{ id: 'f'.repeat(32), text: 'Following notification' }]; });
+  const p = f.service.previewRecovery('repo');
+  const pending = f.service.store.snapshot().slots.repo!.pending!;
+  await f.service.recoverUnknown('repo', { ...f.input, pendingDigest: p.pendingDigest });
+  expect(f.service.store.snapshot().slots.repo!.pending).toEqual({ ...pending,
+    id: 'f'.repeat(32), text: 'Following notification', remaining: [], phase: 'prepared', continuedAfterUnknown: true });
+  expect(f.messages).toHaveLength(0);
+  f.postWorks();
+  await f.service.tick();
+  expect(f.messages.map((m) => m.text)).toEqual(['Following notification']);
+});
+it.each(['enable', 'remove-and-add'])('does not replay an acknowledged unknown post after a disabled owner chooses %s', async (action) => {
+  const f = await unknownFixture();
+  await f.service.store.update((s) => { s.slots.repo!.pending!.remaining = [{ id: 'f'.repeat(32), text: 'Following notification' }]; });
+  await f.configure([{ ...f.cfg, enabled: false }]);
+  const { version, expectedRevision, generation, batchId, pendingDigest } = f.service.previewRecovery('repo');
+  await f.service.recoverUnknown('repo', { version, expectedRevision, generation, batchId, pendingDigest, acknowledgePossibleGap: true });
+  expect(f.service.store.snapshot().slots.repo!.pending!.text).toBe('Following notification');
+  expect(f.service.store.snapshot().slots.repo!.config.enabled).toBe(false);
+  if (action === 'remove-and-add') await f.configure([]);
+  await f.configure([f.cfg]); // Ordinary explicit configuration cancels and archives the prepared remainder.
+  f.postWorks();
+  await f.service.tick();
+  expect(f.messages).toHaveLength(0);
+});
+it('refuses an asynchronous authority callback before recording a recovery intent', async () => {
+  const f = await unknownFixture(), before = await readFile(f.service.store.file);
+  const history = await readFile(f.service.store.file + '.history.jsonl');
+  await expect(f.service.recoverUnknown('repo', f.input, async () => {})).rejects.toThrow('SYNCHRONOUS_AUTHORITY_REQUIRED');
+  expect(await readFile(f.service.store.file)).toEqual(before);
+  expect(await readFile(f.service.store.file + '.history.jsonl')).toEqual(history);
+});
+it('fences ticking and configuring during archival, and rechecks authority after fsync', async () => {
+  const f = await unknownFixture(), before = await readFile(f.service.store.file);
+  let owner = true, enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((r) => { enter = r; });
+  const held = new Promise<void>((r) => { release = r; });
+  const archive = f.service.store.archive.bind(f.service.store);
+  vi.spyOn(f.service.store, 'archive').mockImplementation(async (records) => {
+    await archive(records); enter(); await held;
+  });
+  const recovering = f.service.recoverUnknown('repo', f.input, () => { if (!owner) throw Error('OWNER_REQUIRED'); });
+  await entered;
+  await expect(f.configure([{ ...f.cfg, enabled: false }])).rejects.toThrow('CONFIGURATION_BUSY');
+  await expect(f.service.recoverUnknown('repo', f.input)).rejects.toThrow('CONFIGURATION_BUSY');
+  const requests = f.requests();
+  await f.service.tick();
+  expect(f.requests()).toBe(requests);
+  owner = false;
+  const rejected = expect(recovering).rejects.toThrow('OWNER_REQUIRED');
+  release(); await rejected;
+  expect(await readFile(f.service.store.file)).toEqual(before);
+  expect(f.service.store.snapshot().slots.repo!.pending!.phase).toBe('unknown');
+  expect(f.messages).toHaveLength(0);
+});
+it('refuses archive failure without consuming the original pending record', async () => {
+  const f = await unknownFixture(), before = await readFile(f.service.store.file);
+  await fs.writeFile(f.service.store.file + '.history.jsonl', 'partial', { mode: 0o600 });
+  await expect(f.service.recoverUnknown('repo', f.input)).rejects.toThrow();
+  expect(await readFile(f.service.store.file)).toEqual(before);
+  expect(f.messages).toHaveLength(0);
+});
+it('lets an existing reconciliation finish, then refuses recovery of a post that is now confirmed', async () => {
+  const f = await unknownFixture();
+  f.messages.push({ id: 'existing-post', text: f.preview.notification,
+    from: { kind: 'bot', botId: f.bot.id }, at: f.now() } as ChatMessage);
+  const flight = f.service.tick();
+  await expect(f.service.recoverUnknown('repo', f.input)).rejects.toThrow('RECOVERY_CHANGED');
+  await flight;
+  expect(f.service.store.snapshot().slots.repo!.pending).toBeUndefined();
+  expect(f.service.store.snapshot().slots.repo!.lastRecovery).toBeUndefined();
+  expect(f.messages).toHaveLength(1);
+});
+it('rechecks owner authority at the durable rename after the primary temporary file fsync', async () => {
+  const f = await unknownFixture(), before = await readFile(f.service.store.file);
+  const open = fs.open.bind(fs);
+  let owner = true, revoked = false;
+  vi.spyOn(fs, 'open').mockImplementation((async (path: Parameters<typeof fs.open>[0], ...args: unknown[]) => {
+    const handle = await (open as (...a: unknown[]) => ReturnType<typeof fs.open>)(path, ...args);
+    if (!String(path).startsWith(f.service.store.file + '.') || !String(path).endsWith('.tmp')) return handle;
+    return new Proxy(handle, { get(target, key) {
+      if (key === 'sync') return async () => { await target.sync(); owner = false; revoked = true; };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  }) as typeof fs.open);
+  await expect(f.service.recoverUnknown('repo', f.input, () => { if (!owner) throw Error('OWNER_REQUIRED'); })).rejects.toThrow();
+  expect(revoked).toBe(true);
+  expect(await readFile(f.service.store.file)).toEqual(before);
+  vi.restoreAllMocks();
+  const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
+  await reopened.init();
+  expect(reopened.store.snapshot().slots.repo!.pending!.phase).toBe('unknown');
+  expect(reopened.store.snapshot().slots.repo!.lastRecovery).toBeUndefined();
+});
+it('archives a multi-megabyte unknown spool losslessly before any primary change', async () => {
+  const f = await queuedArchiveFixture();
+  await f.service.store.update((s) => { s.slots.repo!.pending!.phase = 'unknown'; });
+  const before = f.service.store.snapshot(), original = before.slots.repo!.pending!;
+  const { version, expectedRevision, generation, batchId, pendingDigest } = f.service.previewRecovery('repo');
+  expect(Buffer.byteLength(JSON.stringify(original))).toBeGreaterThan(2 * 1024 * 1024);
+  const archive = f.service.store.archive.bind(f.service.store);
+  vi.spyOn(f.service.store, 'archive').mockImplementation(async (records) => {
+    expect(f.service.store.snapshot()).toEqual(before);
+    await archive(records);
+  });
+  await f.service.recoverUnknown('repo', { version, expectedRevision, generation, batchId, pendingDigest, acknowledgePossibleGap: true });
+  const frames = (await readFile(f.service.store.file + '.history.jsonl', 'utf8')).trimEnd().split('\n')
+    .map((line) => { expect(Buffer.byteLength(line + '\n')).toBeLessThanOrEqual(2 * 1024 * 1024); return JSON.parse(line).record; })
+    .filter((r) => r.kind === 'github-watch-unknown-continuation-fragment');
+  const intent = JSON.parse(reconstructCancellation(frames).toString('utf8'));
+  expect(intent.pending).toEqual(original);
+  expect(intent.pendingDigest).toBe(pendingDigest);
+  expect(intent.kind).toBe('github-watch-unknown-continuation-proposed');
+  const slot = f.service.store.snapshot().slots.repo!;
+  expect(slot.pending!.remaining!.length).toBe((original.remaining?.length ?? 0) - 1);
+  expect(slot.scan).toEqual(before.slots.repo!.scan);
+  expect(slot.lastSuccessAt).toBe(before.slots.repo!.lastSuccessAt);
+  expect(f.messages).toHaveLength(0);
+  vi.restoreAllMocks();
+  await f.configure([{ ...f.cfg, enabled: false }]);
+  expect(f.service.store.snapshot().slots.repo!.scan).toEqual(original.next);
 });
 it('adopts exact legacy issue cursor/seen and unchanged10 without duplicate dispatch', async () => {
   const f = await fixture(true);

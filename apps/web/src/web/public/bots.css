@@ -6,6 +6,12 @@
   background: #111318;
   color: #e4e7ed;
 }
+.watch-recovery-notification {
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 * {
   box-sizing: border-box;
 }
