@@ -576,15 +576,27 @@ unqualified.
 
 A review packet is a directory holding one git bundle, `PR-TITLE.txt`, `PR-BODY.md`
 (opening with a `## Branch Naming` section that holds the branch in backticks) and
-a `SHA256SUMS` covering them. From a checkout with push access, run
-`reverie agent publish <packet-dir> --repo OWNER/REPO --room <room> [--dry-run]`.
+a `SHA256SUMS` covering them. From a checkout with push access, configure the
+identity commits must carry once, then publish:
+
+```sh
+git config reverie.publishIdentity "James Goppert <473772+jgoppert@users.noreply.github.com>"
+reverie agent publish <packet-dir> --repo OWNER/REPO --room <room> [--dry-run]
+```
+
 It verifies the sums, the bundle's single head, every commit's author, committer
-and single sign-off, the absence of attribution trailers, team names and board ids
-in public text, symlinks and build output, a clean merge onto the base, and no open
-hold on the packet in the room. Only then does it push the head (an existing branch
-moves only by fast-forward, after its old head's runs are cancelled) and open a
-draft pull request whose body says the description is pending review. `--watch`
-follows its checks. Once the text is approved,
+and single sign-off (`--identity` overrides the configured form), the absence of
+attribution trailers, team names and board ids in public text, symlinks and build
+output, a clean merge onto the base, and no open hold on the packet in the room.
+A hold is any message naming the head, branch, PR number or a `--card`/`--slice`
+with hold, blocker, wait or NO-GO wording, until its sender lifts it or gives a GO;
+`--hold-ok <message-id>` publishes past one and says so. The scan fails closed when
+it cannot show it reaches back to the packet: the room must mention the head, or
+`--hold-since <message-id>` names the seal post. Only then does it push the head
+and open a draft pull request whose body says the description is pending review.
+An existing branch moves only by fast-forward, and runs on its old head are
+cancelled after the push. A bundle stacked on another open branch needs
+`--prereq <branch>`. `--watch` follows the checks. Once the text is approved,
 `reverie agent publish-text <packet-dir> --repo OWNER/REPO` sets the body from
 `PR-BODY.md` without the Branch Naming section, and reads it back to confirm.
 
