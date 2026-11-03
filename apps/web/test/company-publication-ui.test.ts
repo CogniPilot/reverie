@@ -49,7 +49,7 @@ async function setup({ owner = true, inventoryFailure = false, deferGrant = fals
   await h.shell.openCompany('people');
   if (owner) { (h.document.querySelector('[aria-label="Edit profile for River"]') as HTMLButtonElement).click(); await h.flush(); }
   const grant = (name: string) => h.document.querySelector(`[aria-label="Access to ${name} for River"]`) as HTMLInputElement;
-  const manage = async () => { (h.document.querySelector('[aria-label="Manage PATs"]') as HTMLButtonElement).click(); await h.flush(); return h.document.querySelector('.ca-publication-tokens')!; };
+  const manage = async () => { (h.document.querySelector('[data-profile-tab="credentials"]') as HTMLButtonElement).click(); (h.document.querySelector('[aria-label="Manage PATs"]') as HTMLButtonElement).click(); await h.flush(); return h.document.querySelector('.ca-publication-tokens')!; };
   return { h, employee, tokens, writes, reads, grant, manage, finishGrant: () => finishGrant!() };
 }
 
@@ -59,6 +59,22 @@ it('shows only named metadata and performs no grant writes on render', async () 
   expect(grant('unavailable PAT ' + MISSING).checked).toBe(true);
   expect(h.document.querySelector('.ca-profile-publication').textContent).toContain('example/project');
   expect(h.document.querySelector('.ca-profile-publication').textContent).toContain('previously copied tokens must be revoked or rotated at GitHub');
+  expect(writes).toEqual([]);
+});
+
+it('gives PAT setup its own profile tab and keeps creation separate from explicit employee access', async () => {
+  const { h, writes, manage } = await setup();
+  const tab = h.document.querySelector('[data-profile-tab="credentials"]') as HTMLButtonElement;
+  expect(tab.textContent).toBe('GitHub PATs'); tab.click();
+  const panel = h.document.querySelector('.ca-profile-credentials') as HTMLElement;
+  expect(panel.hidden).toBe(false);
+  expect(panel.textContent).toContain('enable its access checkbox for River');
+  expect(panel.querySelector('[aria-label="Manage PATs"]')?.textContent).toBe('Add / manage PATs');
+  expect(h.document.querySelector<HTMLButtonElement>('.ca-profile-footer [type="submit"]')?.hidden).toBe(true);
+  expect(writes).toEqual([]);
+  const dialog = await manage();
+  const children = [...dialog.children];
+  expect(children.indexOf(dialog.querySelector('form')!)).toBeLessThan(children.indexOf(dialog.querySelector('.ca-publication-inventory')!));
   expect(writes).toEqual([]);
 });
 
@@ -102,6 +118,8 @@ it('clears secret input on failed saves and close, without echoing untrusted err
   (dialog.querySelector('[aria-label="PAT name"]') as HTMLInputElement).value = 'failed-pat'; secret.value = 'FAKE_SECRET_SHOULD_NOT_ECHO';
   dialog.querySelector('form')!.dispatchEvent(new h.window.Event('submit', { cancelable: true })); await h.flush();
   expect(secret.value).toBe(''); expect(dialog.textContent).not.toContain('FAKE_SECRET_SHOULD_NOT_ECHO');
+  expect(dialog.textContent).toContain('HTTP 503');
+  expect(dialog.textContent).toContain('Credential storage is unavailable');
   secret.value = 'FAKE_UNSAVED_SECRET'; (dialog.querySelector('[aria-label="Close Manage PATs"]') as HTMLButtonElement).click();
   expect(secret.value).toBe(''); expect(dialog.isConnected).toBe(false);
 });
