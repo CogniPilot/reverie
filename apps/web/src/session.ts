@@ -2,6 +2,7 @@ import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
+import { codexHookTrustArgument, reverieCodexHookTrust } from './codex-hook-trust.js';
 import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
@@ -74,6 +75,7 @@ import {
 } from './types.js';
 import { resolveAndClaimOmpSessionId } from './utils/omp-session-resolver.js';
 import { claudeTranscriptExists } from './utils/claude-transcript.js';
+import { locateClaudeTranscript } from './claude-delivery-evidence.js';
 import { resumeAlias } from './web/resume-guard.js';
 import { matchesPattern } from './config/cli-registry/patterns.js';
 import { probeDockerCliVersion } from './docker-hosts.js';
@@ -160,6 +162,7 @@ import { checkFullAccessFlags, fullAccessByDefault, withFullAccessDefault, type 
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
 import { readProcStat, stopPtyChild } from './signal-target.js';
 import { getLifecycleLog } from './session-lifecycle-log.js';
+import { ownerStopPending } from './owner-stop-journal.js';
 import {
   launchModelFor,
   readScreenModel,
@@ -500,6 +503,9 @@ export interface ClaudeMessage {
  * @fires Session#autoClear - Token threshold reached, clearing context
  * @fires Session#autoCompact - Token threshold reached, compacting context
  */
+/** Why a pane was not replaced: an owner stop of this agent is not settled yet. */
+const OWNER_STOP_HELD = 'An unsettled owner stop holds this expert; its pane is not replaced until the laptop settles the stop';
+
 export class Session extends EventEmitter {
   readonly id: string;
   readonly workingDir: string;
@@ -752,6 +758,8 @@ export class Session extends EventEmitter {
   // Claude CLI startup permission mode
   private _claudeMode: ClaudeMode = 'dangerously-skip-permissions';
   private _codexTrustWorkspace?: string;
+  /** Launch-only --config value trusting Reverie's own handlers in the workspace's Codex hooks.json. */
+  private _codexHookTrust?: string;
   private _allowedTools: string | undefined;
 
   // OpenCode configuration (only for mode === 'opencode')
@@ -1424,6 +1432,9 @@ export class Session extends EventEmitter {
     return this._paneExit ?? undefined;
   }
 
+  /** Read-only presentation of the existing gate; never persistence or authority. */
+  get viewerInputHeld(): boolean { return this._viewerInputHeld; }
+
   /** A worker pane observes terminal transport, not the provider inside its laptop. */
   get runtimeHealthScope(): 'provider' | 'terminal' {
     return this._workerBacked || this._remote || this._docker ? 'terminal' : 'provider';
@@ -1987,7 +1998,7 @@ export class Session extends EventEmitter {
   /** Stage an owner-selected runtime. The returned rollback never serializes private environment values. */
   configureRuntime(options: {
     mode: SessionMode; selection?: SessionState['subscriptionProfile']; env: Record<string, string>;
-    sourceKey: string; model?: string; effort?: string; effortField?: string;
+    sourceKey: string; model?: string; effort?: string; effortField?: string; preserveRecipe?: boolean;
   }): () => void {
     const record = this as unknown as Record<string, unknown>;
     const fields = ['_mode', '_acceptsPrompts', '_cliVersion', 'subscriptionProfile', '_envOverrides', '_customModel',
@@ -1996,6 +2007,25 @@ export class Session extends EventEmitter {
     const before = new Map(fields.map((key) => [key, structuredClone(record[key])]));
     const pending = new Set(this._pendingEnvUnsets);
     const currentSource = this._customModel ? 'local:' + this._customModel.endpointId : 'subscription:' + (this.subscriptionProfile?.id ?? '');
+    if (options.preserveRecipe) {
+      // Explicit attendance/restart resolves fresh credentials for the SAME
+      // stored source. It cannot rewrite launch settings or conversation pins.
+      if (options.mode !== this.mode || options.sourceKey !== currentSource ||
+          options.selection?.id !== this.subscriptionProfile?.id ||
+          options.selection?.provider !== this.subscriptionProfile?.provider)
+        throw new Error('Saved runtime source changed');
+      this._envOverrides ??= {};
+      for (const key of ['CODEX_HOME','CLAUDE_CONFIG_DIR','XDG_DATA_HOME','OPENCODE_CONFIG_CONTENT']) {
+        delete this._envOverrides[key]; this._pendingEnvUnsets.add(key);
+      }
+      Object.assign(this._envOverrides, options.env);
+      for (const key of Object.keys(options.env)) this._pendingEnvUnsets.delete(key);
+      return () => {
+        const changedKeys=Object.keys(this._envOverrides ?? {});
+        for (const [key,value] of before) record[key]=value;
+        this._pendingEnvUnsets=new Set([...pending,...changedKeys.filter(key=>!this._envOverrides?.[key])]);
+      };
+    }
     const currentKey = this.mode + ':' + currentSource;
     const currentField = getCli(this.mode)?.launch.legacyConfigField;
     const currentConfig = currentField ? record['_' + currentField] as Record<string, unknown> | undefined : undefined;
@@ -2105,6 +2135,41 @@ export class Session extends EventEmitter {
   /** When the scheduled usage-limit auto-resume fires (epoch ms), or null. */
   get autoResumeAt(): number | null {
     return this._autoOps.autoResumeAt;
+  }
+
+  /**
+   * When the harness itself reported a context compaction starting (Claude Code's PreCompact hook), until it reports the
+   * end (SessionStart "compact"), the turn ends or a prompt is submitted. Quiet output alone is never compaction evidence.
+   * A start with no end is cleared after COMPACTING_MAX_MS by a timer that emits 'compactingChanged', so a lost end hook
+   * cannot leave the state (or a client's dot) stuck.
+   */
+  private _compactingSince: number | null = null;
+  private _compactingTimer: ReturnType<typeof setTimeout> | null = null;
+
+  get compactingSince(): number | null {
+    return this._compactingSince;
+  }
+
+  static readonly COMPACTING_MAX_MS = 15 * 60_000;
+
+  /** Record a compaction start (true) or end (false); returns whether the visible state changed. */
+  noteCompaction(active: boolean): boolean {
+    const before = this._compactingSince;
+    const next = active ? before ?? Date.now() : null;
+    this._compactingSince = next;
+    if (next === null && this._compactingTimer) {
+      clearTimeout(this._compactingTimer);
+      this._compactingTimer = null;
+    } else if (next !== null && !this._compactingTimer && !this._isStopped) {
+      this._compactingTimer = setTimeout(() => {
+        this._compactingTimer = null;
+        if (this._compactingSince === null) return;
+        this._compactingSince = null;
+        this.emit('compactingChanged');
+      }, Session.COMPACTING_MAX_MS);
+      this._compactingTimer.unref?.();
+    }
+    return next !== before;
   }
 
   /** True while the session is paused on a Claude usage limit (auto-resume armed). */
@@ -2256,6 +2321,7 @@ export class Session extends EventEmitter {
       autoClearEnabled: this._autoOps.autoClearEnabled,
       autoClearThreshold: this._autoOps.autoClearThreshold,
       autoCompactEnabled: this._autoOps.autoCompactEnabled,
+      ...(this.compactingSince !== null ? { compactingSince: this.compactingSince } : {}),
       autoCompactThreshold: this._autoOps.autoCompactThreshold,
       autoCompactPrompt: this._autoOps.autoCompactPrompt,
       autoResumeEnabled: this._autoOps.autoResumeEnabled,
@@ -2448,6 +2514,10 @@ export class Session extends EventEmitter {
     spawnErrLabel: string;
   }): Promise<{ isRestored: boolean; respawnedResumeId?: string; respawnedDeadPane: boolean }> {
     const mux = this._mux!;
+    // An unsettled owner stop (owner-stop-journal) could still signal whatever holds this agent's pane, so until the
+    // laptop settles it no new process goes there: only an existing live pane may be attached to.
+    if (ownerStopPending(this.id) && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName) || mux.isPaneDead(this._muxSession.muxName)))
+      throw new Error(OWNER_STOP_HELD);
 
     // Verify stale mux session — tmux may have been destroyed (e.g., killed externally).
     // A session that HAD a mux session relaunches its CLI below just like a failed
@@ -2473,8 +2543,10 @@ export class Session extends EventEmitter {
       // check ran, so it still carries the pre-pin ompConfig; rebuild it.
       this._pinOmpRespawnId();
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
+      // The pane may have read live at the guard above and dead here: check again, now and at the tmux command.
+      this._refuseNewProcessWhileStopHeld();
       this._beginClaudeConversationSelection();
-      const newPid = await mux.respawnPane(respawnOptions);
+      const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => !ownerStopPending(this.id) });
       if (!newPid) {
         console.error('[Session] Failed to respawn pane, will create new session');
         needsNewSession = true;
@@ -2525,8 +2597,9 @@ export class Session extends EventEmitter {
           this._resumeSessionId = pinned;
         }
       }
+      this._refuseNewProcessWhileStopHeld();
       this._beginClaudeConversationSelection();
-      this._muxSession = await mux.createSession(options.createSessionOptions);
+      this._muxSession = await mux.createSession({ ...options.createSessionOptions, admitted: () => !ownerStopPending(this.id) });
       console.log('[Session] Created mux session:', this._muxSession.muxName);
       // No extra sleep — createSession() already waits for tmux readiness
     }
@@ -2604,10 +2677,11 @@ export class Session extends EventEmitter {
       return false;
     }
 
+    if (ownerStopPending(this.id)) return false;  // an unsettled owner stop: no new process in this pane yet
     // Confirmed the mux session (and thus the pane) exists but this reattach
     // is about to respawn it — safe to resolve/pin now.
     this._pinOmpRespawnId();
-    const newPid = await mux.respawnPane(this._buildRespawnPaneOptions());
+    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: () => !ownerStopPending(this.id) });
     if (!newPid) {
       console.error('[Session] reattachRemote: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -2705,6 +2779,10 @@ export class Session extends EventEmitter {
   private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
     explicitRecovery = false): Promise<boolean> {
     if (!this._useMux || !this._mux || !this._muxSession) return false;
+    if (ownerStopPending(this.id)) {
+      console.log(`[Session ${this.id.slice(0, 8)}] restart refused: an unsettled owner stop holds this pane`);
+      return false;
+    }
     const mux = this._mux;
 
     if (!mux.muxSessionExists(this._muxSession.muxName)) {
@@ -2719,10 +2797,17 @@ export class Session extends EventEmitter {
     if (this.mode === 'codex' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
+    await this._prepareCodexHookTrust();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
+    // Preparation above awaited: an owner stop may have been recorded meanwhile. Check now and at the tmux command.
+    if (ownerStopPending(this.id)) {
+      console.log(`[Session ${this.id.slice(0, 8)}] restart refused after preparation: an unsettled owner stop holds this pane`);
+      return false;
+    }
+    const admitted = () => !ownerStopPending(this.id);
     this._beginClaudeConversationSelection();
-    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent } : options);
+    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
     if (!newPid) {
       console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -2748,6 +2833,7 @@ export class Session extends EventEmitter {
   private _buildRespawnPaneOptions(): import('./mux-interface.js').RespawnPaneOptions {
     const options: import('./mux-interface.js').RespawnPaneOptions = {
       codexTrustWorkspace: this._codexTrustWorkspace,
+      codexHookTrust: this._codexHookTrust,
       sessionId: this.id,
       workingDir: this.workingDir,
       mode: this.mode,
@@ -2849,6 +2935,17 @@ export class Session extends EventEmitter {
       docker: this._docker,
       customModel: this._customModel,
     });
+  }
+
+  /**
+   * Only where the workspace itself is trusted at launch: Reverie's own hooks, as written to the workspace just before,
+   * are trusted by content hash so Codex does not stop on "Hooks need review" for them. Read after the write, so the
+   * hashes are of the file Codex will load.
+   */
+  private async _prepareCodexHookTrust(): Promise<void> {
+    this._codexHookTrust = this._codexTrustWorkspace
+      ? codexHookTrustArgument(await reverieCodexHookTrust(this.workingDir))
+      : undefined;
   }
 
   private async _prepareManagedCodexTrust(): Promise<void> {
@@ -3086,6 +3183,11 @@ export class Session extends EventEmitter {
     if (this._closing) {
       throw new Error('Session is being closed');
     }
+    // Before any fallback (a direct PTY included) can start a process: only attaching to a live pane is allowed while an
+    // unsettled owner stop could still signal it (see _doSetupOrAttachMuxSession).
+    if (ownerStopPending(this.id) && (!this._mux || !this._muxSession || !this._mux.muxSessionExists(this._muxSession.muxName)
+      || this._mux.isPaneDead(this._muxSession.muxName)))
+      throw new Error(OWNER_STOP_HELD);
     if (this._respawnBlocked) {
       throw new Error(
         'Respawn blocked: interactive PTY exited non-zero too many times in a short window (circuit breaker tripped). Restart the session to clear it.'
@@ -3120,6 +3222,7 @@ export class Session extends EventEmitter {
     if (this.mode === 'codex' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
+    await this._prepareCodexHookTrust();
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
@@ -3225,6 +3328,7 @@ export class Session extends EventEmitter {
           respawnPaneOptions: this._buildRespawnPaneOptions(),
           createSessionOptions: {
             codexTrustWorkspace: this._codexTrustWorkspace,
+            codexHookTrust: this._codexHookTrust,
             workerAttachOnly: this._workerAttachOnly,
             workerResourceLaunch: this._workerResourceLaunch,
             sessionId: this.id,
@@ -3347,6 +3451,8 @@ export class Session extends EventEmitter {
         }
       } catch (err) {
         if (this._workerResourceLaunch) throw err;
+        // Held by an unsettled owner stop: keep the pane as it is (no fallback process, no forgotten mux session).
+        if (ownerStopPending(this.id)) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -3387,6 +3493,7 @@ export class Session extends EventEmitter {
           getClaudeCliVersion(),
           this._advisorModel
         );
+        this._refuseNewProcessWhileStopHeld();
         this.ptyProcess = spawnPtyWithHelperRepair(() =>
           pty.spawn(getClaudeBinaryPath(), args, {
             name: 'xterm-256color',
@@ -4277,6 +4384,7 @@ export class Session extends EventEmitter {
           }, 100);
         }
       } catch (err) {
+        if (ownerStopPending(this.id)) throw err;  // held by an unsettled owner stop: no fallback process
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -4289,6 +4397,7 @@ export class Session extends EventEmitter {
         throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
       }
       try {
+        this._refuseNewProcessWhileStopHeld();
         this.ptyProcess = spawnPtyWithHelperRepair(() =>
           pty.spawn(shell, [], {
             name: 'xterm-256color',
@@ -4403,6 +4512,7 @@ export class Session extends EventEmitter {
         const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id);
 
         try {
+          this._refuseNewProcessWhileStopHeld();
           this.ptyProcess = spawnPtyWithHelperRepair(() =>
             pty.spawn(launch.binary, launch.args, {
               name: 'xterm-256color',
@@ -4530,6 +4640,13 @@ export class Session extends EventEmitter {
       clearTimeout(this._trustDialogTimer);
       this._trustDialogTimer = null;
     }
+
+    // A compaction cannot be in progress once the session is torn down
+    if (this._compactingTimer) {
+      clearTimeout(this._compactingTimer);
+      this._compactingTimer = null;
+    }
+    this._compactingSince = null;
 
     // Clear activity timeout to prevent memory leak
     if (this.activityTimeout) {
@@ -4908,7 +5025,12 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
-    if (this._viewerInputHeld) return false;
+    if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
+    // An agent's raw write (a mux failure's fallback, an explicit raw send) is checked here, with no await before the write.
+    if (options.agentInput && this._moveHolds > 0) {
+      options.onMoveHeld?.();
+      return false;
+    }
     const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
     if (!this.ptyProcess) return false;
@@ -5055,9 +5177,61 @@ export class Session extends EventEmitter {
    * session.writeViaMux('/init\r');   // Send /init command
    * ```
    */
-  /** Hold the model-capacity auto-resume while something else (a plan move) owns this composer. */
+  /** Plan-move holds on this composer (pauseCapacityRetry), counted even when the capacity auto-resume is off. */
+  private _moveHolds = 0;
+
+  /** Whether a plan move owns this composer now: no agent may type into it (the move's own handoff is not an agent write). */
+  get composerHeldByMove(): boolean {
+    return this._moveHolds > 0;
+  }
+
+  /** Hold the model-capacity auto-resume, and every agent's input, while something else (a plan move) owns this composer. */
   pauseCapacityRetry(): () => void {
-    return this._capacityRetry?.pause() ?? (() => {});
+    this._moveHolds++;
+    const resume = this._capacityRetry?.pause() ?? (() => {});
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._moveHolds--;
+      resume();
+    };
+  }
+
+  /** An owner recovery is stopping this agent: no input from anyone (a person's included) reaches the pane until released. */
+  private _recoveryHold = false;
+
+  /** Also while a durably recorded owner stop of this session is unsettled, whichever Session object (or process) took it. */
+  private _inputHeldForRecovery(): boolean {
+    return this._recoveryHold || ownerStopPending(this.id);
+  }
+
+  /**
+   * No new agent process may start in this pane while an unsettled owner stop could still signal it (owner-stop-journal).
+   * Called immediately before each process creation, after any await, and also handed to the mux as `admitted`, so the
+   * last check is at the tmux command itself. Attaching a viewer to a live pane is not a new process.
+   */
+  private _refuseNewProcessWhileStopHeld(): void {
+    if (ownerStopPending(this.id)) throw new Error(OWNER_STOP_HELD);
+  }
+
+  /**
+   * Take this pane's input before an owner recovery asks the laptop to stop the agent, so the stop cannot kill work
+   * submitted after the owner's check. Refused (undefined) while any write is still being typed; every later write, raw
+   * write and deferred verifier Enter is refused until the returned release runs. No await from the caller's checks to here.
+   */
+  holdInputForRecovery(): (() => void) | undefined {
+    // A start, restart or attach in progress may be about to create a process: a stop must not race it.
+    if (this._inputHeldForRecovery() || this._muxWritesInFlight > 0 || this._paneLifecycleOps > 0) return undefined;
+    this._recoveryHold = true;
+    const resume = this._capacityRetry?.pause() ?? (() => {});
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._recoveryHold = false;
+      resume();
+    };
   }
 
   private _capacityWrites = 0;
@@ -5091,12 +5265,26 @@ export class Session extends EventEmitter {
    * harness fails closed rather than risk typing into a draft it cannot see.
    */
   private _idleForWake(ownId: number | null, composer: boolean): boolean {
-    if (this._viewerInputHeld || this.paneLifecycleInFlight || this._isStopped || this._isWorking) return false;
+    if (this._viewerInputHeld || this.paneLifecycleInFlight || this._isStopped || this._isWorking || this._moveHolds > 0) return false;
     if ((this._workerBacked && this._paneExit) || this._otherMuxWrite(ownId)) return false;
     if (!composer) return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
     if ((glyph !== '›' && glyph !== '❯') || !this._mux || !this._muxSession) return false;
     return composerIsEmpty(this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
+  }
+
+  /** Idle and showing an empty composer on a harness whose composer glyph is verified; held input reads as not idle. */
+  /**
+   * This Claude session's own transcript, for delivery evidence: found only by the conversation id the CLI itself reported
+   * (never a guessed or restored one), on this host, and only when exactly one file carries it.
+   */
+  async claudeTranscript(): Promise<string | undefined> {
+    if (this.mode !== 'claude' || this._remote || !this._claudeSessionIdIsFirstHand || !this._claudeSessionId) return undefined;
+    return locateClaudeTranscript(this._claudeSessionId, this._claudeConfigDir());
+  }
+
+  composerProvablyIdle(): boolean {
+    return !this._inputHeldForRecovery() && !this._viewerInputHeld && this._idleForWake(null, true);
   }
 
   canAcceptChatInput(): boolean {
@@ -5107,19 +5295,34 @@ export class Session extends EventEmitter {
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
-    if (this._viewerInputHeld) return false;
+    if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
+    // An agent's input is refused here, at the write, not only by the route's earlier look: a plan move can take the composer
+    // during any await before it. From here to the first key there is no await.
+    if (options.agentInput && this._moveHolds > 0) {
+      options.onMoveHeld?.();
+      return false;
+    }
     const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
-    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) return false;
+    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) {
+      if (options.requireIdle) options.onIdleRefused?.();
+      return false;
+    }
     // Idle-only is decided here, at the write, not by the route's earlier look: a turn can start during any await before it.
     // The check and the claim below (_beginMuxWrite) run with no await between them, so two wakes cannot both pass.
-    if (options.requireIdle && (!this._mux || !this._muxSession || !this._idleForWake(null, true))) return false;
+    if (options.requireIdle && (!this._mux || !this._muxSession || !this._idleForWake(null, true))) {
+      options.onIdleRefused?.();
+      return false;
+    }
     // A capacity retry's text in flight or left unsent owns the composer until it reads empty again.
     if (this._capacityTextPending && !options.capacityRetry) {
       const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
       const empty = !!glyph && !!this._muxSession && !this._capacityRetryWriting() &&
         composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
       if (empty) this._capacityTextPending = false;
-      else if (options.requireEmptyComposer || options.requireIdle) return false;
+      else if (options.requireEmptyComposer || options.requireIdle) {
+        if (options.requireIdle) options.onIdleRefused?.();
+        return false;
+      }
     }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
@@ -5133,27 +5336,42 @@ export class Session extends EventEmitter {
       const writeId = this._beginMuxWrite();
       // A gated write (idle-only wake, capacity retry) owns the composer only while no OTHER write is in flight, and only for
       // its own id: once this write's finally drops the id, the same gate (held by its delayed verifier) admits no write.
-      const gated = !!options.requireIdle || !!options.writeGate;
-      const gate = gated
-        ? () => !this._otherMuxWrite(writeId) && (options.requireIdle ? this._idleForWake(writeId, false) : true) &&
-          (options.writeGate ? options.writeGate() : true)
+      const exclusive = !!options.requireIdle || !!options.writeGate;
+      // An agent's ordinary send is gated on the move hold alone (other writes in flight do not refuse it), and its keys only in
+      // the one shape the gate follows key by key: text + Enter, OpenCode included (tmux refuses any other shape under a gate).
+      // Any other shape is a single write checked at the top; its later Enter, if any, still answers to the hold below.
+      let heldByMove = false;
+      const moveFree = () => {
+        if (this._moveHolds === 0) return true;
+        heldByMove = true;
+        return false;
+      };
+      const agentKeys = !!options.agentInput && !!data.replace(/[\r\n]/g, '').trimEnd() && data.includes('\r');
+      const gate = exclusive || agentKeys
+        ? () => (!exclusive || !this._otherMuxWrite(writeId)) && (options.requireIdle ? this._idleForWake(writeId, false) : true) &&
+          (options.writeGate ? options.writeGate() : true) && (options.agentInput ? moveFree() : true)
         : undefined;
       if (options.requireIdle) (muxOptions as { stillIdle?: () => boolean }).stillIdle = gate;
       try {
         const send = () => this._mux!.sendInput(this.id, data, Object.keys(muxOptions).length ? muxOptions : undefined);
         let sent: boolean;
+        let unsent = false;
         if (gate) {
           if (options.capacityRetry) this._capacityWrites++;
           try {
             const outcome = await withWriteGate(gate, send);
             // Typed but Enter withheld (before the first Enter, or at the retry): not sent, so no verifier is armed for it.
-            sent = outcome.result && !outcome.typedUnsent;
-            if (outcome.typedUnsent) options.onTypedUnsent?.();
+            unsent = outcome.typedUnsent;
+            sent = outcome.result && !unsent;
+            if (unsent) options.onTypedUnsent?.();
           } finally { if (options.capacityRetry) this._capacityWrites--; }
         } else sent = await send();
         if (sent) {
           this._emitSubmittedPrompt(this._trackSubmit(data, options));
-          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate);
+          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate ?? (options.agentInput ? moveFree : undefined));
+        } else if (heldByMove && !unsent) {
+          // The gate closed before the text: nothing was typed.
+          options.onMoveHeld?.();
         }
         return sent;
       } finally { this._endMuxWrite(writeId); }
@@ -5205,7 +5423,7 @@ export class Session extends EventEmitter {
           : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
       // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
       sendEnter: async () => {
-        if (this._viewerInputHeld) return false;
+        if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
         const gate = this._verifierGate;
         if (gate && !gate()) {
           // Closed once (busy, or a plan move took the composer): this write's verification ends here and its text stays unsent.
@@ -5215,8 +5433,16 @@ export class Session extends EventEmitter {
           return false;
         }
         const enterId = this._beginMuxWrite();
-        try { return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined); }
-        finally { this._endMuxWrite(enterId); }
+        try {
+          // OpenCode's Enter is its own key sequence (settle, footer reads, maybe Escape) with awaits before the key: it goes
+          // under the write's gate, which its typer re-checks at the key itself. This Enter's own id is not "another write"
+          // to that gate. Other harnesses' Enter is one key sent with no await after the check above.
+          if (gate && this.mode === 'opencode') {
+            const own = () => { this._muxWriteIds.delete(enterId); try { return gate(); } finally { this._muxWriteIds.add(enterId); } };
+            return (await withWriteGate(own, () => this._mux!.sendInput(this.id, '\r', { opencode: true }))).result;
+          }
+          return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined);
+        } finally { this._endMuxWrite(enterId); }
       },
       // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
       // Only claude, codex, pi, opencode, omp and gemini declare a promptGlyph; the other modes would fall back

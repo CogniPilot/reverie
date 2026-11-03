@@ -92,11 +92,17 @@ const AGENT_ROUTES = new Set([
   'GET /api/handbook',
   'GET /api/handbook/:slug',
   'GET /api/chat-plugins', // shared enablement is readable; only the verified owner may change it
+  'POST /api/company/employees/:id/vacation', // route checks explicit manageOffice, never title/admin status
+  'POST /api/company/employees/:id/restart', // unchanged-recipe only; runtime settings remain owner-only
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
+  'GET /api/plans/move-impact', // read-only; the route admits only the owner and agents holding plans.view_all
   // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.
   'POST /api/plans/requests/:id/approve',
   'POST /api/plans/requests/:id/reject',
+  'POST /api/plans/agent-moves/current', // exact self holder with a current explicit plan grant
+  'POST /api/plans/agent-moves/:id/status',
+  'POST /api/plans/agent-moves/:id/resolve',
   'POST /api/plans/agent-requests/pending', // exact resolved agent session, self-only records
   'POST /api/plans/agent-requests', // handler checks exact employee and explicit plan permission
   'POST /api/plans/agent-requests/:id/status',
@@ -110,6 +116,10 @@ const AGENT_ROUTES = new Set([
   'GET /api/experts/:id',
   'POST /api/experts/:id/hire',
   'POST /api/experts/:id/retire',
+  // Hire requests: a listed delegate asks, lists its own and withdraws its own; approve and decline stay owner-only.
+  'POST /api/experts/:id/hire-requests',
+  'GET /api/experts-hire-requests',
+  'POST /api/experts-hire-requests/:requestId/withdraw',
   // The board: every agent's `reverie board` reads and moves cards.
   'GET /api/board',
   'GET /api/board/issues',
@@ -118,6 +128,12 @@ const AGENT_ROUTES = new Set([
   'POST /api/publication/credentials/:id/material',
   'GET /api/agent/context',
   'POST /api/agent/context/receipt',
+  'POST /api/agent/journal/save',
+  'GET /api/agent/journal/recall',
+  'GET /api/agent/journal/map',
+  'GET /api/agent/journal/source',
+  'GET /api/agent/journal/receipt/:turnId',
+  'GET /api/agent/memory-brief', // the calling agent's own session-start brief; the handler resolves the exact session
   ...BOARD_WRITE_ROUTES,
 ]);
 /**

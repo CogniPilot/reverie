@@ -136,6 +136,10 @@ class RoomMemory:
                 data, text = decoded[memory.id]
                 item = dict(memory_id=memory.id, source_message_id=data['source'], occurred_at=data['at'],
                             kind=data['kind'], text=text, confirmed_reply=memory.assistant_text)
+                if data['kind'] == 'exchange':
+                    # The prompt and agent reply are distinct evidence. Older rows
+                    # may lack a reply ID; never substitute the prompt's identity.
+                    item['confirmed_reply_id'] = data.get('reply_id')
                 if data['kind'] == 'fact':
                     peers = latest[data['key']][1]
                     item.update(fact_key=data['key'], unresolved_conflict=len(peers) > 1,

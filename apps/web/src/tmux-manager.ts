@@ -24,7 +24,7 @@ import { cliConfigContent } from './cli-config-content.js';
 
 import { randomBytes } from 'node:crypto';
 import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
-import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, writeGateOpen, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
@@ -1010,6 +1010,7 @@ export function buildCodexCommand(config?: CodexConfig): string {
 
 export function buildSpawnCommand(options: {
   codexTrustWorkspace?: string;
+  codexHookTrust?: string;
   mode: SessionMode;
   sessionId: string;
   model?: string;
@@ -2325,6 +2326,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     const baseCmd = buildSpawnCommand({
       codexTrustWorkspace: options.codexTrustWorkspace,
+      codexHookTrust: options.codexHookTrust,
       mode,
       sessionId,
       model,
@@ -2379,6 +2381,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const createSessionCommand = this.supportsLiveHistoryResize()
         ? `${this.tmux()} new-session -ds "${muxName}" -c ${TMUX_LAUNCH_CWD} \\; set-option -t "${muxName}" history-limit ${safeHistoryLimit}`
         : `${this.tmux()} set-option -g history-limit ${safeHistoryLimit} \\; new-session -ds "${muxName}" -c ${TMUX_LAUNCH_CWD} \\; set-option -t "${muxName}" history-limit ${safeHistoryLimit}`;
+      // Final admission: from here to the pane launch below nothing awaits, so this is the last moment to refuse.
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted; nothing was started');
       execSync(createSessionCommand, {
         cwd: TMUX_LAUNCH_CWD,
         timeout: EXEC_TIMEOUT_MS,
@@ -2633,6 +2637,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     const baseCmd = buildSpawnCommand({
       codexTrustWorkspace: options.codexTrustWorkspace,
+      codexHookTrust: options.codexHookTrust,
       mode,
       sessionId,
       model,
@@ -2662,7 +2667,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
         : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
 
-    if (options.stillCurrent && !options.stillCurrent()) return null;
+    if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
     try {
       // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.
       this._configureCliEnv(
@@ -2679,7 +2684,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
-      if (options.stillCurrent && !options.stillCurrent()) return null;
+      if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
       await execAsync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {
@@ -3791,9 +3796,14 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return false;
     }
 
-    // A gated write (idle-only wake, capacity retry) is only ever a gated text + Enter (typeAndSubmit re-checks before each
-    // key); any other shape would go out ungated, so it is refused before any transport, test mode included.
-    if ((options.stillIdle || writeGateActive()) && (options.opencode || !input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))) {
+    // A gated write (idle-only wake, capacity retry, an agent's input under a plan move's hold) is only ever a gated text +
+    // Enter (typeAndSubmit, or typeIntoOpencode, re-checks before each key); any other shape would go out ungated, so it is
+    // refused before any transport, test mode included. OpenCode's typer follows the write's gate but has no idle check, so an
+    // idle-only write (stillIdle) is still refused there.
+    // OpenCode's bare Enter (a submit verifier's later Enter) goes through the same gated typer, so it may be gated too.
+    const gatedOpencodeEnter = !!options.opencode && !options.stillIdle && input.includes('\r');
+    if ((options.stillIdle || writeGateActive()) &&
+      ((options.opencode && options.stillIdle) || (!gatedOpencodeEnter && (!input.replace(/[\r\n]/g, '').trimEnd() || !input.includes('\r'))))) {
       return false;
     }
 
@@ -3842,7 +3852,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return true;
+        return outcome !== 'not-written';
       }
 
       if (textPart && hasCarriageReturn) {
@@ -3859,8 +3869,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
               return execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
             }
             const buffer = `reverie-${randomBytes(6).toString('hex')}`;
+            // A gated write's gate is checked again once the buffer is staged: closed, nothing is pasted (false: not typed).
             return execAsync(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS })
-              .then(() => execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS }));
+              .then<unknown>(() => writeGateOpen()
+                ? execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS })
+                : execAsync(`${this.tmux()} delete-buffer -b ${buffer}`, { timeout: EXEC_TIMEOUT_MS }).catch(() => undefined).then(() => false as const));
           },
         };
         const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer, options.stillIdle);

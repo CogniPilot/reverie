@@ -97,15 +97,18 @@ lists the value inside `data` on success.
 
 | Method | Path | Request body | Response `data` |
 | --- | --- | --- | --- |
+| GET | `/api/v1/cron/active` | None | Verified owner only: `{ jobs: [{ id, name }] }`, the jobs executing now |
 | GET | `/api/v1/cron/jobs` | None | `CronJob[]` |
 | POST | `/api/v1/cron/jobs` | Full job definition below | `{ job: CronJob }` |
 | GET | `/api/v1/cron/jobs/:id` | None | `CronJob` |
 | PUT | `/api/v1/cron/jobs/:id` | Partial job definition | `{ job: CronJob }` |
 | DELETE | `/api/v1/cron/jobs/:id` | None | `{}` |
 | PUT | `/api/v1/cron/jobs/:id/enabled` | `{ enabled: boolean }` | `{ job: CronJob }` |
+| GET | `/api/v1/cron/jobs/:id/preview` | None | `{ preview: CronRunPreview }`; nothing is written, posted or announced |
 | POST | `/api/v1/cron/jobs/:id/run` | None | `{ run: CronJobRun, activeAgents: number }` |
 | GET | `/api/v1/cron/jobs/:id/runs` | None | `CronJobRun[]` |
 | GET | `/api/v1/cron/runs` | None | `CronJobRun[]` |
+| POST | `/api/v1/cron/schedule-preview` | The schedule fields of a job, plus optional `count` (1-10, default 3) | `{ runs: number[] }`, epoch ms; owner only, nothing is saved |
 | GET | `/api/v1/routines-grants` | None | `{ roles: string[], employees: Record<employeeId, boolean> }` |
 | PUT | `/api/v1/routines-grants` | `{ roles?: string[], employees?: Record<employeeId, boolean> }` (owner only) | the stored grants |
 

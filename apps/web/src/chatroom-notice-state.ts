@@ -24,7 +24,8 @@ const recordSchema = z
   .object({
     recipient: recipientSchema,
     source: sourceSchema,
-    disposition: z.enum(['handled', 'superseded']),
+    // 'stale': set aside as too old to act on. Never 'handled': it claims nothing was done, and stays listable.
+    disposition: z.enum(['handled', 'superseded', 'stale']),
     recordedAt: z.number().finite().nonnegative(),
     proof: z.object({ kind: z.literal('exact-read'), receiptDigest: digest }).strict(),
     replacement: sourceSchema.optional(),
@@ -39,7 +40,7 @@ export type NoticeSource = z.infer<typeof sourceSchema>;
 export type NoticeRecipient = z.infer<typeof recipientSchema>;
 export type NoticeRecord = z.infer<typeof recordSchema>;
 export interface NoticeAttention {
-  disposition: 'pending' | 'handled' | 'superseded';
+  disposition: 'pending' | 'handled' | 'superseded' | 'stale';
   proof?: { kind: 'linked-reply'; reply: NoticeSource } | { kind: 'exact-read'; recordedAt: number };
   replacement?: NoticeSource;
 }

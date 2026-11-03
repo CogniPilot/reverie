@@ -90,7 +90,7 @@ def verify_sources(source,pins):
 
 
 def helper_diagnostic(raw):
-    from .worker_service import _DIAGNOSTIC_REASONS, _TRANSPORT_DIAGNOSTIC_STAGES
+    from .worker_service import _DIAGNOSTIC_REASONS, _TRANSPORT_DIAGNOSTIC_STAGES, _MANAGER_STAGES
     categories={'OBSERVATION_TIMEOUT','PATH_UNAVAILABLE','PATH_PERMISSION','EXCLUSIVE_PATH_EXISTS',
                 'PATH_ALIAS','ATOMIC_FILESYSTEM_MISMATCH','IO_UNCONFIRMED','GUARD_CHECK_FAILED','OPERATION_UNCONFIRMED'}
     reasons=_DIAGNOSTIC_REASONS|{'Unlisted exception details withheld.',
@@ -101,6 +101,15 @@ def helper_diagnostic(raw):
         if (type(value)is dict and set(value) in ({'category','reason'},{'category','reason','stage'}) and
                 type(value['category'])is str and type(value['reason'])is str and
                 value['category']in categories and value['reason']in reasons and
+                ('stage' not in value or (type(value['stage'])is str and value['stage'] in _TRANSPORT_DIAGNOSTIC_STAGES))):
+            return value
+        if (type(value)is dict and set(value) in (
+                {'category','reason','managerStage','returncode'},
+                {'category','reason','managerStage','returncode','stage'}) and
+                value['category']=='OPERATION_UNCONFIRMED' and
+                value['reason']=='Owner user-service manager operation failed' and
+                type(value['managerStage'])is str and value['managerStage']in _MANAGER_STAGES.values() and
+                type(value['returncode'])is int and -128<=value['returncode']<=255 and value['returncode']!=0 and
                 ('stage' not in value or (type(value['stage'])is str and value['stage'] in _TRANSPORT_DIAGNOSTIC_STAGES))):
             return value
     return None

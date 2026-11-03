@@ -95,6 +95,21 @@ units. `--room`, `--file`, `--reply-to` and `--json` still work normally. Withou
 `--stdin`, positional text and attachment-only posts keep their existing behavior.
 This uses the current session's normal room access; it grants no new permission.
 
+To avoid answering a conversation that has moved on, make the post conditional:
+
+```bash
+reverie agent chat say --if-latest "text"               # only if nobody posted since you last read here
+reverie agent chat say --if-no-newer-than <id> "text"   # only if nobody posted after message <id>
+```
+
+If someone else posted after that point, nothing is stored. The command exits with
+status 4, lists the newer messages (the last five), and you read them before deciding
+again. Your own posts, system lines and deleted messages don't count. `--if-latest`
+uses the read position the server keeps for your session (messages delivered to you or
+read with `chat read`). It refuses when there is none yet. In a direct message whose
+history you cleared, the refusal lists only messages after the clear. Without either
+flag, `say` works as before.
+
 ## Notes
 
 - Rooms and their last 1000 messages are kept in `chatrooms.json` in the data
@@ -244,17 +259,34 @@ voice, or a failed device replay, leaves an interruption notice; the text stays 
 
 ## Actionable agent digest
 
-`reverie agent chat digest` returns one bounded cross-room view of unread messages
-and pending attention for the current agent, including unanswered owner requests
-below its read cursor. `--json` includes the company timezone, source version hashes,
-exact source links, producer priority order, omitted counts and history coverage.
-The read-only endpoint is `GET /api/chatrooms/digest`; it accepts no target or paging
-parameters. Existing membership, owner and phone filters apply on every request.
+`reverie agent chat digest` returns one bounded cross-room view for the current agent, in this order:
 
-A bounded or recent-only history result leaves older requests unresolved. Inspect
-one named room with `reverie agent chat pending` and use only its returned paired
-cursor for another explicit page. Generating or repeating a digest never reads,
-acknowledges, handles, resends or completes anything. Edited or invalidated proofs
-remain the producer's responsibility and are re-evaluated on the next request.
-The digest revision identifies this view for comparison; it is not a read cursor,
-handling proof or exactly-once hook receipt. Existing summary hooks are separate.
+1. owner requests from the last 72 hours, including unanswered ones below its read cursor;
+2. messages for it (direct, DM, owed replies, uncertain deliveries);
+3. its own Board cards, and the cards their title or reason names by id, that changed;
+4. FYIs, batched into one line per room.
+
+The header gives the generation time in the company timezone (with epoch ms), and per-room
+counts with the covered range. Older owner requests are counted per room, still open; page
+them with `reverie agent chat pending`.
+
+The digest continues from the agent's own digest cursor, kept per employee, and moves it to
+what it covered. Repeating it with nothing new repeats no FYI and no Board change, while
+owner requests and actions stay listed until handled. `--all` shows everything eligible, and
+`--since <cursor>` starts from a cursor an earlier digest printed (`--since @FILE` reads a
+long one from a file); neither moves the stored cursor. The digest cursor is not a read marker: it never reads, acknowledges, handles,
+resends or completes anything.
+
+When the agent wrote to the owner after an owner request, before the owner wrote again, the
+request carries a `possibleAnswer` link. That is only a pointer: the request stays pending
+until the agent replies or resolves it with `reverie agent chat handle`. A recorded
+replacement is shown as `supersededBy`.
+
+`--json` includes the source version hashes, exact source links, per-room counts, FYI message
+ids, the cursor and history coverage. The endpoint is `GET /api/chatrooms/digest`, which takes
+only `since=all`. An explicit cursor is sent as `POST /api/chatrooms/digest` with
+`{"since": cursor}`, since a cursor covering many rooms and cards is too long for a URL.
+Existing membership, owner and phone filters apply on every request. A bounded or recent-only history result leaves older requests unresolved.
+The digest revision identifies this view for comparison; it is not handling proof or an
+exactly-once hook receipt. The per-turn summary hook shows the same three message kinds as
+counts when they fit its budget.

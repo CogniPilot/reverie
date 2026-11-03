@@ -1,77 +1,61 @@
 # Reverie
 
-Reverie is a self-hosted chat server for running an AI company. Hire persistent
-AI employees, organize teams, connect provider plans and models, and give them
+Reverie lets you host a virtual company: a shared chat server with persistent
+AI employees. Organize teams, connect provider plans and models, and give them
 projects to work on. Shared rooms and direct conversations bring people and
 agents together, with tools, memory and company controls in the same office.
 
 You choose employee identities, providers and permissions. Roles describe
 responsibilities; explicit permissions control what an employee may do.
 
-## Start Reverie
+## Install with Docker
 
-Use a Linux host with [Nix](https://nixos.org/download/) and flakes enabled,
-and a running Docker engine available to your ordinary user. From a checkout:
-
-```bash
-git clone https://github.com/CogniPilot/reverie.git
-cd reverie
-nix run .#start
-```
-
-The first build includes the application and its checks, so it can take a while.
-Open **http://127.0.0.1:3000**, create your owner account, connect your provider
-accounts under Plans, and hire your first employee from Company → People.
-Provider sign-in is separate from your Reverie login.
-
-If Nix reports disabled experimental features, enable `nix-command` and `flakes`
-in your Nix configuration before retrying.
-
-### Choose scratch storage and a project
-
-To choose these on the first launch, use this instead of the plain start command:
+Install Docker and verify that `docker info` works as your ordinary user.
+You also need Bash and curl. Run the installer
+from the [Reverie releases](https://github.com/CogniPilot/reverie/releases):
 
 ```bash
-nix run .#start -- \
-  --scratch /path/to/scratch \
-  --project my-project=/path/to/project
+curl --proto '=https' --tlsv1.2 -sSfL https://github.com/CogniPilot/reverie/releases/latest/download/setup.sh | bash -s -- --engine docker --version 0.3.0
 ```
 
-Scratch is mounted at `/scratch`; the selected path is saved for later starts.
-The directory must be writable by your user, and its disk must already be mounted.
-The launcher creates missing directories and runs the container with your UID/GID.
-Existing scratch files are not moved automatically.
+The installer pulls the published GHCR image and starts Reverie. It requires no
+Nix installation or source build. Open **http://127.0.0.1:3000**, create your owner
+account, connect your provider accounts under Plans, and hire your first employee
+from Company → People. Provider sign-in is separate from your Reverie login.
 
-The project is a writable bind mount at `/projects/my-project`, linked from
-`/reverie_workspace/my-project`. It is not copied: container edits change the
-same files on the host. Repeat the same `--project` arguments on later starts.
-`--source /path/to/project` is also available for a mount at `/workspace`.
-
-### Replace an old container
-
-If startup reports an existing-container conflict, stop the old office and run:
-
-```bash
-nix run .#start -- --force
-```
-
-`-f` is an alias. Include your project arguments and any new `--scratch` path.
-The image is built before the stopped container is removed. Mounted data and
-volumes are retained; files stored only inside the old container are discarded.
-Use **Stop Reverie** from the owner power menu first if it is running.
-Isolated-laptop and protected deployments use the manual's coordinated workflows.
+The default container is `reverie`. Company data and provider homes are retained
+in the engine's `reverie-data` and `reverie-home` volumes. Keep both volumes when
+updating. Use `--port 3001` or `--name another-office` for a different port or name.
+For private registry access, custom host mounts or an existing deployment, see the
+[manual](docs/manual.md#published-image-installation).
 
 ## Automatic startup
 
-The launcher sets Docker's `unless-stopped` restart policy. On a systemd Linux
-host, enable Docker at boot:
+For Docker on a systemd Linux host, enable the engine at boot:
 
 ```bash
 sudo systemctl enable --now docker
 ```
 
-Ensure your selected disks are mounted before Docker starts. A deliberate
-**Stop Reverie** stays stopped; run the same Nix start command to start it again.
+The installer uses Docker's `unless-stopped` restart policy. An intentional stop
+stays stopped until you start the container again.
+
+Use your host's normal service configuration if Docker is managed another way.
+Mount any selected storage disks before starting the office.
+
+## Update a release
+
+For an installation created by `setup.sh`, choose a published version and run the
+same installer with the same engine, name and port. Replace `X.Y.Z` below:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSfL https://github.com/CogniPilot/reverie/releases/latest/download/setup.sh | bash -s -- --engine docker --version X.Y.Z
+```
+
+The installer recreates the container while retaining its data and home volumes,
+and records the image for rollback. See the [manual](docs/manual.md) for custom
+mounts and coordinated laptop updates. Pulling an image alone does not update a
+running container.
 
 ## Access over Tailscale
 
@@ -95,10 +79,10 @@ Open **Office → Handbook** in Reverie for everyday company and employee workfl
 The [Reverie manual](docs/manual.md) covers deployment settings, storage, employee
 laptops, updates, recovery, models, memory and development.
 
-The default company data, provider logins, workspace and deployment settings live
-under `~/reverie`, outside this checkout. Edit `~/reverie/deployment.json` to change
-ports, memory limits, process limits and other deployment settings. Keep private
-company data and credentials outside the source repository.
+Nix remains the development and image-build environment. Contributors and agents
+work in isolated checkouts and test instances; the running company stays on a
+reviewed release. Keep private company data and credentials outside this source
+repository.
 
 ## Credits
 

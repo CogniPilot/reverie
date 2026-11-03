@@ -17,6 +17,7 @@ import { ChatDbError } from '../../chat-db.js';
  * - `POST   /api/chatrooms`                             create `{name, members?, coordinatorSessionId?}` (user, or a coordinator)
  * - `GET    /api/chatrooms/:id[?since=&limit=]`         room view (members + synopses + messages)
  * - `POST   /api/chatrooms/:id/read`                    move the user's read cursor `{at?}`
+ * - `POST   /api/chatrooms/:id/clear-history`           hide existing DM history for this owner, without deleting messages
  * - `PUT    /api/chatrooms/:id`                         rename `{name}`
  * - `DELETE /api/chatrooms/:id`                         delete
  * - `POST   /api/chatrooms/:id/members`                 add `{sessionId, goal?, role?}`
@@ -72,7 +73,7 @@ function isReactionEmoji(raw: string): boolean {
   );
 }
 import type { ChatroomService } from '../../chatroom-service.js';
-import { newerUnread, postWarnings } from '../../chatroom-warnings.js';
+import { messagesSince, newerUnread, postWarnings } from '../../chatroom-warnings.js';
 import type { SessionPort } from '../ports/session-port.js';
 import {
   canAccessOwned,
@@ -87,6 +88,7 @@ import {
   ChatroomArchiveSchema,
   ChatroomCreateSchema,
   ChatroomDmSchema,
+  ChatroomClearHistorySchema,
   ChatroomMemberAddSchema,
   ChatroomMessageSchema,
   ChatroomPlacementSchema,
@@ -107,6 +109,7 @@ import {
 } from '../schemas.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { isSensitivePath } from '../sensitive-path.js';
+import { checkLinkedFile, LinkedFileError } from '../../chat-linked-files.js';
 import { NO_OWNER, ownerMark, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import { OWNER_RANK, RolesStore, type Actor, type Permission } from '../../roles.js';
 
@@ -143,7 +146,7 @@ export function registerChatroomRoutes(
   roles: RolesStore = new RolesStore(''),
   /** A session id to its company employee id, if it has one. */
   employeeOf: (sessionId: string) => string | undefined = () => undefined,
-  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; messageOwner?: (humanId: string | undefined) => boolean; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
+  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; humanNames?: (room: ChatRoom) => readonly string[]; messageOwner?: (humanId: string | undefined) => boolean; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
 ): void {
   /** The session this request speaks as, or undefined for the user. */
   const caller = (req: FastifyRequest): string | undefined =>
@@ -266,10 +269,35 @@ export function registerChatroomRoutes(
    * Unread counts belong to the room's owner. In multi-user mode an admin lists every user's rooms,
    * but cannot clear their unread (the read call is a no-op for them), so those rooms report none.
    */
-  const ownedView = (req: FastifyRequest, room: ChatRoom, options: { since?: number; limit?: number }) => {
-    const view = service.view(room, options);
-    const human = host.human?.(req), cursor = human && host.readAt?.(human.id, room.id);
-    if (human && cursor !== undefined) return { ...view, userReadAt: cursor, ...unreadFor({ ...room, userReadAt: cursor }, [human.name], human.id) };
+  const ownsHistoryView = (req: FastifyRequest, room: ChatRoom): boolean =>
+    verifiedOwner(req) &&
+    !caller(req) &&
+    req.headers['x-reverie-parent-session'] === undefined &&
+    req.headers['x-reverie-service-token'] === undefined &&
+    room.owner === ownerFor(req) &&
+    isDm(room) &&
+    room.dm.includes('user');
+  const historyViewer = (req: FastifyRequest): string => host.human?.(req)?.id ?? 'owner';
+  const ownedView = (req: FastifyRequest, room: ChatRoom, options: { since?: number; limit?: number } = {}) => {
+    const view = ownsHistoryView(req, room)
+      ? service.ownerView(room, historyViewer(req), options)
+      : service.view(room, options);
+    const human = host.human?.(req),
+      cursor = human && host.readAt?.(human.id, room.id);
+    if (human && cursor !== undefined)
+      return {
+        ...view,
+        userReadAt: cursor,
+        ...unreadFor(
+          {
+            ...room,
+            messages: room.messages.filter((message) => message.at > (view.historyAfter ?? -1)),
+            userReadAt: cursor,
+          },
+          [human.name],
+          human.id
+        ),
+      };
     if (isMultiUserMode() && room.owner !== getAuthUser(req).username) return { ...view, unread: 0, mentions: 0 };
     return view;
   };
@@ -366,7 +394,7 @@ export function registerChatroomRoutes(
     const body = parseBody(ChatroomDmSchema, req.body);
     try {
       const sessionId = joinableSession(req, { owner: ownerFor(req) }, body.sessionId);
-      return { success: true, data: service.view(service.openDm(sessionId, ownerFor(req))) };
+      return { success: true, data: ownedView(req, service.openDm(sessionId, ownerFor(req))) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -607,7 +635,7 @@ export function registerChatroomRoutes(
         if (sessionId !== coordinator) service.addMember(room.id, sessionId, { ...options, ...addedBy });
       }
       if (coordinator) service.addMember(room.id, coordinator, { ...members.get(coordinator), role: 'coordinator', ...addedBy });
-      return { success: true, data: service.view(room) };
+      return { success: true, data: ownedView(req, room) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -636,15 +664,16 @@ export function registerChatroomRoutes(
       return sendError(reply, error);
     }
   });
-  app.get('/api/chatrooms/:id/search-context/:messageId', async (req, reply) => {
+  const historyQuery = z.object({ page: z.enum(['around', 'older', 'newer']) }).strict();
+  app.get('/api/chatrooms/:id/history/:messageId', async (req, reply) => {
     if (!humanSearch(req)) return forbid(reply, 'Verified owner browser required for channel search');
+    const parsed = historyQuery.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected page=around, older or newer'));
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {
       const room = roomOrFail(req, id);
       if (isDm(room)) throw new ChatroomError('Channel not found', 'NOT_FOUND');
-      return { success: true, data: { roomId: id, roomName: room.name, messageId, timeZone: service.searchTimeZone(room.owner),
-        messages: service.searchContext(id, messageId).map(message => ({ id: message.id, at: message.at,
-          sender: message.from.name ?? '', text: message.text ?? '' })) } };
+      return { success: true, data: { roomId: id, messageId, ...service.historyPage(id, messageId, parsed.data.page) } };
     } catch (error) { return sendError(reply, error); }
   });
 
@@ -659,6 +688,27 @@ export function registerChatroomRoutes(
       };
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  app.post('/api/chatrooms/:id/clear-history', async (req, reply) => {
+    if (
+      !verifiedOwner(req) ||
+      caller(req) ||
+      req.headers['x-reverie-parent-session'] !== undefined ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
+      return forbid(reply, 'Only the owner clears their own DM view');
+    const body = ChatroomClearHistorySchema.safeParse(req.body ?? {});
+    if (!body.success)
+      return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected an empty body'));
+    try {
+      const room = roomOrFail(req, (req.params as { id: string }).id);
+      if (!ownsHistoryView(req, room)) return forbid(reply, 'Only your own direct-message view can be cleared');
+      await service.clearOwnerHistory(room.id, historyViewer(req));
+      return { success: true, data: ownedView(req, room) };
+    } catch (error) {
+      return sendError(reply, error);
     }
   });
 
@@ -691,7 +741,7 @@ export function registerChatroomRoutes(
     const body = parseBody(ChatroomUpdateSchema, req.body);
     try {
       roomOrFail(req, id);
-      return { success: true, data: service.view(service.updateRoom(id, body), { limit: 0 }) };
+      return { success: true, data: ownedView(req, service.updateRoom(id, body), { limit: 0 }) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -738,7 +788,7 @@ export function registerChatroomRoutes(
         postOnly: body.postOnly,
         ...(self ? { addedBy: self } : {}),
       });
-      return { success: true, data: { member, room: service.view(room, { limit: 0 }) } };
+      return { success: true, data: { member, room: ownedView(req, room, { limit: 0 }) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -760,7 +810,7 @@ export function registerChatroomRoutes(
         }
       }
       if (!service.removeMember(id, sessionId)) throw new ChatroomError('Not a member of this room', 'NOT_FOUND');
-      return { success: true, data: { room: service.view(room, { limit: 0 }) } };
+      return { success: true, data: { room: ownedView(req, room, { limit: 0 }) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -780,7 +830,7 @@ export function registerChatroomRoutes(
         }
       }
       service.appointCoordinator(id, target);
-      return { success: true, data: service.view(room, { limit: 0 }) };
+      return { success: true, data: ownedView(req, room, { limit: 0 }) };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -891,8 +941,9 @@ export function registerChatroomRoutes(
   app.get('/api/chatrooms/:id/pins', async (req, reply) => {
     const { id } = req.params as { id: string };
     try {
-      roomOrFail(req, id);
-      return { success: true, data: { pins: service.pinned(id) } };
+      const room = roomOrFail(req, id);
+      const after = ownsHistoryView(req, room) ? service.ownerHistoryAfter(room, historyViewer(req)) : -1;
+      return { success: true, data: { pins: service.pinned(id).filter(message => message.at > after) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1129,6 +1180,26 @@ export function registerChatroomRoutes(
     });
   });
 
+  // Link a shared-drive file instead of uploading a copy: checked here and again on every read (chat-linked-files.ts).
+  app.post('/api/chatrooms/:id/links', { bodyLimit: 8192 }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const room = roomOrFail(req, id);
+      const who = actor(req, room);
+      if (!who) return forbid(reply, 'Join the room before linking files');
+      const body = z.object({ path: z.string().max(4096) }).strict().safeParse(req.body);
+      if (!body.success) throw new ChatroomError('Send { path } with the file\'s absolute shared-drive path', 'INVALID_INPUT');
+      const checked = await checkLinkedFile(body.data.path);
+      const referenced = new Set(room.messages.flatMap((m) => [...(m.attachments ?? []), ...(m.deleted?.attachments ?? [])].map((a) => a.id)));
+      await files.pruneUnreferenced(id, referenced);
+      const file = await files.addLink(id, { path: checked.path, name: checked.name, size: checked.size, type: checked.type, by: who });
+      return { success: true, data: { file: { id: file.id, name: file.name, size: file.size, type: file.type, linked: true } } };
+    } catch (err) {
+      if (err instanceof LinkedFileError) return reply.code(err.status).send(createErrorResponse(err.status === 404 ? ApiErrorCode.NOT_FOUND : err.status === 403 ? ApiErrorCode.FORBIDDEN : ApiErrorCode.INVALID_INPUT, err.message));
+      return sendError(reply, err);
+    }
+  });
+
   app.get('/api/chatrooms/:id/files/:fileId', async (req, reply) => {
     const { id, fileId } = req.params as { id: string; fileId: string };
     try {
@@ -1143,12 +1214,33 @@ export function registerChatroomRoutes(
       // 404 before any header, and the size and the stream both come from the open file.
       let handle: Awaited<ReturnType<typeof fs.open>>;
       try {
-        const resolvedPath = await fs.realpath(file.path);
+        // A linked file is read live from the shared drive, checked again now: it may have moved or become a symlink.
+        let resolvedPath: string;
+        if (file.link) {
+          try {
+            resolvedPath = (await checkLinkedFile(file.link)).real;
+          } catch (error) {
+            if (error instanceof LinkedFileError && error.status === 403)
+              return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, error.message));
+            throw error;
+          }
+        } else resolvedPath = await fs.realpath(file.path);
         if (isSensitivePath(resolvedPath))
           return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Access to this file is blocked'));
         handle = await fs.open(resolvedPath, 'r');
       } catch {
         throw new ChatroomError('No such file', 'NOT_FOUND');
+      }
+      // The shared drive is writable by agents: a folder on the path can become a symlink between the check and the open.
+      // The open file must still be the file a fresh check finds, or nothing is served.
+      if (file.link) {
+        const opened = await handle.stat();
+        const same = await checkLinkedFile(file.link).then((again) => fs.lstat(again.real)).then(
+          (now) => now.dev === opened.dev && now.ino === opened.ino, () => false);
+        if (!same) {
+          await handle.close();
+          return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'That file changed while it was opened; try again.'));
+        }
       }
       const size = (await handle.stat()).size;
       let inlineType = isInlineImage(file.type) ? file.type : null;
@@ -1164,7 +1256,7 @@ export function registerChatroomRoutes(
         .header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encoded}`)
         .header('X-Content-Type-Options', 'nosniff')
         .header('Content-Security-Policy', "default-src 'none'; sandbox")
-        .header('Cache-Control', 'private, max-age=86400');
+        .header('Cache-Control', file.link ? 'no-store' : 'private, max-age=86400');
       // Streamed and range-aware: a large image opened a few times at once must not be
       // held in memory once per request.
       const range = parseByteRange(req.headers.range, size);
@@ -1254,6 +1346,19 @@ export function registerChatroomRoutes(
     } catch (error) { return sendError(reply, error); }
   });
 
+  // A separate purpose avoids recursion: the broker reauthorizes through the ordinary exact GET and files API.
+  app.post('/api/chatrooms/:id/messages/:messageId/image-paths', async (req, reply) => {
+    const { id, messageId } = req.params as { id: string; messageId: string };
+    try {
+      roomOrFail(req, id);
+      const self = caller(req);
+      if (!self) return forbid(reply, 'An agent session is required');
+      if (req.body != null && (typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length))
+        return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'No materialization arguments accepted'));
+      return { success: true, data: await service.agentImagePaths(self, id, messageId) };
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.post('/api/chatrooms/:id/messages/:messageId/read-ack', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {
@@ -1272,7 +1377,7 @@ export function registerChatroomRoutes(
     const q = req.query as { since?: string; limit?: string };
     try {
       const room = roomOrFail(req, id);
-      const view = service.view(room, { since: parseNumber(q.since), limit: parseNumber(q.limit) ?? 50 });
+      const view = ownedView(req, room, { since: parseNumber(q.since), limit: parseNumber(q.limit) ?? 50 });
       // An agent that reads the room has seen what it was given: its seen-marker moves to the newest message returned.
       const self = caller(req);
       if (self && room.members.some((m) => m.sessionId === self)) service.acknowledgeAgentRead(self, room.id, view.messages);
@@ -1311,7 +1416,7 @@ export function registerChatroomRoutes(
       for (const fileId of new Set(body.attachments ?? [])) {
         const file = await files.get(id, fileId);
         if (!file) throw new ChatroomError(`No uploaded file ${fileId} in this room`, 'INVALID_INPUT');
-        attachments.push({ id: file.id, name: file.name, size: file.size, type: file.type, path: file.path });
+        attachments.push({ id: file.id, name: file.name, size: file.size, type: file.type, path: file.path, ...(file.link ? { linked: true as const } : {}) });
       }
       // The user's `/roll ...` becomes a real server-side roll; an agent keeps using the roll tool.
       let text = body.text;
@@ -1322,6 +1427,36 @@ export function registerChatroomRoutes(
           throw new ChatroomError((e as Error).message, 'INVALID_INPUT');
         }
       }
+      // Opt-in crossing guard. It runs after the route's last await, in the same tick as the post, so nothing can land
+      // between this check and the stored message. Without the fields the post behaves exactly as before.
+      if (body.ifNoNewerThan || body.ifLatest) {
+        const cursor = body.ifLatest ? (self ? service.lastSeen(self, id)?.messageId : undefined) : body.ifNoNewerThan;
+        if (!cursor) {
+          return reply.code(409).send({ success: false, errorCode: 'CHAT_NO_READ_MARK',
+            error: 'No read position in this room yet; read it, then post again' });
+        }
+        // One identity per writer: an agent by its session, a person by account (the owner when no humanId is set).
+        const writer = (f: ChatSender) => f.kind === 'agent' ? `agent:${f.sessionId}`
+          : f.kind === 'user' || f.kind === 'human' ? `person:${f.humanId ?? 'owner'}` : undefined;
+        const poster = writer(from);
+        const own = (by: ChatSender) => poster !== undefined && writer(by) === poster;
+        // The owner's cleared DM history stays cleared: hidden messages are neither a cursor nor listed. Agents keep all of it.
+        const all = service.room(id)?.messages ?? [];
+        const after = ownsHistoryView(req, room) ? service.ownerHistoryAfter(room, historyViewer(req)) : -1;
+        const newer = messagesSince(after < 0 ? all : all.filter((m) => m.at > after), cursor, own);
+        if (!newer || newer.length) {
+          const shown = (newer ?? []).slice(-5);
+          return reply.code(409).send({
+            success: false,
+            errorCode: 'CHAT_NEWER_MESSAGES',
+            error: newer ? `${newer.length} newer message${newer.length === 1 ? '' : 's'} arrived since you read; read them, then post again`
+              : 'That message is not in this room\'s recent history; read the room, then post again',
+            data: { newer: shown, more: (newer?.length ?? 0) > shown.length },
+          });
+        }
+      }
+      // Resolve fresh permitted names before the post, so a failed metadata read cannot hide a stored message.
+      const humanNames = host.humanNames?.(room) ?? [];
       const message = service.post(id, from, text, to, {
         ...spoken,
         attachments,
@@ -1331,7 +1466,8 @@ export function registerChatroomRoutes(
       const warnings = postWarnings(
         room,
         body.text,
-        room.members.map((m) => service.nameOf(m.sessionId)),
+        // Permitted humans are ordinary mention names, separate from owner authority and pane recipients.
+        [...room.members.map((m) => service.nameOf(m.sessionId)), ...humanNames],
         service.ownerNames(room.owner),
         // Only an agent has a "last seen"; the service knows the newest message that member has seen here.
         self ? newerUnread(room.messages, self, service.lastSeen(self, id), service.ownerNames(room.owner)[0]) : null

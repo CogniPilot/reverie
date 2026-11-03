@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -22,6 +23,14 @@ H = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(H)
 
 MANAGER = 'nixos-declarative-dry-run-v1'
+MODES = ('dry-run-only', 'live-enabled')
+IDENTITY_KEYS = ('fstype', 'mount_root', 'source')
+ACCEPTANCE_KEYS = {'dry_run_report_sha256', 'signoff', 'selftest_receipt', 'selftest_receipt_sha256'}
+RECEIPT_COPY = 'live-selftest-receipt.json'
+
+
+def _line(value):
+    return isinstance(value, str) and value != '' and not any(c in value for c in '\n\r\0')
 
 
 class DeclaredInstaller(H.Installer):
@@ -31,8 +40,8 @@ class DeclaredInstaller(H.Installer):
     Declaration-specific policy/config extensions belong here, not in H.
     """
     source_hashes = {
-        'reverie_prune.py': 'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181',
-        'lease.py': '7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9',
+        'reverie_prune.py': '55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed',
+        'lease.py': '606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa',
     }
 
     def pins(self):
@@ -46,14 +55,111 @@ class DeclaredInstaller(H.Installer):
         H.immutable(self.paths['systemctl'].parent / 'systemd-detect-virt')
 
     def policy(self, raw):
-        return H.policy(raw, self.state)
+        """The r8 policy for the shared keys, plus the declared r12 keys: root identities (r12 admits only operator-approved
+        roots, also in dry-run) and the live switch with its acceptance record. Live is never the default."""
+        if not isinstance(raw, dict):
+            raise ValueError('Unknown deployment key or unsupported configuration version')
+        raw = dict(raw)
+        identities = raw.pop('root_identities', {})
+        live = raw.pop('live_enabled', False)
+        acceptance = raw.pop('live_acceptance', None)
+        settings = H.policy(raw, self.state)
+        if type(live) is not bool:
+            raise ValueError('live_enabled must be a boolean')
+        if not isinstance(identities, dict):
+            raise ValueError('root_identities must map configured roots to approved mount identities')
+        clean = {}
+        for root, ident in identities.items():
+            if (not isinstance(ident, dict) or sorted(ident) != list(IDENTITY_KEYS) or
+                    not all(_line(ident[k]) for k in IDENTITY_KEYS) or not ident['mount_root'].startswith('/')):
+                raise ValueError('Each root identity needs exactly source, fstype and an absolute mount_root')
+            clean[str(H.absolute(root))] = {k: ident[k] for k in IDENTITY_KEYS}
+        for root in [settings['b_mount'], *settings['checkout_roots']]:
+            if root not in clean:
+                raise ValueError('Every configured root (disposable mount, checkout roots) needs an approved root identity')
+        if clean[settings['b_mount']]['mount_root'] != '/':
+            raise ValueError('The disposable mount must map the full filesystem root')
+        if live:
+            hexes = ('dry_run_report_sha256', 'selftest_receipt_sha256')
+            if (not isinstance(acceptance, dict) or set(acceptance) != ACCEPTANCE_KEYS or
+                    not all(isinstance(acceptance[k], str) and re.fullmatch(r'[0-9a-f]{64}', acceptance[k]) for k in hexes) or
+                    not _line(acceptance['signoff']) or len(acceptance['signoff']) > 256 or
+                    not _line(acceptance['selftest_receipt'])):
+                raise ValueError('Live enablement requires the accepted dry-run report sha256, a reviewer sign-off and '
+                                 'the self-test PASS receipt path and sha256')
+            receipt = H.absolute(acceptance['selftest_receipt'])
+            if receipt.is_relative_to(self.state):
+                raise ValueError('The self-test receipt must come from outside the fresh live state directory')
+            acceptance = dict(acceptance, selftest_receipt=str(receipt))
+            if settings['checkout_roots']:
+                raise ValueError('Live enablement does not yet cover checkout roots')
+        elif acceptance is not None:
+            raise ValueError('live_acceptance is only meaningful with live_enabled = true')
+        settings['root_identities'] = clean
+        settings['live_enabled'] = live
+        if live:
+            settings['live_acceptance'] = dict(acceptance)
+        return settings
 
     def config_text(self, settings):
         inventory = [str(self.paths['closure'] / 'bin/reverie-prune-declared'),
                      '--state-dir', str(self.state), '--inventory']
-        return '\n'.join('laptops_cmd = ' + json.dumps(inventory, ensure_ascii=False)
+        text = '\n'.join('laptops_cmd = ' + json.dumps(inventory, ensure_ascii=False)
                          if line.startswith('laptops_cmd = ') else line
                          for line in super().config_text(settings).splitlines()) + '\n'
+        head = 'live_enabled = false\n'
+        if not text.startswith(head):
+            raise ValueError('Unexpected base cleanup configuration layout')
+        table = ', '.join(json.dumps(root) + ' = {' + ', '.join(f'{k} = {json.dumps(v)}' for k, v in ident.items()) + '}'
+                          for root, ident in sorted(settings['root_identities'].items()))
+        return ('live_enabled = ' + ('true' if settings['live_enabled'] else 'false') + '\n' + text[len(head):] +
+                'root_identities = {' + table + '}\n')
+
+    def selftest_receipt(self, settings, data=None):
+        """Live only with a PASS receipt of the module self-test naming exactly this package's prune and lease.
+        Returns the verified receipt bytes (the declared file, or the copy already in state)."""
+        acceptance = settings['live_acceptance']
+        if data is None:
+            path = Path(acceptance['selftest_receipt'])
+            H.protected_chain(path)
+            data = H.read_file(path)
+        if H.digest(data) != acceptance['selftest_receipt_sha256']:
+            raise ValueError('Self-test receipt differs from the sha256 named in the live declaration')
+        receipt = json.loads(data)
+        files = receipt.get('files') if isinstance(receipt, dict) else None
+        def pinned(name):
+            entry = files.get(name) if isinstance(files, dict) else None
+            return entry[1] if isinstance(entry, list) and len(entry) == 2 else None
+        if (receipt.get('status') != 'PASS' or pinned('prune') != self.source_hashes['reverie_prune.py'] or
+                pinned('lease') != self.source_hashes['lease.py']):
+            raise ValueError('Live enablement requires a self-test PASS receipt for this exact prune and lease')
+        return data
+
+    def check(self):
+        """Exact installed declared state in either mode: binding, pins, every recorded digest, and a prune.toml whose live
+        switch matches the recorded mode and settings. Replaces the r8 installer's dry-run-only check for r12 state."""
+        H.protected_chain(self.state)
+        manifest = json.loads(H.read_file(self.state / 'install.json'))
+        mode = manifest.get('mode')
+        if mode not in MODES or manifest.get('paths') != {k: str(v) for k, v in self.paths.items()}:
+            raise ValueError('Installed declared tool binding differs')
+        self.pins()
+        for name, expected in manifest['files'].items():
+            path = self.state / name
+            H.protected_chain(path)
+            if H.digest(H.read_file(path)) != expected:
+                raise ValueError('Installed config/code changed; re-declare fresh state after review')
+        settings = json.loads(H.read_file(self.state / 'deployment.json'))
+        text = H.read_file(self.state / 'prune.toml').decode()
+        live = mode == 'live-enabled'
+        if (H.tomllib.loads(text).get('live_enabled') is not live or settings.get('live_enabled') is not live or
+                text != self.config_text(settings)):
+            raise ValueError('Only the exact installed declared configuration is allowed')
+        if live:
+            if RECEIPT_COPY not in manifest['files']:
+                raise ValueError('Live state lacks its verified self-test receipt')
+            self.selftest_receipt(settings, H.read_file(self.state / RECEIPT_COPY))
+        return settings
 
 
 def source_hashes(installer):
@@ -81,6 +187,8 @@ def expected_files(installer, settings):
              'prune.toml': installer.config_text(settings).encode()}
     files.update({'lib/' + name: H.read_file(installer.paths['package'] / 'libexec/reverie' / name)
                   for name in source_hashes(installer)})
+    if settings.get('live_enabled') is True:
+        files[RECEIPT_COPY] = installer.selftest_receipt(settings)  # verified copy, digest-pinned in the manifest
     return files
 
 
@@ -104,7 +212,8 @@ def initialize(installer, config):
         if (info.st_uid, info.st_gid) != (settings['laptop_uid'], settings['laptop_gid']) or info.st_mode & 0o077:
             raise ValueError('Persistent lease directories must already be private and owned by the laptop user')
     files = expected_files(installer, settings)
-    manifest = {'version': 1, 'mode': 'dry-run-only', 'manager': MANAGER,
+    live = settings.get('live_enabled') is True
+    manifest = {'version': 1, 'mode': MODES[1] if live else MODES[0], 'manager': MANAGER,
                 'paths': {key: str(value) for key, value in installer.paths.items()},
                 'files': {name: H.digest(data) for name, data in files.items()}}
     H.mkdir_protected(installer.state)
@@ -136,8 +245,8 @@ def initialize(installer, config):
             H.atomic(installed, H.encoded(manifest), 0o600)
             installer.check()
         H.inventory(settings, installer.paths['docker'], config_dir=installer.state / 'docker-config', run=installer.run)
-    return {'status': 'CHECKED_DECLARED_DRY_RUN_ONLY', 'state': str(installer.state),
-            'live_prune_qualified': False, 'units_modified': False}
+    return {'status': 'CHECKED_DECLARED_LIVE_ENABLED' if live else 'CHECKED_DECLARED_DRY_RUN_ONLY',
+            'state': str(installer.state), 'live_prune_qualified': live, 'units_modified': False}
 
 
 def main(argv=None, *, installer_type=H.Installer):

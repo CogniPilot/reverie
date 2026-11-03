@@ -10,7 +10,13 @@ export async function deliverPlanRequest(
   record: PlanRequestView,
   messages: PlanRequestMessages,
   allowed: () => boolean,
-  sleep: (ms: number) => Promise<void> = (ms) => delay(ms, undefined, { ref: false })
+  sleep: (ms: number) => Promise<void> = (ms) => delay(ms, undefined, { ref: false }),
+  options: {
+    /** True only when the request ran out of time while otherwise still valid (from its owner; see PlanRequestPort.notify). */
+    expiredUnseen?: () => boolean;
+    /** Tells the owner once when the request expired before the expert saw it; the credential's lifetime is unchanged. */
+    ownerAlert?: (text: string, owner?: string) => Promise<unknown> | unknown;
+  } = {}
 ): Promise<void> {
   if (!allowed()) throw new Error('The plan request is no longer authorized');
   const harness = record.targetMode ? ` The destination uses the ${record.targetMode === 'codex' ? 'Codex' : 'Claude'} harness${record.targetMode !== record.mode ? ' with that provider’s model and effort defaults' : ''}.` : '';
@@ -31,7 +37,17 @@ export async function deliverPlanRequest(
     if (received()) return;
     await sleep(1000);
   }
+  // Decided now, before any cleanup await, so time passing during cleanup cannot turn another ending into "expired".
+  const expired = !received() && options.expiredUnseen?.() === true;
   // Drop only this notice; its expired/revoked credential already prevents any move.
-  if (!received()) await messages.deleteMessage(room.id, message.id, 'Plans').catch(() => {});
+  if (!received()) {
+    await messages.deleteMessage(room.id, message.id, 'Plans').catch(() => {});
+    // The expert was busy the whole window: say so instead of leaving a silent state change on the Plans page.
+    // The instruction comes first and the name is bounded, so the whole alert fits a push body.
+    if (expired)
+      await Promise.resolve()
+        .then(() => options.ownerAlert?.(`Reauthorize on Plans when idle: the move for ${(record.name || 'an expert').slice(0, 60)} expired unseen. Nothing was switched.`, record.owner))
+        .catch(() => {});
+  }
   throw new Error('The plan request is no longer authorized');
 }

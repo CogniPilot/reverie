@@ -168,13 +168,17 @@
       $('self-name').textContent = self.name;
       $('profile-form').elements.name.value = self.name;
       const catalog = await (await fetch('assets/avatars/pack-manifest.json', { cache: 'no-cache' })).json();
-      for (const avatar of catalog.avatars)
-        if (/^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(avatar.src)) {
+      const withheld = new Set(Array.isArray(catalog.withheld) ? catalog.withheld : []);
+      for (const avatar of catalog.avatars) {
+        const path = typeof avatar?.src === 'string' ? avatar.src.split('?')[0] : '';
+        if (!withheld.has(avatar.id) && path === `/assets/avatars/${avatar.id}.png` &&
+            /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(path)) {
           const o = document.createElement('option');
-          o.value = avatar.src;
+          o.value = path;
           o.textContent = avatar.name;
           $('profile-form').elements.avatar.append(o);
         }
+      }
       if (self.avatar && !$('profile-form').elements.avatar.querySelector(`option[value="${self.avatar}"]`)) {
         const o = document.createElement('option');
         o.value = self.avatar;

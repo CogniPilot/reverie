@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 import os
 import re
+import stat
 import threading
 
 from .hands.command_catalog import CATALOG
@@ -53,6 +54,7 @@ class CommandTelemetry:
         self.config = config
         self.enabled, self.keys = configuration(config)
         self.lock = threading.Lock()
+        self.report_lock = threading.Lock()
         self.root = None
         if not self.enabled:
             return
@@ -196,3 +198,51 @@ class CommandTelemetry:
                 return log.report()
         except Exception:
             return None
+
+    def report_employee(self, employee_id):
+        """Protected host reader, including stopped/retired employee metadata.
+
+        Read access is supplied by the protected broker, never the laptop Office
+        route. Absence is explicit; reading never initializes an empty database.
+        Browser owner authentication remains the caller's separate obligation.
+        """
+        if not self.enabled:
+            return {'status': 'unavailable', 'report': None}
+        try:
+            employee_id = require_uuid(employee_id)
+            def binding():
+                selected = [row for row in company_records(self.config) if row.get('id') == employee_id]
+                if len(selected) != 1:
+                    raise ValueError('TELEMETRY_BINDING_REFUSED')
+                return employee_id, selected[0].get('owner')
+            expected = binding()
+            # Do not hold the producer mutex across reader storage I/O.
+            if binding() != expected:
+                raise ValueError('TELEMETRY_BINDING_REFUSED')
+            private_directory(self.root, self.config['uid'])
+            directory = self.root / employee_id
+            try:
+                directory.lstat()
+            except FileNotFoundError:
+                if binding() != expected:
+                    raise ValueError('TELEMETRY_BINDING_REFUSED')
+                return {'status': 'no_data', 'report': None}
+            private_directory(directory, self.config['uid'])
+            private_directory(directory / 'hands', self.config['uid'])
+            # A missing DB inside an existing store is unavailable, not zero.
+            path = directory / 'hands' / 'command-failures.sqlite'
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            try:
+                current = os.fstat(fd)
+                if (not stat.S_ISREG(current.st_mode) or current.st_uid != self.config['uid'] or
+                        current.st_nlink != 1 or stat.S_IMODE(current.st_mode) != 0o600):
+                    raise ValueError('TELEMETRY_STORE_REFUSED')
+            finally:
+                os.close(fd)
+            report = self._log(employee_id).report()
+            if binding() != expected:
+                raise ValueError('TELEMETRY_BINDING_REFUSED')
+            private_directory(self.root, self.config['uid'])
+            return {'status': 'ready', 'report': report}
+        except Exception:
+            return {'status': 'unavailable', 'report': None}

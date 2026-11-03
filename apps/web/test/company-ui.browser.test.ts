@@ -30,7 +30,7 @@ describe('company roster and research reports in Chromium', () => {
         canManage: true,
         employees: [
           {
-            id: 'ada',
+            id: 'abe',
             name: '<img src=x onerror=window.pwned=1>',
             icon: '🔭',
             position: 'Research scientist',
@@ -50,7 +50,7 @@ describe('company roster and research reports in Chromium', () => {
           {
             id: 'cycle',
             date: '2026-10-15',
-            employeeId: 'ada',
+            employeeId: 'abe',
             kind: 'research',
             state: 'completed',
             result: {
@@ -79,7 +79,7 @@ describe('company roster and research reports in Chromium', () => {
     expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
     await page.getByRole('button', { name: 'Invite to channel', exact: true }).click();
     expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path.endsWith('/invite')))).toEqual({
-      path: '/api/company/employees/ada/invite',
+      path: '/api/company/employees/abe/invite',
       method: 'POST',
       body: { roomId: 'science-room' },
     });
@@ -119,13 +119,13 @@ describe('company roster and research reports in Chromium', () => {
     expect(await grant.isChecked()).toBe(false);
     await grant.check();
     await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-    expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/employees/ada'))).toEqual({
-      path: '/api/company/employees/ada',
+    expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/employees/abe'))).toEqual({
+      path: '/api/company/employees/abe',
       method: 'PUT',
       body: { sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: true } },
     });
     await page.getByRole('button', { name: 'Assign briefing coordinator', exact: true }).click();
-    expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/settings').body.coordinatorEmployeeId)).toBe('ada');
+    expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/settings').body.coordinatorEmployeeId)).toBe('abe');
     await page.evaluate(async () => {
       const w = window as any;
       w.companyData.canManage = false;

@@ -1,4 +1,6 @@
-import { buildChatDigest } from './chatroom-digest.js';
+import { materializeChatImages, isChatRaster, type ImagePathResult } from './chat-image-paths.js';
+import {viewerHealth,type ProviderHealth} from './worker-provider-health.js';
+import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, type DigestCard, type DigestCursor, type DigestRoomScan } from './chatroom-digest.js';
 /**
  * @fileoverview Chatroom service: store + persistence + pane delivery + SSE.
  *
@@ -14,6 +16,13 @@ import { buildChatDigest } from './chatroom-digest.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { displayTime, displayTimeZone } from './display-time.js';
 import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
+import { buildMentionFeed, type MentionCursor, type MentionFeed, type MentionRoomScan } from './chatroom-mentions.js';
+
+/** How old a notice must be before its recipient may set it aside as stale (the digest's owner window). */
+export const STALE_MIN_AGE_MS = 72 * 60 * 60 * 1000;
+
+/** Messages the mention feed reads per room per request; the cursor carries it past the rest. */
+const MENTION_SCAN_PER_ROOM = 2000;
 import { ChatroomNoticeState, noticeDigest, type NoticeAttention, type NoticeRecipient, type NoticeSource } from './chatroom-notice-state.js';
 import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
 import { isOwnerMark } from './owner-auth/marks.js';
@@ -50,7 +59,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -78,6 +87,16 @@ export interface ChatSessionLike extends DeliverySession {
 const CLOSED_ALERT = 'Chat is read-only: a change could not be saved or undone on disk. Fix the disk, then restart the console.';
 
 /** Canonical phone policy for an already selected message and recipient name. */
+/**
+ * Who a message is for, as attention (the pending summary and exact-read handling) sees it. A system line counts only for
+ * the members it is addressed to by name, such as a stalled-seat report to a coordinator; a room-wide one is news to no one.
+ */
+function attentionRecipients(room: ChatRoom, message: ChatMessage): string[] {
+  if (message.from.kind !== 'system') return messageRecipients(room, message);
+  if (message.to === 'all') return [];
+  return message.to.filter((id) => id !== USER_RECIPIENT && room.members.some((m) => m.sessionId === id));
+}
+
 function phoneAlertAllows(mode: AlertMode, message: ChatMessage | undefined, name: string, unique: boolean): boolean {
   if (mode === 'ring') return true;
   if (!message) return false;
@@ -95,7 +114,12 @@ export interface ChatroomServiceDeps {
   /** The pronouns on a member's employee record (owner-set), shown with the member in every room view. */
   pronounsOf?: (sessionId: string) => string | undefined;
   restContextOf?: (sessionId: string) => string | undefined;
+  /** A bot's current record, by its stable id: its posts show its current picture, not the one they were posted with. */
+  botOf?: (botId: string) => { icon?: string } | undefined;
   getSession(id: string): ChatSessionLike | undefined;
+  providerHealth?(id: string, owner?: string): ProviderHealth | undefined;
+  /** Fixed server worker transport configuration, never caller authority. */
+  workerViewers?: boolean;
   broadcast(event: string, data: unknown): void;
   now?: () => number;
   /** Attachment store; a deleted room's files are removed with it. */
@@ -124,19 +148,67 @@ export interface ChatroomServiceDeps {
   database?: string;
   /** The server calls startDelivery after it has finished restoring all session records. */
   deferDeliveryRecovery?: boolean;
+  /**
+   * The owner's Board cards, read only for an agent's own digest (its cards and the cards they name) and for the
+   * 'doing' cards each employee member shows in room views.
+   */
+  boardIssues?: (owner: string | undefined) => ReadonlyArray<{
+    id: string; title: string; status: string; owner?: string; ownerName?: string; reason?: string; updatedAt: number; end?: number;
+  }>;
 }
+
+/** What turnSummary also collects for the digest: every candidate, each room's newest message and possible answers. */
+interface DigestScan {
+  candidates: TurnSummaryCandidate[];
+  rooms: DigestRoomScan[];
+  possibleAnswers: Map<string, string>;
+}
+
+const BOARD_CURSOR = '\0board';
 
 export interface ChatMemberView extends ChatMember {
   name: string;
   alertMode?: AlertLease;
   mode?: string;
   alive: boolean;
+  providerHealth?: ProviderHealth;
+  viewerHealth?: 'connected'|'disconnected'|'unknown';
   working: boolean;
   pendingDeliveries: number;
+  /** Why its queued lines are not being typed yet (a fixed category and its plain text), while any are queued. */
+  deliveryWait?: ChatDeliveryWait;
   /** Accent hue (0-359) derived from the session id; the avatar colour. */
   hue: number;
   /** The member's pronouns, from its employee record; absent when none are set. */
   pronouns?: string;
+  /** Its employee's 'doing' Board cards, earliest end first (at most FOCUS_CARDS); absent when it has none. */
+  focus?: ChatFocusCard[];
+  /** How many more 'doing' cards it has beyond `focus`. */
+  focusMore?: number;
+}
+
+/** A member's queue wait: a closed reason, its fixed text and since when (epoch ms). Never pane or message text. */
+export interface ChatDeliveryWait {
+  reason: DeliveryWaitReason;
+  text: string;
+  since: number;
+}
+
+/** One 'doing' Board card shown on a member: read from the Board on every view, never stored on the membership. */
+export interface ChatFocusCard {
+  id: string;
+  title: string;
+  end?: number;
+}
+
+export const FOCUS_CARDS = 3;
+const FOCUS_TITLE_CHARS = 120;
+/** Messages per history page (search's jump into old messages), the same as a room's first window in the chat. */
+const HISTORY_PAGE = 50;
+
+/** A room's member focus as one comparable string ('' when nobody in it is doing a card). */
+function focusSignature(focus: ReadonlyMap<string, Pick<ChatMemberView, 'focus' | 'focusMore'>>): string {
+  return focus.size ? JSON.stringify([...focus].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : '';
 }
 
 /** A session replaced by its successor after a plan switch: out of every room, hidden, and kept only to roll back to (or to forget). */
@@ -179,6 +251,10 @@ export interface ChatRoomView {
   unread: number;
   /** Of those, the ones addressed to the user (`--to user`); in a direct message with the user, all of them. */
   mentions: number;
+  /** Only an authenticated owner's own DM projection carries these fields. */
+  canClearHistory?: true;
+  historyAfter?: number;
+  historyViewerId?: string;
 }
 
 const PERSIST_DEBOUNCE_MS = 500;
@@ -231,6 +307,8 @@ export class ChatroomService {
 
   /** What each agent session has seen of each room (chatroom-last-seen.ts), next to the rooms file. */
   readonly seen: LastSeenStore;
+  /** Each agent's digest cursor (by employee, else session): FYIs it covered are not repeated. Not a read marker. */
+  readonly digestCursors: LastSeenStore;
   private pendingStore: PendingDeliveryStore | undefined;
   private deliveryReady: boolean;
   private deliveryStart: Promise<void> | undefined;
@@ -242,6 +320,8 @@ export class ChatroomService {
   private owedReplies = new Map<string, OwedReply>();
   /** Last visible delivery-problem notice per session NUL room, so a stuck pane can not flood the feed. */
   private deliveryNotices = new Map<string, number>();
+  /** Per room, the member focus its last view showed (focusSignature), so a Board change re-announces only rooms it moved. */
+  private focusShown = new Map<string, string>();
 
   /** Messages past the per-room cap, archived before they are dropped (chat-archive.ts); with the database, its second record. */
   private readonly archive: ChatArchive;
@@ -257,8 +337,20 @@ export class ChatroomService {
     this.deliveryReady = !deps.deferDeliveryRecovery;
     this.archive = new ChatArchive(deps.archiveDir ?? join(dirname(deps.file), 'chat-archive'));
     this.seen = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-last-seen.json') : undefined);
+    this.digestCursors = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-digest-cursor.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
+      prepareMessage: async (sessionId, roomId, messageId) => {
+        const paths = await this.agentImagePaths(sessionId, roomId, messageId);
+        const room = this.store.require(roomId);
+        const message = this.exactVisibleMessage(sessionId, roomId, messageId);
+        return renderForRecipient(this.withReplyContext(room, message.replyTo), message, sessionId, this.nameOf,
+          new Map(paths.status === 'ready' ? paths.files.map(file => [file.fileId, file.path]) : []));
+      },
+      messageVisible: (sessionId, roomId, messageId) => {
+        try { this.exactVisibleMessage(sessionId, roomId, messageId); return true; }
+        catch { return false; }
+      },
       forceWake: (sessionId, roomId, messageId) => this.phoneForcesWake(sessionId, roomId, messageId),
       allowFragment: (sessionId, roomId, messageId) => this.alertAllows(sessionId, roomId, messageId),
       now: deps.now,
@@ -284,6 +376,23 @@ export class ChatroomService {
         void this.audit({ action: 'delivery-stranded', sessionId, rooms, messages: messages.length }).catch(() => undefined);
         this.noticeDeliveryProblem(sessionId, rooms, 'Delivery to %s failed: the message is still unsent in its composer (held, not resent)');
         this.noteOwedDelivery(sessionId, messages, 'unconfirmed');
+      },
+      // A stuck seat cannot read a notice queued to itself: tell each room's coordinator and the owner instead.
+      onStalled: (sessionId, stall) => {
+        const minutes = Math.max(1, Math.floor((this.now() - stall.since) / 60_000));
+        const text = `${this.nameOf(sessionId)} has had ${stall.waiting} message${stall.waiting === 1 ? '' : 's'} waiting for ${minutes} min: ${DELIVERY_WAIT_TEXT[stall.reason]}.`;
+        console.warn(`[chatroom] delivery to ${sessionId.slice(0, 8)} stalled ${minutes} min (${stall.reason})`);
+        void this.audit({ action: 'delivery-stalled', sessionId, reason: stall.reason, minutes, rooms: stall.roomIds, messages: stall.waiting }).catch(() => undefined);
+        for (const roomId of stall.roomIds) {
+          const room = this.store.get(roomId);
+          if (!room || room.archivedAt) continue;
+          const coordinator = room.members.find((m) => m.role === 'coordinator' && m.sessionId !== sessionId)?.sessionId;
+          if (!coordinator) { this.system(room, text, sessionId, [USER_RECIPIENT]); continue; }
+          // Queued to the coordinator through the normal gated delivery, like noticeMember; never to the stuck seat.
+          const message = this.post(roomId, { kind: 'system', name: 'system', sessionId }, text, [coordinator, USER_RECIPIENT], { deliver: false });
+          this.delivery.deliverMessage(room, message, [coordinator], this.nameOf, new Set([coordinator]));
+        }
+        void this.raiseAlert(text);
       },
       onUncertain: (sessionId, messages) => {
         const rooms = [...new Set(messages.map((m) => m.roomId))];
@@ -320,20 +429,136 @@ export class ChatroomService {
 
   displayTimeZone(owner?: string): string { return displayTimeZone(this.deps.timeZone?.(owner)); }
 
-  /** One fresh actionable view; producer eligibility, proof and read cursors remain authoritative. */
-  actionableDigest(sessionId: string) {
+  /**
+   * One fresh actionable view; producer eligibility, proof and read cursors remain authoritative.
+   * `since` omitted: continue from this agent's stored digest cursor and move it to what this digest covered.
+   * `since: 'all'`: everything eligible, cursor untouched. A cursor token: from there, cursor untouched.
+   * The cursor only hides FYIs and Board changes already covered; owner requests and actions stay until handled.
+   */
+  actionableDigest(sessionId: string, since?: string) {
     const session = this.deps.getSession(sessionId);
     if (!session || session.pid === null) throw new ChatroomError('A live own session is required', 'NOT_FOUND');
-    return buildChatDigest(this.turnSummary(sessionId), this.deps.now?.() ?? Date.now(),
-      this.deps.timeZone?.(session.owner) ?? 'UTC');
+    let from: DigestCursor | undefined;
+    if (since !== undefined && since !== 'all') {
+      try {
+        from = decodeDigestCursor(since);
+      } catch (error) {
+        throw new ChatroomError((error as Error).message, 'INVALID_INPUT');
+      }
+    }
+    const employeeId = this.deps.employeeOf?.(sessionId);
+    const key = employeeId ?? sessionId;
+    if (since === undefined) {
+      const rooms: Record<string, { at: number; id: string }> = {};
+      for (const room of this.store.roomsFor(sessionId)) {
+        const mark = this.digestCursors.get(key, room.id);
+        if (mark) rooms[room.id] = { at: mark.at, id: mark.messageId };
+      }
+      const board = this.digestCursors.get(key, BOARD_CURSOR);
+      let boardIds: string[] = [];
+      try {
+        const parsed: unknown = board ? JSON.parse(board.messageId) : [];
+        if (Array.isArray(parsed)) boardIds = parsed.filter((k): k is string => typeof k === 'string');
+      } catch { /* an unreadable stored set only repeats that millisecond's cards */ }
+      if (Object.keys(rooms).length || board) from = { rooms, ...(board ? { boardAt: board.at, boardIds } : {}) };
+    }
+    const scan: DigestScan = { candidates: [], rooms: [], possibleAnswers: new Map() };
+    const summary = this.turnSummary(sessionId, undefined, undefined, scan);
+    const now = this.deps.now?.() ?? Date.now();
+    // Changed cards are selected before the bound, oldest first: the cursor stops at the last one shown, so the
+    // next digest continues with the rest instead of skipping them.
+    const changed = employeeId
+      ? this.digestCards(session.owner, employeeId)
+        .filter((card) => boardChanged(card, from, now))
+        .sort((a, b) => a.updatedAt - b.updatedAt || a.id.localeCompare(b.id))
+      : [];
+    const digest = buildChatDigest({
+      phoneMode: summary.phoneMode,
+      historyCoverage: summary.historyCoverage ?? { state: 'recent-only', rooms: [] },
+      candidates: scan.candidates,
+      rooms: scan.rooms,
+      possibleAnswers: scan.possibleAnswers,
+      cards: changed.slice(0, DIGEST_CARD_LIMIT),
+      cardsAfter: Math.max(0, changed.length - DIGEST_CARD_LIMIT),
+      since: from,
+      movesCursor: since === undefined,
+    }, now, this.deps.timeZone?.(session.owner) ?? 'UTC');
+    if (since === undefined) {
+      const covered = decodeDigestCursor(digest.cursor);
+      // Room order is (time, id): a newer message in the same millisecond still moves the cursor.
+      for (const [roomId, mark] of Object.entries(covered.rooms))
+        this.digestCursors.advanceWhen(key, roomId, { messageId: mark.id, at: mark.at }, (current) =>
+          !current || mark.at > current.at || (mark.at === current.at && mark.id.localeCompare(current.messageId) > 0));
+      // The Board cursor is the newest card time covered plus the card versions seen at that millisecond.
+      if (covered.boardAt !== undefined) {
+        const board = { messageId: JSON.stringify(covered.boardIds ?? []), at: covered.boardAt };
+        this.digestCursors.advanceWhen(key, BOARD_CURSOR, board, (current) =>
+          !current || board.at > current.at || (board.at === current.at && board.messageId !== current.messageId));
+      }
+    }
+    return digest;
+  }
+
+  /** This employee's own cards, and the cards its open ones name by id; nothing else on the Board. */
+  private digestCards(owner: string | undefined, employeeId: string): DigestCard[] {
+    const issues = this.deps.boardIssues?.(owner) ?? [];
+    const byId = new Map(issues.map((issue) => [issue.id, issue]));
+    const cards = new Map<string, DigestCard>();
+    for (const issue of issues) {
+      if (issue.owner !== employeeId) continue;
+      cards.set(issue.id, { ...issue, mine: true });
+      if (issue.status === 'done' || issue.status === 'wontdo') continue;
+      for (const [ref] of `${issue.title} ${issue.reason ?? ''}`.matchAll(/\bi-[0-9a-f]{8}\b/g)) {
+        const named = byId.get(ref);
+        if (named && !cards.has(ref) && named.owner !== employeeId) cards.set(ref, { ...named, mine: false, via: issue.id });
+      }
+    }
+    return [...cards.values()];
+  }
+
+  /**
+   * The caller's mention feed after `cursor` across its visible rooms (or one), read from the chat database when there
+   * is one and from the in-memory window otherwise. Read-only: no seen mark, delivery or attention changes.
+   */
+  mentionFeed(
+    sessionId: string,
+    options: { roomId?: string; cursor: MentionCursor; limit: number; holds: boolean }
+  ): MentionFeed & { source: 'database' | 'recent-only'; timeZone: string } {
+    const session = this.deps.getSession(sessionId);
+    if (!session || session.pid === null) throw new ChatroomError('A live own session is required for the mention feed', 'NOT_FOUND');
+    const visible = this.store
+      .roomsFor(sessionId)
+      .filter((room) => !room.archivedAt && room.owner === session.owner && (!isDm(room) || room.dm.includes(sessionId)));
+    const rooms = options.roomId ? visible.filter((room) => room.id === options.roomId) : visible;
+    if (options.roomId && !rooms.length) throw new ChatroomError('No visible room for the mention feed', 'NOT_FOUND');
+    const scans: MentionRoomScan[] = rooms.map((room) => {
+      const name = isDm(room) ? 'DM' : room.name;
+      if (this.db) {
+        const messages = this.db.messagesAfter(room.id, options.cursor, MENTION_SCAN_PER_ROOM + 1);
+        const capped = messages.length > MENTION_SCAN_PER_ROOM;
+        return { id: room.id, name, messages: capped ? messages.slice(0, MENTION_SCAN_PER_ROOM) : messages, capped };
+      }
+      const messages = room.messages.filter((m) => m.at > options.cursor.at || (m.at === options.cursor.at && m.id > options.cursor.id));
+      return { id: room.id, name, messages, capped: false };
+    });
+    const feed = buildMentionFeed(scans, { sessionId, name: this.nameOf(sessionId) }, options);
+    return { ...feed, source: this.db ? 'database' : 'recent-only', timeZone: this.displayTimeZone(session.owner) };
   }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
-  turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string } }): TurnSummary {
+  /**
+   * `select`: one visible room's recent window, agent and bot senders only, and every notice still pending before `before`
+   * returned as sourceReferences (for an explicit bulk "handle before"); owner and other human messages are never selected.
+   */
+  turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string }; stale?: boolean },
+    select?: { roomId: string; before: number; humans?: boolean }, scan?: DigestScan): TurnSummary {
+    // Human senders are only ever selected to be set aside as stale, and only past the stale age.
+    if (select?.humans && select.before > this.now() - STALE_MIN_AGE_MS)
+      throw new ChatroomError('Human notices can be set aside only when older than 72 hours', 'INVALID_INPUT');
     const session = this.deps.getSession(sessionId);
     const mode = this.alertMode(sessionId)?.mode ?? 'ring';
     if (!session || session.pid === null) {
-      if (historyPage) throw new ChatroomError('A live own session is required for notice history', 'NOT_FOUND');
+      if (historyPage || select) throw new ChatroomError('A live own session is required for notice history', 'NOT_FOUND');
       return renderTurnSummary(mode, []);
     }
     const held = new Set(this.delivery.inspectionFor(sessionId).map((m) => `${m.roomId}\0${m.messageId}`));
@@ -358,19 +583,20 @@ export class ChatroomService {
     const budget = { rows: 1000, bytes: 8 * 1024 * 1024 };
     const coverage: NoticeHistoryCoverage = { state: this.db ? 'complete' : 'recent-only', rooms: [] };
     const rooms = this.store.roomsFor(sessionId);
-    if (historyPage) {
-      const room = rooms.find(r => r.id === historyPage.roomId);
+    const scoped = historyPage ?? select;
+    if (scoped) {
+      const room = rooms.find(r => r.id === scoped.roomId);
       if (!room || room.archivedAt || room.owner !== session.owner || (isDm(room) && !room.dm.includes(sessionId)))
         throw new ChatroomError('No visible notice room', 'NOT_FOUND');
-      if (!this.db) throw new ChatroomError('Owner history requires the durable chat database', 'UNAVAILABLE');
+      if (historyPage && !this.db) throw new ChatroomError('Owner history requires the durable chat database', 'UNAVAILABLE');
     }
     for (const room of rooms) {
-      if (historyPage && room.id !== historyPage.roomId) continue;
+      if (scoped && room.id !== scoped.roomId) continue;
       if (room.archivedAt || room.owner !== session.owner || (isDm(room) && !room.dm.includes(sessionId))) continue;
       const name = this.nameOf(sessionId);
       const uniquelyNamed =
         room.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
-      const history = this.db?.noticeHistory(room.id, budget, historyPage?.before);
+      const history = select ? undefined : this.db?.noticeHistory(room.id, budget, historyPage?.before);
       if (history && !history.complete) {
         coverage.state = 'bounded';
         coverage.rooms.push({ roomId: room.id, ...(history.before ? { before: history.before } : {}) });
@@ -383,6 +609,23 @@ export class ChatroomService {
       }
       const messages = [...merged.values()].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
         .map((m) => messageWithEmployeeIdentity(m, room.owner, identity));
+      if (scan) {
+        const newest = messages.at(-1);
+        scan.rooms.push({ roomId: room.id, room: room.name, ...(newest ? { newest: { at: newest.at, id: newest.id } } : {}) });
+        // A possible answer: this agent's first message to the owner after an owner request, before the owner wrote again.
+        // Only a pointer for the digest; attention stays pending until explicitly resolved.
+        const ownerNames = (this.deps.ownerNames?.(room.owner) ?? []).filter(Boolean);
+        let answer: string | undefined;
+        for (let i = messages.length - 1; i >= 0 && ownerNames.length; i--) {
+          const m = messages[i];
+          if (m.deleted) continue;
+          if (m.from.kind === 'user' && isOwnerMark(m.from.mark)) {
+            if (answer) scan.possibleAnswers.set(`${room.id}\0${m.id}`, answer);
+            answer = undefined;
+          } else if (m.from.kind === 'agent' && (m.from.sessionId === sessionId || (employeeId && m.from.employeeId === employeeId)) &&
+              ownerNames.some((n) => textMentions(m.text, n))) answer = m.id;
+        }
+      }
       const seen = this.seen.get(sessionId, room.id);
       const seenIndex = seen ? messages.findIndex((m) => m.id === seen.messageId) : -1;
       // One indexed scan, including current validated retirement mappings; no name-only inheritance.
@@ -395,26 +638,32 @@ export class ChatroomService {
       }
       for (const [index, message] of messages.entries()) {
         if ((!recentIds.has(message.id) && !ownerHistoryIds.has(message.id)) ||
-            (historyPage && (message.from.kind !== 'user' || !isOwnerMark(message.from.mark)))) continue;
+            (historyPage && (message.from.kind !== 'user' || !isOwnerMark(message.from.mark))) ||
+            (select && ((message.from.kind !== 'agent' && message.from.kind !== 'bot' &&
+              !(select.humans && (message.from.kind === 'user' || message.from.kind === 'human'))) || message.at >= select.before))) continue;
         if (
           message.deleted ||
-          message.from.kind === 'system' ||
           (message.from.kind === 'agent' &&
             (message.from.sessionId === sessionId || (employeeId && message.from.employeeId === employeeId))) ||
-          !messageRecipients(room, message).includes(sessionId) ||
+          !attentionRecipients(room, message).includes(sessionId) ||
           !phoneAlertAllows(mode, message, name, uniquelyNamed)
         )
           continue;
         const key = `${room.id}\0${message.id}`;
-        const sourceDigest = noticeDigest(this.messageIdentity(room, message, identity));
+        const sourceDigest = noticeDigest(this.messageIdentity(room, message, identity, false));
         const records = this.notices.forSource(recipient, room.id, message.id);
         const attention = this.noticeAttention(sessionId, room, message, records, ownReplies.get(message.id) ?? [], identity);
-        const transportPending = held.has(key) || queued.has(key);
-        if (attention.disposition !== 'pending' && !transportPending) continue;
+        // A notice its recipient already handled stays listed only while its delivery is uncertain (do not resend it); one
+        // merely still queued for the pane is not news, and listing it after every command buried the requests still open.
+        // A stale listing shows only what was set aside; it is the one place those notices stay visible.
+        if (historyPage?.stale ? attention.disposition !== 'stale' : attention.disposition !== 'pending' && !held.has(key)) continue;
         const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
         const direct = message.to !== 'all' || (uniquelyNamed && textMentions(message.text, name));
+        // A system notice about another seat addressed to this one (a stalled-seat report to its coordinator) needs action,
+        // so it stays listed until handled, like an owner request.
+        const aboutOther = message.from.kind === 'system' && !!message.from.sessionId && message.from.sessionId !== sessionId;
         const pendingVersion = attention.disposition === 'pending' &&
-          (!this.notices.available || records.length > 0 || ownReplies.has(message.id) || !!message.edited || owner);
+          (!this.notices.available || records.length > 0 || ownReplies.has(message.id) || !!message.edited || owner || aboutOther);
         const belowSeenCursor = !!seen &&
           (message.at < seen.at || (message.at === seen.at && seenIndex >= 0 && index <= seenIndex));
         const state = held.has(key)
@@ -426,7 +675,8 @@ export class ChatroomService {
               : 'unread';
         if (
           state === 'unread' &&
-          belowSeenCursor
+          belowSeenCursor &&
+          !historyPage?.stale
         )
           continue;
         const senderId = message.from.kind === 'agent' ? message.from.sessionId : undefined;
@@ -448,8 +698,12 @@ export class ChatroomService {
         });
       }
     }
+    if (scan) scan.candidates.push(...candidates);
     const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now());
     if (historyPage) summary.sourceReferences = candidates.map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
+    // Only notices that still need attention: one handled but uncertain in delivery is not re-resolved.
+    if (select) summary.sourceReferences = candidates.filter(m => m.attention?.disposition === 'pending')
+      .map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
     return summary;
   }
 
@@ -481,7 +735,7 @@ export class ChatroomService {
     const name = this.nameOf(sessionId);
     const unique = room.members.filter(m => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
     if (room.archivedAt || (isDm(room) && !room.dm.includes(sessionId)) ||
-        message.from.kind === 'system' || !messageRecipients(room, message).includes(sessionId) ||
+        !attentionRecipients(room, message).includes(sessionId) ||
         !phoneAlertAllows(mode, message, name, unique)) {
       throw new ChatroomError('No eligible notice for this recipient', 'NOT_FOUND');
     }
@@ -492,7 +746,7 @@ export class ChatroomService {
     records: import('./chatroom-notice-state.js').NoticeRecord[], replies: ChatMessage[],
     identity: ChatIdentityLookup): NoticeAttention {
     if (!this.notices.available) return { disposition: 'pending' };
-    const digest = noticeDigest(this.messageIdentity(room, message, identity));
+    const digest = noticeDigest(this.messageIdentity(room, message, identity, false));
     // Latest proof for the current source version; an invalid replacement never falls back to an old proof.
     const record = records.filter(r => r.source.digest === digest).at(-1);
     if (record) {
@@ -510,7 +764,7 @@ export class ChatroomService {
     if (!message.edited) {
       const reply = replies.find(r => !r.deleted && !r.edited && r.at >= message.at);
       if (reply) return { disposition: 'handled', proof: { kind: 'linked-reply', reply: {
-        roomId: room.id, messageId: reply.id, digest: noticeDigest(this.messageIdentity(room, reply, identity)),
+        roomId: room.id, messageId: reply.id, digest: noticeDigest(this.messageIdentity(room, reply, identity, false)),
       } } };
     }
     return { disposition: 'pending' };
@@ -518,11 +772,13 @@ export class ChatroomService {
 
   /** Explicit own intent supported by exact reads. Does not consume/ACK any transport receipt. */
   resolveNotice(sessionId: string, input: { roomId: string; messageId: string; readToken: string;
-    disposition: 'handled' | 'superseded'; replacement?: { roomId: string; messageId: string; readToken: string } }):
+    disposition: 'handled' | 'superseded' | 'stale'; replacement?: { roomId: string; messageId: string; readToken: string } }):
     { source: NoticeSource; attention: NoticeAttention } {
     if (this.writesClosed) throw new ChatroomError('Chat writes are unavailable', 'UNAVAILABLE');
-    if ((input.disposition === 'superseded') !== !!input.replacement || !['handled', 'superseded'].includes(input.disposition))
+    if ((input.disposition === 'superseded') !== !!input.replacement || !['handled', 'superseded', 'stale'].includes(input.disposition))
       throw new ChatroomError('Superseded requires exactly one replacement', 'INVALID_INPUT');
+    if (input.disposition === 'stale' && this.noticeSource(sessionId, input.roomId, input.messageId).at > this.now() - STALE_MIN_AGE_MS)
+      throw new ChatroomError('Only a notice older than 72 hours can be set aside as stale', 'INVALID_INPUT');
     const recipient = this.noticeRecipient(sessionId);
     const checkRead = (ref: { roomId: string; messageId: string; readToken: string }): NoticeSource => {
       const receipt = this.exactReadReceipts.get(ref.readToken);
@@ -556,13 +812,22 @@ export class ChatroomService {
       ...(record.replacement ? { replacement: record.replacement } : {}) } };
   }
 
-  deliveryStatus(sessionId: string): { blocked: boolean; pending: number; held: Array<{ roomId: string; messageId: string }> } {
+  deliveryStatus(sessionId: string): {
+    blocked: boolean; pending: number; held: Array<{ roomId: string; messageId: string }>; deliveryWait?: ChatDeliveryWait;
+  } {
     const holds = this.delivery.inspectionFor(sessionId);
     return {
       blocked: holds.length > 0,
       pending: this.delivery.pendingFor(sessionId),
       held: holds.filter((item) => this.store.get(item.roomId)?.members.some((m) => m.sessionId === sessionId)),
+      ...this.deliveryWaitView(sessionId),
     };
+  }
+
+  /** `{ deliveryWait }` while the session's queued lines wait for a known reason; `{}` otherwise. */
+  private deliveryWaitView(sessionId: string): { deliveryWait?: ChatDeliveryWait } {
+    const wait = this.delivery.waitingFor(sessionId);
+    return wait ? { deliveryWait: { reason: wait.reason, text: DELIVERY_WAIT_TEXT[wait.reason], since: wait.since } } : {};
   }
 
   searchTimeZone(owner: string | undefined): string {
@@ -576,12 +841,18 @@ export class ChatroomService {
     return this.db.searchMessages(roomIds, query, before);
   }
 
-  searchContext(roomId: string, messageId: string) {
+  /**
+   * One page of full messages from the room's whole history: centred on a message (`around`, the message included), or
+   * the page just before or after it. Lets the chat show an old message in place and scroll on from there.
+   */
+  historyPage(roomId: string, messageId: string, page: 'around' | 'older' | 'newer') {
     if (!this.db) throw new ChatroomError('History search requires the chat database', 'UNAVAILABLE');
     const room = this.store.require(roomId);
-    const messages = this.db.searchContext(roomId, messageId);
-    if (!messages) throw new ChatroomError('Message is no longer available', 'NOT_FOUND');
-    return messages.map(message => this.messageIdentity(room, message));
+    const half = HISTORY_PAGE / 2;
+    const window = this.db.historyWindow(roomId, messageId, page === 'around' ? { older: half, newer: half, include: true }
+      : page === 'older' ? { older: HISTORY_PAGE, newer: 0, include: false } : { older: 0, newer: HISTORY_PAGE, include: false });
+    if (!window) throw new ChatroomError('Message is no longer available', 'NOT_FOUND');
+    return { ...window, messages: window.messages.map(message => this.messageIdentity(room, message)) };
   }
 
   /** One indexed, room-scoped historical identity; never scans or restores the recent window. */
@@ -611,7 +882,30 @@ export class ChatroomService {
       ?? this.historicalMessage(roomId, messageId);
     if (!message || message.id !== messageId || message.roomId !== roomId) throw new ChatroomError('No such message in this room', 'NOT_FOUND');
     if (message.deleted) throw new ChatroomError('Deleted messages require separate owner resolution', 'CONFLICT');
-    return structuredClone(this.messageIdentity(room, message));
+    // Agent reads, receipts and notice digests use the stored sender: a bot's new picture is for people's views only.
+    return structuredClone(this.messageIdentity(room, message, this.depsWithIdentity(), false));
+  }
+
+  /** The exact message as this live member session can read it now (employee journal source and turn checks). */
+  agentVisibleMessage(sessionId: string, roomId: string, messageId: string): ChatMessage {
+    return this.exactVisibleMessage(sessionId, roomId, messageId);
+  }
+
+  /** Fresh scoped bytes, never a path saved with a message or pending delivery. */
+  async agentImagePaths(sessionId: string, roomId: string, messageId: string): Promise<ImagePathResult> {
+    const message = this.exactVisibleMessage(sessionId, roomId, messageId);
+    const session = this.deps.getSession(sessionId)!;
+    const pid = session.pid;
+    const employee = this.deps.employeeOf?.(sessionId);
+    const selected = (message.attachments ?? []).filter(isChatRaster).slice(0, 4);
+    if (!selected.length) return { status: 'unavailable' };
+    const before = JSON.stringify(message);
+    const result = await materializeChatImages({ sessionId, roomId, messageId, fileIds: selected.map(file => file.id) });
+    const current = this.deps.getSession(sessionId);
+    if (current !== session || current?.pid !== pid || this.deps.employeeOf?.(sessionId) !== employee ||
+        JSON.stringify(this.exactVisibleMessage(sessionId, roomId, messageId)) !== before)
+      throw new ChatroomError('Message or session changed; read again', 'CONFLICT');
+    return result;
   }
 
   exactAgentRead(sessionId: string, roomId: string, messageId: string): { message: ChatMessage; readToken: string } {
@@ -666,11 +960,26 @@ export class ChatroomService {
     return { getSession: (sessionId) => this.deps.getSession(sessionId), employeeOf: this.deps.employeeOf, retired: this.retired };
   }
 
-  private messageIdentity(room: ChatRoom, message: ChatMessage, identity = this.depsWithIdentity()): ChatMessage {
+  private messageIdentity(room: ChatRoom, message: ChatMessage, identity = this.depsWithIdentity(), present = true): ChatMessage {
     const visible = { ...message };
     delete visible.phoneWakes;
-    const view = messageWithEmployeeIdentity(visible, room.owner, identity);
+    let view = messageWithEmployeeIdentity(visible, room.owner, identity);
+    // A bot's posts show its current picture. Notice digests (present = false) keep the stored sender, so a changed
+    // picture never reads as a changed message. A bot that now has no picture keeps the one each post was made with.
+    const bot = present && view.from.kind === 'bot' ? this.deps.botOf?.(view.from.botId) : undefined;
+    if (bot?.icon && view.from.kind === 'bot') view = { ...view, from: { ...view.from, icon: bot.icon } };
     return view.attachments?.length ? { ...view, attachments: view.attachments.map(file => ({ ...file, path: sharedAttachmentPath(room.id, file) })) } : view;
+  }
+
+  /** A bot's picture changed: re-announce the rooms it may have posted in, so open views redraw its earlier posts. */
+  botChanged(botId: string, rooms: readonly string[] = []): number {
+    let announced = 0;
+    for (const room of this.store.list()) {
+      if (!rooms.includes(room.id) && !room.messages.some((m) => m.from.kind === 'bot' && m.from.botId === botId)) continue;
+      this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id });
+      announced++;
+    }
+    return announced;
   }
 
   private get retiredFile(): string {
@@ -719,6 +1028,7 @@ export class ChatroomService {
     const rooms = this.deps.database ? await this.openDatabase(this.deps.database) : await loadChatrooms(this.deps.file);
     this.store = new ChatroomStore(rooms, (roomId, messageId) => this.historicalMessage(roomId, messageId));
     await this.seen.load();
+    await this.digestCursors.load();
     this.learnNames(rooms);
     if (this.deps.file) {
       try {
@@ -766,6 +1076,7 @@ export class ChatroomService {
     this.owedReplies.clear();
     this.delivery.stop();
     await this.seen.flush();
+    await this.digestCursors.flush();
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = undefined;
@@ -826,7 +1137,7 @@ export class ChatroomService {
       const recipients = messageRecipients(room, message);
       const awake = wakeRecipients(deliveryRoom, message, recipients, this.nameOf);
       this.delivery.enqueue(entry.sessionId, room, renderForRecipient(deliveryRoom, message, entry.sessionId, this.nameOf), {
-        deliveryId: entry.id, messageId: entry.messageId, at: entry.at,
+        deliveryId: entry.id, messageId: entry.messageId, at: entry.at, localImages: message.attachments?.some(isChatRaster),
         passive: entry.passive || !awake.has(entry.sessionId),
       });
     }
@@ -1167,6 +1478,8 @@ export class ChatroomService {
   }
 
   view(room: ChatRoom, options: { since?: number; limit?: number } = {}): ChatRoomView {
+    const focus = this.memberFocus(room);
+    this.focusShown.set(room.id, focusSignature(focus));
     const members = room.members.map((m): ChatMemberView => {
       const s = this.deps.getSession(m.sessionId);
       const name = this.nameOf(m.sessionId);
@@ -1183,10 +1496,14 @@ export class ChatroomService {
         mode: s?.mode,
         alertMode: this.alertMode(m.sessionId),
         alive: !!s && s.pid !== null,
+        providerHealth: this.deps.providerHealth?.(m.sessionId, room.owner),
+        viewerHealth: viewerHealth(s, this.deps.workerViewers),
         working: !!s?.isWorking,
         pendingDeliveries: this.delivery.pendingFor(m.sessionId),
+        ...this.deliveryWaitView(m.sessionId),
         hue: accentHue(m.sessionId),
         ...(pronouns ? { pronouns } : {}),
+        ...focus.get(m.sessionId),
       };
     });
     const last = room.messages[room.messages.length - 1];
@@ -1214,6 +1531,53 @@ export class ChatroomService {
     };
   }
 
+  /**
+   * The Board changed: each live room whose members' 'doing' cards now differ from what its last view showed is
+   * announced as changed, so open pages fetch it again. Rooms whose members' cards did not move stay quiet.
+   */
+  noteBoardChanged(): void {
+    for (const room of this.store.list()) {
+      if (room.archivedAt) continue;
+      const signature = focusSignature(this.memberFocus(room));
+      if (signature === (this.focusShown.get(room.id) ?? '')) continue;
+      this.focusShown.set(room.id, signature);
+      try { this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id }); } catch { /* refreshed on next read */ }
+    }
+  }
+
+  /**
+   * What each employee member is doing, straight from the owner's Board: its own 'doing' cards, earliest end first,
+   * then by id. Read on every view and never written to the membership, so it follows the Board and cannot overwrite
+   * a goal the agent or owner set. An archived room, or a session with no single employee record, shows nothing.
+   */
+  private memberFocus(room: ChatRoom): Map<string, Pick<ChatMemberView, 'focus' | 'focusMore'>> {
+    const out = new Map<string, Pick<ChatMemberView, 'focus' | 'focusMore'>>();
+    if (room.archivedAt || !this.deps.boardIssues || !this.deps.employeeOf) return out;
+    const sessionOf = new Map<string, string>();
+    for (const m of room.members) {
+      const employeeId = this.deps.employeeOf(m.sessionId);
+      if (employeeId) sessionOf.set(employeeId, m.sessionId);
+    }
+    if (!sessionOf.size) return out;
+    const doing = new Map<string, ChatFocusCard[]>();
+    for (const issue of this.deps.boardIssues(room.owner)) {
+      const sessionId = issue.status === 'doing' && issue.owner ? sessionOf.get(issue.owner) : undefined;
+      if (!sessionId) continue;
+      const chars = Array.from(issue.title);
+      const title = chars.length > FOCUS_TITLE_CHARS ? `${chars.slice(0, FOCUS_TITLE_CHARS - 1).join('')}…` : issue.title;
+      const card: ChatFocusCard = { id: issue.id, title, ...(Number.isFinite(issue.end) ? { end: issue.end } : {}) };
+      doing.set(sessionId, [...(doing.get(sessionId) ?? []), card]);
+    }
+    for (const [sessionId, cards] of doing) {
+      cards.sort((a, b) => (a.end ?? Infinity) - (b.end ?? Infinity) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      out.set(sessionId, {
+        focus: cards.slice(0, FOCUS_CARDS),
+        ...(cards.length > FOCUS_CARDS ? { focusMore: cards.length - FOCUS_CARDS } : {}),
+      });
+    }
+    return out;
+  }
+
   /** Resolve recipient tokens (names, prefixes, `user`, `coordinator`, `all`). Throws on an unknown token. */
   resolveRecipients(room: ChatRoom, tokens: string[] | undefined): 'all' | ChatRecipient[] {
     if (!tokens || tokens.length === 0) return 'all';
@@ -1229,6 +1593,68 @@ export class ChatroomService {
   }
 
   // ─── Mutations ────────────────────────────────────────────────────────────
+
+  /** A view preference, never a deletion or an agent read/delivery cursor. */
+  ownerHistoryAfter(room: ChatRoom, viewerId: string): number {
+    const value = Object.hasOwn(room.ownerHistoryAfter ?? {}, viewerId) ? room.ownerHistoryAfter![viewerId] : -1;
+    return Number.isSafeInteger(value) && value >= -1 ? value : -1;
+  }
+
+  ownerView(room: ChatRoom, viewerId: string, options: { since?: number; limit?: number } = {}): ChatRoomView {
+    if (!isDm(room) || !room.dm.includes(USER_RECIPIENT)) return this.view(room, options);
+    const after = this.ownerHistoryAfter(room, viewerId);
+    const visible = room.messages.filter((message) => message.at > after);
+    const view = this.view({ ...room, messages: visible }, { ...options, since: Math.max(options.since ?? -1, after) });
+    // view() reads the store for its tail, while counts come from the supplied room.
+    return {
+      ...view,
+      messages: view.messages.filter((message) => message.at > after),
+      canClearHistory: true,
+      historyAfter: after,
+      historyViewerId: viewerId,
+    };
+  }
+
+  /** Commit the preference before acknowledging it or asking another device to refresh. */
+  async clearOwnerHistory(roomId: string, viewerId: string): Promise<ChatRoom> {
+    const commit = async () => {
+      const room = this.store.get(roomId);
+      if (!room || !isDm(room) || !room.dm.includes(USER_RECIPIENT))
+        throw new ChatroomError('Only your direct-message history can be cleared', 'INVALID_INPUT');
+      const before = room.ownerHistoryAfter;
+      const after = Math.max(this.ownerHistoryAfter(room, viewerId), room.messages.at(-1)?.at ?? -1);
+      room.ownerHistoryAfter = { ...before, [viewerId]: after };
+      try {
+        if (this.db) this.syncDatabase(roomId);
+        else await saveChatrooms(this.deps.file, this.store.toJSON());
+      } catch (error) {
+        // The database path also restores committed room state. JSON has no transaction adapter.
+        if (!this.db) {
+          if (before === undefined) delete room.ownerHistoryAfter;
+          else room.ownerHistoryAfter = before;
+        }
+        throw error instanceof ChatroomError
+          ? error
+          : new ChatroomError('History could not be cleared. Try again.', 'UNAVAILABLE');
+      }
+      this.deps.broadcast(ChatroomChanged, {
+        owner: room.owner ?? '@single',
+        roomId,
+        action: 'history-cleared',
+        viewerId,
+        historyAfter: after,
+      });
+      return room;
+    };
+    if (this.db) return commit();
+    // Serialize the legacy JSON write with its existing saves; propagate this write's failure to the caller.
+    const saved = this.persistChain.then(commit);
+    this.persistChain = saved.then(
+      () => {},
+      () => {}
+    );
+    return saved;
+  }
 
   createRoom(name: string, owner: string | undefined): ChatRoom {
     const room = this.store.create(name, owner, this.now());
@@ -1542,10 +1968,9 @@ export class ChatroomService {
     this.schedulePersist(room.id);
     if (message.from.kind === 'agent' && message.replyTo) {
       const asked = deliveryRoom.messages.find(item => item.id === message.replyTo);
-      if (asked && isAddressedVoiceTurn(deliveryRoom, asked, message.from.sessionId, this.nameOf)) {
-        // The member answered during its current turn: no redundant wake remains.
-        this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
-      }
+      // The member answered it, so it reached the member: no redundant wake remains, and a hold on it (a line the pane
+      // could not confirm) is released, or the pointer to it repeats and new lines keep waiting on it.
+      if (asked) this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
     }
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message: this.messageIdentity(room, message) });
     // A spoken turn was already answered by the voice service: show it, never type it into a pane.
@@ -2131,9 +2556,9 @@ export class ChatroomService {
   }
 
   /** A room event shown in the feed. Not delivered to panes (deliveries above say what matters). */
-  private system(room: ChatRoom, text: string, sessionId?: string): void {
+  private system(room: ChatRoom, text: string, sessionId?: string, to: 'all' | ChatRecipient[] = 'all'): void {
     const from: ChatSender = { kind: 'system', name: 'system', ...(sessionId ? { sessionId } : {}) };
-    const message = this.store.post(room.id, from, text, 'all', this.now());
+    const message = this.store.post(room.id, from, text, to, this.now());
     // With the database, committed before it is shown (a JSON save stays with the caller's change).
     if (this.db) this.schedulePersist(room.id);
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message });

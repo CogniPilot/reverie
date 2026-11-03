@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from reverie.worker import Broker, OfficeAPI
-from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, wait_poll, reap_viewer, run_client
+from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, wait_poll, reap_viewer, run_client, settle_owned_clients
 from tests import test_owner_goal_broker as owner_fixture
 
 
@@ -412,6 +412,182 @@ class ShutdownTests(unittest.TestCase):
                     and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)}
         self.assertIn('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED', produced)
         self.assertEqual(produced - CLEANUP_CODES, set())
+
+
+    def test_real_owned_timeout_can_settle_client_fact_without_replaying_command(self):
+        import sys, time
+        owner = self.owner()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_client([sys.executable, '-I', '-B', '-c', 'import time; time.sleep(30)'],
+                       timeout=.05, owner=owner)
+        owner.stopping.set()
+        settle_owned_clients(owner, min(owner.stopping.deadline, time.monotonic()+1))
+        self.assertEqual(owner.owned_clients, {})
+        self.assertNotIn('ENGINE_CLIENT_UNREAPED', owner.cleanup_uncertain)
+
+    def test_exact_late_reap_settles_only_owned_client_marker(self):
+        owner = self.owner(); child = self.child(code=None, reap_on_kill=False)
+        with Clock(), patch('reverie.worker_cleanup.subprocess.Popen', return_value=child):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_client(['fixture-engine'], timeout=.05, owner=owner)
+            self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED'})
+            child.returncode = -9  # Exact original owned Popen, not a PID lookup.
+            owner.stopping.set()
+            settle_owned_clients(owner, owner.stopping.deadline)
+        self.assertEqual(owner.owned_clients, {})
+        self.assertEqual(owner.cleanup_uncertain, set())
+
+    def test_genuinely_unreapable_client_remains_fatal_with_original_budget(self):
+        owner = self.owner(); child = self.child(code=None, reap_on_kill=False)
+        with Clock() as clock, patch('reverie.worker_cleanup.subprocess.Popen', return_value=child):
+            owner.stopping.set()
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_client(['fixture-engine'], timeout=20, owner=owner)
+            settle_owned_clients(owner, owner.stopping.deadline)
+            self.assertLessEqual(clock.now, 34)
+        self.assertEqual(list(owner.owned_clients.values()), [child])
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED'})
+
+    def test_opaque_prior_client_and_other_uncertainty_never_cleared(self):
+        owner = self.owner(); child = self.child(code=None, reap_on_kill=False)
+        owner.cleanup_uncertain.update({'ENGINE_CLIENT_UNREAPED', 'RESOURCE_ADMISSION_RELEASE_UNCONFIRMED'})
+        with Clock(), patch('reverie.worker_cleanup.subprocess.Popen', return_value=child):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_client(['fixture-engine'], timeout=.05, owner=owner)
+            child.returncode = -9; owner.stopping.set()
+            settle_owned_clients(owner, owner.stopping.deadline)
+        self.assertEqual(owner.owned_clients, {})
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'RESOURCE_ADMISSION_RELEASE_UNCONFIRMED'})
+
+    def test_pending_constructor_publication_is_waited_within_same_budget(self):
+        owner = self.owner(); token = object(); child = self.child(code=0)
+        owner.owned_clients[token] = None
+        with Clock() as clock:
+            owner.stopping.set()
+            def published(seconds):
+                clock.sleep(seconds); owner.owned_clients[token] = child
+            with patch('reverie.worker_cleanup.time.sleep', side_effect=published):
+                settle_owned_clients(owner, owner.stopping.deadline)
+            self.assertLessEqual(clock.now, .01)
+        self.assertEqual(owner.owned_clients, {})
+        self.assertEqual(owner.cleanup_uncertain, set())
+
+    def test_pending_constructor_after_deadline_remains_owned_and_fatal(self):
+        owner = self.owner(); token = object(); owner.owned_clients[token] = None
+        with Clock() as clock:
+            owner.stopping.set(); clock.sleep(33.99)
+            settle_owned_clients(owner, owner.stopping.deadline)
+            self.assertLessEqual(clock.now, 34)
+        self.assertEqual(owner.owned_clients, {token: None})
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED'})
+
+    def test_supervisor_constructor_finalizer_precedes_terminal_client_sweep(self):
+        with tempfile.TemporaryDirectory(prefix='broker-client-') as directory, Clock():
+            broker = Broker({'maxWorkers': 1, 'socket': directory+'/broker.sock'})
+            token = object(); child = self.child(code=0)
+            broker.owned_clients[token] = None
+            def finished(_seconds): broker.owned_clients[token] = child
+            supervisor = Mock(is_alive=Mock(return_value=False), join=Mock(side_effect=finished))
+            self.serve_fixture(broker, supervisor=supervisor)
+            self.assertEqual(broker.owned_clients, {})
+            self.assertEqual(broker.cleanup_uncertain, set())
+
+
+    def test_expired_final_bookkeeping_mutex_never_waits(self):
+        import threading, time
+        from reverie import worker_cleanup as cleanup
+        owner = self.owner(); done = threading.Event(); failures = []
+        def settle():
+            try: settle_owned_clients(owner, time.monotonic()-1)
+            except BaseException as error: failures.append(type(error).__name__)
+            finally: done.set()
+        cleanup._CLIENT_STATE_LOCK.acquire()
+        thread = threading.Thread(target=settle)
+        try:
+            thread.start()
+            self.assertTrue(done.wait(.1), 'expired cleanup blocked on bookkeeping mutex')
+            self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
+        finally:
+            cleanup._CLIENT_STATE_LOCK.release(); thread.join(1)
+        self.assertFalse(thread.is_alive()); self.assertEqual(failures, [])
+
+    def test_future_final_bookkeeping_mutex_uses_original_deadline(self):
+        import threading, time
+        from reverie import worker_cleanup as cleanup
+        owner = self.owner(); done = threading.Event(); elapsed = []
+        def settle():
+            start = time.monotonic()
+            try: settle_owned_clients(owner, start+.03)
+            finally: elapsed.append(time.monotonic()-start); done.set()
+        cleanup._CLIENT_STATE_LOCK.acquire(); thread = threading.Thread(target=settle)
+        try:
+            thread.start(); self.assertTrue(done.wait(.2))
+            self.assertLess(elapsed[0], .2)
+            self.assertIn('LOCK_UNAVAILABLE', owner.cleanup_uncertain)
+        finally:
+            cleanup._CLIENT_STATE_LOCK.release(); thread.join(1)
+        self.assertFalse(thread.is_alive())
+
+    def test_owned_run_client_timeout_does_not_wait_on_held_bookkeeping_mutex(self):
+        import sys, threading, time
+        from reverie import worker_cleanup as cleanup
+        owner = self.owner(); owner.stopping.set(); done = threading.Event(); outcomes = []
+        def command():
+            try:
+                run_client([sys.executable, '-I', '-B', '-c', 'import time; time.sleep(30)'],
+                           timeout=.03, owner=owner)
+            except subprocess.TimeoutExpired: outcomes.append('original-timeout')
+            except BaseException as error: outcomes.append(type(error).__name__)
+            finally: done.set()
+        cleanup._CLIENT_STATE_LOCK.acquire(); thread = threading.Thread(target=command)
+        try:
+            thread.start(); self.assertTrue(done.wait(.2))
+            self.assertEqual(outcomes, ['original-timeout'])
+            self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
+        finally:
+            cleanup._CLIENT_STATE_LOCK.release(); thread.join(1)
+            settle_owned_clients(owner, min(owner.stopping.deadline, time.monotonic()+1))
+        self.assertFalse(thread.is_alive()); self.assertEqual(owner.owned_clients, {})
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
+
+    def test_unreaped_record_mutex_uses_original_command_deadline(self):
+        import threading, time
+        from reverie import worker_cleanup as cleanup
+        owner = self.owner(); child = self.child(code=None, reap_on_kill=False)
+        token = object(); owner.owned_clients[token] = child; done = threading.Event()
+        def mark():
+            try: cleanup._client_unreaped(owner, token, child, time.monotonic()+.03)
+            finally: done.set()
+        cleanup._CLIENT_STATE_LOCK.acquire(); thread = threading.Thread(target=mark)
+        try:
+            thread.start(); self.assertTrue(done.wait(.2))
+            self.assertEqual(owner.owned_clients, {token: child})
+            self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
+        finally:
+            cleanup._CLIENT_STATE_LOCK.release(); thread.join(1)
+        child.returncode = -9; owner.stopping.set()
+        settle_owned_clients(owner, owner.stopping.deadline)
+        self.assertEqual(owner.owned_clients, {})
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
+
+    def test_late_opaque_mutex_failure_cannot_lose_marker_during_owned_clear(self):
+        import time
+        from reverie import worker_cleanup as cleanup
+        owner = self.owner(); child = self.child(code=None, reap_on_kill=False)
+        with Clock(), patch('reverie.worker_cleanup.subprocess.Popen', return_value=child):
+            with self.assertRaises(subprocess.TimeoutExpired):run_client(['fixture-engine'], timeout=.01, owner=owner)
+        child.returncode = -9; late = self.child(code=0); late_token = object()
+        class LateOpaque(set):
+            def discard(self, code):
+                owner.owned_clients[late_token] = late
+                cleanup._client_unreaped(owner, late_token, late, time.monotonic()-1)
+                super().discard(code)
+        owner.cleanup_uncertain = LateOpaque(owner.cleanup_uncertain); owner.stopping.set()
+        settle_owned_clients(owner, owner.stopping.deadline)
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
+        settle_owned_clients(owner, owner.stopping.deadline)
+        self.assertEqual(owner.owned_clients, {})
+        self.assertEqual(owner.cleanup_uncertain, {'ENGINE_CLIENT_UNREAPED', 'LOCK_UNAVAILABLE'})
 
 
 class VersionTests(unittest.TestCase):

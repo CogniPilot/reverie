@@ -205,6 +205,38 @@ class ReadAloudQueue {
     this._next();
   }
 
+  /**
+   * Say this next, cutting what is being said: a line from another message goes back in the queue right after this one
+   * (as mute() does), the same message starts over.
+   */
+  playNow(text, meta) {
+    if (!text || !String(text).trim()) return;
+    const item = { text, meta };
+    const current = this.current;
+    if (current) {
+      const again = meta?.messageId && current.item.meta?.messageId === meta.messageId;
+      this.items.unshift(item, ...(again ? [] : [{ ...current.item, chunks: current.chunks.slice(current.index) }]));
+      this._finish(true);
+      return;
+    }
+    this.items.unshift(item);
+    this._next();
+  }
+
+  /** Stop one message: what is being said of it now is cut, and its queued lines are dropped. */
+  stopMessage(messageId) {
+    if (!messageId) return;
+    const dropped = this.items.filter((item) => item.meta?.messageId === messageId);
+    this.items = this.items.filter((item) => item.meta?.messageId !== messageId);
+    for (const item of dropped) this._done(item, 'dropped');
+    if (this.current?.item.meta?.messageId === messageId) this._finish(true, 'cancelled');
+  }
+
+  /** The message being said now, or null. */
+  get playingMessageId() {
+    return this.current?.item.meta?.messageId || null;
+  }
+
   /** Hold (true) or release (false) the queue; muting cuts what is being said. */
   mute(on) {
     this.muted = on;
@@ -490,6 +522,7 @@ Object.assign(ReverieApp.prototype, {
       this._readAloud = new ReadAloudQueue({
         synth: team || window.speechSynthesis,
         createUtterance: (text, meta) => {
+          if (meta?.messageId) (this._readAloudSpoken ??= new Set()).add(meta.messageId);
           // The car screen shows who is speaking (car-mode.js _renderCarSpeaker), so it is not said there either.
           const car = this._carScreen && !this._carScreen.hidden;
           const u = new SpeechSynthesisUtterance(car && meta?.text ? meta.text : text);
@@ -589,25 +622,44 @@ Object.assign(ReverieApp.prototype, {
     }
     // Car mode reads its own member's answers; never say one twice.
     if (this._carScreen && !this._carScreen.hidden && this._carVoiceMember?.()?.sessionId === m.from.sessionId) return;
+    const said = this._readAloudLine(data.roomId, m);
+    if (!said) return;
+    this._readAloudQueue()?.push(said.line, { ...said.meta, ...(notice ? { notice } : {}) });
+  },
+
+  /**
+   * What read-aloud says for a message and who says it, or null. `whole` (asked for one message) reads all of it; the room's
+   * automatic read-aloud keeps its word and seconds limits.
+   */
+  _readAloudLine(roomId, m, { whole = false } = {}) {
     const phrase = typeof chatAttachmentPhrase === 'function' ? chatAttachmentPhrase(m.attachments) : '';
     // Spoken as car mode would say it (car-mode.js): no markdown stars, code and paths as stand-ins.
-    const options = this._readAloudOptions(data.roomId);
+    const options = this._readAloudOptions(roomId);
     const name = readAloudClean(m.from.name.split(': ').pop(), [], options.emojis) || 'Agent';
     const names = [...(this._chatOwnerNames || []), ...(this._chatRoom?.members || []).flatMap(member => [member.name, member.name?.split(': ').pop()])];
     const cleaned = readAloudClean(m.text, names, options.emojis);
     const text = typeof carModeSpeakable === 'function' ? carModeSpeakable(cleaned) : cleaned;
-    const said = text ? readAloudText(name, text, options.seconds === null ? READ_ALOUD_MAX_WORDS : Infinity) : '';
+    const said = text ? readAloudText(name, text, whole || options.seconds !== null ? Infinity : READ_ALOUD_MAX_WORDS) : '';
     const complete = phrase ? (said ? `${said}, and ${phrase}.` : `${name} ${phrase}.`) : said;
-    const line = readAloudLimit(complete, options.seconds);
-    if (!line) return;
+    const line = whole ? complete : readAloudLimit(complete, options.seconds);
+    if (!line) return null;
     // Their own voice says who it is, so the server line drops "Name says:"; the phone voice (the backup) keeps it.
     const prefix = `${name} says: `;
-    this._readAloudQueue()?.push(line, {
-      room: data.roomId,
-      member: m.from.sessionId,
-      text: line.startsWith(prefix) ? line.slice(prefix.length) : line,
-      ...(notice ? { notice } : {}),
-    });
+    return { line, meta: { room: roomId, member: m.from.sessionId, messageId: m.id, text: line.startsWith(prefix) ? line.slice(prefix.length) : line } };
+  },
+
+  /** "Read aloud" / "Speak again" on one agent message: said now, in full, in its author's voice. False when it cannot be. */
+  _readAloudMessage(roomId, m) {
+    if (!m || m.from?.kind !== 'agent' || m.deleted || !m.text) return false;
+    const said = this._readAloudLine(roomId, m, { whole: true });
+    const queue = said && this._readAloudQueue();
+    if (!queue) return false;
+    queue.playNow(said.line, said.meta);
+    return true;
+  },
+
+  _readAloudStopMessage(messageId) {
+    this._readAloud?.stopMessage(messageId);
   },
 
   /**

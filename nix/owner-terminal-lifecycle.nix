@@ -3,6 +3,7 @@
 { pkgs, src, memory, profile, websiteManifest, imageProvenance, toolkit }:
 assert builtins.elem profile [ "terminal" "resource-terminal" ];
 let
+  pythonSource = import ./owner-terminal-python-source.nix { inherit pkgs src; };
   input = pkgs.writeText "reverie-owner-terminal-lifecycle-input.json" (builtins.toJSON {
     version = 1;
     purpose = "owner-terminal-lifecycle-runtime-v1";
@@ -10,7 +11,7 @@ let
     hostProgram = {
       invocation = "${memory}/bin/python3";
       executable = pkgs.python3.interpreter;
-      entry = "${src}/scripts/reverie-owner-terminal-host";
+      entry = "${pythonSource}/scripts/reverie-owner-terminal-host";
     };
     systemctl = "${pkgs.lib.getBin pkgs.systemd}/bin/systemctl";
     engineProgram = "${pkgs.docker-client}/bin/docker";
@@ -51,7 +52,7 @@ manifest.write_bytes(raw)
 pair={'path':str(manifest),'sha256':hashlib.sha256(raw).hexdigest()}
 script=out/'libexec/owner-terminal-lifecycle.py'
 script.write_text('import sys\n'
-    'sys.path.insert(0,${builtins.toJSON "${src}/python"})\n'
+    'sys.path.insert(0,${builtins.toJSON "${pythonSource}/python"})\n'
     'from reverie.owner_terminal_lifecycle import main\n'
     'raise SystemExit(main(runtime_manifest='+repr(pair)+'))\n')
 launcher=out/'bin/reverie-owner-terminal-lifecycle'

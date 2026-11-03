@@ -194,7 +194,7 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 }
 .ca-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ca-hash { flex: none; width: 20px; text-align: center; color: var(--text-muted); font-weight: 400; }
-/* Sentence case, like the Embassies heading: all caps gave section names more weight than the channels (James 10-19). */
+/* Sentence case, like the Embassies heading: all caps gave section names more weight than the channels. */
 .ca-cat {
   margin-top: 12px;
   font-size: 12px;
@@ -358,7 +358,7 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-root .chatroom-suggest { flex: 1 0 100%; width: auto; }
 .ca-root .chatroom-composer-row { display: contents; }
 /* The text box never shrinks below a readable width: when the bar is too narrow (voice selector, attachments, a thin
-   window) the tools wrap onto their own line instead of crushing the box to one letter per line (James 10-29). */
+   window) the tools wrap onto their own line instead of crushing the box to one letter per line. */
 .ca-root .chatroom-input {
   order: 1;
   flex: 1 1 12em;
@@ -388,6 +388,29 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-root .chatroom-mic { order: 4; }
 .ca-root .chatroom-handsfree { order: 4; height: 32px; max-width: 10em; text-overflow: ellipsis; }
 .ca-root .chatroom-send { order: 5; flex: none; height: 32px; padding: 0 14px; border-radius: 6px; }
+/* Voice: one labelled control beside Send (state dot: off, listening, speaking) and one panel above the composer. */
+.ca-root .chatroom-composer { position: relative; }
+.ca-root .ca-voice-btn { order: 4; flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--ca-line); border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.ca-root .ca-voice-btn[hidden], .ca-root .ca-voice-home[hidden] { display: none; }
+.ca-root .ca-voice-btn:hover { background: var(--ca-hover); }
+.ca-root .ca-voice-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.ca-root .ca-voice-btn[data-state='listening'] .ca-voice-dot { background: #e5484d; }
+.ca-root .ca-voice-btn[data-state='speaking'] .ca-voice-dot { background: var(--accent); }
+.ca-root .ca-voice-panel {
+  position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 30;
+  box-sizing: border-box; max-width: 22rem; max-height: min(60vh, 26rem); margin-left: auto; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+  border: 1px solid var(--ca-line); border-radius: 10px; background: var(--ca-side-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.ca-root .ca-voice-head { display: flex; align-items: center; gap: 8px; }
+.ca-root .ca-voice-state { flex: 1; min-width: 0; color: var(--text-dim); font-size: 13px; }
+.ca-root .ca-voice-talk, .ca-root .ca-voice-listen, .ca-root .ca-voice-replies { display: flex; flex-direction: column; gap: 6px; }
+.ca-root :is(.ca-voice-talk, .ca-voice-listen, .ca-voice-stop)[hidden] { display: none; }
+.ca-root .ca-voice-label { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
+.ca-root .ca-voice-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.ca-root .ca-voice-choices [aria-pressed='true'] { border-color: var(--accent); color: var(--text); }
+.ca-root .ca-voice-panel .chatroom-mic { order: 0; align-self: flex-start; width: 44px; height: 44px; }
+.ca-root .ca-voice-panel .chatroom-handsfree { order: 0; max-width: 100%; height: 36px; }
 
 /* ── member list ── */
 .ca-members {
@@ -635,6 +658,22 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
   }
 }
 
+/* ── a web page from a message, beside the conversation; on a phone it covers the conversation until Back ── */
+.ca-web { flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; background: var(--ca-main-bg); border-left: 1px solid var(--ca-line); }
+.ca-web[hidden] { display: none; }
+.ca-root.ca-web-open .ca-chat { flex: 1 1 50%; }
+.ca-web-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--ca-line); }
+.ca-web-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ca-web-external { flex: none; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.ca-web-note { flex: none; margin: 0; padding: 4px 12px; color: var(--text-dim); font-size: 12px; }
+.ca-web-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; }
+@media (max-width: 767px) {
+  .ca-web { position: fixed; top: var(--ca-vtop, 0); right: 0; bottom: 0; left: 0; z-index: 2; min-width: 0; border-left: 0; }
+  .ca-web-head { padding-top: max(4px, env(safe-area-inset-top)); }
+  .ca-web-head .ca-icon-btn, .ca-web-external { min-height: 44px; min-width: 44px; }
+  .ca-web-frame { padding-bottom: env(safe-area-inset-bottom); box-sizing: border-box; }
+}
+
 /* ── phones: one column, the rail and sidebar are a drawer ──
    Closed, a drawer is moved fully off-screen (its own width plus its left offset) AND hidden, so no
    edge of it can show and nothing in it can be tabbed to. */
@@ -743,9 +782,19 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
   border-bottom: 1px solid var(--ca-line); border-radius: 8px 8px 0 0; background: var(--ca-side-bg); font-size: 13px; color: var(--text-dim);
 }
 .ca-root .ca-reply-bar[hidden] { display: none; }
+.ca-root .ca-select-bar {
+  flex: 1 0 100%; display: flex; align-items: center; gap: 8px; margin: -6px -8px 6px; padding: 6px 12px;
+  border-bottom: 1px solid var(--ca-line); border-radius: 8px 8px 0 0; background: var(--ca-side-bg); font-size: 13px; color: var(--text-dim);
+}
+.ca-root .ca-select-bar[hidden] { display: none; }
+.ca-root .ca-select-count { font-weight: 600; color: var(--text); }
+.ca-root .ca-msg.is-delete-selected { background: color-mix(in srgb, var(--bad, #e5484d) 14%, transparent); box-shadow: inset 3px 0 0 var(--bad, #e5484d); }
 /* "<name> is typing…": one quiet line over the message box, three dots that bounce (still when motion is reduced). */
 .ca-root .ca-typing { display: flex; align-items: center; gap: 8px; min-height: 22px; padding: 2px 16px 4px; font-size: 13px; color: var(--text-dim); }
 .ca-root .ca-typing[hidden] { display: none; }
+/* Over the message box while the feed shows older messages: one click back to the newest. */
+.ca-root .ca-jump-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 16px; padding: 4px 4px 4px 12px; border-radius: 8px 8px 0 0; background: color-mix(in srgb, var(--accent, #5b8def) 85%, #000); color: #fff; font-size: 13px; }
+.ca-root .ca-jump-bar[hidden] { display: none; }
 .ca-root .ca-typing-dots { display: inline-flex; align-items: flex-end; gap: 3px; height: 10px; }
 .ca-root .ca-typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: ca-typing-bounce 1.2s ease-in-out infinite; }
 .ca-root .ca-typing-dots i:nth-child(2) { animation-delay: 0.15s; }
@@ -1137,6 +1186,10 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 /* edited messages, pins and the in-place editor */
 .ca-edited { color: var(--text-muted); font-size: 11px; }
 .ca-msg.is-pinned { box-shadow: inset 2px 0 0 var(--accent, #5b8def); }
+/* A message being read aloud on this device, with its own Stop. */
+.ca-msg.is-reading { background: color-mix(in srgb, var(--accent, #5b8def) 10%, transparent); }
+.ca-reading-stop { display: inline-flex; align-items: center; margin-top: 4px; min-height: 28px; padding: 2px 10px; font-size: 12px; }
+@media (max-width: 767px) { .ca-reading-stop { min-height: 44px; } }
 .ca-pin-mark { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font-size: 11px; color: var(--text-dim); }
 .ca-pin-mark svg { width: 12px; height: 12px; }
 .ca-head-pins.has-pins { color: var(--accent, #5b8def); }
@@ -1382,6 +1435,11 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .ca-company-tree li { padding:4px 0; font-size:13px; line-height:1.5; }
 .ca-company-hire { margin-top:20px; padding:18px; border:1px solid var(--ca-line); border-radius:10px; background:var(--ca-side-bg,var(--bg-card)); }
 .ca-company-hire[hidden] { display:none; }
+.ca-company-hire-requests { margin:0 0 20px; padding:18px; border:1px solid var(--ca-line); border-radius:10px; background:var(--ca-side-bg,var(--bg-card)); }
+.ca-company-hire-request + .ca-company-hire-request { border-top:1px solid var(--ca-line); margin-top:12px; padding-top:12px; }
+.ca-company-hire-request-facts { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:4px 12px; margin:8px 0; }
+.ca-company-hire-request-facts dt { color:var(--text-muted); }
+.ca-company-hire-request-facts dd { margin:0; overflow-wrap:anywhere; }
 .ca-company-people-heading { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
 .ca-company-people-heading h3 { margin:0; }
 .ca-company-add { width:30px; height:30px; padding:0; border-radius:50%; font-size:22px; line-height:1; }
@@ -1630,7 +1688,7 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-rail > .ca-office-launcher { position: absolute; left: 0; flex: 0 0 auto; margin: 0; width: 100%; justify-content: center; padding: 0; }
 .ca-rail .ca-office-gear { width: 40px; height: 36px; }
 .ca-rail .ca-office-gear svg { width: 24px; height: 24px; flex: none; }
-/* One rule above the panel, like the one under the server name (.ca-side-title), and no box around it (James 10-27). */
+/* One rule above the panel, like the one under the server name (.ca-side-title), and no box around it. */
 .ca-root > .ca-office-pane { position: absolute; z-index: 30; left: var(--ca-rail); width: var(--ca-side); box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 0; border-top: 1px solid var(--ca-line); border-radius: 0; background: var(--ca-side-bg, var(--ca-main-bg)); box-shadow: none; overflow-y: auto; }
 .ca-root > .ca-office-pane.ca-office-pane-opening { animation: ca-office-slide-up .16s ease-out; }
 .ca-root > .ca-office-pane[hidden] { display: none; }
@@ -1652,8 +1710,6 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-search-form select { min-width: 0; }
 .ca-search-hit { margin: 10px 0; padding: 10px; border: 1px solid var(--ca-line); border-radius: 6px; overflow-wrap: anywhere; }
 .ca-search-excerpt { white-space: pre-wrap; margin: 8px 0; font-size: 13px; }
-.ca-search-hit.is-selected { border-color: var(--accent, #5b8def); outline: 1px solid var(--accent, #5b8def); }
-.ca-search-nav { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 900px) {
   .ca-message-search { position: absolute; right: 0; top: 0; bottom: 0; width: min(420px, 100%); box-sizing: border-box; z-index: 20; box-shadow: -4px 0 20px #0005; }
 }
@@ -1670,3 +1726,32 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-gpu-dialog .ca-gpu-graph { display: block; width: min(480px, 100%); height: auto; margin: 8px 0; background: var(--ca-side-bg); border-radius: 6px; }
 .ca-gpu-dialog .ca-gpu-grid { stroke: var(--ca-line); stroke-width: 1; }
 .ca-gpu-dialog .ca-gpu-line { fill: none; stroke: var(--accent, #5865f2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ca-company-gpu-history { margin-top: 20px; }
+.ca-company-gpu-history .ca-gpu-graph { display: block; width: min(720px, 100%); height: 140px; margin: 8px 0; background: var(--ca-side-bg); border-radius: 6px; }
+.ca-company-gpu-history .ca-gpu-grid { stroke: var(--ca-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ca-company-gpu-history .ca-gpu-line { fill: none; stroke: var(--accent, #5865f2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ca-company-gpu-history [aria-pressed="true"] { border-color: var(--accent, #5865f2); }
+
+/* Viewer transport loss is a neutral warning, separate from agent availability. */
+.ca-root .ca-viewer-warning, .ca-root .ca-runtime-health.is-viewer-unavailable,
+.ca-root .ca-company-state.is-viewer-unavailable { color: var(--text-dim); font-weight: 400; }
+.ca-root .ca-viewer-warning { font-size: .85em; }
+.ca-root .ca-viewer-warning::before, .ca-root .ca-runtime-health.is-viewer-unavailable::before { content: '↔ '; }
+.ca-root .ca-member.is-state-viewer-unavailable { opacity: 1; }
+.ca-root .ca-member.is-state-viewer-unavailable .ca-member-sub { color: var(--text-dim); }
+
+/* Journal map (openJournalMap): sized by importance, faded when superseded. */
+.ca-dialog.ca-journal-dialog { width: min(96vw, 1000px); max-width: min(96vw, 1000px); }
+.ca-journal-map { display: block; width: 100%; height: auto; max-height: 62vh; background: var(--ca-surface-2, transparent); border-radius: 8px; }
+.ca-journal-edge { stroke: currentColor; opacity: .25; stroke-width: 1; }
+.ca-journal-edge.is-supersedes { stroke-width: 2.5; opacity: .55; }
+.ca-journal-edge.is-related { stroke-dasharray: 5 4; stroke-width: 1.5; opacity: .45; }
+.ca-journal-edge.is-active { opacity: .9; }
+.ca-journal-node { cursor: pointer; }
+.ca-journal-node circle { fill: hsl(var(--hue, 210) 55% 55%); stroke: hsl(var(--hue, 210) 55% 35%); stroke-width: 1.5; }
+.ca-journal-node.is-superseded { opacity: .35; }
+.ca-journal-node.is-dim { opacity: .12; }
+.ca-journal-node.is-selected circle, .ca-journal-node:focus-visible circle { stroke-width: 4; }
+.ca-journal-node:focus { outline: none; }
+.ca-journal-text { white-space: pre-wrap; }
+.ca-journal-sources { margin: 4px 0; padding-left: 20px; }

@@ -25,7 +25,7 @@ afterEach(async () => {
 async function fixture(mode?: boolean, existingStore?: BoardStore) {
   let store = existingStore;
   if (!store) {
-    const dir = await mkdtemp(join(tmpdir(), 'quill-decision-fallback-'));
+    const dir = await mkdtemp(join(tmpdir(), 'quinn-decision-fallback-'));
     dirs.push(dir);
     store = new BoardStore(join(dir, 'board.json'));
     await store.init();

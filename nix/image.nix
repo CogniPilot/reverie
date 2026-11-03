@@ -3,6 +3,7 @@ let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
+  imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
   claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
@@ -15,23 +16,40 @@ let
     runtimeInputs = [ pkgs.nix pkgs.coreutils ];
     text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile (src + "/scripts/reverie-nix-store-prepare"));
   };
+  # dockerTools.caCertificates, but from the runtime's CA bundle rather than the pinned nixpkgs' older one.
+  caCertificates = pkgs.runCommand "ca-certificates" { } ''
+    mkdir -p $out/etc/ssl/certs $out/etc/pki/tls/certs
+    ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-bundle.crt
+    ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-certificates.crt
+    ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/pki/tls/certs/ca-bundle.crt
+  '';
   baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
-    pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ]
+    caCertificates pkgs.sudo pkgs.tini ]
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare ]
+      # Laptops build Rust (the autoenv cargo/rustc shims pass through to these);
+      # the server image does not, and the toolchain closure is about 2.4 GB.
+      ++ [ pkgs.rustc pkgs.cargo ]
       ++ import ./worker-base-tools.nix { inherit pkgs; })
     ++ pkgs.lib.optional (rootlessDocker != null) idmap
     ++ pkgs.lib.optional (browserRuntime != null) browserRuntime
     ++ pkgs.lib.optionals (chatLanguageTools != null) [ chatLanguageTools.python chatLanguageTools.modelica ];
   nixBase = pkgs.linkFarm "reverie-laptop-base" (pkgs.lib.imap0 (i: path: {
     name = "share/reverie/base/${toString i}"; inherit path;
-  }) (baseContents ++ [ reverie console memory entrypoint ]));
+  }) (baseContents ++ [ reverie console memory entrypoint ] ++ pkgs.lib.optional worker imagePython));
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
+  webArgs = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
+  ownerWebArgs = if ownerTerminalWebsite == null then null else ownerTerminalWebsite.webArgs;
+  # The selected H factory adds only this exact pair to the fixed web command.
+  # Reuse its string-only canonical guest-path validator; no host file is read.
+  serviceAuthWebArgs = builtins.isList ownerWebArgs && builtins.length ownerWebArgs == 7
+    && builtins.elemAt ownerWebArgs 5 == "--service-auth-config"
+    && builtins.isString (builtins.elemAt ownerWebArgs 6)
+    && ownerWebArgs == webArgs ++ [ "--service-auth-config"
+      ((import ./service-auth-config.nix { inherit (pkgs) lib; }) (builtins.elemAt ownerWebArgs 6)) ];
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
-assert ownerTerminalWebsite == null || (!worker && !resourceReplacement && builtins.elem ownerTerminalWebsite.webArgs [
-  [ "web" "--host" "0.0.0.0" "--port" "3000" ]
-  [ "web" "--host" "0.0.0.0" "--port" "3000" "--resource-replacement" ]
-]);
+assert ownerTerminalWebsite == null || (!worker && !resourceReplacement &&
+  (builtins.elem ownerWebArgs [ webArgs (webArgs ++ [ "--resource-replacement" ]) ] || serviceAuthWebArgs));
 assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
   && uid < 2147483648 && gid < 2147483648
   && builtins.isInt rootlessDocker.subuidStart && rootlessDocker.subuidStart > 0
@@ -98,7 +116,7 @@ pkgs.dockerTools.buildLayeredImage {
     ln -s ${console}/lib/reverie opt/reverie/console
     mkdir -p opt/reverie/apps
     ln -s ${console}/lib/reverie opt/reverie/apps/web
-    ln -s ${memory} opt/reverie/python
+    ln -s ${imagePython} opt/reverie/python
     ln -s ${entrypoint} usr/local/bin/reverie-start
     ${pkgs.lib.optionalString (worker && claudeInterpreter != null) ''
       mkdir -p .${builtins.dirOf claudeInterpreter}
@@ -107,6 +125,12 @@ pkgs.dockerTools.buildLayeredImage {
       ln -s ${pkgs.stdenv.cc.bintools.dynamicLinker} .${claudeInterpreter}
     ''}
     ${pkgs.lib.optionalString worker ''
+      # Keep the interactive aliases and pytest on the laptop-only interpreter.
+      for command in python python3 ${pkgs.python3.executable} pytest py.test; do
+        test -L "bin/$command"
+        unlink "bin/$command"
+        ln -s ${imagePython}/bin/"$command" "bin/$command"
+      done
       mkdir -p opt/reverie/human/bin
       # Direct image-root files, not links into the laptop's writable /nix.
       cp ${humanToolkit}/opt/reverie/human/bin/{reverie-human-shell,bash} opt/reverie/human/bin/
@@ -135,6 +159,7 @@ pkgs.dockerTools.buildLayeredImage {
     max-jobs = 1
     cores = 4
     flake-registry = /etc/nix/registry.json
+    auto-optimise-store = true
     NIXCONF
     cat > etc/nix/registry.json <<'REGISTRY'
     ${builtins.toJSON { version = 2; flakes = [{ from = { type = "indirect"; id = "nixpkgs"; }; to = nixpkgsPin; }]; }}
@@ -184,6 +209,9 @@ pkgs.dockerTools.buildLayeredImage {
       "TMPDIR=${if worker then "/tmp" else "/scratch/tmp"}"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
       "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
+      # Laptops: Reverie's own hooks run the image's CLI, so an older `reverie` earlier on PATH (a home
+      # install from before a release) cannot answer for them.
+      ++ pkgs.lib.optionals worker [ "REVERIE_CLI=${reverie}/bin/reverie" ]
       ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs"
         "TZDIR=${pkgs.tzdata}/share/zoneinfo" ]
       ++ pkgs.lib.optionals (chatLanguageTools != null) [

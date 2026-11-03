@@ -54,6 +54,30 @@ class WorkerServiceDiagnosticsTests(unittest.TestCase):
         self.assertNotIn(secret, errors)
         self.assertEqual(json.loads(errors.splitlines()[-1])['category'], 'OBSERVATION_TIMEOUT')
 
+    def test_manager_failure_reports_only_fixed_stage_and_bounded_returncode(self):
+        for operation, stage in [('stop', 'MANAGER_STOP'), ('disable', 'MANAGER_DISABLE'),
+                                 ('daemon-reload', 'MANAGER_RELOAD')]:
+            with self.subTest(operation=operation):
+                service = S.WorkerService(run=lambda args: subprocess.CompletedProcess(
+                    args, 5, 'private-output', 'private-error'))
+                with self.assertRaises(S.ManagerOperationError) as failure:
+                    service.manager(operation, S.UNIT)
+                code, output, errors = self.call(failure.exception)
+                self.assertEqual((code, output), (1, ''))
+                self.assertEqual(json.loads(errors.splitlines()[-1]), {
+                    'category': 'OPERATION_UNCONFIRMED', 'reason': 'Owner user-service manager operation failed',
+                    'managerStage': stage, 'returncode': 5})
+                self.assertNotIn('private-output', errors); self.assertNotIn('private-error', errors)
+
+    def test_arbitrary_manager_metadata_is_not_serialized(self):
+        for stage, code in [('/private/sensitive', 1), ('MANAGER_STOP', True),
+                            ('MANAGER_DISABLE', 0), ('MANAGER_RELOAD', 999999999)]:
+            error = S.ManagerOperationError(stage, code)
+            _, output, errors = self.call(error)
+            value = json.loads(errors.splitlines()[-1])
+            self.assertEqual(output, ''); self.assertNotIn('managerStage', value)
+            self.assertNotIn('returncode', value); self.assertNotIn('/private/sensitive', errors)
+
     def test_opt_in_and_help_do_not_change_success_or_default_failure_status(self):
         code, output, errors = self.call(ValueError('synthetic-private-reason'), diagnostic=False)
         self.assertEqual(code, 1); self.assertEqual(output, '')

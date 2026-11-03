@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AUDIO_ATTACHMENT_EXTENSIONS, VIDEO_ATTACHMENT_EXTENSIONS } from '../src/attachment-registry.js';
+import { VIDEO_EXTENSION_TYPES } from '../src/video-container.js';
 
 const publicFile = (name: string) =>
   readFileSync(resolve(import.meta.dirname, '..', 'src', 'web', 'public', name), 'utf8');
@@ -71,5 +72,16 @@ describe('media extension parity (attachment registry ⇄ frontend)', () => {
 
   it("panels-ui.js AUDIO_EXTS exactly equals the registry's audio set", () => {
     expect(sorted(panelsUiSet('AUDIO_EXTS'))).toEqual(sorted(AUDIO_ATTACHMENT_EXTENSIONS));
+  });
+
+  it('the read-only preview plays exactly the registry video set, and the server knows a type for each', () => {
+    expect(sorted(panelsUiSet('READ_ONLY_VIDEO_EXTS'))).toEqual(sorted(VIDEO_ATTACHMENT_EXTENSIONS));
+    expect(sorted(new Set(Object.keys(VIDEO_EXTENSION_TYPES)))).toEqual(sorted(VIDEO_ATTACHMENT_EXTENSIONS));
+  });
+
+  it('chat plays inline exactly the video types the server can serve inline', () => {
+    const m = publicFile('chat-media.js').match(/\/\^video\\\/\(([a-z0-9|-]+)\)\$\//);
+    expect(m, 'chat video type pattern not found in chat-media.js').not.toBeNull();
+    expect(sorted(new Set(m![1].split('|').map((t) => `video/${t}`)))).toEqual(sorted(new Set(Object.values(VIDEO_EXTENSION_TYPES))));
   });
 });

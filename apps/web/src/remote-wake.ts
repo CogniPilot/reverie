@@ -129,20 +129,27 @@ export function decideRemoteInputAction(args: {
  * typing, where the newest bytes are the ones the user just produced, and wrong for a
  * chunk that arrived whole.
  */
-export function appendBoundedPending(
-  pending: string[],
-  data: string,
+export function appendBoundedPending<T extends string | PendingChunk>(
+  pending: T[],
+  data: T,
   maxBytes = REMOTE_WAKE_PENDING_MAX_BYTES
-): string[] {
-  if (Buffer.byteLength(data) > maxBytes) return pending;
+): T[] {
+  if (chunkBytes(data) > maxBytes) return pending;
   const next = [...pending, data];
-  let total = next.reduce((sum, chunk) => sum + Buffer.byteLength(chunk), 0);
+  let total = next.reduce((sum, chunk) => sum + chunkBytes(chunk), 0);
   while (next.length > 1 && total > maxBytes) {
-    total -= Buffer.byteLength(next[0]);
+    total -= chunkBytes(next[0]);
     next.shift();
   }
   return next;
 }
+
+/** One buffered input chunk and who sent it: an agent's keeps the move-hold check and its guard through the deferred flush. */
+export interface PendingChunk {
+  data: string;
+  agentInput: boolean;
+}
+const chunkBytes = (chunk: string | PendingChunk) => Buffer.byteLength(typeof chunk === 'string' ? chunk : chunk.data);
 
 /** The remote fields the wake flow needs. Structurally satisfied by `SessionRemote`. */
 export interface WakeableRemote {
@@ -246,7 +253,8 @@ export interface WakeableSession {
   /** COD-108 reattach: respawns the local ssh pane, idempotently attaching the durable remote tmux. */
   reattachRemote(): Promise<boolean>;
   /** Write bytes to the session's pane. `fromUser` marks input a person typed (or an agent sent for them). */
-  writeViaMux(data: string, options?: { fromUser?: boolean; opencodeGuard?: boolean | 'person' }): Promise<boolean>;
+  writeViaMux(data: string, options?: { fromUser?: boolean; opencodeGuard?: boolean | 'person'; agentInput?: boolean;
+    onMoveHeld?: () => void; onTypedUnsent?: () => void }): Promise<boolean>;
 }
 
 /** Injected IO so the registry holds no direct dependency on ssh/net/child_process in tests. */
@@ -322,7 +330,7 @@ interface WakeState {
   probedAt: number;
   reachable?: boolean;
   waking: Promise<boolean> | null;
-  pending: string[];
+  pending: PendingChunk[];
   /** Host config resolved after launch (see `RemoteWakeDeps.resolveRemote`). */
   resolvedRemote?: WakeableRemote;
   resolvedAt: number;
@@ -375,7 +383,7 @@ export class RemoteWakeRegistry {
   pendingBytes(sessionId: string): number {
     const state = this.states.get(sessionId);
     if (!state) return 0;
-    return state.pending.reduce((sum, chunk) => sum + Buffer.byteLength(chunk), 0);
+    return state.pending.reduce((sum, chunk) => sum + chunkBytes(chunk), 0);
   }
 
   /**
@@ -430,7 +438,8 @@ export class RemoteWakeRegistry {
    * queued them behind an in-flight wake or started a wake, and will flush them
    * in order once the pane is reattached.
    */
-  async handleInput(session: WakeableSession, data: string): Promise<RemoteInputOutcome> {
+  async handleInput(session: WakeableSession, data: string, origin: { agentInput?: boolean } = {}): Promise<RemoteInputOutcome> {
+    const chunk: PendingChunk = { data, agentInput: !!origin.agentInput };
     const remote = await this._effectiveRemote(session);
     // A proxied host can never pass the readiness poll, so buffering for it would hold
     // the bytes for the life of the session (reproduced upstream: three inputs, nothing
@@ -447,7 +456,7 @@ export class RemoteWakeRegistry {
 
     if (action === 'deliver') return 'deliver';
     if (action === 'buffer') {
-      const queued = this._enqueue(session.id, data);
+      const queued = this._enqueue(session.id, chunk);
       // A buffered verdict with no wake in flight still has to DRIVE a wake (the
       // previous one failed and reset the probe state, or the ladder landed here
       // directly) — otherwise the bytes would sit in the buffer forever.
@@ -460,7 +469,7 @@ export class RemoteWakeRegistry {
     state.reachable = remote ? await this.deps.probe(remote) : true;
     if (state.reachable) return 'deliver';
 
-    const queued = this._enqueue(session.id, data);
+    const queued = this._enqueue(session.id, chunk);
     void this.wake(session);
     return queued;
   }
@@ -769,22 +778,22 @@ export class RemoteWakeRegistry {
   }
 
   /** Queue a chunk; `'dropped'` when it was over the cap and never entered the buffer. */
-  private _enqueue(sessionId: string, data: string): 'buffered' | 'dropped' {
+  private _enqueue(sessionId: string, chunk: PendingChunk): 'buffered' | 'dropped' {
     const state = this._state(sessionId);
-    const next = appendBoundedPending(state.pending, data);
+    const next = appendBoundedPending(state.pending, chunk);
     if (next === state.pending) {
       // Oversized chunk: dropped whole (see `appendBoundedPending`), so the buffer is
       // untouched and nothing is delivered as a fragment. Logged, and reported to the
       // route, which answers `dropped:true` — the user's paste is gone and a bare 200
       // could not say so.
       this.deps.log?.(
-        `[RemoteWake] dropped a ${Buffer.byteLength(data)}-byte input chunk for session ${sessionId} — over the ${REMOTE_WAKE_PENDING_MAX_BYTES}-byte wake buffer, and a truncated paste must not be delivered as a fragment`
+        `[RemoteWake] dropped a ${chunkBytes(chunk)}-byte input chunk for session ${sessionId} — over the ${REMOTE_WAKE_PENDING_MAX_BYTES}-byte wake buffer, and a truncated paste must not be delivered as a fragment`
       );
       return 'dropped';
     }
-    const before = state.pending.reduce((sum, chunk) => sum + Buffer.byteLength(chunk), 0);
-    const after = next.reduce((sum, chunk) => sum + Buffer.byteLength(chunk), 0);
-    if (before + Buffer.byteLength(data) > after) {
+    const before = state.pending.reduce((sum, c) => sum + chunkBytes(c), 0);
+    const after = next.reduce((sum, c) => sum + chunkBytes(c), 0);
+    if (before + chunkBytes(chunk) > after) {
       this.deps.log?.(`[RemoteWake] pending buffer cap reached for session ${sessionId} — oldest input dropped`);
     }
     state.pending = next;
@@ -804,7 +813,17 @@ export class RemoteWakeRegistry {
       // `fromUser`: these bytes came through the input route as a person's prompt, so
       // they may name the tab — without it a session whose FIRST prompt was buffered
       // through a wake could never be auto-named.
-      const ok = await session.writeViaMux(chunk, { fromUser: true, opencodeGuard: 'person' }).catch(() => false);
+      // An agent's chunk keeps its origin: its guard, and the plan-move hold checked at the write (agentInput), so a move
+      // that took the composer after the buffered ACK gets nothing typed. Refused before any byte, that chunk alone is
+      // dropped (it was ACKed as buffered, so it is never replayed) and the person's chunks behind it still go out.
+      let heldByMove = false;
+      const ok = await session.writeViaMux(chunk.data, chunk.agentInput
+        ? { fromUser: true, opencodeGuard: true, agentInput: true, onMoveHeld: () => { heldByMove = true; } }
+        : { fromUser: true, opencodeGuard: 'person' }).catch(() => false);
+      if (!ok && heldByMove) {
+        this.deps.log?.(`[RemoteWake] a buffered agent chunk for session ${session.id} was dropped: a plan move owns the composer`);
+        continue;
+      }
       if (!ok) {
         // Drop the rest, and say so. Retaining it looked safer but was worse: the wake
         // still resolves and marks the host reachable, so the NEXT input takes the

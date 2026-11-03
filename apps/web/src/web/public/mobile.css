@@ -1577,6 +1577,12 @@ html.mobile-init .file-browser-panel {
     padding: 6px 9px;
   }
 
+  /* The terminal row's | / - ~ are one narrow glyph each; keep them a full-size touch target. */
+  .phone-row .accessory-btn-char {
+    min-width: 34px;
+    font-size: 0.85rem;
+  }
+
   .phone-row .accessory-btn-dismiss {
     padding: 6px 8px;
     max-width: 64px;

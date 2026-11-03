@@ -19,6 +19,16 @@ phone mode or complete a Board task. Unconfirmed/queued deliveries remain visibl
 even if attention is handled. Use the existing delivery-status and exact-read
 acknowledgement commands for their separate purpose.
 
+To clear a backlog of older notices from agents and bots in one room, use
+`reverie agent chat handle --room ROOM --before TIME`, where TIME is epoch
+milliseconds or ISO 8601 with `Z` or an offset, and in the past. It lists the
+caller's notices from agents and bots in that room's recent window that are still
+pending before TIME (`GET /api/chatrooms/notices/pending-before?roomId=&before=`,
+exact caller, read-only), then resolves each one exactly as the single form does,
+with its own exact read. Owner and other human messages are never included: an
+owner request is answered or handled one at a time. Messages already handled, and
+handled ones whose delivery is still uncertain, are not resolved again.
+
 The own-session API is `POST /api/chatrooms/notices/resolve`, also available through
 the existing `/api/v1` alias. Its strict body has `roomId`, `messageId`, `readToken`
 and `disposition` (`handled` or `superseded`). Supersession also requires a

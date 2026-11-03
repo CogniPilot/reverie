@@ -1,17 +1,20 @@
 /** Bounded repair of disposable worker viewers; never a provider launch. */
 import type { CompanyService } from './company-service.js';
+import type { CompanyEmployee } from './company-types.js';
 import type { Session } from './session.js';
 import { expertRuntimeRecipe } from './expert-runtime-recipe.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ownerFor, parseBody } from './web/route-helpers.js';
 
-const BACKOFF = [2_000, 5_000, 15_000] as const;
+const BACKOFF = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
 export type ViewerReconnectResult = 'connected' | 'unavailable' | 'busy' | 'changed';
 export interface ViewerReconnectDeps {
   company: CompanyService;
   session(id: string): Session | undefined;
   ready(): boolean;
+  /** Fresh, bound native command observation; no provider launch authority. */
+  providerHealthy(employee: CompanyEmployee): boolean;
   moveGuard(employeeId: string): Promise<() => boolean>;
   pause(id: string): () => void;
   publish(session: Session): void;
@@ -22,11 +25,12 @@ export class WorkerViewerReconnect {
   private flights = new Set<string>();
   private attempts = new Map<string, { key: string; count: number; next: number }>();
   private ticking = false;
+  private lastAutomaticEmployeeId?: string;
   constructor(private readonly deps: ViewerReconnectDeps) {}
 
   async reconnect(employeeId: string, expected: { sessionId: string; sessionGeneration: number },
     owner: string | undefined, automatic = false): Promise<ViewerReconnectResult> {
-    const d = this.deps, now = d.now ?? Date.now;
+    const d = this.deps, now = d.now ?? (() => performance.now());
     const original = d.company.registeredEmployees().find(e => e.id === employeeId && e.owner === owner);
     if (!d.ready() || !original || original.sessionId !== expected.sessionId ||
       original.sessionGeneration !== expected.sessionGeneration || original.desiredRunning !== true ||
@@ -34,16 +38,20 @@ export class WorkerViewerReconnect {
     const session = d.session(original.sessionId);
     if (!session?.workerViewerReconnect || session.owner !== owner || session.runtimeHealth !== 'disconnected')
       return 'unavailable';
+    if (automatic && !d.providerHealthy(original)) return 'unavailable';
     if (this.flights.has(employeeId)) return 'busy';
     const fingerprint = (e: typeof original) => JSON.stringify([e.id,e.owner,e.sessionId,e.sessionGeneration,
       e.desiredRunning,e.onVacation,e.bindingMigration,e.runtimeRecipe,e.permissions]);
     const runtime = JSON.stringify(expertRuntimeRecipe(session));
     const key = fingerprint(original), previous = this.attempts.get(employeeId);
-    if (automatic && previous?.key === key && (previous.count >= BACKOFF.length || now() < previous.next))
+    if (automatic && previous?.key === key && now() < previous.next)
       return 'unavailable';
     this.flights.add(employeeId);
     const count = previous?.key === key ? previous.count : 0;
-    this.attempts.set(employeeId, { key, count: count + 1, next: now() + BACKOFF[Math.min(count, BACKOFF.length - 1)] });
+    this.attempts.set(employeeId, { key, count: Math.min(count + 1, BACKOFF.length),
+      next: now() + BACKOFF[Math.min(count, BACKOFF.length - 1)] });
+    // Advance before asynchronous admission: a throwing attempt still owns its seat.
+    if (automatic) this.lastAutomaticEmployeeId = employeeId;
     let release: (() => void) | undefined;
     let claim: ReturnType<CompanyService['prepareWake']>;
     try {
@@ -51,7 +59,8 @@ export class WorkerViewerReconnect {
       const current = () => {
         const employee = d.company.registeredEmployees().find(e => e.id === employeeId);
         return d.ready() && moveCurrent() && !!employee && fingerprint(employee) === key &&
-          d.session(original.sessionId) === session && JSON.stringify(expertRuntimeRecipe(session)) === runtime && (!claim || claim.current());
+          (!automatic || d.providerHealthy(employee)) && d.session(original.sessionId) === session &&
+          JSON.stringify(expertRuntimeRecipe(session)) === runtime && (!claim || claim.current());
       };
       if (!current()) return 'changed';
       claim = d.company.prepareWake(employeeId, original.sessionId);
@@ -73,7 +82,10 @@ export class WorkerViewerReconnect {
     if (this.ticking || !this.deps.ready()) return;
     this.ticking = true;
     try {
-      for (const employee of this.deps.company.registeredEmployees()) {
+      const employees = this.deps.company.registeredEmployees();
+      const previousIndex = employees.findIndex(employee => employee.id === this.lastAutomaticEmployeeId);
+      for (let offset = 1; offset <= employees.length; offset++) {
+        const employee = employees[(previousIndex + offset) % employees.length];
         const session = this.deps.session(employee.sessionId);
         if (session?.runtimeHealth !== 'disconnected') { this.attempts.delete(employee.id); continue; }
         const previous = this.attempts.get(employee.id);

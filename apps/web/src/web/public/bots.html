@@ -39,6 +39,16 @@
         <p id="watch-status" role="status">Loading repository watchers…</p>
         <div id="github-watches" class="cards"></div>
       </section>
+      <section id="disk-alarm-section" aria-labelledby="disk-alarm-title">
+        <h2 id="disk-alarm-title">Disk alarm</h2>
+        <p class="hint">Posts in a channel when a disk Reverie can see passes the warning or critical level.</p>
+        <p id="disk-status" role="status">Loading the disk alarm…</p>
+        <div id="disk-volumes" class="cards"></div>
+        <div class="actions">
+          <button id="disk-edit" type="button" disabled>Set up the disk alarm</button
+          ><button id="disk-toggle" type="button" hidden>Turn off</button>
+        </div>
+      </section>
       <section aria-labelledby="routines-title">
         <h2 id="routines-title">Routines</h2>
         <p class="hint">Enabled routines run on their schedule. Execution status updates every 10 seconds.</p>
@@ -105,6 +115,73 @@
         <div class="actions">
           <button type="button" data-close="watch-dialog">Cancel</button
           ><button class="primary" type="submit">Save watcher</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="watch-recovery-dialog" aria-labelledby="watch-recovery-title">
+      <form id="watch-recovery-form">
+        <h2 id="watch-recovery-title">Review uncertain notification</h2>
+        <p id="watch-recovery-summary" role="status"></p>
+        <p>
+          The previous post may or may not have reached the channel. Its evidence will be retained. This action does not
+          resend it or mark it delivered.
+        </p>
+        <pre id="watch-recovery-notification" class="watch-recovery-notification"></pre>
+        <label class="check"
+          ><input id="watch-recovery-ack" type="checkbox" required />I understand this notification may be missing from
+          the channel.</label
+        >
+        <p id="watch-recovery-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="watch-recovery-dialog">Close</button>
+          <button id="watch-recovery-go" class="primary" type="submit" disabled>Retain evidence and continue</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="disk-dialog" aria-labelledby="disk-title">
+      <form id="disk-form">
+        <h2 id="disk-title">Disk alarm</h2>
+        <label>Channel<select name="roomId" aria-label="Disk alarm channel" required></select></label>
+        <label>Post as<select name="botId" aria-label="Disk alarm bot" required></select></label>
+        <label
+          >Warn at (% used)<input name="warnPercent" type="number" min="50" max="99" step="1" value="90" required
+        /></label>
+        <label
+          >Critical at (% used)<input
+            name="criticalPercent"
+            type="number"
+            min="51"
+            max="100"
+            step="1"
+            value="99"
+            required
+        /></label>
+        <label
+          >Check every (minutes)<input
+            name="intervalMinutes"
+            type="number"
+            min="1"
+            max="1440"
+            step="1"
+            value="5"
+            required
+        /></label>
+        <label
+          >Mention (optional)<input
+            name="mention"
+            maxlength="40"
+            placeholder="Name to mention, without @"
+            autocapitalize="none"
+            spellcheck="false"
+        /></label>
+        <p class="hint">
+          It posts once when a disk crosses a level and again when it recovers. Critical also notifies the owner's
+          devices. Saving turns the alarm on; the first check runs within the interval.
+        </p>
+        <p id="disk-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="disk-dialog">Cancel</button
+          ><button class="primary" type="submit">Save and turn on</button>
         </div>
       </form>
     </dialog>
@@ -189,21 +266,26 @@
         <label>Name<input name="name" required maxlength="100" /></label
         ><label>Bot<select name="botId" aria-label="Bot" required></select></label
         ><label>Channel<select name="roomId" aria-label="Channel" required></select></label
-        ><label>Message<textarea name="postText" required maxlength="2000" rows="4"></textarea></label
-        ><label
-          >Repeat every (minutes)<input
-            name="intervalMinutes"
-            type="number"
-            min="5"
-            max="525600"
-            value="60"
-            required /></label
-        ><label class="check"><input type="checkbox" name="enabled" />Enable schedule immediately</label>
+        ><label>Message<textarea name="postText" required maxlength="2000" rows="4"></textarea></label>
+        <div id="routine-schedule" class="schedule"></div>
+        <label class="check"><input type="checkbox" name="enabled" />Enable schedule immediately</label>
         <p class="hint">Saved disabled by default. Saving does not post a message immediately.</p>
         <p id="routine-error" class="error" role="alert"></p>
         <div class="actions">
           <button type="button" data-close="routine-dialog">Cancel</button
           ><button class="primary" type="submit">Save routine</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="schedule-dialog" aria-labelledby="schedule-title">
+      <form id="schedule-form">
+        <h2 id="schedule-title">Edit schedule</h2>
+        <p class="hint">Changes apply from the next run. The content and permissions stay as configured.</p>
+        <div id="edit-schedule" class="schedule"></div>
+        <p id="schedule-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="schedule-dialog">Cancel</button
+          ><button class="primary" type="submit">Save schedule</button>
         </div>
       </form>
     </dialog>
@@ -220,6 +302,27 @@
           ><button class="primary" type="submit">Save content</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="trial-dialog" aria-labelledby="trial-title">
+      <div class="trial">
+        <h2 id="trial-title">Preview</h2>
+        <p id="trial-summary" role="status"></p>
+        <pre id="trial-text" hidden></pre>
+        <h3>Checks</h3>
+        <ul id="trial-checks" class="trial-list"></ul>
+        <h3>Run once would</h3>
+        <ul id="trial-effects" class="trial-list"></ul>
+        <p id="trial-note" class="hint"></p>
+        <section id="trial-result" hidden>
+          <h3>Result</h3>
+          <dl id="trial-run"></dl>
+        </section>
+        <p id="trial-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="trial-dialog">Close</button
+          ><button id="trial-go" class="primary" type="button" disabled>Run once</button>
+        </div>
+      </div>
     </dialog>
     <footer>
       <button id="advanced" type="button">Advanced schedules</button><span id="advanced-hint" class="hint"></span>

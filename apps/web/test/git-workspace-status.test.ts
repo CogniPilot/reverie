@@ -117,9 +117,9 @@ describe('parsePorcelainV2', () => {
 
 describe('parseCommitLog', () => {
   it('reads hash, author, time and subject, including unicode and empty input', () => {
-    const text = 'abc1234\x1fAda\x1f1700000000\x1ffix: café\x1e\ndef5678\x1fBob\x1f1700000100\x1fsecond\x1e';
+    const text = 'abc1234\x1fAbe\x1f1700000000\x1ffix: café\x1e\ndef5678\x1fBob\x1f1700000100\x1fsecond\x1e';
     expect(parseCommitLog(text)).toEqual([
-      { hash: 'abc1234', author: 'Ada', time: 1700000000, subject: 'fix: café' },
+      { hash: 'abc1234', author: 'Abe', time: 1700000000, subject: 'fix: café' },
       { hash: 'def5678', author: 'Bob', time: 1700000100, subject: 'second' },
     ]);
     expect(parseCommitLog('')).toEqual([]);

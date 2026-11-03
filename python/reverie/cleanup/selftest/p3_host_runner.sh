@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Phase-3 ROOT runner for Rex's p3kit sandbox (kit r4; runner r5: config parent from RUNTIME_DIRECTORY for the self-test unit). Takes external Tim's preflight requirements
-# (external-tim/prune-host-preflight-r1): root never reads the agent's sandbox config or a laptop-selected library; the
+# Phase-3 ROOT runner for the p3kit sandbox (kit r4; runner r5: config parent from RUNTIME_DIRECTORY for the self-test unit). Takes host preflight requirements
+# (host preflight review): root never reads the agent's sandbox config or a laptop-selected library; the
 # config is built here, root-only, with fixed relative paths and the INSTALLED lease lib; exit status is captured
 # explicitly (no set -e); an optional bind mount is trapped and verified gone; every path is checked for symlinks first.
 #
@@ -8,8 +8,8 @@
 #   p3_host_runner.sh --host-tmp DIR --run NAME --python PY --prune FILE --prune-sha HEX --lease-lib FILE --lease-sha HEX
 #                     --run-id ID [--rev r8|r10] [--with-mount]
 #   --host-tmp  the selected laptop's /tmp as seen from the host (its folder on drive B, ending in /tmp)
-#   --run       the kit run directory name under that /tmp, e.g. rex-p3/host-run2 (relative, no ..)
-#   --with-mount  ONLY after the prune has mount-identity detection (rex/prune-bind-mount-finding-r1): until then a
+#   --run       the kit run directory name under that /tmp, e.g. prune-p3/host-run2 (relative, no ..)
+#   --with-mount  ONLY after the prune has mount-identity detection (mount-identity review): until then a
 #               same-filesystem bind would let the prune empty the victim; default is no mount (mount case NOT RUN).
 # Exit: 0 runner finished (the prune's own status is in HOST-RESULT.json), 2 refused before any effect, 3 cleanup failed.
 set -u -o pipefail
@@ -65,7 +65,7 @@ done
 # r5: the self-test unit runs under ProtectSystem=strict, so its RuntimeDirectory is the config parent (default /run).
 CFG_PARENT=${RUNTIME_DIRECTORY:-/run}
 case "$CFG_PARENT" in /run|/run/*) ;; *) fail "config parent must be under /run";; esac
-CFGDIR=$(mktemp -d "$CFG_PARENT/rex-p3.XXXXXX") || fail "mktemp"; chmod 0700 "$CFGDIR"
+CFGDIR=$(mktemp -d "$CFG_PARENT/prune-p3.XXXXXX") || fail "mktemp"; chmod 0700 "$CFGDIR"
 CFG="$CFGDIR/prune.toml"
 {
   echo 'live_enabled = true'                      # confined synthetic run only; production config stays false

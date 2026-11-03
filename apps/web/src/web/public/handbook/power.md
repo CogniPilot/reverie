@@ -8,7 +8,7 @@ Use the power button beside the bottom-left gear for **Stop all agents**, **Rest
 - Leave office keeps an expert off until the owner turns it back on; it is not retirement.
 - Retire removes the expert from the company and its rooms while preserving its identity in chat history.
 
-For one expert, use the red **Restart session** or **Leave office** actions on its Company card, profile or member menu. These interrupt active work without asking for a fresh handoff; saved conversation, memory and files remain. Ask the expert to checkpoint first when needed. Leave office keeps it away until deliberately returned; Retire removes company and room membership. Check the intended person before confirming either action. **Enter office** starts the expert again using its current plan.
+For one expert, use the red **Restart session** or **Leave office** actions on its Company card, profile or member menu. These interrupt active work without asking for a fresh handoff; saved conversation, memory and files remain. Ask the expert to checkpoint first when needed. Leave office keeps it away until deliberately returned; Retire removes company and room membership. Check the intended person before confirming either action. **Enter office** starts the expert again using its current plan. The neutral **Wake** action, beside Restart session, starts an expert whose agent is not running and leaves a running one alone. The server checks the owner, office status and wake limit and reports what happened; nothing retries by itself, so check status before trying again.
 
 ## Offline safeguard
 

@@ -480,6 +480,25 @@ it('offers explicit unsupported and stale-binding errors with Download, never fa
   expect(g.document.getElementById('filePreviewBody')?.textContent).toContain('binding');
   expect(g.document.querySelector('#filePreviewBody pre,h1')).toBeNull();
 });
+it('plays a movie in a player streamed from the authorized URL instead of refusing it or reading it into memory', async () => {
+  const f = fixture();
+  await f.app.openReadOnlyFilePreview(source('flight sim.mp4'));
+  const video = f.document.querySelector<HTMLVideoElement>('#filePreviewBody video')!;
+  expect(video).not.toBeNull();
+  expect(video.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/file-a');
+  expect(video.controls).toBe(true);
+  expect(f.calls).toHaveLength(0); // never fetched as bytes
+  expect(f.document.querySelector('.file-preview-source-download')).not.toBeNull();
+  video.dispatchEvent(new f.dom.window.Event('error'));
+  expect(f.document.getElementById('filePreviewBody')?.textContent).toContain('not a video this browser can play. Use Download');
+  const movie = { ...metadata, path: 'reports/run.webm', name: 'run.webm', absolutePath: '/drive/reports/run.webm' };
+  const g = fixture(async () => Response.json({ success: true, data: movie }));
+  await g.app.openWorkspaceFilePreview(movie.absolutePath);
+  expect(g.document.querySelector('#filePreviewBody video')?.getAttribute('src')).toBe(
+    `/prefix/api/workspace/file?path=${encodeURIComponent(movie.path)}&binding=${binding}&preview=1`
+  );
+  expect(g.calls.map((call) => call.url)).toEqual([`/prefix/api/workspace/resolve?path=${encodeURIComponent(movie.absolutePath)}`]);
+});
 it('closes on Escape, restores focus and traps Tab inside the active viewer', async () => {
   const f = fixture();
   await f.app.openReadOnlyFilePreview(source(), f.trigger);
@@ -609,7 +628,7 @@ it('keeps the existing dirty-edit confirmation before a read-only backdrop close
   overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
   expect(overlay.classList.contains('visible')).toBe(false);
 });
-it('plays MP4/WebM attachments inline and falls back to the preview card when the file is not a playable video', () => {
+it('plays MP4/QuickTime/WebM attachments inline and falls back to the preview card when the file is not a playable video', () => {
   const f = fixture();
   const mediaContext = vm.createContext({ ReverieApp: class {}, URL });
   vm.runInContext(file('chat-media.js'), mediaContext);
@@ -626,15 +645,18 @@ it('plays MP4/WebM attachments inline and falls back to the preview card when th
     roomId: 'room-a',
     attachments: [
       { id: 'clip', name: 'lap.mp4', type: 'video/mp4', size: 10 },
-      { id: 'other', name: 'lap.mov', type: 'video/quicktime', size: 10 },
+      { id: 'phone', name: 'lap.mov', type: 'video/quicktime', size: 10 },
+      { id: 'other', name: 'lap.avi', type: 'video/x-msvideo', size: 10 },
     ],
   });
-  const video = wrap.querySelector('video') as HTMLVideoElement;
+  const [video, phone] = [...wrap.querySelectorAll('video')] as HTMLVideoElement[];
+  expect(phone.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/phone'); // iPhone .mov plays in place too
   expect(video.getAttribute('src')).toBe('/prefix/api/chatrooms/room-a/files/clip');
   expect(video.controls).toBe(true);
   expect(video.preload).toBe('metadata');
-  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(1); // the .mov stays a card
+  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(1); // the .avi stays a card
   video.dispatchEvent(new f.dom.window.Event('error'));
+  phone.dispatchEvent(new f.dom.window.Event('error')); // e.g. HEVC the browser cannot decode
   expect(wrap.querySelector('video')).toBeNull();
-  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(2);
+  expect(wrap.querySelectorAll('a.chatroom-file')).toHaveLength(3);
 });

@@ -395,7 +395,10 @@ class PeerClient:
                 connection.settimeout(5);connection.connect('/proc/self/fd/'+str(parent)+'/'+self.path.name)
                 I.require(I.peer_uid(connection)==self.broker_uid,'broker OS identity differs')
                 deadline=time.monotonic()+(30 if request.get('method')=='prepare' else 20)
-                I.send_message(connection,request,deadline)
+                # A refusing broker answers and closes without reading the request, so the send can lose that race.
+                # Its reply is already queued here and decides the call; no reply still ends as Unconfirmed.
+                try:I.send_message(connection,request,deadline)
+                except (BrokenPipeError,ConnectionResetError):pass
                 reply=I.receive_message(connection,deadline)
                 I.require(isinstance(reply,dict) and reply.get('ok') is True and set(reply)=={'ok','value'},'peer refused or outcome unconfirmed')
                 value=reply['value']

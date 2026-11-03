@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""reverie-autoenv (prototype r1, Ada): build or check the cached dev env the shim loads.
+"""reverie-autoenv (prototype r1): build or check the cached dev env the shim loads.
   reverie-autoenv build REPO [--from-json FILE]   write <cache>/<key>.env from `nix print-dev-env --json --offline REPO#ATTR`
                                                   (or from FILE, for tests) for the repo's approved attr
   reverie-autoenv key REPO                        print the key the shim would use (attr + flake.nix + flake.lock)

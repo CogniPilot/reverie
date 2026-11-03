@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { managedCodexTrust, codexTrustArgument } from '../src/managed-codex-trust.js';
+import { codexHookTrustArgument, reverieCodexHookTrust } from '../src/codex-hook-trust.js';
 import { Session } from '../src/session.js';
 import { TmuxManager, buildSpawnCommand } from '../src/tmux-manager.js';
 import * as users from '../src/user-store.js';
@@ -63,6 +64,12 @@ describe('managed Codex workspace trust', () => {
     expect(options.codexTrustWorkspace).toBe(cwd);
     expect(buildSpawnCommand(options)).toContain('--config ' + codexTrustArgument(cwd));
     expect(buildSpawnCommand(options)).toContain('--dangerously-bypass-approvals-and-sandbox');
+    // Reverie's own hooks, just written, are trusted by hash for this launch only.
+    const hookTrust = codexHookTrustArgument(await reverieCodexHookTrust(dir));
+    expect(hookTrust).toContain('trusted_hash');
+    expect(options.codexHookTrust).toBe(hookTrust);
+    expect(buildSpawnCommand(options)).toContain('--config ' + hookTrust);
+    expect(session.toState()).not.toHaveProperty('codexHookTrust');
     expect(await fs.readdir(dir)).toEqual(['.codex']);
     expect(await fs.readdir(join(dir, '.codex'))).toEqual(['hooks.json']);
     const hooks = JSON.parse(await fs.readFile(join(dir, '.codex', 'hooks.json'), 'utf8'));
@@ -74,6 +81,7 @@ describe('managed Codex workspace trust', () => {
     const session = new Session({ workingDir: dir, mode: 'codex', useMux: true, mux, codexConfig: { dangerouslyBypassApprovals: false } });
     sessions.push(session); await session.startInteractive();
     expect(create.mock.calls[0][0].codexTrustWorkspace).toBeUndefined();
+    expect(create.mock.calls[0][0].codexHookTrust).toBeUndefined();
     expect(session.codexConfig?.dangerouslyBypassApprovals).toBe(false);
   });
 });

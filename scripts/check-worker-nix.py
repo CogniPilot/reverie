@@ -41,6 +41,8 @@ def inside(*args,timeout=300):return run(['docker','exec',name,*args],timeout)
 try:
  run(base);run(['docker','start',name]);print(inside('nix','--version'),flush=True)
  inside('/bin/bash','-c','test "$NIX_REMOTE" = local; test ! -S /nix/var/nix/daemon-socket/socket; test ! -S /var/run/docker.sock; test -w /nix/store; test ! -w /etc/nix/nix.conf')
+ # Identical files in new store paths are hard-linked as they land (each flake evaluation copies the repository).
+ assert inside('nix','config','show','auto-optimise-store')=='true'
  inside('nix','profile','install','nixpkgs#openssh',timeout=600);print('Real nix profile install openssh: PASS',flush=True)
  print(inside('/home/agent/.nix-profile/bin/ssh','-V'),flush=True)
  # A genuine local build, distinct from package substitution.

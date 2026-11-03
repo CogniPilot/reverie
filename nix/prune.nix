@@ -2,8 +2,8 @@
 let
   lib = pkgs.lib;
   sourceHashes = {
-    prune = "eee8b1608e1e87117d00b955b6cf6271cea809ab5e0cfd3f77696a05007eb3fb";
-    lease = "7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9";
+    prune = "333d8e56f4a7de0347736455df10d06551daac9eef3a491389334a02393df075";
+    lease = "606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa";
   };
 in
 pkgs.runCommand "reverie-prune-tools" {

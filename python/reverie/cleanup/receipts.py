@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Closed adapter: reverie-prune run summaries and A1 exception reports -> receipt-shaped records (RECEIPTS lane).
 
-It binds existing producer output to the accepted ops semantics (Ada efficiency-ops-interface-r4: resource
+It binds existing producer output to the accepted ops semantics (efficiency-ops-interface-r4: resource
 ADMISSION/TERMINAL and EVIDENCE) without inventing an authority store:
   - a dry run, or any run without operator-supplied admission context, is an OBSERVATION (codes WOULD_* / REPORTED_*);
   - a TERMINAL record is emitted only when the trusted context binds that run_id to an existing admission

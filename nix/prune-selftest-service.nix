@@ -65,9 +65,9 @@ in {
         ExecStart = argv [ "${pkgs.python3}/bin/python3" "-I" "-B" "${kit}/selftest.py"
           "--base" base "--uid" cfg.uid "--gid" cfg.gid "--python" "${pkgs.python3}/bin/python3"
           "--prune" "${prunePackage}/libexec/reverie/reverie_prune.py"
-          "--prune-sha" "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181"
+          "--prune-sha" "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed"
           "--lease-lib" "${state}/lib/lease.py"
-          "--lease-sha" "7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9"
+          "--lease-sha" "606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa"
           "--runner" "${kit}/p3_host_runner.sh" "--kit" kit "--receipt" "${state}/selftest-receipt.json" ];
         PrivateMounts = true; PrivateTmp = true; PrivateNetwork = true; ProtectHome = true;
         NoNewPrivileges = true; PrivateUsers = false; ProtectProc = "default"; ProcSubset = "all";

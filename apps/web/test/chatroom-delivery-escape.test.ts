@@ -170,7 +170,7 @@ describe('hardening from the review of the quoting', () => {
   });
   it('an attachment-only message and a deleted one say so outside any quote', () => {
     const msg = { id: 'm', roomId: 'r', at: 1, to: 'all', text: '', attachments: [{ id: 'f', name: 'a.png', size: 1, type: 'image/png', path: '/p/a.png' }], from: { kind: 'agent', sessionId: A, name: 'alpha' } } as unknown as ChatMessage;
-    expect(renderForRecipient(room(), msg, B, nameOf)).toBe('"alpha": (attachment only) [attached: "/p/a.png"]');
+    expect(renderForRecipient(room(), msg, B, nameOf)).toBe('"alpha": (attachment only) [attached image: "a.png" (local image unavailable; re-read to request a fresh path)]');
     const line = formatChatMessage({ id: 'm', at: 1, from: { kind: 'user', name: 'user' }, to: 'all', text: '', deleted: { at: 2 } }, []);
     expect(line.endsWith('USER: (deleted)')).toBe(true);
   });

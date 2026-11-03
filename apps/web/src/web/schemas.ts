@@ -1238,6 +1238,9 @@ export const HookEventSchema = z.object({
     // Claude Code's UserPromptSubmit: a first-hand report of the pane's live
     // conversation id. Keep in step with HookEventType in types/api.ts.
     'prompt_submitted',
+    // Claude Code's PreCompact and SessionStart(source "compact"): a context compaction started / ended.
+    'compact_started',
+    'compact_finished',
     // A turn STARTED. Unlike the others this one has no Claude Code hook behind
     // it: it is reported by the DeepSeek Harness status shim, and exists so a
     // dialog answered in the terminal resolves its Approvals Inbox item at once
@@ -1947,14 +1950,8 @@ function refineCronJob(val: z.infer<typeof CronJobBaseSchema>, ctx: z.Refinement
     } else if (val.postWhen || val.postChangeOnly) {
       add('postWhen and postChangeOnly need a postSource', 'postSource');
     }
-    if (val.scheduleType === 'once' && val.runAt === undefined) add('runAt is required for a one-time schedule', 'runAt');
-    if (val.scheduleType === 'interval' && val.intervalMinutes === undefined) {
-      add('intervalMinutes is required for an interval schedule', 'intervalMinutes');
-    }
-    if (val.scheduleType === 'daily' && !val.dailyTime) add('dailyTime is required for a daily schedule', 'dailyTime');
-    if (val.scheduleType === 'weekly' && (!val.weeklyTime || !val.weeklyDays?.length)) {
-      add('weeklyDays and weeklyTime are required for a weekly schedule', 'weeklyTime');
-    }
+    const problem = scheduleProblem(val);
+    if (problem) add(problem.message, problem.path);
     return;
   }
   if (!val.agentType) add('agentType is required to launch a session', 'agentType');
@@ -1969,18 +1966,23 @@ function refineCronJob(val: z.infer<typeof CronJobBaseSchema>, ctx: z.Refinement
   if (val.promptMode === 'prompt_file_path' && !val.promptFilePath) {
     add('promptFilePath is required when promptMode is prompt_file_path', 'promptFilePath');
   }
-  if (val.scheduleType === 'once' && val.runAt === undefined) {
-    add('runAt is required for a one-time schedule', 'runAt');
-  }
+  const problem = scheduleProblem(val);
+  if (problem) add(problem.message, problem.path);
+}
+
+type ScheduleFields = Pick<z.infer<typeof CronJobBaseSchema>, 'scheduleType' | 'runAt' | 'intervalMinutes' | 'dailyTime' | 'weeklyDays' | 'weeklyTime'>;
+
+/** The field a schedule is missing for its type, or null. Shared by a new job, an edited one and a schedule preview. */
+export function scheduleProblem(val: Partial<ScheduleFields>): { message: string; path: string } | null {
+  if (val.scheduleType === 'once' && val.runAt === undefined) return { message: 'runAt is required for a one-time schedule', path: 'runAt' };
   if (val.scheduleType === 'interval' && val.intervalMinutes === undefined) {
-    add('intervalMinutes is required for an interval schedule', 'intervalMinutes');
+    return { message: 'intervalMinutes is required for an interval schedule', path: 'intervalMinutes' };
   }
-  if (val.scheduleType === 'daily' && !val.dailyTime) {
-    add('dailyTime is required for a daily schedule', 'dailyTime');
-  }
+  if (val.scheduleType === 'daily' && !val.dailyTime) return { message: 'dailyTime is required for a daily schedule', path: 'dailyTime' };
   if (val.scheduleType === 'weekly' && (!val.weeklyTime || !val.weeklyDays?.length)) {
-    add('weeklyDays and weeklyTime are required for a weekly schedule', 'weeklyTime');
+    return { message: 'weeklyDays and weeklyTime are required for a weekly schedule', path: 'weeklyTime' };
   }
+  return null;
 }
 
 /** POST /api/cron/jobs — full job definition. */
@@ -1988,6 +1990,23 @@ export const CronJobSchema = CronJobBaseSchema.superRefine(refineCronJob);
 
 /** PUT /api/cron/jobs/:id — partial update. */
 export const CronJobUpdateSchema = CronJobBaseSchema.partial();
+
+/** POST /api/cron/schedule-preview — a schedule as a job would hold it, and how many next runs to show. */
+export const CronSchedulePreviewSchema = CronJobBaseSchema.pick({
+  scheduleType: true,
+  runAt: true,
+  intervalMinutes: true,
+  timeZone: true,
+  dailyTime: true,
+  weeklyDays: true,
+  weeklyTime: true,
+})
+  .extend({ count: z.number().int().min(1).max(10).optional() })
+  .strict()
+  .superRefine((val, ctx) => {
+    const problem = scheduleProblem(val);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem.message, path: [problem.path] });
+  });
 
 /** PUT /api/cron/jobs/:id/enabled */
 export const CronJobEnabledSchema = z.object({ enabled: z.boolean() });
@@ -2384,6 +2403,8 @@ export const ChatroomReadSchema = z.object({ at: z.number().finite().nonnegative
 
 /** A direct message with one agent session. */
 export const ChatroomDmSchema = z.object({ sessionId: ChatSessionIdSchema }).strict();
+/** No client-selected viewer, cutoff or deletion option. */
+export const ChatroomClearHistorySchema = z.object({}).strict();
 
 /** Where an ordinary room sits in the channel list; `''` clears one. */
 export const ChatroomPlacementSchema = z
@@ -2457,9 +2478,14 @@ export const ChatroomMessageSchema = z
     replyTo: z.string().uuid().optional(),
     /** Refuse rather than post as the user when the caller's agent session does not resolve. */
     requireAgent: z.boolean().optional(),
+    /** Opt-in crossing guard: refuse (409) instead of posting when someone else has posted after this message id. */
+    ifNoNewerThan: z.string().uuid().optional(),
+    /** Opt-in crossing guard against the caller's own last-seen mark in this room (agents only). */
+    ifLatest: z.literal(true).optional(),
   })
   .strict()
   .refine((v) => v.text.trim() !== '' || (v.attachments?.length ?? 0) > 0, 'Write something or attach a file')
+  .refine((v) => !(v.ifNoNewerThan && v.ifLatest), 'Use ifNoNewerThan or ifLatest, not both')
   .refine((v) => !v.spoken || v.text.trim() !== '', 'A spoken message needs a nonempty transcript');
 
 export const ChatroomPollSchema = z

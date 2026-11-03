@@ -37,6 +37,8 @@ class RetainedBrokerOrdering(unittest.TestCase):
             if args[0]=='exec':
                 if 'new-session' in args:
                     self.assertFalse(self.pending().exists(),'CLI must not precede confirmed retained commit')
+                    # remain-on-exit rides in the SAME tmux command, so a dying wrapper leaves a dead pane, not a gone server.
+                    self.assertEqual(args[-5:],[';','set-option','-g','remain-on-exit','on'])
                     raise RuntimeError('owned pre-CLI boundary reached')
                 raise AssertionError('unexpected exec')
             return subprocess.CompletedProcess(args,0,'','')

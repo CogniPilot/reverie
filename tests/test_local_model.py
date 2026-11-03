@@ -20,18 +20,25 @@ class LocalModelTests(unittest.TestCase):
             root = Path(directory)
             model = root / 'model.gguf'; model.touch()
             projector = root / 'mmproj.gguf'; projector.touch()
-            for service in (False, True):
-                with self.subTest(service=service), \
+            for service, selected in ((False, None), (False, root / 'selected'),
+                                      (True, None), (True, root / 'selected')):
+                with self.subTest(service=service, selected=selected), \
                         patch.object(local_model.Path, 'home', return_value=root), \
                         patch.dict(os.environ, {'REVERIE_MODEL_SCRATCH': str(root / 'scratch'),
+                            'REVERIE_ROOT': str(selected) if selected else '',
                             'REVERIE_MODEL_BUILD_EXPR': '/fixture/build.nix', 'REVERIE_MODEL_NIXPKGS': '/fixture/nixpkgs',
                             'REVERIE_MODEL_SYSTEM': 'x86_64-linux'}), \
-                        patch.object(local_model, 'run', return_value=SimpleNamespace(stdout='/fixture/runtime\n')), \
+                        patch.object(local_model, 'run', return_value=SimpleNamespace(stdout='/fixture/runtime\n')) as build, \
                         patch.object(local_model.os, 'execv') as execute, \
                         patch.object(local_model, 'install_service') as install, contextlib.redirect_stdout(io.StringIO()):
                     argv = ['--model', str(model), '--mmproj', str(projector), '--image-max-tokens', '2048',
                             '--gpu', 'cpu', '--context', '32768', '--sampling-profile', 'qwen3.8-thinking']
                     local_model.main(argv + (['--install-service'] if service else []))
+                    state = (selected or root / 'reverie') / 'runtime/local-model'
+                    command = build.call_args.args[0]
+                    self.assertEqual(command[command.index('--out-link') + 1], str(state / 'runtime'))
+                    self.assertTrue((state / 'control/models/api-key').is_file())
+                    self.assertFalse((root / '.local').exists())
                     if service:
                         config = install.call_args.args[0]
                         self.assertEqual(config['mmproj'], str(projector))

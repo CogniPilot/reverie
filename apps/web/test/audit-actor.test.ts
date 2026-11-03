@@ -79,7 +79,7 @@ describe('employee replacement audit names the caller', () => {
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     const rooms = new ChatroomStore();
-    const sessions = new Map(['ada-1', 'ada-2', 'ada-3'].map((id) => [id, { id, name: 'Ada', owner: undefined }]));
+    const sessions = new Map(['abe-1', 'abe-2', 'abe-3'].map((id) => [id, { id, name: 'Abe', owner: undefined }]));
     const by: string[] = [];
     const service = new CompanyService(store, {
       getSession: (id) => sessions.get(id),
@@ -94,9 +94,9 @@ describe('employee replacement audit names the caller', () => {
       },
       research: { start: vi.fn(), inspect: vi.fn(async () => undefined), stop: vi.fn(async () => {}) },
     });
-    const ada = await service.hire({ name: 'Ada', icon: '🧩', position: 'Lead', expertise: ['ui'], sessionId: 'ada-1', researchEnabled: false });
-    await service.completeSpawn('ada-2', service.prepareSpawn({ owner: undefined, employeeId: ada.id }));
-    await service.completeSpawn('ada-3', service.prepareSpawn({ owner: undefined, parentSessionId: 'ada-2', employeeId: ada.id }), 'ada-2');
-    expect(by).toEqual(['owner', 'ada-2']);
+    const abe = await service.hire({ name: 'Abe', icon: '🧩', position: 'Lead', expertise: ['ui'], sessionId: 'abe-1', researchEnabled: false });
+    await service.completeSpawn('abe-2', service.prepareSpawn({ owner: undefined, employeeId: abe.id }));
+    await service.completeSpawn('abe-3', service.prepareSpawn({ owner: undefined, parentSessionId: 'abe-2', employeeId: abe.id }), 'abe-2');
+    expect(by).toEqual(['owner', 'abe-2']);
   });
 });

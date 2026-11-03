@@ -36,7 +36,37 @@ function chatBadgeCount(n) {
 
 /** At or below this window width a profile card is a bottom sheet; the card is this wide (matches `.ca-profile` in the CSS). */
 const CA_SHEET_MAX_WIDTH = 767;
+/** At most this many messages are picked for one group delete. */
+const CA_DELETE_SELECTION_MAX = 100;
+/** Rewound history (search's Jump) keeps at most this many messages drawn, and pages on within this distance of its end. */
+const CA_HISTORY_KEEP = 200;
+const CA_HISTORY_EDGE_PX = 240;
+/** A jump asks again at most this many times when the room reloads while its page is on its way. */
+const CA_HISTORY_RETRIES = 3;
 const CA_CARD_WIDTH = 280;
+
+/** Plain words for the reasons an owner's wake can be skipped (company-wake.ts, reboot-restore.ts); others show as sent. */
+const CA_WAKE_SKIPS = {
+  'recovery-in-progress': 'another recovery is running. Check their status when it ends',
+  'lifecycle-in-progress': 'a restart or office change is in progress for them',
+  'changed-or-stopping': 'they changed or are stopping',
+  'not-desired': 'they are out of office',
+  'disabled-or-retry-limited': 'a restart is running for them, or their wake limit (three in fifteen minutes) is reached',
+  'intentionally-ended': 'their session was ended on purpose. Use Restart session to resume it',
+  'no-owned-session-record': 'there is no saved session to start',
+  'not-previously-running': 'they were not running before',
+  'wake-failed': 'their agent did not start. Check Runtime settings, or use Restart session',
+  'ineligible': 'their saved session cannot be started this way. Use Restart session',
+  'no-persisted-record': 'there is no saved session to start',
+  'not-running': 'they were not running before. Use Restart session to start them',
+  'agent-exited': 'their agent was ended on purpose. Use Restart session to resume it',
+  'respawn-blocked': 'their agent kept crashing, so it is held. Check Runtime settings, then use Restart session',
+  'remote-or-docker': 'they run on another host or in a container, which Wake cannot start. Use Restart session',
+  'unsupported-mode': 'their harness cannot be resumed this way. Use Restart session',
+  'no-working-dir': 'their working directory is not set. Check Runtime settings',
+  'workspace-missing': 'their working directory is missing. Check Runtime settings',
+  'already-live': 'they are already running',
+};
 
 /** How long a woken member may take to start (be seen busy) before the "is typing" line is dropped, and the longest it ever shows. */
 const CA_TURN_START_MS = 45000;
@@ -95,6 +125,11 @@ function caProfileAvatars(company) {
   return out;
 }
 
+/** A person's account badge: the owner, or a limited-access guest account (the access model itself is unchanged). */
+function caHumanBadgeLabel(role) {
+  return role === 'owner' ? 'Owner' : 'Guest';
+}
+
 function caIsDm(room) {
   return !!room && room.kind === 'dm';
 }
@@ -135,6 +170,14 @@ function caProfilePronouns(company) {
     if (e && typeof e.sessionId === 'string' && e.sessionId && typeof e.pronouns === 'string' && e.pronouns.trim()) out.set(e.sessionId, e.pronouns.trim());
   }
   return out;
+}
+
+/** A member's 'doing' Board cards (`focus`, read from the Board by the server) as one line, or ''. */
+function caFocusLine(m) {
+  const cards = Array.isArray(m?.focus) ? m.focus.filter(c => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+  if (!cards.length) return '';
+  const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
+  return `${cards.map(c => `${c.id} ${c.title}`).join(' · ')}${more}`;
 }
 
 /**
@@ -509,19 +552,63 @@ function caFeedItems(messages, readAt) {
  * rail): needs (a permission or a question is blocking it), error, waiting (idle_prompt: it is done and waits for input), working,
  * idle. A member whose session is gone is gone. `hooks` is the set of pending hook types for the session.
  */
+function caProviderBinding(employee) {
+  return JSON.stringify([employee.id, employee.owner, employee.sessionId, employee.sessionGeneration,
+    employee.desiredRunning, employee.onVacation, employee.bindingMigration, employee.runtimeRecipe, employee.permissions],
+    (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+}
+// Retain the first receipt deadline across repeated snapshots and wall-clock rollback.
+const CA_PROVIDER_RECEIPTS = new Map();
+function caProviderFresh(value, now) {
+  const mono = globalThis.performance?.now?.() ?? now;
+  const prior = CA_PROVIDER_RECEIPTS.get(value.employeeId);
+  if (prior && value.observedAtEpochMs < prior.epoch) return false;
+  if (prior && value.observedAtEpochMs === prior.epoch)
+    return value.binding === prior.binding && mono <= prior.until;
+  if (!prior && CA_PROVIDER_RECEIPTS.size >= 4096) return false;
+  CA_PROVIDER_RECEIPTS.set(value.employeeId, { binding: value.binding, epoch: value.observedAtEpochMs,
+    until: mono + 25000 - (now - value.observedAtEpochMs) });
+  return true;
+}
+function caProviderHealth(employee, session, member) {
+  if (!employee?.id || !Number.isInteger(employee.sessionGeneration) || employee.bindingMigration) return undefined;
+  const sid = employee?.sessionId || session?.id || member?.sessionId;
+  const now = Date.now();
+  return [session?.providerHealth, employee?.providerHealth, member?.providerHealth]
+    .filter(value => value && value.binding === caProviderBinding(employee) && value.sessionId === sid && (!employee?.id || value.employeeId === employee.id) &&
+      (!Number.isInteger(employee?.sessionGeneration) || value.sessionGeneration === employee.sessionGeneration) &&
+      ['healthy', 'dead', 'unknown'].includes(value.state) && Number.isSafeInteger(value.observedAtEpochMs) &&
+      now >= value.observedAtEpochMs && now - value.observedAtEpochMs <= 25000 && caProviderFresh(value, now))
+    .sort((a, b) => b.observedAtEpochMs - a.observedAtEpochMs)[0];
+}
+
 function caEmployeeHealth(employee, session, member, viewerDisconnected = false) {
   if (employee?.onVacation === true || employee?.desiredRunning === false)
     return { state: 'gone', label: employee.onVacation ? 'Out of office' : 'Stopped', detail: 'Stopped by owner choice. Enter the office to start this expert.' };
+  if (employee?.bindingMigration)
+    return { state: 'unknown', label: 'Moving', detail: 'An account or runtime move is in progress. Current agent availability is unconfirmed.' };
   const health = session?.runtimeHealth ?? employee?.runtimeHealth;
   const scope = session?.runtimeHealthScope ?? employee?.runtimeHealthScope;
-  if (health === 'dead' && scope === 'provider') {
+  const provider = caProviderHealth(employee, session, member);
+  if (provider?.state === 'dead' || (health === 'dead' && scope === 'provider')) {
     const exit = typeof session?.paneExit?.signal === 'number' ? ` (signal ${session.paneExit.signal})` : typeof session?.paneExit?.status === 'number' ? ` (exit ${session.paneExit.status})` : '';
-    return { state: 'dead', label: 'Dead pane', detail: `The agent has exited${exit}. Restart the session to resume its saved conversation.` };
+    return { state: 'dead', label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane', detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.` };
   }
-  if (health === 'disconnected' || (health === 'dead' && scope !== 'provider') || session?.paneExit)
+  const serverViewerUnavailable = session?.viewerInputHeld === true || session?.viewerHealth === 'disconnected' || employee?.viewerHealth === 'disconnected' ||
+    member?.viewerHealth === 'disconnected' || (scope === 'terminal' && (health === 'disconnected' || health === 'dead' || session?.paneExit || session?.pid === null));
+  const viewerUnavailable = viewerDisconnected || serverViewerUnavailable;
+  const serverViewerConnected = !serverViewerUnavailable && (session?.viewerHealth === 'connected' ||
+    employee?.viewerHealth === 'connected' || member?.viewerHealth === 'connected' ||
+    (typeof session?.pid === 'number' && session.pid > 0 && !session?.paneExit));
+  if (provider?.state === 'healthy')
+    return { state: 'idle', label: 'Online', detail: 'The current native command runtime was recently confirmed running. Model or API readiness is not implied.',
+      providerConfirmedHealthy: true, viewerUnavailable, viewerOnly: viewerDisconnected && serverViewerConnected };
+  if (viewerUnavailable)
+    return { state: 'viewer-unavailable', label: 'Viewer unavailable', detail: 'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.',
+      viewerUnavailable: true, viewerOnly: viewerDisconnected && serverViewerConnected };
+  if (health === 'disconnected' || session?.paneExit)
     return { state: 'disconnected', label: 'Disconnected', detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.' };
-  if (viewerDisconnected)
-    return { state: 'disconnected', label: 'Viewer disconnected', detail: health === 'healthy' && scope === 'provider' ? 'The agent is running; reconnect its terminal viewer without restarting the agent.' : 'The terminal viewer is disconnected. This does not establish that the agent has stopped.', viewerOnly: health === 'healthy' && scope === 'provider' };
   if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
     return { state: 'gone', label: 'Offline', detail: 'No connected session is available. Agent health has not been confirmed.' };
   if (employee?.available === true || member?.alive === true || (typeof session?.pid === 'number' && session.pid > 0))
@@ -550,6 +637,7 @@ const CA_STATE_LABEL = {
   gone: 'offline',
   dead: 'dead pane; agent exited',
   disconnected: 'disconnected; agent health not confirmed',
+  'viewer-unavailable': 'viewer unavailable; agent availability unconfirmed',
   unknown: 'health unknown',
 };
 
@@ -563,18 +651,21 @@ function caMemberSections(members, humans = [], stateOf) {
   const people = new Set(Array.isArray(humans) ? humans : []);
   const list = [...(Array.isArray(members) ? members : []), ...people];
   const admin = (m) => people.has(m) ? m.role === 'owner' : m.role === 'coordinator';
-  const present = (m) => people.has(m) ? m.online === true : caPresence(m) !== 'offline' &&
-    (!stateOf || !['gone', 'dead', 'disconnected'].includes(stateOf(m)));
+  const unconfirmed = m => !people.has(m) && stateOf?.(m) === 'viewer-unavailable';
+  const present = m => people.has(m) ? m.online === true : stateOf
+    ? !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(stateOf(m)) : caPresence(m) !== 'offline';
   const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
     || String(a.name || '').localeCompare(String(b.name || ''))
     || String(a.sessionId || a.id || '').localeCompare(String(b.sessionId || b.id || ''));
   const coordinator = list.filter(admin).sort(byName);
   const rest = list.filter((m) => !admin(m));
   const online = rest.filter(present).sort(byName);
-  const offline = rest.filter((m) => !present(m)).sort(byName);
+  const unknown = rest.filter(unconfirmed).sort(byName);
+  const offline = rest.filter((m) => !present(m) && !unconfirmed(m)).sort(byName);
   const sections = [];
   if (coordinator.length) sections.push({ key: 'coordinator', label: 'Admin', members: coordinator });
   if (online.length) sections.push({ key: 'online', label: 'Online', members: online });
+  if (unknown.length) sections.push({ key: 'unknown', label: 'Availability unknown', members: unknown });
   if (offline.length) sections.push({ key: 'offline', label: 'Offline', members: offline });
   return sections;
 }
@@ -1003,6 +1094,35 @@ function caGpuHistoryShape(samples, width, height) {
   return { points, avg, peak: Math.max(...valid.map(s => s.u)), minutes: Math.round(span / 60000), count: valid.length };
 }
 
+/**
+ * The recorded GPU history (/api/resource-history points) as polyline segments: the bucket average of each observed or
+ * partial point, split wherever the collector recorded nothing, so a gap never draws as a straight line across it.
+ */
+function caRecordedGpuShape(history, width, height) {
+  const points = Array.isArray(history?.points) ? history.points : [];
+  const start = Number(history?.start), end = Number(history?.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  const segments = [];
+  let current = [], sum = 0, count = 0, peak = 0;
+  for (const p of points) {
+    const avg = p?.gpu_pct?.avg;
+    if (p?.status === 'missing' || !Number.isFinite(avg) || avg < 0 || avg > 100 || !Number.isFinite(p?.t)) {
+      if (current.length) segments.push(current);
+      current = [];
+      continue;
+    }
+    const x = ((p.t + (Number(p.end) - p.t) / 2 - start) / (end - start)) * width;
+    current.push(`${Math.max(0, Math.min(width, x)).toFixed(1)},${(height - avg / 100 * height).toFixed(1)}`);
+    // A bucket's max counts only when it is a real percentage at or above its own average; otherwise its average stands.
+    const max = p.gpu_pct.max;
+    sum += avg; count += 1; peak = Math.max(peak, Number.isFinite(max) && max >= avg && max <= 100 ? max : avg);
+  }
+  if (current.length) segments.push(current);
+  if (!count) return null;
+  return { segments: segments.map(points => points.length === 1 ? [points[0], points[0]] : points).map(points => points.join(' ')),
+    avg: Math.round(sum / count), peak: Math.round(peak), count };
+}
+
 function caStatsView(stats) {
   const out = [];
   const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : Number.NaN);
@@ -1086,6 +1206,7 @@ function caWrite(kind, key, value) {
 }
 
 const CA_ICONS = {
+  reconnect: '<path d="M20 7a8 8 0 1 0 1 8M20 3v4h-4"/>',
   reorder: '<path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/>',
   pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
   chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
@@ -1120,6 +1241,7 @@ const CA_PAGES = {
   bots: { label: 'Bots', icon: 'gear', path: '/bots' },
   people: { label: 'Accounts', icon: 'members', path: '/people' },
   previews: { label: 'Laptop previews', icon: 'folder', path: '/previews' },
+  failures: { label: 'Command failures', icon: 'book', path: '/command-failures', nav: false },
   company: { label: 'Company', icon: 'org', path: null, nav: false },
   'company-plans': { label: 'Company plans', icon: 'gauge', path: null, nav: false },
   'company-people': { label: 'Company people', icon: 'members', path: null, nav: false },
@@ -1131,6 +1253,26 @@ function caPageFromHash(hash) {
   const key = String(hash || '').replace(/^#/, '');
   if (key.startsWith('previews?')) return 'previews';
   return Object.hasOwn(CA_PAGES, key) ? key : null;
+}
+
+/**
+ * A message link opens in the pane beside the conversation when it is an https page on another site, so it can be read
+ * side by side with the chat. Anything else, this site's own pages and
+ * plain http included, keeps its new tab. The page runs sandboxed: it can script itself, use forms and open its own new tabs,
+ * but never navigate this page, and it gets no referrer.
+ */
+const CA_WEB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+const CA_WEB_NOTE = 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.';
+
+/** The address to show beside the chat for a link, or null when the link keeps its new tab. */
+function caWebPaneUrl(href, origin) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  return url.protocol === 'https:' && url.origin !== origin ? url.href : null;
 }
 
 /* ───────────────────────── the app ───────────────────────── */
@@ -1145,6 +1287,11 @@ class ReverieChatApp {
     /** The Board page shown in place of the conversation, or null. */
     this.embed = null;
     this._embedRoom = null;
+    /** Rewound history (search's Jump), and a count of jumps and returns to the present that retires pending pages. */
+    this.history = null;
+    this.navigation = 0;
+    this.historyRefreshes = 0;
+    this.roomReloads = 0;
     // The rail follows the open room until the user picks a workspace by hand.
     this.workspace = 'home';
     this._wsPinned = false;
@@ -1317,13 +1464,14 @@ class ReverieChatApp {
       // A small file read on the server; an older server without the route simply shows no GPU.
       const gpu = await this.app._chatApi('/api/system/gpu');
       this.stats = { ...this.stats, gpu: gpu.ok ? gpu.data : undefined };
-      // The GPU history graph (James 10-27) draws from these readings, kept while this page is open.
+      // The GPU history graph draws from these readings, kept while this page is open.
       const u = gpu.ok && gpu.data?.available ? Number(gpu.data.utilization) : NaN;
       if (Number.isFinite(u)) {
         this.gpuHistory = [...(this.gpuHistory || []), { t: Date.now(), u }].slice(-CA_GPU_HISTORY_MAX);
         this.doc.querySelector('.ca-gpu-dialog')?.dispatchEvent(new this.doc.defaultView.Event('reverie:gpu'));
       }
       this.renderStats();
+      this.schedulePresence();
     };
     this.stopStats();
     tick();
@@ -1383,6 +1531,73 @@ class ReverieChatApp {
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
   }
 
+  /**
+   * Owner-only: the host's recorded GPU utilization (GET /api/resource-history, a shared host observation, never per
+   * employee), for the last day or week. When the history service is not set up the section says so instead of erring.
+   */
+  companyGpuHistory() {
+    const host = this.el('section', 'ca-company-gpu-history');
+    host.setAttribute('aria-label', 'GPU history');
+    const ns = 'http://www.w3.org/2000/svg', W = 480, H = 120;
+    const svg = this.doc.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-gpu-graph'); svg.setAttribute('role', 'img');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const note = this.el('p', 'ca-hint'); note.setAttribute('role', 'status');
+    const ranges = this.el('div', 'ca-company-actions');
+    let epoch = 0;
+    const load = async (days) => {
+      const turn = ++epoch;
+      this._gpuHistoryDays = days; // a repaint of the Company page (after a hire, say) keeps the chosen range
+      for (const b of ranges.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.days === String(days)));
+      note.textContent = 'Loading GPU history…';
+      const end = Math.floor(Date.now() / 1000), start = end - days * 86400;
+      const read = () => this.app._chatApi(`/api/resource-history?start=${start}&end=${end}&resolution=${days > 1 ? 'hour' : 'five-minute'}`);
+      let result = await read();
+      // The route serves one read at a time, and a Company repaint can land while the last section's read is in flight.
+      if (!result.ok && result.status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (turn !== epoch || !host.isConnected) return;
+        result = await read();
+      }
+      if (turn !== epoch || !host.isConnected) return;
+      svg.replaceChildren();
+      for (const y of [0, H / 2, H]) {
+        const grid = this.doc.createElementNS(ns, 'line');
+        grid.setAttribute('x1', '0'); grid.setAttribute('x2', String(W)); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
+        grid.setAttribute('class', 'ca-gpu-grid'); svg.append(grid);
+      }
+      const history = result.ok ? result.data : null;
+      if (!result.ok) {
+        note.textContent = result.status === 503 ? 'GPU history is not recorded on this host. The live GPU meter still works.'
+          : result.error || 'GPU history could not be read.';
+        svg.setAttribute('aria-label', 'No GPU history');
+        return;
+      }
+      const shape = caRecordedGpuShape(history, W, H);
+      if (!shape) {
+        note.textContent = `No GPU readings were recorded in the last ${days > 1 ? `${days} days` : 'day'}.`;
+        svg.setAttribute('aria-label', 'No GPU history');
+        return;
+      }
+      for (const points of shape.segments) {
+        const line = this.doc.createElementNS(ns, 'polyline');
+        line.setAttribute('points', points); line.setAttribute('class', 'ca-gpu-line'); svg.append(line);
+      }
+      const freshness = history.freshness === 'fresh' ? '' : history.freshness === 'stale' ? ' The newest reading is stale.' : ' The newest reading is unavailable.';
+      const span = days > 1 ? `the last ${days} days` : 'the last day';
+      note.textContent = `GPU use over ${span} (whole host): average ${shape.avg}%, peak ${shape.peak}%. Top line is 100%; gaps are times with no reading.${freshness}`;
+      svg.setAttribute('aria-label', `GPU utilization over ${span}, average ${shape.avg}%, peak ${shape.peak}%`);
+    };
+    for (const [days, label] of [[1, 'Day'], [7, 'Week']]) {
+      const b = this.button('ca-btn', `GPU history for the last ${days > 1 ? `${days} days` : 'day'}`, () => { void load(days); }, { text: label });
+      b.dataset.days = String(days);
+      ranges.append(b);
+    }
+    host.append(this.el('h3', '', 'GPU history'), ranges, svg, note);
+    void load(this._gpuHistoryDays === 7 ? 7 : 1);
+    return host;
+  }
+
   /** GPU utilization over the readings this page has taken (every 5 s, up to an hour), redrawn as new ones arrive. */
   openGpuHistory() {
     this.doc.querySelector('.ca-gpu-dialog')?.close();
@@ -1422,7 +1637,19 @@ class ReverieChatApp {
   async loadOwner() {
     const res = await this.app._chatApi('/api/company');
     if (!res.ok) { this.discardBoardFrame(); return; }
+    const prior = new Map((this.company?.employees || []).map(e => [e.sessionId, caProviderBinding(e)]));
     this.company = res.data;
+    // A delayed session/member event cannot keep native proof from an earlier
+    // owner, recipe or generation after the canonical company binding changes.
+    for (const [sid, binding] of prior) {
+      const current = this.company?.employees?.find(e => e.sessionId === sid);
+      if (current && caProviderBinding(current) === binding) continue;
+      const session = this.app.sessions?.get?.(sid);
+      if (session) delete session.providerHealth;
+      for (const room of [this.room, ...(this.viewRooms || [])])
+        for (const member of room?.members || []) if (member.sessionId === sid) delete member.providerHealth;
+    }
+    this.schedulePresence();
     globalThis.ReverieTime?.setTimeZone(res.data?.settings?.timeZone);
     await this.loadPhoneStatus();
     if (this.canManageOffice()) this.scheduleBoardWarm(); else this.discardBoardFrame();
@@ -1664,20 +1891,15 @@ class ReverieChatApp {
     searchBtn.hidden = true;
     searchBtn.setAttribute('aria-expanded', 'false');
     searchBtn.setAttribute('aria-controls', 'ca-message-search');
+    // Device setup lives in Company settings; this detached action only backs the phone header's More menu.
     const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
     const mutedBadge = this.el('span', 'ca-muted-badge', 'Muted');
     mutedBadge.hidden = true;
     mutedBadge.title = 'Channel notifications are muted';
-    // On or off; who is read ("Replies to me" or "Everyone") is chosen in the channel menu.
-    const speakBtn = this.button('ca-icon-btn ca-head-speak', 'Enable spoken replies in this room', () => {
-      this.app._setSpeakReplies?.(this.roomId, this.app._speakRepliesIn?.(this.roomId) ? 'off' : 'mine');
-      this.renderHeader();
-    }, { text: '🔊' });
     const moreBtn = this.button('ca-icon-btn ca-head-more', 'More actions', () => this.openHeaderMenu(moreBtn), { text: '⋯' });
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
-    speakBtn.hidden = true;
-    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, searchBtn, phoneBtn, membersBtn, moreBtn);
+    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, pinsBtn, searchBtn, membersBtn, moreBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1695,7 +1917,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, searchBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
+      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, searchBtn, phoneBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -1714,8 +1936,10 @@ class ReverieChatApp {
     input.addEventListener('input', () => this.fitInput());
     this.installMentions();
     this.installReply();
+    this.installDeleteSelection();
     this.installTyping();
     this.installComposerChrome();
+    this.installWebPane();
     // Scrolling to the newest message is what reads it.
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
@@ -2833,6 +3057,7 @@ class ReverieChatApp {
         const signIn = this.el('a', 'ca-company-signin', 'Owner sign-in'); signIn.href = '/owner/account';
         content.append(note, signIn); return;
       }
+      void this.companyHireRequests(content, employees, paint);
       const section = this.el('section', 'ca-company-hire');
       section.hidden = true; section.id = 'ca-company-hire';
       const hire = this.button('ca-btn ca-company-add', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) { section.scrollIntoView({ block: 'nearest' }); pages[step].querySelector('input, select, textarea, button')?.focus(); } }, { text: '+' });
@@ -2907,6 +3132,10 @@ class ReverieChatApp {
       const rest = this.expertRestFields(pages[2]);
       const recoveryWrap = this.el('label', 'ca-label');
       const recover = this.el('input'); recover.type = 'checkbox'; recover.name = 'recoverEmployees'; recoveryWrap.append(recover, this.el('span', '', 'May wake reporting experts after a crash')); pages[2].append(recoveryWrap, this.el('p', 'ca-hint', 'An explicit recovery permission only. It grants no ability to hire, manage plans or schedule work.'));
+      const officeWrap = this.el('label', 'ca-hint', ' Manage office attendance and restarts');
+      const manageOffice = this.el('input'); manageOffice.type = 'checkbox'; manageOffice.name = 'manageOffice';
+      officeWrap.prepend(manageOffice);
+      pages[2].append(officeWrap, this.el('p', 'ca-hint', 'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.'));
       const planPermissions = {};
       for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
         const wrap = this.el('label', 'ca-label');
@@ -2914,6 +3143,10 @@ class ReverieChatApp {
         wrap.append(input, this.el('span', '', text)); pages[2].append(wrap); planPermissions[key] = input;
       }
       pages[2].append(this.el('p', 'ca-hint', 'Plan moves require the affected expert’s handoff and approval. A title alone grants no permission.'));
+      const goalWrap = this.el('label', 'ca-label');
+      const manageGoals = this.el('input'); manageGoals.type = 'checkbox'; manageGoals.name = 'manageGoals';
+      goalWrap.append(manageGoals, this.el('span', '', 'Manage team goals'));
+      pages[2].append(goalWrap, this.el('p', 'ca-hint', 'Read, create and update this company’s operational goals before review. Verification, closing, cancellation, adoption and grants remain separate. Requires the authenticated Goal broker.'));
       const boardPermissions = {};
       const boardFields = this.el('fieldset'); boardFields.append(this.el('legend', '', 'Board permissions'));
       for (const [key, text, detail] of caBoardPermissionFields) {
@@ -2955,7 +3188,7 @@ class ReverieChatApp {
         pages[3].replaceChildren(this.el('legend', '', 'Ready to welcome them?'));
         const photo = appearance.picture.value(); if (photo) { const image = this.el('img', 'ca-hire-review-photo'); image.src = photo; image.alt = ''; pages[3].append(image); }
         const list = this.el('dl', 'ca-hire-review');
-        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
+        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Office management', manageOffice.checked ? 'May manage office attendance and restarts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Goal management', manageGoals.checked ? 'Manage team goals before review' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
         list.append(this.el('dt', '', 'Board permissions'), this.literalText('dd', '', caBoardPermissionFields.filter(([key]) => boardPermissions[key].checked).map(([, text]) => text).join('; ') || 'Not granted'));
         pages[3].append(list, this.el('p', 'ca-hint', 'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'));
       };
@@ -3004,7 +3237,7 @@ class ReverieChatApp {
         saving = true; submit.disabled = true; error.textContent = '';
         const source = selectedSource();
         if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked, editBoardIssues: basicBoardChoice, manageBoard: boardPermissions.manageBoard.checked, manageDecisions: boardPermissions.manageDecisions.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, manageOffice: manageOffice.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked, manageGoals: manageGoals.checked, editBoardIssues: basicBoardChoice, manageBoard: boardPermissions.manageBoard.checked, manageDecisions: boardPermissions.manageDecisions.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
@@ -3018,6 +3251,7 @@ class ReverieChatApp {
         finally { saving = false; submit.disabled = false; }
       });
       section.append(form); content.append(section);
+      content.append(this.companyGpuHistory());
       head.querySelector('.ca-company-settings-button')?.remove();
       head.querySelector('.ca-company-tools-button')?.remove();
       head.insertBefore(this.button('ca-btn ca-company-settings-button', 'Company settings', () => this.openCompanySettings(paint), { text: 'Company settings' }), head.lastElementChild);
@@ -3029,6 +3263,66 @@ class ReverieChatApp {
       if (this.companyPage !== dlg) return;
       this._companyTimer = this.doc.defaultView.setInterval(() => { void this._companyRefresh?.(); }, 60000);
     } catch { if (this.companyPage === dlg) status.textContent = 'Could not load company. Please reopen it to try again.'; }
+  }
+
+  /**
+   * Hire requests a listed delegate made: shown to the verified owner, who approves (the server runs the hire as the owner,
+   * re-checking everything) or declines. Nothing here hires by itself, and nothing retries.
+   */
+  async companyHireRequests(content, employees, repaint) {
+    const result = await this.app._chatApi('/api/experts-hire-requests');
+    const open = result.ok && Array.isArray(result.data?.requests) ? result.data.requests.filter(r => r.status === 'pending' || r.status === 'approving') : [];
+    if (!open.length || !content.isConnected) return;
+    const host = this.el('section', 'ca-company-hire-requests');
+    host.setAttribute('aria-label', 'Hire requests');
+    host.append(this.el('h3', '', `Hire requests (${open.length})`),
+      this.el('p', 'ca-hint', 'A delegate asked for these hires. Nothing is hired until you approve; approval runs the hire as you, with every limit checked again.'));
+    const nameOf = id => employees.find(e => e.id === id)?.name ?? id;
+    for (const request of open) {
+      const f = request.fields || {};
+      const card = this.el('article', 'ca-company-hire-request');
+      card.dataset.requestId = request.id;
+      card.append(this.literalText('h4', '', `${f.name || `From template ${request.templateId}`}${f.position ? ` · ${f.position}` : ''}`));
+      const facts = this.el('dl', 'ca-company-hire-request-facts');
+      for (const [label, value] of [['Template', request.templateId], ['Asked by', request.requestedBy],
+        ['Asked', globalThis.ReverieTime?.format(request.requestedAt) ?? new Date(request.requestedAt).toISOString()],
+        ['Reports to', f.reportsTo ? nameOf(f.reportsTo) : ''], ['Harness', [f.mode, f.model, f.effort].filter(Boolean).join(' · ')],
+        ['Plan', f.accountProfileId || ''], ['Rooms', (f.rooms || []).join(', ')], ['Working directory', f.workingDir],
+        ['Budget stop', f.budgetStop ? `${f.budgetStop.planId} at ${f.budgetStop.weeklyPercent}% weekly` : ''], ['Reason', f.reason]]) {
+        if (!value) continue;
+        facts.append(this.literalText('dt', '', label), this.literalText('dd', '', String(value)));
+      }
+      card.append(facts);
+      const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+      const actions = this.el('div', 'ca-company-actions');
+      const decide = async (verb, button) => {
+        for (const control of actions.querySelectorAll('button')) control.disabled = true;
+        error.textContent = ''; button.textContent = verb === 'approve' ? 'Hiring…' : 'Declining…';
+        let outcome;
+        try { outcome = await this.app._chatApi(`/api/experts-hire-requests/${encodeURIComponent(request.id)}/${verb}`, { method: 'POST', body: {} }); }
+        catch { outcome = { ok: false }; }
+        if (!outcome.ok) {
+          // No answer cannot tell whether the hire ran: say so instead of offering the same click again.
+          error.textContent = outcome.status ? (outcome.error || 'The request could not be decided.')
+            : 'The outcome is unconfirmed. Reopen Company and check the roster before trying again.';
+          button.textContent = verb === 'approve' ? 'Approve and hire' : 'Decline';
+          if (outcome.status) for (const control of actions.querySelectorAll('button')) control.disabled = false;
+          return;
+        }
+        this.toast(verb === 'approve' ? `Hired ${f.name || `an expert from ${request.templateId}`} on ${request.requestedBy}'s request.` : 'Hire request declined.', 'info');
+        await repaint?.();
+      };
+      const approve = this.button('ca-btn is-primary', `Approve and hire for request ${request.id}`, () => decide('approve', approve), { text: 'Approve and hire' });
+      const decline = this.button('ca-btn', `Decline request ${request.id}`, () => decide('decline', decline), { text: 'Decline' });
+      if (request.status === 'approving') {
+        approve.disabled = true;
+        error.textContent = 'An approval of this request did not finish. Check the roster: if the expert is there, decline to close the request.';
+      }
+      actions.append(approve, decline);
+      card.append(actions, error);
+      host.append(card);
+    }
+    content.prepend(host);
   }
 
   companyRecoveryFields(container, data, status) {
@@ -3083,6 +3377,45 @@ class ReverieChatApp {
     container.append(recovery);
   }
 
+  /**
+   * The company time zone (an IANA name such as America/New_York): chat times, agent briefs, deadlines and plan resets
+   * follow it. Only that one setting is sent, and the page clock switches once the server confirms the saved zone.
+   */
+  companyTimeZoneForm(data, status, error, onSaved) {
+    const form = this.el('form', 'ca-company-time-zone-form');
+    form.append(this.el('h3', '', 'Time zone'));
+    const wrap = this.el('label', 'ca-label');
+    const input = this.el('input', 'ca-field');
+    input.value = data.settings?.timeZone || 'UTC'; input.maxLength = 100; input.required = true;
+    input.placeholder = 'America/New_York'; input.setAttribute('aria-label', 'Company time zone'); input.spellcheck = false;
+    const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+    if (zones.length) {
+      const list = this.el('datalist'); list.id = 'ca-company-time-zones';
+      for (const zone of zones) { const option = this.el('option'); option.value = zone; list.append(option); }
+      input.setAttribute('list', list.id); form.append(list);
+    }
+    wrap.append(this.el('span', 'ca-label-text', 'Company time zone'), input);
+    const save = this.el('button', 'ca-btn is-primary', 'Save time zone'); save.type = 'submit';
+    const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
+    form.append(wrap, this.el('p', 'ca-hint', 'Used for chat times, agent briefs, deadlines and plan resets. Daylight saving changes are automatic.'), actions);
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); if (save.disabled) return;
+      const timeZone = input.value.trim();
+      try { new Intl.DateTimeFormat('en-US', { timeZone }); }
+      catch { error.textContent = `"${timeZone}" is not a time zone this browser knows. Use a name like America/New_York.`; return; }
+      save.disabled = true; error.textContent = ''; status.textContent = '';
+      try {
+        const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { timeZone } });
+        if (!result.ok) throw new Error(result.error || 'The time zone could not be saved.');
+        if (result.data?.settings?.timeZone !== timeZone) throw new Error('Save not confirmed. Reopen Company settings to check the time zone.');
+        globalThis.ReverieTime?.setTimeZone(timeZone);
+        status.textContent = `Company time zone saved: ${timeZone}.`; await onSaved?.();
+      } catch (failure) { error.textContent = failure.message || 'The time zone could not be saved.'; }
+      finally { save.disabled = false; }
+    });
+    return form;
+  }
+
   async openCompanySettings(onSaved) {
     const existing = this.doc.querySelector('.ca-company-settings');
     if (existing) { existing.querySelector('button')?.focus(); return; }
@@ -3095,6 +3428,15 @@ class ReverieChatApp {
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const content = this.el('div', 'ca-company-settings-content');
     dialog.append(head, status, error, content);
+    // Per-device and for everyone who can open this dialog, so it does not wait on (or depend on) the company load.
+    const mobile = this.doc.defaultView?.ReverieMobile;
+    if (mobile) {
+      const device = this.el('section', 'ca-company-device');
+      device.append(this.el('h3', '', 'This device'),
+        this.el('p', 'ca-hint', 'Install Reverie as an app on this phone or computer and turn on its notifications. This applies only to the device you are using.'),
+        this.button('ca-btn', 'Install app and notifications', () => mobile.open(), { text: 'Install app and notifications' }));
+      content.append(device);
+    }
     dialog.addEventListener('close', () => dialog.remove());
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
     try {
@@ -3137,6 +3479,7 @@ class ReverieChatApp {
           finally { saving = false; save.disabled = false; }
         });
         content.append(form);
+        content.append(this.companyTimeZoneForm(data, status, error, onSaved));
         const coreForm = this.el('form', 'ca-company-core-form');
         const companyCore = this.coreBeliefFields(coreForm, 'Company core beliefs', data.settings?.coreBeliefs || []);
         coreForm.append(this.el('p', 'ca-hint', 'Company blocks come first for every expert; personal additions follow with exact duplicates removed. This is configured text, not proof of a running session’s loaded startup.'));
@@ -3154,6 +3497,7 @@ class ReverieChatApp {
           } catch (failure) { error.textContent = failure.message || 'Company core beliefs could not be saved.'; }
           finally { saveCore.disabled = false; }
         }); content.append(coreForm);
+        content.append(this.companyHiringFields(data.employees || []));
       } else content.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
       const receipts = this.el('details', 'ca-company-settings-receipts');
       receipts.append(this.el('summary', '', 'Research receipts'));
@@ -3191,6 +3535,95 @@ class ReverieChatApp {
       }, { text: 'Refresh receipts' });
       receipts.append(reports, refresh); content.append(receipts);
     } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Company settings are unavailable.'; } }
+  }
+
+  /**
+   * Owner-only hiring settings: who may hire for the owner, the two hire caps with their current use, and the active hires,
+   * flagging any whose session is gone. PUT /api/experts-settings replaces the whole settings object, so each save starts
+   * from a fresh read and changes only these fields.
+   */
+  companyHiringFields(employees) {
+    const form = this.el('form', 'ca-company-hiring');
+    form.setAttribute('aria-label', 'Hiring');
+    const usage = this.el('p', 'ca-hint');
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const number = (label, max) => {
+      const wrap = this.el('label', 'ca-label');
+      const input = this.el('input', 'ca-field');
+      input.type = 'number'; input.min = '0'; input.max = String(max); input.step = '1'; input.required = true; input.setAttribute('aria-label', label);
+      wrap.append(this.el('span', 'ca-label-text', label), input);
+      return { wrap, input };
+    };
+    const perDay = number('Hires in any 24 hours', 20), active = number('Active hires at most', 50);
+    const delegates = this.el('fieldset', 'ca-company-hiring-delegates');
+    const hires = this.el('div', 'ca-company-hiring-active');
+    const save = this.el('button', 'ca-btn is-primary', 'Save hiring settings'); save.type = 'submit'; save.disabled = true;
+    const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
+    form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap, delegates, actions, status, error, hires);
+    const when = (ms) => globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
+    let shown = null; // the delegates and caps this section last showed, to notice a change made elsewhere before a save
+    const hiring = (settings) => JSON.stringify([[...(settings.hireDelegates || [])].sort(), settings.maxHiresPerDay, settings.maxActive]);
+    const render = (data) => {
+      const settings = data.settings || {}, limits = data.limits || {};
+      shown = hiring(settings);
+      usage.textContent = `In the last 24 hours: ${limits.hiresLast24h} of ${limits.maxHiresPerDay} hires. Active now: ${limits.active} of ${limits.maxActive}.`;
+      perDay.input.value = String(settings.maxHiresPerDay); active.input.value = String(settings.maxActive);
+      // Delegates are session ids: pick from the roster, and keep showing a listed one that no current expert holds.
+      const chosen = new Set(settings.hireDelegates || []);
+      const rows = employees.filter((e) => e.sessionId).map((e) => [e.sessionId, e.position ? `${e.name} · ${e.position}` : e.name]);
+      for (const id of chosen) if (!rows.some(([sid]) => sid === id)) rows.push([id, `Session ${id.slice(0, 8)} (no current expert)`]);
+      delegates.replaceChildren(this.el('legend', '', 'Who may hire for you'),
+        this.el('p', 'ca-hint', 'A delegate may hire and retire experts within these limits, without asking you each time.'));
+      for (const [sid, text] of rows) {
+        const wrap = this.el('label', 'ca-label'); const box = this.el('input');
+        box.type = 'checkbox'; box.name = 'hireDelegate'; box.value = sid; box.checked = chosen.has(sid);
+        wrap.append(box, this.el('span', '', text)); delegates.append(wrap);
+      }
+      const templates = new Map((data.experts || []).map((t) => [t.id, t.name]));
+      const who = (by) => by === 'owner' ? 'you' : by.startsWith('agent:')
+        ? employees.find((e) => e.sessionId === by.slice(6))?.name ?? `session ${by.slice(6, 14)}` : by;
+      const list = (data.hires || []).filter((h) => h.status === 'active');
+      hires.replaceChildren(this.el('h4', '', `Active hires · ${list.length}`));
+      if (!list.length) hires.append(this.el('p', 'ca-hint', 'No active hires.'));
+      for (const h of list) {
+        const row = this.el('div', 'ca-company-hire-record');
+        const name = employees.find((e) => e.id === h.employeeId)?.name ?? templates.get(h.templateId) ?? h.templateId;
+        row.append(this.el('strong', '', name),
+          this.el('p', 'ca-hint', `${templates.get(h.templateId) ?? h.templateId}, hired by ${who(h.by)} ${when(h.hiredAt)}. ${h.reason}`));
+        // Still counted against the active cap until it is retired.
+        if (h.sessionLive === false) row.append(this.el('p', 'ca-company-error', 'Its session no longer exists. It still counts as active until it is retired.'));
+        hires.append(row);
+      }
+      save.disabled = false;
+    };
+    const load = async () => {
+      const result = await this.app._chatApi('/api/experts');
+      if (!result.ok || !result.data?.settings) { error.textContent = 'Hiring settings could not be loaded. Reopen Company settings to try again.'; return; }
+      render(result.data);
+    };
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); if (save.disabled || !form.reportValidity()) return;
+      const hireDelegates = [...delegates.querySelectorAll('input[name="hireDelegate"]:checked')].map((box) => box.value);
+      if (hireDelegates.length > 20) { error.textContent = 'Choose at most 20 delegates.'; return; }
+      save.disabled = true; error.textContent = ''; status.textContent = '';
+      try {
+        const fresh = await this.app._chatApi('/api/experts');
+        if (!fresh.ok || !fresh.data?.settings) throw new Error(fresh.error || 'Hiring settings could not be read before saving. Nothing was changed.');
+        if (hiring(fresh.data.settings) !== shown) {
+          render(fresh.data);
+          throw new Error('Hiring settings were changed elsewhere since this page loaded. They are shown again; review them and save once more.');
+        }
+        const body = { ...fresh.data.settings, hireDelegates, maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) };
+        const saved = await this.app._chatApi('/api/experts-settings', { method: 'PUT', body });
+        if (!saved.ok) throw new Error(saved.error || 'Hiring settings could not be saved.');
+        status.textContent = 'Hiring settings saved.';
+        await load();
+      } catch (failure) { error.textContent = failure.message || 'Hiring settings could not be saved.'; }
+      finally { save.disabled = false; }
+    });
+    void load();
+    return form;
   }
 
   confirmCompanyAction(name, message, confirmLabel) {
@@ -3470,7 +3903,7 @@ class ReverieChatApp {
     this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
-      // Workspace sits beside Company and Board as a quick link (James 10-27).
+      // Workspace sits beside Company and Board as a quick link.
       ? ['company', 'board', 'workspace'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
       : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
     for (const entry of entries) pane.append(this.button('ca-btn ca-office-pane-link', entry.label, async () => {
@@ -3502,12 +3935,12 @@ class ReverieChatApp {
   }
 
   configureCompanyToolsBack(frame) {
-    if (!['handbook', 'workspace', 'bots', 'people', 'previews'].includes(this.embed)) return;
+    if (!['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].includes(this.embed)) return;
     // These are our same-origin pages. Preserve standalone behavior outside the shell.
     try {
       if (frame.contentWindow.location.origin !== this.doc.defaultView.location.origin) return;
       for (const link of frame.contentDocument.querySelectorAll('a')) {
-        if (link.textContent.trim() !== 'Back to chat') continue;
+        if (link.textContent.trim() !== 'Back to chat' && !(this.embed === 'failures' && link.hasAttribute('data-company-tools-back'))) continue;
         link.textContent = 'Back to Company / tools'; link.setAttribute('href', '#company');
         link.removeAttribute('target');
         link.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); void this.returnToCompanyTools(); }, { capture: true });
@@ -3520,7 +3953,7 @@ class ReverieChatApp {
       if (!await this.verifyOfficeOwner()) return this.toast('Sign in as the owner to use company tools.', 'error');
     } catch { return this.toast('Could not verify company access.', 'error'); }
     if (!anchor.isConnected) return;
-    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }));
+    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }));
     entries.push({ sep: true }, ...this.officeToolEntries(), { sep: true },
       { label: 'Terminal settings', run: () => this.app.openAppSettings?.() },
       { label: 'Office overview', run: () => this.openPage('office') });
@@ -3572,7 +4005,7 @@ class ReverieChatApp {
     // own explicit confirmation and the existing authenticated host workflow.
     void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
       if (!root.isConnected || this.embed !== 'office' || this.app._chatSelf || !company.ok || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) return;
-      for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews']) {
+      for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews', 'failures']) {
         const page = CA_PAGES[kind];
         const link = this.button(`ca-btn ca-office-link${kind === 'company' ? ' ca-company-nav' : ''}`, page.label, () => this.openPage(kind));
         link.dataset.key = `page:${kind}`;
@@ -3634,7 +4067,7 @@ class ReverieChatApp {
     } else {
     if (!frame) { frame = this.el('iframe', 'ca-page-frame'); panel.replaceChildren(frame); }
     frame.title = page.label;
-    let framePath = ['workspace', 'bots', 'previews'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
+    let framePath = ['workspace', 'bots', 'previews', 'failures'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
     if (kind === 'previews') {
       const location = this.doc.defaultView.location;
       const query = new URLSearchParams(location.search);
@@ -3660,7 +4093,7 @@ class ReverieChatApp {
     }
     }
     panel.querySelector('.ca-tool-page-head')?.remove();
-    if (['handbook', 'workspace', 'bots', 'people', 'previews'].includes(kind)) {
+    if (['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].includes(kind)) {
       const back = this.el('header', 'ca-tool-page-head');
       back.append(this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), { icon: 'back', text: 'Back to Company / tools' }));
       panel.prepend(back);
@@ -3779,6 +4212,7 @@ class ReverieChatApp {
     }
     to.hidden = true;
     to.value = '';
+    this.installVoice(els);
     // The send button shows once there is something to send (always on a touch screen, which has no Enter key).
     const sync = () => send.classList.toggle('has-text', input.value.trim() !== '' || (this.app._chatPending?.length ?? 0) > 0);
     input.addEventListener('input', sync);
@@ -3788,6 +4222,159 @@ class ReverieChatApp {
       input.placeholder = this.composerPlaceholder();
     };
     this.syncComposer();
+  }
+
+  /**
+   * Voice in one place: a labelled button beside Send shows what is happening (off, listening, speaking) and opens a
+   * panel with Talk (the existing push-to-talk), Listening mode, Spoken replies, Car mode and Stop. The same stored
+   * preferences and permissions are used; capture continues through the existing Talk and Listening mode handlers.
+   */
+  installVoice(els) {
+    const { send, mic } = els;
+    const voice = this.button('ca-voice-btn', 'Voice', () => (this.els.voicePanel ? this.closeVoicePanel() : this.openVoicePanel()), { text: 'Voice' });
+    voice.prepend(this.el('span', 'ca-voice-dot'));
+    voice.setAttribute('aria-haspopup', 'dialog');
+    voice.setAttribute('aria-expanded', 'false');
+    send.before(voice);
+    // Talk lives in the panel; between openings the mic keeps its bindings in a hidden holder.
+    const home = this.el('span', 'ca-voice-home');
+    home.hidden = true;
+    if (mic) home.append(mic);
+    // The room's hands-free mode select (hands-free.js) is a voice control too: it joins the panel with Talk.
+    if (this.app._hfButton) home.append(this.app._hfButton);
+    send.after(home);
+    this.els.voiceBtn = voice;
+    this.els.voiceHome = home;
+    const win = this.doc.defaultView;
+    if (!this._voiceTick && win?.setInterval) this._voiceTick = win.setInterval(() => this.syncVoice(), 500);
+    this.syncVoice();
+  }
+
+  /** What voice is doing now: the microphone is capturing, read-aloud is speaking, or nothing. */
+  voiceState() {
+    if (this.app._chatRecording || this.app._hfStream || this.app._chatDictation) return 'listening';
+    if (this.app._readAloud?.current) return 'speaking';
+    return 'off';
+  }
+
+  syncVoice() {
+    this.syncReading();
+    const voice = this.els.voiceBtn;
+    if (!voice) return;
+    const room = this.room;
+    voice.hidden = !room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
+    if (voice.hidden) this.closeVoicePanel();
+    const state = this.voiceState();
+    const label = { off: 'Off', listening: 'Listening', speaking: 'Speaking' }[state];
+    voice.dataset.state = state;
+    voice.setAttribute('aria-label', `Voice: ${label}`);
+    voice.title = `Voice: ${label}`;
+    let panel = this.els.voicePanel;
+    if (!panel) return;
+    // The panel belongs to the room it was opened in: another room closes it, and a change in that room's voice
+    // members rebuilds it, so no control acts on a room the panel is not showing.
+    if (panel.dataset.roomId !== room?.id) return this.closeVoicePanel();
+    if (panel.dataset.speaks !== String(caSpeaks(room))) {
+      this.openVoicePanel({ focus: false });
+      return;
+    }
+    panel.querySelector('.ca-voice-state').textContent = { off: 'Off', listening: 'Listening…', speaking: 'Speaking…' }[state];
+    panel.querySelector('.ca-voice-stop').hidden = state === 'off';
+    const mode = this.app._speakRepliesMode?.(room?.id) || 'off';
+    for (const b of panel.querySelectorAll('[data-speak-mode]')) b.setAttribute('aria-pressed', String(b.dataset.speakMode === mode));
+    const talk = panel.querySelector('.ca-voice-talk');
+    if (talk) talk.hidden = !this.app._chatEls?.mic || this.app._chatEls.mic.hidden;
+    const listen = panel.querySelector('.ca-voice-listen');
+    if (listen) listen.hidden = !this.app._hfButton || this.app._hfButton.hidden;
+  }
+
+  stopVoice() {
+    if (this.app._chatRecording || this.app._chatDictation) this.app._stopChatRecording?.();
+    // Hands-free would reopen its microphone on the next tick, so Stop chooses Off through its own control.
+    const hf = this.app._hfButton;
+    // A pending open counts too: choosing Off invalidates it, so a stream that arrives later is released.
+    if ((this.app._hfStream || this.app._hfOpening) && hf && [...hf.options].some(o => o.value === 'off')) {
+      hf.value = 'off';
+      hf.dispatchEvent(new this.doc.defaultView.Event('change', { bubbles: true }));
+    }
+    this.app._readAloud?.clear?.();
+    this.syncVoice();
+  }
+
+  openVoicePanel({ focus = true } = {}) {
+    const room = this.room;
+    if (!room || this.els.voiceBtn?.hidden) return;
+    this.closeMenus();
+    this.closeVoicePanel();
+    const panel = this.el('div', 'ca-voice-panel');
+    panel.dataset.roomId = room.id;
+    panel.dataset.speaks = String(caSpeaks(room));
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Voice');
+    const head = this.el('div', 'ca-voice-head');
+    const state = this.el('span', 'ca-voice-state');
+    state.setAttribute('role', 'status');
+    const stop = this.button('ca-btn ca-voice-stop', 'Stop listening or speaking', () => this.stopVoice(), { text: 'Stop' });
+    head.append(this.el('strong', '', 'Voice'), state, stop);
+    panel.append(head);
+    // Talk: the same push-to-talk, offered exactly where it was before (a voice member, not phone dictation).
+    const mic = this.app._chatEls?.mic;
+    if (mic) {
+      const talk = this.el('div', 'ca-voice-talk');
+      talk.append(this.el('span', 'ca-voice-label', 'Talk'), mic, this.el('span', 'ca-hint', 'Hold to talk, or tap to start and tap again to send.'));
+      panel.append(talk);
+    }
+    const hf = this.app._hfButton;
+    if (hf) {
+      const listen = this.el('label', 'ca-voice-listen');
+      listen.append(this.el('span', 'ca-voice-label', 'Listening mode'), hf);
+      panel.append(listen);
+    }
+    if (this.app._speakRepliesMode && this.app._setSpeakReplies) {
+      const replies = this.el('div', 'ca-voice-replies');
+      replies.setAttribute('role', 'group');
+      replies.setAttribute('aria-label', 'Spoken replies');
+      replies.append(this.el('span', 'ca-voice-label', 'Spoken replies'));
+      const choices = this.el('div', 'ca-voice-choices');
+      for (const [mode, label, said] of CA_READ_ALOUD_MODES) {
+        const b = this.button('ca-btn', `Spoken replies: ${label}`, () => {
+          if (this.room?.id !== room.id) return this.closeVoicePanel();
+          this.app._setSpeakReplies(room.id, mode);
+          this.toast(said, 'info');
+          this.syncVoice();
+        }, { text: label });
+        b.dataset.speakMode = mode;
+        choices.append(b);
+      }
+      replies.append(choices);
+      panel.append(replies);
+    }
+    if (caSpeaks(room) && this.app.openCarMode)
+      panel.append(this.button('ca-btn ca-voice-car', 'Car mode', () => { this.closeVoicePanel(); this.app.openCarMode(); }, { text: 'Car mode' }));
+    else panel.append(this.el('p', 'ca-hint', 'Car mode and Talk need a voice member in this channel.'));
+    this.app._chatEls.composer.append(panel);
+    this.els.voicePanel = panel;
+    this.els.voiceBtn.setAttribute('aria-expanded', 'true');
+    this._voiceDismiss = (ev) => { if (!panel.contains(ev.target) && !this.els.voiceBtn.contains(ev.target)) this.closeVoicePanel(); };
+    this._voiceKey = (ev) => { if (ev.key === 'Escape') { this.closeVoicePanel(); this.els.voiceBtn.focus(); } };
+    this.doc.addEventListener('pointerdown', this._voiceDismiss, true);
+    this.doc.addEventListener('keydown', this._voiceKey, true);
+    this.syncVoice();
+    if (focus) panel.querySelector('button:not([hidden])')?.focus();
+  }
+
+  closeVoicePanel() {
+    const panel = this.els.voicePanel;
+    if (!panel) return;
+    const mic = this.app._chatEls?.mic;
+    if (mic && this.els.voiceHome) this.els.voiceHome.append(mic);
+    if (this.app._hfButton && this.els.voiceHome) this.els.voiceHome.append(this.app._hfButton);
+    panel.remove();
+    this.els.voicePanel = null;
+    this.els.voiceBtn?.setAttribute('aria-expanded', 'false');
+    this._voiceDismiss && this.doc.removeEventListener('pointerdown', this._voiceDismiss, true);
+    this._voiceKey && this.doc.removeEventListener('keydown', this._voiceKey, true);
+    this._voiceDismiss = this._voiceKey = null;
   }
 
   /* ── replies ── */
@@ -3838,6 +4425,8 @@ class ReverieChatApp {
         },
       });
     }
+    const speech = this.readAloudEntry(m);
+    if (speech) out.push(speech);
     if (m.text && sheet) {
       // A touch screen turns selection off on messages (a long press opens this sheet): this turns it on for one.
       out.push({ label: 'Select text', run: () => this.startSelectMode(m.id) });
@@ -3851,9 +4440,52 @@ class ReverieChatApp {
     const lead = room?.members.find((x) => x.sessionId === room?.coordinatorId);
     const reportable = lead && m.from.kind === 'agent' && m.from.sessionId !== lead.sessionId && !caIsDm(room);
     if (this.serverFeatures.deletes || reportable) out.push({ sep: true });
-    if (this.serverFeatures.deletes) out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
+    if (this.serverFeatures.deletes) {
+      out.push({ label: this.deleteSelection?.has(m.id) ? 'Unselect' : 'Select for deleting', run: () => this.toggleDeleteSelection(m) });
+      out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
+    }
     if (reportable) out.push({ label: 'Report message', danger: true, run: () => this.openReportDialog(m, lead) });
     return out;
+  }
+
+  /**
+   * An agent message is read aloud on request ("Read aloud", then "Speak again"), all of it, now, in its author's voice; while
+   * it is being said the entry and the message itself offer Stop. Off where this browser has no speech.
+   */
+  readAloudEntry(m) {
+    const app = this.app;
+    if (m.from.kind !== 'agent' || !m.text || m.deleted || typeof app._readAloudMessage !== 'function' || !this.doc.defaultView?.speechSynthesis) return null;
+    if (app._readAloud?.playingMessageId === m.id) return { label: 'Stop reading', run: () => this.stopReading(m.id) };
+    const roomId = this.roomId;
+    return {
+      label: app._readAloudSpoken?.has(m.id) ? 'Speak again' : 'Read aloud',
+      run: () => {
+        if (!app._readAloudMessage(roomId, m)) this.toast('Could not read this message aloud', 'error');
+        this.syncVoice();
+      },
+    };
+  }
+
+  stopReading(id) {
+    this.app._readAloudStopMessage?.(id);
+    this.syncVoice();
+  }
+
+  /** The message being read aloud shows it, with its own Stop; every other message drops both. */
+  syncReading() {
+    const feed = this.app._chatEls?.feed;
+    if (!feed) return;
+    const id = this.app._readAloud?.playingMessageId || null;
+    for (const el of feed.querySelectorAll('.ca-msg.is-reading')) {
+      if (el.dataset.msgId === id) continue;
+      el.classList.remove('is-reading');
+      el.querySelector('.ca-reading-stop')?.remove();
+    }
+    const el = id ? this.msgEl(id) : null;
+    if (!el || el.querySelector('.ca-reading-stop')) return;
+    el.classList.add('is-reading');
+    const stop = this.button('ca-btn ca-reading-stop', 'Stop reading this message aloud', () => this.stopReading(id), { text: 'Reading aloud · Stop' });
+    (el.querySelector('.ca-msg-body') || el).append(stop);
   }
 
   // Leaves the sheet closed so the native selection handles stay usable; a tap outside the message ends select mode.
@@ -3919,12 +4551,62 @@ class ReverieChatApp {
     this.openMenu(
       [
         { label: 'Upload a File', glyph: '\u2B06', run: () => picker?.click() },
+        { label: 'Link a File', glyph: '\u{1F517}', disabled: !room || !!room.archivedAt, run: () => this.openLinkFileDialog() },
         { label: 'Create Thread', glyph: '\u2630', disabled: true, hint: 'Soon' },
         { label: 'Create Poll', glyph: '\u2261', disabled: !canPoll, run: () => this.openPollDialog() },
         { label: 'Use Apps', glyph: '\u2726', disabled: true, hint: 'Soon' },
       ],
       { at: trigger, focus: trigger, above: true, className: 'ca-plus-menu', label: 'Add to the message' }
     );
+  }
+
+  /**
+   * Link a File: attach a file on the shared drive by its path, without uploading a copy. Everyone in the room opens the
+   * file as it is now; the server refuses a laptop-local path, a symlink or a hidden file.
+   */
+  openLinkFileDialog() {
+    if (!this.room) return;
+    this.doc.querySelector('.ca-dialog.ca-link-dialog')?.remove();
+    const dlg = this.el('dialog', 'ca-dialog ca-link-dialog');
+    dlg.setAttribute('aria-label', 'Link a file');
+    dlg.append(this.el('h2', '', 'Link a file'));
+    const form = this.el('form', 'ca-form');
+    const wrap = this.el('label', 'ca-label');
+    wrap.append(this.el('span', '', 'Path on the shared drive'));
+    const path = this.el('input', 'ca-field');
+    path.required = true;
+    path.maxLength = 4096;
+    path.spellcheck = false;
+    path.autocomplete = 'off';
+    path.placeholder = '/shared/drive/folder/file.pdf';
+    wrap.append(path);
+    const hint = this.el('p', 'ca-hint', 'The file is not copied: everyone in the room opens it as it is now, with no size limit.');
+    const error = this.el('p', 'ca-form-error');
+    error.setAttribute('role', 'alert');
+    const row = this.el('div', 'ca-dialog-actions');
+    const cancel = this.el('button', 'ca-btn', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => dlg.close());
+    const go = this.el('button', 'ca-btn is-primary', 'Link');
+    go.type = 'submit';
+    row.append(cancel, go);
+    form.append(wrap, hint, error, row);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const value = path.value.trim();
+      if (!value.startsWith('/')) return void (error.textContent = 'Use the absolute path of a file on the shared drive.');
+      go.disabled = true;
+      const refused = await this.app._linkChatFile?.(value);
+      go.disabled = false;
+      if (refused) return void (error.textContent = refused);
+      dlg.close();
+      this.els.composerInput()?.focus?.();
+    });
+    dlg.append(form);
+    dlg.addEventListener('close', () => dlg.remove());
+    this.doc.body.append(dlg);
+    dlg.showModal();
+    path.focus();
   }
 
   /**
@@ -4349,6 +5031,94 @@ class ReverieChatApp {
     this.app._chatEls.feed.querySelector(`[data-msg-id="${CSS.escape(r.id)}"]`)?.classList.add('is-replying');
   }
 
+  /** Messages picked for a group delete (Ctrl- or Cmd-click, or "Select for deleting"), with a bar over the message box. */
+  installDeleteSelection() {
+    const input = this.app._chatEls.input;
+    const bar = this.el('div', 'ca-select-bar');
+    bar.hidden = true;
+    bar.setAttribute('role', 'region');
+    bar.setAttribute('aria-label', 'Selected messages');
+    this.els.selectBar = bar;
+    input.parentNode.insertBefore(bar, input.parentNode.firstChild);
+    this.deleteSelection = new Set();
+    this.deleteSelectionRoom = null;
+    this.doc.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !this.deleteSelection.size || e.defaultPrevented || this.doc.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      this.clearDeleteSelection();
+    });
+  }
+
+  toggleDeleteSelection(m) {
+    if (this.deleteSelectionRoom !== this.roomId) {
+      this.deleteSelection.clear();
+      this.deleteSelectionRoom = this.roomId;
+    }
+    if (this.deleteSelection.has(m.id)) this.deleteSelection.delete(m.id);
+    else if (this.deleteSelection.size >= CA_DELETE_SELECTION_MAX) return this.toast(`Select at most ${CA_DELETE_SELECTION_MAX} messages at a time.`, 'info');
+    else this.deleteSelection.add(m.id);
+    this.renderSelectBar();
+  }
+
+  clearDeleteSelection() {
+    this.deleteSelection.clear();
+    this.renderSelectBar();
+  }
+
+  /** Marks the picked messages and shows the bar. A pick only lasts in its own room, and only while the message is there. */
+  renderSelectBar() {
+    const bar = this.els.selectBar;
+    if (!bar || !this.deleteSelection) return;
+    if (this.deleteSelectionRoom !== this.roomId) this.deleteSelection.clear();
+    const live = new Set((this.room?.messages || []).filter((x) => !x.deleted).map((x) => x.id));
+    for (const id of [...this.deleteSelection]) if (!live.has(id)) this.deleteSelection.delete(id);
+    for (const node of this.app._chatEls.feed.querySelectorAll('.ca-msg')) {
+      const on = this.deleteSelection.has(node.dataset.msgId);
+      node.classList.toggle('is-delete-selected', on);
+      // aria-selected is not a state of role=article, so a picked message says so in its own label.
+      if (on) node.setAttribute('aria-label', 'Selected for deletion');
+      else node.removeAttribute('aria-label');
+    }
+    const n = this.deleteSelection.size;
+    bar.hidden = !n;
+    bar.replaceChildren();
+    if (!n) return;
+    const plural = n === 1 ? 'message' : 'messages';
+    bar.append(this.el('span', 'ca-select-count', `${n} ${plural} selected`), this.el('span', 'ca-spacer'),
+      this.button('ca-btn is-danger', `Delete ${n} selected ${plural}`, () => this.deleteSelected(), { text: 'Delete selected' }),
+      this.button('ca-btn', 'Clear the selection', () => this.clearDeleteSelection(), { text: 'Clear' }));
+  }
+
+  /** One confirmation, then each picked message through the same delete as one at a time: its own permission check and audit record. */
+  async deleteSelected() {
+    const ids = [...this.deleteSelection];
+    if (!ids.length || this._deletingSelection) return;
+    const many = ids.length === 1 ? 'this message' : `these ${ids.length} messages`;
+    if (!this.doc.defaultView?.confirm(`Delete ${many}? They are hidden for everyone in the channel and kept in an audit log, where each can be restored. Agents that already received them still have them.`)) return;
+    this._deletingSelection = true;
+    const roomId = this.roomId;
+    const failed = [];
+    let deleted = 0;
+    try {
+      for (const id of ids) {
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (res.ok) {
+          deleted++;
+          this.deleteSelection.delete(id);
+          if (this.replyTo?.id === id) this.cancelReplySilently();
+        } else failed.push(res.error || 'refused');
+      }
+    } finally { this._deletingSelection = false; }
+    if (this.roomId === roomId) {
+      await this.app._loadChatRoom(roomId, { quiet: true });
+      this.renderAll();
+      this.renderFeed();
+    }
+    // What could not be deleted stays selected, so it can be tried again or cleared.
+    if (failed.length) this.toast(`Deleted ${deleted} of ${ids.length}. ${failed.length} could not be deleted: ${failed[0]}`, 'error');
+    else this.toast(`Deleted ${deleted} ${deleted === 1 ? 'message' : 'messages'}.`, 'info');
+  }
+
   async deleteMessage(m) {
     if (!this.doc.defaultView?.confirm(`Delete this message from ${this.authorOf(m.from)}? It is hidden for everyone in the channel and kept in an audit log, where you can restore it. Agents that already received it still have it.`)) return;
     const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}`, { method: 'DELETE' });
@@ -4489,6 +5259,7 @@ class ReverieChatApp {
   async openPinsDialog(roomId) {
     this.doc.querySelector('.ca-dialog.ca-pins')?.remove();
     const dlg = this.el('dialog', 'ca-dialog ca-pins');
+    dlg.dataset.roomId = roomId;
     dlg.setAttribute('aria-label', 'Pinned messages');
     const head = this.el('div', 'ca-invite-head');
     head.append(this.el('h2', '', 'Pinned messages'), this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
@@ -4636,7 +5407,11 @@ class ReverieChatApp {
     for (const hit of response.data.hits) {
       const item = this.el('article', 'ca-search-hit');
       item.append(this.el('strong', '', `# ${hit.roomName}`), this.el('div', 'ca-hint', `${hit.sender} · ${this.searchMessageTime(hit.at)}`), this.searchExcerpt(hit.text, q));
-      item.append(this.button('ca-btn', 'View message in context', () => this.openSearchContext(hit), { text: 'View context' }));
+      item.append(this.button('ca-btn', 'Show this message in the chat', async () => {
+        await this.jumpTo(hit.id, hit.roomId);
+        // On a narrow screen the results cover the chat they just moved.
+        if (this.doc.defaultView?.matchMedia?.('(max-width: 900px)').matches) this.closeMessageSearch(false);
+      }, { text: 'Jump' }));
       state.results.append(item);
     }
     state.status.textContent = state.results.children.length ? `${state.results.children.length} results shown · newest first${state.next ? ' · more available' : ''}` : 'No matching messages.';
@@ -4663,45 +5438,142 @@ class ReverieChatApp {
     catch { return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(at); }
   }
 
-  async openSearchContext(hit) {
-    const state = this.messageSearch;
-    if (!state) return;
-    const request = ++state.request;
-    state.abort?.abort(); state.abort = new AbortController(); state.more.hidden = true;
-    state.results.replaceChildren(); state.status.textContent = 'Loading original context…';
-    let response;
-    try { response = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(hit.roomId)}/search-context/${encodeURIComponent(hit.id)}`, { signal: state.abort.signal }); }
-    catch { response = { ok: false, error: 'Context unavailable. Search again.' }; }
-    if (this.messageSearch !== state || state.request !== request) return;
-    if (!response.ok) { state.status.textContent = response.error || 'Message unavailable or access changed.'; return; }
-    state.timeZone = response.data.timeZone || 'UTC';
-    state.status.textContent = `# ${response.data.roomName} · original message and nearby context`;
-    const nav = this.el('div', 'ca-search-nav');
-    nav.append(this.button('ca-btn', 'Back to search results', () => this.runMessageSearch(), { text: 'Back to results' }),
-      this.button('ca-btn', 'Open channel', async () => { await this.selectRoom(hit.roomId); if (this.messageSearch === state) this.jumpToVisibleSearchHit(hit.id); }, { text: 'Open channel' }));
-    state.results.append(nav);
-    for (const message of response.data.messages) {
-      const item = this.el('article', 'ca-search-hit'); item.dataset.sourceId = message.id;
-      if (message.id === hit.id) { item.classList.add('is-selected'); item.setAttribute('aria-label', 'Selected original message'); }
-      item.append(this.el('strong', '', `${message.sender} · ${this.searchMessageTime(message.at)}`), this.el('p', 'ca-search-excerpt', message.text));
-      state.results.append(item);
+  /**
+   * Show one message in the chat: in place when the feed draws it, else the feed rewinds to a page of the room's history
+   * around it (archived messages included), until the reader jumps or scrolls back to the present.
+   */
+  async jumpTo(id, roomId = this.roomId) {
+    const navigation = ++this.navigation;
+    if (roomId !== this.roomId) await this.selectRoom(roomId);
+    if (roomId !== this.roomId || navigation !== this.navigation || this.flashMessage(id)) return;
+    // History is served for channels by a server that searches; elsewhere an undrawn message stays out of reach.
+    if (!this.serverFeatures.search || caIsDm(this.room)) return this.toast('That message is no longer available', 'info');
+    // A later jump, a return to the present or another opening of a room (even this one) makes this answer stale. A
+    // reload of the room while it was on its way (a delete or edit here or in another tab) means asking again.
+    const load = this.app._chatLoadSeq;
+    let page;
+    for (let attempt = 0; ; attempt++) {
+      const reloads = this.roomReloads;
+      page = await this.historyPage(roomId, id, 'around');
+      if (!page || navigation !== this.navigation || load !== this.app._chatLoadSeq || roomId !== this.roomId) return;
+      if (reloads === this.roomReloads) break;
+      if (attempt === CA_HISTORY_RETRIES) return this.toast('The chat changed while loading. Try again.', 'info');
     }
-    state.results.querySelector('.is-selected')?.scrollIntoView?.({ block: 'nearest' });
+    if (!page.messages.some((m) => m.id === id && !m.deleted)) return this.toast('That message is no longer available', 'info');
+    this.history = { roomId, messages: page.messages, olderMore: page.olderMore, newerMore: page.newerMore, busy: false };
+    this.renderFeed();
+    // At once, not smoothly: the feed must not pass through its newest end, where scrolling pages on.
+    this.flashMessage(id, 'auto');
   }
 
-  jumpToVisibleSearchHit(id) {
-    const feed = this.app._chatEls?.feed;
-    if (feed && [...feed.querySelectorAll('[data-msg-id]')].some(node => node.dataset.msgId === id)) this.jumpTo(id);
-    // Older sources remain selected in the history context pane; never replace live conversation/drafts.
-  }
-
-  jumpTo(id) {
-    const feed = this.app._chatEls.feed;
-    const el = [...feed.querySelectorAll('[data-msg-id]')].find((n) => n.dataset.msgId === id);
-    if (!el) return this.toast('That message is no longer available', 'info');
-    el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  /** Scroll to a message the feed draws and flash it; false when it is not drawn. */
+  flashMessage(id, behavior = 'smooth') {
+    const el = this.feedMessage(id);
+    if (!el) return false;
+    el.scrollIntoView?.({ block: 'center', behavior });
     el.classList.add('is-flash');
     this.doc.defaultView?.setTimeout(() => el.classList.remove('is-flash'), 1600);
+    return true;
+  }
+
+  feedMessage(id) {
+    return [...this.app._chatEls.feed.querySelectorAll('[data-msg-id]')].find((n) => n.dataset.msgId === id);
+  }
+
+  /** One page of a room's history `around`, `older` or `newer` than a message; null once the reader is told why not. */
+  async historyPage(roomId, id, page) {
+    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/history/${encodeURIComponent(id)}?page=${page}`);
+    if (res.ok) return res.data;
+    this.toast(res.error || 'That message is no longer available', 'info');
+    return null;
+  }
+
+  /** The rewound history the feed shows instead of the live room, else null. It lapses once another room or the embassy opens. */
+  historyView() {
+    if (this.history && (this.history.roomId !== this.roomId || this.embassy?.selected)) this.history = null;
+    return this.history || null;
+  }
+
+  /** Near either end of rewound history: draw the next page that way. */
+  async extendHistory(direction) {
+    const history = this.historyView();
+    if (!history || history.busy) return;
+    const newer = direction === 'newer';
+    const edge = newer ? history.messages.at(-1) : history.messages[0];
+    if (!edge) return;
+    // Past the room's last stored message the live room is the rest: rejoin it with the reader's place kept.
+    if (newer && !history.newerMore) return this.leaveHistory(edge.id);
+    if (!newer && !history.olderMore) return;
+    history.busy = true;
+    const reloads = this.roomReloads;
+    const page = await this.historyPage(history.roomId, edge.id, direction);
+    history.busy = false;
+    // A reload while the page was on its way reloads the rewind itself; this page may predate it.
+    if (!page || this.history !== history || reloads !== this.roomReloads) return;
+    history.messages = newer ? [...history.messages, ...page.messages] : [...page.messages, ...history.messages];
+    if (newer) history.newerMore = page.newerMore; else history.olderMore = page.olderMore;
+    // A long read keeps a bounded window; what falls off the far end loads again on the way back.
+    if (history.messages.length > CA_HISTORY_KEEP) {
+      history.messages = newer ? history.messages.slice(-CA_HISTORY_KEEP) : history.messages.slice(0, CA_HISTORY_KEEP);
+      if (newer) history.olderMore = true; else history.newerMore = true;
+    }
+    this.redrawKeeping(edge.id);
+  }
+
+  /**
+   * The room was loaded again (a delete, edit, restore, pin or reaction, here or in another tab): load the rewound page
+   * again around the message the reader is looking at, so it shows what the room now holds. The latest refresh wins; a
+   * jump, a return to the present or another room retires it.
+   */
+  async refreshHistory() {
+    const history = this.historyView();
+    if (!history) return;
+    const anchor = this.readerMessageId(history);
+    const refresh = ++this.historyRefreshes, navigation = this.navigation, load = this.app._chatLoadSeq;
+    const page = await this.historyPage(history.roomId, anchor, 'around');
+    if (!page || refresh !== this.historyRefreshes || navigation !== this.navigation || load !== this.app._chatLoadSeq || !this.historyView()) return;
+    this.history = { roomId: history.roomId, messages: page.messages, olderMore: page.olderMore, newerMore: page.newerMore, busy: false };
+    this.redrawKeeping(anchor);
+  }
+
+  /** The first drawn message still on screen, else the middle of the rewound page. */
+  readerMessageId(history) {
+    const feed = this.app._chatEls.feed;
+    const top = feed.getBoundingClientRect().top;
+    const seen = [...feed.querySelectorAll('[data-msg-id]')].find((el) => el.getBoundingClientRect().bottom > top);
+    return seen?.dataset.msgId ?? history.messages[Math.floor(history.messages.length / 2)].id;
+  }
+
+  /** Back to the live room; with `keep`, that message stays where the reader sees it. */
+  leaveHistory(keep) {
+    this.navigation++;
+    this.history = null;
+    if (keep) this.redrawKeeping(keep); else this.renderFeed();
+  }
+
+  /** Redraw the feed leaving message `id` where it was on screen; the bottom when the feed no longer draws it. */
+  redrawKeeping(id) {
+    const feed = this.app._chatEls.feed;
+    const offset = () => { const el = this.feedMessage(id); return el ? el.getBoundingClientRect().top - feed.getBoundingClientRect().top : undefined; };
+    const before = offset();
+    this.renderFeed({ keepScroll: true });
+    const after = offset();
+    if (before === undefined || after === undefined) feed.scrollTop = feed.scrollHeight;
+    else feed.scrollTop += after - before;
+    this.renderJumpBar();
+  }
+
+  /** "You're viewing older messages": over the message box while the feed is rewound or scrolled a screen up from the newest. */
+  renderJumpBar() {
+    const feed = this.app._chatEls.feed;
+    let bar = this.els.jumpBar;
+    if (!bar) {
+      bar = this.els.jumpBar = this.el('div', 'ca-jump-bar');
+      bar.append(this.el('span', '', "You're viewing older messages"), this.button('ca-btn', 'Jump to the newest messages', () => this.leaveHistory(), { text: 'Jump to present' }));
+      feed.after(bar);
+    }
+    const away = feed.scrollHeight - feed.scrollTop - feed.clientHeight > feed.clientHeight;
+    bar.hidden = !!this.embassy?.selected || feed.hidden || !(this.historyView() || away);
   }
 
   /** `@` autocomplete: agents and authorized humans of this room, plus @everyone. */
@@ -4767,7 +5639,7 @@ class ReverieChatApp {
         } else if (it.kind === 'human') {
           b.append(this.humanAvatar(it.human, 'sm', it.human.online ? 'idle' : 'gone'),
             this.literalText('span', 'ca-mention-name', it.human.name),
-            this.el('span', 'ca-mention-sub', it.human.role === 'owner' ? 'Person · Owner' : 'Person · Limited'));
+            this.el('span', 'ca-mention-sub', `Person · ${caHumanBadgeLabel(it.human.role)}`));
         } else {
           b.append(
             this.app._chatAvatar(it.member.sessionId, it.member.name, { size: 'sm' }),
@@ -4840,6 +5712,111 @@ class ReverieChatApp {
     }
   }
 
+  /**
+   * Web links in messages open beside the conversation. A modified or middle click, the link's own right-click or long-press
+   * menu ("Open link in new tab") and the pane's "Open in new tab" still open the page outside Reverie.
+   */
+  installWebPane() {
+    const pane = this.el('aside', 'ca-web');
+    pane.hidden = true;
+    pane.setAttribute('aria-label', 'Web page');
+    const head = this.el('header', 'ca-web-head');
+    const close = this.button('ca-icon-btn ca-web-close', 'Close web page', () => this.closeWebPane(), { icon: 'back' });
+    const host = this.literalText('span', 'ca-web-host');
+    const external = this.el('a', 'ca-btn ca-web-external', 'Open in new tab');
+    external.target = '_blank';
+    external.rel = 'noopener noreferrer';
+    head.append(close, host, this.el('span', 'ca-spacer'), external);
+    const note = this.el('p', 'ca-web-note', CA_WEB_NOTE);
+    pane.append(head, note);
+    this.els.body.insertBefore(pane, this.els.members);
+    Object.assign(this.els, { web: pane, webHost: host, webExternal: external, webNote: note });
+    const feed = this.app._chatEls.feed;
+    feed.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target?.closest?.('a.chatroom-link[href]');
+      if (!link || !feed.contains(link) || link.classList.contains('ca-workspace-download')) return;
+      const url = caWebPaneUrl(link.href, this.doc.defaultView?.location.origin);
+      if (!url) return;
+      event.preventDefault();
+      this.openWebPane(url);
+    });
+    // On a phone the page covers the conversation, so the system Back button returns to it. That Back is the pane's alone:
+    // the conversation is already showing, so the page handler (registered after this one) must not refocus the composer.
+    this.doc.defaultView?.addEventListener('popstate', (event) => {
+      if (this._webHistory && !this.doc.defaultView.history.state?.reverieWeb) {
+        this._webHistory = false;
+        this.closeWebPane({ history: false });
+        event.stopImmediatePropagation();
+      }
+    });
+  }
+
+  openWebPane(url) {
+    const { web, webHost, webExternal, webNote } = this.els;
+    const address = new URL(url);
+    webHost.textContent = address.host;
+    webHost.title = address.href;
+    webExternal.href = address.href;
+    webNote.textContent = CA_WEB_NOTE;
+    // The frame exists only while a page is open, so a closed pane leaves no empty frame in the page.
+    let frame = web.querySelector('.ca-web-frame');
+    if (!frame) {
+      frame = this.el('iframe', 'ca-web-frame');
+      frame.setAttribute('sandbox', CA_WEB_SANDBOX);
+      frame.referrerPolicy = 'no-referrer';
+      // Another site's page cannot be read from here. One that can be read is a page of this site that the framed site
+      // navigated its frame to: it would run same-origin inside the pane, so it is blanked and the new tab offered instead.
+      frame.addEventListener('load', () => {
+        let href = null;
+        try {
+          href = frame.contentWindow?.location.href ?? null;
+        } catch {
+          return;
+        }
+        if (!href || href === 'about:blank') return;
+        frame.src = 'about:blank';
+        webNote.textContent = 'That page tried to open a Reverie page inside the pane, so it was stopped. Use Open in new tab.';
+      });
+      web.append(frame);
+    }
+    frame.title = 'Web page from ' + address.host;
+    if (frame.getAttribute('src') !== address.href) frame.src = address.href;
+    web.hidden = false;
+    this.els.root.classList.add('ca-web-open');
+    const win = this.doc.defaultView;
+    if (win?.matchMedia?.('(max-width: 767px)')?.matches) {
+      this.els.chat.inert = true;
+      if (!this._webHistory) {
+        try {
+          win.history.pushState({ ...(win.history.state || {}), reverieWeb: true }, '');
+          this._webHistory = true;
+        } catch {
+          /* Back is a convenience; the pane's own button closes it */
+        }
+      }
+      web.querySelector('.ca-web-close')?.focus();
+    }
+  }
+
+  /** `history: false` when Back already left the pane's history entry. */
+  closeWebPane({ history = true } = {}) {
+    const { web } = this.els;
+    if (!web || web.hidden) return;
+    web.hidden = true;
+    web.querySelector('.ca-web-frame')?.remove();
+    this.els.root.classList.remove('ca-web-open');
+    if (!this.embed) this.els.chat.inert = false;
+    if (history && this._webHistory) {
+      this._webHistory = false;
+      try {
+        this.doc.defaultView.history.back();
+      } catch {
+        /* nothing to step back over */
+      }
+    }
+  }
+
   /** Files on the company drive stay ordinary paths for agents and open authorized previews for humans. */
   decorateWorkspaceFiles(root) {
     const makePreviewLink = (path) => {
@@ -4887,7 +5864,7 @@ class ReverieChatApp {
     }
   }
 
-  /** Mark `@name` / `@everyone` in a rendered message (text nodes only, never code or links; an address like a@b is left alone). */
+  /** Mark `@name` / `@everyone` in a rendered message as plain highlighted text, not a link (text nodes only, never code or links; an address like a@b is left alone). */
   decorateMentions(el) {
     const names = [...new Set(['everyone', ...(this.room?.members || []).map(m => m.name), ...this.channelHumans().map(p => p.name)].filter(Boolean))];
     names.sort((a, b) => b.length - a.length);
@@ -4904,46 +5881,13 @@ class ReverieChatApp {
       let last = 0;
       for (const m of text.matchAll(re)) {
         const at = m.index + m[1].length;
-        parts.push(text.slice(last, at), this.mentionReference(m[2]));
+        parts.push(text.slice(last, at), this.el('span', 'ca-mention-tag', m[2]));
         last = at + m[2].length;
       }
       if (!parts.length) continue;
       parts.push(text.slice(last));
       node.replaceWith(...parts.filter((p) => p !== ''));
     }
-  }
-
-  /** References carry no authority: resolve current room membership again on every action. */
-  mentionReference(text) {
-    const name = text.slice(1).toLowerCase(), roomId = this.roomId;
-    const matches = () => [...(this.room?.members || []).map(member => ({ member })),
-      ...this.channelHumans().map(human => ({ human }))]
-      .filter(value => String((value.member || value.human).name).toLowerCase() === name);
-    const initial = matches();
-    if (name === 'everyone' || initial.length !== 1) return this.el('span', 'ca-mention-tag', text);
-    const identity = initial[0].member?.sessionId || initial[0].human?.id;
-    const kind = initial[0].member ? 'member' : 'human';
-    const current = () => {
-      const found = this.roomId === roomId ? matches() : [];
-      return found.length === 1 && (found[0][kind]?.sessionId || found[0][kind]?.id) === identity ? found[0][kind] : null;
-    };
-    const button = this.el('button', 'ca-mention-tag ca-chat-reference', text); button.type = 'button';
-    button.title = kind === 'member' ? `View ${text.slice(1)} profile` : `Mention ${text.slice(1)}`;
-    button.addEventListener('click', event => {
-      event.stopPropagation(); const person = current();
-      if (!person) return;
-      if (kind === 'member') this.openProfile(person, button);
-      else this.mentionHuman(person.id);
-    });
-    if (kind === 'member') {
-      const menu = event => {
-        event.preventDefault(); event.stopPropagation(); const person = current();
-        if (person) this.openMemberMenu(person, button, event.type === 'contextmenu' ? { x: event.clientX, y: event.clientY } : button);
-      };
-      button.addEventListener('contextmenu', menu);
-      button.addEventListener('keydown', event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) menu(event); });
-    }
-    return button;
   }
 
   /** Only known, unambiguous channel names and canonical assignment IDs become read-only links. */
@@ -5479,7 +6423,12 @@ class ReverieChatApp {
     const hooks = id ? this.app.pendingHooks?.get?.(id) : undefined;
     const employee = this.company?.employees?.find(e => e.sessionId === id);
     const health = this.employeeHealth(employee || { sessionId: id }, member);
-    if ((employee || session?.runtimeHealth || session?.paneExit) && ['dead', 'disconnected', 'gone', 'unknown'].includes(health.state)) return health.state;
+    if (health.providerConfirmedHealthy) {
+      if (hooks && (hooks.has('permission_prompt') || hooks.has('elicitation_dialog'))) return 'needs';
+      if (hooks?.has('idle_prompt')) return 'waiting';
+      return member?.working || session?.status === 'busy' ? 'working' : 'idle';
+    }
+    if ((employee || session?.runtimeHealth || session?.paneExit) && ['dead', 'disconnected', 'viewer-unavailable', 'gone', 'unknown'].includes(health.state)) return health.state;
     if (!member || !member.alive) return 'gone';
     // The terminal UI's own classifier decides, so the chat can never rank a state differently from the tab rail and the phone
     // overview; caMemberState is the same ranking for a page that does not have it.
@@ -5495,7 +6444,11 @@ class ReverieChatApp {
   /** What the state dots show right now, as one string: a redraw is only worth it when this changes. */
   presenceSignature() {
     const people = [...(this.room?.members || []), ...caDmItems(this.viewRooms, this.roomId, this.closedDms, caEmployeeBySession(this.company)).map((i) => i.peer).filter(Boolean)];
-    return people.map((m) => `${m.sessionId}:${this.presenceOf(m)}`).join('|');
+    return people.map((m) => {
+      const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+      const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+      return `${m.sessionId}:${this.presenceOf(m)}:${!!health.viewerUnavailable}:${!!health.viewerOnly}:${!!employee && this.canReconnectEmployee(employee)}`;
+    }).join('|');
   }
 
   syncSessionPresence(id, deleted = false) {
@@ -5515,7 +6468,8 @@ class ReverieChatApp {
     const session = this.app.sessions?.get?.(employee?.sessionId);
     const viewerDisconnected = this.app._wsSessionId === employee?.sessionId &&
       ['disconnected', 'fallback', 'reconnecting'].includes(this.app._wsState);
-    return caEmployeeHealth(employee, session, member, viewerDisconnected);
+    const current = this.company?.employees?.find(e => e.id === employee?.id && e.sessionId === employee?.sessionId);
+    return caEmployeeHealth(current || { sessionId: employee?.sessionId }, session, member, viewerDisconnected);
   }
 
   employeeHealthBadge(employee, className = 'ca-runtime-health') {
@@ -5530,10 +6484,16 @@ class ReverieChatApp {
     const employee = this.company?.employees?.find(e => e.id === record.employee.id) || record.employee;
     const health = this.employeeHealth(employee);
     node.className = `${record.className} is-${health.state}${health.state === 'idle' ? ' is-connected' : ''}`;
-    node.textContent = health.label; node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
+    node.textContent = health.label;
+    if (health.viewerUnavailable && health.state !== 'viewer-unavailable') {
+      const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
+      warning.title = 'The optional terminal viewer is unavailable. Automatic terminal input may wait for Reconnect; uncertain deliveries are not replayed.';
+      node.append(' ', warning);
+    }
+    node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
     node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${health.detail}`);
     const card = node.closest('.ca-company-person');
-    if (card) for (const state of ['dead', 'disconnected', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
+    if (card) for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
     card?.classList.toggle('is-offline', health.state === 'gone');
     if (card) card.title = `${card.dataset.healthTitle} · ${health.detail}`;
     if (card) {
@@ -5544,17 +6504,17 @@ class ReverieChatApp {
       else if (!wanted) restart?.remove();
       const reconnect = card.querySelector('.ca-reconnect-viewer');
       const canReconnect = health.viewerOnly || (controls?.manage && this.canReconnectEmployee(employee));
-      if (canReconnect && !reconnect) card.append(this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+      if (canReconnect && !reconnect) card.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
       else if (!canReconnect) reconnect?.remove();
     }
   }
 
   canReconnectEmployee(employee) {
     const session = this.app.sessions?.get?.(employee?.sessionId);
-    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation &&
+    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation && !employee?.bindingMigration &&
       Number.isInteger(employee?.sessionGeneration) &&
       (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
-      this.employeeHealth(employee).state === 'disconnected';
+      (this.employeeHealth(employee).state === 'disconnected' || this.employeeHealth(employee).viewerUnavailable === true);
   }
 
   async reconnectEmployeeViewer(employee) {
@@ -5577,7 +6537,7 @@ class ReverieChatApp {
         this.toast(result.error || 'Connection not confirmed. Check this expert’s status before trying again.', 'error');
         return;
       }
-      // The canonical state event, not this acknowledgement, clears the red status.
+      // The canonical state event clears the viewer warning and input hold.
       this.toast(`Terminal reconnected for ${employee.name}.`, 'info');
     } catch { this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error'); }
     finally { this._reconnectingEmployees.delete(employee.id); }
@@ -5709,6 +6669,13 @@ class ReverieChatApp {
     this.openCreateChannelDialog({ ...inSpace, ...(placement || {}) }, title);
   }
 
+  /** The display name of the employee bound to a session, else the session's own name. */
+  sessionDisplayName(session) {
+    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === session.id);
+    const name = typeof employee?.name === 'string' ? employee.name.trim() : '';
+    return name || session.name;
+  }
+
   /** Discord's Create Channel: type (text, or voice with a voice agent), name, category, members. */
   openCreateChannelDialog(place = {}, title) {
     this.doc.querySelector('.ca-dialog.ca-create')?.remove();
@@ -5774,7 +6741,8 @@ class ReverieChatApp {
     catWrap.append(category, catList);
 
     // Members, coordinator, voice agent
-    const sessions = (this.app._chatCandidateSessions?.(new Set()) || []).filter((s) => s.mode !== 'shell');
+    const sessions = (this.app._chatCandidateSessions?.(new Set()) || []).filter((s) => s.mode !== 'shell')
+      .map((s) => ({ ...s, label: this.sessionDisplayName(s) }));
     const membersBox = this.el('div', 'ca-create-members');
     const checks = new Map();
     for (const s of sessions) {
@@ -5784,7 +6752,10 @@ class ReverieChatApp {
       box.value = s.id;
       box.addEventListener('change', syncMembers);
       checks.set(s.id, box);
-      row.append(box, this.app._chatAvatar(s.id, s.name, { size: 'sm' }), this.el('span', 'ca-name', s.name), this.el('span', 'ca-invite-sub', (Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || ''))));
+      const backend = Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || '');
+      // The session name stays visible beside an employee's display name, so two sessions never look alike.
+      const sub = s.label === s.name ? backend : [s.name, backend].filter(Boolean).join(' · ');
+      row.append(box, this.app._chatAvatar(s.id, s.label, { size: 'sm' }), this.el('span', 'ca-name', s.label), this.el('span', 'ca-invite-sub', sub));
       membersBox.append(row);
     }
     if (!sessions.length) membersBox.append(this.el('p', 'ca-hint', 'No agents are open yet. You can invite them later.'));
@@ -5804,7 +6775,7 @@ class ReverieChatApp {
       for (const sel of [coord.sel, voice.sel]) {
         const keep = sel.value;
         sel.replaceChildren(new Option(sel === coord.sel ? 'No admin (I direct them)' : 'Choose the agent that answers you', ''));
-        for (const s of sessions) if (checks.get(s.id)?.checked) sel.append(new Option(s.name, s.id));
+        for (const s of sessions) if (checks.get(s.id)?.checked) sel.append(new Option(s.label, s.id));
         sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
       }
     }
@@ -6063,8 +7034,7 @@ class ReverieChatApp {
         label: button.getAttribute('aria-label') || button.title,
         run: () => button === bellBtn ? this.openNotifyMenu(anchor) : button.click(),
       }));
-    const plugins = this.doc.defaultView?.ReverieChatPlugins;
-    if (plugins) entries.push({ label: 'Chat plugins', run: () => plugins.openSettings() });
+    // Shared chat plugins (math, code languages) are owner settings: they live in Company settings only.
     this.openMenu(entries, { at: anchor, focus: anchor, right: true, label: 'More actions', className: 'ca-head-menu' });
   }
 
@@ -6076,20 +7046,7 @@ class ReverieChatApp {
     if (!this.serverFeatures.search || this.embed || this.embassy?.selected) this.closeMessageSearch(false);
     const voiceControls = !!room && caSpeaks(room) && !this.embed && !this.embassy?.selected && !this.app._chatCreating;
     this.els.head?.classList.toggle('has-voice-controls', voiceControls);
-    if (this.els.speakBtn) {
-      // Read aloud is any room's choice (opt-in per room); car mode needs a voice member.
-      this.els.speakBtn.hidden = !room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
-      const mode = this.app._speakRepliesMode?.(room?.id) || 'off';
-      this.els.speakBtn.setAttribute('aria-pressed', String(mode !== 'off'));
-      this.els.speakBtn.dataset.mode = mode;
-      // The hover text says what a click does.
-      const label =
-        mode === 'off'
-          ? 'Enable spoken replies in this room'
-          : `Disable spoken replies in this room (now: ${mode === 'all' ? 'everyone' : 'replies to you'})`;
-      this.els.speakBtn.setAttribute('aria-label', label);
-      this.els.speakBtn.title = label;
-    }
+    this.syncVoice?.();
     headTitle.replaceChildren();
     headTopic.textContent = '';
     this.els.mutedBadge.hidden = true;
@@ -6168,7 +7125,7 @@ class ReverieChatApp {
     if (!button) return;
     const humans = this.channelHumans();
     const members = [...(this.room?.members || []), ...humans];
-    const online = (this.room?.members || []).filter(member => member.alive !== false && !['gone', 'dead', 'disconnected'].includes(this.presenceOf(member))).length + humans.filter(p => p.online).length;
+    const online = (this.room?.members || []).filter(member => !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(this.presenceOf(member))).length + humans.filter(p => p.online).length;
     const compact = !!this.doc.defaultView?.matchMedia?.('(max-width: 899px)')?.matches;
     const expanded = compact ? this.drawer === 'members' : this.membersOpen;
     button.hidden = !this.room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
@@ -6204,7 +7161,7 @@ class ReverieChatApp {
           const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
           if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
             const group = this.el('div', 'ca-member-with-actions');
-            group.append(row, this.button('ca-btn ca-reconnect-viewer', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect' }));
+            group.append(row, this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
             box.append(group);
           } else box.append(row);
         }
@@ -6219,19 +7176,78 @@ class ReverieChatApp {
     row.dataset.humanId = person.id;
     row.dataset.key = `human:${person.id}`;
     row.disabled = String(person.name).trim().toLowerCase() === 'everyone';
-    row.title = `Mention ${person.name}`;
-    row.addEventListener('click', () => this.mentionHuman(person.id));
-    row.setAttribute('aria-label', `${person.name}, ${person.role === 'owner' ? 'Owner' : 'Limited'}, ${person.online ? 'online' : 'offline'}`);
+    // Like an agent row: a click opens the card, the context menu (or its keys) lists the same actions.
+    row.addEventListener('click', () => this.openPersonCard(person, row));
+    row.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const r = row.getBoundingClientRect();
+      this.openPersonMenu(person, row, { x: ev.clientX || r.left, y: ev.clientY || r.bottom });
+    });
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ContextMenu' && !(ev.shiftKey && ev.key === 'F10')) return;
+      ev.preventDefault();
+      this.openPersonMenu(person, row);
+    });
+    row.setAttribute('aria-label', `${person.name}, ${caHumanBadgeLabel(person.role)}, ${person.online ? 'online' : 'offline'}`);
     row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
     const text = this.el('span', 'ca-member-text');
-    text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-member-sub', (person.id === this.humanSelf?.id ? 'You · ' : '') + (person.role === 'owner' ? 'Owner' : 'Limited')));
+    // The account badge sits beside the name like an agent's Admin tag; "You" stays in the subtext.
+    text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(person.role)));
+    if (person.id === this.humanSelf?.id) text.append(this.el('span', 'ca-member-sub', 'You'));
     row.append(text);
     return row;
   }
 
+  /**
+   * What a person row (Owner or Guest) offers. Every check reads server-provided roles, and every action is a
+   * composer insert, a copy, or navigation to the page that already owns the change.
+   */
+  personActions(person) {
+    const own = !!this.humanSelf?.id && person.id === this.humanSelf.id;
+    const verifiedOwner = this.humanSelf?.role === 'owner' && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
+    const entries = [];
+    if (String(person.name).trim().toLowerCase() !== 'everyone')
+      entries.push({ label: 'Mention', run: () => { this.closeProfile(); this.mentionHuman(person.id); } });
+    entries.push({ label: 'Copy name', run: async () => {
+      try {
+        await this.doc.defaultView.navigator.clipboard.writeText(String(person.name));
+        this.toast('Name copied', 'info');
+      } catch { this.toast('Could not copy the name', 'error'); }
+    } });
+    // The original owner's details live in Company settings; every other account edits its profile on Accounts.
+    if (own) entries.push({ label: 'Edit my profile', run: () => { this.closeProfile(); person.id === 'owner' ? void this.openCompanySettings() : this.openPage('people'); } });
+    else if (verifiedOwner && person.role !== 'owner') entries.push({ label: 'Manage account', run: () => { this.closeProfile(); this.openPage('people'); } });
+    return entries;
+  }
+
+  openPersonMenu(person, anchor, at = anchor) {
+    this.closeProfile();
+    this.openMenu(this.personActions(person), { at, focus: anchor, label: `${person.name} actions`, className: 'ca-member-menu' });
+  }
+
+  openPersonCard(person, anchor) {
+    this.closeMenus();
+    this.closeProfile();
+    const card = this.el('div', 'ca-profile ca-profile--compact ca-profile--person');
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', `${person.name} profile`);
+    const top = this.el('div', 'ca-profile-top');
+    top.append(this.profilePortrait(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'), person.name));
+    const names = this.el('div', 'ca-profile-names');
+    names.append(this.literalText('strong', '', person.name));
+    const own = !!this.humanSelf?.id && person.id === this.humanSelf.id;
+    names.append(this.el('span', 'ca-profile-sub', [caHumanBadgeLabel(person.role), person.online ? 'Online' : 'Offline', own ? 'You' : ''].filter(Boolean).join(' · ')));
+    top.append(names);
+    const actions = this.el('div', 'ca-profile-actions');
+    for (const [i, entry] of this.personActions(person).entries())
+      actions.append(this.button(i === 0 ? 'ca-btn is-primary' : 'ca-btn', entry.label, () => entry.run(), { text: entry.label }));
+    card.append(top, actions);
+    this.presentCard(card, anchor);
+  }
+
   memberRow(m) {
-    const presence = caPresence(m);
     const state = this.presenceOf(m);
+    const presence = state === 'viewer-unavailable' ? 'unknown' : ['gone', 'dead', 'disconnected', 'unknown'].includes(state) ? 'offline' : 'online';
     const b = this.el('button', `ca-member is-${presence} is-state-${state}`);
     b.type = 'button';
     b.dataset.key = `member:${m.sessionId}`;
@@ -6240,7 +7256,7 @@ class ReverieChatApp {
     const pronouns = this.pronounsOf(m);
     b.setAttribute('aria-label', `${m.name}${pronouns ? ` (${pronouns})` : ''}, ${role}, ${CA_STATE_LABEL[state]}`);
     if (pronouns) b.title = `${m.name} (${pronouns})`;
-    if (state === 'dead' || state === 'disconnected') b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
+    if (state === 'dead' || state === 'disconnected' || state === 'viewer-unavailable') b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
     b.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }));
     const text = this.el('span', 'ca-member-text');
     const line = this.el('span', 'ca-member-name', m.name);
@@ -6263,8 +7279,14 @@ class ReverieChatApp {
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
-    const sub = state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || '';
+    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || (caFocusLine(m) && `${caFocusLine(m)} (from the Board)`);
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
+    const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+    const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+    if (health.providerConfirmedHealthy && health.viewerUnavailable) {
+      const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
+      warning.title = 'The agent runtime is running. Its optional terminal viewer is unavailable; automatic terminal input may wait for Reconnect.'; text.append(warning);
+    }
     b.append(text);
     b.addEventListener('click', () => this.openProfile(m, b));
     b.addEventListener('contextmenu', (ev) => {
@@ -6296,6 +7318,7 @@ class ReverieChatApp {
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
       entries.push({ label: 'Runtime settings', run: () => this.openRuntimeSettings(employee) },
         { label: 'Edit profile', run: () => this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); }) });
+      entries.push({ label: 'Wake', disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before waking them' : '', tip: 'Start this expert if their agent is not running; a running agent is not interrupted', run: () => this.wakeEmployee(employee) });
       entries.push({ label: 'Restart session', danger: true, disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
       const returning = employee.onVacation === true;
       entries.push({ label: returning ? 'Enter office' : 'Leave office', success: returning, danger: !returning, run: () => returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee) });
@@ -6512,6 +7535,7 @@ class ReverieChatApp {
     const facts = caAgentFacts(session);
     for (const [k, v] of facts.headline) kv(k, v, technical);
     kv('Goal', m.goal, technical);
+    kv('Doing', caFocusLine(m), technical);
     kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '', technical);
     if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
     // What the page already knows is shown at once; the runtime's fuller profile replaces it when it arrives.
@@ -6546,9 +7570,10 @@ class ReverieChatApp {
         this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); });
       }, { text: 'Edit profile' }));
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.humanSelf?.role === 'owner' && ['dead', 'disconnected'].includes(this.employeeHealth(employee).state) && !this.employeeHealth(employee).viewerOnly)
-      actions.append(this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
-    if (employee && this.employeeHealth(employee).viewerOnly)
-      actions.append(this.button('ca-btn', `Reconnect terminal viewer for ${employee.name}`, () => this.reconnectEmployeeViewer(employee), { text: 'Reconnect view' }));
+      actions.append(this.button('ca-btn', `Wake ${employee.name}`, () => { this.closeProfile(); void this.wakeEmployee(employee); }, { text: 'Wake' }),
+        this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
+    if (employee && (this.employeeHealth(employee).viewerOnly || this.canReconnectEmployee(employee)))
+      actions.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
       actions.append(this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' }));
     card.append(actions, technical);
@@ -6879,7 +7904,10 @@ class ReverieChatApp {
       request.promise = Promise.race([fetching, deadline]).then(async response => {
         if (!response.ok) throw new Error('Avatar catalog unavailable');
         const manifest = await Promise.race([response.json(), deadline]);
-        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar.id) && typeof avatar.src === 'string' && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` && /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src));
+        // The manifest decides what is offered: every listed pack avatar except its one "withheld" line.
+        const withheld = new Set(Array.isArray(manifest.withheld) ? manifest.withheld : []);
+        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])$/.test(avatar.id) && !withheld.has(avatar.id) && typeof avatar.src === 'string' && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` && /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src))
+          .map(avatar => ({ ...avatar, thumb: typeof avatar.thumb === 'string' && avatar.thumb === `/assets/avatars/thumbs/${avatar.id}.webp${avatar.thumb.slice(avatar.thumb.indexOf('?'))}` && /^\/assets\/avatars\/thumbs\/pack-[0-9]{2,3}\.webp\?v=[a-f0-9]{64}$/.test(avatar.thumb) ? avatar.thumb : avatar.src }));
         if (catalogRequest !== request || !form.isConnected) throw new Error('Avatar catalog cancelled');
         if (!avatars.length) throw new Error('Avatar catalog unavailable');
         catalog = avatars;
@@ -6924,7 +7952,7 @@ class ReverieChatApp {
           for (const avatar of avatars) {
             const button = this.button('ca-btn', `Use ${avatar.name}`, async () => { if (await select(avatar) && dialog.isConnected) dialog.close(); });
             button.title = avatar.name;
-            const image = this.el('img'); image.src = avatar.src; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
+            const image = this.el('img'); image.src = avatar.thumb; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
             button.append(image); gallery.append(button);
           }
         } catch (failure) {
@@ -6985,6 +8013,37 @@ class ReverieChatApp {
     } finally { this._changingOfficeEmployees.delete(employee.id); }
   }
 
+  /**
+   * Wake: start an expert whose agent is not running, through the scoped recovery route POST /api/company/employees/:id/wake.
+   * It never interrupts a running agent, and never retries: the server decides (owner, vacation, wake budget) and its
+   * awakened/skipped report is shown as it is. An answer that cannot be confirmed says so, so the owner checks first.
+   */
+  async wakeEmployee(employee, onSaved) {
+    this._wakingEmployees ||= new Set();
+    if (this._wakingEmployees.has(employee.id)) return this.toast(`A wake is already in progress for ${employee.name}.`, 'info');
+    this._wakingEmployees.add(employee.id);
+    const unconfirmed = () => this.toast(`Wake for ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
+    try {
+      let result;
+      try { result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/wake`, { method: 'POST', body: {} }); }
+      catch { return unconfirmed(); }
+      // A missing HTTP response cannot tell us whether the POST committed.
+      if (!result.ok) return result.status ? this.toast(result.error || `${employee.name} could not be woken.`, 'error') : unconfirmed();
+      const recovery = result.data?.recovery;
+      const ours = Array.isArray(recovery?.awakened) && Array.isArray(recovery?.skipped) && recovery.awakened.length + recovery.skipped.length <= 1
+        && recovery.awakened.every(id => id === employee.id)
+        && recovery.skipped.every(skip => skip?.employeeId === employee.id && typeof skip.reason === 'string' && skip.reason.length > 0 && skip.reason.length <= 200);
+      if (!ours) return unconfirmed();
+      try { await this.loadOwner(); await onSaved?.(); } catch { /* the wake itself is settled; the view refreshes on the next load */ }
+      if (recovery.awakened.length) return this.toast(`Woke ${employee.name}. Check that their terminal is ready.`, 'info');
+      if (!recovery.skipped.length) return this.toast(`${employee.name} is already running. Nothing was started.`, 'info');
+      const reason = recovery.skipped[0].reason;
+      // The start was attempted and its outcome is unknown: not "not woken", and never offered as a retry.
+      if (reason === 'start-unconfirmed') return this.toast(`Startup of ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
+      this.toast(`${employee.name} was not woken: ${CA_WAKE_SKIPS[reason] ?? reason}.`, 'error');
+    } finally { this._wakingEmployees.delete(employee.id); }
+  }
+
   async openEmployeeRestart(employee, onSaved) {
     const existing = this.doc.querySelector('.ca-employee-restart');
     if (existing) { existing.querySelector('button')?.focus(); return; }
@@ -6995,7 +8054,7 @@ class ReverieChatApp {
     dialog.append(this.literalText('h2', '', `Restart session · ${employee.name}`), this.literalText('p', 'ca-dialog-note', `Restart ${employee.name} using their saved runtime settings? Active work is interrupted without a fresh handoff. Their expert identity, saved conversation, memory, files and channel memberships stay the same. Ask them to checkpoint first if the current work matters.`));
     const recoverLabel = this.el('label', 'ca-hint');
     const recover = this.doc.createElement('input'); recover.type = 'checkbox'; recover.disabled = true;
-    recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks or activity within two minutes prevent recovery.'));
+    recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks, an open dialog or input within two minutes prevent recovery.'));
     dialog.append(recoverLabel);
     const health = this.employeeHealth(employee);
     const restartHealth = this.employeeHealthBadge(employee); restartHealth.dataset.healthRole = 'note'; restartHealth.setAttribute('role', 'note');
@@ -7515,6 +8574,18 @@ class ReverieChatApp {
     recovery.checked = employee.permissions?.recoverEmployees === true;
     recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
     label.prepend(recovery);
+    const officeLabel = this.el('label', 'ca-hint', ' Manage office attendance and restarts');
+    const manageOffice = this.el('input'); manageOffice.type = 'checkbox';
+    manageOffice.checked = employee.permissions?.manageOffice === true;
+    manageOffice.setAttribute('aria-label', `Manage office attendance and restarts for ${employee.name}`);
+    officeLabel.title = 'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.';
+    officeLabel.prepend(manageOffice);
+    const goalLabel = this.el('label', 'ca-hint', ' Manage team goals');
+    const manageGoals = this.el('input'); manageGoals.type = 'checkbox';
+    manageGoals.checked = employee.permissions?.manageGoals === true;
+    manageGoals.setAttribute('aria-label', `Manage team goals for ${employee.name}`);
+    goalLabel.title = 'Read, create and update this company’s operational goals before review. Does not grant verification, closing, cancellation, adoption, grants or unblocker attestations. Requires the authenticated Goal broker.';
+    goalLabel.prepend(manageGoals);
     const planPermissions = {};
     const planLabels = [];
     for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
@@ -7604,12 +8675,14 @@ class ReverieChatApp {
       }
     };
     recovery.addEventListener('change', () => { void savePreference(recovery, 'recoverEmployees', true); });
+    manageOffice.addEventListener('change', () => { void savePreference(manageOffice, 'manageOffice', true); });
+    manageGoals.addEventListener('change', () => { void savePreference(manageGoals, 'manageGoals', true); });
     for (const [key, input] of Object.entries(planPermissions))
       input.addEventListener('change', () => { void savePreference(input, key, true); });
     for (const [key, { input }] of Object.entries(boardPermissions))
       input.addEventListener('change', () => { void savePreference(input, key, true); });
     const general = this.el('fieldset', 'ca-profile-permissions');
-    general.append(this.el('legend', '', 'Recovery and plans'), label, ...planLabels);
+    general.append(this.el('legend', '', 'Recovery, office, plans and goals'), label, officeLabel, ...planLabels, goalLabel);
     preferenceStatus.classList.add('ca-profile-permission-status');
     container.append(this.el('p', 'ca-hint', 'Permission checkboxes save immediately. They do not need Save profile.'), general, boardFields, preferenceStatus);
   }
@@ -7684,7 +8757,10 @@ class ReverieChatApp {
       const retirement = this.el('details', 'ca-company-retirement');
       retirement.append(this.el('summary', 'ca-hint', 'Remove from company'),
         this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' }));
-      lifecycle.append(restart, officeLabel);
+      const wake = this.button('ca-btn', `Wake ${employee.name}`, () => this.wakeEmployee(employee, onSaved), { text: 'Wake' });
+      wake.disabled = restart.disabled;
+      wake.title = restart.disabled ? 'Bring this expert into the office before waking them.' : 'Start this expert if their agent is not running. A running agent is not interrupted.';
+      lifecycle.append(wake, restart, officeLabel);
       if (leave) lifecycle.append(leave);
       lifecycle.append(this.el('span', 'ca-hint', 'Off stays off until you switch it on.'), retirement);
       host.append(lifecycle, lifecycleError);
@@ -7829,7 +8905,285 @@ class ReverieChatApp {
       this.employeeGpuFields(management, employee, dialog);
       this.publicationCredentialsFields(management, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
+      management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));
+      if (company.data?.resourceReplacement === true) this.employeeMemoryFields(management, employee, dialog);
     }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });
+  }
+
+  /**
+   * Owner-only: an employee's journal as a map, read through the owner's existing GET /api/company/employees/:id/journal
+   * (nothing here writes). Larger circles are more important memories, faded ones were superseded by a later entry, and
+   * lines join supersedes, related and shared-topic entries (caJournalGraph). Selecting a memory shows its text, tags,
+   * sources and links. Entries are the employee's own account and are rendered with textContent only.
+   */
+  async openJournalMap(employee) {
+    this.doc.querySelector('.ca-journal-dialog')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-journal-dialog');
+    dialog.setAttribute('aria-label', `${employee.name}'s journal map`);
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status'); status.textContent = 'Loading the journal…';
+    const search = this.el('input', 'ca-field'); search.type = 'search'; search.placeholder = 'Find a word or tag';
+    search.setAttribute('aria-label', 'Find a memory by word or tag');
+    const ns = 'http://www.w3.org/2000/svg', W = 900;
+    const svg = this.doc.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'ca-journal-map');
+    svg.setAttribute('aria-label', `Memories of ${employee.name}`);
+    const detail = this.el('section', 'ca-journal-detail'); detail.setAttribute('aria-live', 'polite');
+    const close = this.button('ca-btn', 'Close journal map', () => dialog.close(), { text: 'Close' });
+    dialog.append(this.el('h2', '', `${employee.name}'s journal`),
+      this.el('p', 'ca-dialog-note', "Larger circles are more important memories; faded ones were superseded by a later entry. Solid lines: supersedes; dashed: related; thin: shared tags or topics. Entries are the employee's own account, not verified fact."),
+      search, status, svg, detail, close);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => dialog.remove());
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+
+    const LIMIT = 500, entries = [];
+    let before, more = false;
+    for (let page = 0; page < 50 && entries.length < LIMIT; page++) {
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/journal${before ? `?before=${before}` : ''}`);
+      if (!dialog.isConnected) return;
+      if (!result.ok) {
+        status.textContent = result.status === 403 ? 'Sign in as the owner to see this journal.' : 'The journal could not be loaded. Close and try again.';
+        return;
+      }
+      const got = Array.isArray(result.data?.entries) ? result.data.entries : [];
+      entries.push(...got);
+      more = result.data?.more === true && got.length > 0;
+      if (!more) break;
+      before = got[got.length - 1].entryId;
+    }
+    const shown = entries.slice(0, LIMIT);
+    if (!shown.length) { status.textContent = `${employee.name} has no journal entries yet.`; return; }
+    status.textContent = `${shown.length} ${shown.length === 1 ? 'memory' : 'memories'}${more || entries.length > LIMIT ? ` (the newest ${LIMIT})` : ''}.`;
+
+    const byId = new Map(shown.map(e => [e.entryId, e]));
+    // A larger journal gets a taller map, so its memories still fit without overlapping.
+    const H = shown.length <= 120 ? 600 : Math.round(600 * Math.sqrt(shown.length / 120));
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const graph = caJournalGraph(shown), pos = caJournalLayout(graph, { width: W, height: H });
+    // Each topic gets its own hue, spread by the golden angle in order of first appearance, so neighbours never share one.
+    const groups = [...new Set(graph.nodes.map(node => node.group))];
+    const hue = (group) => Math.round((groups.indexOf(group) * 137.508 + 200) % 360);
+    const edgeLayer = this.doc.createElementNS(ns, 'g'), nodeLayer = this.doc.createElementNS(ns, 'g');
+    for (const edge of graph.edges) {
+      const a = pos.get(edge.source), b = pos.get(edge.target), line = this.doc.createElementNS(ns, 'line');
+      line.setAttribute('x1', a.x); line.setAttribute('y1', a.y); line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+      line.setAttribute('class', `ca-journal-edge is-${edge.kind}`);
+      line.dataset.source = String(edge.source); line.dataset.target = String(edge.target);
+      edgeLayer.append(line);
+    }
+    const nodeEls = new Map();
+    const select = (id) => {
+      const entry = byId.get(id);
+      if (!entry) return;
+      for (const [nid, el] of nodeEls) el.classList.toggle('is-selected', nid === id);
+      for (const line of edgeLayer.children) line.classList.toggle('is-active', line.dataset.source === String(id) || line.dataset.target === String(id));
+      const at = Date.parse(entry.committedAt);
+      const when = Number.isFinite(at) ? (globalThis.ReverieTime?.format(at) ?? new Date(at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })) : '';
+      const meta = [`#${entry.entryId}`, when, entry.annotations?.importance, entry.supersededBy?.length ? 'superseded' : ''].filter(Boolean).join(' · ');
+      const body = this.el('p', 'ca-journal-text'); body.textContent = String(entry.text ?? '');
+      detail.replaceChildren(this.el('h3', '', meta), body);
+      const tags = [...(entry.annotations?.topics ?? []), ...(entry.tags ?? [])];
+      if (tags.length) detail.append(this.el('p', 'ca-hint', `Tags: ${tags.join(', ')}`));
+      const sources = this.el('ul', 'ca-journal-sources');
+      for (const source of entry.sources ?? []) {
+        const item = this.el('li');
+        item.textContent = source.ref !== undefined ? `${source.ref} (unverified reference)`
+          : `${source.roomId}/${source.id}${source.quote ? `: "${source.quote}"` : ''}`;
+        sources.append(item);
+      }
+      if (sources.children.length) detail.append(this.el('h4', '', 'Sources'), sources);
+      const links = this.el('div', 'ca-company-actions');
+      const link = (label, target) => {
+        if (!byId.has(target)) return links.append(this.el('span', 'ca-hint', `${label} #${target} (not shown)`));
+        links.append(this.button('ca-btn', `${label} memory ${target}`, () => { select(target); nodeEls.get(target)?.focus(); }, { text: `${label} #${target}` }));
+      };
+      for (const t of entry.annotations?.supersedes ?? []) link('Supersedes', t);
+      for (const t of entry.supersededBy ?? []) link('Superseded by', t);
+      for (const t of entry.annotations?.related ?? []) link('Related', t);
+      if (links.children.length) detail.append(links);
+    };
+    for (const node of graph.nodes) {
+      const p = pos.get(node.id), g = this.doc.createElementNS(ns, 'g'), circle = this.doc.createElementNS(ns, 'circle');
+      const title = this.doc.createElementNS(ns, 'title');
+      g.setAttribute('class', `ca-journal-node${node.superseded ? ' is-superseded' : ''}`);
+      g.setAttribute('transform', `translate(${p.x} ${p.y})`); g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', `Memory ${node.id}${node.importance ? `, ${node.importance}` : ''}${node.superseded ? ', superseded' : ''}: ${node.label}`);
+      g.style.setProperty('--hue', String(hue(node.group)));
+      circle.setAttribute('r', String(node.r)); title.textContent = node.label;
+      g.append(circle, title);
+      g.addEventListener('click', () => select(node.id));
+      g.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(node.id); } });
+      nodeEls.set(node.id, g); nodeLayer.append(g);
+    }
+    svg.append(edgeLayer, nodeLayer);
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      for (const [id, el] of nodeEls) {
+        const e = byId.get(id), hay = [e.text, ...(e.tags ?? []), ...(e.annotations?.topics ?? [])].join(' ').toLowerCase();
+        el.classList.toggle('is-dim', !!q && !hay.includes(q));
+      }
+    });
+    const top = [...shown].sort((a, b) => caJournalRadius(b.annotations?.importance) - caJournalRadius(a.annotations?.importance) || b.entryId - a.entryId)[0];
+    select(top.entryId);
+  }
+
+  /**
+   * Owner-only laptop memory, through the protected replacement routes (POST /api/company/resources/preview, apply,
+   * result). Preview asks the broker for a draft with the new memory and the limits it keeps; Restart replaces the
+   * laptop with it and hands the agent the note below. Apply is sent once and never retried: an unconfirmed answer
+   * says to check the status first. Shown only when the server reports the routes (resourceReplacement).
+   */
+  employeeMemoryFields(container, employee, dialog) {
+    const host = this.el('section', 'ca-profile-memory');
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    const row = this.el('div', 'ca-company-actions');
+    const label = this.el('label', 'ca-hint', 'Memory (MiB) ');
+    const input = this.el('input', 'ca-field');
+    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '512'; input.required = true;
+    input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`); label.append(input);
+    const draftBox = this.el('div', 'ca-profile-memory-draft');
+    const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
+    const legacyKey = `reverie:laptop-memory:${employee.id}`;
+    let ownerId = null, key = null;
+    const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+    const tracked = new Set();
+    let busy = false, discovering = true, discoveryFailed = false, storageFailed = false;
+    const currentOwner = async () => {
+      try {
+        const result = await this.app._chatApi('/api/owner/status');
+        const data = result.data, identity = data?.identity;
+        if (!result.ok || data?.configured !== true || data.signedIn !== true || identity?.role !== 'owner'
+          || typeof identity.id !== 'string' || !(identity.id === 'owner' || uuid.test(identity.id))
+          || (ownerId !== null && ownerId !== identity.id)) throw new Error();
+        ownerId = identity.id;
+        key = `reverie:laptop-memory:${ownerId}:${employee.id}`;
+        return true;
+      } catch {
+        discoveryFailed = true;
+        status.textContent = 'The signed-in owner could not be verified or changed. Reopen this profile after signing in; recovery records have been kept.';
+        return false;
+      }
+    };
+    const readIds = () => {
+      try {
+        // Older records have no attributable owner. Preserve and fence them;
+        // neither a new account nor an empty server listing proves them safe.
+        const legacy = JSON.parse(this.doc.defaultView.localStorage.getItem(legacyKey) || '[]');
+        if (!Array.isArray(legacy) || legacy.length || !key) throw new Error();
+        const value = JSON.parse(this.doc.defaultView.localStorage.getItem(key) || '[]');
+        if (!Array.isArray(value) || value.length > 100 || value.some(id => typeof id !== 'string' || !uuid.test(id))) throw new Error();
+        storageFailed = false; return value;
+      } catch { storageFailed = true; return []; }
+    };
+    const retain = (remove) => {
+      // Merge other open profiles/tabs; a late response may remove only its own
+      // definitively terminal ID, never a newer unknown request.
+      const ids = new Set([...readIds(), ...tracked]);
+      if (storageFailed) return false;
+      if (remove) ids.delete(remove);
+      try { this.doc.defaultView.localStorage.setItem(key, JSON.stringify([...ids])); return !storageFailed; }
+      catch { storageFailed = true; return false; }
+    };
+    const unconfirmed = 'Restart unconfirmed. Check status; do not preview or apply another change.';
+    const sync = () => {
+      preview.disabled = busy || discovering || discoveryFailed || storageFailed || tracked.size > 0;
+      input.disabled = preview.disabled;
+      check.hidden = tracked.size === 0 && !discoveryFailed && !storageFailed;
+      check.disabled = busy || discovering;
+    };
+    const discover = async () => {
+      discovering = true; sync();
+      try {
+        if (!await currentOwner()) return;
+        for (const id of readIds()) tracked.add(id);
+        const result = await this.app._chatApi('/api/company/resources/operations', { method: 'POST', body: { employeeId: employee.id } });
+        if (!await currentOwner()) return;
+        if (!result.ok || !Array.isArray(result.data) || result.data.length > 200 || result.data.some(item =>
+          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string')) throw new Error();
+        for (const item of result.data) if (!['completed', 'not-started'].includes(item.phase)) tracked.add(item.id);
+        discoveryFailed = false;
+        if (tracked.size) { retain(); status.textContent = unconfirmed; }
+        else status.textContent = storageFailed ? 'The local recovery record is unavailable. Do not start another change; inspect owner operations.' : '';
+      } catch {
+        discoveryFailed = true;
+        status.textContent = 'Previous memory changes could not be checked. Check status before starting another change.';
+      } finally { discovering = false; sync(); }
+    };
+    const check = this.button('ca-btn', `Check laptop memory change for ${employee.name}`, async () => {
+      if (busy || discovering) return;
+      if (discoveryFailed || storageFailed) await discover();
+      if (discoveryFailed || !tracked.size) return;
+      busy = true; sync();
+      try {
+        if (!await currentOwner()) return;
+        for (const operationId of [...tracked]) {
+          try {
+            if (!await currentOwner()) return;
+            const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
+            if (!await currentOwner()) return;
+            const phase = result.ok && result.data?.id === operationId ? result.data.phase : null;
+            if (phase === 'completed' || phase === 'not-started') {
+              tracked.delete(operationId); retain(operationId);
+              status.textContent = phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
+                : 'The restart was not dispatched. You can prepare a new preview.';
+            } else status.textContent = !result.ok
+              ? `Status could not be read (${result.status ?? 'network'}). The outcome is unknown; do not start another change.`
+              : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
+                : `In progress or unconfirmed (${phase || 'unknown'}). Check again; do not start another change.`;
+          } catch { status.textContent = 'Status could not be read. The outcome is unknown; do not start another change.'; }
+        }
+        if (tracked.size && !status.textContent.includes('not start another')) status.textContent = unconfirmed;
+      } finally { busy = false; sync(); }
+    }, { text: 'Check status' });
+    const preview = this.button('ca-btn', `Preview laptop memory for ${employee.name}`, async () => {
+      if (busy || discovering || discoveryFailed || storageFailed || tracked.size || !input.reportValidity()) return;
+      busy = true; sync(); draftBox.replaceChildren(); status.textContent = 'Preparing a preview…';
+      try {
+        if (!await currentOwner()) return;
+        const memoryMiB = Number(input.value);
+        const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
+        if (!dialog.isConnected || !await currentOwner()) return;
+        if (!result.ok) {
+          status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
+            : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
+              : 'No preview: the laptop may be busy, or a previous change needs inspection. Check status before trying again.';
+          if (result.status !== 403 && result.status !== 404) void discover();
+          return;
+        }
+        const draft = result.data, r = draft?.resources || {};
+        if (!uuid.test(draft?.operationId) || !uuid.test(draft?.draftId)) throw new Error();
+        status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
+        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} processes, ${r.cpus} CPUs. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
+        const note = this.el('textarea', 'ca-field');
+        note.rows = 3; note.maxLength = 12000; note.required = true;
+        note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
+        note.setAttribute('aria-label', `Handoff note for ${employee.name} after the restart`);
+        const apply = this.button('ca-btn is-danger', `Restart ${employee.name} with ${mib(r.memoryMiB)}`, async () => {
+          if (busy || tracked.size || !note.value.trim()) return;
+          const question = `Restart ${employee.name}'s laptop with ${mib(r.memoryMiB)} of memory? Current work is interrupted and resumes from the note.`;
+          if (!await this.confirmCompanyAction(employee.name, question, 'Restart laptop') || !dialog.isConnected || busy || tracked.size) return;
+          busy = true; sync();
+          if (!await currentOwner()) { busy = false; sync(); return; }
+          if (!dialog.isConnected) { busy = false; sync(); return; }
+          // Retain identity BEFORE dispatch/await and even if the profile closes.
+          tracked.add(draft.operationId);
+          if (!retain()) { busy = false; tracked.delete(draft.operationId); status.textContent = 'The recovery record could not be saved. Nothing was dispatched; check status before trying again.'; sync(); return; }
+          busy = true; apply.disabled = true; sync(); status.textContent = 'Restarting the laptop…';
+          try {
+            const applied = await this.app._chatApi('/api/company/resources/apply', { method: 'POST', body: { previewId: draft.draftId, handoff: note.value.trim() } });
+            status.textContent = applied.ok ? `Restart started (${applied.data?.phase || 'starting'}). Use Check status to follow it.` : unconfirmed;
+          } catch { status.textContent = unconfirmed; }
+          finally { busy = false; sync(); }
+        }, { text: `Restart with ${mib(r.memoryMiB)}` });
+        draftBox.append(this.el('label', 'ca-hint', 'Note for the agent after the restart'), note, apply);
+      } catch { status.textContent = 'A preview could not be obtained. No restart was dispatched.'; }
+      finally { busy = false; sync(); }
+    }, { text: 'Preview' });
+    row.append(label, preview, check);
+    host.append(this.el('h3', '', 'Laptop memory'),
+      this.el('p', 'ca-hint', 'Changes this expert\'s laptop memory by restarting it on a new laptop. Processes, CPUs and the shared pool stay as they are.'),
+      row, draftBox, status);
+    container.append(host); status.textContent = 'Checking previous memory changes…'; sync(); void discover();
   }
 
   /** Company marks share the existing upload, preview and workspace-picture persistence. */
@@ -8454,6 +9808,7 @@ class ReverieChatApp {
       out.push({ sep: true });
       out.push({ label: 'Invite agents', run: () => this.openInviteDialog(room.id) });
     }
+    if (dm && room.canClearHistory) out.push({ label: 'Clear history…', run: () => this.clearDmHistory(room.id) });
     if (dm) out.push({ label: 'Close DM', run: () => this.closeDm(room.id) });
     const { mute, levels } = this.notifyEntries(room);
     out.push({ sep: true }, mute, { label: 'Notification settings', sub: levels });
@@ -8942,6 +10297,12 @@ class ReverieChatApp {
     el.tabIndex = 0;
     // Right-click, or a long press on a phone, opens the message's actions (a bottom sheet on a phone).
     if (!m.deleted && !m.external) this.wireMessageMenu(el, m);
+    // Ctrl-click (Cmd-click on a Mac) picks the message for a group delete; links, buttons and fields keep their own click.
+    if (!m.deleted && !m.external && this.serverFeatures.deletes) el.addEventListener('click', (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.target?.closest?.('a, button, input, textarea, select, summary, [contenteditable="true"]')) return;
+      ev.preventDefault();
+      this.toggleDeleteSelection(m);
+    });
     el.setAttribute('role', 'article');
     const gutter = this.el('div', 'ca-msg-gutter');
     const name = this.authorOf(m.from);
@@ -8961,7 +10322,7 @@ class ReverieChatApp {
       from.style.setProperty('--chat-hue', String(this.authorHue(m.from, name)));
       if (m.from.sessionId && m.from.sessionId === this.room?.coordinatorId) from.append(this.el('span', 'ca-tag', 'Admin'));
       if (m.from.kind === 'bot') from.append(this.el('span', 'ca-tag ca-tag--bot', 'Bot'));
-      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag', m.from.kind === 'human' ? 'Limited' : 'Owner'));
+      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(m.from.kind === 'human' ? 'limited' : 'owner')));
       const time = this.el('time', 'ca-time', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })));
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
@@ -9006,25 +10367,33 @@ class ReverieChatApp {
    * reader within a thumb's width of the bottom stays pinned to it, so they keep following new messages.
    */
   renderFeed({ keepScroll = false } = {}) {
-    if (this.embassy?.selected) return this.embassy.renderPosts();
+    const history = this.historyView();
+    if (this.embassy?.selected) { this.renderJumpBar(); return this.embassy.renderPosts(); }
     const feed = this.app._chatEls.feed;
     this.app._watchChatFeedTop?.(feed);
     if (!feed._caStick) {
       feed._caStick = true;
-      feed.addEventListener('scroll', () => (this._feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60), { passive: true });
+      feed.addEventListener('scroll', () => {
+        const fromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+        this._feedStick = fromBottom < 60;
+        if (fromBottom < CA_HISTORY_EDGE_PX) void this.extendHistory('newer');
+        this.renderJumpBar();
+      }, { passive: true });
     }
     const top = feed.scrollTop;
     const pinned = feed.scrollHeight - top - feed.clientHeight < 40;
     feed.replaceChildren();
-    const messages = this.room?.messages || [];
-    this._readMarkAt = this.serverFeatures.unread ? Number(this.room?.userReadAt) || 0 : 0;
+    const messages = (history || this.room)?.messages || [];
+    this._readMarkAt = this.serverFeatures.unread && !history ? Number(this.room?.userReadAt) || 0 : 0;
     if (!messages.length) {
-      feed.append(this.el('p', 'ca-feed-empty', this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
+      feed.append(this.el('p', 'ca-feed-empty', this.room?.historyAfter >= 0 ? 'History cleared from your view. New messages will appear here.' : this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
     }
     for (const item of caFeedItems(messages, this._readMarkAt)) feed.append(this.feedNode(item));
     this.app._chatPendingDraw?.();
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
     this._feedStick = !(keepScroll && !pinned);
+    this.renderSelectBar?.();
+    this.renderJumpBar();
     this.markReadSoon();
   }
 
@@ -9064,6 +10433,7 @@ class ReverieChatApp {
   /** A new message. Returns true when handled, so the floating-panel code does not run. */
   handleMessage(data) {
     if (!this.built) return false;
+    if (this.app._chatMessageHidden(data)) return true;
     const room = this.rooms.find((r) => r.id === data.roomId);
     // Something new arrives in a closed direct message: it comes back.
     if (room && caIsDm(room) && data.message?.from?.kind !== 'user') this.reopenDm(room.id);
@@ -9074,6 +10444,12 @@ class ReverieChatApp {
       if (this.room.messages.some((m) => m.id === data.message.id)) return true;
       this.room.messages.push(data.message);
       this.noteSeen(data);
+      // Rewound history keeps its place; the reader's own message brings them back to the present.
+      if (this.historyView()) {
+        if (this.isHumanMessageMine(data.message.from)) this.leaveHistory();
+        else this.countMessage(data, room);
+        return true;
+      }
       const feed = this.app._chatEls.feed;
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       this.appendMessage(data.message);
@@ -9106,6 +10482,34 @@ class ReverieChatApp {
     this.app._renderChatBadge?.();
   }
 
+  /** Hide this owner's existing history, while retaining the conversation and its stored messages. */
+  clearDmHistory(roomId) {
+    const room = this.rooms.find(room => room.id === roomId);
+    if (!room?.canClearHistory || !caIsDm(room)) return;
+    const dlg = this.el('dialog', 'ca-dialog');
+    dlg.setAttribute('aria-label', 'Clear direct-message history');
+    dlg.append(this.el('h2', '', 'Clear history?'), this.el('p', 'ca-dialog-note',
+      'Hide all messages currently in this direct message from your view on every device. Stored messages and agent memory stay intact. New messages will still appear.'));
+    const cancel = this.button('ca-btn', 'Cancel', () => dlg.close(), { text: 'Cancel' });
+    const clear = this.button('ca-btn is-danger', 'Clear history', async () => {
+      if (clear.disabled) return;
+      clear.disabled = true;
+      const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/clear-history`, { method: 'POST', body: {} });
+      clear.disabled = false;
+      if (!res.ok) return this.toast(`History could not be cleared: ${res.error}`, 'error');
+      this.app._chatHistoryChanged({ action: 'history-cleared', roomId, viewerId: this.humanSelf?.id || 'owner', historyAfter: res.data.historyAfter });
+      if (this.roomId === roomId) await this.app._applyChatRoom(roomId, res.data, { quiet: true, switched: false, redraw: true });
+      dlg.close();
+      await this.refreshRooms({ keepRoom: true });
+      this.toast('History cleared from your view on every device', 'info');
+    }, { text: 'Clear history' });
+    dlg.append(cancel, clear);
+    dlg.addEventListener('close', () => dlg.remove());
+    this.doc.body.append(dlg);
+    dlg.showModal();
+    cancel.focus();
+  }
+
   /** A room changed (created, renamed, members, archived, read elsewhere). */
   handleChanged(data) {
     if (!this.built) return false;
@@ -9132,7 +10536,7 @@ class ReverieChatApp {
   async refreshRooms({ attempt = 0, reloadCurrent = false, keepRoom = false } = {}) {
     const res = await this.app._chatApi('/api/chatrooms');
     if (!res.ok) return;
-    this.app._chatRooms = res.data.rooms || [];
+    this.app._chatRooms = (res.data.rooms || []).map(room => this.app._chatFilterHistory(room));
     this.app._chatFeatures = res.data.features || this.app._chatFeatures;
     this.app._chatOwnerNames = Array.isArray(res.data.ownerNames) ? res.data.ownerNames : this.app._chatOwnerNames;
     this.app._chatRetired = Array.isArray(res.data.retired) ? res.data.retired : this.app._chatRetired;
@@ -9157,7 +10561,7 @@ class ReverieChatApp {
   /** The user can see the newest message of the open room: move the server-side read cursor. */
   async markRead() {
     if (this.embassy?.selected) { this.embassy.markRead(); return; }
-    if (!this.active || !this.serverFeatures.unread) return;
+    if (!this.active || !this.serverFeatures.unread || this.historyView()) return;
     const entry = this.rooms.find((r) => r.id === this.roomId);
     const room = this.room;
     if (!room || !entry || this.doc.visibilityState === 'hidden') return;
@@ -9198,6 +10602,8 @@ function caInstall(proto) {
     _renderChatBadge: proto._renderChatBadge,
     _sendChatMessage: proto._sendChatMessage,
     _attachChatFiles: proto._attachChatFiles,
+    _loadOlderChat: proto._loadOlderChat,
+    _applyChatRoom: proto._applyChatRoom,
     _chatApi: proto._chatApi,
     setPendingHook: proto.setPendingHook,
     clearPendingHooks: proto.clearPendingHooks,
@@ -9402,6 +10808,17 @@ function caInstall(proto) {
     _renderChatFeed(opts) {
       if (this._chatApp?.built) return this._chatApp.renderFeed(opts);
       return undefined;
+    },
+    _loadOlderChat() {
+      if (this._chatApp?.built && this._chatApp.historyView()) return this._chatApp.extendHistory('older');
+      return original._loadOlderChat?.call(this);
+    },
+    // Whatever reloaded the room also changes what its rewound history should show.
+    async _applyChatRoom(id, data, opts) {
+      const applied = await original._applyChatRoom.call(this, id, data, opts);
+      if (this._chatApp?.built) this._chatApp.roomReloads++;
+      if (this._chatApp?.built && this._chatApp.history?.roomId === id) await this._chatApp.refreshHistory();
+      return applied;
     },
     _chatMessageEl(m) {
       if (this._chatApp?.built) return this._chatApp.messageEl(m, true);
@@ -9631,7 +11048,7 @@ class ReverieEmbassyView {
     const focusLabel = focused?.getAttribute('aria-label');
     previous?.remove();
     host.querySelector('.eg-access-note')?.remove();
-    // Embassies are shared rooms beside the server's channels, not part of Direct Messages (James 10-20).
+    // Embassies are shared rooms beside the server's channels, not part of Direct Messages.
     if (this.shell.workspace === 'home') return;
     if (!this.allowed) {
       if (this.ownerRequired) {
@@ -10321,7 +11738,7 @@ class ReverieEmbassyPairingView {
     fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
     this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
   }
-  /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access (James 10-23). */
+  /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access. */
   hostRoom() {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
     this.clearBody(); this.title.textContent = 'Embassy name and closing'; const epoch = this.epoch;
@@ -10702,8 +12119,114 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof R
   caBoot();
 }
 
+/** Circle radius for a journal entry by its importance: a keystone memory is drawn largest, an unrated one smallest. */
+function caJournalRadius(importance) {
+  return { keystone: 22, important: 16, notable: 12 }[importance] ?? 9;
+}
+
+/**
+ * A journal page (GET /api/company/employees/:id/journal) as a map: one node per entry, sized by importance and faded when
+ * a later entry supersedes it. Edges are the entry's own supersedes and related links, then shared tags and topics, at most
+ * three per entry by overlap so the map stays readable. Links to entries not on the page are left out.
+ */
+function caJournalGraph(entries) {
+  const list = Array.isArray(entries) ? entries.filter(e => e && Number.isSafeInteger(e.entryId)) : [];
+  const ids = new Set(list.map(e => e.entryId));
+  const words = (e) => new Set([...(e.annotations?.topics ?? []), ...(e.tags ?? [])].map(w => String(w).toLowerCase()));
+  const nodes = list.map(e => ({
+    id: e.entryId, r: caJournalRadius(e.annotations?.importance), importance: e.annotations?.importance ?? '',
+    superseded: (e.supersededBy ?? []).length > 0, group: String(e.annotations?.topics?.[0] ?? e.tags?.[0] ?? ''),
+    label: String(e.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 60), committedAt: e.committedAt ?? '',
+  }));
+  const edges = [], seen = new Set();
+  const add = (a, b, kind, weight) => {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (a === b || !ids.has(a) || !ids.has(b) || seen.has(key)) return;
+    seen.add(key); edges.push({ source: a, target: b, kind, weight });
+  };
+  for (const e of list) for (const t of e.annotations?.supersedes ?? []) add(e.entryId, t, 'supersedes', 3);
+  for (const e of list) for (const t of e.annotations?.related ?? []) add(e.entryId, t, 'related', 2);
+  const sets = list.map(words);
+  for (let i = 0; i < list.length; i++) {
+    const scored = [];
+    for (let j = 0; j < list.length; j++) {
+      if (i === j) continue;
+      let shared = 0;
+      for (const w of sets[i]) if (sets[j].has(w)) shared++;
+      if (shared) scored.push([shared, list[j].entryId]);
+    }
+    scored.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+    for (const [shared, id] of scored.slice(0, 3)) add(list[i].entryId, id, 'shared', Math.min(shared, 3) / 3);
+  }
+  return { nodes, edges };
+}
+
+/**
+ * A deterministic force layout (no randomness, so the same journal always draws the same map): nodes start on a sunflower
+ * spiral, repel each other, are pulled together along edges (harder for supersedes and related) and towards the centre,
+ * and stay inside the box. Returns a Map of entry id to {x, y}.
+ */
+function caJournalLayout(graph, { width = 900, height = 600, iterations } = {}) {
+  const nodes = graph.nodes, n = nodes.length, pos = new Map();
+  if (!n) return pos;
+  const cx = width / 2, cy = height / 2, k = Math.sqrt((width * height) / n) * 0.4;
+  const xs = new Float64Array(n), ys = new Float64Array(n), index = new Map(nodes.map((node, i) => [node.id, i]));
+  const spread = Math.min(width, height) * 0.45;
+  for (let i = 0; i < n; i++) {
+    const radius = spread * Math.sqrt((i + 0.5) / n), angle = i * 2.399963229728653;
+    xs[i] = cx + radius * Math.cos(angle); ys[i] = cy + radius * Math.sin(angle);
+  }
+  const rounds = iterations ?? (n > 200 ? 120 : 250);
+  let temperature = Math.min(width, height) / 8;
+  const dx = new Float64Array(n), dy = new Float64Array(n);
+  for (let round = 0; round < rounds; round++) {
+    dx.fill(0); dy.fill(0);
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      let x = xs[i] - xs[j], y = ys[i] - ys[j], d2 = x * x + y * y;
+      if (d2 < 0.01) { x = 0.1 * ((i % 3) - 1 || 1); y = 0.1; d2 = 0.02; }
+      const f = (k * k) / d2;
+      dx[i] += x * f; dy[i] += y * f; dx[j] -= x * f; dy[j] -= y * f;
+    }
+    for (const edge of graph.edges) {
+      const a = index.get(edge.source), b = index.get(edge.target);
+      const x = xs[a] - xs[b], y = ys[a] - ys[b], d = Math.sqrt(x * x + y * y) || 0.01;
+      const f = (d * edge.weight) / k;
+      dx[a] -= x * f; dy[a] -= y * f; dx[b] += x * f; dy[b] += y * f;
+    }
+    for (let i = 0; i < n; i++) {
+      dx[i] += (cx - xs[i]) * 0.06; dy[i] += (cy - ys[i]) * 0.06;
+      const d = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]) || 1, step = Math.min(d, temperature);
+      const r = nodes[i].r + 2;
+      xs[i] = Math.min(width - r, Math.max(r, xs[i] + (dx[i] / d) * step));
+      ys[i] = Math.min(height - r, Math.max(r, ys[i] + (dy[i] / d) * step));
+    }
+    temperature = Math.max(0.5, temperature * 0.97);
+  }
+  // Then push overlapping circles apart (a 3 px gap), so a dense topic does not stack its memories on each other.
+  for (let pass = 0; pass < (n > 200 ? 120 : 40); pass++) {
+    let moved = false;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const x = xs[j] - xs[i], y = ys[j] - ys[i], d = Math.sqrt(x * x + y * y) || 0.01, need = nodes[i].r + nodes[j].r + 3;
+      if (d >= need) continue;
+      const push = (need - d) / 2, ux = x / d, uy = y / d;
+      xs[i] -= ux * push; ys[i] -= uy * push; xs[j] += ux * push; ys[j] += uy * push;
+      moved = true;
+    }
+    for (let i = 0; i < n; i++) {
+      const r = nodes[i].r + 2;
+      xs[i] = Math.min(width - r, Math.max(r, xs[i])); ys[i] = Math.min(height - r, Math.max(r, ys[i]));
+    }
+    if (!moved) break;
+  }
+  for (let i = 0; i < n; i++) pos.set(nodes[i].id, { x: Math.round(xs[i] * 10) / 10, y: Math.round(ys[i] * 10) / 10 });
+  return pos;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    caJournalRadius,
+    caJournalGraph,
+    caJournalLayout,
     chatBadgeFor,
     caChannelItems,
     caByPosition,

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command failures</title>
+  <link rel="stylesheet" href="command-failures.css">
+  <script type="module" src="command-failures.js"></script>
+</head>
+<body>
+  <main>
+    <header><a href="./#company" data-company-tools-back>Back to Company / tools</a><h1>Command failures</h1></header>
+    <p class="intro">Failure counts by employee, with the most repeated failures first. Only fixed tool names and numeric results are included.</p>
+    <div class="controls"><label for="employee">Employee</label><select id="employee"><option value="">All employees</option></select><button id="refresh" type="button">Refresh</button></div>
+    <p id="status" role="status" aria-live="polite">Loading failure metadata…</p>
+    <p id="coverage" class="hint">Hands results are self-reported. Claude and Codex logging is not installed. Counts cover received records; dropped reports may be missing.</p>
+    <section aria-labelledby="repeat-title"><h2 id="repeat-title">Top repeats</h2><div id="repeats"></div></section>
+    <section aria-labelledby="employee-title"><h2 id="employee-title">By employee</h2><div id="employees"></div></section>
+  </main>
+</body>
+</html>

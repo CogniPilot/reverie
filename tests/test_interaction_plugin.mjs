@@ -279,8 +279,12 @@ async function agentRun(t, child = false, policy = { coding_agent: 'coding' }) {
   const f = await wrapper(t, child, { cooldown_ms: 1000, ...policy });
   // OpenCode passes the user message it is about to save; its agent is the one the TUI last used.
   const continuation = async () => {                                         // the wrapper's own (real, 1 s) timer
+    const expected = f.prompts.length + 1;
     await f.hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'session_a' } } });
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const deadline = performance.now() + 5000;
+    while (f.prompts.length < expected && performance.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(f.prompts.length >= expected, 'the continuation did not submit its prompt within 5 s');
   };
   const send = async (text, agent, synthetic = false) => {
     const output = { message: { role: 'user', agent }, parts: [{ type: 'text', text, ...(synthetic ? { synthetic: true } : {}) }] };

@@ -386,7 +386,7 @@ describe('one-shot Ctrl modifier', () => {
 
 describe('terminal input wiring', () => {
   it('applies the modifier in onData after the query-response filter and before the send paths', () => {
-    const hook = terminalSource.indexOf('KeyboardAccessoryBar.consumeCtrl(data)');
+    const hook = terminalSource.indexOf('KeyboardAccessoryBar.consumeModifiers(data)');
     const queryFilter = terminalSource.indexOf('shouldSuppressTerminalQueryResponse(data)', hook - 4000);
     const firstSend = terminalSource.indexOf('this._lastTerminalData', hook - 4000);
 

@@ -61,18 +61,24 @@ export function buildEmployeeContext(
     const profile = JSON.stringify({ name: employee.name, position: employee.position, expertise: employee.expertise,
       responsibilities: employee.responsibilities ?? [], personality: employee.personality ?? '' });
     // Select public permission facts explicitly: never serialize credentials, runtime env or provider history.
-    const declared = Object.fromEntries(['recoverEmployees', 'moveOwnPlan', 'managePlans', 'editBoardIssues', 'manageBoard', 'manageDecisions']
+    const declared = Object.fromEntries(['recoverEmployees', 'moveOwnPlan', 'managePlans', 'manageGoals', 'editBoardIssues', 'manageBoard', 'manageDecisions']
       .flatMap(key => typeof employee.permissions[key as keyof typeof employee.permissions] === 'boolean'
         ? [[key, employee.permissions[key as keyof typeof employee.permissions]]] : []));
+    const goalGuidance = `Canonical team Goal management: ${employee.permissions.manageGoals === true ? 'granted' : 'not granted'}. ` +
+      'This flag covers same-owner canonical team Goal reads, creation and operational progress/pause/resume before REVIEW, subject to current bindings, exact CAS and required proofs. ' +
+      'It requires the separately authenticated Goal broker; the flag does not establish that the broker is installed or available. ' +
+      'It grants no verification, terminal decisions, reopening, adoption, grants or unblocker attestations; existing own-Goal rights remain separate. ' +
+      'This is not provider-native /goal or PAUSED control. Actions recheck current authority; this context grants none.';
     const sections: EmployeeContextSection[] = [
       { id: 'profile', label: 'Current owner-selected profile', status: 'configured', text: profile, source: 'current employee record' },
       { id: 'core-beliefs', label: 'Effective core beliefs', status: core.length ? 'configured' : 'missing', text: core.join('\n\n'), source: 'company core first, then personal additions; exact duplicates omitted' },
       { id: 'tool-permissions', label: 'Current declared tool grants', status: 'configured', text: JSON.stringify(declared) + '\nActions still check their current canonical grants. Profile and core text add no permissions.', source: 'current employee permission record' },
       { id: 'rest-preferences', label: 'Sleep and Dream eligibility', status: 'configured', text: employeeRestContext(employee), source: 'current employee record' },
       { id: 'plan-permissions', label: 'Plan permission guidance', status: 'configured', text: employeePlanContext(employee), source: 'current employee record' },
+      { id: 'goal-permissions', label: 'Canonical Goal permission guidance', status: 'configured', text: goalGuidance, source: 'current employee permission record' },
       { id: 'workspace-instructions', label: 'Selected workspace instructions', status: 'missing', text: '', source: 'No selected-file capture is available; arbitrary workspace files were not read.' },
     ];
-    const context = employeeProfileContext(employee, companyCoreBeliefs) + '\n\n' + employeeRestContext(employee) + '\n\n' + employeePlanContext(employee);
+    const context = employeeProfileContext(employee, companyCoreBeliefs) + '\n\n' + employeeRestContext(employee) + '\n\n' + employeePlanContext(employee) + '\n\n' + goalGuidance;
     const generatedAt = (options.now ?? Date.now)();
     if (!Number.isSafeInteger(generatedAt) || generatedAt < 0 || bytes(context) > EMPLOYEE_CONTEXT_BYTES ||
         sections.length > 8 || sections.reduce((total, section) => total + bytes(section.text), 0) > EMPLOYEE_CONTEXT_BYTES)

@@ -164,8 +164,10 @@ export interface ChatAttachment {
   name: string;
   size: number;
   type: string;
-  /** Absolute path of the stored file on this machine. */
+  /** Absolute path of the stored file on this machine; for a linked file, its path on the shared drive. */
   path: string;
+  /** A reference to a shared-drive file, read live, rather than a copy (chat-linked-files.ts). */
+  linked?: true;
 }
 
 /** Poll limits: the question, the options and each option's label. */
@@ -210,6 +212,8 @@ export interface ChatRoom {
   overrides?: RoomOverride[];
   /** The user's read cursor (ms): messages after it are unread. */
   userReadAt?: number;
+  /** Per authenticated owner identity: hide messages through this timestamp in that owner's DM view only. */
+  ownerHistoryAfter?: Record<string, number>;
   /** Multi-user owner; undefined in single-user mode. */
   owner?: string;
   createdAt: number;
@@ -224,6 +228,11 @@ export const MAX_DM_PARTICIPANTS = 10;
 export const MAX_PLACEMENT_CHARS = 40;
 export const MAX_MEMBERS = 50;
 export const MAX_MESSAGES_PER_ROOM = 1000;
+
+/** A message as the chat shows it: a tombstone keeps its file references in the store (so the upload sweep leaves the files for a restore) but never shows them. */
+export function shownMessage(m: ChatMessage): ChatMessage {
+  return m.deleted?.attachments ? { ...m, deleted: { at: m.deleted.at, by: m.deleted.by } } : m;
+}
 export const MAX_MESSAGE_CHARS = 8000;
 /** Pinned messages in one room. */
 export const MAX_PINS = 10;
@@ -905,8 +914,7 @@ export class ChatroomStore {
     const since = options.since ?? 0;
     const list = room.messages.filter((m) => m.at > since);
     const limit = options.limit ?? 200;
-    // A tombstone keeps its file references in the store (so the upload sweep leaves the files for a restore) but never shows them.
-    return list.slice(Math.max(0, list.length - limit)).map((m) => (m.deleted?.attachments ? { ...m, deleted: { at: m.deleted.at, by: m.deleted.by } } : m));
+    return list.slice(Math.max(0, list.length - limit)).map(shownMessage);
   }
 
   toJSON(): ChatRoom[] {

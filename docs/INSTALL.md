@@ -1,7 +1,11 @@
 # Install Reverie offline on Debian 12 (x86_64)
 
 Transfer and extract reverie-X.Y.Z.tar.gz on the target machine, then open
-a terminal in the extracted directory. The image is included; Nix and a GHCR
+a terminal in the extracted directory. A release whose bundle is 2 GiB or more
+attaches it as reverie-X.Y.Z.tar.gz.part-00, part-01, … plus
+reverie-X.Y.Z.tar.gz.sha256: download them all into one directory and join them
+first with `cat reverie-X.Y.Z.tar.gz.part-* > reverie-X.Y.Z.tar.gz` and
+`sha256sum -c reverie-X.Y.Z.tar.gz.sha256`. The image is included; Nix and a GHCR
 login are not required. Installing Docker requires access to Debian repositories.
 Run these commands as your normal user with sudo permission:
 

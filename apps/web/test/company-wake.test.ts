@@ -72,6 +72,29 @@ function fixture() {
 }
 
 describe('company crash recovery selection', () => {
+  it('explicit entry preserves a genuinely healthy native provider even without a viewer or saved row', async () => {
+    const f=fixture();f.saved.delete(f.root.sessionId);
+    const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'healthy' as const});
+    expect(await recovery.wakeOne(f.root.id,{explicitStart:true})).toEqual({awakened:[],skipped:[]});
+    expect(f.deps.wake).not.toHaveBeenCalled();expect(f.deps.claim).not.toHaveBeenCalled();
+    expect(f.deps.noteRunning).toHaveBeenCalledExactlyOnceWith(f.root.sessionId);
+  });
+
+  it('explicit entry does not mistake an alive viewer for a dead native provider', async () => {
+    const f=fixture();f.live.add(f.root.sessionId);
+    const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'dead' as const});
+    expect((await recovery.wakeOne(f.root.id,{explicitStart:true})).awakened).toEqual([f.root.id]);
+    expect(f.deps.wake).toHaveBeenCalledOnce();
+  });
+
+  it('unknown native health with an alive viewer refuses instead of guessing or restarting', async () => {
+    const f=fixture();f.live.add(f.root.sessionId);
+    const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'unknown' as const});
+    expect(await recovery.wakeOne(f.root.id,{explicitStart:true})).toEqual({awakened:[],skipped:[{
+      employeeId:f.root.id,reason:'native-health-unconfirmed'}]});
+    expect(f.deps.wake).not.toHaveBeenCalled();expect(f.deps.claim).not.toHaveBeenCalled();
+  });
+
   it.each(['hands', 'codex', 'claude'])('an explicit office entry starts a stopped %s report without changing its saved recipe', async (mode) => {
     const f = fixture();
     const saved = f.saved.get(f.report.sessionId)!;
@@ -230,6 +253,21 @@ describe('company crash recovery selection', () => {
     });
     expect((await new CompanyWake(f.deps).tick()).awakened).toEqual([]);
   });
+  it('a wake that throws after it was called is unconfirmed, never "did not start"; a throw before it is wake-failed', async () => {
+    const f = fixture();
+    const recovery = new CompanyWake(f.deps);
+    f.deps.wake.mockRejectedValueOnce(new Error('lost after the session was created'));
+    expect(await recovery.wakeOne(f.report.id)).toEqual({ awakened: [], skipped: [{ employeeId: 'report', reason: 'start-unconfirmed' }] });
+    expect(f.deps.kickoff).not.toHaveBeenCalled();
+    const before = fixture();
+    before.deps.claim.mockRejectedValueOnce(new Error('store unavailable'));
+    expect(await new CompanyWake(before.deps).wakeOne(before.report.id)).toEqual({ awakened: [], skipped: [{ employeeId: 'report', reason: 'wake-failed' }] });
+    expect(before.deps.wake).not.toHaveBeenCalled();
+    const refused = fixture();
+    refused.deps.wake.mockResolvedValueOnce(false);
+    expect((await new CompanyWake(refused.deps).wakeOne(refused.report.id)).skipped).toEqual([{ employeeId: 'report', reason: 'wake-failed' }]);
+  });
+
   it('explicit delegated wake starts a report without another kickoff or duplicate process', async () => {
     const f = fixture();
     const recovery = new CompanyWake(f.deps);

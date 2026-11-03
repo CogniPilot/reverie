@@ -200,9 +200,16 @@
         const form = $('profile-form');
         form.elements.name.value = snapshot.self.name;
         const manifest = await (await fetch('assets/avatars/pack-manifest.json', { cache: 'no-cache' })).json();
-        const avatars = manifest.avatars.filter((a) =>
-          /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(a.src)
-        );
+        // Offered: listed pack avatars except the manifest's one "withheld" line, stored as their plain path.
+        const withheld = new Set(Array.isArray(manifest.withheld) ? manifest.withheld : []);
+        const avatars = manifest.avatars
+          .map((a) => ({ name: a.name, id: a.id, src: typeof a.src === 'string' ? a.src.split('?')[0] : '' }))
+          .filter(
+            (a) =>
+              !withheld.has(a.id) &&
+              a.src === `/assets/avatars/${a.id}.png` &&
+              /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(a.src)
+          );
         if (snapshot.self.avatar && !avatars.some((a) => a.src === snapshot.self.avatar))
           avatars.push({ name: 'Current avatar', src: snapshot.self.avatar });
         for (const avatar of avatars) {

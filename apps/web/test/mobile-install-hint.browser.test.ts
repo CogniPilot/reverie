@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import { chromium, devices, type Browser } from 'playwright';
 
-// The phone setup dialog in a real browser (James 10-29: Reverie would not install on his phone): an iPhone gets
+// The phone setup dialog in a real browser (Reverie would not install on his phone): an iPhone gets
 // Safari's Add to Home Screen steps instead of a prompt it never receives, and a plain-HTTP page says why install
 // and notifications cannot work rather than offering buttons that do nothing.
 const pub = resolve(import.meta.dirname, '../src/web/public');

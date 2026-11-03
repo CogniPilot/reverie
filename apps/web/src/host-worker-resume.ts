@@ -51,7 +51,7 @@ export function resumeSocketMount(mountinfo:string,directory:string):string {
     'Native host socket needs its read-only directory mount');
   return rows[0].line;
 }
-function socketCustody(socketPath:string):()=>boolean {
+function socketCustody(socketPath:string):{identity:string;current:()=>boolean} {
   need(path.isAbsolute(socketPath)&&path.normalize(socketPath)===socketPath&&
     fs.realpathSync(socketPath)===socketPath);
   const directory=path.dirname(socketPath);
@@ -67,9 +67,12 @@ function socketCustody(socketPath:string):()=>boolean {
     need(row.isSocket()&&row.uid===BigInt(process.getuid!())&&(row.mode&0o777n)===0o600n&&row.nlink===1n);
     const parent=fs.lstatSync(directory,{bigint:true});
     need(parent.isDirectory()&&(parent.mode&0o022n)===0n);
-    return [row.dev,row.ino,row.uid,row.mode,row.ctimeNs,parent.dev,parent.ino,parent.mode].join(':');};
+    return {socket:[row.dev,row.ino,row.uid,row.mode,row.ctimeNs].join(':'),
+      parent:[parent.dev,parent.ino,parent.mode].join(':')};};
   const firstMount=mount(),first=identity();
-  return ()=>{try{return mount()===firstMount&&identity()===first&&fs.realpathSync(socketPath)===socketPath;}catch{return false;}};
+  return {identity:first.socket,current:()=>{try{const now=identity();
+    return mount()===firstMount&&now.socket===first.socket&&now.parent===first.parent&&
+      fs.realpathSync(socketPath)===socketPath;}catch{return false;}}};
 }
 function frame(value:unknown):Buffer {const raw=Buffer.from(text(value));need(raw.length>0&&raw.length<=MAX);
   const head=Buffer.alloc(4);head.writeUInt32BE(raw.length);return Buffer.concat([head,raw]);}
@@ -152,7 +155,7 @@ export class HostResumeHandler {
 /** Server-selected worker socket only. Registration carries no process/owner claims. */
 export class HostWorkerResumeStream {
   #socket?:net.Socket;#buffer=Buffer.alloc(0);#ready=false;#busy=false;#closed=false;
-  #stopped=false;#attempts=0;#retry?:NodeJS.Timeout;
+  #stopped=false;#attempts=0;#incarnation?:string;#retry?:NodeJS.Timeout;
   constructor(private readonly path:string|undefined,private readonly handler:HostResumeHandler){}
   start():void {
     if(!this.path)return;
@@ -160,11 +163,16 @@ export class HostWorkerResumeStream {
     this.#connect();
   }
   #connect():void {
-    if(this.#stopped||this.#socket||this.#busy||this.#attempts>=120)return;
-    this.#attempts++;this.#closed=false;this.#buffer=Buffer.alloc(0);this.#ready=false;
+    if(this.#stopped||this.#socket||this.#busy)return;
     need(this.path);
-    let current:()=>boolean;
-    try{current=socketCustody(this.path);}catch{this.#schedule();return;}
+    let custody:ReturnType<typeof socketCustody>;
+    try{custody=socketCustody(this.path);}catch{this.#schedule();return;}
+    // Exhaustion permits custody observations only. A new trusted kernel socket
+    // gets a fresh registration budget; the handler and its consumed wakes persist.
+    if(custody.identity!==this.#incarnation){this.#incarnation=custody.identity;this.#attempts=0;}
+    if(this.#attempts>=120){this.#schedule();return;}
+    this.#attempts++;this.#closed=false;this.#buffer=Buffer.alloc(0);this.#ready=false;
+    const current=custody.current;
     const socket=this.#socket=net.createConnection(this.path);
     socket.setTimeout(60_000);socket.on('timeout',()=>socket.destroy());
     socket.on('connect',()=>{if(!current()){socket.destroy();return;}const raw=Buffer.from(text({version:1,purpose:PURPOSE,kind:'register'}));
@@ -174,7 +182,7 @@ export class HostWorkerResumeStream {
       if(this.#socket!==socket)return;this.#closed=true;this.#socket=undefined;this.#schedule();});
   }
   #schedule():void {
-    if(this.#stopped||this.#busy||this.#retry||this.#attempts>=120)return;
+    if(this.#stopped||this.#busy||this.#retry)return;
     this.#retry=setTimeout(()=>{this.#retry=undefined;this.#connect();},5000);this.#retry.unref();
   }
   close():void {this.#stopped=true;this.#closed=true;if(this.#retry)clearTimeout(this.#retry);this.#socket?.destroy();}

@@ -98,10 +98,11 @@ def main():
                     if time.monotonic() > deadline: raise
                     time.sleep(0.1)
             sid1, sid2, sid3 = [str(uuid.uuid4()) for _ in range(3)]
-            connection, thread = launch(sid1, "printf TERMINAL_READY; stty size; read -r value; printf 'INPUT=%s\\n' \"$value\"; stty size; printf shared > /workspace/proof; printf durable > /home/agent/proof")
+            connection, thread = launch(sid1, "printf TERMINAL_READY; stty size; read -r value; printf 'INPUT=%s\\n' \"$value\"; i=0; while [ \"$(stty size)\" = '24 80' ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; stty size; printf shared > /workspace/proof; printf durable > /home/agent/proof")
             output = until(connection, b'24 80')
+            # The resize reaches the pane asynchronously (engine exec resize, then the tmux client and server), so the
+            # script waits up to 10 s for its own size to change instead of the test guessing a delay.
             worker.send_frame(connection, b'R', json.dumps([100, 35]).encode())
-            time.sleep(0.2)
             worker.send_frame(connection, b'I', b'hello-worker\n')
             code, output = until(connection)
             assert code == 0 and b'INPUT=hello-worker' in output and b'35 100' in output, (code, output)

@@ -27,8 +27,8 @@ let
     onlyFixtureAndReceiptWrites = s.ReadWritePaths == "\"/disposable/.reverie-prune-selftest\" \"/var/lib/reverie-prune-selftest\"";
     hostPidVisibility = !s.PrivateUsers && s.ProtectProc == "default" && s.ProcSubset == "all" && !(s ? RestrictNamespaces) && !(s ? CapabilityBoundingSet);
     fixedProtectedLease = lib.hasInfix "--lease-lib\" \"/var/lib/reverie-prune-selftest/lib/lease.py" s.ExecStart;
-    fixedRawR12 = lib.hasInfix "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181" s.ExecStart;
-    kitR2Exact = selftestPackage.sourceHashes."selftest.py" == "280dd66b9c83f0faa99c263dddbee99f8e37a1104548f4d4f690066d0061574e";
+    fixedRawR12 = lib.hasInfix "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed" s.ExecStart;
+    kitR2Exact = selftestPackage.sourceHashes."selftest.py" == "2468295330b1d75a4c7eefff6f8f1d2669e792cf13515277c2b1143e6a6c591c";
     noAutomaticStart = service.wantedBy == [ ] && setup.wantedBy == [ ];
     realLeasePrecedesSynthetic = builtins.elem "reverie-prune-lease-acceptance.service" service.requires && builtins.elem "reverie-prune-lease-acceptance.service" service.after;
     noTmpfilesAdoption = !(builtins.any (rule: lib.hasInfix "prune-selftest" rule) on.systemd.tmpfiles.rules);

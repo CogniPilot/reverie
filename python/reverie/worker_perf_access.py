@@ -135,11 +135,19 @@ def _current_config(gate, eid):
     return config, stamp, _current(config, eid)
 
 
-def _native_current(gate,rows):
+def _stopped_current(gate, rows, stopped, *, deadline=None):
+    if stopped is not None:
+        selected = [row for row in rows if row.get('Id') == stopped['Id']]
+        R.need(len(selected) == 1 and
+               gate.native.stopped_state(selected[0], deadline=deadline) == stopped['State'], 'PERF_NATIVE_CHANGED')
+
+
+def _native_current(gate,rows,stopped=None):
     # The ordinary gate covers its journal/marker. The additional fixed target
     # protects the actual broker configuration and every physical/nested alias.
     R.need(gate._guard()==rows and gate.native.custody(gate.root,Path(gate.broker.config_file))==rows
            and gate.native.inventory()==rows,'PERF_NATIVE_CHANGED')
+    _stopped_current(gate, rows, stopped)
 
 
 def status(broker, eid, *, deadline=None):
@@ -209,13 +217,15 @@ def _plan(gate, eid):
     rows = gate._guard(); _native_current(gate,rows); selected = _selected(rows,before,current)
     R.need(not any(row.get('State',{}).get('Running') is True and
                   row.get('Config',{}).get('Labels',{}).get('reverie.employee') == eid for row in rows), 'PERF_SELECTED_MUST_BE_STOPPED')
+    stopped = None
     if selected is not None:
-        state = selected['State']
+        state = gate.native.stopped_state(selected)
         R.need(state['Running'] is False and state.get('Pid') == 0 and
                state.get('Status') in ('exited','created') and type(state.get('StartedAt'))is str
                and 1<=len(state['StartedAt'])<=80 and type(selected.get('Id'))is str
                and re.fullmatch('[a-f0-9]{64}',selected['Id']) and selected.get('Image')==before['image']
                and all(state.get(k) is False for k in ('Paused','Restarting','Dead')), 'PERF_STOPPED_NATIVE_UNKNOWN')
+        stopped = {'Id': selected['Id'], 'State': state}
     R.need(not _installed_consumers(before), 'PERF_INSTALLED_CONSUMERS_REQUIRE_RECONCILIATION')
     _idle(gate); gate.check_headroom()
     fixed = P.artifact(); kernel = _kernel()
@@ -244,10 +254,10 @@ def _plan(gate, eid):
     plan = {'version':1,'purpose':'owner-task-perf-cold-plan-v1','employeeId':eid,'current':current,
             'request':queued,'beforeDigest':J.fingerprint(before),'afterDigest':J.fingerprint(after),
             'beforeBindingDigest':J.fingerprint(old_binding),'afterBindingDigest':J.fingerprint(new_binding),
-            'nativeDigest':J.fingerprint(rows),'companyDigest':J.fingerprint(company),
+            'nativeDigest':J.fingerprint(rows),'stoppedNative':stopped,'companyDigest':J.fingerprint(company),
             'artifact':fixed,'kernel':kernel,'historyNames':sorted(history_names),'stamps':{str(p):list(s) if s is not None else None for p,s in stamps.items()},
             'parents':{str(p):list(s) for p,s in parents.items()}}
-    _native_current(gate,rows)
+    _native_current(gate,rows,stopped)
     R.need(_private(before['companyFile'],before['uid'])[0] == company and _current(before,eid) == current,'PERF_CURRENT_CHANGED')
     _parents_current(parents); _leaves(stamps)
     return plan, before, after, old_binding, new_binding, rows, stamps, parents
@@ -281,6 +291,7 @@ def owns_pending(gate):
 def check_transition_rows(gate,rows):
     record=getattr(gate._local,'perf_transition',None)
     R.need(type(record) is _Transition and record.gate is gate and rows == record.rows,'PERF_NATIVE_CHANGED')
+    _stopped_current(gate, rows, record.stopped)
 
 
 def apply(broker,eid,expected_plan):
@@ -296,7 +307,7 @@ def apply(broker,eid,expected_plan):
                     'beforeConfiguration':before,'afterConfiguration':after,
                     'beforeBinding':old_binding,'afterBinding':new_binding}
             R._write_exclusive(R.pending(before),intent)
-            record=_Transition();record.gate=gate;record.rows=copy.deepcopy(rows)
+            record=_Transition();record.gate=gate;record.rows=copy.deepcopy(rows);record.stopped=plan['stoppedNative']
             info=os.fstat(gate._local.fd);record.lock=(info.st_dev,info.st_ino)
             record.pending=_private(R.pending(before),before['uid']);gate._local.perf_transition=record
             R._write_exclusive(attempt,intent)
@@ -310,7 +321,7 @@ def apply(broker,eid,expected_plan):
                      config_temp:config_temp_stamp,marker_temp:marker_temp_stamp}
             # Fsync/finalizers above precede the final pre-CAS actual producers,
             # then all named static leaves. Never overwrite a changed selection.
-            _native_current(gate,rows)
+            _native_current(gate,rows,plan['stoppedNative'])
             R.need(_current(before,eid) == plan['current'] and _kernel() == plan['kernel'],'PERF_CURRENT_CHANGED')
             _parents_current(parents);_leaves(pre_cas)
             os.replace(config_temp,broker.config_file);_sync(Path(broker.config_file).parent)
@@ -319,12 +330,12 @@ def apply(broker,eid,expected_plan):
             del pre_cas[config_temp];pre_cas[Path(broker.config_file)]=config_stamp
             # The first rename's fsync and readback finalizers precede another
             # real producer/static bracket before the marker CAS.
-            _native_current(gate,rows)
+            _native_current(gate,rows,plan['stoppedNative'])
             R.need(_current(before,eid)==plan['current'] and _kernel()==plan['kernel'],'PERF_CURRENT_CHANGED')
             _parents_current(parents);_leaves(pre_cas)
             os.replace(marker_temp,R.marker(before));_sync(R.marker(before).parent)
             broker.config=after;gate.binding=new_binding
-            _native_current(gate,rows)
+            _native_current(gate,rows,plan['stoppedNative'])
             committed={'schema':'reverie-owner-task-perf-commit-v1','planDigest':expected_plan,
                  'attemptSHA256':J.fingerprint(intent),'afterConfigurationDigest':J.fingerprint(after),
                  'pendingReleaseRequired':True}
@@ -336,7 +347,7 @@ def apply(broker,eid,expected_plan):
                                   (attempt,intent),(complete,committed)):
                 value,stamp=_private(path,before['uid'])
                 R.need(value==expected,'PERF_COMMIT_READBACK_CHANGED');terminal[path]=stamp
-            _native_current(gate,rows)
+            _native_current(gate,rows,plan['stoppedNative'])
             _parents_current(parents);_leaves(terminal)
         # Admission and its descriptor finalizers have finished.
         R.need(_current(after,eid) == plan['current'] and _kernel() == plan['kernel'],'PERF_CURRENT_CHANGED')
@@ -346,6 +357,7 @@ def apply(broker,eid,expected_plan):
         R.need(gate.native.custody(gate.root,Path(broker.config_file),deadline=deadline)==rows and
                gate.native.custody(gate.root,R.marker(after),deadline=deadline)==rows and
                gate.native.inventory(deadline)==rows,'PERF_NATIVE_CHANGED')
+        _stopped_current(gate, rows, plan['stoppedNative'], deadline=deadline)
         _parents_current(parents);_leaves(terminal)
         R.need(_stamp(R.pending(after)) == record.pending[1],'PERF_PENDING_REPLACED')
         R.need(time.monotonic()<deadline,'PERF_APPLY_DEADLINE')

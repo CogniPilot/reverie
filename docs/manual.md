@@ -1,10 +1,57 @@
 # Reverie manual
 
-Operator and contributor reference for the Nix deployment. Start with the
+Operator and contributor reference for published images and source development. Start with the
 [README](../README.md) for installation and Tailscale access. In the running
 office, open **Office → Handbook** for everyday employee and company workflows.
 
-## Default local deployment
+## Published image installation
+
+The [README](../README.md) documents the supported Docker quick start.
+Use the same engine, container name and port throughout an installation.
+The standalone `setup.sh` stores company data in `NAME-data`, private tool homes
+in `NAME-home`, and image history under `REVERIE_ROOT/runtime/setup`.
+Its `--version`, `--rollback`, `--name` and `--port` options apply to this layout.
+
+For private GHCR credentials, architectures and detailed prerequisites, see the
+[image guide](image.md). Keep provider credentials separate from registry login.
+
+Do not run the standalone installer over a custom bind-mounted company or an
+isolated-laptop deployment: its managed named volumes are a different layout.
+Preserve the existing mount sources, configuration, profiles and recovery evidence
+when recreating a custom container. Use [website updates](website-update.md) and
+the [agent workstation workflow](#agent-workstations) for coordinated deployments.
+
+### Scratch and shared projects
+
+For a custom engine deployment, grant scratch and project directories with explicit
+bind mounts. Select an owner-writable scratch directory and ensure its disk is
+mounted. A project bind mount exposes the host files directly; it is not a copy.
+Keep the original company data/home mounts and the container UID/GID when updating.
+Never mount personal instance data into a development or shared test container.
+
+The source launcher below supports `--scratch`, `--project` and `--force` for
+Nix-built development deployments. Those flags are not standalone installer flags.
+
+### Developing Reverie with its own employees
+
+Keep the office on a pinned, tested release. Give employees separate Git worktrees
+through explicit project drives. Use `nix develop` for local builds and checks,
+with synthetic company data in isolated test deployments. Do not use the live
+company database as a test fixture.
+
+Push work through branches and pull requests. CI checks and builds the candidate
+without publishing it. After review, publish a GitHub release from a `vX.Y.Z` tag
+and include `Reviewed commit: <40-hex commit SHA>` on its own line in the release
+notes. The image workflow verifies that the tag points to that commit before
+building, testing and publishing `X.Y.Z`, `X.Y` and `latest` to GHCR. It also
+attaches `setup.sh` and the offline installation bundle to the release. Pushing a
+tag alone does not publish an image.
+
+Promote that version through a controlled update retaining data, mounts and rollback.
+Coordinate server/worker compatibility when changing laptop images. A writable
+source mount does not automatically deploy edits to the running office.
+
+## Build from source with Nix (development)
 
 Reverie does not require NixOS or changes to a personal host configuration.
 The flake provides the application, tools and launchers. The native service runs
@@ -96,6 +143,11 @@ waking employees. The explicit `start` command starts the broker; employee stop
 and vacation choices still apply. See [service setup](services.md) for boot
 and login behavior, container controls and platform limits. This setup does not
 require a personal NixOS repository or host rebuild.
+
+The host broker's GC root is `~/reverie/runtime/services/worker-broker/root`.
+Set `REVERIE_ROOT` to select a different durable Reverie root. Existing service
+installations need a coordinated migration of their recorded roots; these defaults
+do not move live state.
 
 ### Recover from an existing install
 
@@ -487,6 +539,12 @@ quality and available evidence still limit how good a brief can be.
 
 ## Local GPU keep-alive
 
+The Nix host local-model launcher keeps its build root under
+`~/reverie/runtime/local-model/runtime` and native model controls and API key under
+`~/reverie/runtime/local-model/control`. `REVERIE_ROOT` selects another durable root.
+Container inference continues to use the container's explicitly selected control
+mount. Updating these defaults does not move existing keys or live sockets.
+
 Users can select an OpenAI-compatible local GPU server, model ID, context limits and
 fallback profile. Set the provider/model ID explicitly, for example `local_agent/MODEL_ID`. Model weights are installed/served by
 the operator; this package does not download weights or allocate a GPU automatically.
@@ -521,6 +579,10 @@ server at boot and running the watcher as a supervised service are operator setu
 The watcher never restarts the host machine or overrides an owner pause/stop.
 
 ## Task cleanup
+
+The native `nix develop` shell defaults `REVERIE_LEASE_DIR` to
+`${REVERIE_ROOT:-$HOME/reverie}/runtime/leases`, retaining an explicit override.
+All launchers and cleanup tools sharing a workspace must select the same registry.
 
 Scratch directories can stay on separate drives. For native tasks, select the
 location with `reverie-workspaces --root /path/on/drive create TASK`; set `TMPDIR`
@@ -563,12 +625,12 @@ unqualified.
 
 Enter `nix develop` before running the checks. Custody-sensitive fixtures require
 private scratch under trusted directory ancestry; a `TMPDIR` under world-writable
-`/tmp` causes those fixtures to refuse. The flake shell's declared private scratch
-location can be selected explicitly:
+`/tmp` causes those fixtures to refuse. Unix socket fixtures also require a short
+path. Select a short private temporary directory for the suite:
 
 ```bash
-mkdir -p "$HOME/scratch/reverie/tmp"
-export TMPDIR="$HOME/scratch/reverie/tmp"
+mkdir -m 700 -p "$HOME/rt"
+export TMPDIR="$HOME/rt"
 python3 -m unittest discover -s tests
 node --test tests/test_opencode_plugin.mjs
 ```

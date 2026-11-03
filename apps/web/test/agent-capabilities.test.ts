@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 const snapshot = (): AgentCapabilities => ({
   checkedAt: 1,
-  identity: { kind: 'agent', sessionId: 'self-session', employeeId: 'employee-one', name: 'Jinx' },
+  identity: { kind: 'agent', sessionId: 'self-session', employeeId: 'employee-one', name: 'Jester' },
   board: {
     read: true,
     fileIssue: true,
@@ -21,7 +21,7 @@ const snapshot = (): AgentCapabilities => ({
     clearDecision: true,
     reason: 'Owner-made coordinator membership.',
   },
-  company: { recoverEmployees: true, moveOwnPlan: false, managePlans: false, planPreconditions: 'Grant only; target/runtime checks remain.' },
+  company: { manageOffice: false, recoverEmployees: true, moveOwnPlan: false, managePlans: false, planPreconditions: 'Grant only; target/runtime checks remain.' },
 });
 const refs = async () => ({
   directory: '/home/agent/.config/reverie/credentials/github',
@@ -62,11 +62,38 @@ function fixture() {
   };
 }
 describe('current agent capability command', () => {
+  it('reports fresh canonical Goal management, revocation and older-server uncertainty without writes', async () => {
+    const f = fixture();
+    f.deps.json = false;
+    const current = snapshot();
+    current.company.manageGoals = true;
+    current.company.goalPreconditions = 'Canonical Goal broker, current same-owner bindings and exact CAS required; not provider-native /goal.';
+    f.set(current);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Canonical team Goal management: allowed');
+    expect(f.output.join('\n')).toContain(current.company.goalPreconditions);
+    f.output.length = 0;
+    current.company.manageGoals = false;
+    f.set(current);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Canonical team Goal management: denied');
+    f.output.length = 0;
+    delete current.company.manageGoals;
+    delete current.company.goalPreconditions;
+    f.set(current);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Canonical team Goal management: unknown (server does not report this grant)');
+    expect(f.output.join('\n')).toContain('not provider-native /goal');
+    expect(f.calls.every(call => call.method === 'GET' && call.body === undefined)).toBe(true);
+  });
   it('uses the authenticated server snapshot, performs only GET, and sees a revoked grant on the next call', async () => {
     const f = fixture();
     expect(await agentCapabilities(f.deps, refs)).toBe(0);
     expect(JSON.parse(f.output[0]).board.createDecision).toBe(true);
     expect(JSON.parse(f.output[0]).commands.refreshRuntime).toContain('--restart');
+    expect(JSON.parse(f.output[0]).company.manageOffice).toBe(false);
+    expect(JSON.parse(f.output[0]).commands.officeEnter).toBe('reverie agent office "<employee-id>" --in --json');
+    expect(JSON.parse(f.output[0]).commands.wakeEmployee).toBe('reverie agent wake-employee "<employee-id>" --json');
     expect(JSON.parse(f.output[0]).company.moveOwnPlan).toBe(false);
     const next = snapshot();
     next.board.createDecision = next.board.manageBoard = false;
@@ -178,5 +205,42 @@ describe('current agent capability command', () => {
     expect(f.output.join('\n')).toContain('manage board tasks and schedule: denied');
     expect(f.output.join('\n')).toContain('Plan preconditions:');
     expect(f.output.join('\n')).toContain('/handbook/operations');
+  });
+});
+
+describe('seat CLI compatibility', () => {
+  it('lists the real registered command paths, parents included', async () => {
+    const { agentCommandPaths, commandPaths } = await import('../src/cli-command-list.js');
+    const paths = await agentCommandPaths();
+    for (const path of ['agent', 'agent journal', 'agent journal save', 'agent chat read', 'plans', 'plans show']) expect(paths).toContain(path);
+    const { Command } = await import('commander');
+    const root = new Command('x');
+    root.command('a').command('b');
+    expect(commandPaths(root)).toEqual(['a', 'a b']);
+  });
+
+  it('names the commands the server CLI has and this one lacks, in JSON and in the summary', async () => {
+    const { agentCommandPaths } = await import('../src/cli-command-list.js');
+    const local = await agentCommandPaths();
+    const f = fixture();
+    const absent = ['agent absent-a', 'agent absent-b'];
+    f.set({ ...snapshot(), cli: { commands: [...local, ...absent] } });
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(JSON.parse(f.output.at(-1)!).cliCompatibility.missing).toEqual(absent);
+    const human = fixture();
+    human.deps.json = false;
+    human.set({ ...snapshot(), cli: { commands: [...local, 'agent absent-a'] } });
+    expect(await agentCapabilities(human.deps, refs)).toBe(0);
+    expect(human.output.join('\n')).toContain('lacks 1 command: agent absent-a. Ask the operator to refresh the seat CLI.');
+  });
+
+  it('reports nothing missing when the lists match or the server predates the check', async () => {
+    const { agentCommandPaths } = await import('../src/cli-command-list.js');
+    for (const value of [{ ...snapshot(), cli: { commands: await agentCommandPaths() } }, snapshot()]) {
+      const f = fixture();
+      f.set(value);
+      expect(await agentCapabilities(f.deps, refs)).toBe(0);
+      expect(JSON.parse(f.output.at(-1)!).cliCompatibility.missing).toEqual([]);
+    }
   });
 });

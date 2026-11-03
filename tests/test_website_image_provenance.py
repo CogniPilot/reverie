@@ -128,6 +128,33 @@ class ArchiveProvenanceTests(unittest.TestCase):
         self.assertEqual(actual,value);self.assertEqual(pair['sha256'],hashlib.sha256(path.read_bytes()).hexdigest())
         self.assertNotIn('ownerApproved',actual)
 
+    def test_resume_pair_reads_actual_manifest_hash_and_checks_its_whole_startup_graph(self):
+        from reverie import worker_resume_program as Q
+        path, console, node, value = self.startup()
+        args = ['web', '--host', '0.0.0.0', '--port', '3000',
+                '--service-auth-config', '/run/private-services/service-auth.json']
+        value['argvPrefix'] = [node, value['nodeWrapper'], *args]
+        python = value['startupPython']
+        python['argvPrefix'] = [python['invocation'], '-I', python['entry'], *args]
+        path.write_text(json.dumps(value))
+        pair = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        resume = {'console': console, 'nodeInvocation': node, 'ownerTerminalProgram': pair}
+        checked = []
+        def declared(name, **kwargs):
+            checked.append(name);return name, value['codeFiles'][name]
+        with patch.object(P, 'immutable', return_value=path), patch.object(P, 'code', side_effect=declared):
+            selected = Q.owner_program(resume, verify_files=True)
+        self.assertEqual(selected['command'], [python['entry'], *args])
+        self.assertEqual(set(checked), set(value['codeFiles']))
+        path.write_text(json.dumps(value) + ' ')
+        with patch.object(P, 'immutable', return_value=path):
+            with self.assertRaisesRegex(ValueError, 'RESUME_H_PROGRAM_CHANGED'):Q.owner_program(resume)
+        path.write_text(json.dumps(value))
+        with patch.object(P, 'immutable', return_value=path), patch.object(P, 'code',
+                return_value=('wrong', {'sha256': 'b' * 64, 'bytes': 1})):
+            with self.assertRaisesRegex(ValueError, 'startup code bytes differ'):
+                Q.owner_program(resume, verify_files=True)
+
     def test_wrapped_python_graph_requires_both_declared_wrapper_and_real_elf(self):
         path,console,node,value=self.startup()
         invocation=str(python_environment_invocation())

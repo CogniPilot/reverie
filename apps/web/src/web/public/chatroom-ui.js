@@ -23,6 +23,12 @@ function chatPhoneComposer(nav) {
   return nav?.userAgentData?.mobile === true || /Android|iPhone|iPod/i.test(nav?.userAgent || '');
 }
 
+/** A random id for one spoken turn (crypto.randomUUID needs a secure context, which the microphone needs too). */
+function chatVoiceTurnId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0')).join('-');
+}
+
 const CHAT_MIN_WIDTH = 320;
 /** Client trace lines kept for "Send diagnostics". */
 const CHAT_DIAG_LINES = 300;
@@ -257,6 +263,8 @@ Object.assign(ReverieApp.prototype, {
           dur: Number.isFinite(audio.duration) ? Number(audio.duration.toFixed(2)) : null,
           src: String(audio.src).slice(-40),
           err: audio.error ? audio.error.code : undefined,
+          // Only while this element still plays the turn's own reply: car-mode and read-aloud audio reuse it.
+          turnId: this._chatAudioTurn && audio.src === this._chatAudioTurn.src ? this._chatAudioTurn.id : undefined,
         })
       );
     }
@@ -586,7 +594,7 @@ Object.assign(ReverieApp.prototype, {
       this.showToast?.(`Chat: ${res.error}`, 'error');
       return;
     }
-    this._chatRooms = res.data.rooms || [];
+    this._chatRooms = (res.data.rooms || []).map(room => this._chatFilterHistory(room));
     this._chatSelf = res.data.self || null;
     // What the server can do (unread counts, direct messages): the conversation shell shows only that.
     this._chatFeatures = res.data.features || {};
@@ -624,7 +632,8 @@ Object.assign(ReverieApp.prototype, {
     // The latest switch wins: an answer for a room the reader has since left must not bring them back to it.
     const seq = quiet ? this._chatLoadSeq : (this._chatLoadSeq = (this._chatLoadSeq || 0) + 1);
     // Coming back to a room: draw what was last seen at once, then bring it up to date behind it.
-    const cached = switching && !quiet ? this._chatCache?.get(id) : undefined;
+    // An owner's DM must revalidate before displaying a cached view: another device may have cleared it.
+    const cached = switching && !quiet && !this._chatRooms?.find(room => room.id === id)?.canClearHistory ? this._chatCache?.get(id) : undefined;
     if (cached) {
       this._chatEmotes = this._chatEmoteCache?.get(id) || [];
       await this._applyChatRoom(id, cached, { quiet: false, switched: true });
@@ -641,8 +650,9 @@ Object.assign(ReverieApp.prototype, {
     }
     if (quiet && this._chatCreating) return false;
     if (seq !== this._chatLoadSeq || (quiet && this._chatRoomId !== id)) return false;
+    res.data = this._chatFilterHistory(res.data);
     // Older messages the reader already scrolled back to stay; the fresh window only replaces the tail.
-    const held = this._chatRoomId === id ? this._chatRoom?.messages || [] : [];
+    const held = (this._chatRoomId === id ? this._chatRoom?.messages || [] : []).filter(message => message.at > (res.data.historyAfter ?? -1));
     const fresh = res.data.messages || [];
     // They stay only if the fresh window holds the last message proved complete (`_chatSyncedFrom`): everything held
     // up to it has no gap, so joining at the first held message the window also holds leaves none. A join at any other
@@ -676,6 +686,14 @@ Object.assign(ReverieApp.prototype, {
 
   /** `synced`: the fresh room tail this data was built from, which moves the proved-complete point (`_chatSyncedFrom`). */
   async _applyChatRoom(id, data, { quiet, switched, synced = null, redraw = false }) {
+    data = this._chatFilterHistory(data);
+    if (synced) synced = synced.filter(message => message.at > (data.historyAfter ?? -1));
+    if (data.canClearHistory && (data.historyAfter ?? -1) > (this._chatRoomId === id ? this._chatRoom?.historyAfter ?? -1 : -1)) {
+      this._readAloud?.clear();
+      if (this._chatApp?.replyTo?.roomId === id) this._chatApp.cancelReplySilently();
+      const pins = this._chatApp?.doc.querySelector('.ca-dialog.ca-pins');
+      if (pins?.dataset.roomId === id) { pins.close(); pins.remove(); }
+    }
     // A message gone from the loaded window (deleted) needs the feed redrawn, which a quiet refresh skips.
     const before = this._chatRoom?.messages || [];
     const now = data.messages || [];
@@ -686,7 +704,7 @@ Object.assign(ReverieApp.prototype, {
     // A message gone, deleted or restored (another tab did it) redraws the feed; so does one the live stream missed.
     const removed =
       !switched &&
-      (before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
+      (before.some((m) => m.at <= (data.historyAfter ?? -1)) || before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
         now.some((m) => wasDeleted.has(m.id) && wasDeleted.get(m.id) !== !!m.deleted) ||
         now.some((m) => !known.has(m.id)));
     // What another room's read-aloud queued is not said here.
@@ -733,6 +751,12 @@ Object.assign(ReverieApp.prototype, {
     try {
       const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?limit=${have + CHAT_OPEN_LIMIT}`);
       if (!res.ok || this._chatRoomId !== id) return;
+      res.data = this._chatFilterHistory(res.data);
+      // A clear on another device also changes this room's projection and count.
+      if ((res.data.historyAfter ?? -1) > (room.historyAfter ?? -1)) {
+        await this._applyChatRoom(id, res.data, { quiet: true, switched: false, redraw: true, synced: res.data.messages || [] });
+        return;
+      }
       const feed = this._chatEls.feed;
       const fromBottom = feed.scrollHeight - feed.scrollTop;
       // Only the messages grow; the member list and synopses already on screen are left alone.
@@ -943,7 +967,15 @@ Object.assign(ReverieApp.prototype, {
     }
     if (m.pendingDeliveries) {
       const q = this._chatEl('span', 'chatroom-queued', `${m.pendingDeliveries} queued`);
-      q.title = 'Messages waiting for this session to finish its turn';
+      // The server's fixed reason when it knows why the lines are not typed yet; never pane or message text.
+      const wait = m.deliveryWait;
+      // Elapsed time, not a clock: the browser's zone may differ from the office's.
+      const minutes = wait && Number.isFinite(wait.since) ? Math.max(0, Math.round((Date.now() - wait.since) / 60000)) : -1;
+      const elapsed = minutes < 0 ? '' : minutes < 1 ? ' for under a minute' : minutes < 120 ? ` for ${minutes} min` : ` for ${Math.round(minutes / 60)} h`;
+      q.title = wait && typeof wait.text === 'string'
+        ? `Not typed${elapsed}: ${wait.text}`
+        : 'Messages waiting to be typed into this session';
+      if (wait && wait.reason !== 'working') q.classList.add('chatroom-queued-stuck');
       top.append(q);
     }
     const actions = this._chatEl('span', 'chatroom-member-actions');
@@ -966,14 +998,25 @@ Object.assign(ReverieApp.prototype, {
     top.append(actions);
     card.append(top);
     const goal = this._chatEl('div', 'chatroom-synopsis');
-    goal.append(this._chatEl('span', 'chatroom-synopsis-key', 'Goal'), this._chatEl('span', '', m.goal || '–'));
+    // A goal the member set itself wins; without one, its first 'doing' Board card (read from the Board, never stored) stands in.
+    const cards = Array.isArray(m.focus) ? m.focus.filter((c) => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+    const fromBoard = !m.goal && cards.length ? `${cards[0].id} ${cards[0].title} (from the Board)` : '';
+    goal.append(this._chatEl('span', 'chatroom-synopsis-key', 'Goal'), this._chatEl('span', '', m.goal || fromBoard || '–'));
+    const doing = this._chatEl('div', 'chatroom-synopsis');
+    if (cards.length) {
+      const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
+      doing.append(
+        this._chatEl('span', 'chatroom-synopsis-key', 'Doing'),
+        this._chatEl('span', '', `${cards.map((c) => `${c.id} ${c.title}`).join(' · ')}${more}`)
+      );
+    }
     const progress = this._chatEl('div', 'chatroom-synopsis');
     progress.append(
       this._chatEl('span', 'chatroom-synopsis-key', 'Progress'),
       this._chatEl('span', '', m.progress || '–'),
       this._chatEl('span', 'chatroom-ago', m.updatedAt ? ` · ${this._chatAgo(m.updatedAt)}` : '')
     );
-    card.append(goal, progress);
+    card.append(goal, ...(cards.length ? [doing] : []), progress);
     card.setAttribute('data-i18n-skip', '');
     return card;
   },
@@ -1210,21 +1253,26 @@ Object.assign(ReverieApp.prototype, {
     const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported?.(t));
     const recorder = new MediaRecorder(this._chatStream, type ? { mimeType: type } : undefined);
     const chunks = [];
+    // One id per spoken turn, from this press to the reply's playback: the trace lines and the server log share it.
+    const turnId = target ? chatVoiceTurnId() : null;
+    const capturing = performance.now();
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onstop = () => {
       this._chatRecorder = null;
       this._releaseChatMic();
       this._setChatRecording(false);
       const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
+      if (turnId) this._diag('voice:capture-end', { turnId, captureMs: Math.round(performance.now() - capturing), bytes: blob.size });
       if (blob.size < 1000) {
         this._chatVoiceStatus('Too short: hold the mic while you speak', 'error');
         return;
       }
-      if (target) this._sendChatVoice(blob, target);
+      if (target) this._sendChatVoice(blob, target, turnId);
       else this._transcribeOnServer?.(blob);
     };
     this._chatRecorder = recorder;
     recorder.start();
+    if (turnId) this._diag('voice:capture-start', { turnId, member: target.sessionId });
     this._setChatRecording(true);
     this._chatVoiceStatus(
       `\u25CF Recording for ${target ? target.name : this._chatToLabel?.() || 'everyone'}\u2026 release (or tap) to send`,
@@ -1254,17 +1302,17 @@ Object.assign(ReverieApp.prototype, {
     mic.setAttribute('aria-pressed', String(on));
   },
 
-  async _sendChatVoice(blob, target) {
+  async _sendChatVoice(blob, target, turnId = null) {
     // The turn plays this member's answer itself: voice-chat.js leaves it out of read-aloud meanwhile.
     this._chatVoiceTurnFor = target.sessionId;
     try {
-      return await this._sendChatVoiceTurn(blob, target);
+      return await this._sendChatVoiceTurn(blob, target, turnId);
     } finally {
       if (this._chatVoiceTurnFor === target.sessionId) this._chatVoiceTurnFor = null;
     }
   },
 
-  async _sendChatVoiceTurn(blob, target) {
+  async _sendChatVoiceTurn(blob, target, turnId = null) {
     this._chatVoiceStatus(`${target.name} is typing\u2026`, 'busy');
     const car = () => this._carScreen && !this._carScreen.hidden;
     // The wait for a linked answer can be long: car mode says whom it waits for, and a tap stops it
@@ -1276,10 +1324,12 @@ Object.assign(ReverieApp.prototype, {
     const q = `room=${encodeURIComponent(this._chatRoomId)}&member=${encodeURIComponent(target.sessionId)}`;
     let res;
     let body = null;
+    const sent = performance.now();
+    if (turnId) this._diag('voice:turn-sent', { turnId, bytes: blob.size });
     try {
       res = await fetch(this._chatUrl(`/api/voice/turn?${q}`), {
         method: 'POST',
-        headers: { 'Content-Type': blob.type.split(';')[0] || 'audio/webm' },
+        headers: { 'Content-Type': blob.type.split(';')[0] || 'audio/webm', ...(turnId ? { 'X-Reverie-Voice-Turn': turnId } : {}) },
         body: blob,
         signal: stop.signal,
       });
@@ -1289,7 +1339,11 @@ Object.assign(ReverieApp.prototype, {
         if (stop.signal.aborted) throw stop.signal.reason;
         /* non-JSON error page */
       }
+      // The server's own stage times (speech to text, the member's answer, text to speech) under the same id.
+      if (turnId) this._diag('voice:turn-answered', { turnId, status: res.status, roundTripMs: Math.round(performance.now() - sent),
+        messageId: body?.data?.messages?.[0]?.id, answerId: body?.data?.messages?.[1]?.id, timing: body?.data?.timing });
     } catch {
+      if (turnId) this._diag('voice:turn-failed', { turnId, aborted: stop.signal.aborted, roundTripMs: Math.round(performance.now() - sent) });
       if (stop.signal.aborted) {
         this._chatVoiceStatus('');
         if (car()) this._renderCarState?.('paused', `Stopped waiting; ${target.name}'s answer will show in the room`);
@@ -1308,7 +1362,7 @@ Object.assign(ReverieApp.prototype, {
       return false;
     }
     this._chatVoiceStatus('');
-    if (data.audioUrl) this._playChatAudio(data.audioUrl, target.sessionId);
+    if (data.audioUrl) this._playChatAudio(data.audioUrl, target.sessionId, turnId);
     // The answer came but its audio did not (the voice service failed or timed out): say so, never go quiet.
     else if (data.reply)
       this._chatVoiceStatus(`Couldn't make audio for ${target.name}'s answer; its text is in the room`, 'error');
@@ -1346,11 +1400,12 @@ Object.assign(ReverieApp.prototype, {
    * retry on the very next tap or key anywhere on the page, which is a gesture.
    */
   /** Play a reply; `from` is who is speaking (the car screen shows them). */
-  _playChatAudio(url, from = null) {
+  _playChatAudio(url, from = null, turnId = null) {
     this._chatAudioFrom = from;
     this._chatAudioEl();
     const src = this._chatUrl(url);
     this._chatAudio.src = src;
+    this._chatAudioTurn = turnId ? { id: turnId, src: this._chatAudio.src } : null;
     this._chatAudio.play().then(
       () => {
         this._chatAudioUnlocked = true;
@@ -1370,7 +1425,7 @@ Object.assign(ReverieApp.prototype, {
 
   _offerChatAudioRetry(url) {
     const { voiceStatus, mic } = this._chatEls;
-    const from = this._chatAudioFrom;
+    const from = this._chatAudioFrom, turnId = this._chatAudioTurn?.id ?? null;
     this._chatVoiceStatus('');
     voiceStatus.hidden = false;
     voiceStatus.className = 'chatroom-voice-status';
@@ -1384,7 +1439,7 @@ Object.assign(ReverieApp.prototype, {
       if (mic.contains(event.target) || this._chatRecorder?.state === 'recording') return;
       this._clearChatAudioRetry();
       this._chatVoiceStatus('');
-      this._playChatAudio(url, from);
+      this._playChatAudio(url, from, turnId);
     };
     document.addEventListener('pointerup', this._chatAudioRetry, { capture: true });
     document.addEventListener('keydown', this._chatAudioRetry, { capture: true });
@@ -1730,6 +1785,12 @@ Object.assign(ReverieApp.prototype, {
       const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?since=${since}&limit=${limit}`);
       if (!current()) return false;
       if (!res.ok || !Array.isArray(res.data?.messages)) return this._chatRecoveryFail(id, res.ok ? 'unrecognised answer' : res.error);
+      res.data = this._chatFilterHistory(res.data);
+      // A cleared anchor is intentionally no longer visible. Rebase on this owner's new start, rather than retain it
+      // behind a recovery warning or join the visible tail to messages the owner cleared on another device.
+      if ((res.data.historyAfter ?? -1) > (room.historyAfter ?? -1)) {
+        return this._applyChatRoom(id, res.data, { quiet: true, switched: false, redraw: true, synced: res.data.messages });
+      }
       const fresh = res.data.messages;
       // The page is the newest `limit`. It joins the proved history if it holds the anchor (by id), or, from the
       // empty start, if it holds fewer than asked for (then it is the whole room). A full page that does neither:
@@ -1842,7 +1903,53 @@ Object.assign(ReverieApp.prototype, {
 
   // ─── SSE ────────────────────────────────────────────────────────────────
 
+  _chatHistoryKey(room) {
+    return JSON.stringify([room.historyViewerId || this._chatApp?.humanSelf?.id || 'owner', room.id]);
+  },
+
+  /** Monotonic server-owned view preferences also fence older in-flight HTTP answers and SSE echoes. */
+  _chatFilterHistory(room) {
+    if (!room?.canClearHistory) return room;
+    this._chatHistoryAfter ||= new Map();
+    const key = this._chatHistoryKey(room);
+    const after = Math.max(this._chatHistoryAfter.get(key) ?? -1, room.historyAfter ?? -1);
+    this._chatHistoryAfter.set(key, after);
+    const filtered = { ...room, historyAfter: after };
+    if (room.messages) filtered.messages = room.messages.filter(message => message.at > after);
+    if (room.lastMessage && room.lastMessage.at <= after) filtered.lastMessage = null;
+    if ((room.lastMessageAt || 0) <= after) { filtered.lastMessageAt = undefined; filtered.unread = 0; filtered.mentions = 0; filtered.messageCount = 0; }
+    return filtered;
+  },
+
+  _chatHistoryChanged(data) {
+    if (data?.action !== 'history-cleared') return;
+    const room = this._chatRooms?.find(room => room.id === data.roomId);
+    if (data.viewerId !== (room?.historyViewerId || this._chatApp?.humanSelf?.id || 'owner')) return;
+    if (!room?.canClearHistory || !Number.isSafeInteger(data.historyAfter) || data.historyAfter < -1) return;
+    const key = this._chatHistoryKey(room);
+    const after = Math.max(this._chatHistoryAfter?.get(key) ?? -1, data.historyAfter);
+    (this._chatHistoryAfter ||= new Map()).set(key, after);
+    this._chatLoadSeq = (this._chatLoadSeq || 0) + 1;
+    this._chatCache?.delete(room.id);
+    this._chatSynced?.delete(room.id);
+    Object.assign(room, this._chatFilterHistory(room));
+    const pins = this._chatApp?.doc.querySelector('.ca-dialog.ca-pins');
+    if (pins?.dataset.roomId === room.id) { pins.close(); pins.remove(); }
+    if (this._chatRoomId === room.id && this._chatRoom) {
+      this._chatRoom = this._chatFilterHistory(this._chatRoom);
+      this._readAloud?.clear();
+      this._chatApp?.cancelReplySilently?.();
+      this._renderChatFeed?.({ keepScroll: true });
+    }
+  },
+
+  _chatMessageHidden(data) {
+    const room = this._chatRooms?.find(room => room.id === data?.roomId);
+    return !!room?.canClearHistory && data.message?.at <= Math.max(room.historyAfter ?? -1, this._chatHistoryAfter?.get(this._chatHistoryKey(room)) ?? -1);
+  },
+
   _onChatroomMessage(data) {
+    if (this._chatMessageHidden(data)) return;
     // Car mode (car-mode.js) speaks the voice member's answers; read-aloud (voice-chat.js)
     // the replies to the user from everyone else.
     this._carModeOnMessage?.(data);
@@ -1854,6 +1961,7 @@ Object.assign(ReverieApp.prototype, {
   /** Put a message into the open feed (once: a known id is skipped). The live echo and the send answer both come here. */
   _chatShowMessage(data) {
     if (!data?.message) return;
+    if (this._chatMessageHidden(data)) return;
     // The conversation shell (chat-app.js) owns the feed and the counts once it is running.
     if (this._chatApp?.handleMessage(data)) return;
     if (this.isChatroomOpen() && data.roomId === this._chatRoomId && this._chatRoom) {
@@ -1878,6 +1986,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   _onChatroomChanged(data) {
+    this._chatHistoryChanged(data);
     if (this._chatApp?.handleChanged(data)) return;
     if (!this.isChatroomOpen()) return;
     clearTimeout(this._chatChangedTimer);

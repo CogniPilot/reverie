@@ -239,7 +239,7 @@ class OwnerGoalBrokerTests(unittest.TestCase):
             self.write(self.worker_file, {**self.config, 'goalPrivateConfig': value})
             with self.subTest(value=value), self.assertRaises(ValueError): load_config(self.worker_file)
         self.assertEqual(self.config['maxWorkers'], 16)
-        for file in ('flake.nix', 'nix/worker-isolation.nix'):
+        for file in ('nix/native-worker-packages.nix', 'nix/worker-isolation.nix'):
             text = (Path(__file__).resolve().parents[1]/file).read_text()
             self.assertIn('TasksMax', text); self.assertNotIn('TasksMax=1024', text)
 

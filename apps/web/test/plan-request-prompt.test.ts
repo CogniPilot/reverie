@@ -47,6 +47,53 @@ describe('queued expert plan approval messages', () => {
     expect(m.post).toHaveBeenCalledTimes(1);
     expect(m.deleteMessage).toHaveBeenCalledWith('dm', 'notice', 'Plans');
   });
+  it('tells the owner once, within a push body, when the request expired before the expert saw it', async () => {
+    const m = messages(); let allowed = true;
+    const ownerAlert = vi.fn(async () => 1);
+    const name = 'Rowan ' + 'x'.repeat(94);
+    await expect(deliverPlanRequest({ ...record, name, owner: 'pat' }, m as unknown as PlanRequestMessages, () => allowed,
+      async () => { allowed = false; }, { expiredUnseen: () => true, ownerAlert })).rejects.toThrow('no longer authorized');
+    expect(m.deleteMessage).toHaveBeenCalledWith('dm', 'notice', 'Plans');
+    expect(ownerAlert).toHaveBeenCalledTimes(1);
+    const [text, owner] = ownerAlert.mock.calls[0] as unknown as [string, string];
+    expect(owner).toBe('pat');
+    expect(text.startsWith('Reauthorize on Plans when idle')).toBe(true);
+    expect(text).toContain('Rowan');
+    expect(text).toContain('Nothing was switched');
+    expect(text.length).toBeLessThanOrEqual(220);
+    expect(text).not.toMatch(/[a-f0-9]{64}/);
+  });
+  it('decides expiry when delivery stops, so time passing during cleanup cannot turn another ending into an alert', async () => {
+    // A cancellation or lost authority just before the deadline, with cleanup finishing after it.
+    const m = messages(); let allowed = true; let expiredNow = false;
+    m.deleteMessage.mockImplementation(async () => { expiredNow = true; });
+    const ownerAlert = vi.fn(async () => 1);
+    await expect(deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => allowed,
+      async () => { allowed = false; }, { expiredUnseen: () => expiredNow, ownerAlert })).rejects.toThrow();
+    expect(m.deleteMessage).toHaveBeenCalledTimes(1);
+    expect(ownerAlert).not.toHaveBeenCalled();
+  });
+  it('no owner notice when the expert saw it in time, or when it ended for another reason', async () => {
+    const ownerAlert = vi.fn(async () => 1);
+    const seen = messages();
+    await deliverPlanRequest(record, seen as unknown as PlanRequestMessages, () => true, async () => {
+      seen.lastSeen.mockReturnValue({ messageId: 'notice', at: 100 });
+    }, { expiredUnseen: () => true, ownerAlert });
+    const cancelled = messages(); let allowed = true;
+    await expect(deliverPlanRequest(record, cancelled as unknown as PlanRequestMessages, () => allowed,
+      async () => { allowed = false; }, { expiredUnseen: () => false, ownerAlert })).rejects.toThrow();
+    const unknown = messages(); let open = true;
+    await expect(deliverPlanRequest(record, unknown as unknown as PlanRequestMessages, () => open,
+      async () => { open = false; }, { ownerAlert })).rejects.toThrow();
+    expect(cancelled.deleteMessage).toHaveBeenCalledTimes(1);
+    expect(ownerAlert).not.toHaveBeenCalled();
+  });
+  it('a failing owner alert changes nothing else', async () => {
+    const m = messages(); let allowed = true;
+    await expect(deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => allowed, async () => { allowed = false; },
+      { expiredUnseen: () => true, ownerAlert: () => { throw new Error('push down'); } })).rejects.toThrow('no longer authorized');
+    expect(m.deleteMessage).toHaveBeenCalledTimes(1);
+  });
   it('creates no message when refused before queuing and never mistakes an older read for receipt', async () => {
     const m = messages();
     await expect(deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => false)).rejects.toThrow();

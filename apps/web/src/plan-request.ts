@@ -57,14 +57,18 @@ export interface PlanRequestExecution {
 export interface PlanRequestPort {
   load(): Promise<PlanRequestRecord[]>;
   save(records: PlanRequestRecord[]): Promise<void>;
-  moves: Pick<PlanMoves, 'begin' | 'get' | 'cancel'>;
+  moves: Pick<PlanMoves, 'begin' | 'get' | 'cancel'> & Partial<Pick<PlanMoves, 'assertAvailable'>>;
   binding(employeeId: string, owner?: string): string | undefined;
   validateTarget(snapshot: PlanMoveSnapshot, target: string, owner?: string): Promise<{ mode: 'codex' | 'claude' } | void>;
   capability: {
     write(value: { requestId: string; sessionId: string; nonce: string }): Promise<string>;
     remove(sessionId: string, id: string): Promise<void>;
   };
-  notify(record: PlanRequestView, file: string, allowed: () => boolean): Promise<void>;
+  /**
+   * Deliver the request. `expiredUnseen` is evaluated the moment delivery stops waiting: it is true only when the request
+   * ended by running out of time while still pending, authorized and bound, never for a cancellation or lost authority.
+   */
+  notify(record: PlanRequestView, file: string, allowed: () => boolean, expiredUnseen?: () => boolean): Promise<void>;
   audit(entry: Record<string, unknown>): Promise<void>;
   now?(): number;
 }
@@ -80,6 +84,9 @@ const view = (record: PlanRequestRecord): PlanRequestView => {
 export class PlanMoveRequests {
   private records = new Map<string, PlanRequestRecord>();
   private executions = new Map<string, PlanRequestExecution>();
+  /** Which issue of a request is current; unlike executions it survives revoke, so an earlier delivery stays retired. */
+  private issues = new Map<string, number>();
+  private issued = 0;
   private initialized?: Promise<void>;
   private chain: Promise<unknown> = Promise.resolve();
   constructor(private readonly port: PlanRequestPort) {}
@@ -143,6 +150,19 @@ export class PlanMoveRequests {
         await this.save();
       }
     }
+    // A request which observed the journal hold must follow that SAME move's
+    // verified terminal adoption. Otherwise it would keep blocking after the
+    // move and its durable recovery acknowledgement have already settled.
+    if (record.phase === 'recovery-required') {
+      const move = await this.port.moves.get(record.id, record.owner);
+      if (move?.phase === 'completed' && move.recoveryAction === 'adopt-existing' &&
+        move.sourceCleanupVerified === true && move.employeeId === record.employeeId &&
+        move.oldSession === record.sessionId && move.newSession === record.newSession &&
+        move.fromAccount === record.fromAccount && move.toAccount === record.toAccount) {
+        record.phase = 'completed'; record.movePhase = 'completed'; record.error = move.error;
+        await this.save();
+      }
+    }
     if (record.phase === 'executing') {
       const move = await this.port.moves.get(record.id, record.owner);
       if (move) {
@@ -179,6 +199,8 @@ export class PlanMoveRequests {
     });
   }
   private async issue(record: PlanRequestRecord, execution: PlanRequestExecution): Promise<void> {
+    const generation = ++this.issued;
+    this.issues.set(record.id, generation);
     const nonce = randomBytes(32).toString('hex');
     record.nonceHash = hash(nonce);
     record.phase = 'pending';
@@ -198,8 +220,17 @@ export class PlanMoveRequests {
         execution.authorized() &&
         this.port.binding(record.employeeId, record.owner) === record.sessionId &&
         this.now() < record.expiresAt;
+      // Why delivery ended, decided from the request's own state rather than a later clock: everything still valid
+      // except the deadline. 'expired' is set only by the deadline; cancellation, a session change and lost owner
+      // authority each fail one of the other checks.
+      const expiredUnseen = () =>
+        this.issues.get(record.id) === generation &&
+        (record.phase === 'expired' || (record.phase === 'pending' && this.executions.get(record.id) === execution)) &&
+        execution.authorized() &&
+        this.port.binding(record.employeeId, record.owner) === record.sessionId &&
+        this.now() >= record.expiresAt;
       void this.port
-        .notify(view(record), file, allowed)
+        .notify(view(record), file, allowed, expiredUnseen)
         .then(
           () =>
             this.serial(async () => {
@@ -248,6 +279,8 @@ export class PlanMoveRequests {
         await this.current(existing);
         return view(existing);
       }
+      await this.port.moves.assertAvailable?.(input.employeeId, owner);
+      if (!execution.authorized()) throw new PlanMoveError('The plan permission or binding changed', 403);
       for (const record of this.records.values())
         if (record.owner === owner && record.employeeId === input.employeeId) {
           await this.current(record);
@@ -267,6 +300,7 @@ export class PlanMoveRequests {
         const old = [...this.records.values()].find((record) => !active(record.phase));
         if (!old) throw new PlanMoveError('Resolve pending requests before creating more');
         this.records.delete(old.id);
+        this.issues.delete(old.id);
       }
       const record: PlanRequestRecord = {
         ...input,
@@ -308,6 +342,22 @@ export class PlanMoveRequests {
         await this.current(record);
         if (['pending', 'reauthorize-required'].includes(record.phase) &&
             this.port.binding(record.employeeId, owner) === sessionId) result.push(view(record));
+      }
+      return result;
+    });
+  }
+  /** The session an employee is bound to now, if any: who a manager's listing is checked against. */
+  bindingOf(employeeId: string, owner?: string): string | undefined {
+    return this.port.binding(employeeId, owner);
+  }
+  /** Pending requests filed for one employee, whoever filed them; the caller has already been authorized for it. */
+  async pendingForEmployee(employeeId: string, owner?: string): Promise<PlanRequestView[]> {
+    return this.serial(async () => {
+      const result: PlanRequestView[] = [];
+      for (const record of this.records.values()) {
+        if (record.owner !== owner || record.employeeId !== employeeId) continue;
+        await this.current(record);
+        if (['pending', 'reauthorize-required'].includes(record.phase)) result.push(view(record));
       }
       return result;
     });
@@ -429,9 +479,13 @@ export class PlanMoveRequests {
         record.movePhase = move.phase;
         record.newSession = move.newSession;
         await this.save();
-      } catch {
+      } catch (error) {
         record.phase = 'failed';
-        record.error = 'The approved move could not start. Inspect the current session before requesting again.';
+        // A refusal's own text (a lock, a changed account, an existing plan) is written for the expert; anything else
+        // stays generic for them and goes to the log, so the reason is never lost.
+        const reason = error instanceof PlanMoveError ? ` ${error.message.replace(/[.\s]+$/, '')}.` : '';
+        record.error = `The approved move could not start.${reason} Inspect the current session before requesting again.`;
+        console.warn(`[plans] approved move ${record.id} could not start:`, error instanceof Error ? error.message : error);
         await this.save();
       }
       return view(record);

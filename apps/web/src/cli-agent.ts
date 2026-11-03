@@ -1,3 +1,4 @@
+import { isChatRaster, localImageFiles } from './chat-image-paths.js';
 /**
  * @fileoverview `reverie agent …` — session-to-session verbs for the agent running
  * inside a Reverie session, in every CLI mode.
@@ -31,15 +32,19 @@
 import http from 'node:http';
 import { displayTime, displayTimeZone } from './display-time.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
+import { agentEmployeeOffice } from './cli-agent-office.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
 import { agentCredentialStatus } from './cli-agent-credential-status.js';
 import { agentContext, agentContextReceipt } from './cli-agent-context.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import https from 'node:https';
+import { readFileSync } from 'node:fs';
+import { DIGEST_CURSOR_MAX } from './chatroom-digest.js';
 import { StringDecoder } from 'node:string_decoder';
 import { MAX_MESSAGE_CHARS } from './chatroom-store.js';
 import { saveChatAttachment, chatAttachmentDestinationRefusal } from './cli-chat-attachment.js';
 import type { Command } from 'commander';
+import type { CompanyWakeReport } from './company-wake.js';
 import {
   basicAuthHeader,
   credentialsFrom,
@@ -53,8 +58,11 @@ import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
-import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves } from './cli-plan-request.js';
+import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves, agentPlanRecovery } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
+import { registerJournalCommands } from './cli-agent-journal.js';
+import { registerPublishCommands } from './cli-agent-publish.js';
+import { registerHireRequestCommands } from './cli-agent-hire-request.js';
 import { goalClientTarget } from './goal-client-target.js';
 
 /** A chat message id, as the server stores it. */
@@ -406,10 +414,27 @@ export const httpRequest: ApiRequest = (ctx, options) => {
   });
 };
 
+/** A server field as one line of text: a nested `{ message }` keeps its words, anything else is bounded JSON, never `[object Object]`. */
+function envelopeText(value: unknown, fallback: string): string {
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (value === undefined || value === null) return fallback;
+  const message = (value as { message?: unknown }).message;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  try {
+    return JSON.stringify(value).slice(0, 200);
+  } catch {
+    return fallback;
+  }
+}
+
 /** One line describing a failed response, for humans. Plain-text guards (401/403/429) have no envelope. */
 export function describeFailure(res: ApiResponse): string {
   if (res.json && !res.json.success) {
-    return `${res.json.errorCode ?? 'ERROR'}: ${res.json.error ?? 'request failed'} (HTTP ${res.status})`;
+    const error = envelopeText(res.json.error, 'request failed');
+    // A framework error body ({ error: 'Service Unavailable', message }) puts the useful words in `message`.
+    const detail = envelopeText((res.json as { message?: unknown }).message, '');
+    const text = detail && detail !== error ? `${error}: ${detail}` : error;
+    return `${envelopeText(res.json.errorCode, 'ERROR')}: ${text} (HTTP ${res.status})`;
   }
   const text = res.text.trim().split('\n')[0] ?? '';
   if (res.status === 401)
@@ -450,12 +475,29 @@ export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Pro
   return 0;
 }
 
-/** Fresh own digest; no hook installation, suppression marker or consumption state. */
-export async function agentChatDigest(deps: AgentDeps): Promise<number> {
-  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000 });
+/**
+ * Fresh own digest; no hook installation, suppression marker or read state. By default it continues from, and moves,
+ * this agent's digest cursor (FYIs already covered are not repeated); --all and --since leave the cursor alone.
+ */
+export async function agentChatDigest(deps: AgentDeps, options: { all?: boolean; since?: string } = {}): Promise<number> {
+  if (options.all && options.since !== undefined) return fail(deps, 'Use --all or --since, not both');
+  let since = options.since;
+  // A cursor can be longer than a command-line argument; --since @FILE reads it from a file (e.g. saved from --json).
+  if (since?.startsWith('@')) {
+    try {
+      since = readFileSync(since.slice(1), 'utf8').trim();
+    } catch {
+      return fail(deps, 'Could not read the cursor file');
+    }
+  }
+  if (since !== undefined && (!since || since.length > DIGEST_CURSOR_MAX)) return fail(deps, 'Use --since with a cursor printed by an earlier digest');
+  // An explicit cursor goes in the body: a long one does not fit in a URL.
+  const result = await deps.request(deps.ctx, since !== undefined
+    ? { method: 'POST', path: '/api/chatrooms/digest', body: { since }, timeoutMs: 2000 }
+    : { method: 'GET', path: '/api/chatrooms/digest', timeoutMs: 2000, ...(options.all ? { query: { since: 'all' } } : {}) });
   const data = result.json?.data as { version?: unknown; generatedAt?: unknown; text?: unknown; revision?: unknown } | undefined;
   const age = (deps.now?.() ?? Date.now()) - Number(data?.generatedAt);
-  if (!result.json?.success || data?.version !== 1 || typeof data.text !== 'string' || data.text.length > 12000 ||
+  if (!result.json?.success || data?.version !== 2 || typeof data.text !== 'string' || data.text.length > 12000 ||
       typeof data.revision !== 'string' || !/^[a-f0-9]{64}$/.test(data.revision) ||
       typeof data.generatedAt !== 'number' || !Number.isSafeInteger(data.generatedAt) || age < -5000 || age > 30000)
     return fail(deps, 'Fresh actionable digest unavailable; attention and read state are unchanged');
@@ -784,7 +826,7 @@ export const WAKE_PROMPT =
   'Wake-up check from a colleague: you look idle. Read what needs you (reverie agent chat digest), check your Board cards (reverie board show --mine), then carry on with your current work or say what is blocking you.';
 
 /**
- * `agent wake` — type the standard resume prompt into an idle colleague's composer (James 10-19: an agent should be
+ * `agent wake` — type the standard resume prompt into an idle colleague's composer (an agent should be
  * able to wake a sleeping agent with one command). It goes through the same input route as `send`, so the server decides who
  * may type where. A session that is working is left alone: the CLI checks first, and the server checks again at write time
  * (`ifIdle`), types only into an empty composer and never falls back to a raw write.
@@ -803,6 +845,67 @@ export async function agentWake(deps: AgentDeps, options: { id: string }): Promi
     return fail(deps, `not waking ${row.name ?? target.id}: it is ${row.status ?? 'in an unknown state'}, not idle`, EXIT.refused);
   }
   return agentSend(deps, { id: target.id, text: WAKE_PROMPT, enter: true, ifIdle: true });
+}
+
+/** Recover one exact company employee through the caller's existing scoped API. Never types session input. */
+export async function agentWakeEmployee(deps: AgentDeps, options: { employeeId: string }): Promise<number> {
+  const id = options.employeeId;
+  if (!UUID_RE.test(id) || id !== id.toLowerCase()) {
+    return fail(
+      deps,
+      'Use a full canonical employee UUID from /api/company; session IDs and PIDs are not employee IDs.',
+      EXIT.refused
+    );
+  }
+  const company = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
+  if (company.status < 200 || company.status >= 300 || !company.json?.success)
+    return fail(
+      deps,
+      describeFailure(company),
+      company.status === 401 || company.status === 403 ? EXIT.refused : EXIT.error
+    );
+  const employees = (company.json.data as { employees?: Array<{ id?: unknown }> } | undefined)?.employees;
+  if (!Array.isArray(employees)) return fail(deps, 'Company employee identities could not be confirmed.');
+  if (employees.filter((employee) => employee?.id === id).length !== 1)
+    return fail(deps, 'No unique company employee has that full UUID; do not use a session ID or PID.', EXIT.refused);
+
+  let response: ApiResponse;
+  try {
+    response = await deps.request(deps.ctx, {
+      method: 'POST',
+      path: `/api/company/employees/${id}/wake`,
+      body: {},
+    });
+  } catch {
+    return fail(deps, 'Employee wake outcome is unconfirmed. Check its current state before trying again.');
+  }
+  if (response.status < 200 || response.status >= 300 || !response.json?.success)
+    return fail(deps, describeFailure(response), [401, 403, 409].includes(response.status) ? EXIT.refused : EXIT.error);
+  const data = response.json.data as { recovery?: CompanyWakeReport } | undefined;
+  const recovery = data?.recovery;
+  if (
+    !recovery ||
+    !Array.isArray(recovery.awakened) ||
+    !Array.isArray(recovery.skipped) ||
+    recovery.awakened.length + recovery.skipped.length > 1 ||
+    !recovery.awakened.every((employeeId) => employeeId === id) ||
+    !recovery.skipped.every(
+      (skip) =>
+        skip &&
+        typeof skip === 'object' &&
+        skip.employeeId === id &&
+        typeof skip.reason === 'string' &&
+        skip.reason.length > 0 &&
+        skip.reason.length <= 200
+    )
+  )
+    return fail(deps, 'Employee wake result could not be confirmed. Check its current state before trying again.');
+  if (deps.json) emitJson(deps, data);
+  else if (recovery.awakened.length) deps.io.out(`Awakened employee ${id}.`);
+  else if (recovery.skipped.length)
+    deps.io.out(`Skipped employee ${id}: ${quoteForPane(recovery.skipped[0].reason, 200)}`);
+  else deps.io.out(`No employee awakened; the server returned no recovery outcome for ${id}.`);
+  return recovery.awakened.length ? EXIT.ok : EXIT.refused;
 }
 
 function describeWait(wait: WaitResult): string {
@@ -983,9 +1086,15 @@ interface ChatMemberRow {
   away?: string;
   /** Owner-set, from the member's employee record. */
   pronouns?: string;
+  /** Its own 'doing' Board cards, read from the Board by the server (never stored on the membership). */
+  focus?: Array<{ id: string; title: string; end?: number }>;
+  focusMore?: number;
   alive?: boolean;
   working?: boolean;
   updatedAt?: number;
+  /** Lines queued for it; with deliveryWait, why they are not typed yet (a fixed reason, never pane text). */
+  pendingDeliveries?: number;
+  deliveryWait?: { reason: string; text: string; since: number };
 }
 
 interface ChatMessageRow {
@@ -994,7 +1103,7 @@ interface ChatMessageRow {
   from: { kind: string; name: string; sessionId?: string };
   to: 'all' | string[];
   text: string;
-  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number }>;
+  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number; linked?: true; localPath?: string; localImageStatus?: 'ready' | 'unavailable' }>;
   /** Set when the user deleted the message (its text is then empty). */
   deleted?: { at: number };
   /** A poll: `text` is its question. */
@@ -1128,7 +1237,11 @@ export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], r
             roomId && UUID_RE.test(roomId) && UUID_RE.test(file.id)
               ? ` /api/v1/chatrooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(file.id)}`
               : '';
-          return ` [attached: ${quoteForPane(file.name, 200)}${link}]`;
+          // A linked file is on the shared drive at the same path in every laptop: that path is the way to read it.
+          if (file.linked && file.path) return ` [linked file: ${quoteForPane(file.path, 400)}]`;
+          return file.localPath
+            ? ` [attached: ${quoteForPane(file.localPath, 400)}]`
+            : ` [attached: ${quoteForPane(file.name, 200)}${file.localImageStatus === 'unavailable' ? ' (local image unavailable; re-read to request a fresh path)' : link}]`;
         })
         .join('');
   const marks = `${m.edited && !m.deleted ? ' (edited)' : ''}${m.pinned && !m.deleted ? ' [pinned]' : ''}`;
@@ -1377,7 +1490,7 @@ const TO_IGNORED_NOTE = '--to is ignored: everyone in a channel reads every mess
 export async function agentChatSayInput(
   deps: AgentDeps,
   words: string[],
-  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; replyTo?: string },
+  options: { stdin?: boolean; room?: string; to?: string; file?: string[]; linkFile?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string },
   input: AsyncIterable<Buffer | string> = process.stdin
 ): Promise<number> {
   if (options.stdin && words.length)
@@ -1399,14 +1512,17 @@ export async function agentChatSayInput(
     if (text.length > MAX_MESSAGE_CHARS)
       return fail(deps, `refusing: message exceeds ${MAX_MESSAGE_CHARS} characters`, EXIT.refused);
   }
-  if (!text.trim() && (options.stdin || !options.file?.length))
+  if (!text.trim() && (options.stdin || (!options.file?.length && !options.linkFile?.length)))
     return fail(deps, 'refusing: empty message', EXIT.refused);
   return agentChatSay(deps, {
     room: options.room,
     to: options.to,
     text,
     files: options.file,
+    links: options.linkFile,
     replyTo: options.replyTo,
+    ifLatest: options.ifLatest,
+    ifNoNewerThan: options.ifNoNewerThan,
   });
 }
 
@@ -1418,14 +1534,24 @@ export async function agentChatSay(
     to?: string;
     text: string;
     files?: string[];
+    /** Shared-drive files to attach as references (no copy); the server refuses anything off the shared drive. */
+    links?: string[];
     /** The id of the message this post answers (a spoken turn waits for exactly this link). */
     replyTo?: string;
+    /** Refuse instead of posting when someone else posted after the last message this session saw here. */
+    ifLatest?: boolean;
+    /** Refuse instead of posting when someone else posted after this message id. */
+    ifNoNewerThan?: string;
     readFile?: (path: string) => Promise<Buffer>;
   }
 ): Promise<number> {
   // Refused before anything is uploaded or posted, so a bad id never turns into an unlinked answer.
   if (options.replyTo !== undefined && !UUID_RE.test(options.replyTo))
     return fail(deps, `refusing: --reply-to needs a message id, got ${JSON.stringify(options.replyTo).slice(0, 80)}`, EXIT.refused);
+  if (options.ifNoNewerThan !== undefined && !UUID_RE.test(options.ifNoNewerThan))
+    return fail(deps, `refusing: --if-no-newer-than needs a message id, got ${JSON.stringify(options.ifNoNewerThan).slice(0, 80)}`, EXIT.refused);
+  if (options.ifLatest && options.ifNoNewerThan !== undefined)
+    return fail(deps, 'refusing: use --if-latest or --if-no-newer-than, not both', EXIT.refused);
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   // Each --file is copied into the room's attachment store first, then the message names them.
@@ -1447,6 +1573,17 @@ export async function agentChatSay(
     if (!up.json?.success) return fail(deps, `${path}: ${describeFailure(up)}`);
     attachments.push((up.json.data as { file: { id: string } }).file.id);
   }
+  // Each --link-file is recorded as a reference to the shared-drive file itself: nothing is copied or size-limited.
+  for (const link of options.links ?? []) {
+    const path = (await import('node:path')).resolve(link);
+    const res = await deps.request(deps.ctx, {
+      method: 'POST',
+      path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/links`,
+      body: { path },
+    });
+    if (!res.json?.success) return fail(deps, `${path}: ${describeFailure(res)}`);
+    attachments.push((res.json.data as { file: { id: string } }).file.id);
+  }
   const res = await deps.request(deps.ctx, {
     method: 'POST',
     path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/messages`,
@@ -1454,8 +1591,23 @@ export async function agentChatSay(
       text: options.text,
       ...(attachments.length ? { attachments } : {}),
       ...(options.replyTo !== undefined ? { replyTo: options.replyTo } : {}),
+      ...(options.ifLatest ? { ifLatest: true } : {}),
+      ...(options.ifNoNewerThan !== undefined ? { ifNoNewerThan: options.ifNoNewerThan } : {}),
     },
   });
+  // A guarded post that crossed newer messages was not stored: show them, so the next step is to read and decide.
+  if (res.status === 409 && (res.json?.errorCode === 'CHAT_NEWER_MESSAGES' || res.json?.errorCode === 'CHAT_NO_READ_MARK')) {
+    if (deps.json) {
+      deps.io.out(JSON.stringify({ success: false, error: res.json.error, errorCode: res.json.errorCode, data: res.json.data ?? {} }));
+      return EXIT.refused;
+    }
+    const data = res.json.data as { newer?: Array<{ id: string; from: string; excerpt: string }>; more?: boolean } | undefined;
+    deps.io.err(`not posted: ${describeFailure(res)}`);
+    if (data?.more) deps.io.err('  (older ones not shown)');
+    for (const m of data?.newer ?? []) deps.io.err(`  ${m.id.slice(0, 8)} ${JSON.stringify(m.from)}: ${JSON.stringify(m.excerpt)}`);
+    deps.io.err('read them with: reverie agent chat read');
+    return EXIT.refused;
+  }
   if (!res.json?.success) return fail(deps, describeFailure(res));
   if (deps.json) emitJson(deps, res.json.data ?? {});
   else
@@ -1498,6 +1650,38 @@ export function guessContentType(path: string): string {
   return types[ext] ?? 'application/octet-stream';
 }
 
+/** Default reads request bounded local image copies; failure never advertises a server path as readable. */
+async function withLocalImages(deps: AgentDeps, roomId: string, messages: ChatMessageRow[]): Promise<ChatMessageRow[]> {
+  let requests = 0;
+  const result: ChatMessageRow[] = [];
+  for (const original of messages) {
+    const message = { ...original, attachments: original.attachments?.map(file => ({ ...file })) };
+    // A linked picture is read from the shared drive at its own path; only uploaded copies need a local image.
+    const images = message.deleted ? [] : (message.attachments ?? []).filter((file) => !file.linked && isChatRaster(file));
+    if (images.length) {
+      for (const image of images) {
+        image.path = '';
+        delete image.localPath;
+        image.localImageStatus = 'unavailable';
+      }
+      if (requests++ < 4) {
+        try {
+          const response = await deps.request(deps.ctx, { method: 'POST',
+            path: `/api/v1/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(message.id)}/image-paths`, body: {} });
+          const files = response.json?.success ? localImageFiles(response.json.data, images.slice(0, 4).map(file => file.id)) : [];
+          for (const file of files) {
+            const image = images.find(image => image.id === file.fileId)!;
+            image.path = image.localPath = file.path;
+            image.localImageStatus = 'ready';
+          }
+        } catch { /* A readable message remains usable when its local copy is unavailable. */ }
+      }
+    }
+    result.push(message);
+  }
+  return result;
+}
+
 /** `agent chat read` — recent history. */
 export async function agentChatRead(deps: AgentDeps, options: { room?: string; limit: number; message?: string; acknowledge?: boolean }): Promise<number> {
   if (options.acknowledge && !options.message) return fail(deps, '--acknowledge requires --message');
@@ -1509,6 +1693,7 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
     if (!exact.json?.success) return fail(deps, describeFailure(exact));
     const data = exact.json.data as { message?: ChatMessageRow; readToken?: string; timeZone?: string } | undefined;
     if (data?.message?.id !== options.message || typeof data.readToken !== 'string') return fail(deps, 'Unrecognized exact-message response; nothing acknowledged');
+    data.message = (await withLocalImages(deps, target.room.id, [data.message]))[0];
     // Explicit acknowledgement follows receipt of this exact response, never a guessed timestamp or text match.
     if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id, data.timeZone));
     if (options.acknowledge) {
@@ -1529,18 +1714,19 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
   });
   if (!res.json?.success) return fail(deps, describeFailure(res));
   const data = (res.json.data ?? {}) as { messages?: ChatMessageRow[]; members?: ChatMemberRow[]; timeZone?: string };
+  data.messages = await withLocalImages(deps, target.room.id, data.messages ?? []);
   if (deps.json) {
     emitJson(deps, data);
     return EXIT.ok;
   }
-  const messages = data.messages ?? [];
+  const messages = data.messages;
   if (messages.length === 0) deps.io.out(palette.muted('(no messages yet)'));
   for (const m of messages) deps.io.out(formatChatMessage(m, data.members ?? [], target.room.id, data.timeZone));
   return EXIT.ok;
 }
 
 /** One bounded read-only owner-attention history page; never advances seen or ACKs. */
-export async function agentChatPending(deps: AgentDeps, options: { room?: string; beforeAt?: string; beforeId?: string }): Promise<number> {
+export async function agentChatPending(deps: AgentDeps, options: { room?: string; beforeAt?: string; beforeId?: string; stale?: boolean }): Promise<number> {
   if ((options.beforeAt === undefined) !== (options.beforeId === undefined) ||
       (options.beforeAt !== undefined && (!/^\d{1,16}$/.test(options.beforeAt) || !Number.isSafeInteger(Number(options.beforeAt)))) ||
       (options.beforeId !== undefined && (!options.beforeId || options.beforeId.length > 200)))
@@ -1548,7 +1734,8 @@ export async function agentChatPending(deps: AgentDeps, options: { room?: string
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/notices/history',
-    query: { roomId: target.room.id, ...(options.beforeAt !== undefined ? { beforeAt: options.beforeAt, beforeId: options.beforeId! } : {}) } });
+    query: { roomId: target.room.id, ...(options.beforeAt !== undefined ? { beforeAt: options.beforeAt, beforeId: options.beforeId! } : {}),
+      ...(options.stale ? { stale: '1' } : {}) } });
   const data = result.json?.data as { text?: string; historyCoverage?: unknown; sourceReferences?: Array<{ roomId?: string; messageId?: string }> } | undefined;
   if (!result.json?.success || typeof data?.text !== 'string' || !data.historyCoverage ||
       !Array.isArray(data.sourceReferences) || data.sourceReferences.length > 1000 ||
@@ -1559,8 +1746,86 @@ export async function agentChatPending(deps: AgentDeps, options: { room?: string
   return EXIT.ok;
 }
 
+/**
+ * `agent chat mentions`: messages across your rooms that @-mention you, address you, say @everyone or (--holds) use
+ * hold wording, after a cursor or time; prints the next cursor. Read-only: no seen mark, delivery or attention change.
+ */
+export async function agentChatMentions(
+  deps: AgentDeps,
+  options: { room?: string; since?: string; limit?: number; holds?: boolean }
+): Promise<number> {
+  let since = options.since?.trim();
+  if (since !== undefined && !/^m1\./.test(since)) {
+    const at = /^\d{1,16}$/.test(since) ? Number(since)
+      : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(since) ? Date.parse(since) : NaN;
+    if (!Number.isSafeInteger(at)) return fail(deps, 'Use --since with a cursor printed by an earlier call, epoch ms, or ISO 8601 with Z or an offset');
+    since = String(at);
+  }
+  let roomId: string | undefined;
+  if (options.room) {
+    const target = await resolveChatRoom(deps, options.room);
+    if ('error' in target) return fail(deps, target.error, target.code);
+    roomId = target.room.id;
+  }
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/mentions', query: {
+    ...(roomId ? { roomId } : {}), ...(since ? { since } : {}), limit: String(options.limit ?? 50), holds: options.holds ? '1' : '0' } });
+  const data = result.json?.data as { items?: Array<{ room: string; messageId: string; at: number; from: string; reasons: string[]; excerpt: string }>;
+    next?: string; complete?: boolean; source?: string; timeZone?: string } | undefined;
+  if (!result.json?.success || !Array.isArray(data?.items) || typeof data.next !== 'string') return fail(deps, describeFailure(result));
+  if (deps.json) {
+    emitJson(deps, data);
+    return EXIT.ok;
+  }
+  for (const item of data.items)
+    deps.io.out(`${displayTime(item.at, data.timeZone)} ${quoteForPane(item.room, 60)} ${quoteForPane(item.from, 60)} [${item.reasons.join(',')}] ${item.messageId.slice(0, 8)}: ${quoteForPane(item.excerpt, 240)}`);
+  if (!data.items.length) deps.io.out('No new mentions.');
+  deps.io.out(`${data.complete ? 'next' : 'more after'}: --since ${data.next}${data.source === 'recent-only' ? ' (recent window only: no chat database)' : ''}`);
+  return EXIT.ok;
+}
+
+/** The server's age floor for setting a notice aside as stale (STALE_MIN_AGE_MS); checked here first for a clear error. */
+const STALE_AGE_MS = 72 * 60 * 60 * 1000;
+
 /** Explicit own attention resolution; exact reads support intent but never ACK delivery here. */
-export async function agentChatHandle(deps: AgentDeps, options: { room?: string; message: string; supersededBy?: string }): Promise<number> {
+/**
+ * Explicit bulk resolution of your own notices from agents and bots in one room posted before a time (epoch ms, or ISO 8601
+ * with Z or an offset). Owner and other human messages are never included. Each is resolved like `handle <id>`: an exact
+ * read, then the same checked resolution; delivery and task state are unchanged.
+ */
+export async function agentChatHandleBefore(deps: AgentDeps, options: { room?: string; before: string; stale?: boolean; owner?: boolean }): Promise<number> {
+  const raw = options.before.trim();
+  const before = /^\d{1,16}$/.test(raw) ? Number(raw)
+    : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(raw) ? Date.parse(raw) : NaN;
+  if (!Number.isSafeInteger(before) || before > (deps.now ?? Date.now)())
+    return fail(deps, 'Use --before with a past time: epoch milliseconds, or ISO 8601 with Z or an offset');
+  if (!options.room) return fail(deps, '--before needs an explicit --room');
+  if (options.owner && !options.stale) return fail(deps, '--owner only sets owner and human notices aside with --stale; they are never bulk-handled');
+  if (options.owner && before > (deps.now ?? Date.now)() - STALE_AGE_MS)
+    return fail(deps, '--owner --stale needs a --before at least 72 hours ago');
+  const target = await resolveChatRoom(deps, options.room);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const listing = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/notices/pending-before',
+    query: { roomId: target.room.id, before: String(before), ...(options.owner ? { humans: '1' } : {}) } });
+  const refs = (listing.json?.data as { sourceReferences?: Array<{ roomId?: string; messageId?: string }> } | undefined)?.sourceReferences;
+  if (!listing.json?.success || !Array.isArray(refs) || refs.length > 1000 ||
+      refs.some(ref => ref.roomId !== target.room.id || typeof ref.messageId !== 'string'))
+    return fail(deps, 'Pending notice list not confirmed; nothing was handled');
+  const quiet: AgentDeps = { ...deps, json: true, io: { ...deps.io, out: () => {}, err: () => {} } };
+  const handled: string[] = [], failed: string[] = [];
+  for (const ref of refs) {
+    const code = await agentChatHandle(quiet, { room: target.room.id, message: ref.messageId!, stale: options.stale });
+    (code === EXIT.ok ? handled : failed).push(ref.messageId!);
+  }
+  if (deps.json) emitJson(deps, { roomId: target.room.id, before, handled, failed });
+  else if (options.stale)
+    deps.io.out(`Set aside ${handled.length} of ${refs.length} pending ${options.owner ? '' : 'agent/bot '}notices before ${new Date(before).toISOString()} as stale` +
+      (failed.length ? `; ${failed.length} not confirmed: ${failed.join(', ')}` : '') + '. Not handled: list them with chat pending --stale.');
+  else deps.io.out(`Handled ${handled.length} of ${refs.length} pending agent/bot notices before ${new Date(before).toISOString()}` +
+    (failed.length ? `; ${failed.length} not confirmed: ${failed.join(', ')}` : '') + '. Owner messages are never bulk-handled.');
+  return failed.length ? EXIT.error : EXIT.ok;
+}
+
+export async function agentChatHandle(deps: AgentDeps, options: { room?: string; message: string; supersededBy?: string; stale?: boolean }): Promise<number> {
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   if (!options.message || options.message.length > 200 ||
@@ -1577,7 +1842,8 @@ export async function agentChatHandle(deps: AgentDeps, options: { room?: string;
   if (!source) return fail(deps, 'Exact source read failed; attention unchanged');
   const replacement = options.supersededBy ? await exact(options.supersededBy) : undefined;
   if (options.supersededBy && !replacement) return fail(deps, 'Exact replacement read failed; attention unchanged');
-  const disposition = replacement ? 'superseded' : 'handled';
+  if (options.stale && replacement) return fail(deps, 'Use --stale or --superseded-by, not both');
+  const disposition = replacement ? 'superseded' : options.stale ? 'stale' : 'handled';
   const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/v1/chatrooms/notices/resolve',
     body: { ...source, disposition, ...(replacement ? { replacement } : {}) } });
   const data = result.json?.data as { source?: { roomId?: string; messageId?: string }; attention?: { disposition?: string; replacement?: { messageId?: string } } } | undefined;
@@ -1739,6 +2005,12 @@ export async function agentChatPin(deps: AgentDeps, options: { room?: string; id
 }
 
 /** `agent chat who` — members with role, live state, goal and progress. */
+/** An elapsed time without a clock or zone: "under a minute", "12 min", "3 h". */
+function waitedFor(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60000));
+  return minutes < 1 ? 'under a minute' : minutes < 120 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+}
+
 export async function agentChatWho(deps: AgentDeps, options: { room?: string; names?: boolean }): Promise<number> {
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
@@ -1761,7 +2033,20 @@ export async function agentChatWho(deps: AgentDeps, options: { room?: string; na
     // Owner-set pronouns (your own too, so you know how you are referred to): use them when you write about a member.
     if (m.pronouns) deps.io.out(`    pronouns: ${quoteForPane(m.pronouns, 40)}`);
     if (m.away) deps.io.out(`    away: ${quoteForPane(m.away, 500)}`);
-    deps.io.out(`    goal: ${m.goal ? quoteForPane(m.goal, 500) : '-'}`);
+    // Queued lines and why they are not typed yet, so a silent member is not mistaken for one that ignored its mentions.
+    if (m.pendingDeliveries) {
+      const wait = m.deliveryWait;
+      const why = wait ? `, waiting ${waitedFor((deps.now ?? Date.now)() - wait.since)}: ${quoteForPane(wait.text, 120)}` : '';
+      deps.io.out(`    queued: ${m.pendingDeliveries}${why}`);
+    }
+    // A goal the member set itself wins; without one, its first 'doing' Board card stands in, marked as such.
+    const first = m.focus?.[0];
+    const goal = m.goal ? quoteForPane(m.goal, 500) : first ? `${quoteForPane(`${first.id} ${first.title}`, 160)} (from the Board)` : '-';
+    deps.io.out(`    goal: ${goal}`);
+    if (m.focus?.length) {
+      const cards = m.focus.map((c) => quoteForPane(`${c.id} ${c.title}`, 160)).join('; ');
+      deps.io.out(`    doing: ${cards}${m.focusMore ? ` (+${m.focusMore} more)` : ''}`);
+    }
     deps.io.out(`    progress: ${m.progress ? quoteForPane(m.progress, 500) : '-'}`);
   }
   return EXIT.ok;
@@ -1968,7 +2253,7 @@ export async function agentChatVoice(
 // Plans (read-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface PlanRowView {
+export interface PlanRowView {
   id: string;
   label: string;
   provider: string;
@@ -2047,6 +2332,38 @@ function planLines(a: PlanRowView, timeZone?: string): string[] {
   return lines;
 }
 
+/** A banked reset expiring within this long gets a warning in `plans show`. */
+export const BANKED_RESET_EXPIRY_WARN_MS = 72 * 3600_000;
+/** Applying a banked reset this close to the weekly reset wastes it: the week resets on its own anyway. */
+export const BANKED_RESET_NEAR_WEEKLY_MS = 24 * 3600_000;
+
+/**
+ * Advice for an account's banked resets, for `plans show`. Reverie only reads them (the provider exposes no redeem call
+ * here), so this says where to apply one, warns when one is about to expire, and says whether now is a sensible time:
+ * only with the week fully used, and not when the weekly reset is close.
+ */
+export function bankedResetAdvice(a: PlanRowView, now: number, timeZone?: string): string[] {
+  const b = a.bankedResets;
+  if (a.provider !== 'openai' || !b || b.availableCount < 1) return [];
+  const hours = (ms: number) => `${Math.max(0, Math.round(ms / 3600_000))} h`;
+  const lines: string[] = [];
+  if (b.earliestExpiresAt && b.earliestExpiresAt > now && b.earliestExpiresAt - now <= BANKED_RESET_EXPIRY_WARN_MS)
+    lines.push(`  ! a banked reset expires in ${hours(b.earliestExpiresAt - now)} (${planEt(b.earliestExpiresAt, timeZone)})`);
+  const weekly = a.pace.weekly;
+  const untilReset = a.pace.weekReset !== null ? a.pace.weekReset - now : null;
+  // A signed-out account, or one whose recorded weekly reset has already passed, is judged from a stale reading.
+  if (!a.signedIn) lines.push('  signed out: the last reading may be stale; sign in before judging whether to apply one');
+  else if (untilReset !== null && untilReset <= 0)
+    lines.push('  the recorded weekly reset has passed, so this reading is stale; check current use before applying one');
+  else if (weekly === null || !Number.isFinite(weekly)) lines.push('  apply one only at 100% of the week; current use is unknown');
+  else if (weekly < 100) lines.push(`  not now: the week is at ${planPct(weekly)}; apply one only at 100%`);
+  else if (untilReset !== null && untilReset <= BANKED_RESET_NEAR_WEEKLY_MS)
+    lines.push(`  not now: the week resets in ${hours(untilReset)} anyway; keep the banked reset`);
+  else lines.push(`  the week is at 100%${untilReset !== null ? ` with ${hours(untilReset)} to its reset` : ''}: a banked reset can be applied now`);
+  lines.push("  Reverie never redeems one: apply it from the provider's own account page for this login");
+  return lines;
+}
+
 async function loadPlans(deps: AgentDeps): Promise<{ rows: PlanRowView[]; timeZone: string } | { error: string }> {
   const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/plans' });
   if (!res.json?.success) return { error: describeFailure(res) };
@@ -2079,6 +2396,7 @@ export async function agentPlansShow(deps: AgentDeps, options: { name: string })
     return EXIT.ok;
   }
   for (const line of planLines(hit, loaded.timeZone)) deps.io.out(line);
+  for (const line of bankedResetAdvice(hit, (deps.now ?? Date.now)(), loaded.timeZone)) deps.io.out(line);
   return EXIT.ok;
 }
 
@@ -2445,11 +2763,22 @@ export function registerAgentCommands(program: Command): Command {
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialStatus));
   credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
+  registerJournalCommands(agent, run);
+  registerPublishCommands(agent, run);
+  registerHireRequestCommands(agent, run);
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
-  planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
-    .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
+  planMove.command('list').description('List this expert’s pending plan requests, or with --employee another expert’s')
+    .option('--employee <id-or-name>', 'Another team expert, by employee id or name (requires Manage team plans)')
+    .option('--json', 'Machine-readable result')
+    .action((options: { employee?: string; json?: boolean }) => run(Boolean(options.json), deps => agentPendingPlanMoves(deps, options.employee)));
+  planMove.command('blocked').description('Inspect your unresolved existing moves without creating or replaying one').option('--json', 'Machine-readable result')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps)));
+  planMove.command('recovery-status <id>').description('Inspect an existing move held for recovery (not a new plan request)').option('--json', 'Machine-readable result')
+    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps, id)));
+  planMove.command('recover-existing <id>').description('Explicitly adopt your verified existing destination; never launch or replay').option('--json', 'Machine-readable result')
+    .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), deps => agentPlanRecovery(deps, id, true)));
   planMove.command('request <account-id>')
     .description('Prepare a permitted plan move or same-account runtime refresh for safe handoff')
     .option('--restart', 'Refresh this expert on its current account through handoff and approval')
@@ -2479,7 +2808,7 @@ export function registerAgentCommands(program: Command): Command {
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentPlans));
   plans
     .command('show <name>')
-    .description('One account by label or id')
+    .description('One account by label or id, with advice on its banked resets (when to apply one, and where)')
     .option('--json', 'Machine-readable output')
     .action((name: string, options: { json?: boolean }, cmd: Command) =>
       run(Boolean(options.json ?? cmd.parent?.opts().json), (deps) => agentPlansShow(deps, { name }))
@@ -2582,6 +2911,30 @@ export function registerAgentCommands(program: Command): Command {
     .description('Nudge an idle colleague: type the standard "check your rooms and Board, then carry on" prompt (a working session is left alone)')
     .option('--json', 'Machine-readable output')
     .action((id: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentWake(deps, { id })));
+
+  agent
+    .command('wake-employee <employee-id>')
+    .description(
+      'Recover a company employee by full employee UUID using your recovery grant; agent wake instead nudges an idle session'
+    )
+    .option('--json', 'Print the real awakened/skipped recovery report; a skipped or unconfirmed wake exits nonzero')
+    .action((employeeId: string, options: { json?: boolean }) =>
+      run(Boolean(options.json), (deps) => agentWakeEmployee(deps, { employeeId }))
+    );
+
+  agent.command('office <employee-id>').description('Explicitly enter or leave office using your owner-granted manageOffice permission; saved identity and conversations remain')
+    .option('--in', 'Enter office and request normal startup, including a deliberately stopped employee')
+    .option('--out', 'Leave office and stop the employee through the normal attendance route')
+    .option('--json', 'Print the real attendance/startup result; startup acknowledgement is not native readiness')
+    .action((employeeId: string, options: { in?: boolean; out?: boolean; json?: boolean }) => run(Boolean(options.json), deps => {
+      if (Boolean(options.in) === Boolean(options.out)) return Promise.resolve(fail(deps, 'Choose exactly one of --in or --out.', EXIT.refused));
+      return agentEmployeeOffice(deps, { employeeId, action: options.in ? 'in' : 'out' });
+    }));
+  agent.command('restart-employee <employee-id>').description('Request a same-recipe employee restart using manageOffice; never edits runtime, plan or account')
+    .option('--force', 'Explicitly request stalled-agent recovery, confirmed against the current session; existing stop holds remain')
+    .option('--json', 'Print the normal restart acknowledgement, not a claim of native readiness')
+    .action((employeeId: string, options: { force?: boolean; json?: boolean }) => run(Boolean(options.json), deps =>
+      agentEmployeeOffice(deps, { employeeId, action: 'restart', forceRestart: options.force })));
 
   agent
     .command('wait <id>')
@@ -2700,9 +3053,12 @@ export function registerAgentCommands(program: Command): Command {
 
   chat
     .command('digest')
-    .description('One bounded actionable cross-room delta with source links; no read or handling acknowledgement')
+    .description('One bounded cross-room delta since your last digest: owner requests, actions for you and changed Board cards first, FYIs batched; no read or handling acknowledgement')
     .option('--json', 'Machine-readable snapshot')
-    .action((options: { json?: boolean }) => run(Boolean(options.json), agentChatDigest));
+    .option('--all', 'Everything currently eligible; your digest cursor is not moved')
+    .option('--since <cursor>', 'From a cursor printed by an earlier digest (or @FILE holding one); your digest cursor is not moved')
+    .action((options: { json?: boolean; all?: boolean; since?: string }) =>
+      run(Boolean(options.json), (deps) => agentChatDigest(deps, { all: options.all, since: options.since })));
 
   chat
     .command('summary')
@@ -2767,10 +3123,17 @@ export function registerAgentCommands(program: Command): Command {
       'Attach a file (repeat for several; copied into the room, max 25 MB each)',
       (v: string, prev: string[] = []) => [...prev, v]
     )
+    .option(
+      '--link-file <path>',
+      'Attach a shared-drive file by reference (repeat for several; not copied, no size limit; only files on the shared drive)',
+      (v: string, prev: string[] = []) => [...prev, v]
+    )
     .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
     .option('--reply-to <id>', 'Answer the message with this id (a spoken turn is read back only when its answer names it)')
+    .option('--if-latest', 'Post only if nobody else has posted since you last read this room; otherwise list the newer messages')
+    .option('--if-no-newer-than <id>', 'Post only if nobody else has posted after this message id')
     .option('--json', 'Machine-readable output')
-    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; replyTo?: string; json?: boolean }) =>
+    .action((words: string[], options: { stdin?: boolean; to?: string; room?: string; file?: string[]; linkFile?: string[]; replyTo?: string; ifLatest?: boolean; ifNoNewerThan?: string; json?: boolean }) =>
       run(Boolean(options.json), (deps) => agentChatSayInput(deps, words, options))
     );
 
@@ -2874,19 +3237,43 @@ export function registerAgentCommands(program: Command): Command {
     .option('-r, --room <room>', 'Room id or name')
     .option('--before-at <epoch-ms>', 'Older-page cursor timestamp, paired with --before-id')
     .option('--before-id <id>', 'Older-page cursor message identity, paired with --before-at')
+    .option('--stale', 'List only the notices you set aside as stale')
     .option('--json', 'Machine-readable output including source references and coverage')
-    .action((options: { room?: string; beforeAt?: string; beforeId?: string; json?: boolean }) =>
+    .action((options: { room?: string; beforeAt?: string; beforeId?: string; stale?: boolean; json?: boolean }) =>
       run(Boolean(options.json), deps => agentChatPending(deps, options))
     );
 
   chat
-    .command('handle <message-id>')
-    .description('Resolve your own attention for an exact notice; does not ACK delivery or complete work')
+    .command('mentions')
+    .description('Messages across your rooms that @-mention or address you, or say @everyone, after a cursor or time; read-only, nothing expires')
+    .option('-r, --room <room>', 'Only this room (id or name)')
+    .option('--since <cursor-or-time>', 'Cursor printed by the last call, epoch ms, or ISO 8601 with Z or an offset (default: the last 24 h)')
+    .option('--holds', 'Also any message using hold, blocker or NO-GO wording')
+    .option('-n, --limit <n>', 'At most this many (1-200)', '50')
+    .option('--json', 'Machine-readable output')
+    .action((options: { room?: string; since?: string; holds?: boolean; limit?: string; json?: boolean }) =>
+      run(Boolean(options.json), (deps) =>
+        agentChatMentions(deps, { room: options.room, since: options.since, holds: options.holds, limit: Math.min(200, parsePositiveInt(options.limit, 50, '--limit')) })
+      )
+    );
+
+  chat
+    .command('handle [message-id]')
+    .description('Resolve your own attention for an exact notice, or with --before every pending agent/bot notice in a room before a time; does not ACK delivery or complete work')
     .option('-r, --room <room>', 'Room id or name')
     .option('--superseded-by <id>', 'Visible replacement message in the same room')
+    .option('--before <time>', 'Bulk: your pending notices from agents and bots in --room before this time (epoch ms or ISO 8601 with offset); never the owner\'s')
+    .option('--stale', 'Set aside as stale instead of handled: too old to act on, never marked done, listed by chat pending --stale (notices older than 72 h)')
+    .option('--owner', 'With --stale --before: include owner and other human notices (the --before time must be at least 72 h ago)')
     .option('--json', 'Machine-readable output')
-    .action((message: string, options: { room?: string; supersededBy?: string; json?: boolean }) =>
-      run(Boolean(options.json), deps => agentChatHandle(deps, { message, room: options.room, supersededBy: options.supersededBy }))
+    .action((message: string | undefined, options: { room?: string; supersededBy?: string; before?: string; stale?: boolean; owner?: boolean; json?: boolean }) =>
+      run(Boolean(options.json), async deps => {
+        if ((message === undefined) === (options.before === undefined) || (options.before !== undefined && options.supersededBy !== undefined))
+          return fail(deps, 'Give either an exact message id or --before <time> (not both, and --superseded-by only with an id)');
+        return options.before !== undefined
+          ? agentChatHandleBefore(deps, { room: options.room, before: options.before, stale: options.stale, owner: options.owner })
+          : agentChatHandle(deps, { message: message!, room: options.room, supersededBy: options.supersededBy, stale: options.stale });
+      })
     );
 
   chat

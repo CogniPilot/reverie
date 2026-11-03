@@ -48,6 +48,8 @@ export const POST_SOURCE_FIELDS: Record<PostSourceName, { numeric: string[]; tex
 export interface PostSourceContext {
   args?: Record<string, unknown>;
   last?: string;
+  /** A run preview: read only, and write nothing (no logs or other side files). */
+  preview?: boolean;
 }
 export type PostSources = { [K in PostSourceName]?: (ctx: PostSourceContext) => Promise<PostSourceData> };
 

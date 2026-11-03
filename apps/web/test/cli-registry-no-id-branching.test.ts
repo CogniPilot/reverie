@@ -88,6 +88,7 @@ const allow = (count: number, reason: string): Allowance => ({ count, reason });
  * Keyed `<relative path>::<the matched expression>`.
  */
 const ALLOWED_BRANCHES: Record<string, Allowance> = {
+  "plan-move-runtime.ts::mode === 'claude'": allow(1, 'strict native Claude composer grammar fallback; canonical empty composer and confirmed task footer remain CLI-specific, never a generic glyph readiness grant'),
   // --- Legacy <Mode>Config plumbing (public wire shape, see the header) ---
   "web/routes/session-routes.ts::mode === 'opencode'": allow(2, 'legacy <Mode>Config plumbing'),
   "web/routes/session-routes.ts::mode === 'codex'": allow(2, 'legacy <Mode>Config plumbing'),

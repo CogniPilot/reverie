@@ -41,6 +41,7 @@ import { HOOK_TIMEOUT_SECONDS } from './config/auth-config.js';
 import { dataPath } from './config/instance.js';
 import { readJsonConfig, SETTINGS_PATH } from './web/route-helpers.js';
 import { isNearStalledPath, probePath } from './utils/index.js';
+import { MEMORY_BRIEF_NO_CLI, MEMORY_BRIEF_UNREADABLE } from './memory-brief.js';
 
 /**
  * Existence check for a WRITER. Unlike the bounded read-side probe (`probePath`),
@@ -114,6 +115,8 @@ const BACKGROUND_WAKE_MARKER_PREFIX = 'REVERIE_BACKGROUND_REWAKE_V';
 const BACKGROUND_WAKE_MARKER = `${BACKGROUND_WAKE_MARKER_PREFIX}3`;
 const SUBAGENT_STOP_GUARD_MARKER_PREFIX = 'REVERIE_SUBAGENT_STOP_GUARD_V';
 const SUBAGENT_STOP_GUARD_MARKER = `${SUBAGENT_STOP_GUARD_MARKER_PREFIX}1`;
+const RM_SCOPE_MARKER_PREFIX = 'REVERIE_RM_SCOPE_V';
+const RM_SCOPE_MARKER = `${RM_SCOPE_MARKER_PREFIX}1`;
 const BACKGROUND_WAKE_TIMEOUT_SECONDS = 6 * 60 * 60;
 
 /**
@@ -323,6 +326,133 @@ export function generateSubagentStopGuardScript(): string {
   ].join('\n');
 }
 
+/**
+ * Answer Claude Code's critical-path `rm` prompt for removals that stay inside the
+ * expert's own workspace or its own `/tmp/<name>-<task>` dirs.
+ *
+ * Claude Code checks `rm`/`rmdir` targets before running a Bash command, and no allow
+ * rule, sandbox setting or PreToolUse "allow" approves a removal it cannot rule out
+ * (e.g. `cd /tmp/x && rm -rf cache/*`); even bypass mode shows a prompt that an
+ * unattended seat lets time out into a denial. A PermissionRequest hook may answer it.
+ * This one only ever answers "allow", only in bypass mode (where the rest of the
+ * command is already approved), and only when every removal resolves, after symlinks,
+ * strictly inside CLAUDE_PROJECT_DIR or inside a /tmp/<name>-<task> dir of that
+ * expert. Anything it cannot read as plain literal words (expansions, substitutions,
+ * redirections, subshells, wrappers such as sudo/timeout/xargs) keeps the prompt.
+ */
+export function generateRmScopeScript(): string {
+  return [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    `const ${RM_SCOPE_MARKER} = true;`,
+    'let input;',
+    "try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }",
+    '// Only the prompt bypass mode still shows: every other part of the command is already approved there.',
+    "if (!input || input.permission_mode !== 'bypassPermissions' || input.tool_name !== 'Bash') process.exit(0);",
+    'const command = input.tool_input && input.tool_input.command;',
+    "const project = process.env.CLAUDE_PROJECT_DIR || '';",
+    "if (typeof command !== 'string' || command.length > 4000 || !path.isAbsolute(project)) process.exit(0);",
+    'function real(p) { try { return fs.realpathSync(p); } catch { return null; } }',
+    'const workspace = real(project);',
+    "if (!workspace || workspace === '/') process.exit(0);",
+    'const owner = (path.basename(workspace).match(/^expert-([a-z0-9][a-z0-9-]*)$/) || [])[1];',
+    "const taskDir = owner ? new RegExp('^/tmp/' + owner + '-[^/]+(/.*)?$') : null;",
+    "// Strictly inside the workspace, or inside (or equal to) one of the expert's own /tmp/<name>-<task> dirs.",
+    'function allowed(p) {',
+    "  return p.startsWith(workspace + '/') || (taskDir !== null && taskDir.test(p) && real('/tmp') === '/tmp');",
+    '}',
+    'function refuse() { process.exit(0); }',
+    '// Lex the command into steps of literal words joined by &&, so each step runs only after every earlier one',
+    '// succeeded. Anything the shell could expand, redirect, pipe, background or run conditionally is refused.',
+    'const steps = [];',
+    'let words = [];',
+    'let word = null;',
+    'let globbed = false;',
+    'function endWord() { if (word !== null) words.push({ text: word, globbed }); word = null; globbed = false; }',
+    'function endStep() {',
+    '  endWord();',
+    '  if (words.length === 0) refuse();',
+    '  steps.push(words);',
+    '  words = [];',
+    '}',
+    'for (let i = 0; i < command.length; i++) {',
+    '  const c = command[i];',
+    "  if (c === ' ' || c === '\\t') { endWord(); continue; }",
+    "  if (c === '&' && command[i + 1] === '&') { i++; endStep(); continue; }",
+    '  if (c === "\'") {',
+    '    const close = command.indexOf("\'", i + 1);',
+    '    if (close < 0) refuse();',
+    "    word = (word || '') + command.slice(i + 1, close);",
+    '    i = close;',
+    '    continue;',
+    '  }',
+    '  if (c === \'"\') {',
+    '    const close = command.indexOf(\'"\', i + 1);',
+    '    if (close < 0) refuse();',
+    '    const body = command.slice(i + 1, close);',
+    '    if (/[$`\\\\!]/.test(body)) refuse();',
+    "    word = (word || '') + body;",
+    '    i = close;',
+    '    continue;',
+    '  }',
+    "  if ('$`\\\\(){}<>!#;&|\\n'.includes(c)) refuse();",
+    "  if ('*?['.includes(c)) globbed = true;",
+    "  word = (word || '') + c;",
+    '}',
+    'endStep();',
+    '// A . or .. component would be resolved here lexically but by the kernel through symlinks, so it is refused.',
+    "function dotted(p) { return p.split('/').some((part) => part === '.' || part === '..'); }",
+    "let cwd = real(typeof input.cwd === 'string' ? input.cwd : '');",
+    'if (!cwd) refuse();',
+    'let removals = 0;',
+    '// Only cd to an absolute path and plain rm/rmdir are understood; any other step (an assignment, a wrapper, a',
+    '// path to some other rm) keeps the prompt, so no other part of the command is approved along with the removal.',
+    'for (const step of steps) {',
+    '  const name = step[0].text;',
+    '  if (step[0].globbed) refuse();',
+    "  if (name === 'cd') {",
+    '    // CDPATH and ~ never apply to an absolute target.',
+    '    if (step.length !== 2 || step[1].globbed || !path.isAbsolute(step[1].text) || dotted(step[1].text)) refuse();',
+    '    cwd = real(step[1].text);',
+    '    if (!cwd) refuse();',
+    '    continue;',
+    '  }',
+    "  if (name !== 'rm' && name !== 'rmdir') refuse();",
+    '  let targets = 0;',
+    '  let options = true;',
+    '  for (const arg of step.slice(1)) {',
+    "    if (options && arg.text === '--') { options = false; continue; }",
+    "    if (options && arg.text.startsWith('-')) {",
+    '      // rmdir -p would climb into the parents of its target.',
+    "      if (name === 'rmdir' || arg.text.includes('preserve-root') || arg.globbed) refuse();",
+    '      continue;',
+    '    }',
+    '    targets++;',
+    '    const target = arg.text;',
+    "    if (target === '' || target.startsWith('~') || dotted(target)) refuse();",
+    '    const full = path.resolve(cwd, target);',
+    '    const leaf = path.basename(full);',
+    '    const parentText = path.dirname(full);',
+    '    // A glob may only sit in the last component, so it expands inside one directory.',
+    '    if (arg.globbed && /[*?[]/.test(parentText)) refuse();',
+    "    if (arg.globbed && leaf.startsWith('.')) refuse();",
+    '    const parent = real(parentText);',
+    '    if (!parent) refuse();',
+    '    let resolved;',
+    '    if (arg.globbed) resolved = parent;',
+    "    else if (target.endsWith('/')) resolved = real(full);",
+    '    else resolved = path.join(parent, leaf);',
+    '    if (!resolved || !allowed(resolved)) refuse();',
+    '    if (arg.globbed && resolved === workspace) refuse();',
+    '  }',
+    '  if (targets === 0) refuse();',
+    '  removals++;',
+    '}',
+    'if (removals === 0) refuse();',
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));",
+  ].join('\n');
+}
+
 function withSettingsLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   const prev = settingsWriteLocks.get(path) ?? Promise.resolve();
   const run = prev.then(fn, fn); // run after the prior writer, regardless of its outcome
@@ -396,9 +526,21 @@ async function withSafeSettingsWrite(
   });
 }
 
+/**
+ * The CLI Reverie's own hooks run. A laptop image names its own CLI in REVERIE_CLI (an absolute store path), so an
+ * older `reverie` earlier on PATH, such as a home install from before a release, cannot answer for the hooks. A
+ * container started from an image that predates REVERIE_CLI still has the image's CLI at /bin/reverie, so inside a
+ * container that is used before PATH. Anywhere else the hooks use `reverie` from PATH as before.
+ */
+const HOOK_CLI =
+  "const cli = (process.env.REVERIE_CLI || '').startsWith('/') ? process.env.REVERIE_CLI : " +
+  "process.env.REVERIE_CONTAINER === '1' && require('node:fs').existsSync('/bin/reverie') ? '/bin/reverie' : 'reverie';";
+
 /** Bounded, fail-open summary hooks shared by Claude Code and Codex. */
 const TURN_SUMMARY_MARKER_PREFIX = 'REVERIE_TURN_SUMMARY_V';
-const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}2`;
+// V3: the hooks run the laptop image's CLI (REVERIE_CLI). V4: in a container without REVERIE_CLI, /bin/reverie before
+// PATH. Bumping the version is what makes refreshStaleReverieHooks rewrite an older block.
+const TURN_SUMMARY_MARKER = `${TURN_SUMMARY_MARKER_PREFIX}4`;
 export type TurnSummaryHookEvent = 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse';
 
 export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
@@ -410,7 +552,8 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
     // environment identifies the caller; tool arguments are never part of a summary.
     "const sessionId = process.env.REVERIE_SESSION_ID || '';",
     'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
-    `execFile('reverie', ['agent', 'chat', 'summary', '--hook-event', '${event}'],`,
+    HOOK_CLI,
+    `execFile(cli, ['agent', 'chat', 'summary', '--hook-event', '${event}'],`,
     "  { timeout: 2500, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout) => {",
     '  if (error) return;',
     '  try {',
@@ -452,6 +595,56 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
   ].join('\n');
 }
 
+const MEMORY_BRIEF_MARKER_PREFIX = 'REVERIE_MEMORY_BRIEF_V';
+// V5: a CLI without the journal (an older home copy on PATH) is retried once with the image's /bin/reverie.
+const MEMORY_BRIEF_MARKER = `${MEMORY_BRIEF_MARKER_PREFIX}5`;
+
+/**
+ * The session-start memory brief, as its own handler with its own budget: the chat summary can fill its 3000 characters
+ * on a busy inbox, and one oversized output would drop both. When the brief cannot be had (the CLI failed, timed out, or
+ * predates the journal), the session is told so instead of starting as if it had no memory; outside a Reverie session, or
+ * when the CLI answers with nothing (a session that is no employee's), nothing is printed. A CLI that has no journal
+ * command (an older home copy earlier on PATH) is retried once with the image's /bin/reverie, within the same 2.5 s
+ * budget. The fallback names every CLI the hook ran, so a laptop whose CLI drifted says which one.
+ */
+export function generateMemoryBriefScript(): string {
+  return [
+    `const ${MEMORY_BRIEF_MARKER} = true;`,
+    "const { execFile } = require('node:child_process');",
+    'process.stdin.resume();',
+    "const sessionId = process.env.REVERIE_SESSION_ID || '';",
+    'if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sessionId) || !process.env.REVERIE_API_URL) process.exit(0);',
+    HOOK_CLI,
+    'const started = Date.now();',
+    'const ran = [];',
+    "const run = (command, timeout) => { ran.push(command); execFile(command, ['agent', 'journal', 'brief', '--hook-event', 'SessionStart'],",
+    "  { timeout, maxBuffer: 32768, killSignal: 'SIGKILL' }, (error, stdout, stderr) => {",
+    '  if (error) {',
+    "    const noJournal = error.code === 'ENOENT' || /unknown command 'journal'/i.test(String(stderr));",
+    '    const left = 2500 - (Date.now() - started);',
+    "    if (noJournal && left >= 500 && !ran.includes('/bin/reverie') && require('node:fs').existsSync('/bin/reverie')) return run('/bin/reverie', left);",
+    `    const reason = noJournal ? ${JSON.stringify(MEMORY_BRIEF_NO_CLI)} : ${JSON.stringify(MEMORY_BRIEF_UNREADABLE)};`,
+    "    const text = reason + ' (The hook ran ' + ran.map((c) => c === 'reverie' ? 'reverie from PATH' : c).join(', then ') + '.)';",
+    "    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));",
+    '    return;',
+    '  }',
+    '  try {',
+    '    const output = JSON.parse(stdout).hookSpecificOutput;',
+    "    if (output?.hookEventName !== 'SessionStart' || typeof output.additionalContext !== 'string') return;",
+    '    const text = output.additionalContext.trim();',
+    '    if (!text || text.length > 2000) return;',
+    "    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));",
+    '  } catch {}',
+    '}); };',
+    'run(cli, 2500);',
+  ].join('\n');
+}
+
+function memoryBriefEntry(): { hooks: unknown[] } {
+  const script = generateMemoryBriefScript().replaceAll("'", "'\\''");
+  return { hooks: [{ type: 'command', command: `node -e '${script}'`, timeout: 3 }] };
+}
+
 function turnSummaryEntry(event: TurnSummaryHookEvent): { hooks: unknown[] } {
   // A command string works in both harnesses; quote the inline script for POSIX
   // shells rather than depending on harness-specific support for an args field.
@@ -462,7 +655,8 @@ function turnSummaryEntry(event: TurnSummaryHookEvent): { hooks: unknown[] } {
 export function generateCodexTurnSummaryHooks(): { hooks: Record<string, unknown[]> } {
   return {
     hooks: Object.fromEntries(
-      (['SessionStart', 'UserPromptSubmit', 'PostToolUse'] as const).map((event) => [event, [turnSummaryEntry(event)]])
+      (['SessionStart', 'UserPromptSubmit', 'PostToolUse'] as const).map((event) =>
+        [event, event === 'SessionStart' ? [memoryBriefEntry(), turnSummaryEntry(event)] : [turnSummaryEntry(event)]])
     ),
   };
 }
@@ -552,7 +746,18 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
 
   return {
     hooks: {
-      SessionStart: [turnSummaryEntry('SessionStart')],
+      // The memory brief first, then the chat summary: a new session (start, resume, clear, compact or a new backend)
+      // begins with its own memory.
+      SessionStart: [
+        memoryBriefEntry(),
+        turnSummaryEntry('SessionStart'),
+        // A session (re)started from a compaction: the compaction is over. Silent: SessionStart stdout becomes context.
+        { matcher: 'compact', hooks: [{ type: 'command', command: curlCmdSilent('compact_finished'), timeout: HOOK_TIMEOUT_SECONDS }] },
+      ],
+      // A context compaction (manual /compact or automatic) is starting: shown as Compacting until it ends.
+      PreCompact: [
+        { hooks: [{ type: 'command', command: curlCmdSilent('compact_started'), timeout: HOOK_TIMEOUT_SECONDS }] },
+      ],
       Notification: [
         {
           matcher: 'idle_prompt',
@@ -607,6 +812,15 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
           ],
         },
       ],
+      // Claude Code's critical-path rm prompt: approve removals inside the expert's own dirs, keep the prompt otherwise.
+      PermissionRequest: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            { type: 'command', command: 'node', args: ['-e', generateRmScopeScript()], timeout: HOOK_TIMEOUT_SECONDS },
+          ],
+        },
+      ],
       TeammateIdle: [
         {
           hooks: [{ type: 'command', command: curlCmd('teammate_idle'), timeout: HOOK_TIMEOUT_SECONDS }],
@@ -644,7 +858,9 @@ function isReverieHookHandler(value: unknown): boolean {
       serialized.includes('/api/hook-event') ||
       serialized.includes(BACKGROUND_WAKE_MARKER_PREFIX) ||
       serialized.includes(SUBAGENT_STOP_GUARD_MARKER_PREFIX) ||
-      serialized.includes(TURN_SUMMARY_MARKER_PREFIX)
+      serialized.includes(RM_SCOPE_MARKER_PREFIX) ||
+      serialized.includes(TURN_SUMMARY_MARKER_PREFIX) ||
+      serialized.includes(MEMORY_BRIEF_MARKER_PREFIX)
     );
   } catch {
     return false;
@@ -919,6 +1135,7 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // on a self-signed HTTPS install.
     const hasTlsFlaglessCurl = hooksJson.includes('curl -s -X POST');
     const hasSubagentStopGuard = hooksJson.includes(SUBAGENT_STOP_GUARD_MARKER);
+    const hasRmScope = hooksJson.includes(RM_SCOPE_MARKER);
     // Approvals Inbox needs the elicitation_complete/elicitation_response
     // matchers; their absence marks a pre-inbox hooks block.
     const hasElicitationComplete = hooksJson.includes('elicitation_complete');
@@ -931,14 +1148,20 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
     // quote-free for the same reason.
     const hasPromptSubmit = hooksJson.includes('prompt_submitted');
     const hasTurnSummary = hooksJson.includes(TURN_SUMMARY_MARKER);
+    const hasMemoryBrief = hooksJson.includes(MEMORY_BRIEF_MARKER);
+    // Compaction reporting (PreCompact / SessionStart "compact"); quote-free like the markers above.
+    const hasCompaction = hooksJson.includes('compact_started');
     if (
       !isOurs ||
       (hasSecret &&
         hasBackgroundWake &&
         hasSubagentStopGuard &&
+        hasRmScope &&
         hasElicitationComplete &&
         hasPromptSubmit &&
         hasTurnSummary &&
+        hasMemoryBrief &&
+        hasCompaction &&
         !hasTlsFlaglessCurl)
     )
       return;

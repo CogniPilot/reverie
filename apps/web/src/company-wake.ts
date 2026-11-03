@@ -6,6 +6,8 @@ import { planRebootRestore, type RebootRestoreEntry } from './reboot-restore.js'
 export interface CompanyWakeDeps {
   company(): CompanyState;
   saved(sessionId: string): SessionState | undefined;
+  /** Fresh bounded native facts for explicit attendance; viewer/PID liveness is not provider health. */
+  nativeHealth?(sessionId: string): 'healthy' | 'dead' | 'unknown';
   live(sessionId: string): boolean;
   closing(sessionId: string): boolean;
   noteRunning(sessionId: string): Promise<void>;
@@ -144,7 +146,11 @@ export class CompanyWake {
         continue;
       }
       if (!stillCurrent()) { skip('changed-or-stopping'); continue; }
-      if (this.deps.live(employee.sessionId)) {
+      const isLive = () => explicitStart && this.deps.nativeHealth
+        ? this.deps.nativeHealth(employee.sessionId)==='healthy' : this.deps.live(employee.sessionId);
+      if (explicitStart && this.deps.nativeHealth && this.deps.live(employee.sessionId) &&
+          this.deps.nativeHealth(employee.sessionId)==='unknown') { skip('native-health-unconfirmed'); continue; }
+      if (isLive()) {
         await this.deps.noteRunning(employee.sessionId);
         continue;
       }
@@ -178,6 +184,9 @@ export class CompanyWake {
       const lease = this.deps.begin(employee.id, employee.sessionId);
       if (!lease) { skip('lifecycle-in-progress'); continue; }
       const allowed = () => lease.current() && baseAllowed();
+      // Before the wake call nothing was started. Once it is called a throw may come after the session started, so its
+      // outcome is unknown: never reported as "did not start", which would invite a second start.
+      let attempted = false;
       try {
         if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId))) {
           skip('disabled-or-retry-limited');
@@ -187,10 +196,11 @@ export class CompanyWake {
           skip('changed-or-stopping');
           continue;
         }
-        if (this.deps.live(employee.sessionId)) {
+        if (isLive()) {
           await this.deps.noteRunning(employee.sessionId);
           continue;
         }
+        attempted = true;
         const woke = await this.deps.wake(entry, allowed);
         if (!allowed()) {
           skip('changed-or-stopping');
@@ -207,7 +217,7 @@ export class CompanyWake {
           }
         } else skip('wake-failed');
       } catch {
-        skip('wake-failed');
+        skip(attempted ? 'start-unconfirmed' : 'wake-failed');
       } finally {
         lease.finish();
       }

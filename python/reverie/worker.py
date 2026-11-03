@@ -7,6 +7,16 @@ socket, the engine socket, or the host control directory.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Packaged services execute this file with -I, and migration tools may load it
+# under a spec alias. Both need the same sibling package context as -m imports,
+# including lazy imports and the exact closed helper fast path below.
+if not __package__:
+    _package_root = str(Path(__file__).resolve().parents[1])
+    if _package_root not in sys.path:
+        sys.path.insert(0, _package_root)
+    __package__ = 'reverie'
 # Exact packaged helper operations only. Mixed/unknown flags still enter the
 # ordinary parser and refuse; this branch never loads broker configuration.
 if (__name__ == '__main__' and __package__ and sys.argv[1:] in
@@ -23,9 +33,9 @@ import http.server
 import ipaddress
 import json
 import os
-from pathlib import Path
 import pty
 import re
+import secrets
 import selectors
 import signal
 import socket
@@ -42,65 +52,19 @@ import tty
 import uuid
 from urllib.parse import unquote, urlsplit
 
-if __package__:
-    from .worker_gpu import gpu_create_args, validate_gpu_grants, validate_gpu_config
-    from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
-    from .worker_nix import prepare_store, store_guard
-    from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
-    from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
-    from .worker_retained_tmp import prepare_retained, finish_retained, retired_root
-    from .worker_cold_tmp import _mount_location as _retained_mount_location
-    from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
-    from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
-    from .worker_storage_labels import hostname as employee_hostname
-    from .goal_assertion import goal_forward_headers
-    from .goal_bootstrap import GoalBrokerBootstrap
-    from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, wait_poll
-else:
-    # Host migration tools also load this file with spec_from_file_location;
-    # their sys.path need not contain the sibling module's directory.
-    import importlib.util
-    _package_root = str(Path(__file__).resolve().parents[1])
-    if _package_root not in sys.path:
-        sys.path.insert(0, _package_root)
-    from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
-    from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
-    from reverie.worker_storage_labels import hostname as employee_hostname
-    _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
-    _gpu_module = importlib.util.module_from_spec(_gpu_spec)
-    _gpu_spec.loader.exec_module(_gpu_module)
-    gpu_create_args = _gpu_module.gpu_create_args
-    validate_gpu_grants = _gpu_module.validate_gpu_grants
-    validate_gpu_config = _gpu_module.validate_gpu_config
-    _resource_spec = importlib.util.spec_from_file_location('reverie_worker_resources', Path(__file__).with_name('worker_resources.py'))
-    _resource_module = importlib.util.module_from_spec(_resource_spec)
-    _resource_spec.loader.exec_module(_resource_module)
-    effective_config = _resource_module.effective_config
-    policy_digest = _resource_module.policy_digest
-    validate_session_resources = _resource_module.validate_session_resources
-    validate_resource_reload = _resource_module.validate_resource_reload
-    _nix_spec = importlib.util.spec_from_file_location('reverie_worker_nix', Path(__file__).with_name('worker_nix.py'))
-    _nix_module = importlib.util.module_from_spec(_nix_spec)
-    _nix_spec.loader.exec_module(_nix_module)
-    prepare_store = _nix_module.prepare_store
-    store_guard = _nix_module.store_guard
-    _tmp_spec = importlib.util.spec_from_file_location('reverie_worker_tmp', Path(__file__).with_name('worker_tmp.py'))
-    _tmp_module = importlib.util.module_from_spec(_tmp_spec)
-    _tmp_spec.loader.exec_module(_tmp_module)
-    from reverie.worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
-    from reverie.worker_retained_tmp import prepare_retained, finish_retained, retired_root
-    from reverie.worker_cold_tmp import _mount_location as _retained_mount_location
-    prepare_temporary = _tmp_module.prepare_temporary
-    temporary_environment = _tmp_module.temporary_environment
-    write_storage_instructions = _tmp_module.write_storage_instructions
-    workspace_alias = _tmp_module.workspace_alias
-    home_workspace_alias = _tmp_module.home_workspace_alias
-    _package_root = str(Path(__file__).resolve().parents[1])
-    if _package_root not in sys.path:
-        sys.path.insert(0, _package_root)
-    from reverie.goal_assertion import goal_forward_headers
-    from reverie.goal_bootstrap import GoalBrokerBootstrap
-    from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, wait_poll
+from .worker_gpu import gpu_create_args, validate_gpu_grants, validate_gpu_config
+from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
+from .worker_nix import prepare_store, store_guard
+from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
+from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
+from .worker_retained_tmp import prepare_retained, finish_retained, retired_root
+from .worker_cold_tmp import _mount_location as _retained_mount_location
+from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
+from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
+from .worker_storage_labels import hostname as employee_hostname
+from .goal_assertion import goal_forward_headers
+from .goal_bootstrap import GoalBrokerBootstrap
+from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, settle_owned_clients, wait_poll
 
 MAX_FRAME = 256 * 1024
 SHARED_WORKSPACE = Path('/reverie_workspace')
@@ -281,14 +245,8 @@ def validate_config(config):
 
 
 def _lease_peer_module():
-    if __package__:
-        from .cleanup import peer_port
-        return peer_port
-    import importlib.util
-    spec = importlib.util.spec_from_file_location('_reverie_lease_peer', Path(__file__).with_name('cleanup') / 'peer_port.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from .cleanup import peer_port
+    return peer_port
 
 
 def create_args(config, session_id, home, *, scratch=None, storage=None):
@@ -709,6 +667,32 @@ class OfficeAPI:
         return not self.thread.is_alive() and not self.requests and not self.upstreams and not self.request_threads
 
 
+
+class StopNotDispatched(RuntimeError):
+    """An owner stop that was refused before any signal was sent: nothing changed, and the caller may let go at once."""
+
+STOP_FENCE = re.compile(r'[0-9a-f]{32}')
+# Both run in the laptop as its own user, so the outcome is decided where the signal is sent, not by how long a client
+# waited. Each stop has a fence file, created exclusively (noclobber is O_EXCL) by whichever runs first: the signal
+# writes "signal <process group>" and then kills, a settle writes "fenced". Once a settle has fenced it, an engine exec of
+# that stop that was accepted but ran late finds the file and exits without signalling. The signal also refuses after the
+# request's deadline (in microseconds, against the laptop's clock), so a late run is refused even before a settle.
+# A fence that cannot be created at all (exit 6) is a refusal too: nothing was signalled.
+STOP_SIGNAL = ('set -C; now=${EPOCHREALTIME//[!0-9]/}; [ -n "$now" ] || exit 5; '
+               '[ -z "$2" ] || [ "$now" -le "$2" ] || exit 3; mkdir -p -m 700 -- "${3%/*}" 2>/dev/null; '
+               'if ! { echo "signal $1" > "$3"; } 2>/dev/null; then [ -e "$3" ] && exit 4; exit 6; fi; kill -KILL -- "-$1"')
+# Settling answers "fenced" (that stop never signals), or "signalled" only once the exec that claimed the fence has
+# exited, so it cannot signal anything later, whichever process holds the pane by then. A claimed stop whose exec is
+# still running is "pending", and a fence claimed but not yet written prints nothing: both are still unknown.
+STOP_SETTLE = ('set -C; f=$1; mkdir -p -m 700 -- "${f%/*}" 2>/dev/null; '
+               'if { echo fenced > "$f"; } 2>/dev/null; then echo fenced; exit 0; fi; '
+               'IFS= read -r state < "$f" 2>/dev/null || exit 0; '
+               'case $state in fenced) echo fenced; exit 0;; "signal "[0-9]*) ;; *) exit 0;; esac; '
+               'for p in /proc/[0-9]*; do [ "${p#/proc/}" = "$$" ] && continue; '
+               'mapfile -d "" -t args < "$p/cmdline" 2>/dev/null || continue; n=${#args[@]}; '
+               '[ "$n" -ge 2 ] && [ "${args[n-1]}" = "$f" ] || continue; '
+               'for a in "${args[@]}"; do [ "$a" = stop-agent ] && { echo pending; exit 0; }; done; done; echo signalled')
+
 class Broker:
     def __init__(self, config, engine='docker', config_file=None, host_actions=None):
         self.config, self.engine = config, engine
@@ -727,6 +711,7 @@ class Broker:
         self.goals = GoalBrokerBootstrap(self)
         self.config_file = config_file
         self.lock = threading.RLock()
+        self._provider_health_init_lock = threading.Lock()
         self.active = {}
         self.laptops = {}
         self.offices = {}
@@ -747,6 +732,8 @@ class Broker:
         self.storage_lease_lock = threading.RLock()
         self.storage_leases = {}
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
+        from reverie.worker_chat_images import WorkerChatImages
+        self.chat_images = WorkerChatImages(self)
         from reverie.worker_command_telemetry import CommandTelemetry
         self.command_telemetry = CommandTelemetry(config, self.run_engine)
         from reverie.worker_resource_reservations import ReservationGate, configured
@@ -765,7 +752,7 @@ class Broker:
             from reverie.browser_job_requests import BrowserJobRequests
             self.browser_jobs = BrowserJobRequests(self,config['browserJobPolicy'])
 
-    def resource_admission(self, sid=None, *, protected_start=None, deadline=None):
+    def resource_admission(self, sid=None, *, protected_start=None, deadline=None, entry_deadline=None):
         if self.resource_reservations is None:
             if protected_start is not None:
                 raise ValueError('Protected resource admission is unavailable')
@@ -774,8 +761,9 @@ class Broker:
             if configured(self.config):
                 raise ValueError('Resource reservation control requires reconciliation')
             return nullcontext()
-        if deadline is not None:
-            return self.resource_reservations.admission(sid,protected_start=protected_start,deadline=deadline)
+        if deadline is not None or entry_deadline is not None:
+            return self.resource_reservations.admission(sid,protected_start=protected_start,
+                                                       deadline=deadline,entry_deadline=entry_deadline)
         return self.resource_reservations.admission(sid,protected_start=protected_start)
 
     def _release_resource_admission(self, guard):
@@ -1330,6 +1318,139 @@ class Broker:
         self.offices.update(created)
         self.laptops=recovered
 
+    # In the laptop user's own home (its bind-mounted storage), like .reverie-launch: /run is a root-owned tmpfs that the
+    # laptop user cannot write. Each stop's fence is one small file, and it outlives the container, which only keeps a
+    # settled answer valid; a pending exec cannot outlive the container.
+    stop_fence_dir = '/home/agent/.reverie-stop'
+
+    def stop_agent(self, session_id, not_after=None, fence=None):
+        """Owner stop of one laptop's agent: kill its inner pane's whole process group (wrapper, provider and relays
+        share it), so no exit receipt is written and the pane reads dead. Normal J then replaces the dead pane on the
+        same laptop, keeping its storage. The laptop itself keeps running. Processes the agent moved into a session of
+        their own (setsid) are outside the group and are not stopped.
+
+        not_after (epoch ms) bounds the request: the signal is not sent after it. fence names this stop so that a
+        caller that lost the answer can settle it later (settle_stop). Every refusal before the signal raises
+        StopNotDispatched. If the engine call that signals does not answer, this settles the stop itself: fenced
+        first is a refusal, signalled first goes on to confirm the exit, and otherwise the outcome stays unknown."""
+        if type(session_id) is not str or not SESSION.fullmatch(session_id):
+            raise ValueError('Invalid session')
+        if not_after is not None and (type(not_after) is not int or not_after <= 0):
+            raise ValueError('Invalid stop deadline')
+        if fence is None:
+            fence = secrets.token_hex(16)
+        elif type(fence) is not str or not STOP_FENCE.fullmatch(fence):
+            raise ValueError('Invalid stop fence')
+        with self.lock:
+            name = self.laptops.get(session_id)
+        if name is None:
+            raise StopNotDispatched('This expert has no running laptop')
+        def pane(signalled):
+            state = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead} #{pane_pid}'), optional=True)
+            fields = state.stdout.split() if state.returncode == 0 else []
+            if len(fields) != 2 or fields[0] not in ('0', '1') or not fields[1].isdigit() or int(fields[1]) <= 1:
+                if signalled: raise RuntimeError('Laptop pane state is unavailable after the stop signal; its outcome is unknown')
+                raise StopNotDispatched('Laptop pane state is unavailable; nothing was stopped')
+            return fields[0] == '1', int(fields[1])
+        dead, pid = pane(False)
+        if dead:
+            return {'action': 'stop-agent', 'success': True, 'stopped': False, 'paneDead': True}
+        if not_after is not None and time.time() * 1000 > not_after:
+            raise StopNotDispatched('The stop request expired before the signal; nothing was stopped')
+        # Warm laptops may predate retained panes, and a window-local OFF overrides
+        # the global launch default. Admit and read back this exact office window
+        # before signalling, so its dead pane remains available to canonical J.
+        try:
+            retained = self.run_engine(tmux_exec_args(name, 'set-option', '-w', '-t', 'office', 'remain-on-exit', 'on'), optional=True)
+            option = self.run_engine(tmux_exec_args(name, 'show-options', '-w', '-A', '-v', '-t', 'office', 'remain-on-exit'), optional=True) if retained.returncode == 0 else None
+            if option is None or option.returncode != 0 or option.stdout.strip() != 'on':
+                raise StopNotDispatched('Laptop pane retention could not be confirmed; nothing was stopped')
+            dead, current = pane(False)
+        except StopNotDispatched:
+            raise
+        except Exception as error:
+            raise StopNotDispatched('Laptop pane retention could not be confirmed; nothing was stopped') from error
+        if current != pid:
+            raise StopNotDispatched('Laptop pane changed before the stop signal; nothing was stopped')
+        if dead:
+            return {'action': 'stop-agent', 'success': True, 'stopped': False, 'paneDead': True}
+        with self.lock:
+            if self.laptops.get(session_id) != name:
+                raise StopNotDispatched('Laptop binding changed before the stop signal; nothing was stopped')
+        if not_after is not None and time.time() * 1000 > not_after:
+            raise StopNotDispatched('The stop request expired before the signal; nothing was stopped')
+        # As the laptop's own user (the container user), never root: it may signal only its own processes.
+        try:
+            sent = self.run_engine(['exec', name, '/bin/bash', '-c', STOP_SIGNAL, 'stop-agent', str(pid),
+                                    '' if not_after is None else str(not_after * 1000), self._stop_fence(fence)], optional=True)
+        except Exception:
+            sent = None
+        refused = {3: 'The stop request expired before the signal; nothing was stopped',
+                   4: 'The stop was already settled; nothing was stopped',
+                   5: 'The laptop shell cannot check the stop deadline; nothing was stopped',
+                   6: 'The laptop cannot record the stop; nothing was stopped'}
+        if sent is not None and sent.returncode in refused:
+            raise StopNotDispatched(refused[sent.returncode])
+        if sent is None or sent.returncode:
+            try:
+                signalled = self._settle_stop(name, fence)
+            except RuntimeError:
+                # Keep settling here too, so the stop is decided even if the caller (and its own retries) go away.
+                threading.Thread(target=self._keep_settling, args=(session_id, name, fence), daemon=True).start()
+                raise
+            if not signalled:
+                raise StopNotDispatched('The laptop did not run the stop in time and it is now fenced; nothing was stopped')
+        deadline = time.monotonic() + 5
+        while True:
+            dead, current = pane(True)
+            if dead and current == pid:
+                return {'action': 'stop-agent', 'success': True, 'stopped': True, 'paneDead': True}
+            if current != pid:
+                raise RuntimeError('Laptop pane changed during stop; reconnect before restarting')
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Laptop agent did not stop; nothing else was changed')
+            time.sleep(0.1)
+
+    def _stop_fence(self, fence):
+        return f'{self.stop_fence_dir}/reverie-stop-{fence}'
+
+    def _settle_stop(self, name, fence):
+        """False once the stop is fenced (no exec of it can signal from now on); True once it signalled and the exec that
+        did so has exited (it can signal nothing later). Raises while that is not yet known: no answer, a fence claimed
+        but not yet written, or a claimed stop whose exec is still running."""
+        try:
+            state = self.run_engine(['exec', name, '/bin/bash', '-c', STOP_SETTLE, 'settle-stop', self._stop_fence(fence)]).stdout.strip()
+        except Exception as error:
+            raise RuntimeError('The laptop did not answer the stop settle; its outcome is unknown') from error
+        if state not in ('signalled', 'fenced'):
+            raise RuntimeError('The laptop stop is not settled yet; its outcome is unknown')
+        return state == 'signalled'
+
+    stop_settle_retry = 5.
+
+    def _keep_settling(self, session_id, name, fence):
+        while not self.stopping.is_set():
+            with self.lock:
+                if self.laptops.get(session_id) != name:
+                    return  # that laptop is gone, and an exec cannot outlive it
+            try:
+                self._settle_stop(name, fence)
+                return
+            except RuntimeError:
+                time.sleep(self.stop_settle_retry)
+
+    def settle_stop(self, session_id, fence):
+        """Settle a stop whose answer the caller lost: afterwards the stop either signalled or never will."""
+        if type(session_id) is not str or not SESSION.fullmatch(session_id):
+            raise ValueError('Invalid session')
+        if type(fence) is not str or not STOP_FENCE.fullmatch(fence):
+            raise ValueError('Invalid stop fence')
+        with self.lock:
+            name = self.laptops.get(session_id)
+        if name is None:
+            raise RuntimeError('This expert has no running laptop; its stop cannot be settled')
+        return {'action': 'settle-stop', 'success': True, 'signalled': self._settle_stop(name, fence)}
+
     def stop_laptops(self):
         # Same admission -> broker -> journal ordering as launch/reload. Never
         # acquire the global allocation lock while holding the broker mutex.
@@ -1492,6 +1613,20 @@ class Broker:
         if action == 'status':
             with self.lock:
                 return {'runningLaptops': len(self.laptops), 'runningSessionIds': self.running_sessions(), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
+        if action == 'provider-health':
+            empty = {'version': 1, 'purpose': 'worker-provider-health-v1', 'providers': []}
+            # Observer creation must not queue behind lifecycle work. Its reader
+            # retains its own nonblocking lock and final native revalidation.
+            if self.stopping.is_set() or not self._provider_health_init_lock.acquire(blocking=False):
+                return {'providerHealth': empty}
+            try:
+                if not hasattr(self, '_provider_health_observer'):
+                    from .worker_provider_health import ProviderHealthObserver
+                    self._provider_health_observer = ProviderHealthObserver(self)
+                observer = self._provider_health_observer
+            finally:
+                self._provider_health_init_lock.release()
+            return {'providerHealth': observer.read()}
         if action not in ['stop-laptops', 'shutdown', 'restart-website']:
             raise ValueError('Unknown office power action')
         if action in ['stop-laptops', 'shutdown']:
@@ -1599,6 +1734,10 @@ class Broker:
             if peer[1] != self.config['uid']:
                 raise ValueError('Worker peer identity is not authorized')
             kind, raw = receive_frame(connection)
+            if kind == b'M':
+                result = self.chat_images.dispatch(raw)
+                send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
+                return
             if kind == b'Y':
                 from reverie.human_terminal_protocol import decode
                 if decode(raw) != {'version':1,'purpose':'host-worker-resume-v1','kind':'register'} or self.host_resume is None:
@@ -1622,6 +1761,22 @@ class Broker:
                     raise ValueError('This broker supports owner-only Goal custody')
                 result = self.goals.project(projection, peer)
                 send_frame(connection, b'J', json.dumps(result).encode())
+                return
+            if kind == b'T':
+                # This socket is console/host-only and is never a laptop mount.
+                # Browser owner checks remain mandatory in the separate API.
+                try:
+                    from reverie.command_failure_reports import report_request, build_report
+                    employees = report_request(raw)
+                    if not self.command_telemetry.report_lock.acquire(blocking=False):
+                        raise ValueError('TELEMETRY_REPORT_UNAVAILABLE')
+                    try:
+                        result = build_report(self.command_telemetry, employees)
+                    finally:
+                        self.command_telemetry.report_lock.release()
+                except Exception:
+                    raise ValueError('TELEMETRY_REPORT_REFUSED') from None
+                send_frame(connection, b'J', json.dumps(result, separators=(',', ':')).encode())
                 return
             if kind == b'C':
                 control = json.loads(raw)
@@ -1651,6 +1806,24 @@ class Broker:
                     result = gpu_dispatch(self, gpu_decode(raw))
                     send_frame(connection, b'J', json.dumps(result, allow_nan=False).encode())
                     return
+                if isinstance(control, dict) and control.get('action') == 'settle-stop':
+                    if set(control) != {'action', 'sessionId', 'fence'}:
+                        raise ValueError('Invalid settle-stop request')
+                    send_frame(connection, b'J', json.dumps(self.settle_stop(control['sessionId'], control['fence'])).encode())
+                    return
+                if isinstance(control, dict) and control.get('action') == 'stop-agent':
+                    # Website owner path only: exactly one session, its deadline and fence, no maintenance caller.
+                    if set(control) not in ({'action', 'sessionId'}, {'action', 'sessionId', 'notAfter'}, {'action', 'sessionId', 'notAfter', 'fence'}):
+                        raise ValueError('Invalid stop-agent request')
+                    try:
+                        result = self.stop_agent(control['sessionId'], control.get('notAfter'), control.get('fence'))
+                    except StopNotDispatched as refused:
+                        # Definitive: no signal was sent, so the caller may release what it holds at once.
+                        result = {'action': 'stop-agent', 'success': False, 'dispatched': False, 'error': str(refused)}
+                    send_frame(connection, b'J', json.dumps(result).encode())
+                    return
+                if isinstance(control, dict) and control.get('action') == 'provider-health' and set(control) != {'action'}:
+                    raise ValueError('Closed read-only provider health request required')
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
                     raise ValueError('Invalid office power request')
                 result = self.control(control['action'], control.get('caller'))
@@ -1720,7 +1893,7 @@ class Broker:
                     if protected_start is None:
                         if time.monotonic()>=storage_deadline:raise RuntimeError('Previous employee laptop has not released its data')
                         waited=True;wait_current()
-                        pending_guard=self.resource_admission(session_id,deadline=storage_deadline)
+                        pending_guard=self.resource_admission(session_id,entry_deadline=storage_deadline)
                         pending_guard.__enter__();resource_guard=pending_guard
             with self.lock:
                 if waited:wait_current()
@@ -1924,7 +2097,9 @@ class Broker:
                         finish_retained(self.config, paths, retention_ready,
                                         lambda: self.confirm_retained_temporary(paths, retention_ready, retention_container_id))
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
-                    self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
+                    # remain-on-exit in the same tmux command: a wrapper that dies (or an owner stop-agent)
+                    # leaves a dead pane that canonical J can see and replace, instead of a vanished server.
+                    self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name, ';', 'set-option', '-g', 'remain-on-exit', 'on'))
                     self.run_engine(tmux_exec_args(name, 'set-option', '-g', 'status', 'off'))
                     if _resource_launch is not None:
                         from reverie.worker_resource_native import record_cli_started
@@ -2209,11 +2384,6 @@ class Broker:
                         if current is office: self.offices.pop(sid, None)
             for token in tuple(self.viewers):
                 self._reap_viewer(token)
-            for token, child in tuple(self.owned_clients.items()):
-                if child is not None and wait_poll(child, deadline, self.stopping):
-                    self.owned_clients.pop(token, None)
-                else:
-                    self.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
             if supervisor_started:
                 supervisor.join(min(5., remaining(deadline)))
                 if supervisor.is_alive():
@@ -2225,6 +2395,11 @@ class Broker:
             for handler in tuple(self.handlers.values()):
                 if handler is not threading.current_thread():
                     handler.join(remaining(deadline))
+            # Constructors and client finalizers publish before the final owned
+            # client sweep. Still-active handlers/supervisor remain fatal.
+            settle_owned_clients(self, deadline)
+            if getattr(self, 'chat_images', None) is not None and not self.chat_images.close(deadline=deadline):
+                self.cleanup_uncertain.add('CHAT_IMAGE_CLEANUP_UNCONFIRMED')
             if self.handlers or self.active:
                 self.cleanup_uncertain.add('HANDLER_ACTIVE')
             if not remaining(deadline):
@@ -2255,6 +2430,13 @@ def client(args):
     info = Path(path).lstat()
     if not stat.S_ISSOCK(info.st_mode) or info.st_mode & 0o077:
         raise ValueError('Worker socket is unavailable or not private')
+    if (getattr(args, 'command_failure_report', False) and
+            any((getattr(args, 'goal_custody', False), args.control, args.caller_session,
+                 args.attach_only, args.session_id, args.cwd, args.command,
+                 getattr(args, 'resource_ref', None) is not None))):
+        raise ValueError('TELEMETRY_REPORT_REFUSED')
+    if getattr(args, 'employee_id', None) and not getattr(args, 'command_failure_report', False):
+        raise ValueError('TELEMETRY_REPORT_REFUSED')
     resource_ref=getattr(args,'resource_ref',None)
     if resource_ref is not None:
         if (not SESSION.fullmatch(resource_ref) or args.attach_only or args.control or
@@ -2263,11 +2445,38 @@ def client(args):
     if getattr(args, 'goal_custody', False):
         from reverie.goal_custody_client import project
         return project(args)
+    if getattr(args, 'command_failure_report', False):
+        from reverie.command_failure_reports import selected_employees, decode_report
+        employees = selected_employees(args.employee_id or [])
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(3)
+            connection.connect(path)
+            send_frame(connection, b'T', json.dumps({'v': 1, 'action': 'command-failures',
+                                                   'employee_ids': employees}).encode())
+            kind, payload = receive_frame(connection)
+            if kind != b'J':
+                raise ValueError('TELEMETRY_REPORT_UNAVAILABLE')
+            value = decode_report(payload, employees)
+            print(json.dumps(value, separators=(',', ':')))
+        return 0
     if args.control:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(120)
             connection.connect(path)
-            send_frame(connection, b'C', json.dumps({'action': args.control, **({'caller': args.caller_session} if args.caller_session else {})}).encode())
+            if args.control == 'stop-agent':
+                if args.caller_session or not SESSION.fullmatch(args.session_id or '') or args.cwd or args.command or (args.fence and args.not_after is None):
+                    raise ValueError('stop-agent takes exactly --session-id (and optionally --not-after, then --fence)')
+                request = {'action': 'stop-agent', 'sessionId': args.session_id}
+                if args.not_after is not None: request['notAfter'] = args.not_after
+                if args.fence is not None: request['fence'] = args.fence
+                send_frame(connection, b'C', json.dumps(request).encode())
+            elif args.control == 'settle-stop':
+                if args.caller_session or not SESSION.fullmatch(args.session_id or '') or args.cwd or args.command or args.not_after is not None or not args.fence:
+                    raise ValueError('settle-stop takes exactly --session-id and --fence')
+                send_frame(connection, b'C', json.dumps({'action': 'settle-stop', 'sessionId': args.session_id, 'fence': args.fence}).encode())
+            else:
+                if args.not_after is not None or args.fence is not None: raise ValueError('--not-after and --fence are only for stop-agent')
+                send_frame(connection, b'C', json.dumps({'action': args.control, **({'caller': args.caller_session} if args.caller_session else {})}).encode())
             kind, payload = receive_frame(connection)
             if kind != b'J':
                 raise RuntimeError(payload.decode() if kind == b'E' else 'Office power request failed')
@@ -2275,6 +2484,8 @@ def client(args):
         return 0
     if not all([args.session_id, args.cwd, args.command]):
         raise ValueError('A laptop launch requires session, directory and command')
+    if args.not_after is not None or args.fence is not None:
+        raise ValueError('--not-after and --fence are only for stop-agent')
     cols, rows = terminal_size()
     env = {k: v for k, v in os.environ.items() if ENV_KEY.fullmatch(k)}
     request = dict(sessionId=args.session_id, cwd=args.cwd, command=args.command, env=env, cols=cols, rows=rows)
@@ -2356,12 +2567,16 @@ def main():
     serve = commands.add_parser('broker')
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
-    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
+    execute.add_argument('--control', choices=['status', 'provider-health', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources', 'stop-agent', 'settle-stop'])
     execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
+    execute.add_argument('--command-failure-report', action='store_true', help='Closed host/server-only failure metadata report')
+    execute.add_argument('--employee-id', action='append')
     execute.add_argument('--caller-session')
     execute.add_argument('--attach-only', action='store_true')
     execute.add_argument('--resource-ref', help='Server-private registered resource launch reference')
     execute.add_argument('--session-id')
+    execute.add_argument('--not-after', type=int, help='stop-agent: epoch ms after which the signal is not dispatched')
+    execute.add_argument('--fence', help='stop-agent/settle-stop: 32 hex digits naming one stop')
     execute.add_argument('--cwd')
     execute.add_argument('--command')
     launch = commands.add_parser('child')

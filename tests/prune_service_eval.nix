@@ -1,17 +1,19 @@
 # Pure NixOS evaluation, with synthetic paths and no host activation.
-{ nixpkgs, pruneHostPackage, prunePackage, system ? builtins.currentSystem }:
+{ nixpkgs, pruneHostPackage, prunePackage, legacyPrunePackage, system ? builtins.currentSystem }:
 let
   lib = nixpkgs.lib;
-  evaluate = extra: import "${nixpkgs}/nixos/lib/eval-config.nix" {
+  evaluateWith = package: extra: import "${nixpkgs}/nixos/lib/eval-config.nix" {
     inherit system;
     modules = [
       ({ config, lib, pkgs, ... }: import ../nix/prune-service.nix {
-        inherit config lib pkgs pruneHostPackage prunePackage;
+        inherit config lib pkgs pruneHostPackage;
+        prunePackage = package;
       })
       { system.stateVersion = "26.05"; }
       extra
     ];
   };
+  evaluate = evaluateWith prunePackage;
   deployment = {
     name = "fixture";
     disposableMount = "/disposable";
@@ -19,7 +21,37 @@ let
     employeeIds = [ "11111111-1111-4111-8111-111111111111" ];
     laptopUid = 1000;
     laptopGid = 1000;
+    rootIdentities."/disposable" = { source = "/dev/fixture"; fstype = "ext4"; };
   };
+  acceptance = {
+    enable = true;
+    acceptedDryRunReportSha256 = lib.concatStrings (lib.genList (_: "ab") 32);
+    signoff = "reviewer: record-1";
+    selfTestReceipt = "/var/lib/reverie-prune-declared-dry/selftest-receipt.json";
+    selfTestReceiptSha256 = lib.concatStrings (lib.genList (_: "cd") 32);
+  };
+  # Only this module's assertions: a synthetic evaluation also fails unrelated NixOS base checks (no root filesystem).
+  failing = c: builtins.any (entry: !entry.assertion && lib.hasInfix "reverie" (lib.toLower entry.message)) c.assertions;
+  liveConfig = (evaluate { services.reverie.prune = { enable = true; inherit deployment; live = acceptance; }; }).config;
+  liveService = liveConfig.systemd.services.reverie-prune;
+  liveText = liveConfig.systemd.units."reverie-prune.service".text;
+  liveNoAcceptance = (evaluate { services.reverie.prune = { enable = true; inherit deployment; live.enable = true; }; }).config;
+  liveOldPackage = (evaluateWith legacyPrunePackage { services.reverie.prune = { enable = true; inherit deployment; live = acceptance; }; }).config;
+  liveCheckouts = (evaluate { services.reverie.prune = {
+    enable = true; live = acceptance;
+    deployment = deployment // { checkoutRoots = [ "/src" ]; rootIdentities = deployment.rootIdentities // { "/src" = { source = "/dev/src"; fstype = "ext4"; }; }; };
+  }; }).config;
+  liveWithoutService = (evaluate { services.reverie.prune.live = acceptance; }).config;
+  liveNoReceipt = (evaluate { services.reverie.prune = { enable = true; inherit deployment; live = removeAttrs acceptance [ "selfTestReceipt" "selfTestReceiptSha256" ]; }; }).config;
+  liveReceiptInsideState = (evaluate { services.reverie.prune = { enable = true; inherit deployment;
+    live = acceptance // { selfTestReceipt = "/var/lib/reverie-prune-declared/selftest-receipt.json"; }; }; }).config;
+  noIdentity = (evaluate { services.reverie.prune = { enable = true; deployment = removeAttrs deployment [ "rootIdentities" ]; }; }).config;
+  subtreeIdentity = (evaluate { services.reverie.prune = { enable = true; deployment = deployment // { rootIdentities."/disposable" = { source = "/dev/fixture"; fstype = "ext4"; mountRoot = "/sub"; }; }; }; }).config;
+  reportTo = directory: { inherit directory; uid = 1000; gid = 100; };
+  reportNoUser = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report.directory = "/var/lib/reverie-prune-reports"; }; }).config;
+  reported = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report = reportTo "/var/lib/reverie-prune-reports"; }; }).config;
+  reportInState = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report = reportTo "/var/lib/reverie-prune-declared/reports"; }; }).config;
+  reportOnDisposable = (evaluate { services.reverie.prune = { enable = true; inherit deployment; report = reportTo "/disposable/reports"; }; }).config;
   disabled = (evaluate { }).config;
   enabled = (evaluate { services.reverie.prune = { enable = true; inherit deployment; }; }).config;
   scheduled = (evaluate { services.reverie.prune = { enable = true; timer.enable = true; inherit deployment; }; }).config;
@@ -42,8 +74,8 @@ let
     unscheduledByDefault = enabled.systemd.timers.reverie-prune.wantedBy == [ ];
     scheduledOnlyExplicitly = scheduled.systemd.timers.reverie-prune.wantedBy == [ "timers.target" ];
     fixedDryRun = lib.hasInfix "--dry-run" serviceText && !(lib.hasInfix "--live" serviceText) && lib.hasInfix "reverie-prune-declared" serviceText;
-    exactR12 = prunePackage.sourceHashes.prune == "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181" &&
-      prunePackage.sourceHashes.lease == "7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9" &&
+    exactR12 = prunePackage.sourceHashes.prune == "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed" &&
+      prunePackage.sourceHashes.lease == "606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa" &&
       pruneHostPackage.sourceHashes == prunePackage.sourceHashes &&
       lib.hasPrefix "\"${prunePackage}/bin/reverie-prune\"" service.serviceConfig.ExecStart &&
       lib.hasPrefix "+\"${pruneHostPackage}/bin/reverie-prune-declared\"" service.serviceConfig.ExecStartPre;
@@ -55,6 +87,22 @@ let
     badWatermarkRejected = builtins.any (entry: !entry.assertion) badWater.assertions;
     timerRequiresService = builtins.any (entry: !entry.assertion) badTimer.assertions;
     noncanonicalPathRejected = !invalidPath.success;
+    enabledAssertionsHold = !(failing enabled) && !(failing liveConfig);
+    dryRunKeepsDisposableReadOnly = lib.hasInfix "/disposable" service.serviceConfig.ReadOnlyPaths && !(lib.hasInfix "/disposable" service.serviceConfig.ReadWritePaths);
+    liveIsExplicitAndGated = lib.hasInfix "reverie-prune-live" liveText && lib.hasInfix "--live" liveText && !(lib.hasInfix "--dry-run" liveText) &&
+      lib.hasInfix "/disposable" liveService.serviceConfig.ReadWritePaths && !(lib.hasInfix "/disposable" liveService.serviceConfig.ReadOnlyPaths);
+    liveNeedsAcceptance = failing liveNoAcceptance;
+    liveNeedsPinnedCandidate = failing liveOldPackage;
+    liveExcludesCheckouts = failing liveCheckouts;
+    liveNeedsService = failing liveWithoutService;
+    liveNeedsSelfTestReceipt = failing liveNoReceipt && failing liveReceiptInsideState;
+    rootIdentityRequired = failing noIdentity && failing subtreeIdentity;
+    reportCopyOptIn = !(service.serviceConfig ? ExecStopPost);
+    reportCopyAfterEveryRun = let post = reported.systemd.services.reverie-prune.serviceConfig.ExecStopPost; in
+      lib.hasPrefix "+\"" post && lib.hasInfix "report_export.py\" \"--state\" \"/var/lib/reverie-prune-declared\" \"--out\" \"/var/lib/reverie-prune-reports\" \"--uid\" \"1000\" \"--gid\" \"100\"" post &&
+      !(failing reported) && reported.systemd.services.reverie-prune.serviceConfig.ExecStartPre == service.serviceConfig.ExecStartPre;
+    reportOutsideStateAndDisposable = failing reportInState && failing reportOnDisposable;
+    reportNeedsNonRootWriter = failing reportNoUser;
     pathEscaping = lib.hasInfix "prune %%$$ state" specialPaths.systemd.services.reverie-prune.serviceConfig.ExecStartPre &&
       lib.hasInfix "prune %%$ state" specialPaths.systemd.services.reverie-prune.serviceConfig.ReadWritePaths;
   };

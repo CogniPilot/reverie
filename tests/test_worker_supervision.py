@@ -86,6 +86,44 @@ class WorkerSupervisionTests(unittest.TestCase):
         self.broker.stop_laptops.assert_called_once_with()
         self.assertTrue(offline.exists())
 
+    def test_console_restart_shorter_than_grace_keeps_detached_running_laptop(self):
+        # A website restart detaches every terminal viewer and the office API is briefly down. The laptop and the
+        # agent in its own tmux keep running: only the full grace period, or a real stop reason, ends them.
+        old = fixtures.OLD
+        name = 'test-agent-' + old
+        self.broker.laptops[old] = name
+        self.broker.stop = Mock()
+        self.broker.stop_laptops = Mock()
+        self.broker.release_storage = Mock()
+        def engine(args, optional=False):
+            if args == ['inspect', 'test-console']:
+                return self.result(self.console())
+            self.assertEqual(args, ['inspect', name])
+            return self.result([{'State': {'Running': True}}])
+        self.broker.run_engine = Mock(side_effect=engine)
+        offline = self.state / 'office-offline-since'
+        down, up = OSError('console restarting'), Mock(status=200)
+        health = [down, down, down, up, down]
+        marks = []
+        def tick(_seconds):
+            marks.append(float(offline.read_text()) if offline.exists() else None)
+            return len(marks) > len(health)
+        self.broker.stopping = Mock(deadline=None)
+        self.broker.stopping.wait.side_effect = tick
+        started = time.time()
+        with patch('reverie.worker.http.client.HTTPConnection') as connection:
+            connection.return_value.getresponse.side_effect = health
+            self.broker.supervise()
+        self.broker.stop.assert_not_called()
+        self.broker.stop_laptops.assert_not_called()
+        self.broker.release_storage.assert_not_called()
+        self.assertEqual(self.broker.laptops, {old: name})
+        first, during, recovered, again = marks[1], marks[1:4], marks[4], marks[5]
+        self.assertGreaterEqual(first, started)
+        self.assertEqual(during, [first, first, first])  # one outage, one start time
+        self.assertIsNone(recovered)  # recovery clears the timer
+        self.assertGreaterEqual(again, first)  # a later outage gets a fresh grace period
+
     def test_unknown_detached_state_keeps_real_storage_lease_until_confirmed_stopped(self):
         old, new = fixtures.OLD, fixtures.NEW
         self.broker.claim_storage(old)

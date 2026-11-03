@@ -27,7 +27,7 @@ beforeAll(async () => {
   const archive = Buffer.alloc(25 * 1024 * 1024);
   for (let i = 0; i < archive.length; i++) archive[i] = i % 251;
   await writeFile(join(fixture.root, 'archive λ with spaces.zip'), archive);
-  const sample = join(fixture.root, 'handoffs', '2026-10-23', 'burt');
+  const sample = join(fixture.root, 'handoffs', '2026-10-23', 'brooke');
   await mkdir(sample, { recursive: true });
   for (let i = 1; i <= 47; i++) await mkdir(join(sample, `project-review-${String(i).padStart(2, '0')}`));
   await writeFile(
@@ -142,7 +142,7 @@ for (const viewportWidth of [1905, 390, 320])
       const width = await frame.locator('body').evaluate((el) => ({ scroll: el.scrollWidth, inner: innerWidth }));
       expect(width.scroll).toBeLessThanOrEqual(width.inner);
       if (process.env.WORKSPACE_SCREENSHOT_DIR) {
-        for (const name of ['handoffs', '2026-10-23', 'burt'])
+        for (const name of ['handoffs', '2026-10-23', 'brooke'])
           await frame.getByRole('button', { name: `${name} Folder`, exact: true }).click();
         await frame.getByRole('status').filter({ hasText: '48 items' }).waitFor();
         if (!phone) await page.getByRole('button', { name: 'Office', exact: true }).click();

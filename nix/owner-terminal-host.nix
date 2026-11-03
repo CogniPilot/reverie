@@ -1,14 +1,17 @@
-{ pkgs, src, console, memory, memoryPackage, entrypoint, resourceReplacement ? false }:
+{ pkgs, src, console, memory, memoryPackage, entrypoint, resourceReplacement ? false, serviceAuthConfig ? null }:
 # Optional package/image input only. No automatic install/start or CLI replacement.
 # A composed resource actor may opt into its separately reviewed web flag at build
 # time; no runtime, browser or worker field selects commands or startup arguments.
 assert builtins.isBool resourceReplacement;
 let
+  pythonSource = import ./owner-terminal-python-source.nix { inherit pkgs src; };
+  auth = import ./service-auth-config.nix { inherit (pkgs) lib; } serviceAuthConfig;
   toolkit = import ./human-terminal-toolkit.nix { inherit pkgs src; };
   nodeInvocation = "${pkgs.nodejs_22}/bin/node";
   pythonInvocation = "${memory}/bin/python3";
   wrapper = "${console}/lib/reverie/scripts/owner-terminal-start.mjs";
   webArgs = [ "web" "--host" "0.0.0.0" "--port" "3000" ]
+    ++ pkgs.lib.optionals (auth != null) [ "--service-auth-config" auth ]
     ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];
   nodeArgv = [ nodeInvocation wrapper ] ++ webArgs;
   host = pkgs.writeShellApplication {
@@ -16,7 +19,7 @@ let
     runtimeInputs = [ memory pkgs.docker-client ];
     text = ''
       unset PYTHONPATH PYTHONHOME NODE_OPTIONS NODE_PATH LD_PRELOAD LD_AUDIT
-      exec ${pythonInvocation} -I -B ${src}/scripts/reverie-owner-terminal-host "$@"
+      exec ${pythonInvocation} -I -B ${pythonSource}/scripts/reverie-owner-terminal-host "$@"
     '';
   };
   website = pkgs.writeTextFile {

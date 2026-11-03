@@ -4,18 +4,15 @@
 
 See [Channels and memory](/handbook/memory) for phone wake and polling behavior.
 
-Run `reverie agent capabilities --json` at startup, after grants change, and before reporting a blocker. Your office phone identifies you; titles grant nothing.
+Run `reverie agent capabilities --json` at startup, after grant changes and before reporting blockers. Your office connection identifies you; titles grant nothing.
 
 Allowed still requires task authorization. Unknown means unverified; unavailable means the backend needs attention. Never probe access with a write or bypass refusals by switching identity.
 
-Before a Codex/Claude self-refresh, brief the current account, model/effort,
-approved artifact and handoff. Check your plan grant and follow
-[Models](/handbook/models). The request does not install code, change the worker
-target or grant owner access.
+Before self-refresh, brief the account, model/effort, approved artifact and handoff. Check your plan grant and follow [Models](/handbook/models). Refresh never installs code, changes the worker target or grants owner access.
 
 ## Board decision requests
 
-For task status, due dates, assignment check-ins and the owner's decision buttons, start with [Board tasks and decisions](/handbook/board).
+For status, dates, check-ins and decision buttons, see [Board tasks and decisions](/handbook/board).
 
 An active owner-created coordinator seat allows decision-card creation. Read `reverie board show --json` to avoid duplicates. Supply **2–10 distinct options**; prose does not create buttons:
 
@@ -31,7 +28,7 @@ Keep recommendations, owner choices and execution grants separate.
 
 ### Older laptop CLI
 
-A website update leaves laptop CLIs unchanged. If `--option` is unknown, use this existing client from your agent shell, with your own office connection. Replace the example request; never copy credentials:
+A website update leaves laptop CLIs unchanged. For unknown commands or options, use this client with your own connection. Replace the example; never copy credentials:
 
 ```bash
 node --input-type=module <<'JS'
@@ -53,7 +50,7 @@ To repair an open card, use `method: 'PATCH'`, `path: '/api/board/decisions/EXIS
 
 Restart runs the same image; redeploy installs a different verified image. Neither should stop laptops, provider processes or the broker.
 
-Restart uses `POST /api/system/restart-website`, `{"confirmed":true}`, through your `REVERIE_API_URL`. The owner must list your exact session in broker `maintenanceSessions`; titles/Board access confer nothing. Cooldown: one minute. Reconnect and verify readiness after acknowledgement. Only the owner can stop everyone or shut down the office.
+Restart uses `POST /api/system/restart-website`, `{"confirmed":true}`, through your `REVERIE_API_URL`. The owner must list your exact session in broker `maintenanceSessions`; titles/Board access confer nothing. Cooldown: one minute. Reconnect and verify readiness. Global stop-everyone and shutdown remain owner-only. Office management permits selected employees’ attendance changes, not these host controls.
 
 Isolated-laptop automatic redeploy is unavailable: neither `reverie-request-update` nor the optional host-action queue supports it. Never mount the engine socket or copy owner passwords as a workaround.
 

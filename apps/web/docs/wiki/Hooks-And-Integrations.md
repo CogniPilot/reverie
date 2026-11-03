@@ -18,6 +18,8 @@ terminal into something that can notify you.
 | `elicitation_response` | The dialog is answered.                          | Clearing the alert.                            |
 | `teammate_idle`        | An agent-team member goes idle.                  | Team surfaces.                                 |
 | `task_completed`       | A task finishes.                                 | Task tracking, run summary.                    |
+| `compact_started`      | A context compaction starts.                     | The yellow Compacting tab dot.                 |
+| `compact_finished`     | The compaction ends.                             | Clearing the Compacting dot.                   |
 
 This is why several Reverie features are Claude-only. The one partial exception is DeepSeek
 Harness, whose terminal front door reports idle, working and blocked to Reverie over the

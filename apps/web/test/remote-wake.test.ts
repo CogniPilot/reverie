@@ -391,6 +391,21 @@ describe('RemoteWakeRegistry', () => {
     expect(h.writeViaMux).toHaveBeenCalledWith('ok', { fromUser: true, opencodeGuard: 'person' });
   });
 
+  it('flushes an agent chunk with its origin, and drops only that chunk when a plan move refuses it', async () => {
+    const h = harness();
+    h.probe.mockResolvedValue(false);
+    await h.registry.handleInput(h.session, 'agent\r', { agentInput: true });
+    await h.registry.handleInput(h.session, 'person\r');
+    // The agent's write is refused before any byte: a move took the composer after the buffered ACK.
+    h.writeViaMux.mockImplementationOnce(async (_data: string, options: { onMoveHeld?: () => void }) => { options.onMoveHeld?.(); return false; });
+    await h.registry.wake(h.session);
+    expect(h.writeViaMux.mock.calls).toEqual([
+      ['agent\r', expect.objectContaining({ fromUser: true, opencodeGuard: true, agentInput: true })],
+      ['person\r', { fromUser: true, opencodeGuard: 'person' }], // a person's chunk behind it still goes out
+    ]);
+    expect(h.registry.pendingBytes('sess-1')).toBe(0);
+  });
+
   it('drops the buffer when a flush write fails, so nothing is replayed by a later wake', async () => {
     // Retaining the chunk was the earlier behaviour, and it was worse: the wake still
     // resolves and marks the host reachable, so the next input takes the deliver path

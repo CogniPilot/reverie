@@ -37,7 +37,7 @@ export function parseScratchMounts(mountinfo: string, limit: number): DiskTarget
   return [...paths].sort((a, b) => Number(a.slice(8)) - Number(b.slice(8))).slice(0, Math.max(0, limit)).map(path => ({ label: `Scratch ${path.slice(8)}`, path, requireExisting: true }));
 }
 
-async function mountedScratchTargets(limit: number): Promise<DiskTarget[]> {
+export async function mountedScratchTargets(limit: number): Promise<DiskTarget[]> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open('/proc/self/mountinfo', 'r');
@@ -48,7 +48,7 @@ async function mountedScratchTargets(limit: number): Promise<DiskTarget[]> {
   finally { await handle?.close().catch(() => undefined); }
 }
 
-async function probeFilesystem(path: string, requireExisting = false): Promise<DiskProbe> {
+export async function probeFilesystem(path: string, requireExisting = false): Promise<DiskProbe> {
   // A not-yet-created configured folder uses its nearest existing parent filesystem.
   for (let depth = 0; depth < 32; depth++) {
     try {

@@ -303,6 +303,5 @@ async function scan(config: WatchConfig, state: ScanState, get: Get, now: number
     Object.keys(next.openRuns).length > 256
   )
     fail('STATE_CAPACITY');
-  if (events.length > 30) fail('CHANGE_BATCH_BOUND');
   return { next, events, createdSince };
 }

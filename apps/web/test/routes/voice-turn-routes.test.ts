@@ -6,7 +6,7 @@
  * reply and nothing spoken. One turn per member at a time. The service's own model (/turn)
  * is never asked. Only the reply audio the service names is proxied.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -244,6 +244,51 @@ describe('voice turn routes', () => {
     expect(pane).toContain(`reverie agent chat say --reply-to ${askedId} "..."`);
     expect(messages[1].replyTo).toBe(askedId);
     expect(listeners()).toBe(0);
+  });
+
+  it('times each stage of the turn under the phone\'s turn id, and logs ids and durations but never the words', async () => {
+    onTranscript((asked) => {
+      answer(asked, VOICE, 'Time to ship, Pat.');
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/voice/turn?room=${roomId}&member=${VOICE}`,
+        headers: { 'content-type': 'audio/webm;codecs=opus', 'x-reverie-voice-turn': '2f1c9a7e-5b3d-4c1e-9f0a-8d7e6c5b4a39' },
+        payload: Buffer.from('fake-webm-bytes'),
+      });
+      const data = res.json().data;
+      expect(data.turnId).toBe('2f1c9a7e-5b3d-4c1e-9f0a-8d7e6c5b4a39');
+      for (const stage of ['sttMs', 'answerMs', 'ttsMs']) {
+        expect(Number.isInteger(data.timing[stage]) && data.timing[stage] >= 0, stage).toBe(true);
+      }
+      const line = log.mock.calls.map((call) => String(call[0])).find((text) => text.startsWith('[voice] turn '))!;
+      expect(line).toContain('2f1c9a7e-5b3d-4c1e-9f0a-8d7e6c5b4a39');
+      expect(line).toContain(data.messages[0].id);
+      expect(line).toContain(data.messages[1].id);
+      expect(line).not.toContain('what time is it');
+      expect(line).not.toContain('Time to ship');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('mints its own turn id when the phone sends none or a malformed one, and times a turn that heard nothing', async () => {
+    heard = { status: 200, body: { transcript: '   ' } };
+    for (const header of [undefined, 'bad id!', 'x'.repeat(65)]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/voice/turn?room=${roomId}&member=${VOICE}`,
+        headers: { 'content-type': 'audio/webm', ...(header === undefined ? {} : { 'x-reverie-voice-turn': header }) },
+        payload: Buffer.from('fake-webm-bytes'),
+      });
+      const data = res.json().data;
+      expect(data.heard).toBe(false);
+      expect(data.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(Number.isInteger(data.timing.sttMs)).toBe(true);
+      expect(data.timing.answerMs).toBeUndefined();
+    }
   });
 
   it('marks the transcript owner_spoken only for a verified owner', async () => {

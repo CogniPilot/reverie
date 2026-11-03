@@ -322,3 +322,38 @@ describe('read-only owner inspection of an interrupted move destination', () => 
   });
 
 });
+
+
+describe('normal replacement composer uses the strict Claude task footer', () => {
+  const hud = [
+    'Goal active · generic task', '──────────────────── generic-worker ─', '❯\u00a0',
+    '────────────────────────────────────', 'Generic model · usage 12%',
+    '⏵⏵ bypass permissions on · 1 shell · 1 feedback draft',
+  ].join('\n');
+  it('verifies the new Claude composer then submits the original handoff once through normal guarded input', async () => {
+    const h = harness(), candidate = h.sessions.get('new')!;
+    Object.defineProperty(candidate, 'mode', { value: 'claude', configurable: true });
+    h.runtime.plans.account = vi.fn(async id => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);
+    h.runtime.mux.capturePaneText = vi.fn(() => hud);
+    await h.executor.create({ ...input, targetMode: 'claude' }, undefined);
+    await h.executor.ready('new');
+    expect(h.runtime.mux.capturePaneText).toHaveBeenCalledWith('new');
+    expect(candidate.writeViaMux).toHaveBeenCalledTimes(1);
+    expect(candidate.writeViaMux).toHaveBeenCalledWith(input.handoff + '\r', expect.objectContaining({ requireEmptyComposer: true, fromUser: true }));
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+  it.each(['draft', 'dialog', 'busy', 'codex'] as const)('does not submit a handoff for %s even with the task footer', async kind => {
+    const h = harness(), candidate = h.sessions.get('new')!;
+    Object.defineProperty(candidate, 'mode', { value: kind === 'codex' ? 'codex' : 'claude', configurable: true });
+    h.runtime.plans.account = vi.fn(async id => ({ id, provider: kind === 'codex' ? 'openai' : 'anthropic', label: id, profileId: id }) as PlanAccount);
+    h.runtime.mux.capturePaneText = vi.fn(() => kind === 'draft' ? hud.replace('❯\u00a0', '❯ unsent draft') : hud);
+    if (kind === 'dialog') Object.defineProperty(candidate, 'paneDialog', { value: 'trust', configurable: true });
+    if (kind === 'busy') Object.defineProperty(candidate, 'isWorking', { value: true, configurable: true });
+    await h.executor.create({ ...input, targetMode: kind === 'codex' ? 'codex' : 'claude' }, undefined);
+    const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(90_001);
+    try { await expect(h.executor.ready('new')).rejects.toThrow('composer before the deadline'); }
+    finally { clock.mockRestore(); }
+    expect(candidate.writeViaMux).not.toHaveBeenCalled();
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+});

@@ -146,6 +146,26 @@ function sameDays(a: number[] | undefined, b: number[] | undefined): boolean {
   return x.length === y.length && x.every((v, i) => v === y[i]);
 }
 
+/** What Run once would do now (CronService.preview). Nothing in it has happened. */
+export interface CronRunPreview {
+  jobId: string;
+  name: string;
+  action: 'launch' | 'post';
+  generatedAt: number;
+  /** post: posts a message; dry-run: records a dry run only; skip: the source condition is not met; launch: starts a session. */
+  outcome: 'post' | 'dry-run' | 'skip' | 'launch' | 'blocked' | 'not-previewed';
+  reason?: string;
+  sender?: string;
+  roomId?: string;
+  /** The message that would be posted, or the prompt a session would get. */
+  text?: string;
+  /** A data source read for this preview. */
+  readsSource?: string;
+  checks: Array<{ label: string; ok: boolean; detail?: string }>;
+  /** What Run once would change. */
+  effects: string[];
+}
+
 /** What a 'post' job needs from the chat side; wired by the server once the chat service exists. */
 export interface BotPoster {
   getBot(id: string): ChatBot | undefined;
@@ -158,6 +178,8 @@ export interface BotPoster {
    * employee is gone, no longer sits in the room, or the room is archived. Optional: without it author routines fail their run.
    */
   postAsAuthor?(employeeId: string, roomId: string, text: string): { name: string };
+  /** The same checks as postAsAuthor, without posting (for a run preview); throws with the same plain message. */
+  canPostAsAuthor?(employeeId: string, roomId: string): void;
   /** One system line in the routine's room, also queued for its author, telling them the routine was disabled. */
   notifyDisabled?(employeeId: string, roomId: string, text: string): void;
 }
@@ -415,6 +437,119 @@ export class CronService {
   }
 
   /**
+   * What Run once would do now, without doing it: no run record, status, schedule, change key, post, session or broadcast.
+   * Reading a post job's data source is the one outside call it makes (a read). Checks are the ones the run itself makes.
+   */
+  async preview(id: string): Promise<CronRunPreview | null> {
+    const job = this.getJob(id);
+    if (!job) return null;
+    const checks: CronRunPreview['checks'] = [];
+    const check = (label: string, fn: () => string | void): boolean => {
+      try {
+        const detail = fn();
+        checks.push({ label, ok: true, ...(detail ? { detail } : {}) });
+        return true;
+      } catch (err) {
+        checks.push({ label, ok: false, detail: getErrorMessage(err) });
+        return false;
+      }
+    };
+    const base = { jobId: job.id, name: job.name, action: job.action ?? 'launch', generatedAt: Date.now(), checks };
+    const unchanged = 'Does not change the schedule or the next run time.';
+    if (job.recoveryUncertain)
+      return { ...base, outcome: 'blocked', reason: 'Held after a backup restore; the owner must reconcile it first.', effects: [] };
+    if (job.postSourceArgs?.pull !== undefined)
+      return { ...base, outcome: 'not-previewed', reason: 'Repository watchers are not previewed: Run once queries GitHub and posts only new activity.',
+        effects: ['May post one notice and move the watcher cursor.', unchanged] };
+    if ((job.action ?? 'launch') === 'post') {
+      const room = job.roomId as string;
+      if (job.postAs === 'author') {
+        const employeeId = job.createdBy?.employeeId;
+        const ready = check('Author can post', () => {
+          if (!employeeId || !this.poster?.postAsAuthor) throw new Error('This routine has no author who can post');
+          // Without the read-only check the answer is unknown, so it is not shown as passing.
+          if (!this.poster.canPostAsAuthor) throw new Error('Not verified: this server cannot check the author without posting');
+          this.poster.canPostAsAuthor(employeeId, room);
+        }) && check('Author hourly limit', () => {
+          const used = this.recentAuthorPosts(employeeId as string, Date.now());
+          if (used >= AUTHOR_POSTS_PER_HOUR) throw new Error(`Limit of ${AUTHOR_POSTS_PER_HOUR} routine posts an hour reached`);
+          return `${used} of ${AUTHOR_POSTS_PER_HOUR} used this hour`;
+        });
+        if (!ready) return { ...base, outcome: 'blocked', sender: 'Routine author', roomId: room, effects: ['Records a failed run in history.', unchanged] };
+        return job.dryRun
+          ? { ...base, outcome: 'dry-run', sender: 'Routine author', roomId: room, text: job.postText, effects: ['Records a dry run in history; posts nothing.', unchanged] }
+          : { ...base, outcome: 'post', sender: 'Routine author', roomId: room, text: job.postText,
+            effects: ['Posts one message as the routine author in the room.', 'Records the run in history.', unchanged] };
+      }
+      const bot = job.botId ? this.poster?.getBot(job.botId) : undefined;
+      const sender = bot?.name ?? job.botId ?? 'Bot';
+      if (!check('Bot is registered', () => { if (!this.poster || !bot) throw new Error(`No bot "${job.botId ?? ''}" is registered`); }))
+        return { ...base, outcome: 'blocked', sender, roomId: room, effects: ['Records a failed run in history.', unchanged] };
+      let text = job.postText as string;
+      if (job.postSource) {
+        let sourced: { text: string | null; reason: string };
+        try {
+          sourced = await this.renderSourcePost(job, true);
+          checks.push({ label: `Data source "${job.postSource}" reads`, ok: true });
+        } catch (err) {
+          checks.push({ label: `Data source "${job.postSource}" reads`, ok: false, detail: getErrorMessage(err) });
+          return { ...base, outcome: 'blocked', sender, roomId: room, readsSource: job.postSource, effects: ['Records a failed run in history.', unchanged] };
+        }
+        if (sourced.text === null)
+          return { ...base, outcome: 'skip', reason: sourced.reason, sender, roomId: room, readsSource: job.postSource,
+            effects: ['Records a skipped run in history; posts nothing.', unchanged] };
+        text = sourced.text;
+      }
+      const allowed = check('Bot may post in this room now', () => {
+        this.poster!.check(bot!, room, this.recentBotPosts(bot!.id, Date.now()));
+      });
+      const read = job.postSource ? { readsSource: job.postSource } : {};
+      if (!allowed) return { ...base, outcome: 'blocked', sender, roomId: room, text, ...read, effects: ['Records a failed run in history.', unchanged] };
+      if (job.dryRun)
+        return { ...base, outcome: 'dry-run', sender, roomId: room, text, ...read, effects: ['Records a dry run in history; posts nothing.', unchanged] };
+      return { ...base, outcome: 'post', sender, roomId: room, text, ...read, effects: [
+        `Posts one message as ${sender} in the room.`, 'Records the run in history.',
+        ...(job.postChangeOnly ? ['Remembers this text, so the same text is not posted again.'] : []), unchanged] };
+    }
+    // An agent session job.
+    let prompt: string | undefined;
+    try {
+      prompt = await this.resolvePrompt(job);
+      checks.push({ label: 'Prompt resolves', ok: true });
+    } catch (err) {
+      checks.push({ label: 'Prompt resolves', ok: false, detail: getErrorMessage(err) });
+    }
+    const dir = check('Working directory exists', () => { if (!statSync(job.workingDir).isDirectory()) throw new Error('workingDir is not a directory'); });
+    let allowedDir = false;
+    if (dir) {
+      allowedDir = await isWorkingDirAllowedForUsername(job.owner, job.workingDir);
+      checks.push({ label: 'Working directory is in the owner workspace', ok: allowedDir });
+    }
+    const active = this.countActiveAgents(job.agentType, job.id);
+    checks.push({ label: 'Other sessions of this agent', ok: true, detail: active ? `${active} already running` : 'None running' });
+    // The same session limits the launch checks. A routine that closes its earlier sessions first may free room.
+    const cap = sessionCapacityState(this.deps.sessions, job.owner);
+    const earlier = job.scheduleType !== 'once' && job.autoClosePreviousSession !== false
+      ? this.listRuns(job.id).filter((r) => r.sessionId && this.deps.sessions.has(r.sessionId)).length : 0;
+    const full = cap.atGlobalCap ? `Maximum concurrent sessions (${MAX_CONCURRENT_SESSIONS}) reached` : cap.atUserCap ? "Owner's per-user session limit reached" : '';
+    checks.push(!full ? { label: 'Session limit', ok: true }
+      : earlier ? { label: 'Session limit', ok: true, detail: `${full}; Run once first closes ${earlier} earlier session${earlier === 1 ? '' : 's'} of this routine` }
+      : { label: 'Session limit', ok: false, detail: full });
+    // The owner's grant, re-resolved now exactly as the launch does, for shell and launch-command jobs.
+    let granted = true;
+    if (getCli(job.agentType)?.capabilities.privilegedCommandGate || job.launchCommand) {
+      granted = await canUsernameRunPrivilegedCommands(job.owner);
+      checks.push(granted ? { label: 'Owner grant for shell or launch-command jobs', ok: true }
+        : { label: 'Owner grant for shell or launch-command jobs', ok: false, detail: 'Owner lacks the can-bypass-permissions grant for shell/launchCommand jobs' });
+    }
+    const ready = prompt !== undefined && dir && allowedDir && (!full || earlier > 0) && granted;
+    return { ...base, outcome: ready ? 'launch' : 'blocked', ...(prompt !== undefined ? { text: prompt } : {}), effects: ready ? [
+      `Starts a new ${job.agentType} session in ${job.workingDir} and sends it the prompt.`,
+      ...(job.scheduleType !== 'once' && job.autoClosePreviousSession !== false ? ['Closes the sessions this routine started before.'] : []),
+      'Records the run in history.', unchanged] : ['Records a failed run in history.', unchanged] };
+  }
+
+  /**
    * Background tick: launch every enabled job whose next run is due. Advances
    * each job's schedule and guards against double-launching the same due time.
    */
@@ -497,10 +632,10 @@ export class CronService {
    * A post job with a data source: read it, apply the condition and the change-only rule, and render the
    * text. `text` is null when a scheduled fire should stay silent (nothing to say), with `reason`.
    */
-  private async renderSourcePost(job: CronJob): Promise<{ text: string | null; reason: string; key?: string }> {
+  private async renderSourcePost(job: CronJob, preview = false): Promise<{ text: string | null; reason: string; key?: string }> {
     const read = job.postSource ? this.postSources[job.postSource] : undefined;
     if (!job.postSource || !read) throw new Error(`Data source "${job.postSource ?? ''}" is not available`);
-    const data = await read({ args: job.postSourceArgs, last: job.postLastText });
+    const data = await read({ args: job.postSourceArgs, last: job.postLastText, ...(preview ? { preview: true } : {}) });
     // A source that could not finish reading (`_hold`) always says so, whatever the template, condition or change-only
     // rule, and does not move the change key: silence must never read as an all-clear.
     if (data._hold) return { text: String(data.message ?? 'monitoring incomplete'), reason: '', key: job.postLastText ?? '' };

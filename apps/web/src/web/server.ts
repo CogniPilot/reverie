@@ -1,3 +1,4 @@
+import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
 import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
@@ -6,17 +7,20 @@ import { OfficeAuthService } from '../owner-auth/office.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
+import { ownPlanRecovery } from '../agent-plan-recovery.js';
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
-import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
-import { employeeRestContext, employeeBriefContext } from '../company-types.js';
+import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
+import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
+import type { Issue } from '../board-types.js';
 import { decisionWritesEnabled } from './decision-config.js';
 import { fullAccessAlertRoom } from '../full-access-default.js';
 import { CompanyService, CompanyError } from '../company-service.js';
@@ -249,8 +253,10 @@ import { isBoardCoordinator } from '../board-permissions.js';
 import { PublicationCredentialVault } from '../publication-credentials.js';
 import { registerPublicationRoutes } from './routes/publication-routes.js';
 import { registerEmployeeContextRoutes } from './routes/employee-context-routes.js';
+import { registerEmployeeJournalRoutes } from './routes/employee-journal-routes.js';
+import { EmployeeJournalStore } from '../employee-journal.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
-import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
+import { registerSessionRuntimeRoutes, resumeOwnerStops } from './routes/session-runtime-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
 import { registerHealthMetadataProviderRoutes } from './routes/session-health-provider-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
@@ -334,6 +340,7 @@ import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { PlanService } from '../plan-accounts.js';
+import { PlanCostTracker } from '../plan-agent-burn.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
 import { readFixedPr } from '../cron/fixed-github-watch.js';
 import { registerBotWatches } from '../bot-watches-runtime.js';
@@ -461,8 +468,14 @@ export class WebServer extends EventEmitter {
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
   private workerViewerReconnect?: WorkerViewerReconnect;
+  private workerProviderHealth?: WorkerProviderHealth;
+  /** The console Board, once created; the chat digest reads it for an agent's own cards. */
+  private boardStore?: BoardStore;
+  private chatBots?: ChatBotRegistry;
   private cronPort!: CronPort;
   private planService!: PlanService;
+  /** Per-session status-line cost samples, for per-agent plan burn. */
+  private readonly planCosts = new PlanCostTracker(dataPath('plan-agent-cost-history.json'));
   private accountLogins: AccountLoginService | null = null;
   /** Fingerprint of the served frontend, sent in `init` so stale tabs can offer a reload. */
   private frontendBuildId = 'unknown';
@@ -979,6 +992,17 @@ export class WebServer extends EventEmitter {
     return buildHostPolicy(this.host, this.tunnelManager.getUrl());
   }
 
+  /**
+   * A new backend under the same session remembers nothing else: brief it again in each live room it is in, so it hears
+   * who it is and where its memory lives (the briefing carries the journal recall). Returns how many briefs were queued.
+   */
+  private rebriefAfterBackendChange(sessionId: string): number {
+    let briefed = 0;
+    for (const room of this.chatroomService.rooms())
+      if (!room.archivedAt && room.members.some((m) => m.sessionId === sessionId)) briefed += this.chatroomService.rebrief(room.id, sessionId);
+    return briefed;
+  }
+
   private async setupRoutes(): Promise<void> {
     // multipart/form-data: parser is provided by @fastify/multipart (registered
     // below). Its parser is a no-op marker that leaves the body on req.raw, so
@@ -1366,7 +1390,7 @@ export class WebServer extends EventEmitter {
     registerReadMyMindRoutes(this.app, ctx);
     registerGitStatusRoutes(this.app, ctx);
     registerAgentProfileRoutes(this.app, ctx, undefined, undefined, verifiedOwner);
-    registerStatusTelemetryRoutes(this.app, ctx);
+    registerStatusTelemetryRoutes(this.app, ctx, this.planCosts);
     registerSubscriptionProfileRoutes(
       this.app,
       this.subscriptionUsageReader,
@@ -1430,6 +1454,15 @@ export class WebServer extends EventEmitter {
     // in one room; messages reach member panes as single-line prompts.
     const chatroomFiles = new ChatFileStore(getDataDir());
     await chatroomFiles.initializeShared();
+    let boardIssuesCache: { rev: number; issues: Issue[] } | undefined;
+    // The employee journal: opened on first use, in its own file beside the chat database. Briefs read its highlights.
+    let employeeJournal: EmployeeJournalStore | undefined;
+    this.app.addHook('onClose', async () => employeeJournal?.close());
+    const openJournal = () => (employeeJournal ??= EmployeeJournalStore.open(dataPath('employee-journal.db')));
+    // A brief without a recall is still a brief: an unreadable journal never blocks delivery, and says so instead of reading as empty.
+    const journalHighlights = (employee: { id: string; owner?: string }): EmployeeMemoryRecall => {
+      try { return openJournal().highlights(employee.owner ?? '', employee.id); } catch { return 'unreadable'; }
+    };
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
@@ -1449,7 +1482,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
+          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1457,11 +1490,25 @@ export class WebServer extends EventEmitter {
       deferDeliveryRecovery: true,
       files: chatroomFiles,
       getSession: (id) => this.sessions.get(id),
+      providerHealth: (id, owner) => this.workerProviderHealth?.read(id, { owner }),
+      workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       broadcast: (event, data) => this.broadcast(event, data),
       // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
       timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
+      // An agent's digest lists its own Board cards and the cards they name, and room views show each member's 'doing'
+      // cards (the Board store is created below, after chat).
+      boardIssues: (owner) => {
+        const names = new Map((this.companyService?.view(owner).employees ?? []).map((e) => [e.id, e.name]));
+        // One copy of the Board per revision, not one per room view.
+        const store = this.boardStore;
+        if (store && boardIssuesCache?.rev !== store.rev) boardIssuesCache = { rev: store.rev, issues: store.snapshot().issues };
+        return (boardIssuesCache?.issues ?? []).map((issue) => ({
+          id: issue.id, title: issue.title, status: issue.status, owner: issue.owner, reason: issue.reason,
+          ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt, end: issue.end,
+        }));
+      },
       // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
       alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000 }),
       // A session retired by a plan switch leaves every tab list (its row carries `retired`); a restore brings it back.
@@ -1473,6 +1520,8 @@ export class WebServer extends EventEmitter {
           if (session) this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
         }
       },
+      // A bot's posts show its current picture (the registry is created further down).
+      botOf: (botId) => this.chatBots?.get(botId),
     });
     await this.chatroomService.init();
     this.chatroomService.onMessage((room, message) => {
@@ -1502,6 +1551,13 @@ export class WebServer extends EventEmitter {
     this.chatBackup.start();
     const companyStore = new CompanyStore(canonicalCompanyFile);
     await companyStore.init();
+    registerCommandFailureRoutes(this.app, {
+      verifiedOwner,
+      employees: () => {
+        const snapshot = companyStore.snapshot();
+        return [...snapshot.employees, ...snapshot.retired].map(({ id, owner }) => ({ id, owner }));
+      },
+    });
     registerHealthMetadataProviderRoutes(this.app, {
       authorized: (req, id) =>
         verifiedOwner(req) && !!this.sessions.get(id) && this.sessions.get(id)!.owner === ownerFor(req),
@@ -1526,6 +1582,8 @@ export class WebServer extends EventEmitter {
       goalAuthentication: goalBoundary.authentication,
       servicePurposes: serviceConfig?.purposes,
       getSession: (id) => this.sessions.get(id),
+      providerHealth: (employee) => this.workerProviderHealth?.read(employee),
+      workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       runtimeRecipeOf: (id) => {
         const session = this.sessions.get(id);
         return session ? expertRuntimeRecipe(session) : undefined;
@@ -1579,6 +1637,17 @@ export class WebServer extends EventEmitter {
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
       },
     });
+    this.workerProviderHealth = new WorkerProviderHealth({
+      employees: () => this.companyService.registeredEmployees(),
+      query: signal => laptopPower('provider-health', undefined, signal),
+      changed: () => {
+        this.cachedSessionsList = null;
+        for (const session of this.sessions.values())
+          this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
+        for (const owner of new Set(this.companyService.registeredEmployees().map(e => e.owner)))
+          this.broadcast(SseEvent.ChatroomChanged, { owner: owner ?? '@single', roomId: '', action: 'profile' });
+      },
+    });
     goalBoundary.attach(this.companyService, {
       getSession: (id) => this.sessions.get(id),
       restSessionMetadata: (id) => restSessionMetadataFromRegistry(this.sessions, id),
@@ -1608,6 +1677,10 @@ export class WebServer extends EventEmitter {
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
+      ...(process.env.REVERIE_WORKER_SOCKET ? { nativeHealth: (id: string) => {
+        const employee=this.companyService.registeredEmployees().find(e=>e.sessionId===id);
+        return employee ? this.workerProviderHealth?.read(employee)?.state ?? 'unknown' as const : 'unknown' as const;
+      }} : {}),
       live: (id) => {
         const session = this.sessions.get(id);
         return !!session && session.pid !== null && !session.paneExit && session.status !== 'stopped';
@@ -1628,7 +1701,9 @@ export class WebServer extends EventEmitter {
             existing?.pid !== null &&
             existing?.pid !== undefined &&
             !existing.paneExit &&
-            existing.status !== 'stopped'
+            existing.status !== 'stopped' &&
+            (!process.env.REVERIE_WORKER_SOCKET || !this.companyService.view(entry.owner).employees.some(e=>
+              e.sessionId===entry.sessionId && e.providerHealth?.state==='dead'))
           )
             return false;
           if (existing) await this.discardPartiallyBuiltSession(entry.sessionId);
@@ -1658,6 +1733,7 @@ export class WebServer extends EventEmitter {
           }));
         await deliverRecoveryPrompt(
           session,
+          employeeMemoryContext(employee, journalHighlights(employee)) + ' ' +
           'Crash recovery: you are the owner-selected recovery expert. Continue with your existing memory and conversation. Wake all eligible desired-running experts in organization order; managers may delegate downward. Preserve deliberately stopped, paused and retired experts, skip already-live agents, and report failures. Stable agent IDs identify experts independently of their runtime sessions or models. With an explicit owner-granted recoverEmployees permission, call POST /api/company/employees/:id/wake through the authenticated console API; selection alone grants no permission. If permission is absent, ask the owner. Organization: ' +
             JSON.stringify(roster),
           () => allowed() && this.sessions.get(employee.sessionId) === session
@@ -1705,6 +1781,13 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     });
+    registerEmployeeJournalRoutes(this.app, ctx, {
+      verifiedOwner,
+      agentSession: currentAgentSession,
+      company: owner => this.companyService.view(owner),
+      journal: openJournal,
+      visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
+    });
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
     registerCompanyRoutes(
       this.app,
@@ -1718,9 +1801,15 @@ export class WebServer extends EventEmitter {
         serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
+        resourceReplacement: this.resourceReplacementEnabled === true,
+        refreshHealth: async () => { await this.workerProviderHealth?.refresh(); },
+        startEmployee: (id, req, reply, current) => {
+          if (!startOfficeEmployee) throw new CompanyError('Employee startup is not ready',503);
+          return startOfficeEmployee(id,req,reply,current);
+        },
       }
     );
-    registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
+    const startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);
       const recipe = employee?.runtimeRecipe;
       const saved = this.store.getSession(id) ?? (recipe ? { ...recipe, ...recipe.configs, id, owner: employee?.owner, name: employee?.name } : undefined);
@@ -1731,10 +1820,13 @@ export class WebServer extends EventEmitter {
       if (custom) session.setCustomModel(custom);
       if (!custom && recipe?.customModel) session.setCustomModel({ ...recipe.customModel, label: 'Local model', envKeys: [] });
       return session;
-    }, this.companyService, async (session) => {
-      await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
-      await this.companyService.setDesiredRunning(session.id, true);
-    });
+    }, this.companyService, async (session, stillCurrent, preserveRecipe) => {
+      // Attendance/restart preserves the canonical saved recipe, including absent optional fields.
+      if (!preserveRecipe) await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session), stillCurrent);
+      await this.companyService.setDesiredRunning(session.id, true, stillCurrent);
+      if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication',409);
+      this.rebriefAfterBackendChange(session.id);
+    }, laptopAgentStop);
     registerCompanyHireRoutes(this.app, {
       company: this.companyService,
       verifiedOwner,
@@ -1775,6 +1867,9 @@ export class WebServer extends EventEmitter {
     // The server's board (one per console): issues, milestones, wins, blockers, decisions, focus. Audited writes.
     const boardStore = new BoardStore(dataPath('board.json'));
     await boardStore.init();
+    this.boardStore = boardStore;
+    // Room views show each member's 'doing' cards: a saved Board write re-announces the rooms whose cards moved.
+    boardStore.onChange(() => this.chatroomService.noteBoardChanged());
     registerBoardRoutes(this.app, ctx, {
       verifiedOwner,
       store: boardStore,
@@ -1866,13 +1961,15 @@ export class WebServer extends EventEmitter {
       (sessionId) =>
         this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
           ?.id,
-      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
+      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), humanNames: room => ownerAuth.members(room).map(person => person.name), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
     );
     registerBrowserJobEvidence(this.app, { sessions: ctx, chat: this.chatroomService, company: companyStore, currentOwner: id => ownerAuth.isMessageOwner(id), policy: { service: ownerAuth, ctx } });
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
+    this.chatBots = chatBots;
     registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>
-      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id)
+      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id) || botWatches.github.usesBot(id),
+      (bot) => this.chatroomService.botChanged(bot.id, bot.rooms)
     );
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
@@ -1881,8 +1978,9 @@ export class WebServer extends EventEmitter {
       coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
       verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
+      alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), title: 'Disk critical', timeoutMs: 5000 }),
     });
-    this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment and public issue watchers' });
+    this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment, public issue and disk-space watchers' });
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
       timeZone: owner => this.companyService.view(owner).settings.timeZone,
@@ -1913,20 +2011,26 @@ export class WebServer extends EventEmitter {
         }).catch(() => undefined);
       },
     });
+    // The checks an author routine post makes, without posting; a run preview asks the same question.
+    const authorFor = (employeeId: string, roomId: string) => {
+      const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
+      if (!employee) throw new Error('The author is no longer an employee');
+      const room = this.chatroomService.room(roomId);
+      if (!room) throw new Error('The room no longer exists');
+      if (room.archivedAt) throw new Error('This room is archived');
+      if (!room.members.some((m) => m.sessionId === employee.sessionId))
+        throw new Error(`${employee.name} is no longer a member of this room`);
+      return employee;
+    };
     this.cronService.setBotPoster({
       getBot: (id) => chatBots.get(id),
       check: (bot, roomId, recent) => this.chatroomService.checkBotPost(bot, roomId, recent),
       post: (bot, roomId, text, recent) => void this.chatroomService.postAsBot(bot, roomId, text, recent),
       postWatchNotice: (bot, roomId, text, recent, owner) => this.chatroomService.postWatchNotice(bot, roomId, text, recent, owner),
       // An author routine speaks as the employee, found by employee id each time so a restart or rebind changes nothing.
+      canPostAsAuthor: (employeeId, roomId) => void authorFor(employeeId, roomId),
       postAsAuthor: (employeeId, roomId, text) => {
-        const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
-        if (!employee) throw new Error('The author is no longer an employee');
-        const room = this.chatroomService.room(roomId);
-        if (!room) throw new Error('The room no longer exists');
-        if (room.archivedAt) throw new Error('This room is archived');
-        if (!room.members.some((m) => m.sessionId === employee.sessionId))
-          throw new Error(`${employee.name} is no longer a member of this room`);
+        const employee = authorFor(employeeId, roomId);
         this.chatroomService.post(
           roomId,
           { kind: 'agent', sessionId: employee.sessionId, name: employee.name },
@@ -2065,9 +2169,10 @@ export class WebServer extends EventEmitter {
     this.cronService.setPostSources({
       'plans-pace': async () => plansPaceData((await this.planService.plans()).accounts),
       'host-load': hostLoadData,
-      'burn-watch': async () => {
+      'burn-watch': async ({ preview }) => {
         const rows = (await this.planService.plans()).accounts;
-        appendBurnLog(dataPath('burn-hourly.log'), burnLogLines(rows));
+        // The hourly log records real runs; a run preview reads and writes nothing.
+        if (!preview) appendBurnLog(dataPath('burn-hourly.log'), burnLogLines(rows));
         return burnWatchData(rows);
       },
       github: async ({ args, last }) => {
@@ -2098,6 +2203,7 @@ export class WebServer extends EventEmitter {
           .rooms()
           .flatMap((r) => r.members.filter((m) => m.role === 'coordinator').map((m) => m.sessionId)),
       historyFile: dataPath('plan-usage-history.json'),
+      costs: this.planCosts,
     });
     // One-click sign-in: the provider's login CLI in a hidden pane on its own tmux socket.
     this.accountLogins = new AccountLoginService(
@@ -2174,6 +2280,7 @@ export class WebServer extends EventEmitter {
       company: this.companyService,
       session: id => this.sessions.get(id),
       ready: () => this.companyWakeReady,
+      providerHealthy: employee => this.workerProviderHealth?.read(employee)?.state === 'healthy',
       moveGuard: id => planMoves.viewerReconnectGuard(id),
       pause: id => this.chatroomService.delivery.pauseForMigration(id),
       publish: session => {
@@ -2232,7 +2339,12 @@ export class WebServer extends EventEmitter {
       ctx,
       ownerAuth,
       capturePlanMove,
-      async (target) => (await availablePlanTarget(target)).mode
+      async (target) => (await availablePlanTarget(target)).mode,
+      request => {
+        const caller = callerOf(request, { service: ownerAuth, ctx });
+        return caller.kind === 'agent' && request.headers['x-reverie-parent-session'] === caller.session
+          ? ownPlanRecovery(request, planMoveRuntime) : undefined;
+      }
     );
     const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));
     const planRequestCapabilities = new PlanRequestCapabilities();
@@ -2247,7 +2359,12 @@ export class WebServer extends EventEmitter {
         write: value => planRequestCapabilities.write(value),
         remove: (sessionId, requestId) => planRequestCapabilities.remove(sessionId, requestId),
       },
-      notify: (record, _file, allowed) => deliverPlanRequest(record, this.chatroomService, allowed),
+      notify: (record, _file, allowed, expiredUnseen) => deliverPlanRequest(record, this.chatroomService, allowed, undefined, {
+        expiredUnseen,
+        // Multi-user alerts reach every admin, so an expired request is reported only where one owner holds the plans.
+        ownerAlert: (text) => isMultiUserMode() ? undefined
+          : sendOwnerAlert(this.pushStore, text, { multiUser: false, title: 'Plan move expired', timeoutMs: 5000 }),
+      }),
       audit: entry => this.chatroomService.auditEntry(entry),
     });
     registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
@@ -3452,6 +3569,8 @@ export class WebServer extends EventEmitter {
     const controller = this.respawnControllers.get(session.id);
     return {
       ...session.toLightDetailedState(),
+      providerHealth: this.workerProviderHealth?.read(session.id, { owner: session.owner }),
+      viewerHealth: viewerHealth(session),
       respawnEnabled: controller?.getConfig()?.enabled ?? false,
       respawnConfig: controller?.getConfig() ?? null,
       respawn: controller?.getStatus() ?? null,
@@ -4044,6 +4163,9 @@ export class WebServer extends EventEmitter {
     // CRITICAL: Skip in test mode to prevent tests from picking up user sessions
     if (!this.testMode) {
       const restored = await this.restoreMuxSessions();
+      // Owner stops the previous process left unsettled: input to those agents is already refused (owner-stop-journal).
+      // Settle each one so the input can be given back.
+      if (process.env.REVERIE_WORKER_SOCKET) resumeOwnerStops(laptopAgentStop);
       if (restored && process.env.REVERIE_WORKER_SOCKET) {
         try {
           const result = await reattachLaptops({
@@ -4221,6 +4343,10 @@ export class WebServer extends EventEmitter {
     if (!this.testMode) {
       this.embassyGuestClient.start();
       this.embassyPairing.start();
+      if (process.env.REVERIE_WORKER_SOCKET) {
+        void this.workerProviderHealth?.refresh();
+        this.cleanup.setInterval(() => void this.workerProviderHealth?.refresh(), 5_000, { description: 'Read-only native command health' });
+      }
       const tickCompany = () =>
         this.companyService
           .tick()
@@ -4230,7 +4356,7 @@ export class WebServer extends EventEmitter {
           .tick()
           .then((report) => {
             for (const item of report.skipped)
-              if (item.reason === 'kickoff-failed' || item.reason === 'wake-failed')
+              if (item.reason === 'kickoff-failed' || item.reason === 'wake-failed' || item.reason === 'start-unconfirmed')
                 console.error('[company] crash recovery needs owner attention:', item.employeeId, item.reason);
           })
           .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
@@ -5254,6 +5380,7 @@ export class WebServer extends EventEmitter {
 
   async stop(): Promise<void> {
     this.companyWakeReady = false;
+    this.workerProviderHealth?.close();
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });

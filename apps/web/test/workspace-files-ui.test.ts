@@ -86,6 +86,24 @@ it('opens a selected file, renders inert preview text, and restores the full lis
   expect(file.getAttribute('aria-pressed')).toBe('false');
 });
 
+it('shows an SVG as an image from a data: URL, never as markup or a same-origin blob, with its script inert', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><script>window.executed=true</script><rect width="4" height="4"/></svg>';
+  const { win, doc } = setup(async (input) =>
+    input.includes('/file?') ? new Response(svg, { headers: { 'content-type': 'text/plain; charset=utf-8' } }) : listing([item('logo.svg')])
+  );
+  win.URL.createObjectURL = vi.fn(() => 'blob:never');
+  await vi.waitFor(() => expect(doc.querySelector('#files button')).not.toBeNull());
+  (doc.querySelector('#files button') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(doc.querySelector('#preview img')).not.toBeNull());
+  const img = doc.querySelector('#preview img') as HTMLImageElement;
+  expect(img.alt).toBe('logo.svg');
+  expect(img.getAttribute('src')!.startsWith('data:image/svg+xml;base64,')).toBe(true);
+  expect(Buffer.from(img.getAttribute('src')!.split(',')[1], 'base64').toString('utf8')).toBe(svg);
+  expect(win.URL.createObjectURL).not.toHaveBeenCalled();
+  expect(doc.querySelector('#preview rect, #preview script, #preview pre')).toBeNull(); // the file's own markup is never in the page
+  expect((win as any).executed).toBeUndefined();
+});
+
 it('does not reopen a preview when an earlier request finishes after close', async () => {
   const pending = deferred<Response>();
   const { doc } = setup(async (input) => (input.includes('/file?') ? pending.promise : listing()));

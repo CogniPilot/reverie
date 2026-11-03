@@ -1,6 +1,6 @@
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
- * Employee pronouns (card i-f5b288f8): an optional one-line field on the employee record that only the owner sets
+ * Employee pronouns: an optional one-line field on the employee record that only the owner sets
  * (PUT /api/company/employees/:id, null clears it). An agent can neither set them on itself (/api/company/self stays
  * name and icon) nor on anyone else; `reverie agent profile --pronouns` only posts a proposal line in the room, which
  * remains a chat message. Room views and `agent chat who` carry them where known; editing uses the owner profile form.
@@ -87,11 +87,14 @@ describe('the pronouns field on the employee record', () => {
           onVacation: false,
           sleepEnabled: false,
           dreamEnabled: false,
-          permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false },
+          permissions: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false },
           wakeAttempts: [],
         },
       ]);
       expect(store.snapshot().retired[0]).not.toHaveProperty('pronouns');
+      expect(store.snapshot().retired[0].permissions).toEqual({
+        recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false,
+      });
       expect(
         CompanyStateSchema.parse({ ...old, retired: [{ ...old.retired[0], pronouns: 'he/him' }] }).retired[0].pronouns
       ).toBe('he/him');
@@ -313,7 +316,7 @@ describe('pronouns in the room member list', () => {
         id: 'room-aaaa',
         name: 'Lab',
         members: [
-          { sessionId: 'me-session', name: 'Ada', role: 'agent', goal: '', progress: '', pronouns: 'she/her' },
+          { sessionId: 'me-session', name: 'Abe', role: 'agent', goal: '', progress: '', pronouns: 'she/her' },
           { sessionId: 'other-session', name: 'Linus', role: 'agent', goal: '', progress: '' },
         ],
       },
@@ -326,7 +329,7 @@ describe('pronouns in the room member list', () => {
     };
     expect(await agentChatWho(d, { room: 'Lab' })).toBe(0);
     const text = out.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
-    expect(text).toMatch(/"Ada" \(you\).*\n {4}pronouns: "she\/her"/);
+    expect(text).toMatch(/"Abe" \(you\).*\n {4}pronouns: "she\/her"/);
     expect(text.match(/pronouns: /g)).toHaveLength(1);
   });
 });

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import copy
 import fcntl
 import json
+import select
 import os
 from pathlib import Path
 import socket
@@ -123,6 +124,20 @@ class PortTests(unittest.TestCase):
         with self.assertRaises(ValueError):client.call(self.request())
         self.assertEqual(self.backend.launched,0)
 
+    def test_refusal_decides_even_when_the_server_closes_before_the_client_sends(self):
+        # The server refuses a non-root peer without reading its request, then closes. On a loaded machine that close
+        # can land before the client's send, which then fails with EPIPE; the refusal already sent must still decide.
+        if os.getuid()==0:self.skipTest('denial case requires ordinary test user')
+        self.server.start();send=P.I.send_message
+        def after_server_closed(connection,value,deadline):
+            if 'method' in value:
+                poller=select.poll();poller.register(connection,select.POLLRDHUP)
+                self.assertTrue(poller.poll(5000),'server never closed the connection')
+            send(connection,value,deadline)
+        client=P.PeerClient(self.backend.option['socket'],os.getuid())
+        with patch.object(P.I,'send_message',after_server_closed),self.assertRaises(I.Refused):client.call(self.request())
+        self.assertEqual(self.backend.launched,0)
+
     def test_closed_requests_do_not_launch_arbitrary_code_or_paths(self):
         for change in ({'method':'exec'},{'command':'sh'},{'source':'evil'},{'path':'/etc'},{'employeeId':SID},{'expiresAt':time.time()+900}):
             with self.subTest(change=change),self.assertRaises(ValueError):self.server.request(self.request(**change))
@@ -177,7 +192,7 @@ class SchemaTests(unittest.TestCase):
         self.assertIsNone(P.validate_option(base))
         good=dict(base,leaseAcceptance={'socket':'/host/state/lease-peer/peer.sock','employeeId':EMP,'leaseSubdirectory':'.local/state/reverie/leases','peerBinary':'/nix/store/test-static/bin/peer'})
         self.assertEqual(P.validate_option(good)['employeeId'],EMP)
-        for option in (dict(good['leaseAcceptance'],command='x'),dict(good['leaseAcceptance'],socket='/host/state/employees/x/p.sock'),dict(good['leaseAcceptance'],employeeId='Stan'),dict(good['leaseAcceptance'],leaseSubdirectory='../escape')):
+        for option in (dict(good['leaseAcceptance'],command='x'),dict(good['leaseAcceptance'],socket='/host/state/employees/x/p.sock'),dict(good['leaseAcceptance'],employeeId='Sam'),dict(good['leaseAcceptance'],leaseSubdirectory='../escape')):
             with self.subTest(option=option),self.assertRaises(ValueError):P.validate_option(dict(base,leaseAcceptance=option))
 
     def test_control_never_confuses_direct_result_with_process_exit(self):

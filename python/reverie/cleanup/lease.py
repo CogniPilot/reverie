@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build leases for disposable directories: roadmap T7b, to Ada's lease contract r10 (r4 behaviour + §T timestamps,
+"""Build leases for disposable directories: roadmap T7b, to the lease contract r10 (r4 behaviour + §T timestamps,
 §5 several lease dirs, §C configuration, §G generic, r9 N1 probes and N2 unreadable walks, r10 §2M metadata). Names no team, repo or tool.
 
 Lease dir (persistent, outside every pruned root): ~/.local/state/reverie/leases, or REVERIE_LEASE_DIR
@@ -8,7 +8,7 @@ Lease dir (persistent, outside every pruned root): ~/.local/state/reverie/leases
   <st_dev>-<st_ino>.path.json     §2M: exactly one per lock {version 1, path, first_seen_utc}, written by the first
                                   holder or reserver; gc removes it with the lock (keys can't be reversed to paths)
   <st_dev>-<st_ino>.<pid>.json    §2M: one per LIVE holder, for people and receipts; deleted by its holder before release
-  <st_dev>-<st_ino>.reserve.json  RESERVE: {version 1, path, created_utc, until_utc (epoch seconds, as Ada's
+  <st_dev>-<st_ino>.reserve.json  RESERVE: {version 1, path, created_utc, until_utc (epoch seconds, as the
                                   reference model), owner, compute_lease_id?}; each window <= 24 h; renew rewrites it
 and the lease dir has one barrier.lock. Every acquisition takes it SHARED for milliseconds; the janitor takes it
 EXCLUSIVE from scan to delete, so no new lease can appear between the janitor's scan and its delete.
@@ -259,7 +259,7 @@ def reserve(directory, duration: str, owner: str = "", compute_lease_id: str | N
             current = _read_reservation(path)
             if not current or current.get("path") != directory:
                 raise LeaseError(f"no reservation to renew: {directory}")
-        now = _now()   # renew rewrites the window: created = now, so each window is <= 24 h (Ada's model)
+        now = _now()   # renew rewrites the window: created = now, so each window is <= 24 h (the model)
         value = {"version": 1, "path": directory, "created_utc": now, "until_utc": now + length,
                  "owner": owner or os.environ.get("USER", "")}
         if compute_lease_id:
@@ -394,7 +394,7 @@ def check(candidate, root: str | None = None, bases=None) -> tuple[int, str]:
         with janitor(candidate, root, bases):
             return FREE, "free"
     except Busy as error:
-        return IN_USE, str(error)   # a busy barrier means SKIP this pass, as in Ada's reference model
+        return IN_USE, str(error)   # a busy barrier means SKIP this pass, as in the reference model
     except LeaseError as error:
         return (IN_USE if error.code == IN_USE else UNKNOWN), str(error)
     except OSError as error:

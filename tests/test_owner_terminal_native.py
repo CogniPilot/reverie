@@ -77,7 +77,8 @@ class FullWebsiteTests(unittest.TestCase):
         root=Path(self.temp.name).resolve()
         self.roots={name:root/name for name in ('controlRoot','bootstrapRoot','ledgerRoot')}
         for path in self.roots.values(): path.mkdir(mode=0o700)
-        self.item={'Id':'c'*64,'Image':'sha256:'+'d'*64,'State':{'Running':True,'Pid':4321},
+        self.item={'Id':'c'*64,'Image':'sha256:'+'d'*64,'Name':'/fixture',
+                   'State':{'Running':True,'Pid':4321,'Status':'running','Paused':False,'Restarting':False,'Dead':False},
                    'Config':{'User':str(os.getuid())+':'+str(os.getgid()),'Env':['PATH=/bin']},
                    'HostConfig':{'ReadonlyRootfs':True,'Memory':123,'SecurityOpt':['no-new-privileges:true'],'OomKillDisable':False,
                                  'Privileged':False,'PidMode':'','CapDrop':['ALL'],'CapAdd':None},
@@ -104,6 +105,16 @@ class FullWebsiteTests(unittest.TestCase):
         self.installation.facts.selection=copy.deepcopy(self.installation.runtime_website)
         self.installation.facts.binding=copy.deepcopy(self.installation.runtime_website)
         self.installation.facts.initial={'pid':4321,'start':23}
+        # These tests isolate full engine-spec integrity. The new kernel bind
+        # producer has separate actual-root/held-FD controls; model only its
+        # namespace ports here, retaining the real source and mount-location FDs.
+        from reverie import owner_terminal_bind_sources as B,worker_cold_tmp as C
+        table=C.read_mount_table();source=self.roots['bootstrapRoot'];device,backing=C._mount_location(source,table)
+        guest=table+[{'id':10**9,'device':device,'root':backing,'point':Path('/run/reverie-owner-terminal')}]
+        self.enterContext(patch.object(B,'read_proc',return_value={'pid':4321,'start':23}))
+        self.enterContext(patch.object(B,'_root',side_effect=lambda pid:os.open(root,os.O_PATH|os.O_DIRECTORY)))
+        self.enterContext(patch.object(B,'open_in_root',side_effect=lambda fd,path,**k:os.open(source,os.O_PATH|os.O_DIRECTORY)))
+        self.enterContext(patch.object(B,'read_mount_table',return_value=guest))
 
     def observe(self):
         with patch.object(F,'read_proc',return_value={'pid':4321,'start':23}):return self.installation.assert_website()

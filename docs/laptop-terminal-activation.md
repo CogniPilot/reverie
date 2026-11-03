@@ -43,6 +43,44 @@ an old broker sidecar does not enroll a different console merely because its
 socket exists. Upgrade through the existing supported transport maintenance
 before starting an installation window when required.
 
+## Preserve explicit service authentication
+
+A website using `--service-auth-config` needs the optional factory selection as
+well. Supply the existing canonical **guest-path string**, never a Nix path or
+authentication-file contents:
+
+```nix
+let
+  f = builtins.getFlake "git+file:///reviewed/checkout?rev=REVIEWED_COMMIT";
+  h = f.lib.ownerTerminalPackages {
+    system = "x86_64-linux";
+    serviceAuthConfig = "/run/private-services/service-auth.json";
+  };
+in h.ownerTerminalWebsiteSetup
+```
+
+This factory supplies the same H package attributes and `nativeWorkerPackages`.
+Qualify its paired native generation before the H transition. The native program
+manifest pins the complete H startup manifest and admits only its exact
+Python/Node command. Default packages retain their no-auth startup. The factory
+accepts no arbitrary argument list, secret contents or environment override.
+For this selection, invoke the built `ownerTerminalWebsiteSetup` and
+`ownerTerminalLifecycle` binaries from that same factory result; the default
+flake apps still select the default no-auth packages.
+
+The old website command must be exactly the normal host/port command with the
+same selected auth path. Its existing single read-only bind must survive with
+identical source, destination, propagation and physical file identities. Missing,
+writable, masked, aliased or changed sources refuse. Before effects the host
+source must also match the OLD website's actual guest mount-root and config
+leaf, bracketed by its init birth/root/namespaces. Owned nofollow descriptors
+retain that proof through stop; a stopped engine record alone does not prove
+the original init is gone. READY and final adoption repeat the candidate's
+actual guest join. Every owned proof descriptor closes before success; an
+uncertain close or observation refuses. Keep the original reviewed
+backup scopes for the auth document and every selected key; the existing
+checkpoint checks remain mandatory. No private auth file is imported into Nix.
+
 ## Private installation and review files
 
 Prepare the private initial document and three physical0700 roots described in

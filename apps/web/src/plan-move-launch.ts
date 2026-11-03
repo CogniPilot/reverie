@@ -92,6 +92,12 @@ export function planMoveLaunch(saved: SessionState, account: PlanAccount, input:
       : { envOverrides: launch.envOverrides }),
     ...(mode === 'codex'
       ? { codexConfig: { ...config, ...(sameHarness && input.model ? { model: input.model } : {}) } }
-      : sameHarness ? { model: input.model ?? saved.model, effort: saved.effort, advisorModel: saved.advisorModel } : {}),
+      : sameHarness ? {
+        // Delegation compares the exact JSON request; absent policy must not add
+        // own undefined properties that JSON serialization will discard.
+        ...((input.model ?? saved.model) === undefined ? {} : { model: input.model ?? saved.model }),
+        ...(saved.effort === undefined ? {} : { effort: saved.effort }),
+        ...(saved.advisorModel === undefined ? {} : { advisorModel: saved.advisorModel }),
+      } : {}),
   });
 }

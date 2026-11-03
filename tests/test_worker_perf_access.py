@@ -5,9 +5,12 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import socket
+import subprocess
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -27,6 +30,22 @@ class PerfAccess(unittest.TestCase):
         self.addCleanup(patch.stopall)
         F.Reservations.setUp(self)
         self.broker=self.native; self.broker.resource_reservations=self.gate
+        original_engine = self.native.run_engine
+        def formatted_engine(args, optional=False, *, deadline=None):
+            result = original_engine(args, optional, deadline=deadline)
+            if args[0] == 'inspect' and '--format' in args:
+                # Model Docker's actual requested projection, rather than hand
+                # the consumer every field in this fixture's engine record.
+                template = args[args.index('--format') + 1]
+                keys = re.findall(r'\{\{json \.State\.([A-Za-z]+)\}\}', template)
+                rows = [json.loads(line) for line in result.stdout.splitlines()]
+                for row in rows:
+                    state = row['State']
+                    row['State'] = {key: state.get(key) for key in keys}
+                result = subprocess.CompletedProcess(args, result.returncode,
+                    '\n'.join(json.dumps(row) for row in rows), result.stderr)
+            return result
+        self.native.run_engine = formatted_engine
         self.path=self.root/'broker.json';self.broker.config_file=self.path
         self.base={'defaultAction':'SCMP_ACT_ERRNO','syscalls':[]}
         self.base_raw=json.dumps(self.base).encode();self.selected_raw=json.dumps(P.derivative(self.base)).encode()
@@ -66,6 +85,97 @@ class PerfAccess(unittest.TestCase):
     def ready(self):
         A.request(self.broker,self.command());self.stop()
         return A.preview(self.broker,F.EID)
+
+    def test_normal_native_projection_reaches_cold_preview(self):
+        A.request(self.broker, self.command())
+        self.stop()
+        rows = self.gate.native.inventory()
+        selected = next(row for row in rows if row['Id'] == self.native.rows[0]['Id'])
+        self.assertEqual(selected['State'], {'Running': False, 'Pid': 0})
+        self.assertIs(type(self.gate.native), R.NativeObserver)
+        preview = A.preview(self.broker, F.EID)
+        self.assertEqual(preview['state'], 'READY_COLD')
+        self.assertEqual(preview['plan']['stoppedNative'],
+                         {'Id': selected['Id'], 'State': self.native.rows[0]['State']})
+
+    def test_changed_stopped_birth_invalidates_preview_without_pending(self):
+        ready = self.ready()
+        before = self.path.read_bytes()
+        self.native.rows[0]['State']['StartedAt'] = 'new-cold-birth'
+        with self.assertRaisesRegex(ValueError, 'PREVIEW_CHANGED'):
+            A.apply(self.broker, F.EID, ready['planDigest'])
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(os.path.lexists(R.pending(self.config)))
+
+    def test_missing_stopped_fields_never_default_to_cold(self):
+        A.request(self.broker, self.command())
+        self.stop()
+        state = copy.deepcopy(self.native.rows[0]['State'])
+        before = self.path.read_bytes()
+        for key in ('Status', 'StartedAt', 'Paused', 'Restarting', 'Dead'):
+            self.native.rows[0]['State'] = {k: v for k, v in state.items() if k != key}
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                A.preview(self.broker, F.EID)
+            self.assertFalse(os.path.lexists(R.pending(self.config)))
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_stopped_flags_and_unknown_status_still_refuse(self):
+        A.request(self.broker, self.command())
+        self.stop()
+        state = copy.deepcopy(self.native.rows[0]['State'])
+        for key, value in [('Paused', True), ('Restarting', True), ('Dead', True),
+                           ('Status', 'dead'), ('StartedAt', '')]:
+            self.native.rows[0]['State'] = {**state, key: value}
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'STOPPED_NATIVE_UNKNOWN'):
+                A.preview(self.broker, F.EID)
+            self.assertFalse(os.path.lexists(R.pending(self.config)))
+
+    def test_selected_stopped_inspect_cannot_substitute_another_identity(self):
+        A.request(self.broker, self.command())
+        self.stop()
+        original = self.native.run_engine
+        def wrong_identity(args, optional=False, *, deadline=None):
+            result = original(args, optional, deadline=deadline)
+            if len(args) > 2 and args[2] == R.STOPPED_ENGINE_FORMAT:
+                row = json.loads(result.stdout)
+                row['Id'] = 'f' * 64
+                return subprocess.CompletedProcess(args, 0, json.dumps(row), '')
+            return result
+        with patch.object(self.native, 'run_engine', side_effect=wrong_identity), \
+             self.assertRaisesRegex(ValueError, 'STOPPED_IDENTITY_CHANGED'):
+            A.preview(self.broker, F.EID)
+        self.assertFalse(os.path.lexists(R.pending(self.config)))
+
+    def test_stopped_producer_does_not_renew_or_exceed_original_deadline(self):
+        self.stop()
+        row = next(r for r in self.gate.native.inventory() if r['Id'] == self.native.rows[0]['Id'])
+        start = time.monotonic()
+        deadlines = []
+        original = self.native.run_engine
+        def engine(args, optional=False, *, deadline=None):
+            deadlines.append(deadline)
+            return original(args, optional, deadline=deadline)
+        with patch.object(self.native, 'run_engine', side_effect=engine), \
+             patch.object(R.time, 'monotonic', side_effect=[start, start + 1]), \
+             self.assertRaisesRegex(ValueError, 'OBSERVATION_DEADLINE'):
+            self.gate.native.stopped_state(row, deadline=start + 0.5)
+        self.assertEqual(deadlines, [start + 0.5])
+
+    def test_stopped_birth_drift_after_admission_finalizer_retains_pending(self):
+        ready = self.ready()
+        original = A._kernel
+        changed = []
+        def kernel():
+            result = original()
+            if getattr(self.gate._local, 'depth', 0) == 0 and os.path.lexists(R.pending(self.config)) and not changed:
+                self.native.rows[0]['State']['StartedAt'] = 'late-new-cold-birth'
+                changed.append(True)
+            return result
+        with patch.object(A, '_kernel', side_effect=kernel), \
+             self.assertRaisesRegex(RuntimeError, 'RECONCILIATION'):
+            A.apply(self.broker, F.EID, ready['planDigest'])
+        self.assertEqual(changed, [True])
+        self.assertTrue(os.path.lexists(R.pending(self.config)))
 
     def test_running_request_only_queues_never_changes_policy_or_starts(self):
         before=self.path.read_bytes();marker=R.marker(self.config).read_bytes();rows=copy.deepcopy(self.native.rows)

@@ -541,7 +541,7 @@ describe('file-routes', () => {
 
   describe('GET /api/filesystem/download', () => {
     it('streams an owner workspace artifact without depending on its agent session lifetime', async () => {
-      const path = CASES_DIR + '/expert-quill/EP010.mp4';
+      const path = CASES_DIR + '/expert-quinn/EP010.mp4';
       mockedStat.mockImplementation(async (path) => ({ size: 15, isFile: () => String(path).endsWith('.mp4'), isDirectory: () => !String(path).endsWith('.mp4') }) as never);
       const response = await harness.app.inject({ method: 'GET', url: '/api/filesystem/download?path=' + encodeURIComponent(path) });
       expect(response.statusCode).toBe(200);
@@ -552,7 +552,7 @@ describe('file-routes', () => {
     it('downloads shared-drive artifacts even when cases are configured at another mount', async () => {
       vi.stubEnv('REVERIE_SHARED_WORKSPACE_PATH', '/reverie_workspace');
       try {
-        const path = '/reverie_workspace/cases/expert-quill/EP010.mp4';
+        const path = '/reverie_workspace/cases/expert-quinn/EP010.mp4';
         mockedStat.mockImplementation(async (path) => ({ size: 15, isFile: () => String(path).endsWith('.mp4'), isDirectory: () => !String(path).endsWith('.mp4') }) as never);
         const response = await harness.app.inject({ method: 'GET', url: '/api/filesystem/download?path=' + encodeURIComponent(path) });
         expect(response.statusCode).toBe(200);

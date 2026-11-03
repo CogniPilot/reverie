@@ -217,7 +217,7 @@ describe('read aloud in the team voices', () => {
     a._readAloudQueue = () => ({ push: (...args: unknown[]) => pushed.push(args) });
     (a._readAloudOnMessage as (d: unknown) => void)(message('Workspace: Reviewer', 'reviewer-id', 'Voices are live.'));
     expect(pushed).toEqual([
-      ['Reviewer says: Voices are live.', { room: 'board', member: 'reviewer-id', text: 'Voices are live.' }],
+      ['Reviewer says: Voices are live.', { room: 'board', member: 'reviewer-id', messageId: 'm-Voices are live.', text: 'Voices are live.' }],
     ]);
     expect(asked).toEqual([]);
   });

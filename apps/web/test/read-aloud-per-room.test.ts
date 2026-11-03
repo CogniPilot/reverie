@@ -89,7 +89,7 @@ describe('speak replies aloud, per room', () => {
     expect(pushed).toEqual([]);
     a._setSpeakReplies('voice', true);
     a._readAloudOnMessage(msg('Here.'));
-    expect(pushed).toEqual([['Reviewer says: Here.', { room: 'voice', member: 'reviewer-id', text: 'Here.' }]]);
+    expect(pushed).toEqual([['Reviewer says: Here.', { room: 'voice', member: 'reviewer-id', messageId: 'm-Here.', text: 'Here.' }]]);
   });
 
   it('reads in any room it is turned on in, voice member or not', () => {

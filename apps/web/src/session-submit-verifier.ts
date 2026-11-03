@@ -45,6 +45,27 @@ export const SUBMIT_VERIFY_DELAYS_MS: readonly number[] = [
  * chip additionally requires an observed empty composer before this write.
  */
 const PASTE_PLACEHOLDER = /\[Pasted (?:Content|text)[^\]]*?(\d+) chars\]/gi;
+/**
+ * Claude Code folds a paste longer than 800 characters, or with more than two line breaks, into an indexed chip:
+ * `[Pasted text #1]`, or `[Pasted text #1 +3 lines]` where the count is the paste's line breaks (measured in Claude Code
+ * 2.1.308). The chip carries no length, so it binds a prompt only as the whole composer, after a write observed from an empty
+ * composer, and only by that count.
+ */
+const CLAUDE_PASTE_CHIP = /^\[Pasted text #\d+(?: \+(\d+) lines)?\]$/;
+const CLAUDE_PASTE_MIN_CHARS = 800;
+const CLAUDE_PASTE_MIN_BREAKS = 3;
+const lineBreaks = (text: string): number => (text.match(/\r\n|\r|\n/g) ?? []).length;
+
+/** Whether a composer holding only one Claude paste chip holds `prompt`; `undefined` when it is not such a composer. */
+export function claudeChipHoldsPrompt(composer: string, prompt: string, allowOpaque = false): boolean | undefined {
+  const chip = CLAUDE_PASTE_CHIP.exec(composer);
+  if (!chip) return undefined;
+  if (!allowOpaque) return false;
+  const breaks = Number(chip[1] ?? 0);
+  // Only an otherwise wholly opaque paste can include its terminal line ending.
+  const counts = [lineBreaks(prompt), lineBreaks(prompt.replace(/(?:\r\n|\r|\n)$/, ''))];
+  return counts.includes(breaks) && (prompt.length > CLAUDE_PASTE_MIN_CHARS || breaks >= CLAUDE_PASTE_MIN_BREAKS);
+}
 const PASTE_SLACK_CHARS = 4;
 /** After the last Enter of the schedule, how long to wait before the final look. */
 const FINAL_LOOK_MS = 2_000;
@@ -56,6 +77,61 @@ const FINAL_LOOK_MS = 2_000;
  */
 // eslint-disable-next-line no-control-regex
 const CODEX_DIM_PLACEHOLDER = /^((?:\x1b\[[0-9;]*m)*›(?:\x1b\[[0-9;]*m)* ?)\x1b\[2m[^\x1b\n]*\x1b\[(?:0|22)?m/gmu;
+
+/** Text attributes in effect while reading a styled capture; `unknown` once a code this reader does not model is seen. */
+interface SgrState { on: Set<number>; fg: boolean; bg: boolean; underlineColour: boolean; unknown: boolean }
+/** The attributes each "off" code clears (25 clears both blinks); 26 is not an "off" code and is treated as unknown. */
+const SGR_CLEARS: Record<number, number[]> = { 22: [1, 2], 23: [3], 24: [4], 25: [5, 6], 27: [7], 28: [8], 29: [9] };
+
+/** Apply one SGR sequence's parameters as a terminal would; anything not modelled makes the state unknown until a reset. */
+function applySgr(state: SgrState, params: string): void {
+  if (params.includes(':')) { state.unknown = true; return; }
+  const codes = params === '' ? ['0'] : params.split(';');
+  for (let i = 0; i < codes.length; i++) {
+    const code = Number(codes[i] === '' ? '0' : codes[i]);
+    if (code === 0) {
+      state.on.clear(); state.fg = state.bg = state.underlineColour = state.unknown = false;
+    } else if (code >= 1 && code <= 9) state.on.add(code);
+    else if (SGR_CLEARS[code]) for (const cleared of SGR_CLEARS[code]!) state.on.delete(cleared);
+    else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) state.fg = true;
+    else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) state.bg = true;
+    else if (code === 39) state.fg = false;
+    else if (code === 49) state.bg = false;
+    else if (code === 59) state.underlineColour = false;
+    else if (code === 38 || code === 48 || code === 58) {
+      const width = codes[i + 1] === '5' ? 2 : codes[i + 1] === '2' ? 4 : 0;
+      if (!width || i + width >= codes.length) { state.unknown = true; return; }
+      if (code === 38) state.fg = true; else if (code === 48) state.bg = true; else state.underlineColour = true;
+      i += width;
+    } else state.unknown = true;
+  }
+}
+
+/**
+ * The style at the glyph of every row that starts with it (after style codes), reading the whole capture as one stream:
+ * attributes set on an earlier row and never reset still apply. Sorted attribute numbers, plus "colour" when any colour is
+ * set; undefined when the state is unknown. The capture is taken to start in the default state.
+ */
+function glyphStyles(screen: string, glyph: string): Map<number, string | undefined> {
+  const state: SgrState = { on: new Set(), fg: false, bg: false, underlineColour: false, unknown: false };
+  const styles = new Map<number, string | undefined>();
+  screen.split('\n').forEach((row, index) => {
+    // eslint-disable-next-line no-control-regex
+    const lead = /^((?:\x1b\[[0-9;:]*m)*)/u.exec(row)![1]!;
+    // eslint-disable-next-line no-control-regex
+    for (const [, params] of lead.matchAll(/\x1b\[([0-9;:]*)m/gu)) applySgr(state, params!);
+    if (row.slice(lead.length).startsWith(glyph)) {
+      styles.set(index, state.unknown ? undefined
+        : [...[...state.on].sort((a, b) => a - b).map(String), ...(state.fg || state.bg || state.underlineColour ? ['colour'] : [])].join(','));
+    }
+    // eslint-disable-next-line no-control-regex
+    for (const [, params] of row.slice(lead.length).matchAll(/\x1b(?:\[([0-9;:]*)m)?/gu)) {
+      if (params === undefined) state.unknown = true;
+      else applySgr(state, params);
+    }
+  });
+  return styles;
+}
 
 /** The complete last composer, including wrapped text, ending before the CLI's chrome. */
 export function composerBody(screen: string, glyph: string): string | undefined {
@@ -85,7 +161,12 @@ export function composerBody(screen: string, glyph: string): string | undefined 
   // and `⚠` warning. Only the last pair counts. Higher up, two user rows in a row are plain history: a message steered into a
   // running turn is echoed right under the one that started it (codex-cli 0.163.0), and refusing there left every mid-turn
   // delivery unverified.
-  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻■⚠]/u.test(line))) return undefined;
+  // One such pair is read, from its styles: Codex (0.163.0) draws an echoed user prompt bold and faint, and its enabled composer
+  // bold only. Exactly that pair means the lower row is the composer; any other style, or none, stays ambiguous.
+  if (glyph === '›' && previous >= 0 && !lines.slice(previous + 1, last).some(line => /^[•●✻■⚠]/u.test(line))) {
+    const styles = glyphStyles(screen, glyph);
+    if (styles.get(previous) !== '1,2' || styles.get(last) !== '1') return undefined;
+  }
   const body = [lines[last].trimStart().slice(glyph.length).trimStart()];
   for (const line of lines.slice(last + 1, end)) {
     const text = line.trim();
@@ -171,6 +252,8 @@ export function promptStillInComposer(screen: string, prompt: string, glyph: str
   const body = composerBody(screen, glyph);
   if (body === undefined) return undefined;
   if (!body) return false;
+  const chip = claudeChipHoldsPrompt(body, prompt, allowOpaque);
+  if (chip !== undefined) return chip ? true : undefined;
   if (body.match(PASTE_PLACEHOLDER)) {
     return placeholderHoldsPrompt(body, prompt, allowOpaque) ? true : undefined;
   }

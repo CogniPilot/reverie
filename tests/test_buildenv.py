@@ -234,12 +234,13 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(result["status"], "refused")
         self.assertGreaterEqual(result["waited_s"], 0.3)
         self.assertLess(time.monotonic() - started, 3)
-        # A wait shorter than the poll interval still rechecks once at the deadline.
+        # A wait shorter than the poll interval still rechecks once at the deadline. The deadline leaves the freeing
+        # timer seconds, not tenths: a loaded CI runner once woke it too late for a 0.5 s wait.
         free = threading.Timer(0.2, lambda: self.tasks(current=100)); free.start(); self.addCleanup(free.cancel)
         started = time.monotonic()
-        result = self.run_build([sys.executable, "-c", "pass"], wait=0.5, poll=10)
+        result = self.run_build([sys.executable, "-c", "pass"], wait=2, poll=10)
         self.assertEqual(result["status"], "ok", result)
-        self.assertLess(time.monotonic() - started, 3)                                # slept to the deadline, not a full poll
+        self.assertLess(time.monotonic() - started, 5)                                # slept to the deadline, not a full poll
         self.tasks(current=0, limit=100)                                                # 64 reserve + 64 for --jobs 2 > 100
         started = time.monotonic()
         result = self.run_build([sys.executable, "-c", "pass"], wait=30, poll=0.1)   # can never be admitted

@@ -128,7 +128,7 @@ class OfflineStoreTests(unittest.TestCase):
         self.receipts = {}
         for kind in ('D2','CAN'):
             path = self.root/(kind+'.json'); raw = self.root/(kind+'.txt')
-            text = ('PASS shim body = F1 r7 / Ada r5 (shebang line excluded)\n'
+            text = ('PASS shim body = F1 r7 / native bridge r5 (shebang line excluded)\n'
                     'PASS builder body = r5 (fixture)\nPASS cargo resolves to the shim\n'
                     'PASS shim sets CARGO_BUILD_JOBS=2\nPASS REVERIE_NO_AUTOENV=1 untouched\n'
                     'PASS explicit -j left as given\njobs=2\n') if kind=='D2' else 'GREP pos=0 neg=1 find=0\nSHIMS /opt/reverie/autoenv/bin/cargo /shim jobs=2\nCAN-DONE\n'

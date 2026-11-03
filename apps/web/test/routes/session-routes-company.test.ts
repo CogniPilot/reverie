@@ -96,15 +96,15 @@ describe('temporary worker creation with company identity and channel inheritanc
   });
 
   it('refuses an employee\'s name for a new session, and lets the employee\'s own session replace itself by employee id', async () => {
-    const ada = await company.hire({ name: 'Ada', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
+    const abe = await company.hire({ name: 'Abe', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
     const before = ctx.sessions.size;
-    const byName = await spawn({ name: 'Ada' });
+    const byName = await spawn({ name: 'Abe' });
     expect(byName.json().success).toBe(false);
     expect(byName.json().error).toContain('existing employee');
     expect(byName.json().errorCode).toBe('CONFLICT');
     expect((await spawn({ employeeId: 'no-such-employee' })).json().errorCode).toBe('NOT_FOUND');
     expect(ctx.sessions.size).toBe(before);
-    const replaced = await spawn({ employeeId: ada.id });
+    const replaced = await spawn({ employeeId: abe.id });
     expect(replaced.statusCode).toBe(200);
     const created = replaced.json().session;
     expect(company.view().employees).toHaveLength(1);
@@ -113,28 +113,28 @@ describe('temporary worker creation with company identity and channel inheritanc
   });
 
   it('resumes the employee\'s own thread when its session is replaced, whatever the old session ran', async () => {
-    const ada = await company.hire({ name: 'Ada', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
-    await company.setThread(ada.id, undefined, 'ses_chosen');
+    const abe = await company.hire({ name: 'Abe', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
+    await company.setThread(abe.id, undefined, 'ses_chosen');
     ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
-    const replaced = await owner({ employeeId: ada.id, mode: 'opencode' });
+    const replaced = await owner({ employeeId: abe.id, mode: 'opencode' });
     expect(replaced.statusCode).toBe(200);
     const thread = (r: { json(): { session: { openCodeConfig?: { continueSession?: unknown } } } }) => r.json().session.openCodeConfig?.continueSession;
     expect(thread(replaced)).toBe('ses_chosen');
     // A caller's own thread choice is not overridden.
-    const own = await owner({ employeeId: ada.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_caller' } });
+    const own = await owner({ employeeId: abe.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_caller' } });
     expect(own.statusCode).toBe(200);
     expect(thread(own)).toBe('ses_caller');
   });
 
   describe('replacing an employee that is still running its thread', () => {
     const hire = async () => {
-      const ada = await company.hire({ name: 'Ada', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
-      await company.setThread(ada.id, undefined, 'ses_chosen');
-      return ada;
+      const abe = await company.hire({ name: 'Abe', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
+      await company.setThread(abe.id, undefined, 'ses_chosen');
+      return abe;
     };
 
     it('stops the old session before the owner\'s replacement launches', async () => {
-      const ada = await hire();
+      const abe = await hire();
       const order: string[] = [];
       ctx.cleanupSession.mockImplementation(async (id: string) => {
         order.push(`stop ${id}`);
@@ -145,7 +145,7 @@ describe('temporary worker creation with company identity and channel inheritanc
         order.push(`add ${session.id}`);
         return addSession(session, ...rest);
       });
-      const response = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const response = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(response.statusCode).toBe(200);
       expect(order[0]).toBe('stop test-session-1');
       expect(order[1]).toBe(`add ${response.json().session.id}`);
@@ -153,8 +153,8 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('tells an agent caller, even the employee\'s own session, to stop the old one first', async () => {
-      const ada = await hire();
-      const response = await spawn({ employeeId: ada.id, mode: 'opencode' });
+      const abe = await hire();
+      const response = await spawn({ employeeId: abe.id, mode: 'opencode' });
       expect(response.json().errorCode).toBe('CONFLICT');
       expect(response.json().error).toContain('Stop');
       expect(ctx.cleanupSession).not.toHaveBeenCalled();
@@ -163,33 +163,33 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('tells an agent replacing its own running session to ask the owner', async () => {
-      const ada = await hire();
-      const response = await spawn({ employeeId: ada.id, mode: 'opencode' });
+      const abe = await hire();
+      const response = await spawn({ employeeId: abe.id, mode: 'opencode' });
       expect(response.json().error).toContain('ask the owner');
     });
 
     it('reports a launch that throws after the old session was stopped, and frees the claim', async () => {
-      const ada = await hire();
+      const abe = await hire();
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
       const addSession = ctx.addSession.getMockImplementation()!;
       ctx.addSession.mockRejectedValueOnce(new Error('tmux gone'));
-      const failed = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const failed = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(failed.statusCode).toBeGreaterThanOrEqual(500);
-      expect(failures).toEqual([{ employeeId: ada.id, replacedSessionIds: ['test-session-1'], error: 'tmux gone' }]);
+      expect(failures).toEqual([{ employeeId: abe.id, replacedSessionIds: ['test-session-1'], error: 'tmux gone' }]);
       ctx.addSession.mockImplementation(addSession);
-      const retry = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const retry = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(retry.json().error ?? '').not.toContain('already being replaced');
     });
 
     it('reports a failed rebind too, but not a refusal that stopped nothing', async () => {
-      const ada = await hire();
-      await spawn({ employeeId: ada.id, mode: 'opencode' });
+      const abe = await hire();
+      await spawn({ employeeId: abe.id, mode: 'opencode' });
       expect(failures).toEqual([]);
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
       vi.spyOn(company, 'completeSpawn').mockRejectedValue(new CompanyError('Session already bound', 409));
-      await owner({ employeeId: ada.id, mode: 'opencode' });
+      await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(failures).toHaveLength(1);
-      expect(failures[0].employeeId).toBe(ada.id);
+      expect(failures[0].employeeId).toBe(abe.id);
     });
 
     it('lets only one launch at a time start on a thread, employee or not', async () => {
@@ -211,20 +211,20 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('refuses when the old session survives the stop, instead of running two on one thread', async () => {
-      const ada = await hire();
-      const response = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const abe = await hire();
+      const response = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(ctx.cleanupSession).toHaveBeenCalledWith('test-session-1', true, 'employee_replaced');
       expect(response.json().errorCode).toBe('CONFLICT');
       expect(ctx.addSession).not.toHaveBeenCalled();
     });
 
     it('treats a header whose session cannot be found as no one, never as the owner', async () => {
-      const ada = await hire();
+      const abe = await hire();
       const response = await app.inject({
         method: 'POST',
         url: '/api/sessions',
         headers: { 'x-reverie-parent-session': 'test-session-1' },
-        payload: { workingDir: directory, mode: 'opencode', employeeId: ada.id, parentSessionId: 'zzz' },
+        payload: { workingDir: directory, mode: 'opencode', employeeId: abe.id, parentSessionId: 'zzz' },
       });
       expect(response.json().errorCode).toBe('FORBIDDEN');
       expect(ctx.cleanupSession).not.toHaveBeenCalled();
@@ -233,27 +233,27 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('stops the old session when the owner asks for the employee\'s own thread explicitly, and refuses an agent', async () => {
-      const ada = await hire();
+      const abe = await hire();
       // The employee's own session owns that conversation, so the resume guard lets the request through to the thread guard.
       (ctx.sessions.get('test-session-1') as unknown as { claudeSessionId: string }).claudeSessionId = 'ses_chosen';
-      const agent = await spawn({ employeeId: ada.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_chosen' } });
+      const agent = await spawn({ employeeId: abe.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_chosen' } });
       expect(agent.json().errorCode).toBe('CONFLICT');
       expect(ctx.addSession).not.toHaveBeenCalled();
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
-      const response = await owner({ employeeId: ada.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_chosen' } });
+      const response = await owner({ employeeId: abe.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_chosen' } });
       expect(response.statusCode).toBe(200);
       expect(ctx.cleanupSession).toHaveBeenCalledWith('test-session-1', true, 'employee_replaced');
     });
 
     it('resumes the old session\'s thread for an employee hired before threads were recorded', async () => {
-      const ada = await company.hire({ name: 'Ada', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
+      const abe = await company.hire({ name: 'Abe', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
       expect(company.view().employees[0].threadId).toBeUndefined();
       ctx.store.getSession.mockImplementation((id: string) => (id === 'test-session-1' ? { openCodeConfig: { continueSession: 'ses_old' } } : undefined));
       ctx.cleanupSession.mockImplementation(async (id: string) => {
         ctx.sessions.delete(id);
         ctx.store.getSession.mockReturnValue(undefined);
       });
-      const response = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const response = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(response.statusCode).toBe(200);
       expect(response.json().session.openCodeConfig?.continueSession).toBe('ses_old');
     });
@@ -267,16 +267,16 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('lets only one replacement of an employee run at a time', async () => {
-      const ada = await hire();
+      const abe = await hire();
       let release!: () => void;
       const gate = new Promise<void>((resolve) => (release = resolve));
       ctx.cleanupSession.mockImplementation(async (id: string) => {
         await gate;
         ctx.sessions.delete(id);
       });
-      const first = owner({ employeeId: ada.id, mode: 'opencode' });
+      const first = owner({ employeeId: abe.id, mode: 'opencode' });
       await vi.waitFor(() => expect(ctx.cleanupSession).toHaveBeenCalled());
-      const second = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const second = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(second.json().errorCode).toBe('CONFLICT');
       expect(second.json().error).toContain('already being replaced');
       release();
@@ -285,11 +285,11 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('does not stop the old session when the request is refused later for another reason', async () => {
-      const ada = await hire();
+      const abe = await hire();
       const response = await app.inject({
         method: 'POST',
         url: '/api/quick-start',
-        payload: { caseName: 'ada-restart', mode: 'opencode', employeeId: ada.id, customModel: { endpointId: 'missing', modelId: 'x' } },
+        payload: { caseName: 'abe-restart', mode: 'opencode', employeeId: abe.id, customModel: { endpointId: 'missing', modelId: 'x' } },
       });
       expect(response.json().success).toBe(false);
       expect(ctx.cleanupSession).not.toHaveBeenCalled();
@@ -297,10 +297,10 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('removes the session it just started when the rebind fails, so no orphan keeps running', async () => {
-      const ada = await hire();
+      const abe = await hire();
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
       vi.spyOn(company, 'completeSpawn').mockRejectedValue(new CompanyError('Session already bound', 409));
-      const response = await owner({ employeeId: ada.id, mode: 'opencode' });
+      const response = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(response.json().errorCode).toBe('CONFLICT');
       const created = ctx.addSession.mock.calls[0][0].id as string;
       expect(ctx.cleanupSession).toHaveBeenCalledWith(created, true, 'spawn_failed');
@@ -308,13 +308,13 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('does the same on quick-start', async () => {
-      const ada = await hire();
+      const abe = await hire();
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
       vi.spyOn(company, 'completeSpawn').mockRejectedValue(new CompanyError('Session already bound', 409));
       const response = await app.inject({
         method: 'POST',
         url: '/api/quick-start',
-        payload: { caseName: 'ada-restart', mode: 'opencode', employeeId: ada.id },
+        payload: { caseName: 'abe-restart', mode: 'opencode', employeeId: abe.id },
       });
       expect(response.json().success).toBe(false);
       const created = ctx.addSession.mock.calls[0][0].id as string;

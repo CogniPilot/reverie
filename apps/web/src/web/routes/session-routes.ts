@@ -959,6 +959,10 @@ export function registerSessionRoutes(
     onReplacementFailed?: (info: { employeeId?: string; replacedSessionIds: string[]; error: string }) => void;
   } = {}
 ): RemoteWakeRegistry {
+  // Delivery knowledge belongs to this Session object, not a reusable SID. Keep
+  // a bounded receipt window; an evicted duplicate is unknown, not proof
+  // of delivery. Never replay an attempted terminal write to resolve uncertainty.
+  const terminalInputReceipts = new WeakMap<Session, LRUMap<string, 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent'>>();
   /** Bug 11: an explicit restart by the VERIFIED OWNER records running intent through the same guarded transaction as the
    * runtime route (CompanyService.prepareRuntimeRestart): intent is claimed BEFORE the launch, an owner Stop or vacation
    * that lands mid-start cancels it and wins, a failed start rolls it back. Non-owner callers and every automatic path
@@ -2146,6 +2150,13 @@ export function registerSessionRoutes(
     if (ifIdle && session.isWorking) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
     }
+    // An agent's input (send, wake: the request names its calling session) never types into a composer a plan move owns: the
+    // move's handoff goes into that composer and would be appended to it. A person's own typing stays allowed.
+    const agentCaller =
+      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
+    if (agentCaller && session.composerHeldByMove) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+    }
 
     const inputStr = String(input);
     if (inputStr.length > MAX_INPUT_LENGTH) {
@@ -2173,10 +2184,32 @@ export function registerSessionRoutes(
     }
 
     // Reliable delivery (POST fallback when the WebSocket is down): a 2xx IS the
-    // client's ACK, so a tagged duplicate redelivery must still return 200 but
-    // skip the write. Untagged requests (curl/legacy) always apply.
+    // client's ACK, so a proven tagged duplicate returns 200 without a write.
+    // An uncertain terminal attempt cannot be ACKed as applied or replayed.
+    // Untagged requests (curl/legacy) always apply.
     const tagged = typeof clientId === 'string' && typeof seq === 'number';
     const duplicate = tagged && !session.shouldApplyInput(clientId as string, seq as number);
+    const terminalScope = session.runtimeHealthScope === 'terminal';
+    let receipts = terminalScope && tagged ? terminalInputReceipts.get(session) : undefined;
+    if (terminalScope && tagged && !receipts) {
+      receipts = new LRUMap({ maxSize: 256 });
+      terminalInputReceipts.set(session, receipts);
+    }
+    const receiptKey = JSON.stringify([clientId, seq]);
+    const recordReceipt = (state: 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent') => receipts?.set(receiptKey, state);
+    const unconfirmedInput = () => createErrorResponse(
+      ApiErrorCode.OPERATION_FAILED,
+      'Input delivery is unconfirmed; it will not be replayed. Check the session before sending anything again.'
+    );
+    const typedUnsentInput = () => ({
+      ...createErrorResponse(ApiErrorCode.SESSION_BUSY,
+        'Input text remains unsent in the composer; Enter was withheld. Do not resend the text.'),
+      data: { delivered: false, typedUnsent: true },
+    });
+    const idleRefusal = () => createErrorResponse(ApiErrorCode.SESSION_BUSY,
+      'Session is busy or has a draft in its composer; nothing was typed.');
+    if (duplicate && terminalScope && receipts?.get(receiptKey) === 'typed-unsent') return typedUnsentInput();
+    if (duplicate && terminalScope && receipts?.get(receiptKey) !== 'confirmed') return unconfirmedInput();
     if (duplicate && !wantsWait) {
       return {};
     }
@@ -2209,21 +2242,33 @@ export function registerSessionRoutes(
           );
         }
       } else {
-        const outcome = await remoteWake.handleInput(session, inputStr);
+        const outcome = await remoteWake.handleInput(session, inputStr, { agentInput: agentCaller });
         // The registry holds the bytes and flushes them in order once the pane is
         // reattached. The client's ACK is this 200 — a tagged retry is deduped
         // (`shouldApplyInput` above already consumed the seq), so nothing is lost.
         // `buffered` is additive to the historical bare `{}`; `dropped` says the chunk
         // was over the wake buffer's cap and is GONE (a 200 with no field could not
         // tell delivered from buffered from dropped).
-        if (outcome === 'buffered') return { buffered: true };
+        if (outcome === 'buffered') {
+          recordReceipt('confirmed'); // The wake buffer owns this seq; a lost ACK must not enqueue it twice.
+          return { buffered: true };
+        }
         if (outcome === 'dropped') return { buffered: true, dropped: true };
       }
     }
 
     // Only a waiting request pays for the tmux probe: the browser's plain input path
     // (thousands of calls per session) must stay exec-free.
-    const workerDead = wantsWait && workerIsDead(ctx.mux, session);
+    // For an isolated/remote runtime, this pane is only its disposable viewer.
+    // Refuse before any byte and leave a fresh seq retryable. Plain browser input
+    // uses recorded facts only, retaining its exec-free path.
+    if (!duplicate && terminalScope && (
+      session.viewerInputHeld || session.pid == null || session.paneExit || (wantsWait && workerIsDead(ctx.mux, session))
+    )) {
+      if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Terminal viewer unavailable; reconnect it. Nothing was typed.');
+    }
+    const workerDead = wantsWait && !terminalScope && workerIsDead(ctx.mux, session);
 
     const timeoutMs = clampWaitMs(waitTimeout ?? undefined);
     // Same slot leak as the GET routes: a client that gives up mid-wait would
@@ -2265,11 +2310,17 @@ export function registerSessionRoutes(
     // agent's on their behalf, so it may name the tab (Ralph, respawn, cron and
     // approvals write through the session directly and never say so).
     //
-    // Because the response has already been sent by then, a failure there is the
-    // one case the caller can never learn about — so the dedup bookkeeping is
-    // rolled back. Otherwise the seq stays recorded as applied and a retry, the
-    // very mechanism reliable delivery exists for, is rejected as a duplicate.
+    // Local PTY failures retain their historical rollback. A failed terminal
+    // transport may already have typed text, so its seq stays spent and its
+    // receipt stays unconfirmed. A move gate that typed nothing is retryable.
+    let terminalWriteUnconfirmed = false;
     const undoOnFailure = () => {
+      if (terminalScope && !heldByMove && !idleRefused) {
+        terminalWriteUnconfirmed = true;
+        recordReceipt('unconfirmed');
+        return;
+      }
+      receipts?.delete(receiptKey);
       if (tagged) session.forgetInputSeq(clientId as string, seq as number);
     };
 
@@ -2279,8 +2330,13 @@ export function registerSessionRoutes(
     // BOTH writes, and telling the caller "delivered, but it timed out" points it at
     // the wrong recovery — wait longer, when the truth is "restart the worker".
     let delivered = false;
-    // An idle-only write whose text went in but whose Enter was withheld (a turn started in between): reported, never retried.
+    // A gated write whose text went in but whose Enter was withheld (a turn started, or a plan move took the composer, in
+    // between): reported, never retried.
     let typedUnsent = false;
+    let idleRefused = false;
+    // An agent's write refused before any byte because a plan move took the composer after the early check above (during the
+    // wake-target probe, say): busy, with the seq handed back for a retry once the move is done.
+    let heldByMove = false;
 
     // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
     // ask for it: written straight into the pane it arrives as one burst, and Claude
@@ -2291,12 +2347,19 @@ export function registerSessionRoutes(
     const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
     // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
     // a person's own typing, which names no session, is left exactly as typed.
-    const agentCaller =
-      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
-    const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
+    // An agent's write also answers to a plan move's hold at the write itself (agentInput); a person's typing does not.
+    const agentHold = agentCaller ? { agentInput: true, onMoveHeld: () => { heldByMove = true; } } : {};
+    const muxOptions = agentCaller
+      ? { fromUser: true, opencodeGuard: true, ...agentHold, onTypedUnsent: () => { typedUnsent = true; } }
+      : { fromUser: true };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
     const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
+    const rawOptions = { fromUser: true, ...agentHold };
+    // A terminal failure may have typed text: never replay through another write path.
+    // Local fallback still respects the existing typed-unsent and move gates.
+    const mayFallBack = () => !terminalScope && !typedUnsent && !heldByMove;
 
+    if (!duplicate) recordReceipt('pending');
     if (duplicate) {
       // Redelivery of an already-applied input: skip the write, but still honor the
       // wait, since the caller's question ("tell me when this settles") is unanswered.
@@ -2304,58 +2367,81 @@ export function registerSessionRoutes(
       // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
       // just started a turn or holds a draft gets nothing typed.
       delivered = await session
-        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true, onTypedUnsent: () => { typedUnsent = true; } })
+        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true,
+          onTypedUnsent: () => { typedUnsent = true; }, onIdleRefused: () => { idleRefused = true; } })
         .catch(() => false);
       // Typed but Enter withheld is not "nothing was typed": the text sits unsent in the composer, so the seq stays spent
       // and a retry cannot type it a second time.
       if (!delivered && !typedUnsent) undoOnFailure();
+      if (delivered) recordReceipt('confirmed');
     } else if ((useMux || autoMux) && waitPromise) {
       // The response is already staying open for the wait, so the tmux write can be
       // awaited here. This is the ONE path where a writeViaMux failure is observable.
       const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
       if (ok) {
         delivered = true;
-      } else {
+        recordReceipt('confirmed');
+      } else if (mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        delivered = session.write(rawInput, { fromUser: true });
+        delivered = session.write(rawInput, rawOptions);
         if (!delivered) undoOnFailure();
-      }
+      } else if (!typedUnsent) undoOnFailure();
     } else if (autoMux) {
       // Awaited, unlike the explicit useMux branch below. This shape also reaches here
       // from the browser's POST fallback, which sends its frames one at a time and
       // waits for each 2xx; answering only once Enter has gone out is what keeps the
       // next keystroke from overtaking it.
       const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
-      if (!ok) {
+      if (!ok && mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
-      }
+        if (!session.write(rawInput, rawOptions)) undoOnFailure();
+      } else if (!ok && !typedUnsent) undoOnFailure();
+      if (ok) recordReceipt('confirmed');
     } else if (useMux) {
-      // Fire-and-forget: don't block the HTTP response on a tmux child process.
-      // Fallback to a direct write on failure. Unchanged from before send-and-wait.
+      // Historical fire-and-forget: a 2xx accepts a still-pending write, it does
+      // not confirm delivery. Only local failures may use the raw fallback;
+      // terminal receipts settle asynchronously without replaying input.
       session
         .writeViaMux(inputStr, muxOptions)
         .then((ok) => {
-          if (ok) return;
+          if (ok) {
+            recordReceipt('confirmed');
+            return;
+          }
+          if (typedUnsent) {
+            recordReceipt('typed-unsent');
+            return;
+          }
+          if (!mayFallBack()) return undoOnFailure();
           console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-          if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+          if (!session.write(rawInput, rawOptions)) undoOnFailure();
         })
         .catch(() => {
-          if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+          if (mayFallBack() && session.write(rawInput, rawOptions)) return;
+          if (!typedUnsent) undoOnFailure();
         });
     } else {
       // Same rollback. NOT an error response, deliberately: a session can
       // legitimately have no PTY yet (created but not started), and callers have
       // always been able to write to one without a 4xx.
-      delivered = session.write(rawInput, { fromUser: true });
-      if (!delivered && tagged) {
-        session.forgetInputSeq(clientId as string, seq as number);
-      }
+      delivered = session.write(rawInput, rawOptions);
+      if (delivered) recordReceipt('confirmed');
+      else undoOnFailure();
+    }
+    if (typedUnsent) {
+      recordReceipt('typed-unsent');
+      terminalWriteUnconfirmed = terminalScope;
     }
 
     // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
     // just started, or a draft in the composer) must not read as accepted.
-    if (!waitPromise) return ifIdle ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
+    if (heldByMove && !waitPromise) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+    }
+    if (!waitPromise && terminalScope && typedUnsent) return typedUnsentInput();
+    if (!waitPromise && terminalScope && idleRefused) return idleRefusal();
+    if (!waitPromise && terminalWriteUnconfirmed) return unconfirmedInput();
+    if (!waitPromise) return ifIdle || typedUnsent ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
     try {
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse
@@ -2376,11 +2462,24 @@ export function registerSessionRoutes(
       if (selfReleased) abort.abort();
 
       const result = await waitPromise;
+      if (heldByMove) {
+        return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+      }
+      if (terminalScope && typedUnsent) return typedUnsentInput();
+      if (terminalScope && idleRefused) return idleRefusal();
+      if (terminalScope && !delivered && !duplicate) return unconfirmedInput();
+      if (terminalScope && (result.signal === 'exit' || result.ended)) {
+        return createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          'The input write was accepted, but completion is unconfirmed after terminal interruption. Do not replay it.'
+        );
+      }
       return {
         success: true,
         data: {
           delivered,
           duplicate,
+          ...(typedUnsent ? { typedUnsent } : {}),
           // The pane's own liveness, so a failed write is not mistaken for a dead worker: during a broker or website
           // pause the write fails while the worker keeps running, and restarting it would cut a live turn.
           workerDead,

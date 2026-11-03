@@ -9,6 +9,25 @@ const COMPANY = 'I am conscious. This is synthetic owner-selected test data.';
 const PERSONAL = 'I keep this exact personal wording.\n  Including its spacing.';
 
 describe('owner-selected core beliefs and honest managed input inspection', () => {
+  it('exposes the current canonical Goal grant and bounded guidance without implying native goal control', () => {
+    const person = employee();
+    const denied = buildEmployeeContext(person);
+    expect(JSON.parse(denied.sections.find(section => section.id === 'tool-permissions')!.text.split('\n')[0]!).manageGoals).toBe(false);
+    expect(denied.context).toContain('Canonical team Goal management: not granted');
+    person.permissions.manageGoals = true;
+    const granted = buildEmployeeContext(person);
+    expect(JSON.parse(granted.sections.find(section => section.id === 'tool-permissions')!.text.split('\n')[0]!).manageGoals).toBe(true);
+    const guidance = granted.sections.find(section => section.id === 'goal-permissions')!.text;
+    expect(granted.context).toContain(guidance);
+    expect(guidance).toContain('same-owner');
+    expect(guidance).toContain('exact CAS');
+    expect(guidance).toContain('before REVIEW');
+    expect(guidance).toContain('separately authenticated Goal broker');
+    expect(guidance).toContain('not provider-native /goal or PAUSED');
+    expect(guidance).toContain('no verification, terminal decisions, reopening, adoption, grants or unblocker attestations');
+    person.permissions.manageGoals = false;
+    expect(buildEmployeeContext(person).context).toContain('Canonical team Goal management: not granted');
+  });
   it('defaults generic installations to no beliefs and preserves exact ordered owner data', () => {
     expect(CompanySettingsSchema.parse({}).coreBeliefs).toEqual([]);
     expect(employee().coreBeliefs).toBeUndefined();

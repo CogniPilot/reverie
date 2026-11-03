@@ -13,30 +13,24 @@ function render(h: Awaited<ReturnType<typeof createHarness>>, text: string) {
 }
 function reference(node: Element, text: string) { return [...node.querySelectorAll<HTMLButtonElement>('.ca-chat-reference')].find(button => button.textContent === text)!; }
 
-it('opens the existing profile and right-click/keyboard member menu from an agent mention', async () => {
-  const h = await fixture(), node = render(h, 'Ask @Alpha.'), profile = vi.spyOn(h.shell, 'openProfile').mockImplementation(() => {}), menu = vi.spyOn(h.shell, 'openMemberMenu').mockImplementation(() => {});
-  const button = reference(node, '@Alpha'); expect(button.tagName).toBe('BUTTON'); button.click();
-  expect(profile).toHaveBeenCalledWith(h.shell.room.members[0], button);
-  button.dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }));
-  button.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
-  expect(menu).toHaveBeenCalledTimes(2); expect(h.server.posts).toEqual([]);
+it('shows agent and human mentions as plain highlights with no profile link or click action', async () => {
+  const h = await fixture(); h.shell.humans = [{ id: 'human', name: 'Visitor', role: 'limited' }]; h.shell.humanRoomId = h.shell.roomId;
+  const profile = vi.spyOn(h.shell, 'openProfile').mockImplementation(() => {}), menu = vi.spyOn(h.shell, 'openMemberMenu').mockImplementation(() => {}), mention = vi.spyOn(h.shell, 'mentionHuman').mockImplementation(() => {});
+  const node = render(h, 'Ask @Alpha and @Visitor, @everyone.');
+  const tags = [...node.querySelectorAll<HTMLElement>('.ca-mention-tag')];
+  expect(tags.map(tag => [tag.tagName, tag.textContent])).toEqual([['SPAN', '@Alpha'], ['SPAN', '@Visitor'], ['SPAN', '@everyone']]);
+  expect(tags.filter(tag => tag.closest('button, a'))).toEqual([]); expect(node.querySelectorAll('.ca-chat-reference')).toHaveLength(0);
+  for (const tag of tags) {
+    tag.click();
+    tag.dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    tag.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
+  }
+  expect(profile).not.toHaveBeenCalled(); expect(menu).not.toHaveBeenCalled(); expect(mention).not.toHaveBeenCalled(); expect(h.server.posts).toEqual([]);
 });
 
-it('refuses an old mention after membership removal or same-name replacement', async () => {
-  const h = await fixture(), node = render(h, '@Alpha'), profile = vi.spyOn(h.shell, 'openProfile').mockImplementation(() => {});
-  h.shell.room.members.splice(0, 1, member('replacement', 'Alpha')); reference(node, '@Alpha').click();
-  expect(profile).not.toHaveBeenCalled();
-});
-
-it('leaves duplicate names and everyone as non-actionable highlights', async () => {
+it('leaves duplicate names highlighted as plain text', async () => {
   const h = await fixture(); h.shell.room.members.push(member('two', 'alpha'));
   const node = render(h, '@Alpha @everyone'); expect(node.querySelectorAll('.ca-mention-tag')).toHaveLength(2); expect(node.querySelectorAll('button.ca-chat-reference')).toHaveLength(0);
-});
-
-it('reuses the current human member action without posting or creating a seat', async () => {
-  const h = await fixture(); h.shell.humans = [{ id: 'human', name: 'Visitor', role: 'limited' }]; h.shell.humanRoomId = h.shell.roomId;
-  const node = render(h, '@Visitor'); const mention = vi.spyOn(h.shell, 'mentionHuman').mockImplementation(() => {}); reference(node, '@Visitor').click();
-  expect(mention).toHaveBeenCalledWith('human'); expect(h.server.posts).toEqual([]);
 });
 
 it('opens a known channel with spaces through normal navigation, leaving unknown channels alone', async () => {

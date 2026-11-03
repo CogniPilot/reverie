@@ -183,29 +183,31 @@ export class GoalCanonicalAuthority {
         goal.employeeId === principal.employeeId &&
         goal.sessionId === principal.sessionId &&
         goal.sessionGeneration === principal.sessionGeneration;
+      const manages = () => principal.kind === 'employee' &&
+        this.liveEmployee(state, principal.employeeId, principal.owner).permissions.manageGoals === true;
       switch (action) {
         case 'READ':
           if (request.routeOptions.url === '/api/goals/:id') {
             const goal = this.goal(state, params.id, principal);
             if (principal.kind !== 'owner') {
-              if (!own(goal)) refuse();
+              if (!own(goal) && !manages()) refuse();
               this.target(state, goal);
             }
           }
-          break; // list visibility remains the core's exact own/owner filter, never a team full-read grant.
+          break; // The core applies the same explicit owner/own/team-management full-read predicate.
         case 'CREATE': {
           const target = this.employee(state, body.employeeId, principal.owner);
           if (
             body.sessionId !== target.sessionId ||
             body.sessionGeneration !== target.sessionGeneration ||
-            (principal.kind !== 'owner' && principal.employeeId !== target.id)
+            (principal.kind !== 'owner' && principal.employeeId !== target.id && !manages())
           )
             refuse();
           break;
         }
         case 'METADATA_READ':
           if (!valid(ID, params.employeeId)) refuse();
-          if (principal.kind !== 'owner' && principal.employeeId !== params.employeeId)
+          if (principal.kind !== 'owner' && principal.employeeId !== params.employeeId && !manages())
             this.grant(
               state,
               (request.query as Record<string, unknown> | undefined)?.grantId,
@@ -213,6 +215,8 @@ export class GoalCanonicalAuthority {
               principal,
               params.employeeId
             );
+          else if (principal.kind === 'employee' && principal.employeeId !== params.employeeId)
+            this.employee(state, params.employeeId, principal.owner);
           break;
         case 'TRANSITION': {
           const goal = this.goal(state, params.id, principal);
@@ -228,7 +232,7 @@ export class GoalCanonicalAuthority {
                 goal,
                 body.expectedSequence
               );
-            else if (!own(goal)) refuse();
+            else if (!own(goal) && !manages()) refuse();
           }
           // r3 owns transition legality, worker REVIEW freeze and exact historical replay. No preview mutation here.
           break;

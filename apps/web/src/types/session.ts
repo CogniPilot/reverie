@@ -97,6 +97,17 @@ export interface SessionWriteOptions {
   capacityRetry?: boolean;
   /** Told when a gated write's text went in but its Enter was withheld: the text is left unsent in the composer. */
   onTypedUnsent?: () => void;
+  /** Known idle-only refusal before any text/Enter; a failed transport alone is not this proof. */
+  onIdleRefused?: () => void;
+  /**
+   * An agent's input (the input route names its calling session). While a plan move owns the composer
+   * (Session.pauseCapacityRetry) it gets nothing typed: decided at the write, again before the text and before Enter, and at the
+   * submit verifier's later Enter. Not exclusive like `requireIdle`: other writes in flight do not refuse it. A person's own
+   * typing and the move's own handoff leave it unset.
+   */
+  agentInput?: boolean;
+  /** Told when an `agentInput` write was refused before any byte because a plan move owns the composer. */
+  onMoveHeld?: () => void;
   /**
    * Told once how a write that carried Enter ended (session-submit-verifier.ts): `submitted` when the composer was seen empty,
    * `stranded` when it was still there after the whole schedule, `unverified` for unreadable/different content or a newer write.
@@ -845,6 +856,8 @@ export interface SessionState {
   autoClearThreshold?: number;
   /** Auto-compact enabled */
   autoCompactEnabled?: boolean;
+  /** When the harness reported a context compaction starting (its own hook), while it is still compacting. */
+  compactingSince?: number;
   /** Auto-compact token threshold */
   autoCompactThreshold?: number;
   /** Auto-compact prompt */
@@ -1011,6 +1024,9 @@ export interface SessionState {
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';
+  /** Non-authorizing fresh native command observation, separate from the viewer. */
+  providerHealth?: import('./provider-health.js').ProviderHealth;
+  viewerHealth?: 'connected' | 'disconnected' | 'unknown';
 }
 
 /**

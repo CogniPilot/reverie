@@ -53,6 +53,7 @@ export interface SessionListenerRefs {
   autoClear: (data: { tokens: number; threshold: number }) => void;
   autoCompact: (data: { tokens: number; threshold: number; prompt?: string }) => void;
   limitPauseScheduled: (data: { resetAt: number; resumeAt: number; matched: string }) => void;
+  compactingChanged: () => void;
   limitResume: (data: { attempt: number }) => void;
   limitResumeCancelled: (data: { reason: string }) => void;
   respawnBreakerTripped: (data: { count: number }) => void;
@@ -353,6 +354,12 @@ export function createSessionListeners(session: Session, deps: SessionListenerDe
       deps.persistSessionState(session);
     },
 
+    /** A compaction start with no end report expired: push the cleared state so no client keeps the dot. */
+    compactingChanged: () => {
+      deps.broadcastSessionStateDebounced(session.id);
+      deps.persistSessionState(session);
+    },
+
     /** Broadcasts `session:limitResume` — auto-resume prompt sent after limit reset */
     limitResume: (data: { attempt: number }) => {
       deps.broadcast(SseEvent.SessionLimitResume, { sessionId: session.id, ...data });
@@ -549,6 +556,7 @@ export function attachSessionListeners(session: Session, refs: SessionListenerRe
   session.on('autoClear', refs.autoClear);
   session.on('autoCompact', refs.autoCompact);
   session.on('limitPauseScheduled', refs.limitPauseScheduled);
+  session.on('compactingChanged', refs.compactingChanged);
   session.on('limitResume', refs.limitResume);
   session.on('limitResumeCancelled', refs.limitResumeCancelled);
   session.on('respawnBreakerTripped', refs.respawnBreakerTripped);
@@ -589,6 +597,7 @@ export function detachSessionListeners(session: Session, refs: SessionListenerRe
   session.off('autoClear', refs.autoClear);
   session.off('autoCompact', refs.autoCompact);
   session.off('limitPauseScheduled', refs.limitPauseScheduled);
+  session.off('compactingChanged', refs.compactingChanged);
   session.off('limitResume', refs.limitResume);
   session.off('limitResumeCancelled', refs.limitResumeCancelled);
   session.off('respawnBreakerTripped', refs.respawnBreakerTripped);

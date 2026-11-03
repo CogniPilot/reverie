@@ -241,6 +241,51 @@ describe('current exact recipient/source attention boundary', () => {
       await f.service.stop();
     }
   });
+  it('drops a handled notice that is only still queued for the pane, and counts what still needs attention', async () => {
+    const f = await fixture();
+    try {
+      const handled = f.question('first owner request');
+      const open = f.question('second owner request');
+      vi.spyOn(f.service.delivery, 'queuedMessagesFor').mockReturnValue(
+        [handled, open].map((m) => ({ roomId: f.room.id, messageId: m.id }))
+      );
+      const before = f.service.turnSummary(A);
+      expect(before.messages.map((m) => m.messageId)).toEqual(expect.arrayContaining([handled.id, open.id]));
+      expect(before.text).toContain(`: ${before.total} need your attention.`);
+      const read = f.service.exactAgentRead(A, f.room.id, handled.id);
+      f.service.resolveNotice(A, { roomId: f.room.id, messageId: handled.id, readToken: read.readToken, disposition: 'handled' });
+      const after = f.service.turnSummary(A);
+      expect(after.messages.map((m) => m.messageId)).not.toContain(handled.id); // queued, but handled: not news
+      expect(after.messages.map((m) => m.messageId)).toContain(open.id);
+      expect(after.total).toBe(before.total - 1);
+      expect(after.text).toContain(`: ${after.total} need${after.total === 1 ? 's' : ''} your attention.`);
+    } finally {
+      await f.service.stop();
+    }
+  });
+  it('counts a handled notice whose delivery is uncertain as listed but not as needing attention', async () => {
+    const f = await fixture();
+    try {
+      const question = f.question();
+      f.service.delivery.holdForInspection(A, [{ roomId: f.room.id, messageId: question.id }]);
+      const read = f.service.exactAgentRead(A, f.room.id, question.id);
+      f.service.resolveNotice(A, { roomId: f.room.id, messageId: question.id, readToken: read.readToken, disposition: 'handled' });
+      const summary = f.service.turnSummary(A);
+      expect(summary.messages.map((m) => m.messageId)).toContain(question.id);
+      const open = summary.messages.filter((m) => m.attention?.disposition === 'pending').length;
+      expect(summary.text).toContain(`: ${open} need${open === 1 ? 's' : ''} your attention.`);
+      // Agents that answer only after the work leave the room waiting: the summary they see mid-turn asks for an early
+      // one-line acknowledgement, once, right after the count.
+      const cue = 'If replying needs more than a few minutes of work, acknowledge in one line first.';
+      expect(summary.text.split(cue)).toHaveLength(2);
+      // The per-kind counts, when they fit, belong to the count and come before the cue.
+      expect(summary.text).toMatch(
+        new RegExp(`your attention\\.( \\d+ owner, \\d+ for you, \\d+ FYI\\.)? ${cue.replace(/\./g, '\\.')} Quoted records`)
+      );
+    } finally {
+      await f.service.stop();
+    }
+  });
   it.each(['edited', 'deleted'])('invalidates a %s linked reply below the read cursor', async (change) => {
     const f = await fixture();
     try {
@@ -390,6 +435,38 @@ describe('current exact recipient/source attention boundary', () => {
       );
       expect(() => f.handle(q)).toThrow('unavailable');
       expect(readFileSync(join(directory, 'chat-notice-state.json'), 'utf8')).toBe('{broken');
+    } finally {
+      await f.service.stop();
+    }
+  });
+});
+
+describe('bulk handle-before selection (agent and bot senders only)', () => {
+  it('lists only pending agent/bot notices before the cutoff, never the owner, and drops them once handled', async () => {
+    const f = await fixture();
+    try {
+      const svc = f.service;
+      const peer = { kind: 'agent', sessionId: B, name: 'Peer' } as const;
+      const done = svc.post(f.room.id, peer, 'already handled', 'all', { deliver: false });
+      const open = svc.post(f.room.id, peer, 'still pending', 'all', { deliver: false });
+      const bot = svc.post(f.room.id, { kind: 'bot', botId: 'fixture-bot', name: 'Fixture Bot' }, 'bot note', 'all', { deliver: false });
+      const owner = f.question('@Reviewer an owner request');
+      f.handle(done);
+      f.advance(10);
+      const cutoff = Date.now() + 10 ** 12; // after everything above in the fixture clock
+      const select = (before: number) =>
+        (svc.turnSummary(A, undefined, { roomId: f.room.id, before }).sourceReferences ?? []).map((r) => r.messageId);
+      const later = svc.post(f.room.id, peer, 'after the cutoff', 'all', { deliver: false });
+      expect(select(later.at)).toEqual(expect.arrayContaining([open.id, bot.id]));
+      expect(select(later.at)).not.toContain(done.id); // handled already
+      expect(select(later.at)).not.toContain(owner.id); // never the owner
+      expect(select(later.at)).not.toContain(later.id); // not before the cutoff
+      expect(select(cutoff)).toContain(later.id);
+      for (const id of select(later.at)) f.handle(svc.store.require(f.room.id).messages.find((m) => m.id === id)!);
+      expect(select(later.at)).toEqual([]);
+      // The owner's request still needs attention.
+      expect(svc.turnSummary(A).messages.map((m) => m.messageId)).toContain(owner.id);
+      expect(() => svc.turnSummary(A, undefined, { roomId: 'no-such-room', before: cutoff })).toThrow();
     } finally {
       await f.service.stop();
     }

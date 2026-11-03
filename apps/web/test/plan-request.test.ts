@@ -159,6 +159,28 @@ describe('expert-approved plan requests', () => {
     );
     expect(h.port.moves.begin).toHaveBeenCalledTimes(1);
   });
+  it('keeps a refused start\'s own reason on the failed record and logs any other error without exposing it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const refused = requestHarness();
+      await refused.service.create(refused.input, 'owner', refused.execution);
+      vi.mocked(refused.port.moves.begin).mockRejectedValueOnce(
+        new PlanMoveError('This employee already has a move in progress or requiring recovery'));
+      const record = await refused.service.decide('request', 'source', refused.nonce(), 'approve', 'Handoff', 'owner');
+      expect(record.phase).toBe('failed');
+      expect(record.error).toBe('The approved move could not start. This employee already has a move in progress or ' +
+        'requiring recovery. Inspect the current session before requesting again.');
+
+      const broken = requestHarness();
+      await broken.service.create(broken.input, 'owner', broken.execution);
+      vi.mocked(broken.port.moves.begin).mockRejectedValueOnce(new Error('EACCES /private/internal/path'));
+      const generic = await broken.service.decide('request', 'source', broken.nonce(), 'approve', 'Handoff', 'owner');
+      expect(generic.error).toBe('The approved move could not start. Inspect the current session before requesting again.');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not start'), 'EACCES /private/internal/path');
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it('rejects wrong session, owner, nonce, unsafe handoff, and changed source before any execution', async () => {
     const h = requestHarness();
     await h.service.create(h.input, 'owner', h.execution);
@@ -287,6 +309,17 @@ describe('self-service pending discovery', () => {
     await expect(h.service.decide('request', 'source', h.nonce(), 'approve', 'handoff', 'owner')).rejects.toThrow();
     expect(h.port.moves.begin).not.toHaveBeenCalled();
   });
+
+  it('lists one employee’s pending requests by employee, scoped to the owner, without credentials', async () => {
+    const h = requestHarness(); await h.service.create(h.input, 'owner', h.execution);
+    const theirs = await h.service.pendingForEmployee('alex', 'owner');
+    expect(theirs.map((r) => r.id)).toEqual(['request']); expect(theirs[0]).not.toHaveProperty('nonceHash');
+    expect(await h.service.pendingForEmployee('someone-else', 'owner')).toEqual([]);
+    expect(await h.service.pendingForEmployee('alex', 'other-owner')).toEqual([]);
+    expect(h.service.bindingOf('alex', 'owner')).toBe('source');
+    h.clock(1_800_100);
+    expect(await h.service.pendingForEmployee('alex', 'owner')).toEqual([]);
+  });
 });
 
 it('expires a queued notification when its authorization predicate reaches the deadline', async () => {
@@ -304,4 +337,96 @@ it('rechecks expiry after asynchronous approval preparation, before consuming th
   await expect(h.service.decide('request', 'source', h.nonce(), 'approve', 'handoff', 'owner')).rejects.toThrow('expired');
   expect(h.port.moves.begin).not.toHaveBeenCalled();
   expect((await h.service.get('request', 'owner')).phase).toBe('expired');
+});
+
+describe('why delivery of a plan request ended', () => {
+  // notify(record, file, allowed, expiredUnseen): the owner-side reason the delivery uses for its expiry alert.
+  const reason = (h: ReturnType<typeof requestHarness>) =>
+    (vi.mocked(h.port.notify).mock.calls.at(-1) as unknown as [unknown, unknown, () => boolean, () => boolean])[3];
+
+  it('is expiry only when the deadline passed while the request was still pending, authorized and bound', async () => {
+    const h = requestHarness();
+    await h.service.create(h.input, undefined, h.execution);
+    const expired = reason(h);
+    expect(expired()).toBe(false);
+    h.clock(100 + 30 * 60_000);
+    expect(expired()).toBe(true);
+    await h.service.list();
+    expect(h.records()[0].phase).toBe('expired');
+    expect(expired()).toBe(true);
+  });
+
+  it('is never expiry after a cancellation, lost owner authority or a session change, even once the deadline passes', async () => {
+    const cancelled = requestHarness();
+    await cancelled.service.create(cancelled.input, undefined, cancelled.execution);
+    const afterCancel = reason(cancelled);
+    await cancelled.service.cancel('request');
+    cancelled.clock(100 + 30 * 60_000 + 1);
+    expect(afterCancel()).toBe(false);
+
+    const lost = requestHarness();
+    await lost.service.create(lost.input, undefined, lost.execution);
+    const afterLoss = reason(lost);
+    lost.authorize(false);
+    lost.clock(100 + 30 * 60_000 + 1);
+    expect(afterLoss()).toBe(false);
+
+    const moved = requestHarness();
+    await moved.service.create(moved.input, undefined, moved.execution);
+    const afterMove = reason(moved);
+    moved.bind('replacement');
+    moved.clock(100 + 30 * 60_000 + 1);
+    expect(afterMove()).toBe(false);
+  });
+
+  it('after a reauthorize, only the newest delivery can report expiry, even once the new issue expires', async () => {
+    const h = requestHarness();
+    await h.service.create(h.input, undefined, h.execution);
+    const first = reason(h);
+    h.authorize(false);
+    await h.service.list();
+    h.authorize(true);
+    h.clock(1_000);
+    await h.service.reauthorize('request', undefined, { ...h.execution });
+    const second = reason(h);
+    expect(second).not.toBe(first);
+    h.clock(1_000 + 30 * 60_000);
+    await h.service.list();
+    expect(h.records()[0].phase).toBe('expired');
+    expect(second()).toBe(true);
+    expect(first()).toBe(false);
+  });
+
+  it('a reauthorized request retires the earlier delivery’s reason', async () => {
+    const h = requestHarness();
+    await h.service.create(h.input, undefined, h.execution);
+    const first = reason(h);
+    h.authorize(false);
+    await h.service.list();
+    h.authorize(true);
+    await h.service.reauthorize('request', undefined, { ...h.execution });
+    h.clock(100 + 30 * 60_000 + 1);
+    expect(first()).toBe(false);
+  });
+});
+
+
+describe('request follows its verified existing move adoption', () => {
+  it('releases a cached recovery request only after its exact move was durably adopted', async () => {
+    const seed: PlanRequestRecord = { id: 'held', employeeId: 'alex', sessionId: 'source', newSession: 'destination',
+      name: 'Alex', fromAccount: 'first', toAccount: 'second', mode: 'codex', phase: 'recovery-required',
+      createdAt: 1, expiresAt: 99, notified: true };
+    const h = requestHarness([seed]);
+    const completed: PlanMoveRecord = { id: 'held', employeeId: 'alex', oldSession: 'source', newSession: 'destination',
+      name: 'Alex', fromAccount: 'first', toAccount: 'second', phase: 'completed', at: 1,
+      sourceStopRequested: true, sourceCleanupVerified: true, recoveryAction: 'adopt-existing', recoveredAt: 100 };
+    h.move({ ...completed, phase: 'recovery-required' });
+    expect((await h.service.get('held')).phase).toBe('recovery-required');
+    h.move({ ...completed, employeeId: 'other' });
+    expect((await h.service.get('held')).phase).toBe('recovery-required');
+    h.move(completed);
+    expect((await h.service.get('held')).phase).toBe('completed');
+    await expect(h.service.create(h.input, undefined, h.execution)).resolves.toMatchObject({ phase: 'pending' });
+    expect(h.port.moves.begin).not.toHaveBeenCalled();
+  });
 });

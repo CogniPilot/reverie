@@ -30,7 +30,7 @@ import type { ChatMessage } from '../../chatroom-store.js';
 import { canAccessOwned, getAuthUser } from '../route-helpers.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { parseByteRange } from '../http-range.js';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -64,6 +64,8 @@ export const VOICE_STT_TIMEOUT_MS = 60_000;
 export const VOICE_AUDIO_TIMEOUT_MS = 15_000;
 const AUDIO_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const AUDIO_PATH = /^\/audio\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
+/** The phone's id for one spoken turn (X-Reverie-Voice-Turn), from the press to the reply's playback. */
+const VOICE_TURN_ID = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/;
 
 /** Our own AbortSignal.timeout, or undici's headers/body timeout surfacing as "fetch failed". */
 function isFetchTimeout(err: unknown): boolean {
@@ -243,9 +245,15 @@ export function registerVoiceTurnRoutes(
         );
       }
       waiting.add(target.sessionId);
+      // Every stage of this turn is timed under one id, so the phone's trace and the server log line up.
+      const header = req.headers['x-reverie-voice-turn'];
+      const turnId = typeof header === 'string' && VOICE_TURN_ID.test(header) ? header : randomUUID();
+      const timing: { sttMs?: number; answerMs?: number; ttsMs?: number } = {};
+      const since = (start: number) => Math.round(performance.now() - start);
       try {
         // 1. Speech to text only: the member answers in the room, not the voice service's own model.
         let heard: Response;
+        const sttStart = performance.now();
         try {
           heard = await fetch(`${base()}/stt`, {
             method: 'POST',
@@ -277,14 +285,16 @@ export function registerVoiceTurnRoutes(
           const why = typeof stt.error === 'string' ? stt.error.slice(0, 300) : `HTTP ${heard.status}`;
           return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, `Speech to text: ${why}`);
         }
+        timing.sttMs = since(sttStart);
         const transcript = stt.transcript.trim();
         // Nothing intelligible was heard. Not an error; the panel says so.
         if (!transcript) {
-          return { success: true, data: { heard: false, transcript: '', reply: '', audioUrl: null, messages: [] } };
+          return { success: true, data: { heard: false, transcript: '', reply: '', audioUrl: null, messages: [], turnId, timing } };
         }
 
         // 2. An ordinary spoken message to the member, delivered the way that member takes chat.
         const asked = chatrooms.post(room.id, speaker(req), transcript, [target.sessionId], { spoken: true });
+        const answerStart = performance.now();
 
         // 3. Its answer: the member's post in this room whose replyTo is this transcript (say --reply-to <id>).
         // post() invokes room listeners synchronously. An answer can already be saved
@@ -313,7 +323,9 @@ export function registerVoiceTurnRoutes(
             reply.raw.off('close', gone);
           };
         });
+        timing.answerMs = since(answerStart);
         if (!answer) {
+          console.log(`[voice] turn ${turnId} message ${asked.id}: no linked answer after ${timing.answerMs} ms (stt ${timing.sttMs} ms)`);
           if (reply.raw.destroyed) return reply;
           return fail(
             reply,
@@ -325,6 +337,7 @@ export function registerVoiceTurnRoutes(
 
         // 4. Text to speech. Without audio the answer still stands: its text is in the room.
         let audioUrl: string | undefined;
+        const ttsStart = performance.now();
         try {
           const spoken = await fetch(`${base()}/tts`, {
             method: 'POST',
@@ -339,9 +352,12 @@ export function registerVoiceTurnRoutes(
         } catch {
           audioUrl = undefined;
         }
+        timing.ttsMs = since(ttsStart);
+        // Ids and durations only: the words stay in the room.
+        console.log(`[voice] turn ${turnId} message ${asked.id} answer ${answer.id}: stt ${timing.sttMs} ms, answer ${timing.answerMs} ms, tts ${timing.ttsMs} ms${audioUrl ? '' : ' (no audio)'}`);
         return {
           success: true,
-          data: { heard: true, transcript, reply: answer.text, audioUrl: audioUrl ?? null, messages: [asked, answer] },
+          data: { heard: true, transcript, reply: answer.text, audioUrl: audioUrl ?? null, messages: [asked, answer], turnId, timing },
         };
       } finally {
         waiting.delete(target.sessionId);

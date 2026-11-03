@@ -6,6 +6,7 @@ import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT as EXIT } from './agent-exit-codes.js';
 import type { AgentCapabilities } from './agent-capabilities.js';
 import { fetchGrantedCredentials, type GrantedCredentialMetadata } from './cli-agent-credentials.js';
+import { agentCommandPaths, missingCommands } from './cli-command-list.js';
 
 export const GITHUB_CREDENTIAL_DIRECTORY = '.config/reverie/credentials/github';
 
@@ -75,8 +76,17 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     publication = { status: 'unavailable', credentials: [],
       note: 'Current named PAT grants could not be verified. Local credential files do not establish a current grant.' };
   }
+  // A seat CLI older than the server lacks commands the server's own CLI has; say which, since the version string cannot.
+  const missing = missingCommands(capabilities.cli?.commands, await agentCommandPaths());
+  const cliCompatibility = {
+    missing,
+    note: missing.length
+      ? 'This CLI is older than the server: it lacks the commands listed. Ask the operator to refresh the seat CLI; meanwhile /bin/reverie or the handbook API may have them.'
+      : 'This CLI has every command the server CLI has (or the server predates this check).',
+  };
   const report = {
     ...capabilities,
+    cliCompatibility,
     website: {
       restart: {
         status: 'unknown',
@@ -97,7 +107,14 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       fileDecision: 'reverie board decision add "<request>" --id <stable-id> --where "<source room>" --option "<choice 1>" --option "<choice 2>" --recommend "<choice 1>" --json',
       inspectBoard: 'reverie board show --json',
       plans: 'reverie plans --json',
+      blockedMoves: 'reverie agent plan-move blocked --json',
+      inspectMoveRecovery: 'reverie agent plan-move recovery-status <move-id> --json',
+      recoverExistingMove: 'reverie agent plan-move recover-existing <move-id> --json',
       refreshRuntime: 'reverie agent plan-move request "<current-account-id>" --restart --id "<stable-id>" --json',
+      officeEnter: 'reverie agent office "<employee-id>" --in --json',
+      officeLeave: 'reverie agent office "<employee-id>" --out --json',
+      restartEmployee: 'reverie agent restart-employee "<employee-id>" --json',
+      wakeEmployee: 'reverie agent wake-employee "<employee-id>" --json',
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
       publicationCredentials: 'reverie agent credentials list --json',
@@ -112,6 +129,8 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
   if (deps.json) deps.io.out(JSON.stringify(report, null, 2));
   else {
     deps.io.out(`${capabilities.identity.name} · current session ${capabilities.identity.sessionId}`);
+    if (missing.length)
+      deps.io.out(`! This CLI is older than the server and lacks ${missing.length} command${missing.length === 1 ? '' : 's'}: ${missing.slice(0, 12).join(', ')}${missing.length > 12 ? ', ...' : ''}. Ask the operator to refresh the seat CLI.`);
     deps.io.out(
       `Board decision cards: ${capabilities.board.createDecision ? 'allowed' : 'denied'}; clear: ${capabilities.board.clearDecision ? 'allowed' : 'denied'} — ${capabilities.board.reason}`
     );
@@ -121,9 +140,11 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     if (typeof capabilities.board.editBoardIssues === 'boolean')
       deps.io.out(`Update own board work: ${capabilities.board.editBoardIssues ? 'allowed' : 'denied'}. Only the verified owner answers decision requests.`);
     deps.io.out(
-      `Recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
+      `Office attendance/restarts: ${capabilities.company.manageOffice === true ? 'allowed' : capabilities.company.manageOffice === false ? 'denied' : 'unknown (server does not report this grant)'}; recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
     );
     deps.io.out(`Plan preconditions: ${capabilities.company.planPreconditions}`);
+    deps.io.out(`Canonical team Goal management: ${capabilities.company.manageGoals === true ? 'allowed' : capabilities.company.manageGoals === false ? 'denied' : 'unknown (server does not report this grant)'}`);
+    deps.io.out(`Goal preconditions: ${capabilities.company.goalPreconditions ?? 'Requires the separately authenticated canonical Goal broker and current grants; not provider-native /goal or PAUSED control.'}`);
     deps.io.out(
       `Website restart: host grant must be checked. Redeploy: host operator required; restart does not install new code.`
     );

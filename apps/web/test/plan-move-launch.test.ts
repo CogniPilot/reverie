@@ -37,6 +37,19 @@ const input: PlanMoveInput = {
 };
 
 describe('fresh account launch selection', () => {
+  it.each([
+    {}, { model: 'sonnet' }, { effort: 'high' }, { advisorModel: 'opus' },
+    { model: 'sonnet', effort: 'high', advisorModel: 'opus' },
+  ] as const)('preserves only defined Claude policy through the exact JSON request: %j', policy => {
+    const source = { ...saved, mode: 'claude', codexConfig: undefined, ...policy } as SessionState;
+    const launch = planMoveLaunch(source, { ...account, provider: 'anthropic' }, { ...input, model: undefined });
+    for (const key of ['model', 'effort', 'advisorModel'] as const) {
+      if (source[key] === undefined) expect(launch).not.toHaveProperty(key);
+      else expect(launch[key]).toBe(source[key]);
+    }
+    expect(JSON.parse(JSON.stringify(launch))).toStrictEqual(launch);
+  });
+
   it('explicitly refreshes on the same account with the exact model, effort, approval policy and fresh thread', () => {
     const current = { ...account, id: 'source', profileId: 'old-profile' };
     const policy = { envOverrides: { CODEX_HOME: '/scratch/selected-account' } };

@@ -28,7 +28,7 @@ describe('durable tool-capable company research backend', () => {
     file = join(directory, 'bindings.json');
     employee = {
       id: randomUUID(),
-      name: 'Ada',
+      name: 'Abe',
       icon: '🔭',
       position: 'Scientist',
       expertise: ['systems'],

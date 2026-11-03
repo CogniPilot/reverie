@@ -5,6 +5,7 @@
  * Nothing on the board is ever deleted: a blocker or decision is cleared (`clearedAt`), and an issue ends as `done` or
  * `wontdo`. Times are epoch ms; a milestone's `due` is a date in the company time zone.
  */
+import type { PlanAgentBurn } from './plan-agent-burn.js';
 import { z } from 'zod';
 
 export const ISSUE_STATUSES = ['triage', 'todo', 'doing', 'blocked', 'done', 'wontdo'] as const;
@@ -22,10 +23,13 @@ const ms = z.number().int().nonnegative();
 const httpUrl = z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'A link is an http(s) URL');
 export const LinkSchema = z.object({ url: httpUrl, kind: z.enum(LINK_KINDS).default('other') }).strict();
 
+/** The longest issue title the board stores; the CLI checks it before sending. */
+export const ISSUE_TITLE_MAX = 300;
+
 export const IssueSchema = z
   .object({
     id,
-    title: text(300),
+    title: text(ISSUE_TITLE_MAX),
     /** Member (employee) id; unset while the issue waits in triage. */
     owner: z.string().max(100).optional(),
     /** Set only by an import when no employee matched the name. */
@@ -218,6 +222,8 @@ export interface PlanBurn {
   /** Codex banked resets the account holds (count and earliest expiry, epoch ms); null when not read or not Codex. */
   banked: { count: number; expiresAt: number | null } | null;
   points: { t: number; used: number; rate: number | null; proj: number | null }[];
+  /** Per-session burn from status-line cost and the realtime plan rate (Claude Code plans only); null without cost reports. */
+  agentBurn?: PlanAgentBurn | null;
 }
 
 export interface BoardPoll {

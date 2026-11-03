@@ -387,5 +387,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Asset attachment and GHCR publication are independent outcomes.
         run: |
-          gh release upload "$TAG" "bundle/reverie-${TAG#v}.tar.gz" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"
+          bundle="reverie-${TAG#v}.tar.gz"
+          assets=("bundle/$bundle")
+          # GitHub refuses a release asset of 2 GiB or more (0.3.0's bundle was 2.74 GB), so a large bundle is attached as
+          # numbered parts under that limit plus the whole archive's checksum; INSTALL.md says how to join them.
+          if [ "$(stat -c %s "bundle/$bundle")" -ge 2000000000 ]; then
+            (cd bundle && split --bytes=1900M --numeric-suffixes --suffix-length=2 "$bundle" "$bundle.part-" && sha256sum "$bundle" > "$bundle.sha256")
+            assets=(bundle/"$bundle".part-* "bundle/$bundle.sha256")
+          fi
+          gh release upload "$TAG" "${assets[@]}" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"
           printf 'Release assets attached for %s; see publish-image separately for GHCR status.\n' "$TAG" >> "$GITHUB_STEP_SUMMARY"

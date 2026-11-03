@@ -6,6 +6,12 @@
   background: #111318;
   color: #e4e7ed;
 }
+.watch-recovery-notification {
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 * {
   box-sizing: border-box;
 }
@@ -157,6 +163,26 @@ a:focus-visible {
 #watch-dialog [hidden] {
   display: none;
 }
+/* A routine's schedule: only the fields its repeat kind uses are shown. */
+.schedule {
+  display: grid;
+  gap: 14px;
+}
+.schedule [hidden] {
+  display: none;
+}
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.schedule-days legend {
+  width: 100%;
+}
+.schedule-days .check {
+  min-height: 44px;
+}
+
 .bot-icon-row {
   display: flex;
   align-items: center;
@@ -358,4 +384,43 @@ fieldset {
   dialog {
     padding: 18px;
   }
+}
+.trial {
+  display: grid;
+  gap: 10px;
+}
+.trial h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+.trial pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #10141a;
+  border: 1px solid #333c49;
+  border-radius: 8px;
+  padding: 10px;
+}
+.trial-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.trial-list .ok::marker {
+  content: '✓  ';
+  color: #8be6b8;
+}
+.trial-list .fail::marker {
+  content: '✗  ';
+  color: #ffb1a9;
+}
+.trial dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.trial dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }

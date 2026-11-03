@@ -34,6 +34,27 @@ def handler(engine, recognizer, root, fixture):
         with record_lock, (root / "synth-events.jsonl").open("a") as stream:
             stream.write(json.dumps(event) + "\n")
 
+    def record_request(phase, request, timing):
+        # Keep starts separately: the completion-only acceptance stream must
+        # not mistake an interrupted request for a successful synthesis.
+        event = {**request, "phase": phase, "atNs": time.monotonic_ns(),
+                 "processCpuNs": time.process_time_ns(), "timing": dict(timing)}
+        with record_lock, (root / "speech-requests.jsonl").open("a") as stream:
+            stream.write(json.dumps(event) + "\n")
+
+    class RequestTiming(dict):
+        def __init__(self, request):
+            super().__init__()
+            self.request = request
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            # Engine writes these around model.create. Retain them immediately
+            # even if the client deadline later ends the fixture process.
+            if key in {"inferenceStartNs", "inferenceEndNs"}:
+                phase = "inference-start" if key == "inferenceStartNs" else "inference-end"
+                record_request(phase, self.request, self)
+
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
@@ -75,10 +96,22 @@ def handler(engine, recognizer, root, fixture):
                 payload = json.loads(body)
                 requested = payload.get("voice")
                 selected = requested or fixture["voice"]
-                timing = {}
+                text = payload["text"]
+                request = {"requestId": uuid.uuid4().hex, "requestNs": started,
+                           "effectiveVoice": selected,
+                           "textCharacters": len(text) if isinstance(text, str) else None,
+                           "textSha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+                           if isinstance(text, str) else None}
+                timing = RequestTiming(request)
+                record_request("synthesis-start", request, timing)
+                phase = "synthesis-raised"
                 try:
                     # Preserve Engine's nonblocking busy refusal; never add a hidden TTS queue.
-                    wav = engine.synthesize({"text": payload["text"], "voice": selected}, timing=timing)
+                    try:
+                        wav = engine.synthesize({"text": payload["text"], "voice": selected}, timing=timing)
+                        phase = "synthesis-return"
+                    finally:
+                        record_request(phase, request, timing)
                 except RuntimeError:
                     record({"requestNs": started, "responseNs": time.monotonic_ns(),
                             "status": timing.get("status", "failed"), "timing": timing,
@@ -135,12 +168,12 @@ def main():
     torch.set_num_interop_threads(1)
     print("voice-ci whisper load start", flush=True)
     recognizer = whisper.load_model(str(checkpoint), device="cpu")
-    print("voice-ci whisper load complete; Kokoro warm start", flush=True)
+    print("voice-ci whisper load complete; Kokoro model load start", flush=True)
     engine = Engine(models)
     engine.warm()
     if engine.model is None:
         raise RuntimeError("Real Kokoro model failed to load")
-    print("voice-ci Kokoro warm complete", flush=True)
+    print("voice-ci Kokoro model load complete; no synthesis warmup performed", flush=True)
     fixture = json.loads(Path(__file__).with_name("fixtures.json").read_text())
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler(engine, recognizer, root, fixture))
     (root / "speech-url.txt").write_text(f"http://127.0.0.1:{server.server_port}")

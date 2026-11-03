@@ -10,6 +10,7 @@ import { BotWatchPostRefused } from './bot-watch-state.js';
 import { AssignmentStatusWatch } from './assignment-status-watch.js';
 import { PublicIssueWatch } from './cron/public-issue-watch.js';
 import { GithubRepositoryWatches } from './github-repository-watches.js';
+import { DiskSpaceWatch, type DiskSpaceWatchDeps } from './disk-space-watch.js';
 import type { PublicationCredentialVault } from './publication-credentials.js';
 
 export interface BotWatchesRuntimeDeps {
@@ -26,6 +27,10 @@ export interface BotWatchesRuntimeDeps {
   multiUser: boolean;
   now?: () => number;
   credentials?: Pick<PublicationCredentialVault, 'metadata' | 'material'>;
+  /** Owner push for a critical disk alarm; chat may not be writable then. */
+  alert?: (text: string) => Promise<number>;
+  /** Disk readers; the defaults read the website's own filesystems. */
+  disk?: Pick<DiskSpaceWatchDeps, 'volumes' | 'hostVolumes' | 'consumers'>;
 }
 export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRuntimeDeps) {
   const post = (
@@ -56,6 +61,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
     running: d.running,
     bot: (id) => d.bots.get(id),
     room: (id) => d.chat.room(id),
+    roomsFor: (sid) => d.chat.roomsFor(sid),
     canDeliver: (sid, rid) => {
       const r = d.chat.room(rid);
       return (
@@ -74,6 +80,10 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
     canEdit: (id) => {
       const e = d.employees().find((e) => e.id === id);
       return effectiveBoardPermissions(e, e ? isBoardCoordinator(d.chat.rooms(), e.sessionId) : false).editBoardIssues;
+    },
+    canManageBoard: (id) => {
+      const e = d.employees().find((e) => e.id === id);
+      return !!e && effectiveBoardPermissions(e, isBoardCoordinator(d.chat.rooms(), e.sessionId)).manageBoard;
     },
     post,
     delivered: (sid, rid, id) => d.chat.phoneAccepts(sid, rid, id),
@@ -126,11 +136,37 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
       return d.chat.postDurableBotMessage(current, rid, text, recent + existing, 'all', false);
     },
   });
+  // Disk alarms are notices: they never wake providers or create owed replies.
+  const disk = new DiskSpaceWatch(d.dataPath('disk-space-watch.json'), {
+    bot: (id) => d.bots.get(id),
+    room: (id) => d.chat.room(id),
+    post: (bot, rid, text, recent) => {
+      const current = d.bots.get(bot.id);
+      if (!current) throw new BotWatchPostRefused('Current bot removed');
+      const existing = d.chat
+        .rooms()
+        .flatMap((r) => r.messages)
+        .filter(
+          (m) => m.from.kind === 'bot' && m.from.botId === current.id && m.at > (d.now ?? Date.now)() - 3600000
+        ).length;
+      try {
+        d.chat.checkBotPost(current, rid, recent + existing);
+      } catch {
+        throw new BotWatchPostRefused('Bot post admission refused');
+      }
+      return d.chat.postDurableBotMessage(current, rid, text, recent + existing, 'all', false);
+    },
+    push: d.alert,
+    timeZone: () => d.timeZone?.(undefined),
+    now: d.now,
+    ...d.disk,
+  });
   const unavailable: string[] = [];
   for (const [name, service] of [
     ['assignments', assignments],
     ['github-issues', issues],
     ['github-repositories', github],
+    ['disk-space', disk],
   ] as const) {
     try {
       await service.init();
@@ -150,6 +186,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
     assignments: unavailable.includes('assignments') ? { state: 'HOLD' } : safeStatus(assignments),
     githubIssues: unavailable.includes('github-issues') ? { state: 'HOLD' } : safeStatus(issues),
     github: unavailable.includes('github-repositories') ? { state: 'HOLD' } : safeStatus(github),
+    disk: unavailable.includes('disk-space') ? { state: 'HOLD' } : safeStatus(disk),
     unavailable,
   });
   app.get('/api/bot-watches', async (req, reply) => {
@@ -182,27 +219,58 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
         return { success: true, data: await github.configure(req.body, validate) };
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-        return reply
-          .code(code === 'REVISION_CONFLICT' ? 409 : 400)
-          .send({
-            success: false,
-            error: 'Watch configuration refused; refresh status and retain pending delivery evidence',
-            errorCode: code === 'REVISION_CONFLICT' ? 'REVISION_CONFLICT' : 'WATCH_CONFIGURATION_REFUSED',
-          });
+        return reply.code(code === 'REVISION_CONFLICT' ? 409 : 400).send({
+          success: false,
+          error: 'Watch configuration refused; refresh status and retain pending delivery evidence',
+          errorCode: code === 'REVISION_CONFLICT' ? 'REVISION_CONFLICT' : 'WATCH_CONFIGURATION_REFUSED',
+        });
+      }
+    }
+  );
+  app.get<{ Params: { id: string } }>('/api/bot-watches/github/:id/recovery', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (!allowed(req)) return reply.code(403).send({ success: false, error: 'Verified owner required' });
+    try {
+      return { success: true, data: github.previewRecovery(req.params.id) };
+    } catch {
+      return reply.code(409).send({ success: false, error: 'Recovery unavailable; refresh watcher status' });
+    }
+  });
+  app.post<{ Params: { id: string } }>(
+    '/api/bot-watches/github/:id/recovery',
+    {
+      bodyLimit: 4096,
+      errorHandler: (_error, _request, reply) =>
+        reply.code(400).send({ success: false, error: 'Invalid recovery acknowledgement' }),
+    },
+    async (req, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      if (!allowed(req)) return reply.code(403).send({ success: false, error: 'Verified owner required' });
+      const validate = () => {
+        if (!allowed(req)) throw Error('OWNER_REQUIRED');
+      };
+      try {
+        return { success: true, data: await github.recoverUnknown(req.params.id, req.body, validate) };
+      } catch {
+        // A lost reply/write may follow a commit. Never imply that a failed response permits a blind retry.
+        return reply.code(409).send({
+          success: false,
+          error: 'Recovery not confirmed; refresh watcher status before reviewing again',
+        });
       }
     }
   );
   app.put('/api/bot-watches/:type', async (req, reply) => {
     if (!allowed(req)) return reply.code(403).send({ success: false, error: 'Verified owner required' });
     const type = (req.params as { type: string }).type;
-    if (!['assignments', 'github-issues'].includes(type))
+    if (!['assignments', 'github-issues', 'disk-space'].includes(type))
       return reply.code(404).send({ success: false, error: 'Unknown typed bot watch' });
     if (unavailable.includes(type))
       return reply.code(503).send({ success: false, error: 'Bot state requires reconciliation' });
     try {
       if (type === 'github-issues' && github.status().revision > 0)
         return reply.code(409).send({ success: false, error: 'Use the GitHub watch collection after legacy adoption' });
-      await (type === 'assignments' ? assignments : issues).configure(req.body);
+      await (type === 'assignments' ? assignments : type === 'disk-space' ? disk : issues).configure(req.body);
       return { success: true, data: status() };
     } catch {
       return reply.code(400).send({ success: false, error: 'Invalid typed bot watch configuration' });
@@ -213,6 +281,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
     assignments,
     issues,
     github,
+    disk,
     async tick() {
       if (running || d.multiUser) return;
       running = true;
@@ -220,6 +289,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
         for (const [name, service] of [
           ['assignments', assignments],
           ['github-repositories', github],
+          ['disk-space', disk],
         ] as const) {
           if (unavailable.includes(name)) continue;
           try {

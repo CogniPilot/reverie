@@ -100,3 +100,23 @@ export function postWarnings(
   }
   return warnings;
 }
+
+/** One message that crossed a guarded post, as the 409 refusal lists it. */
+export interface CrossingMessage { id: string; from: string; at: number; excerpt: string }
+
+/**
+ * For a guarded post (`ifNoNewerThan` / `ifLatest`): the messages from others after `cursorId` in this room, oldest first,
+ * or `undefined` when the cursor is not in the room's recent window (the caller re-reads). Own posts, system lines and deleted
+ * messages never count, the same rule as the newer-unread heads-up.
+ */
+export function messagesSince(
+  messages: readonly Pick<ChatMessage, 'id' | 'at' | 'from' | 'deleted' | 'text'>[],
+  cursorId: string,
+  isOwn: (from: ChatMessage['from']) => boolean
+): CrossingMessage[] | undefined {
+  const index = messages.findIndex((m) => m.id === cursorId);
+  if (index < 0) return undefined;
+  return messages.slice(index + 1)
+    .filter((m) => !m.deleted && m.from.kind !== 'system' && !isOwn(m.from))
+    .map((m) => ({ id: m.id, from: m.from.name, at: m.at, excerpt: m.text.slice(0, 200) }));
+}

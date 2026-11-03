@@ -143,6 +143,25 @@ it.each(['office', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews
   expect(h.document.querySelector('.ca-page')!.hidden).toBe(false);
 });
 
+it('opens the owner failure view under a mounted base and preserves preview deep-link fields', async () => {
+  const h = await fixture({ owner: true });
+  h.window.__REVERIE_BASE__ = '/office';
+  const anchor = h.document.createElement('button'); h.document.body.append(anchor);
+  await h.shell.openCompanyTools(anchor);
+  const failures = [...h.document.querySelectorAll<HTMLButtonElement>('[aria-label="Company tools"] button')]
+    .find(button => button.textContent === 'Command failures');
+  expect(failures).toBeDefined(); failures!.click();
+  expect(h.document.querySelector('iframe[title="Command failures"]')!.getAttribute('src')).toBe('/office/command-failures');
+  expect(h.shell.roomId).toBe('general');
+  h.document.querySelector<HTMLButtonElement>('.ca-tool-page-head button')!.click();
+  await h.flush(); await h.flush();
+  expect(h.shell.embed).toBe('company');
+  h.window.history.replaceState(null, '', '#previews?sessionId=example&port=8106&path=%2Fview');
+  h.shell.openPage('previews', { push: false });
+  expect(h.document.querySelector('iframe[title="Laptop previews"]')!.getAttribute('src'))
+    .toBe('/office/previews?sessionId=example&port=8106&path=%2Fview');
+});
+
 async function warmBoardFixture() {
   const h = await fixture({ owner: true });
   let owner = true, identity = 'owner'; const idle: (() => void)[] = [], writes: string[] = [];

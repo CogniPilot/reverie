@@ -1,3 +1,4 @@
+import { agentCommandPaths } from '../../cli-command-list.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview The server's board (board-types.ts): GET /api/board and its audited writes.
@@ -49,7 +50,7 @@ interface Employee {
   avatar?: string;
   position?: string;
   sessionId?: string;
-  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
+  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; manageOffice?: boolean; manageGoals?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
 }
 
 export interface BoardDeps {
@@ -386,6 +387,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         roster,
         capabilities: {
           checkedAt: at,
+          // The agent commands of the CLI built from this server's source, so a seat CLI can name what it lacks.
+          cli: { commands: await agentCommandPaths().catch(() => [] as string[]) },
           identity: { kind: c.kind, name: nameOf(c), ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}) },
           board: { read: true, fileIssue: boardAccess.editBoardIssues, editBoardIssues: boardAccess.editBoardIssues,
             createDecision: structuredDecisionWrites && boardAccess.manageDecisions,
@@ -393,9 +396,12 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
             manageDecisions: boardAccess.manageDecisions,
             reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Current Board grants still apply.' : 'Current owner-selected Board permissions; absent grants retain owner-made membership compatibility. Titles and plan/recovery grants confer no Board authority.' },
           company: {
+            manageOffice: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageOffice === true,
             recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
             moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
             managePlans: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.managePlans === true,
+            manageGoals: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageGoals === true,
+            goalPreconditions: 'Canonical Goal permission only. Requires the separately authenticated Goal broker, current same-company bindings and exact CAS. It does not control provider-native goals or grant verification, terminal decisions, adoption, grants or unblocker attestations.',
             planPreconditions: 'Grant admission only. Current owned live source/target bindings, non-vacation employees, supported single-company plan/account and handoff approval are checked again by the plan action. Self runtime refresh additionally requires the unchanged current account and runtime; it grants no installation or session-creation permission.',
           },
         },
@@ -429,7 +435,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         if (typeof owner !== 'string') throw new BoardError(`owner: ${owner.error}`, 400);
         wanted.add(owner);
       }
-      // mine and owner together are one owner set: --mine --owner Kit is "mine or Kit's".
+      // mine and owner together are one owner set: --mine --owner Reviewer is "mine or the reviewer's".
       const issues = state.issues.filter(issue =>
         (!wanted.size || wanted.has(ownerOf(issue) ?? '')) &&
         (!q.status || q.status.includes(issue.status)) &&
@@ -480,6 +486,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         sustainablePctPerHour: row.pace.sustainablePctPerHour,
         at: row.updatedAt,
         banked: row.bankedResets ? { count: row.bankedResets.availableCount, expiresAt: row.bankedResets.earliestExpiresAt } : null,
+        agentBurn: row.agentBurn ?? null,
         points,
       };
     });

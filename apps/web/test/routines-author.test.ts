@@ -50,6 +50,11 @@ async function setup() {
     getBot: () => undefined,
     check: () => {},
     post: () => {},
+    canPostAsAuthor: (employeeId, roomId) => {
+      const e = people.find((p) => p.id === employeeId);
+      if (!e) throw new Error('The author is no longer an employee');
+      if (!rooms[roomId]?.includes(e.session)) throw new Error(`${e.name} is no longer a member of this room`);
+    },
     postAsAuthor: (employeeId, roomId, text) => {
       const e = people.find((p) => p.id === employeeId);
       if (!e) throw new Error('The author is no longer an employee');
@@ -60,6 +65,7 @@ async function setup() {
     notifyDisabled: (_id, _room, text) => void systemLines.push(text),
   };
   cron.setBotPoster(poster);
+  const notify = vi.fn(() => true);
   const grants = new RoutinesGrants(join(mkdtempSync(join(tmpdir(), 'rt-')), 'g.json'));
   await grants.init();
   // Deny by default: the owner grants these two authors, as the live tree requires.
@@ -71,7 +77,7 @@ async function setup() {
       findEmployee: (sid: string) => people.find((p) => p.session === sid),
       isMember: (room: string, sid: string) => !!rooms[room]?.includes(sid),
       notificationRoomId: () => 'room-board',
-      notify: () => true,
+      notify,
     },
   };
   const app = Fastify({ logger: false });
@@ -85,7 +91,7 @@ async function setup() {
   await app.ready();
   const create = (who: Person | { session: string }, extra: object = {}) =>
     app.inject({ method: 'POST', url: '/api/cron/jobs', headers: as(who), payload: { ...mine, ...extra } });
-  return { app, cron, jobs, runs, people, rooms, posts, systemLines, grants, create };
+  return { app, cron, jobs, runs, people, rooms, posts, systemLines, grants, create, notify };
 }
 
 describe('agent routines: what the server accepts', () => {
@@ -322,5 +328,37 @@ describe('agent routines: when one fires', () => {
     const recipients = messageRecipients(room, message);
     expect(recipients).toEqual([BOB.session]);
     expect([...wakeRecipients(room, message, recipients, nameOf)]).not.toContain(ALICE.session);
+  });
+});
+
+describe('agent routines: preview before Run once', () => {
+  it('previews an own routine with no run, post or announcement; another author\'s routine and unknown ids are refused', async () => {
+    const { app, create, runs, posts, notify } = await setup();
+    const id = (await create(ALICE)).json().job.id as string;
+    const announced = notify.mock.calls.length;
+    const preview = await app.inject({ url: `/api/cron/jobs/${id}/preview`, headers: as(ALICE) });
+    expect(preview.json()).toMatchObject({
+      preview: { jobId: id, action: 'post', outcome: 'post', sender: 'Routine author', roomId: 'room-1', text: 'standup in 5' },
+    });
+    expect(preview.json().preview.checks.map((c: { label: string; ok: boolean }) => [c.label, c.ok])).toEqual([
+      ['Author can post', true], ['Author hourly limit', true],
+    ]);
+    expect(Object.keys(runs)).toEqual([]);
+    expect(posts).toEqual([]);
+    expect(notify.mock.calls.length).toBe(announced);
+    expect((await app.inject({ url: `/api/cron/jobs/${id}/preview`, headers: as(BOB) })).json()).toMatchObject({ success: false, errorCode: 'FORBIDDEN' });
+    expect((await app.inject({ url: '/api/cron/jobs/missing/preview', headers: as(ALICE) })).json()).toMatchObject({ success: false, errorCode: 'NOT_FOUND' });
+    // Run once is the real thing, and its result is the run record.
+    const run = await app.inject({ method: 'POST', url: `/api/cron/jobs/${id}/run`, headers: as(ALICE) });
+    expect(run.json().run).toMatchObject({ status: 'posted', triggerType: 'manual_run_now' });
+    expect(posts.map((p) => p.text)).toEqual(['⏰ routine: standup in 5']);
+  });
+
+  it('shows a removed author as a failing check, as posting would, instead of a green one', async () => {
+    const { app, create, people } = await setup();
+    const id = (await create(ALICE)).json().job.id as string;
+    people.splice(people.findIndex((p) => p.id === ALICE.id), 1);
+    const preview = (await app.inject({ url: `/api/cron/jobs/${id}/preview`, headers: { 'x-test-user': 'owner' } })).json().preview;
+    expect(preview).toMatchObject({ outcome: 'blocked', checks: [{ label: 'Author can post', ok: false, detail: 'The author is no longer an employee' }] });
   });
 });

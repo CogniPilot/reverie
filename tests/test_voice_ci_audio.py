@@ -58,6 +58,7 @@ class VoiceAudioAcceptanceTests(unittest.TestCase):
 class VoiceAdapterSchedulingTests(unittest.TestCase):
     def test_real_engine_busy_refusal_is_not_hidden_by_adapter_queue(self):
         import contextlib
+        import hashlib
         import json
         import sys
         import tempfile
@@ -96,6 +97,18 @@ class VoiceAdapterSchedulingTests(unittest.TestCase):
             client = threading.Thread(target=first)
             try:
                 client.start(); self.assertTrue(entered.wait(5))
+                journal = root / "speech-requests.jsonl"
+                pending = [json.loads(line) for line in journal.read_text().splitlines()]
+                self.assertEqual(len(pending), 2)
+                self.assertEqual(pending[0]["phase"], "synthesis-start")
+                self.assertEqual(pending[1]["phase"], "inference-start")
+                self.assertGreaterEqual(pending[1]["timing"]["inferenceStartNs"],
+                                        pending[1]["timing"]["acquiredNs"])
+                self.assertNotIn("inferenceEndNs", pending[1]["timing"])
+                self.assertEqual(pending[0]["textCharacters"], 5)
+                self.assertEqual(pending[0]["textSha256"], hashlib.sha256(b"Hello").hexdigest())
+                self.assertNotIn("text", pending[0])
+                self.assertFalse((root / "synth-events.jsonl").exists())
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     urllib.request.urlopen(request(), timeout=2)
                 with contextlib.closing(error.exception) as response:
@@ -108,6 +121,20 @@ class VoiceAdapterSchedulingTests(unittest.TestCase):
                 self.assertLessEqual(timing["acquiredNs"], timing["inferenceStartNs"])
                 self.assertLess(timing["inferenceStartNs"], timing["inferenceEndNs"])
                 self.assertLessEqual(timing["inferenceEndNs"], timing["finishedNs"])
+                requests = [json.loads(line) for line in journal.read_text().splitlines()]
+                self.assertEqual([item["phase"] for item in requests],
+                                 ["synthesis-start", "inference-start", "synthesis-start", "synthesis-raised",
+                                  "inference-end", "synthesis-return"])
+                self.assertEqual(requests[0]["requestId"], requests[5]["requestId"])
+                self.assertEqual(requests[2]["requestId"], requests[3]["requestId"])
+                self.assertNotEqual(requests[0]["requestId"], requests[2]["requestId"])
+                self.assertEqual(requests[3]["timing"]["status"], "busy")
+                self.assertEqual(requests[5]["timing"]["status"], "completed")
+                self.assertLessEqual(requests[0]["requestNs"], requests[0]["atNs"])
+                self.assertLessEqual(requests[0]["atNs"], requests[5]["atNs"])
+                self.assertLessEqual(requests[0]["processCpuNs"], requests[5]["processCpuNs"])
+                self.assertEqual(pending[0], requests[0])
+                self.assertEqual(pending[1], requests[1])
             finally:
                 release.set(); client.join(5); server.shutdown(); server.server_close(); thread.join(5)
 
@@ -135,6 +162,10 @@ class VoiceAdapterSchedulingTests(unittest.TestCase):
             request.send = disconnected
             handler.do_POST(request)
             self.assertEqual(len(calls), 1); self.assertEqual(len(sends), 1)
+            events = [json.loads(line) for line in (Path(tmp) / "speech-requests.jsonl").read_text().splitlines()]
+            self.assertEqual([event["phase"] for event in events], ["synthesis-start", "synthesis-return"])
+            self.assertEqual(events[0]["requestId"], events[1]["requestId"])
+            self.assertNotIn("text", events[0])
 
     def test_inference_telemetry_requires_finite_ordered_real_stage_times(self):
         import sys

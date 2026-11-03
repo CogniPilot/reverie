@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """reverie-prune: nightly cleanup of registered rebuildable roots (prune-spec r4, lease contract r9, proposal r32).
-r12 (Ada, Rex prune-bind-mount-finding-r1): mount identity, not just st_dev: Walk and the delete compare every directory fd's
+r12 (mount-identity review): mount identity, not just st_dev: Walk and the delete compare every directory fd's
 mnt_id (/proc/self/fdinfo) with the candidate's / trusted base's mount, so a same-filesystem bind mount is never entered,
 including one added after the walk; an unreadable mnt_id fails closed.
-r11 (Ada, external Tim preflight item 5): any mount point at or under a candidate in mountinfo (a same-filesystem bind
+r11 (host preflight item 5): any mount point at or under a candidate in mountinfo (a same-filesystem bind
 mount has the SAME st_dev, so the walk can't see it) skips the candidate as "mount"; unreadable mountinfo fails closed. And with
 no checkout roots the registry is not loaded (an empty install needs no approvals file).
-r10 (Ada, Kit R9-1/R9-2): b_mount's full-root invariant is unconditional; the manifest is a plain file in the trusted
+r10 (R9-1/R9-2): b_mount's full-root invariant is unconditional; the manifest is a plain file in the trusted
 registry dir; repo ids reject dot and unsafe segments and registry paths must stay inside registry_dir.
-r9 (Ada, Kit AUTH-1/AUTH-2): production admission binds every configured root to its operator-approved filesystem identity
+r9 (AUTH-1/AUTH-2): production admission binds every configured root to its operator-approved filesystem identity
 (re-checked before each candidate), and the checkout registry to a root-controlled snapshot bound to owner approvals.
-Leases are Bev's lease.py (the one implementation), loaded from the configured lease_lib path.
+Leases are lease.py (the one implementation), loaded from the configured lease_lib path.
 
 Dry-run is the default. Deleting needs both --live and live_enabled = true in the config. Every candidate must pass
 every check (spec §4); any doubt means SKIP. Stdlib only. Run with python3 -I.
@@ -56,7 +56,7 @@ DEFAULTS = {
     "lease_dir_template": "{home}/.local/state/reverie/leases",
     "host_lease_dirs": ["/var/lib/reverie/leases"],
     "lease_report_days": 3,
-    "lease_lib": "/usr/lib/reverie/lease.py",  # Bev's lease.py: the one lease implementation
+    "lease_lib": "/usr/lib/reverie/lease.py",  # lease.py: the one lease implementation
     # A command printing JSON [{"id":..., "init_pid":...}] for running laptops (host runtime specific).
     "laptops_cmd": [],
     # r9 AUTH-1: operator-approved identity of EVERY configured root (b_mount and each checkout root), as seen in
@@ -374,7 +374,7 @@ def maps_inodes(base):
 def proc_scan(test_mode):
     """(dev, ino) of everything a process uses: fd targets (files and dirs), mapped files and the executable; and
     every cwd and root. Fail closed: any live pid we can't read makes the scan 'unreadable'. Zombies (Z, X) hold
-    nothing and are skipped (Rex P4). In test mode, pids of other users are ignored (an unprivileged sandbox can't
+    nothing and are skipped (P4). In test mode, pids of other users are ignored (an unprivileged sandbox can't
     read them)."""
     me, uid, root = os.getpid(), os.getuid(), os.geteuid() == 0
     opened, dirs, unreadable = set(), set(), False
@@ -572,10 +572,10 @@ def _long_held_in(d, days):
 
 # ---------------------------------------------------------------------------------------------------------- leases
 def load_lease_lib(path, test_mode):
-    """The ONE lease implementation (Bev's lease.py, contract r9). Root must only import a root-owned file that
+    """The ONE lease implementation (lease.py, contract r9). Root must only import a root-owned file that
     nobody else can write."""
     if not test_mode:
-        # Rex m2: the whole path, not just the file: no symlink anywhere, and every directory from / down plus the
+        # m2: the whole path, not just the file: no symlink anywhere, and every directory from / down plus the
         # file itself root-owned and not group/world-writable, so no user can swap lease.py under root.
         if not os.path.isabs(path) or os.path.realpath(path) != os.path.normpath(path):
             raise ConfigError(f"lease_lib {path} must be an absolute path with no symlinks")
@@ -699,7 +699,7 @@ def chain_inodes(trusted, cand):
 
 
 def delete_tree(trusted, root_dev, parts, expected, exclude_top=(), deadline=None):
-    """Delete trusted/parts... (Rex P1). Opened from the trusted base one component at a time with O_NOFOLLOW, each
+    """Delete trusted/parts... (P1). Opened from the trusted base one component at a time with O_NOFOLLOW, each
     fstat-matched to the inode seen under the barrier and pinned to root_dev, so a component swapped for a symlink
     after the checks makes this fail instead of deleting elsewhere. Never crosses a filesystem. Returns bytes."""
     fd = os.open(trusted, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -767,7 +767,7 @@ GIT = shutil.which("git") or "git"
 
 
 def run_git(co, args):
-    """Run git for a checkout as the checkout's owner, never as root (Rex P2), with repo-controlled command hooks
+    """Run git for a checkout as the checkout's owner, never as root (P2), with repo-controlled command hooks
     disabled. Returns CompletedProcess, or None when the checkout's ownership makes that unsafe."""
     try:
         st_co, st_git = os.lstat(co), os.lstat(os.path.join(co, ".git"))

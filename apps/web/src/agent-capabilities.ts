@@ -1,5 +1,7 @@
 /** Caller-specific facts, produced by the same Board caller/lead gates as writes. */
 export interface AgentCapabilities {
+  /** The agent command paths of the CLI built from this server's source; absent on servers older than this check. */
+  cli?: { commands: string[] };
   checkedAt: number;
   identity: { kind: 'owner' | 'agent'; sessionId?: string; employeeId?: string; name: string };
   board: {
@@ -13,5 +15,5 @@ export interface AgentCapabilities {
     clearDecision: boolean;
     reason: string;
   };
-  company: { recoverEmployees: boolean; moveOwnPlan: boolean; managePlans: boolean; planPreconditions: string };
+  company: { manageOffice?: boolean; manageGoals?: boolean; goalPreconditions?: string; recoverEmployees: boolean; moveOwnPlan: boolean; managePlans: boolean; planPreconditions: string };
 }

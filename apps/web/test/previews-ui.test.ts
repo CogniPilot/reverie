@@ -11,8 +11,11 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 const source = readFileSync(new URL('../src/web/public/previews.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../src/web/public/previews.html', import.meta.url), 'utf8');
 const params = (values: Record<string,string>) => new URLSearchParams(values).toString();
-const response = (data: unknown, ok = true) => ({ ok, json: async () => data });
-async function page(suffix = '', previews = Promise.resolve(response({ previews: [] })), company = Promise.resolve(response({ data: { employees: [{ sessionId: OTHER, name: 'Other laptop' }, { sessionId: SID, name: 'Fixture laptop' }] } }))) {
+// As the server sends them: the console wraps every /api payload without its own envelope (the preview route's, errors
+// included) as {success: true, data}; a console error is {success: false, error, errorCode} (preview-envelope test).
+const response = (data: unknown, ok = true) => ({ ok, json: async () => ({ success: true, data }) });
+const consoleError = (error: string) => ({ ok: false, json: async () => ({ success: false, error, errorCode: 'OPERATION_FAILED' }) });
+async function page(suffix = '', previews = Promise.resolve(response({ previews: [] })), company = Promise.resolve(response({ employees: [{ sessionId: OTHER, name: 'Other laptop' }, { sessionId: SID, name: 'Fixture laptop' }] }))) {
  const dom = new JSDOM(html, { url: 'https://office.test/previews' + suffix, runScripts: 'outside-only' }); doms.push(dom);
  const calls: {url:string;method:string}[] = [];
  Object.assign(dom.window, { AbortSignal, fetch: (url: URL, options: RequestInit) => {
@@ -42,7 +45,7 @@ it('populates laptops before a slow preview-list request finishes', async () => 
  finish(response({ error: setupError }, false)); await settle(); expect(p.status()).toBe(setupError);
 });
 it('does not describe a roster failure as an empty successful laptop list', async () => {
- const p = await page('', Promise.resolve(response({ previews: [] })), Promise.resolve(response({ error: 'Company unavailable.' }, false)));
+ const p = await page('', Promise.resolve(response({ previews: [] })), Promise.resolve(consoleError('Company unavailable.')));
  expect(p.selected().options).toHaveLength(0); expect(p.status()).toContain('Could not load laptops. Company unavailable.');
 });
 it('retains successful listing and laptop labels when both sources succeed', async () => {

@@ -17,6 +17,14 @@ def main(argv=None) -> int:
         if not args.instance:
             raise ValueError("select an instance with --instance or REVERIE_INSTANCE_CONFIG")
         request = json.load(sys.stdin)
+        if isinstance(request, dict) and request.get("action") == "screen":
+            # The hard floors alone, for a save that goes to the office journal instead of this store: nothing is written.
+            from .floors import violates
+            text = request.get("text")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("screen needs text")
+            print(json.dumps({"floor": violates(text)}))
+            return 0
         if not isinstance(request, dict) or request.get("action") not in ("recall", "remember"):
             raise ValueError("expected a recall or remember JSON object")
         project = request.get("project")

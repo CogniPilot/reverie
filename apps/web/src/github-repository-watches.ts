@@ -1,7 +1,8 @@
 /** Owner-selected fixed GET watchers; durable reservations and legacy cursor adoption, no model/shell jobs. */
 import { z } from 'zod';
 import { performance } from 'node:perf_hooks';
-import { BotWatchState, BotWatchPostRefused } from './bot-watch-state.js';
+import { createHash } from 'node:crypto';
+import { BotWatchState, BotWatchPostRefused, BOT_WATCH_MAX_STATE_BYTES } from './bot-watch-state.js';
 import { PublicIssueWatch } from './cron/public-issue-watch.js';
 import type { ChatBot } from './chat-bots.js';
 import type { ChatRoom, ChatMessage } from './chatroom-store.js';
@@ -15,8 +16,10 @@ import {
   type WatchConfig,
   type ScanState,
   type Reply,
+  type WatchEvent,
 } from './github-repository-watch-source.js';
 export { GithubWatchConfig };
+const batchSchema = z.object({ id: z.string().length(32), text: z.string().max(5000) }).strict();
 const scanSchema = z
   .object({
     issueCursor: z.string().max(40).optional(),
@@ -28,6 +31,14 @@ const scanSchema = z
     pageCache: z
       .record(z.string(), z.object({ etag: z.string().max(300), body: z.unknown(), next: z.boolean() }).strict())
       .optional(),
+  })
+  .strict();
+const recoveryReceiptSchema = z
+  .object({
+    at: z.number().int().nonnegative(),
+    batchId: z.string().length(32),
+    pendingDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    scannedAt: z.number().int().nonnegative().nullable(),
   })
   .strict();
 const slotSchema = z
@@ -44,6 +55,7 @@ const slotSchema = z
     baselineAt: z.number().int().optional(),
     ciCreatedSince: z.number().int().optional(),
     posts: z.array(z.number().int()).max(120),
+    lastRecovery: recoveryReceiptSchema.optional(),
     pending: z
       .object({
         id: z.string().length(32),
@@ -52,6 +64,18 @@ const slotSchema = z
         next: scanSchema,
         phase: z.enum(['prepared', 'reserved', 'delivered', 'unknown']),
         messageId: z.string().max(100).optional(),
+        remaining: z.array(batchSchema).max(5999).optional(),
+        configDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        credentialDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        scannedAt: z.number().int().nonnegative().optional(),
+        createdSince: z.number().int().nonnegative().optional(),
+        continuedAfterUnknown: z.literal(true).optional(),
       })
       .strict()
       .optional(),
@@ -63,6 +87,31 @@ const stateSchema = z
     revision: z.number().int().nonnegative(),
     adoptedLegacy: z.boolean(),
     slots: z.record(z.string(), slotSchema).refine((x) => Object.keys(x).length <= 32),
+  })
+  .strict();
+type PreparedCancellation = {
+  kind: 'github-watch-prepared-cancelled';
+  id: string;
+  generation: number;
+  pending: NonNullable<z.infer<typeof slotSchema>['pending']>;
+};
+type UnknownRecoveryIntent = {
+  kind: 'github-watch-unknown-continuation-proposed';
+  id: string;
+  generation: number;
+  at: number;
+  expectedRevision: number;
+  pendingDigest: string;
+  pending: NonNullable<z.infer<typeof slotSchema>['pending']>;
+};
+export const GithubUnknownRecoveryInput = z
+  .object({
+    version: z.literal(1),
+    expectedRevision: z.number().int().nonnegative(),
+    generation: z.number().int().positive(),
+    batchId: z.string().length(32),
+    pendingDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    acknowledgePossibleGap: z.literal(true),
   })
   .strict();
 export const GithubWatchCollectionInput = z
@@ -85,9 +134,30 @@ export interface GithubRepositoryWatchDeps {
 const own = <T>(record: Record<string, T>, key: string): T | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 const emptyScan = (): ScanState => ({ issueSeen: {}, issuePrimed: false, ciSeen: {}, ciPrimed: false, openRuns: {} });
+const SCAN_BUDGET_MS = 60_000;
 const need = (ok: unknown, code: string) => {
   if (!ok) throw new GithubWatchError(code);
 };
+/** Freeze every observed revision before dispatch; the existing 4MiB store bounds the whole spool. */
+function batches(config: WatchConfig, generation: number, events: WatchEvent[]) {
+  need(events.length <= 6000, 'STATE_CAPACITY');
+  const render = (rows: WatchEvent[]) => {
+    const id = fingerprint([config.id, generation, rows]).slice(0, 32);
+    return { id, text: `[github-watch:${id}] ${config.owner}/${config.repo}\n` + rows.map((e) => e.text).join('\n') };
+  };
+  const result: z.infer<typeof batchSchema>[] = [];
+  let chunk: WatchEvent[] = [];
+  for (const event of events) {
+    const candidate = [...chunk, event];
+    if (chunk.length && (candidate.length > 30 || render(candidate).text.length > 5000)) {
+      result.push(render(chunk));
+      chunk = [event];
+    } else chunk = candidate;
+    need(render(chunk).text.length <= 5000, 'CHANGE_BATCH_BOUND');
+  }
+  if (chunk.length) result.push(render(chunk));
+  return result;
+}
 /** Raw response stays bounded and never reaches error/status logs. Redirects never receive credentials. */
 async function request(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<Reply> {
   const r = await fetch(url, { method: 'GET', headers, signal, redirect: 'error', credentials: 'omit' });
@@ -226,8 +296,10 @@ export class GithubRepositoryWatches {
           lastSuccessAt: x.lastSuccessAt ?? null,
           nextPollAt: x.nextPollAt,
           failures: x.failures,
-          pendingCount: x.pending ? 1 : 0,
+          pendingCount: x.pending ? 1 + (x.pending.remaining?.length ?? 0) : 0,
           lastError: x.lastError ?? null,
+          canRecoverUnknown: x.pending?.phase === 'unknown',
+          lastRecovery: x.lastRecovery ?? null,
           legacyAdopted: x.legacyAdopted,
           ciCoverage: {
             createdSince: x.ciCreatedSince ?? null,
@@ -283,11 +355,139 @@ export class GithubRepositoryWatches {
       };
       material = await this.deps.credentials!.material(undefined, c.credentialId, validate);
       await revalidate();
-      return { material, revalidate };
+      return { material, revalidate, binding };
     } catch (error) {
       material?.fill(0);
       if (error instanceof GithubWatchError) throw error;
       throw new GithubWatchError('AUTH_REQUIRED');
+    }
+  }
+  private async archiveCancellation(record: PreparedCancellation | UnknownRecoveryIntent) {
+    const bytes = Buffer.from(JSON.stringify(record));
+    // Preserve small legacy records exactly; the generic archive's per-call/line cap stays 2MiB.
+    if (Buffer.byteLength(JSON.stringify({ version: 1, record }) + '\n') <= 2 * 1024 * 1024) {
+      await this.store.archive([record]);
+      return;
+    }
+    need(bytes.length <= BOT_WATCH_MAX_STATE_BYTES, 'SPOOL_CAPACITY');
+    const partBytes = 256 * 1024,
+      partCount = Math.ceil(bytes.length / partBytes),
+      recordSHA256 = createHash('sha256').update(bytes).digest('hex');
+    for (let partIndex = 0; partIndex < partCount; partIndex++)
+      await this.store.archive([
+        {
+          kind:
+            record.kind === 'github-watch-prepared-cancelled'
+              ? 'github-watch-prepared-cancelled-fragment'
+              : 'github-watch-unknown-continuation-fragment',
+          version: 1,
+          id: record.id,
+          generation: record.generation,
+          recordSHA256,
+          recordBytes: bytes.length,
+          partIndex,
+          partCount,
+          payload: bytes.subarray(partIndex * partBytes, (partIndex + 1) * partBytes).toString('base64'),
+        },
+      ]);
+    // Init validates framing only. A partial frame group never replaces the original primary pending record.
+  }
+  /** Owner preview only: never reads credentials, posts a message, or changes a delivery outcome. */
+  previewRecovery(id: string) {
+    GithubWatchConfig.shape.id.parse(id);
+    const state = this.store.snapshot(),
+      slot = own(state.slots, id);
+    need(slot && !slot.removed && slot.pending?.phase === 'unknown', 'RECOVERY_CHANGED');
+    const pending = slot!.pending!;
+    return {
+      version: 1 as const,
+      expectedRevision: state.revision,
+      generation: slot!.generation,
+      batchId: pending.id,
+      pendingDigest: fingerprint([slot!.config, slot!.generation, pending]),
+      repository: `${slot!.config.owner}/${slot!.config.repo}`,
+      enabled: slot!.config.enabled,
+      notification: pending.text,
+      scannedAt: pending.scannedAt ?? null,
+      remainingBatches: pending.remaining?.length ?? 0,
+    };
+  }
+  private adoptAcknowledgedScan(slot: z.infer<typeof slotSchema>) {
+    if (!slot.pending?.continuedAfterUnknown) return;
+    slot.scan = slot.pending.next;
+    if (slot.pending.createdSince !== undefined) slot.ciCreatedSince = slot.pending.createdSince;
+  }
+  /**
+   * Explicit owner acknowledgement of a possible missed notification. Preserve the whole original unknown batch before
+   * advancing its scan; do not call it delivered, repost it, reset the watch, enable a disabled watch, or run a manual poll.
+   * Other prepared batches remain queued for ordinary delivery. The revision makes an already committed request stale.
+   */
+  async recoverUnknown(id: string, raw: unknown, validate: () => void = () => {}) {
+    const input = GithubUnknownRecoveryInput.parse(raw);
+    const check = () => {
+      need(validate() === undefined, 'SYNCHRONOUS_AUTHORITY_REQUIRED');
+      const preview = this.previewRecovery(id);
+      need(preview.expectedRevision === input.expectedRevision, 'REVISION_CONFLICT');
+      need(
+        preview.generation === input.generation &&
+          preview.batchId === input.batchId &&
+          preview.pendingDigest === input.pendingDigest,
+        'RECOVERY_CHANGED'
+      );
+    };
+    check();
+    need(!this.configuring, 'CONFIGURATION_BUSY');
+    this.configuring = true;
+    try {
+      // A flight that already saw the unknown batch may find its original post. Let that flight settle, then revalidate.
+      if (this.tickFlight) await this.tickFlight;
+      check();
+      const slot = own(this.store.snapshot().slots, id)!;
+      const intent: UnknownRecoveryIntent = {
+        kind: 'github-watch-unknown-continuation-proposed',
+        id,
+        generation: slot.generation,
+        at: this.now(),
+        expectedRevision: input.expectedRevision,
+        pendingDigest: input.pendingDigest,
+        pending: slot.pending!,
+      };
+      await this.archiveCancellation(intent);
+      check();
+      await this.store.update((state) => {
+        check();
+        need(state.revision === input.expectedRevision, 'REVISION_CONFLICT');
+        const current = own(state.slots, id)!;
+        need(
+          current.pending?.phase === 'unknown' &&
+            fingerprint([current.config, current.generation, current.pending]) === input.pendingDigest,
+          'RECOVERY_CHANGED'
+        );
+        const pending = current.pending!;
+        current.lastRecovery = {
+          at: intent.at,
+          batchId: pending.id,
+          pendingDigest: input.pendingDigest,
+          scannedAt: pending.scannedAt ?? null,
+        };
+        const remaining = [...(pending.remaining ?? [])],
+          following = remaining.shift();
+        if (following) {
+          // Keep the scan once, in pending.next: duplicating its page cache can exceed the 4MiB state cap.
+          // A later explicit configuration cancellation must also adopt these acknowledged observations.
+          current.pending = { ...pending, ...following, remaining, phase: 'prepared', continuedAfterUnknown: true };
+          delete current.pending.messageId;
+        } else {
+          current.scan = pending.next;
+          if (pending.createdSince !== undefined) current.ciCreatedSince = pending.createdSince;
+          delete current.pending;
+        }
+        state.revision++;
+      }, check);
+      need(validate() === undefined, 'SYNCHRONOUS_AUTHORITY_REQUIRED');
+      return this.status();
+    } finally {
+      this.configuring = false;
     }
   }
   async configure(raw: unknown, validate: () => void = () => {}) {
@@ -365,7 +565,7 @@ export class GithubRepositoryWatches {
           lastSuccessAt: legacyState.lastSuccessAt,
           posts: legacyState.posts,
         };
-      const cancelled: unknown[] = [];
+      const cancelled: PreparedCancellation[] = [];
       for (const [id, x] of Object.entries(priorSlots)) {
         const c = input.watches.find((c) => c.id === id);
         if (fingerprint(c) !== fingerprint(x.config) && x.pending) {
@@ -388,8 +588,8 @@ export class GithubRepositoryWatches {
           revision: input.expectedRevision,
           watches: input.watches,
         },
-        ...cancelled,
       ]);
+      for (const record of cancelled) await this.archiveCancellation(record);
       check();
       await this.store.update((s) => {
         check();
@@ -416,6 +616,7 @@ export class GithubRepositoryWatches {
             x.config.enabled = false;
             x.removed = true;
             x.generation++;
+            this.adoptAcknowledgedScan(x);
             delete x.pending;
           }
         for (const c of input.watches) {
@@ -423,7 +624,10 @@ export class GithubRepositoryWatches {
           if (x) {
             if (fingerprint(x.config) !== fingerprint(c) || x.removed) {
               x.generation++;
-              if (x.pending?.phase === 'prepared') delete x.pending;
+              if (x.pending?.phase === 'prepared') {
+                this.adoptAcknowledgedScan(x);
+                delete x.pending;
+              }
               delete x.lastError;
               delete x.lastSuccessAt;
               x.nextPollAt = 0;
@@ -479,6 +683,25 @@ export class GithubRepositoryWatches {
     const bot = this.deps.bot(x.config.botId)!,
       room = this.deps.room(x.config.roomId)!;
     need(p.generation === generation, 'DELIVERY_UNCONFIRMED');
+    const authority = async () => {
+      const fresh = this.current(id, generation);
+      need(!p!.configDigest || p!.configDigest === fingerprint(fresh.config), 'CONFIG_CHANGED');
+      if (!fresh.config.credentialId) need(fresh.config.visibility === 'public', 'AUTH_REQUIRED');
+      else {
+        const metadata = await this.deps.credentials?.metadata(undefined);
+        this.current(id, generation);
+        const selected = metadata?.find((m) => m.id === fresh.config.credentialId);
+        need(
+          selected?.repositories.some(
+            (r) => r.toLowerCase() === `${fresh.config.owner}/${fresh.config.repo}`.toLowerCase()
+          ),
+          'CREDENTIAL_REPOSITORY_REQUIRED'
+        );
+        need(!p!.credentialDigest || fingerprint(selected) === p!.credentialDigest, 'CREDENTIAL_CHANGED');
+      }
+      this.current(id, generation);
+    };
+    await authority();
     if (p.phase === 'reserved' || p.phase === 'unknown') {
       const matches = room.messages.filter(
         (m) => m.from.kind === 'bot' && m.from.botId === bot.id && m.text === p!.text && !m.deleted
@@ -507,10 +730,13 @@ export class GithubRepositoryWatches {
         a.posts = [...recent, this.now()];
         a.pending!.phase = 'reserved';
       });
+      let postAttempted = false;
       try {
+        await authority();
         const fresh = this.current(id, generation),
           currentBot = this.deps.bot(fresh.config.botId)!;
         this.validateRoom(fresh.config);
+        postAttempted = true;
         const message = this.deps.post(currentBot, fresh.config.roomId, p.text, recent.length);
         await this.store.update((s) => {
           this.current(id, generation);
@@ -521,8 +747,9 @@ export class GithubRepositoryWatches {
         await this.store.update((s) => {
           const a = s.slots[id]!;
           if (a.generation === generation && a.pending)
-            a.pending.phase = error instanceof BotWatchPostRefused ? 'prepared' : 'unknown';
+            a.pending.phase = !postAttempted || error instanceof BotWatchPostRefused ? 'prepared' : 'unknown';
         });
+        if (!postAttempted) throw error;
         return;
       }
     }
@@ -531,8 +758,22 @@ export class GithubRepositoryWatches {
       await this.store.update((s) => {
         this.current(id, generation);
         const a = s.slots[id]!;
-        a.scan = a.pending!.next;
-        delete a.pending;
+        const pending = a.pending!,
+          following = pending.remaining?.shift();
+        if (following) {
+          Object.assign(pending, following, { phase: 'prepared' });
+          delete pending.messageId;
+        } else {
+          a.scan = pending.next;
+          if (pending.scannedAt !== undefined) {
+            a.lastSuccessAt = pending.scannedAt;
+            a.baselineAt ??= pending.scannedAt;
+            a.ciCreatedSince = pending.createdSince;
+            a.failures = 0;
+            delete a.lastError;
+          }
+          delete a.pending;
+        }
       });
   }
   private async poll(id: string, generation: number) {
@@ -563,7 +804,7 @@ export class GithubRepositoryWatches {
         if (credential) await credential.revalidate();
         validate();
         need(path === '' || /^\/(?:issues\?|actions\/runs(?:\?|\/\d+$))/.test(path), 'FIXED_GITHUB_PATH_REQUIRED');
-        const remaining = 20000 - (performance.now() - began);
+        const remaining = SCAN_BUDGET_MS - (performance.now() - began);
         need(remaining > 0, 'SCAN_TIMEOUT');
         const headers: Record<string, string> = {
           Accept: 'application/vnd.github+json',
@@ -573,12 +814,16 @@ export class GithubRepositoryWatches {
           ...(x.scan.pageCache?.[path] ? { 'If-None-Match': x.scan.pageCache[path]!.etag } : {}),
         };
         const url = `https://api.github.com/repos/${encodeURIComponent(x.config.owner)}/${encodeURIComponent(x.config.repo)}${path}`;
-        const reply = await (this.deps.fetch ?? request)(
-          url,
-          headers,
-          AbortSignal.timeout(Math.max(1, Math.floor(remaining)))
-        );
+        const signal = AbortSignal.timeout(Math.max(1, Math.floor(remaining)));
+        let reply: Reply;
+        try {
+          reply = await (this.deps.fetch ?? request)(url, headers, signal);
+        } catch (error) {
+          if (signal.aborted) throw new GithubWatchError('SCAN_TIMEOUT');
+          throw error;
+        }
         validate();
+        need(!signal.aborted, 'SCAN_TIMEOUT');
         totalBytes += Buffer.byteLength(JSON.stringify(reply.body ?? null));
         need(totalBytes <= 64 * 1024 * 1024, 'SCAN_BYTE_BOUND');
         if (
@@ -603,7 +848,7 @@ export class GithubRepositoryWatches {
             body: prior!.body,
             headers: {
               get: (k) =>
-                k === 'link' ? (prior!.next ? '<fixed>; rel=\"next\"' : null) : k === 'etag' ? prior!.etag : null,
+                k === 'link' ? (prior!.next ? '<fixed>; rel="next"' : null) : k === 'etag' ? prior!.etag : null,
             },
           };
         }
@@ -612,7 +857,7 @@ export class GithubRepositoryWatches {
             etag = reply.headers.get('etag');
           if (etag) {
             need(etag.length <= 300 && !/[\r\n]/.test(etag), 'INVALID_ETAG');
-            pageCache[path] = { etag, body, next: !!reply.headers.get('link')?.includes('rel=\"next\"') };
+            pageCache[path] = { etag, body, next: !!reply.headers.get('link')?.includes('rel="next"') };
           }
           return { ...reply, body };
         }
@@ -632,29 +877,40 @@ export class GithubRepositoryWatches {
       result.next.pageCache = pageCache;
       if (credential) await credential.revalidate();
       validate();
-      const text = result.events.length
-        ? `[github-watch:${fingerprint([id, generation, result.events]).slice(0, 32)}] ${x.config.owner}/${x.config.repo}\n` +
-          result.events.map((e) => e.text).join('\n')
-        : '';
-      need(text.length <= 5000, 'CHANGE_BATCH_BOUND');
-      await this.store.update((s) => {
-        this.current(id, generation);
-        const a = s.slots[id]!;
-        a.failures = 0;
-        delete a.lastError;
-        a.lastSuccessAt = this.now();
-        a.baselineAt ??= this.now();
-        a.ciCreatedSince = result.createdSince;
-        if (result.events.length)
-          a.pending = {
-            id: fingerprint([id, generation, result.events]).slice(0, 32),
-            text,
-            generation,
-            next: result.next,
-            phase: 'prepared',
-          };
-        else a.scan = result.next;
-      });
+      const notices = batches(x.config, generation, result.events),
+        scannedAt = this.now();
+      await this.store.update(
+        (s) => {
+          this.current(id, generation);
+          const a = s.slots[id]!;
+          if (notices.length)
+            a.pending = {
+              ...notices[0]!,
+              remaining: notices.slice(1),
+              generation,
+              configDigest: fingerprint(x.config),
+              ...(credential ? { credentialDigest: credential.binding } : {}),
+              scannedAt,
+              createdSince: result.createdSince,
+              next: result.next,
+              phase: 'prepared',
+            };
+          else {
+            a.failures = 0;
+            delete a.lastError;
+            a.lastSuccessAt = scannedAt;
+            a.baselineAt ??= scannedAt;
+            a.ciCreatedSince = result.createdSince;
+            a.scan = result.next;
+          }
+          need(Buffer.byteLength(JSON.stringify(s)) <= BOT_WATCH_MAX_STATE_BYTES, 'SPOOL_CAPACITY');
+        },
+        // Check at writer admission and after temporary-file write/fsync, immediately before rename.
+        () => {
+          validate();
+          need(performance.now() - began < SCAN_BUDGET_MS, 'SCAN_TIMEOUT');
+        }
+      );
       await this.deliver(id, generation);
     } catch (error) {
       if (error instanceof GithubWatchError && error.code === 'CONFIG_CHANGED') return;

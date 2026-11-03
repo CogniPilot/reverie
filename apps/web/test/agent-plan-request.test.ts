@@ -83,8 +83,10 @@ describe('explicit agent plan delegation', () => {
   it('defaults both capabilities off; rejects titles, temporary agents, stale sessions and another owner', () => {
     expect(EmployeePermissionsSchema.parse({})).toEqual({
       recoverEmployees: false,
+      manageOffice: false,
       moveOwnPlan: false,
       managePlans: false,
+      manageGoals: false,
     });
     const h = fixture();
     h.employees[0].permissions.moveOwnPlan = false;

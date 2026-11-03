@@ -27,6 +27,7 @@ import {
   telemetrySignature,
   type RawStatuslinePayload,
 } from '../../usage-telemetry.js';
+import type { PlanCostTracker } from '../../plan-agent-burn.js';
 import { SessionPromptCache, SessionStatusTelemetry } from '../sse-events.js';
 import { setLatestPlanUsage, setLatestAccountPlanUsage } from '../plan-usage-latest.js';
 import { accountForSession, planCatalogue, type PlanSessionLike } from '../../plan-accounts.js';
@@ -59,7 +60,12 @@ async function relocatedAccount(session: PlanSessionLike): Promise<RelocatedAcco
   }
 }
 
-export function registerStatusTelemetryRoutes(app: FastifyInstance, ctx: SessionPort & EventPort): void {
+export function registerStatusTelemetryRoutes(
+  app: FastifyInstance,
+  ctx: SessionPort & EventPort,
+  /** Per-session cost samples for per-agent plan burn (`plan-agent-burn.ts`); every report's cumulative cost is offered. */
+  costs?: Pick<PlanCostTracker, 'record'>
+): void {
   // Last broadcast telemetry signature per session — the statusline fires on
   // every assistant message, so we only rebroadcast when the value changes.
   const lastSig = new Map<string, string>();
@@ -78,6 +84,8 @@ export function registerStatusTelemetryRoutes(app: FastifyInstance, ctx: Session
     }
 
     const payload = data as RawStatuslinePayload | undefined;
+    // The session's cumulative cost rides every render; the tracker keeps at most one sample a minute.
+    if (costs) await costs.record(sessionId, payload?.cost?.total_cost_usd).catch(() => {});
 
     // The model the CLI says it is running, for the session headers (displayModel). It
     // rides every render, so it follows an in-session `/model`; the session dedupes and

@@ -119,12 +119,12 @@ function loadApp() {
 }
 
 describe('refreshing an expert debug terminal', () => {
-  it.each([undefined, '', ' ', 'x'.repeat(101), '../mira', 'mira?other=true'])('keeps a legacy debug view with invalid pin %s empty instead of choosing another expert', pin => {
+  it.each([undefined, '', ' ', 'x'.repeat(101), '../morgan', 'morgan?other=true'])('keeps a legacy debug view with invalid pin %s empty instead of choosing another expert', pin => {
     const { make, debugStorage } = loadApp();
     debugStorage.set('reverie:view', 'debug');
     if (pin !== undefined) debugStorage.set('reverie:debug-session', pin);
-    const app = make(['mira']);
-    app.activeSessionId = 'mira'; app._disconnectWs = vi.fn();
+    const app = make(['morgan']);
+    app.activeSessionId = 'morgan'; app._disconnectWs = vi.fn();
     app.terminal = { clear: vi.fn(), write: vi.fn() };
     expect(app._restorePinnedDebugSession()).toBe(true);
     expect(app.activeSessionId).toBeNull();
@@ -141,8 +141,8 @@ describe('refreshing an expert debug terminal', () => {
       if (key === 'reverie:debug-session') throw new Error('synthetic storage refusal');
       return get(key);
     });
-    const app = make(['mira']);
-    app.activeSessionId = 'mira'; app._disconnectWs = vi.fn();
+    const app = make(['morgan']);
+    app.activeSessionId = 'morgan'; app._disconnectWs = vi.fn();
     app.terminal = { clear: vi.fn(), write: vi.fn() };
     expect(app._restorePinnedDebugSession()).toBe(true);
     expect(app.activeSessionId).toBeNull();
@@ -151,18 +151,18 @@ describe('refreshing an expert debug terminal', () => {
   it('restores the tab-specific expert instead of another tab’s last active session', () => {
     const { make, debugStorage } = loadApp();
     debugStorage.set('reverie:view', 'debug');
-    debugStorage.set('reverie:debug-session', 'jinx');
-    const app = make(['mira', 'jinx']);
-    app.activeSessionId = 'mira';
+    debugStorage.set('reverie:debug-session', 'jester');
+    const app = make(['morgan', 'jester']);
+    app.activeSessionId = 'morgan';
     expect(app._restorePinnedDebugSession()).toBe(true);
-    expect(app.selectSession).toHaveBeenCalledWith('jinx', { auto: true, leaveTiles: true });
+    expect(app.selectSession).toHaveBeenCalledWith('jester', { auto: true, leaveTiles: true });
   });
   it('disconnects and shows unavailable when the pinned expert is absent, without selecting someone else', () => {
     const { make, debugStorage } = loadApp();
     debugStorage.set('reverie:view', 'debug');
-    debugStorage.set('reverie:debug-session', 'jinx');
-    const app = make(['mira']);
-    app.activeSessionId = 'mira';app._disconnectWs = vi.fn();
+    debugStorage.set('reverie:debug-session', 'jester');
+    const app = make(['morgan']);
+    app.activeSessionId = 'morgan';app._disconnectWs = vi.fn();
     app.terminal = { clear: vi.fn(), write: vi.fn() };
     expect(app._restorePinnedDebugSession()).toBe(true);
     expect(app.activeSessionId).toBeNull();

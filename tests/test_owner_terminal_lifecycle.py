@@ -71,6 +71,57 @@ class LockAndMetadata(unittest.TestCase):
             self.assertEqual(error.exception.code,2)
 
 
+class CapacityProjectionTests(unittest.TestCase):
+    def observe(self, user='1000:100', *, missing=False):
+        import time
+        from reverie.worker_resource_reservations import NativeObserver
+        cid='a'*64
+        config={'Labels':{'reverie.worker':'owned'},'User':user,
+                'Env':['PRIVATE_FIXTURE_ONLY=not-returned'],'Cmd':['not-returned'],
+                'Entrypoint':['not-returned']}
+        if missing:del config['User']
+        row={'Id':cid,'Name':'/owned-agent','Image':'b'*64,'Config':config,
+             'State':{'Running':True,'Pid':123},'Mounts':[],
+             'HostConfig':{'ReadonlyRootfs':True,'Privileged':False,'PidMode':'',
+                           'CapDrop':['ALL'],'CapAdd':None}}
+        calls=[]
+        class Engine:
+            def get(self,path):
+                calls.append(path)
+                if path=='/containers/json?all=1':return [{'Id':cid}]
+                if path=='/containers/'+cid+'/json':return row
+                raise AssertionError('Only metadata GETs are allowed')
+        probe=L._CapacityProbe({'serverContainer':'owned-site'},Engine(),time.monotonic()+5,None)
+        rows=NativeObserver(probe).inventory()
+        self.assertEqual(calls,['/containers/json?all=1','/containers/'+cid+'/json'])
+        return rows[0]
+
+    def test_real_capacity_producer_supplies_user_without_environment_or_argv(self):
+        row=self.observe()
+        self.assertEqual(row['Config'],{'Labels':{'reverie.worker':'owned'},'User':'1000:100'})
+        self.assertEqual(row['State'],{'Running':True,'Pid':123})
+        self.assertEqual(set(row),{'Id','Name','Image','Config','State','Mounts','HostConfig'})
+
+    def test_projected_user_passes_real_toolkit_namespace_guard_before_kernel_ports(self):
+        from reverie import owner_terminal_toolkit as toolkit
+        class KernelBoundary(Exception):pass
+        row=self.observe()
+        with patch.object(toolkit,'read_proc',side_effect=KernelBoundary) as kernel:
+            with self.assertRaises(KernelBoundary):toolkit.qualify(row,{},uid=1000,gid=100)
+            kernel.assert_called_once_with(123)
+
+    def test_unknown_or_wrong_actual_user_refuses_before_kernel_ports(self):
+        from reverie import owner_terminal_toolkit as toolkit
+        for user,missing in [(None,True),(None,False),('',False),('0:0',False),
+                             ('agent',False),(1000,False),('1000:101',False)]:
+            with self.subTest(user=user,missing=missing):
+                row=self.observe(user,missing=missing)
+                with patch.object(toolkit,'read_proc',side_effect=AssertionError('No kernel access')) as kernel:
+                    with self.assertRaisesRegex(ValueError,'PROTECTED_TOOLKIT_NAMESPACE_REQUIRED'):
+                        toolkit.qualify(row,{},uid=1000,gid=100)
+                    kernel.assert_not_called()
+
+
 class NativeProcessMetadata(unittest.TestCase):
     def test_inventory_mount_order_is_canonical_but_all_fields_and_duplicates_remain(self):
         from reverie.owner_terminal_native import inventory

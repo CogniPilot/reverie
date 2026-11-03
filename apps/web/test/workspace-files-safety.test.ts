@@ -15,6 +15,7 @@ const control = vi.hoisted(() => ({
   release: undefined as (() => void) | undefined,
   gate: undefined as Promise<void> | undefined,
   root: '',
+  slowCloses: 0,
   renameFrom: '',
   renameTo: '',
 }));
@@ -61,6 +62,11 @@ vi.mock('node:fs/promises', async (original) => {
         }) as typeof handle.stat;
         handle.close = async () => {
           await wait('close');
+          // A close that outlasts a 1000 ms operation, as a slow disk can: the operation answers 408 and keeps admission.
+          if (control.slowCloses > 0) {
+            control.slowCloses--;
+            await new Promise((resolve) => setTimeout(resolve, 1400));
+          }
           return close();
         };
       }
@@ -96,16 +102,31 @@ const trustedFixture = (timeout = 100) =>
       /* Private synthetic authority only. */
     }
   );
+/** Release the gate, then wait until the retained operation has settled and given admission back. Its late cleanup
+ * runs on the disk's schedule, so no fixed pause is enough: a slow CI runner once still answered 429 after 40 ms. */
 async function drain() {
   control.phase = '';
   control.release?.();
   await pause(40);
+  for (const deadline = Date.now() + 10_000; Date.now() < deadline; await pause(10)) {
+    try {
+      await trustedFixture(1000).list('');
+      return;
+    } catch (error) {
+      // A refusal from inside the operation is given only after it settles and releases admission. Two are not:
+      // 429, the retained work still holds admission, and 408, this probe timed out and now holds it itself.
+      const status = (error as { status?: number }).status;
+      if (status !== 429 && status !== 408) return;
+    }
+  }
+  throw new Error('The retained workspace operation never gave admission back');
 }
 beforeEach(async () => {
   task = await mkdtemp(join(tmpdir(), 'workspace-safety-'));
   root = join(task, 'drive');
   await mkdir(root);
   control.root = root;
+  control.slowCloses = 0;
   control.calls = 0;
   control.active = 0;
   control.maximum = 0;
@@ -212,6 +233,12 @@ for (const phase of ['root', 'temporary', 'stat', 'list', 'close'])
     expect((await readdir(root)).filter((n) => n.startsWith('.reverie-upload') || n === 'late.txt')).toEqual([]);
     await trustedFixture(1000).upload('', 'after.txt', Readable.from(['ok']), 2);
   });
+it('drain waits out its own probe when that probe times out closing and keeps admission', async () => {
+  await writeFile(join(root, 'a.txt'), 'x');
+  control.slowCloses = 2;
+  await drain();
+  await expect(trustedFixture(1000).list('')).resolves.toMatchObject({ entries: [{ name: 'a.txt' }] });
+}, 20000);
 it('retains a timed-out preview read and closes the late descriptor without returning bytes', async () => {
   await writeFile(join(root, 'read.txt'), 'readable');
   gate('read');

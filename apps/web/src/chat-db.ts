@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
-import type { ChatMessage, ChatRoom } from './chatroom-store.js';
+import { shownMessage, type ChatMessage, type ChatRoom } from './chatroom-store.js';
 
 export const CHAT_DB_SCHEMA_VERSION = 1;
 
@@ -198,23 +198,39 @@ export class ChatDb {
     return { hits, next: rows.length > 30 && last ? { at: last.at, id: last.id, roomId: last.roomId } : null };
   }
 
-  /** Exact source plus bounded chronological neighbors, including messages outside memory. */
-  searchContext(roomId: string, messageId: string): ChatMessage[] | undefined {
-    const source = this.db.prepare("SELECT at, id FROM messages WHERE room_id = ? AND id = ? AND json_extract(data, '$.deleted') IS NULL").get(roomId, messageId);
-    if (!source) return undefined;
-    const older = this.db.prepare('SELECT id, length(CAST(data AS BLOB)) AS bytes FROM messages WHERE room_id = ? AND (at, id) <= (?, ?) ORDER BY at DESC, id DESC LIMIT 6').all(roomId, source.at, source.id).reverse();
-    const newer = this.db.prepare('SELECT id, length(CAST(data AS BLOB)) AS bytes FROM messages WHERE room_id = ? AND (at, id) > (?, ?) ORDER BY at, id LIMIT 5').all(roomId, source.at, source.id);
-    const rows = [...older, ...newer];
-    if (rows.reduce((bytes, row) => bytes + Number(row.bytes), 0) > 1024 * 1024) throw new ChatDbError('Context exceeds the bounded response size');
+  /**
+   * Up to `older` messages before and `newer` after one message (plus the message itself with `include`), oldest first,
+   * archived history included. `olderMore`/`newerMore` say whether the room has more past either end. A deleted message
+   * comes back as the chat shows it, a tombstone without its files, the anchor included.
+   */
+  historyWindow(roomId: string, messageId: string, { older, newer, include }: { older: number; newer: number; include: boolean }):
+    { messages: ChatMessage[]; olderMore: boolean; newerMore: boolean } | undefined {
+    const anchor = this.db.prepare('SELECT at, id, length(CAST(data AS BLOB)) AS bytes FROM messages WHERE room_id = ? AND id = ?').get(roomId, messageId);
+    if (!anchor) return undefined;
+    const side = (op: '<' | '>', limit: number) => this.db.prepare(`SELECT id, length(CAST(data AS BLOB)) AS bytes FROM messages
+      WHERE room_id = ? AND (at, id) ${op} (?, ?) ORDER BY at ${op === '<' ? 'DESC' : ''}, id ${op === '<' ? 'DESC' : ''} LIMIT ?`)
+      .all(roomId, anchor.at, anchor.id, limit + 1);
+    const before = side('<', older), after = side('>', newer);
+    const rows = [...before.slice(0, older).reverse(), ...(include ? [anchor] : []), ...after.slice(0, newer)];
+    if (rows.reduce((bytes, row) => bytes + Number(row.bytes), 0) > 1024 * 1024) throw new ChatDbError('History exceeds the bounded response size');
     // Read bounded bodies only after the metadata budget passes.
-    return this.db.prepare(`SELECT data FROM messages WHERE room_id = ? AND id IN (${rows.map(() => '?').join(',')}) ORDER BY at, id`)
-      .all(roomId, ...rows.map(row => row.id)).map(row => JSON.parse(String(row.data)) as ChatMessage).filter(message => !message.deleted);
+    const messages = rows.length ? this.db.prepare(`SELECT data FROM messages WHERE room_id = ? AND id IN (${rows.map(() => '?').join(',')}) ORDER BY at, id`)
+      .all(roomId, ...rows.map(row => row.id)).map(row => JSON.parse(String(row.data)) as ChatMessage)
+      .map(shownMessage) : [];
+    return { messages, olderMore: before.length > older, newerMore: after.length > newer };
   }
 
   /** Those of `ids` whose sync committed. */
   committedTxns(ids: Iterable<string>): Set<string> {
     const has = this.db.prepare('SELECT 1 AS hit FROM txns WHERE id = ?');
     return new Set([...ids].filter((id) => has.get(id) !== undefined));
+  }
+
+  /** A room's messages after (at, id), oldest first, at most `limit`: the mention feed's forward scan. */
+  messagesAfter(roomId: string, after: { at: number; id: string }, limit: number): ChatMessage[] {
+    const rows = this.db.prepare(`SELECT data FROM messages INDEXED BY messages_room_at WHERE room_id = ?
+      AND (at, id) > (?, ?) ORDER BY at, id LIMIT ?`).all(roomId, after.at, after.id, limit) as Array<{ data: string }>;
+    return rows.map((row) => JSON.parse(String(row.data)) as ChatMessage);
   }
 
   /** Indexed owner-source discovery, not an unbounded history walk. Budget is shared across rooms. */

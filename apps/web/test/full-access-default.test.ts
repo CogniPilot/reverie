@@ -231,7 +231,7 @@ describe('codex sessions launch with full access in the container', () => {
 
   it('move (audit requiredRegression 1-2): the replacement launch gets the flag and keeps its identity and thread', async () => {
     // The replace spawn hands the clamped body config to `new Session`; for codex it is absent when not sent.
-    const session = make({ name: 'Ada', codexConfig: { reasoningEffort: 'high' }, resumeSessionId: 'thread-f6511f77' });
+    const session = make({ name: 'Abe', codexConfig: { reasoningEffort: 'high' }, resumeSessionId: 'thread-f6511f77' });
     const id = session.id;
     await session.startInteractive();
     const options = created.at(-1);
@@ -240,7 +240,7 @@ describe('codex sessions launch with full access in the container', () => {
     expect(command).toContain('model_reasoning_effort=high');
     expect(options?.resumeSessionId).toBe('thread-f6511f77');
     expect(session.id).toBe(id);
-    expect(session.name).toBe('Ada');
+    expect(session.name).toBe('Abe');
   });
 
   it('relaunch (audit requiredRegression 2-3): restart adds the flag and the argv check passes on the real CLI', async () => {
@@ -320,8 +320,8 @@ describe('codex sessions launch with full access in the container', () => {
 
   it('audit requiredRegression 4: the check is per session, so a stale same-name session is not confused with the bound one', async () => {
     useTable(table([700, 1, 'bash'], [701, 700, 'codex', FLAG], [800, 1, 'bash']));
-    const bound = make({ name: 'Ada', muxSession: { sessionId: 'a', muxName: 'reverie-ada-a', pid: 1 } as never });
-    const stale = make({ name: 'Ada', muxSession: { sessionId: 'b', muxName: 'reverie-ada-b', pid: 2 } as never });
+    const bound = make({ name: 'Abe', muxSession: { sessionId: 'a', muxName: 'reverie-abe-a', pid: 1 } as never });
+    const stale = make({ name: 'Abe', muxSession: { sessionId: 'b', muxName: 'reverie-abe-b', pid: 2 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     const pids = [700, 800];
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockImplementation(async () => pids.shift() as number);

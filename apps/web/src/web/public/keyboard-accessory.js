@@ -619,6 +619,9 @@ function ctrlByteFor(char) {
   return null;
 }
 
+/** Characters the terminal row types. They go through the armed modifiers like a key typed on the keyboard. */
+const TERMINAL_ROW_KEYS = { 'key-pipe': '|', 'key-slash': '/', 'key-dash': '-', 'key-tilde': '~' };
+
 /**
  * Apply an armed one-shot Ctrl to one chunk of terminal input.
  * Returns `{ data, consumed }`, where `consumed` tells the bar to disarm.
@@ -652,14 +655,17 @@ const COMPOSER_PASTE_END = '\x1b[201~';
  */
 const KeyboardAccessoryBar = {
   element: null,
-  // Layout currently in the DOM: 'simple' | 'extended' | 'shell' | 'phone'.
+  // Layout currently in the DOM: 'simple' | 'extended' | 'shell' | 'phone' | 'terminal'.
   _mode: 'simple',
   // Layout the user picked for AGENT sessions ('simple' | 'extended', the
   // extendedKeyboardBar setting). Shell sessions override it with the shell
   // bar; this is what we come back to when they switch to an agent tab.
   _baseMode: 'simple',
-  // One-shot Ctrl modifier (shell bar only). See handleAction('ctrl').
+  // One-shot Ctrl modifier (shell bar and terminal row). See handleAction('ctrl').
   _ctrlArmed: false,
+  // One-shot Alt modifier (terminal row): the next typed character is sent with an ESC prefix, the meta-sends-escape
+  // convention terminals use. Same arming and disarming rules as Ctrl.
+  _altArmed: false,
   // The ⋯ panel (phone layout). Built on open, removed on close.
   _overflowEl: null,
   // Prompt drafts intentionally stay in memory: prompts routinely contain secrets,
@@ -792,6 +798,28 @@ const KeyboardAccessoryBar = {
         </svg>
       </button>`,
 
+  /** HTML for the debug terminal (a Termux-style row): Esc, Tab, one-shot Ctrl and Alt, the four arrows and the
+   *  characters a soft keyboard hides, each sending what a hardware key would. Everything else stays behind ⋯. */
+  _terminalButtons: `
+      <button class="accessory-btn" data-action="esc" title="Escape">Esc</button>
+      <button class="accessory-btn" data-action="tab" title="Tab">Tab</button>
+      <button class="accessory-btn accessory-btn-ctrl" data-action="ctrl" title="Ctrl, then tap a key" aria-pressed="false">Ctrl</button>
+      <button class="accessory-btn accessory-btn-ctrl" data-action="alt" title="Alt, then tap a key" aria-pressed="false">Alt</button>
+      <button class="accessory-btn" data-action="arrow-left" title="Arrow left" aria-label="Arrow left">←</button>
+      <button class="accessory-btn" data-action="scroll-up" title="Arrow up" aria-label="Arrow up">↑</button>
+      <button class="accessory-btn" data-action="scroll-down" title="Arrow down" aria-label="Arrow down">↓</button>
+      <button class="accessory-btn" data-action="arrow-right" title="Arrow right" aria-label="Arrow right">→</button>
+      <button class="accessory-btn accessory-btn-char" data-action="key-pipe" title="|" aria-label="Pipe">|</button>
+      <button class="accessory-btn accessory-btn-char" data-action="key-slash" title="/" aria-label="Slash">/</button>
+      <button class="accessory-btn accessory-btn-char" data-action="key-dash" title="-" aria-label="Dash">-</button>
+      <button class="accessory-btn accessory-btn-char" data-action="key-tilde" title="~" aria-label="Tilde">~</button>
+      <button class="accessory-btn accessory-btn-more" data-action="overflow" title="More" aria-label="More keys and actions" aria-haspopup="true" aria-expanded="false">&#x22EF;</button>
+      <button class="accessory-btn accessory-btn-dismiss" data-action="dismiss" title="Dismiss keyboard">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+          <path d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>`,
+
   /** HTML for extended mode: all keys including arrows, Tab, Esc, etc. */
   _extendedButtons: `
       <button class="accessory-btn accessory-btn-arrow" data-action="scroll-up" title="Arrow up">
@@ -861,6 +889,12 @@ const KeyboardAccessoryBar = {
     if (typeof window !== 'undefined') {
       window.matchMedia?.('(max-width: 599px)').addEventListener?.('change', () => this._applyLayout(this._resolveMode()));
     }
+    // The debug terminal gets the terminal row; chat-app.js marks the view on <html> (data-reverie-view).
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    if (root && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(() => this._applyLayout(this._resolveMode()))
+        .observe(root, { attributes: true, attributeFilter: ['data-reverie-view'] });
+    }
 
     // Add click handlers — preventDefault stops event from reaching terminal
     this.element.addEventListener('click', (e) => {
@@ -873,7 +907,7 @@ const KeyboardAccessoryBar = {
       this.handleAction(action, btn);
 
       // Refocus terminal so keyboard stays open (tap blurs terminal → keyboard dismisses → toolbar shifts)
-      const refocusActions = new Set(['scroll-up', 'scroll-down', 'arrow-left', 'arrow-right', 'tab', 'shift-tab', 'shift-left', 'shift-right', 'ctrl', 'ctrl-o', 'opt-enter', 'esc', 'enter', 'effort-max', 'clear-input']);
+      const refocusActions = new Set(['scroll-up', 'scroll-down', 'arrow-left', 'arrow-right', 'tab', 'shift-tab', 'shift-left', 'shift-right', 'ctrl', 'alt', 'ctrl-o', 'opt-enter', 'esc', 'enter', 'effort-max', 'clear-input', ...Object.keys(TERMINAL_ROW_KEYS)]);
       if (refocusActions.has(action) ||
           ((action === 'clear' || action === 'compact') && this._confirmAction)) {
         if (typeof app !== 'undefined' && app.terminal) {
@@ -899,10 +933,10 @@ const KeyboardAccessoryBar = {
 
   /** Re-resolve the layout after the active session changed (issue #262):
    *  shell sessions get the terminal bar, everything else the agent bar. Also
-   *  disarms Ctrl, because a modifier armed on one session must never fire on
-   *  the next one. */
+   *  disarms Ctrl and Alt, because a modifier armed on one session must never
+   *  fire on the next one. */
   refreshForActiveSession() {
-    this.clearCtrl();
+    this.clearModifiers();
     const activeSessionId = typeof app !== 'undefined' ? app.activeSessionId : null;
     if (this._composerOverlay && this._composerOverlay.dataset.sessionId !== activeSessionId) {
       this._composerOverlay._closeComposer?.({ restoreFocus: false });
@@ -914,6 +948,7 @@ const KeyboardAccessoryBar = {
 
   /** Which layout the current state calls for. */
   _resolveMode() {
+    if (this._isDebugView()) return 'terminal';
     if (this._isPhoneWidth()) return 'phone';
     return this._isShellSession() ? 'shell' : this._baseMode;
   },
@@ -921,6 +956,11 @@ const KeyboardAccessoryBar = {
   /** Phone width, the same <600px the footer toolbar collapses at. */
   _isPhoneWidth() {
     return typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 599px)').matches;
+  },
+
+  /** The chat app's Debug terminal view (chat-app.js setView), the raw terminal the terminal row is for. */
+  _isDebugView() {
+    return typeof document !== 'undefined' && document.documentElement?.getAttribute?.('data-reverie-view') === 'debug';
   },
 
   _isShellSession() {
@@ -938,19 +978,22 @@ const KeyboardAccessoryBar = {
     if (!this.element || mode === this._mode) return;
     this._mode = mode;
     this.clearConfirm();
-    // Reset before the rewrite: _setCtrl() styles the button it can find, and
-    // the one holding the armed class is about to be replaced.
-    this.clearCtrl();
+    // Reset before the rewrite: _setCtrl()/_setAlt() style the button they can
+    // find, and the one holding the armed class is about to be replaced.
+    this.clearModifiers();
     this.closeOverflow();
     this.element.innerHTML =
       mode === 'phone'
         ? this._phoneButtons
-        : mode === 'shell'
-          ? this._shellButtons
-          : mode === 'extended'
-            ? this._extendedButtons
-            : this._simpleButtons;
-    this.element.classList.toggle('phone-row', mode === 'phone');
+        : mode === 'terminal'
+          ? this._terminalButtons
+          : mode === 'shell'
+            ? this._shellButtons
+            : mode === 'extended'
+              ? this._extendedButtons
+              : this._simpleButtons;
+    // The terminal row is one compact row too, so it shares the phone row's sizing.
+    this.element.classList.toggle('phone-row', mode === 'phone' || mode === 'terminal');
     this.syncPhoneMic();
     this._syncComposerDraftIndicator();
   },
@@ -974,6 +1017,7 @@ const KeyboardAccessoryBar = {
     panel.className = 'accessory-overflow';
     panel.setAttribute('role', 'menu');
     for (const [action, label, title] of this._overflowItems(shell)) {
+      if (this.element.querySelector(`[data-action="${action}"]`)) continue;  // already on the row
       if (action === 'attach') {
         // The file input takes the tap itself (iOS will not open the picker from a script while the keyboard is up)
         // and hands its files to the footer's own input, so there is one upload path.
@@ -1100,6 +1144,53 @@ const KeyboardAccessoryBar = {
     return result.data;
   },
 
+  /** Is the one-shot Alt waiting for a key? */
+  isAltArmed() {
+    return this._altArmed === true;
+  },
+
+  /** Arm/cancel the one-shot Alt (the Alt button toggles). */
+  toggleAlt() {
+    this._setAlt(!this._altArmed);
+  },
+
+  clearAlt() {
+    if (this._altArmed) this._setAlt(false);
+  },
+
+  _setAlt(on) {
+    this._altArmed = !!on;
+    const btn = this.element?.querySelector('[data-action="alt"]');
+    if (btn) {
+      btn.classList.toggle('armed', this._altArmed);
+      btn.setAttribute('aria-pressed', this._altArmed ? 'true' : 'false');
+    }
+  },
+
+  /** Disarm both modifiers: session switch, layout swap, keyboard dismissal and every other key. */
+  clearModifiers() {
+    this.clearCtrl();
+    this.clearAlt();
+  },
+
+  /** Is either one-shot modifier waiting for a key? The terminal input paths check this before consumeModifiers. */
+  isModifierArmed() {
+    return this._ctrlArmed === true || this._altArmed === true;
+  },
+
+  /**
+   * Apply the armed modifiers to a chunk of typed input and disarm them: Ctrl first (its control byte), then Alt (an
+   * ESC prefix), so Ctrl+Alt+x is ESC followed by Ctrl+x. Like Ctrl alone, a multi-character chunk (a paste, an
+   * escape sequence) spends Alt without a prefix. Data passes through unchanged when nothing is armed.
+   */
+  consumeModifiers(data) {
+    const alt = this._altArmed && typeof data === 'string' && data.length > 0;
+    const single = alt && data.length === 1;
+    const out = this.consumeCtrl(data);
+    if (alt) this.clearAlt();
+    return single ? '\x1b' + out : out;
+  },
+
   /** Exposed for tests: pure char to control byte mapping. */
   ctrlByteFor,
 
@@ -1110,14 +1201,29 @@ const KeyboardAccessoryBar = {
   handleAction(action, btn) {
     if (typeof app === 'undefined' || !app.activeSessionId) return;
 
-    // Any key other than Ctrl itself spends the modifier. It is a one-shot for
+    // The terminal row's characters are typed keys: the armed modifiers apply to them, as to a key typed on the
+    // system keyboard, and are spent by them.
+    if (Object.hasOwn(TERMINAL_ROW_KEYS, action)) {
+      const char = TERMINAL_ROW_KEYS[action];
+      const out = this.consumeModifiers(char);
+      // A plain character is text at the prompt (local echo included); a modified one is a raw control or escape
+      // sequence, sent after any buffered text like the other control keys.
+      if (out === char) app.insertTerminalText?.(char);
+      else this.flushPendingThen(() => this.sendKey(out));
+      return;
+    }
+    // Any key other than Ctrl or Alt spends the modifiers. They are one-shots for
     // the next TYPED character, so an accessory key tapped in between (Esc, an
-    // arrow, paste) must not leave it armed to bite the keystroke after that.
-    if (action !== 'ctrl') this.clearCtrl();
+    // arrow, paste) must not leave them armed to bite the keystroke after that.
+    // Ctrl and Alt keep each other armed, so Ctrl+Alt+x can be built.
+    if (action !== 'ctrl' && action !== 'alt') this.clearModifiers();
 
     switch (action) {
       case 'ctrl':
         this.toggleCtrl();
+        break;
+      case 'alt':
+        this.toggleAlt();
         break;
       case 'scroll-up':
         this.sendNavKey('\x1b[A');
@@ -1751,10 +1857,10 @@ const KeyboardAccessoryBar = {
 
   /** Hide the accessory bar */
   hide() {
-    // The bar goes away with the keyboard, so an armed Ctrl has nothing left
-    // to modify, and a modifier the user can no longer see must not survive
-    // to the next time they open the keyboard.
-    this.clearCtrl();
+    // The bar goes away with the keyboard, so an armed Ctrl or Alt has nothing
+    // left to modify, and a modifier the user can no longer see must not
+    // survive to the next time they open the keyboard.
+    this.clearModifiers();
     this.closeOverflow();
     if (this.element) {
       this.element.classList.remove('visible');

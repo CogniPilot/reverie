@@ -2,6 +2,7 @@
 # Optional owner-local initial H website activation. Defaults do not depend on
 # this package, and no runtime flag can select a program or lifecycle manifest.
 let
+  pythonSource = import ./owner-terminal-python-source.nix { inherit pkgs src; };
   runtime = "${lifecycle}/share/reverie-owner-terminal/lifecycle-runtime.json";
   binding = {
     unit = "${workerUnit}/share/systemd/user/reverie-worker-broker.service";
@@ -21,7 +22,7 @@ assert value['purpose']=='owner-terminal-lifecycle-runtime-v1' and value['profil
 pair={'path':str(runtime),'sha256':hashlib.sha256(raw).hexdigest()}
 out=pathlib.Path(sys.argv[2]);script=out/'libexec/owner-terminal-website.py'
 script.write_text('import sys\n'
-    'sys.path.insert(0,${builtins.toJSON "${src}/python"})\n'
+    'sys.path.insert(0,${builtins.toJSON "${pythonSource}/python"})\n'
     'from reverie.owner_terminal_website import main\n'
     'raise SystemExit(main(runtime_manifest='+repr(pair)+',service_binding='+repr(${builtins.toJSON binding})+'))\n')
 launcher=out/'bin/reverie-owner-terminal-website'

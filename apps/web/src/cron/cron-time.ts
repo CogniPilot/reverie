@@ -152,6 +152,22 @@ export function computeNextRunAt(job: CronJob, after: number): number | null {
 }
 
 /**
+ * The next `count` fire times after `after`, as the cron would reach them (each one computed from the previous), for showing
+ * a schedule before it is saved. Fewer when the schedule ends (a one-time job) or is incomplete.
+ */
+export function nextRuns(job: CronJob, after: number, count: number): number[] {
+  const out: number[] = [];
+  let from = after;
+  while (out.length < count) {
+    const next = computeNextRunAt(job, from);
+    if (next === null || (out.length && next <= out[out.length - 1])) break;
+    out.push(next);
+    from = next;
+  }
+  return out;
+}
+
+/**
  * Duplicate-launch guard key: identifies a specific due time for a job. The
  * cron records the key it last consumed so an overlapping or restarted
  * loop will not launch the same due time twice.

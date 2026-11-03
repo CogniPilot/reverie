@@ -1,3 +1,4 @@
+import { isChatRaster } from './chat-image-paths.js';
 /**
  * @fileoverview Chatroom delivery: puts chat messages into member panes.
  *
@@ -23,6 +24,7 @@ import { cutQuoted, quoteForPane } from './pane-quote.js';
 import type { ChatMember, ChatMessage, ChatRoom } from './chatroom-store.js';
 import { USER_RECIPIENT, isDm, textMentions } from './chatroom-store.js';
 import { getCli } from './config/cli-registry/registry.js';
+import { findDeliveredTurn, markTranscript, type TranscriptMark } from './claude-delivery-evidence.js';
 import { STOCK_CLIS } from './config/cli-registry/stock.js';
 
 /**
@@ -57,9 +59,13 @@ export interface DeliverySession {
   readonly pid: number | null;
   readonly mode: string;
   canAcceptChatInput?(): boolean;
+  /** Idle with a composer proven empty on screen (only harnesses whose composer glyph is verified); false when unsure. */
+  composerProvablyIdle?(): boolean;
+  /** The session's own Claude transcript (claude-delivery-evidence.ts), when it has exactly one; otherwise undefined. */
+  claudeTranscript?(): Promise<string | undefined>;
   writeViaMux(
     data: string,
-    options?: { opencodeGuard?: boolean; requireEmptyComposer?: boolean; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
+    options?: { opencodeGuard?: boolean; requireIdle?: boolean; requireEmptyComposer?: boolean; onIdleRefused?: () => void; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
   ): Promise<boolean>;
 }
 
@@ -70,6 +76,10 @@ export interface DeliveredMessage {
 }
 
 export interface DeliveryDeps {
+  /** A seat's waking lines have waited STALLED_ALERT_MS for a reason other than a busy turn (checkStalled). */
+  onStalled?: (sessionId: string, stall: DeliveryStall) => void;
+  /** When an unconfirmed Claude line is looked for in the session's transcript (TRANSCRIPT_CHECK_DELAYS_MS by default). */
+  transcriptCheckDelaysMs?: readonly number[];
   /** False while the server is restoring its session registry; missing entries are not gone yet. */
   isReady?: () => boolean;
   /** Opened before delivery starts; only message identities are persisted. */
@@ -79,6 +89,8 @@ export interface DeliveryDeps {
   forceWake?: (sessionId: string, roomId: string, messageId: string) => boolean;
   allowFragment?: (sessionId: string, roomId: string, messageId?: string) => boolean;
   now?: () => number;
+  prepareMessage?: (sessionId: string, roomId: string, messageId: string) => Promise<string>;
+  messageVisible?: (sessionId: string, roomId: string, messageId: string) => boolean;
   /** A message line was typed into this session's pane, for each room it was about (not a briefing, not a held message). */
   onWoken?: (sessionId: string, roomId: string, at: number) => void;
   /**
@@ -103,6 +115,7 @@ interface Pending {
   brief?: boolean;
   /** The chat message this fragment renders, so a deleted message can be withdrawn before it is typed. */
   messageId?: string;
+  localImages?: boolean;
   /**
    * Read, not woken for: a message the member is not addressed by. It is held and travels in the line of the next message that
    * does wake the member, so the member still sees everything, in order, without a billed turn per message.
@@ -197,7 +210,8 @@ export function renderForRecipient(
   room: ChatRoom,
   message: ChatMessage,
   recipientId: string,
-  nameOf: (id: string) => string
+  nameOf: (id: string) => string,
+  imagePaths: ReadonlyMap<string, string> = new Map()
 ): string {
   const from = senderLabel(message.from);
   const sender = message.from.kind === 'agent' ? message.from.sessionId : undefined;
@@ -209,7 +223,11 @@ export function renderForRecipient(
   else if (message.to.length === 1 && message.to[0] === recipientId) to = 'you';
   else to = describeRecipients(message, nameOf);
   // Attachments reach an agent as absolute paths it can read, still on the one line.
-  const files = (message.attachments ?? []).map((a) => ` [attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`).join('');
+  // A linked file is the shared-drive file itself (same path in every laptop), so even a picture is named by that path.
+  const files = (message.attachments ?? []).map((a) => a.linked ? ` [linked file: ${quoteForPane(a.path, 400)}]` : isChatRaster(a)
+    ? imagePaths.has(a.id) ? ` [attached: ${quoteForPane(imagePaths.get(a.id)!, 400)}]`
+      : ` [attached image: ${quoteForPane(a.name, 200)} (local image unavailable; re-read to request a fresh path)]`
+    : ` [attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`).join('');
   // An attachment-only message says so in Reverie's own words, outside any quote (the sender wrote nothing).
   const text = message.poll
     ? quoteForPane(pollSummary(message))
@@ -224,8 +242,13 @@ export function renderForRecipient(
   // Only a turn the server found the verified owner speaking (owner_spoken, owner-auth/marks.ts) gets this turn's voice
   // context, outside the quote. A body's own `spoken` is a request, never evidence: an unsigned post gets no hint.
   const voice = message.from.kind === 'user' && message.from.mark === 'owner_spoken' ? ` ${SPOKEN_TURN_HINT}` : '';
-  // Spoken turns and addressed voice questions need an answer linked to their identity, outside the quote.
-  const link = (message.from.kind === 'user' && message.spoken) || isAddressedVoiceTurn(room, message, recipientId, nameOf)
+  // An assignment marker names its ledger entry, not the chat message an answer must link to.
+  const assignmentCheckin = !message.deleted && message.from.kind === 'bot'
+    && message.to !== 'all' && message.to.includes(recipientId)
+    && /^\[assignment-checkin:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\] /.test(message.text)
+    && message.text.includes('Reply directly to this message with On track');
+  // Keep the reply command outside the quote, with the actual stored message identity.
+  const link = (message.from.kind === 'user' && message.spoken) || isAddressedVoiceTurn(room, message, recipientId, nameOf) || assignmentCheckin
     ? ` ${answerLinkHint(message.id)}` : '';
   return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${voice}${link}`;
 }
@@ -266,6 +289,9 @@ export function buildDeliveryBatch(pending: Pending[], maxChars = MAX_DELIVERY_C
   }
   return { line: `${head}${parts.join(' | ')}${tail}`, taken };
 }
+
+/** When an unconfirmed line is looked for in the session's transcript, after its outcome; then it stays held. */
+export const TRANSCRIPT_CHECK_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 180_000];
 
 /** One line every briefing carries: how to read what arrives. */
 const QUOTING_NOTE =
@@ -466,6 +492,33 @@ function wakeByRoom(
 }
 
 /**
+ * Why a session's queued lines are not being typed. A closed category, never pane, composer or message text, so it can be
+ * shown to the room and the owner.
+ */
+export type DeliveryWaitReason =
+  | 'paused' | 'delivery_unavailable' | 'not_running' | 'dialog_open' | 'working' | 'input_closed' | 'unconfirmed_unread' | 'not_idle';
+
+/** Plain words for each reason, as the member list and `agent chat who` show them. */
+export const DELIVERY_WAIT_TEXT: Readonly<Record<DeliveryWaitReason, string>> = {
+  paused: 'paused while its plan moves',
+  delivery_unavailable: 'chat delivery is unavailable on the server',
+  not_running: 'its runtime is not running',
+  dialog_open: 'a dialog is open in its terminal',
+  working: 'busy with a turn',
+  input_closed: 'its terminal is not taking chat input',
+  unconfirmed_unread: 'earlier lines are unconfirmed and its composer is not provably empty',
+  not_idle: 'its terminal was not idle when the line was about to be typed',
+};
+
+/** A seat whose waking lines have waited this long, for any reason but a busy turn, is reported (once per wait). */
+export const STALLED_ALERT_MS = 10 * 60_000;
+/** At most one stalled-seat report per session in this window, so a reason that flips cannot repeat it. */
+export const STALLED_REPEAT_MS = 30 * 60_000;
+
+/** A stalled seat: why its waking lines wait, since when, from which rooms, and how many. */
+export interface DeliveryStall { reason: DeliveryWaitReason; since: number; roomIds: string[]; waiting: number }
+
+/**
  * Queues per session and flushes them into idle panes. Owns one interval timer;
  * `stop()` clears it.
  */
@@ -476,6 +529,64 @@ export class ChatroomDelivery {
   private lastRooms = new Map<string, { roomIds: string[]; at: number }>();
   private inFlight = new Set<string>();
   private promptPauses = new Map<string, number>();
+  /** The latest reason a session's queue was left untyped, and since when that reason has held; cleared by a written line. */
+  private waits = new Map<string, { reason: DeliveryWaitReason; since: number }>();
+  /** The wait last reported as stalled for each session, and when. */
+  private stalledReported = new Map<string, { since: number; at: number }>();
+
+  /** When the oldest line that would wake the session was queued; undefined when none is queued. */
+  private oldestWaking(sessionId: string): number | undefined {
+    const now = (this.deps.now ?? Date.now)();
+    const times = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive).map((p) => p.at ?? now);
+    return times.length ? Math.min(...times) : undefined;
+  }
+
+  /** A wait is only timed while a waking line is queued: a pause or a busy pane with nothing to type is not one. */
+  private noteWait(sessionId: string, reason: DeliveryWaitReason): void {
+    if (this.oldestWaking(sessionId) === undefined) {
+      this.waits.delete(sessionId);
+      return;
+    }
+    if (this.waits.get(sessionId)?.reason !== reason) this.waits.set(sessionId, { reason, since: (this.deps.now ?? Date.now)() });
+    this.checkStalled(sessionId);
+  }
+
+  /**
+   * Report a seat whose waking lines have waited STALLED_ALERT_MS for anything but a busy turn: once per wait, and at most
+   * once per STALLED_REPEAT_MS. It only reports; nothing is typed, cleared or resent.
+   */
+  private checkStalled(sessionId: string): void {
+    const wait = this.waitingFor(sessionId);
+    if (!wait || wait.reason === 'working' || !this.deps.onStalled) return;
+    const now = (this.deps.now ?? Date.now)();
+    if (now - wait.since < STALLED_ALERT_MS) return;
+    const last = this.stalledReported.get(sessionId);
+    if (last && (last.since === wait.since || now - last.at < STALLED_REPEAT_MS)) return;
+    this.stalledReported.set(sessionId, { since: wait.since, at: now });
+    const waking = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive);
+    this.deps.onStalled(sessionId, { reason: wait.reason, since: wait.since, roomIds: [...new Set(waking.map((p) => p.roomId))], waiting: waking.length });
+  }
+
+  /**
+   * Why the session's waking lines are still queued, while any are; nothing once they are written or gone. The start is never
+   * earlier than the oldest waking line still queued, so lines read, deleted or withdrawn with their room cannot lend their age
+   * to a later one held back for the same reason.
+   */
+  waitingFor(sessionId: string): { reason: DeliveryWaitReason; since: number } | undefined {
+    const oldest = this.oldestWaking(sessionId);
+    const wait = oldest === undefined ? undefined : this.waits.get(sessionId);
+    return wait && oldest !== undefined ? { reason: wait.reason, since: Math.max(wait.since, oldest) } : undefined;
+  }
+
+  /** The pane state that keeps a line from being typed now, in the order a person would fix it. */
+  private paneWait(session: { pid: number | null; isWorking?: boolean; paneDialog?: unknown; canAcceptChatInput?: () => boolean }):
+    DeliveryWaitReason | undefined {
+    if (session.pid === null) return 'not_running';
+    if (session.paneDialog) return 'dialog_open';
+    if (session.isWorking) return 'working';
+    if (session.canAcceptChatInput?.() === false) return 'input_closed';
+    return undefined;
+  }
 
   /** Keep queued chat durable while a migration owns a session's composer. */
   pauseForMigration(sessionId: string): () => void {
@@ -494,7 +605,11 @@ export class ChatroomDelivery {
   private timer: ReturnType<typeof setInterval> | undefined;
   private persistenceFailed = false;
   private inspectionHolds = new Map<string, Map<string, DeliveredMessage>>();
+  /** Transcript turns that already confirmed a delivery, per session: one turn never confirms two. */
+  private confirmedTurns = new Map<string, Set<number>>();
   /** Reads racing pane IO stay durable until both the write and its submit verifier have settled. */
+  /** Batch awaiting image I/O: reads, deletion and room removal still withdraw its identities. */
+  private preparing = new Map<string, Pending[]>();
   private activeWrites = new Map<string, {
     messages: DeliveredMessage[];
     reads: Map<string, Set<string>>;
@@ -505,6 +620,39 @@ export class ChatroomDelivery {
     const held = this.inspectionHolds.get(sessionId) ?? new Map<string, DeliveredMessage>();
     for (const message of messages) held.set(JSON.stringify([message.roomId, message.messageId]), message);
     this.inspectionHolds.set(sessionId, held);
+  }
+
+  /**
+   * After a line the pane could not confirm, look for it in the session's own transcript a few times, never resending it.
+   * A new user turn after `mark` that contains the whole line confirms it like a seen submit; anything else leaves it held.
+   */
+  private watchTranscript(sessionId: string, mark: TranscriptMark, line: string, messages: DeliveredMessage[], ids: string[]): void {
+    const delays = [...(this.deps.transcriptCheckDelaysMs ?? TRANSCRIPT_CHECK_DELAYS_MS)];
+    const stillHeld = () => {
+      const held = this.inspectionHolds.get(sessionId);
+      return !!held && messages.every((m) => held.has(JSON.stringify([m.roomId, m.messageId])));
+    };
+    const check = async (): Promise<void> => {
+      if (!stillHeld()) return;
+      // One shared set per session, stored before the read: checks of two identical lines can run at once.
+      const consumed = this.confirmedTurns.get(sessionId) ?? new Set<number>();
+      this.confirmedTurns.set(sessionId, consumed);
+      let turn: number | undefined;
+      try { turn = await findDeliveredTurn(mark, line.trim(), consumed); } catch { turn = undefined; }
+      if (turn === undefined || !stillHeld() || consumed.has(turn)) { schedule(); return; }
+      consumed.add(turn);
+      if (consumed.size > 256) consumed.delete(consumed.values().next().value!);
+      try { this.durable((store) => store.remove(ids)); } catch { return; }
+      this.releaseInspection(sessionId, messages);
+      this.deps.onSubmitted?.(sessionId, messages);
+    };
+    const schedule = () => {
+      const delay = delays.shift();
+      if (delay === undefined) return;
+      const timer = setTimeout(() => { void check(); }, delay);
+      timer.unref?.();
+    };
+    schedule();
   }
 
   private releaseInspection(sessionId: string, messages: DeliveredMessage[]): void {
@@ -549,6 +697,7 @@ export class ChatroomDelivery {
     this.lastDelivered.clear();
     this.inspectionHolds.clear();
     this.activeWrites.clear();
+    for (const batch of this.preparing.values()) batch.splice(0);
   }
 
   inspectionFor(sessionId: string): DeliveredMessage[] {
@@ -579,6 +728,8 @@ export class ChatroomDelivery {
     this.durable((store) => store.acknowledge(sessionId, roomId, immediate));
     this.releaseInspection(sessionId, immediate.map((messageId) => ({ roomId, messageId })));
     const read = new Set(messageIds);
+    const preparing = this.preparing.get(sessionId);
+    if (preparing) preparing.splice(0, preparing.length, ...preparing.filter(p => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
     const queue = this.queues.get(sessionId);
     if (queue) this.queues.set(sessionId, queue.filter((p) => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
   }
@@ -589,9 +740,11 @@ export class ChatroomDelivery {
     this.inspectionHolds.delete(sessionId);
     this.activeWrites.delete(sessionId);
     this.queues.delete(sessionId);
+    this.preparing.get(sessionId)?.splice(0);
     this.lastDelivered.delete(sessionId);
     this.lastRooms.delete(sessionId);
     this.omitted.delete(sessionId);
+    this.waits.delete(sessionId);
   }
 
   /**
@@ -609,7 +762,7 @@ export class ChatroomDelivery {
     sessionId: string,
     room: { id: string; name: string; kind?: 'dm'; dm?: string[] },
     text: string | (() => string),
-    options: { brief?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
+    options: { brief?: boolean; localImages?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
   ): void {
     if (this.deps.allowFragment?.(sessionId, room.id, options.messageId) === false) {
       if (options.deliveryId) this.durable((store) => store.remove([options.deliveryId!]));
@@ -627,7 +780,7 @@ export class ChatroomDelivery {
       id: deliveryId, sessionId, roomId: room.id, messageId: options.messageId!,
       passive: !!options.passive, at, state: 'queued',
     }));
-    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, brief: options.brief, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
+    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, localImages: options.localImages, brief: options.brief, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
     const candidates = queue.slice();
     if (options.passive) {
       // Older read-later fragments go first, so a quiet member never loses a wake-up message to a pile of them.
@@ -675,6 +828,8 @@ export class ChatroomDelivery {
   /** Withdraw a message's fragments that have not been typed into a pane yet (a delete cannot unsend the rest). */
   dropMessage(roomId: string, messageId: string): void {
     this.durable((store) => store.forget(undefined, roomId, messageId));
+    for (const batch of this.preparing.values()) batch.splice(0, batch.length,
+      ...batch.filter(p => !(p.roomId === roomId && p.messageId === messageId)));
     for (const id of this.inspectionHolds.keys()) this.releaseInspection(id, [{ roomId, messageId }]);
     for (const [id, writing] of this.activeWrites) {
       writing.messages = writing.messages.filter((m) => !(m.roomId === roomId && m.messageId === messageId));
@@ -690,6 +845,8 @@ export class ChatroomDelivery {
 
   dropRoom(roomId: string, sessionId?: string): void {
     this.durable((store) => store.forget(sessionId, roomId));
+    for (const [id, batch] of this.preparing) if (!sessionId || id === sessionId)
+      batch.splice(0, batch.length, ...batch.filter(p => p.roomId !== roomId));
     for (const [id, held] of this.inspectionHolds) {
       if (!sessionId || sessionId === id) this.releaseInspection(id, [...held.values()].filter((p) => p.roomId === roomId));
     }
@@ -719,6 +876,7 @@ export class ChatroomDelivery {
     for (const id of recipients) {
       this.enqueue(id, room, renderForRecipient(room, message, id, nameOf), {
         messageId: message.id,
+        localImages: message.attachments?.some(isChatRaster),
         durable: true,
         ...(noReply ? { noReply: true } : {}),
         ...(awake && !awake.has(id) && !this.deps.forceWake?.(id, room.id, message.id) ? { passive: true } : {}),
@@ -743,15 +901,21 @@ export class ChatroomDelivery {
 
   /** Write the session's queue as one line if its pane is up and not mid-turn. */
   async flush(sessionId: string): Promise<boolean> {
-    if (this.promptPauses.has(sessionId)) return false;
-    if (this.persistenceFailed || this.deps.isReady?.() === false) return false;
+    if (this.promptPauses.has(sessionId)) {
+      this.noteWait(sessionId, 'paused');
+      return false;
+    }
+    if (this.persistenceFailed || this.deps.isReady?.() === false) {
+      this.noteWait(sessionId, 'delivery_unavailable');
+      return false;
+    }
     const session = this.deps.getSession(sessionId);
     if (!session) {
       this.forget(sessionId);
       return false;
     }
     const queue = this.queues.get(sessionId);
-    if (this.persistenceFailed || this.inspectionHolds.has(sessionId) || !queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
+    if (this.persistenceFailed || !queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
     const blocked = queue.filter((p) => this.deps.allowFragment?.(sessionId, p.roomId, p.messageId) === false);
     if (blocked.length) {
       this.discard(blocked);
@@ -774,7 +938,19 @@ export class ChatroomDelivery {
       this.queues.delete(sessionId);
       return false;
     }
-    if (session.pid === null || session.isWorking || session.paneDialog || session.canAcceptChatInput?.() === false) return false;
+    const paneWait = this.paneWait(session);
+    if (paneWait) {
+      this.noteWait(sessionId, paneWait);
+      return false;
+    }
+    // Unconfirmed earlier lines are never typed again. While any is unread, a new line goes in only when the pane is idle and
+    // its composer is provably empty: an unsent earlier line cannot be sitting there to be submitted with it. Without that proof
+    // the session waits, as before. A seat that never gets a line could never learn to read what is held.
+    const held = this.inspectionHolds.get(sessionId)?.size ?? 0;
+    if (held && session.composerProvablyIdle?.() !== true) {
+      this.noteWait(sessionId, 'unconfirmed_unread');
+      return false;
+    }
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;
@@ -795,26 +971,71 @@ export class ChatroomDelivery {
         this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + 1);
       }
     }
+    const notices: Pending[] = [];
+    if (held) {
+      const anchor = batch.find((p) => !p.passive) ?? batch[0];
+      notices.push({
+        roomId: anchor.roomId,
+        roomName: anchor.roomName,
+        text: `SYSTEM: ${held} earlier message${held === 1 ? '' : 's'} may not have reached you and ${held === 1 ? 'was' : 'were'} not pasted again (read them with reverie agent chat read)`,
+      });
+      batch.unshift(notices[0]!);
+    }
     // Say so when held messages were dropped, so the member does not act on a partial picture.
     const lost = this.omitted.get(sessionId) ?? 0;
     if (lost > 0) {
       this.omitted.delete(sessionId);
       const anchor = batch.find((p) => !p.passive) ?? batch[0];
-      batch.unshift({
+      notices.push({
         roomId: anchor.roomId,
         roomName: anchor.roomName,
         text: `SYSTEM: ${lost} earlier message${lost === 1 ? '' : 's'} not shown (read them with reverie agent chat read)`,
       });
+      batch.unshift(notices[notices.length - 1]!);
     }
     this.inFlight.add(sessionId);
     this.lastDelivered.set(sessionId, now);
+    this.preparing.set(sessionId, batch);
+    const originalPid = session.pid;
     let attempted = 0;
     let submitted = false;
     let finishWrite = () => {};
     let ioDone = false;
     let writeOk = false;
     try {
-      const { line, taken } = buildDeliveryBatch(batch);
+      // Mark the transcript before anything can be typed: only a turn written after this point can confirm the line. It is
+      // taken before the image awaits below, so the reads, deletions and pane checks that follow them also cover it.
+      let mark: TranscriptMark | undefined;
+      if (session.claudeTranscript) {
+        try {
+          const transcript = await session.claudeTranscript();
+          mark = transcript ? await markTranscript(transcript) : undefined;
+        } catch { mark = undefined; }
+      }
+      const prepared = new Map<Pending, string>();
+      let imageRequests = 0;
+      for (const item of batch.slice(0, buildDeliveryBatch(batch).taken)) {
+        if (!['codex', 'claude'].includes(session.mode) || !item.localImages || !item.messageId || !this.deps.prepareMessage || imageRequests++ >= 4) continue;
+        const text = await this.deps.prepareMessage(sessionId, item.roomId, item.messageId);
+        if (batch.includes(item)) prepared.set(item, text);
+      }
+      const rejected = batch.filter(item => item.messageId && this.deps.messageVisible?.(sessionId, item.roomId, item.messageId) === false);
+      this.discard(rejected);
+      batch.splice(0, batch.length, ...batch.filter(item => !rejected.includes(item)));
+      if (!batch.length) return false;
+      // Image HTTP can yield to a read, room removal, plan move or another turn.
+      // No pane attempt or uncertainty barrier exists yet, so a held batch stays queued.
+      const lateWait = this.promptPauses.has(sessionId) ? 'paused'
+        : this.deps.getSession(sessionId) !== session || session.pid !== originalPid ? 'not_running' : this.paneWait(session);
+      if (lateWait) {
+        this.requeue(sessionId, batch);
+        this.noteWait(sessionId, lateWait); // after the requeue: the batch is off the queue until then
+        return false;
+      }
+      this.preparing.delete(sessionId);
+      // Fresh paths are ephemeral: overflow/requeued fragments keep their original renderer.
+      const rendered = batch.map(item => prepared.has(item) ? { ...item, text: prepared.get(item)! } : item);
+      const { line, taken } = buildDeliveryBatch(rendered);
       // Whatever the line could not hold waits for the next delivery; nothing is dropped. A last guard strips every control
       // character (DEL is Backspace in a terminal input box) so no builder can type an editing key.
       // eslint-disable-next-line no-control-regex
@@ -844,9 +1065,11 @@ export class ChatroomDelivery {
         for (const [roomId, read] of writing.reads) this.acknowledgeRead(sessionId, roomId, [...read]);
       };
       attempted = taken;
+      let refused = false;
       const ok = await session.writeViaMux(`${safe}\r`, {
         opencodeGuard: true,
         requireEmptyComposer: true,
+        ...(prepared.size || held ? { requireIdle: true, onIdleRefused: () => { refused = true; } } : {}),
         onOutcome: (outcome) => {
           if (finished || (carried.length && this.activeWrites.get(sessionId) !== writing)) return;
           outcomeSeen = true;
@@ -862,6 +1085,7 @@ export class ChatroomDelivery {
           else if (carried.length) {
             this.deps.onUncertain?.(sessionId, carried);
           }
+          if (outcome !== 'submitted' && mark && carried.length) this.watchTranscript(sessionId, mark, safe, carried, ids);
           finishWrite();
         },
       });
@@ -875,11 +1099,24 @@ export class ChatroomDelivery {
       // Each room whose message was in the line has a turn starting for this member (the page shows "is thinking" there).
       if (ok) for (const roomId of new Set(chat.map((p) => p.roomId))) this.deps.onWoken?.(sessionId, roomId, now);
       if (ok) this.noteReceived(sessionId, batch.slice(0, taken));
+      if (ok) this.waits.delete(sessionId);
+      if (!ok && refused && !submitted) {
+        // Refused at the write before any key (not idle, or the composer not provably empty): nothing reached the pane,
+        // so these identities are queued again rather than made uncertain.
+        this.durable((store) => store.state(ids, 'queued'));
+        this.releaseInspection(sessionId, carried);
+        // The notices are rebuilt on the next attempt; the dropped count they carried is kept for it.
+        if (lost > 0) this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + lost);
+        this.requeue(sessionId, batch.filter((p) => !notices.includes(p)));
+        this.noteWait(sessionId, 'not_idle'); // after the requeue: the batch is off the queue until then
+        return false;
+      }
       if (!ok) {
         // sendInput can type successfully and then fail Enter. Keep uncertainty unless a receipt
         // proves submission; no existing boolean return proves that the pane received no text.
         if (!submitted) {
           this.deps.onUncertain?.(sessionId, carried);
+          if (mark && carried.length && !outcomeSeen) this.watchTranscript(sessionId, mark, safe, carried, ids);
         }
         if (taken < batch.length) this.requeue(sessionId, batch.slice(taken));
       }
@@ -897,6 +1134,7 @@ export class ChatroomDelivery {
       } else if (!this.persistenceFailed) this.requeue(sessionId, batch);
       return false;
     } finally {
+      this.preparing.delete(sessionId);
       ioDone = true;
       try { finishWrite(); }
       finally { this.inFlight.delete(sessionId); }
