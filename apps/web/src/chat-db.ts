@@ -226,6 +226,13 @@ export class ChatDb {
     return new Set([...ids].filter((id) => has.get(id) !== undefined));
   }
 
+  /** A room's messages after (at, id), oldest first, at most `limit`: the mention feed's forward scan. */
+  messagesAfter(roomId: string, after: { at: number; id: string }, limit: number): ChatMessage[] {
+    const rows = this.db.prepare(`SELECT data FROM messages INDEXED BY messages_room_at WHERE room_id = ?
+      AND (at, id) > (?, ?) ORDER BY at, id LIMIT ?`).all(roomId, after.at, after.id, limit) as Array<{ data: string }>;
+    return rows.map((row) => JSON.parse(String(row.data)) as ChatMessage);
+  }
+
   /** Indexed owner-source discovery, not an unbounded history walk. Budget is shared across rooms. */
   noticeHistory(roomId: string, budget: { rows: number; bytes: number }, before?: { at: number; id: string }):
     { messages: ChatMessage[]; replies: ChatMessage[]; complete: boolean; before?: { at: number; id: string } } {

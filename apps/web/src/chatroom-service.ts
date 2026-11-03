@@ -16,6 +16,10 @@ import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, t
 import { randomUUID, createHash } from 'node:crypto';
 import { displayTime, displayTimeZone } from './display-time.js';
 import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
+import { buildMentionFeed, type MentionCursor, type MentionFeed, type MentionRoomScan } from './chatroom-mentions.js';
+
+/** Messages the mention feed reads per room per request; the cursor carries it past the rest. */
+const MENTION_SCAN_PER_ROOM = 2000;
 import { ChatroomNoticeState, noticeDigest, type NoticeAttention, type NoticeRecipient, type NoticeSource } from './chatroom-notice-state.js';
 import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
 import { isOwnerMark } from './owner-auth/marks.js';
@@ -507,6 +511,35 @@ export class ChatroomService {
       }
     }
     return [...cards.values()];
+  }
+
+  /**
+   * The caller's mention feed after `cursor` across its visible rooms (or one), read from the chat database when there
+   * is one and from the in-memory window otherwise. Read-only: no seen mark, delivery or attention changes.
+   */
+  mentionFeed(
+    sessionId: string,
+    options: { roomId?: string; cursor: MentionCursor; limit: number; holds: boolean }
+  ): MentionFeed & { source: 'database' | 'recent-only'; timeZone: string } {
+    const session = this.deps.getSession(sessionId);
+    if (!session || session.pid === null) throw new ChatroomError('A live own session is required for the mention feed', 'NOT_FOUND');
+    const visible = this.store
+      .roomsFor(sessionId)
+      .filter((room) => !room.archivedAt && room.owner === session.owner && (!isDm(room) || room.dm.includes(sessionId)));
+    const rooms = options.roomId ? visible.filter((room) => room.id === options.roomId) : visible;
+    if (options.roomId && !rooms.length) throw new ChatroomError('No visible room for the mention feed', 'NOT_FOUND');
+    const scans: MentionRoomScan[] = rooms.map((room) => {
+      const name = isDm(room) ? 'DM' : room.name;
+      if (this.db) {
+        const messages = this.db.messagesAfter(room.id, options.cursor, MENTION_SCAN_PER_ROOM + 1);
+        const capped = messages.length > MENTION_SCAN_PER_ROOM;
+        return { id: room.id, name, messages: capped ? messages.slice(0, MENTION_SCAN_PER_ROOM) : messages, capped };
+      }
+      const messages = room.messages.filter((m) => m.at > options.cursor.at || (m.at === options.cursor.at && m.id > options.cursor.id));
+      return { id: room.id, name, messages, capped: false };
+    });
+    const feed = buildMentionFeed(scans, { sessionId, name: this.nameOf(sessionId) }, options);
+    return { ...feed, source: this.db ? 'database' : 'recent-only', timeZone: this.displayTimeZone(session.owner) };
   }
 
   /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */

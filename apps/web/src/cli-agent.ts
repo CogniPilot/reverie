@@ -1744,6 +1744,43 @@ export async function agentChatPending(deps: AgentDeps, options: { room?: string
   return EXIT.ok;
 }
 
+/**
+ * `agent chat mentions`: messages across your rooms that @-mention you, address you, say @everyone or (--holds) use
+ * hold wording, after a cursor or time; prints the next cursor. Read-only: no seen mark, delivery or attention change.
+ */
+export async function agentChatMentions(
+  deps: AgentDeps,
+  options: { room?: string; since?: string; limit?: number; holds?: boolean }
+): Promise<number> {
+  let since = options.since?.trim();
+  if (since !== undefined && !/^m1\./.test(since)) {
+    const at = /^\d{1,16}$/.test(since) ? Number(since)
+      : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(since) ? Date.parse(since) : NaN;
+    if (!Number.isSafeInteger(at)) return fail(deps, 'Use --since with a cursor printed by an earlier call, epoch ms, or ISO 8601 with Z or an offset');
+    since = String(at);
+  }
+  let roomId: string | undefined;
+  if (options.room) {
+    const target = await resolveChatRoom(deps, options.room);
+    if ('error' in target) return fail(deps, target.error, target.code);
+    roomId = target.room.id;
+  }
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/mentions', query: {
+    ...(roomId ? { roomId } : {}), ...(since ? { since } : {}), limit: String(options.limit ?? 50), holds: options.holds ? '1' : '0' } });
+  const data = result.json?.data as { items?: Array<{ room: string; messageId: string; at: number; from: string; reasons: string[]; excerpt: string }>;
+    next?: string; complete?: boolean; source?: string; timeZone?: string } | undefined;
+  if (!result.json?.success || !Array.isArray(data?.items) || typeof data.next !== 'string') return fail(deps, describeFailure(result));
+  if (deps.json) {
+    emitJson(deps, data);
+    return EXIT.ok;
+  }
+  for (const item of data.items)
+    deps.io.out(`${displayTime(item.at, data.timeZone)} ${quoteForPane(item.room, 60)} ${quoteForPane(item.from, 60)} [${item.reasons.join(',')}] ${item.messageId.slice(0, 8)}: ${quoteForPane(item.excerpt, 240)}`);
+  if (!data.items.length) deps.io.out('No new mentions.');
+  deps.io.out(`${data.complete ? 'next' : 'more after'}: --since ${data.next}${data.source === 'recent-only' ? ' (recent window only: no chat database)' : ''}`);
+  return EXIT.ok;
+}
+
 /** Explicit own attention resolution; exact reads support intent but never ACK delivery here. */
 /**
  * Explicit bulk resolution of your own notices from agents and bots in one room posted before a time (epoch ms, or ISO 8601
@@ -3155,6 +3192,20 @@ export function registerAgentCommands(program: Command): Command {
     .option('--json', 'Machine-readable output including source references and coverage')
     .action((options: { room?: string; beforeAt?: string; beforeId?: string; json?: boolean }) =>
       run(Boolean(options.json), deps => agentChatPending(deps, options))
+    );
+
+  chat
+    .command('mentions')
+    .description('Messages across your rooms that @-mention or address you, or say @everyone, after a cursor or time; read-only, nothing expires')
+    .option('-r, --room <room>', 'Only this room (id or name)')
+    .option('--since <cursor-or-time>', 'Cursor printed by the last call, epoch ms, or ISO 8601 with Z or an offset (default: the last 24 h)')
+    .option('--holds', 'Also any message using hold, blocker or NO-GO wording')
+    .option('-n, --limit <n>', 'At most this many (1-200)', '50')
+    .option('--json', 'Machine-readable output')
+    .action((options: { room?: string; since?: string; holds?: boolean; limit?: string; json?: boolean }) =>
+      run(Boolean(options.json), (deps) =>
+        agentChatMentions(deps, { room: options.room, since: options.since, holds: options.holds, limit: Math.min(200, parsePositiveInt(options.limit, 50, '--limit')) })
+      )
     );
 
   chat

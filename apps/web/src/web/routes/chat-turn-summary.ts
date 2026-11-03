@@ -6,6 +6,7 @@ import { ownerFor, resolveParentSessionId } from '../route-helpers.js';
 import { ChatroomError } from '../../chatroom-store.js';
 import { z } from 'zod';
 import { DIGEST_CURSOR_MAX } from '../../chatroom-digest.js';
+import { decodeMentionCursor, encodeMentionCursor } from '../../chatroom-mentions.js';
 
 const ref = z
   .object({ roomId: z.string().min(1).max(200), messageId: z.string().min(1).max(200), readToken: z.string().uuid() })
@@ -24,7 +25,23 @@ const historyQuery = z
 // GET continues from the stored cursor, or shows everything with since=all; an explicit cursor is POSTed (see DIGEST_CURSOR_MAX).
 const digestQuery = z.object({ since: z.literal('all').optional() }).strict();
 const digestBody = z.object({ since: z.string().min(1).max(DIGEST_CURSOR_MAX) }).strict();
-const pendingBeforeQuery = z.object({ roomId: z.string().min(1).max(200), before: z.string().regex(/^\d{1,16}$/) }).strict();
+const mentionsQuery = z
+  .object({
+    roomId: z.string().min(1).max(200).optional(),
+    // A cursor from an earlier page (m1.…), or an epoch-ms start time.
+    since: z.string().min(1).max(600).optional(),
+    limit: z
+      .string()
+      .regex(/^\d{1,3}$/)
+      .optional(),
+    holds: z.enum(['0', '1']).optional(),
+  })
+  .strict();
+/** Without `since`, the feed starts this long ago. */
+export const MENTION_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const pendingBeforeQuery = z
+  .object({ roomId: z.string().min(1).max(200), before: z.string().regex(/^\d{1,16}$/) })
+  .strict();
 
 export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, service: ChatroomService): void {
   app.get('/api/chatrooms/turn-summary', async (req, reply) => {
@@ -43,26 +60,36 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
 
   app.get('/api/chatrooms/digest', async (req, reply) => {
     const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
-    if (!self || req.headers['x-reverie-parent-session'] !== self ||
-        req.headers['x-reverie-service-token'] !== undefined)
+    if (
+      !self ||
+      req.headers['x-reverie-parent-session'] !== self ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
       return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
     const parsed = digestQuery.safeParse(req.query);
     if (!parsed.success)
-      return reply.code(400).send({ success: false, error: 'Digest takes only since=all; POST an explicit cursor as {"since": cursor}' });
+      return reply
+        .code(400)
+        .send({ success: false, error: 'Digest takes only since=all; POST an explicit cursor as {"since": cursor}' });
     reply.header('Cache-Control', 'no-store');
     try {
       return { success: true, data: service.actionableDigest(self, parsed.data.since) };
     } catch (error) {
       if (!(error instanceof ChatroomError)) throw error;
-      return reply.code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503).send({ success: false, error: error.message });
+      return reply
+        .code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503)
+        .send({ success: false, error: error.message });
     }
   });
 
   // The same digest from an explicit cursor; like since=all it never moves the stored cursor.
   app.post('/api/chatrooms/digest', async (req, reply) => {
     const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
-    if (!self || req.headers['x-reverie-parent-session'] !== self ||
-        req.headers['x-reverie-service-token'] !== undefined)
+    if (
+      !self ||
+      req.headers['x-reverie-parent-session'] !== self ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
       return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
     const parsed = digestBody.safeParse(req.body);
     if (Object.keys(req.query as object).length || !parsed.success || parsed.data.since === 'all')
@@ -72,7 +99,49 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
       return { success: true, data: service.actionableDigest(self, parsed.data.since) };
     } catch (error) {
       if (!(error instanceof ChatroomError)) throw error;
-      return reply.code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503).send({ success: false, error: error.message });
+      return reply
+        .code(error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_INPUT' ? 400 : 503)
+        .send({ success: false, error: error.message });
+    }
+  });
+
+  // The caller's mentions, addressed messages, @everyone and (holds=1) hold wording across its rooms, paged forward by
+  // cursor. Read-only: unlike the room messages route it never moves the seen mark.
+  app.get('/api/chatrooms/mentions', async (req, reply) => {
+    const self = resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    if (
+      !self ||
+      req.headers['x-reverie-parent-session'] !== self ||
+      req.headers['x-reverie-service-token'] !== undefined
+    )
+      return reply.code(403).send({ success: false, error: 'Exact agent caller required' });
+    const parsed = mentionsQuery.safeParse(req.query);
+    if (!parsed.success)
+      return reply
+        .code(400)
+        .send({ success: false, error: 'Expected roomId, since (cursor or epoch ms), limit 1-200 and holds=0|1' });
+    const { since, roomId } = parsed.data;
+    const cursor =
+      since === undefined
+        ? { at: Date.now() - MENTION_DEFAULT_WINDOW_MS, id: '' }
+        : /^\d{1,16}$/.test(since)
+          ? { at: Number(since), id: '' }
+          : decodeMentionCursor(since);
+    const limit = Number(parsed.data.limit ?? 50);
+    if (!cursor || limit < 1 || limit > 200)
+      return reply
+        .code(400)
+        .send({ success: false, error: 'since must be a cursor from an earlier page or epoch ms; limit 1-200' });
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const feed = service.mentionFeed(self, { roomId, cursor, limit, holds: parsed.data.holds === '1' });
+      return {
+        success: true,
+        data: { ...feed, next: feed.next ? encodeMentionCursor(feed.next) : (since ?? encodeMentionCursor(cursor)) },
+      };
+    } catch (error) {
+      if (!(error instanceof ChatroomError)) throw error;
+      return reply.code(error.code === 'NOT_FOUND' ? 404 : 503).send({ success: false, error: error.message });
     }
   });
 
@@ -117,7 +186,10 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
       return reply.code(400).send({ success: false, error: 'Expected own roomId and before (epoch milliseconds)' });
     reply.header('Cache-Control', 'no-store');
     try {
-      const summary = service.turnSummary(self, undefined, { roomId: parsed.data.roomId, before: Number(parsed.data.before) });
+      const summary = service.turnSummary(self, undefined, {
+        roomId: parsed.data.roomId,
+        before: Number(parsed.data.before),
+      });
       return { success: true, data: { sourceReferences: summary.sourceReferences ?? [] } };
     } catch (error) {
       if (!(error instanceof ChatroomError)) throw error;
