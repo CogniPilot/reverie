@@ -5,7 +5,7 @@
  */
 import { MEMORY_BRIEF_MAX, MEMORY_BRIEF_UNREADABLE } from './memory-brief.js';
 import type { Command } from 'commander';
-import type { AgentDeps } from './cli-agent.js';
+import { resolveChatRoom, type AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import { agentJournalImportLegacy, type ImportLegacyOptions } from './cli-agent-journal-import.js';
 import { JOURNAL_INTERPRETATION, JOURNAL_OUTCOME_STATUSES, JOURNAL_PROJECT_SAVES_PER_DAY, normalizeJournalDue, type JournalEntryView, type JournalGate,
@@ -23,6 +23,26 @@ export function elapsed(at: string, now: number): string {
   if (minutes < 60) return `${minutes} min ago`;
   if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h ago`;
   return `${Math.floor(minutes / 1440)} d ago`;
+}
+
+const ROOM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The room id for `--room`, which, as in every chat verb, may be a room name or an 8+ character id prefix. The journal
+ * routes take exact ids only, so a name used to be refused as an unreadable turn. A full id, or a value that matches no
+ * visible room (an archived one, say), is passed through for the server to judge. Only the commands people type resolve
+ * names; callers that already hold the exact room id (the MCP memory tools) call the journal functions directly.
+ */
+export async function journalRoom(deps: AgentDeps, room: string): Promise<string>;
+export async function journalRoom(deps: AgentDeps, room: string | undefined): Promise<string | undefined>;
+export async function journalRoom(deps: AgentDeps, room: string | undefined): Promise<string | undefined> {
+  if (!room || ROOM_ID.test(room)) return room;
+  try {
+    const found = await resolveChatRoom(deps, room);
+    return 'room' in found ? found.room.id : room;
+  } catch {
+    return room;
+  }
 }
 
 function refused(deps: AgentDeps, error: string, gates?: JournalGate[]): number {
@@ -198,7 +218,7 @@ export function registerJournalCommands(
     .description('Your own source-linked journal on the office server, kept across backend changes (entries are your account, not verified fact)');
   journal.command('save')
     .description('Save one bounded entry for the message you are acting on; the server checks the turn gates and every quote')
-    .requiredOption('-r, --room <id>', 'Room of the turn message and of the cited sources')
+    .requiredOption('-r, --room <room>', 'Room (id or name) of the turn message and of the cited sources')
     .requiredOption('--turn <message-id>', 'The message you are acting on (read-only and save-reason gates read it)')
     .requiredOption('--text <text>', 'Entry text, at most 1024 UTF-8 bytes')
     .requiredOption('--tag <kind>', 'decision, promise, correction, preference, identity, relationship, open-question, lesson or personal-reflection (repeat, 1-6)', repeat)
@@ -216,19 +236,19 @@ export function registerJournalCommands(
     .option('--outcome-of <entry-id>', 'This entry is how an earlier promise or decision turned out (with --status)')
     .option('--status <status>', 'done or dropped (closes a promise; dropped needs --reason) or result (records how it turned out)')
     .option('--json', 'Machine-readable result and gate record')
-    .action((options: JournalSaveOptions & { json?: boolean }) => run(Boolean(options.json), deps => agentJournalSave(deps, options)));
+    .action((options: JournalSaveOptions & { json?: boolean }) => run(Boolean(options.json), async deps => agentJournalSave(deps, { ...options, room: await journalRoom(deps, options.room) })));
   journal.command('recall <words...>').description('Top two matching entries, with sources re-checked now')
-    .option('-r, --room <id>', 'Only entries written while acting in this room')
+    .option('-r, --room <room>', 'Only entries written while acting in this room (id or name)')
     .option('--project <id>', "This project's entries, from every employee, instead of your own")
     .option('--json', 'Machine-readable entries (UTC ISO times)')
-    .action((words: string[], options: { room?: string; project?: string; json?: boolean }) => run(Boolean(options.json), deps => agentJournalRecall(deps, words, options.room, options.project)));
+    .action((words: string[], options: { room?: string; project?: string; json?: boolean }) => run(Boolean(options.json), async deps => agentJournalRecall(deps, words, await journalRoom(deps, options.room), options.project)));
   journal.command('map [words...]').description('One page of entry headers, newest first')
-    .option('-r, --room <id>', 'Only entries written while acting in this room')
+    .option('-r, --room <room>', 'Only entries written while acting in this room (id or name)')
     .option('--project <id>', "This project's entries, from every employee, instead of your own")
     .option('--before <entry-id>', 'Continue below this entry id')
     .option('--json', 'Machine-readable page')
     .action((words: string[] | undefined, options: { room?: string; before?: string; json?: boolean }) =>
-      run(Boolean(options.json), deps => agentJournalMap(deps, words ?? [], options)));
+      run(Boolean(options.json), async deps => agentJournalMap(deps, words ?? [], { ...options, room: await journalRoom(deps, options.room) })));
   journal.command('import-legacy').description('Move your old reverie-memory store into this journal, as imported, unverified entries (run --dry-run first)')
     .option('--dry-run', 'Show what would be imported; write nothing')
     .option('--write', 'Import (safe to repeat: memories already imported are skipped)')
@@ -237,9 +257,9 @@ export function registerJournalCommands(
     .option('--json', 'Machine-readable result')
     .action((options: ImportLegacyOptions & { json?: boolean }) => run(Boolean(options.json), deps => agentJournalImportLegacy(deps, options)));
   journal.command('source <message-id>').description('Re-read a cited message as you can see it now')
-    .requiredOption('-r, --room <id>', 'Room of the message')
+    .requiredOption('-r, --room <room>', 'Room (id or name) of the message')
     .option('--json', 'Machine-readable message')
-    .action((messageId: string, options: { room: string; json?: boolean }) => run(Boolean(options.json), deps => agentJournalSource(deps, options.room, messageId)));
+    .action((messageId: string, options: { room: string; json?: boolean }) => run(Boolean(options.json), async deps => agentJournalSource(deps, await journalRoom(deps, options.room), messageId)));
   journal.command('brief').description('What a new session starts with: who you are, how to use this journal, and your top entries')
     .option('--hook-event <event>', 'Hook output for SessionStart')
     .option('--json', 'Machine-readable brief')
