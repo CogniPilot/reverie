@@ -270,8 +270,12 @@ export type DockerNetworkMode = 'bridge' | 'none' | 'custom';
 
 /** Per-container resource caps. Advisory under non-delegated rootless (see `capsEnforced`). */
 export interface DockerResourceLimits {
-  /** e.g. '4g' -> --memory 4g --memory-swap 4g (swap==memory: a real OOM cap) */
+  /** Hard RAM ceiling, e.g. '32g'. A reservation allows borrowing up to this ceiling. */
   memory?: string;
+  /** Normal share, e.g. '4g'; best-effort reclaim protection, not a RAM guarantee. */
+  memoryReservation?: string;
+  /** Total RAM+swap, e.g. '48g'. With a reservation, defaults to RAM ceiling + 16 GiB. */
+  memorySwap?: string;
   /** e.g. '2' -> --cpus 2 */
   cpus?: string;
   /** e.g. 512 -> --pids-limit 512 (fork-bomb guard) */

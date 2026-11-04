@@ -210,7 +210,7 @@ let
         test/deepseek-web-server.test.ts test/delivery-format-contract.test.ts test/dependency-checker.test.ts \
         test/dependency-report.test.ts test/dependency-security.test.ts test/detached-session-pane-sizing.test.ts \
         test/discard-partially-built-session.test.ts test/docker-adopt-duplicate.test.ts test/docker-adopted-container.test.ts
-      npm test -- test/docker-exec-options.test.ts test/docker-export.test.ts test/docker-hosts.test.ts test/docker-self-update.test.ts \
+      npm test -- test/docker-exec-options.test.ts test/docker-export.test.ts test/docker-hosts.test.ts test/docker-memory-policy.test.ts test/docker-self-update.test.ts \
         test/doctor-cli-json.test.ts test/document-conversion-limiter.test.ts test/document-preview-cache-eviction.test.ts \
         test/document-preview-cache.test.ts test/document-thumbnailer.test.ts test/dropped-output-recovery.test.ts \
         test/effort-injection.test.ts test/embassy-guest-client.test.ts test/embassy-guest-policy.test.ts test/embassy-guest-ui.test.ts \

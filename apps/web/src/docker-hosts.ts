@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dataPath } from './config/instance.js';
+import { dockerMemoryFlags, dockerMemoryReadback } from './docker-memory-policy.js';
 import type {
   DockerCase,
   DockerEngine,
@@ -445,18 +446,25 @@ function mountSpec(m: DockerMount): string {
 function resourceFlags(resources?: DockerResourceLimits, disableSwapLimit = false): string[] {
   if (!resources) return [];
   const flags: string[] = [];
-  if (resources.memory) {
-    flags.push('--memory', resources.memory);
-    // memory-swap == memory disables swap where the daemon supports swap
-    // accounting. Some kernels, including the deployed Unraid host, do not;
-    // requesting it there emits a warning and Docker ignores the value.
-    if (!disableSwapLimit) flags.push('--memory-swap', resources.memory);
-  }
+  flags.push(...dockerMemoryFlags(resources, disableSwapLimit));
   if (resources.cpus) flags.push('--cpus', resources.cpus);
   if (resources.pidsLimit) flags.push('--pids-limit', String(resources.pidsLimit));
   if (resources.nofile) flags.push('--ulimit', `nofile=${resources.nofile}`);
   if (resources.shmSize) flags.push('--shm-size', resources.shmSize);
   return flags;
+}
+
+/** Refuse ignored limits or an old fixed-cap container before starting a new laptop program. */
+export function buildDockerMemoryCheck(docker: SessionDocker, disableSwapLimit = false): string {
+  if (docker.owned === false) return '';
+  const check = dockerMemoryReadback(docker.resources, disableSwapLimit);
+  if (!check) return '';
+  const inspect = [...buildDockerBaseArgs(docker), 'inspect', '--format', shellescape(check.format), shellescape(docker.containerName)].join(' ');
+  // Exact one-line comparison. pipefail also preserves a failed inspect which
+  // happened to print a value; no variable/command substitution crosses tmux.
+  const rule = `BEGIN {a=getline line; b=getline extra; exit !(a == 1 && line == "${check.expected}" && b == 0)}`;
+  const message = 'Reverie: laptop memory limits differ from the selected profile or are unavailable. No agent was started.';
+  return `(set -o pipefail; ${inspect} | awk ${shellescape(rule)}) || { printf '%s\\n' ${shellescape(message)} >&2; exit 1; }`;
 }
 
 function networkArg(network: DockerNetworkMode, networkName?: string): string {
@@ -469,7 +477,7 @@ function networkArg(network: DockerNetworkMode, networkName?: string): string {
  * infinity` CMD) for a long-lived, hardened, per-case container. PURE: every
  * dynamic value is shellescaped; the caller joins with spaces into the launch
  * string. Security invariants baked in: --cap-drop ALL, --security-opt
- * no-new-privileges, --pids-limit, --memory==--memory-swap, --init,
+ * no-new-privileges, --pids-limit, explicit memory policy, --init,
  * --pull=never, --restart no, NEVER --privileged, NEVER the docker socket.
  */
 export function buildDockerCreateArgs(ctx: DockerCreateContext): string[] {

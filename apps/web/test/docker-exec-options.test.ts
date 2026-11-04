@@ -108,6 +108,18 @@ describe('buildDockerLaunchCommand', () => {
     expect(cmd).toContain("sh -lc '");
   });
 
+  it('keeps the normal share separate from the borrowing ceiling through the complete launch chain', () => {
+    const opts = launchOpts();
+    opts.docker.resources = { memory: '32g', memoryReservation: '1536m', memorySwap: '48g' };
+    opts.createContext.docker = opts.docker;
+    const cmd = buildDockerLaunchCommand(opts);
+    expect(cmd).toContain('--memory 32g --memory-reservation 1536m --memory-swap 48g');
+    expect(cmd.indexOf('--memory-reservation')).toBeLessThan(cmd.indexOf('docker start'));
+    expect(cmd.indexOf('{{.HostConfig.MemoryReservation}}')).toBeGreaterThan(cmd.indexOf('docker create'));
+    expect(cmd.indexOf('{{.HostConfig.MemoryReservation}}')).toBeLessThan(cmd.indexOf('docker start'));
+    expect(cmd).not.toContain('--oom-kill-disable');
+  });
+
   it('selects the deterministic existing transcript before execution in the container', () => {
     const cmd = buildDockerLaunchCommand(launchOpts());
     expect(cmd).toContain('claude --dangerously-skip-permissions --session-id 1a2b3c4d5e6f');
