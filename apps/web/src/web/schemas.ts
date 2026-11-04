@@ -29,6 +29,7 @@ import { MAX_INPUT_LENGTH } from '../config/terminal-limits.js';
 import { enabledCliIds, enabledClis } from '../config/cli-registry/registry.js';
 import type { SessionMode } from '../types.js';
 import { isAdvisorModel } from '../types/session.js';
+import { validateDockerMemory } from '../docker-memory-policy.js';
 
 // ========== Path Validation ==========
 
@@ -914,6 +915,14 @@ const DockerResourceLimitsSchema = z
       .string()
       .regex(/^\d+[bkmg]?$/i, 'Memory must be like 512m / 4g')
       .optional(),
+    memoryReservation: z
+      .string()
+      .regex(/^\d+[bkmg]?$/i, 'Reservation must be like 1536m / 4g')
+      .optional(),
+    memorySwap: z
+      .string()
+      .regex(/^\d+[bkmg]?$/i, 'Memory plus swap must be like 32g / 48g')
+      .optional(),
     cpus: z
       .string()
       .regex(/^\d+(\.\d+)?$/, 'CPUs must be a number')
@@ -928,7 +937,17 @@ const DockerResourceLimitsSchema = z
       .regex(/^\d+[bkmg]?$/i, 'shm-size must be like 256m')
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((resources, ctx) => {
+    try {
+      validateDockerMemory(resources);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error instanceof Error ? error.message : 'Invalid memory policy',
+      });
+    }
+  });
 
 export const DockerHostSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid docker host id'),

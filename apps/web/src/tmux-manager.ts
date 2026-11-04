@@ -91,6 +91,7 @@ import {
 import {
   buildDockerBaseArgs,
   buildDockerCreateArgs,
+  buildDockerMemoryCheck,
   containerApiUrl,
   CONTAINER_HOME,
   defaultDockerCommandForMode,
@@ -1476,7 +1477,8 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   const innerCmd = seedSteps.length ? `${seedSteps.join(' ; ')} ; ${tmuxInvocation}` : tmuxInvocation;
   const execCmd = `exec ${base} exec -it --workdir ${workdir} ${execEnvFlags.join(' ')} ${name} sh -lc ${shellescape(innerCmd)}`;
 
-  return [imageCheck, ensure, start, execCmd].filter(Boolean).join(' ; ');
+  const memoryCheck = buildDockerMemoryCheck(docker, createContext.disableSwapLimit);
+  return [imageCheck, ensure, memoryCheck, start, execCmd].filter(Boolean).join(' ; ');
 }
 
 /**
