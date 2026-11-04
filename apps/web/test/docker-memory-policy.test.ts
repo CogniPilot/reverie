@@ -117,7 +117,7 @@ describe('ordinary laptop memory policy', () => {
   it('passes numeric policy values as exact shell tokens in the real create command builder', () => {
     const args = buildDockerCreateArgs(context({ memory: '32g', memoryReservation: '1536m', memorySwap: '48g' }));
     // Parse only with shell builtins; no engine, container, host policy or provider runs.
-    const tokens = execFileSync('/bin/bash', ['-c', `set -- ${args.join(' ')}; printf '%s\\0' "$@"`])
+    const tokens = execFileSync('bash', ['-c', `set -- ${args.join(' ')}; printf '%s\\0' "$@"`])
       .toString()
       .split('\0')
       .slice(0, -1);
@@ -145,11 +145,14 @@ describe('ordinary laptop memory policy', () => {
   });
 
   it('executes the launch readback against a fake engine and refuses ignored limits, extra lines and failed inspect', () => {
+    // Nix provides Bash on PATH without requiring /bin/bash or /bin/sh.
+    // Use that exact interpreter for both the check and its executable fixture.
+    const bash = execFileSync('bash', ['-c', 'printf "%s" "$BASH"'], { encoding: 'utf8' });
     const directory = mkdtempSync(join(tmpdir(), 'laptop-memory-check-'));
     try {
       writeFileSync(
         join(directory, 'docker'),
-        '#!/bin/sh\nprintf "%s\\n" "$FAKE_MEMORY_ROW"\nexit "$FAKE_MEMORY_EXIT"\n',
+        `#!${bash}\nprintf "%s\\n" "$FAKE_MEMORY_ROW"\nexit "$FAKE_MEMORY_EXIT"\n`,
         { mode: 0o700 }
       );
       const docker = context({ memory: '32g', memoryReservation: '4g', memorySwap: '48g' }).docker;
@@ -163,7 +166,7 @@ describe('ordinary laptop memory policy', () => {
         ['34359738368:4294967296:51539607552', '1', false],
         ['', '0', false],
       ] as const) {
-        const result = spawnSync('/bin/bash', ['-c', check], {
+        const result = spawnSync(bash, ['-c', check], {
           encoding: 'utf8',
           env: {
             ...process.env,
@@ -172,6 +175,7 @@ describe('ordinary laptop memory policy', () => {
             FAKE_MEMORY_EXIT: code,
           },
         });
+        expect(result.error, JSON.stringify({ row, code, error: result.error?.message })).toBeUndefined();
         expect(result.status === 0, JSON.stringify({ row, code, stderr: result.stderr })).toBe(success);
       }
       // Legacy and adopted containers keep their existing paths; this is not
