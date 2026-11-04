@@ -13,7 +13,7 @@ in pkgs.runCommand "reverie-owner-terminal-website" {
   nativeBuildInputs = [ pkgs.python3 ];
   meta.mainProgram = "reverie-owner-terminal-website";
 } ''
-  mkdir -p "$out/bin" "$out/libexec"
+  mkdir -p "$out/bin" "$out/libexec" "$out/share/reverie-owner-terminal"
   python3 - ${runtime} "$out" <<'PY'
 import hashlib,json,pathlib,sys
 runtime=pathlib.Path(sys.argv[1]);raw=runtime.read_bytes()
@@ -21,6 +21,18 @@ value=json.loads(raw)
 assert value['purpose']=='owner-terminal-lifecycle-runtime-v1' and value['profile']=='terminal'
 pair={'path':str(runtime),'sha256':hashlib.sha256(raw).hexdigest()}
 out=pathlib.Path(sys.argv[2]);script=out/'libexec/owner-terminal-website.py'
+backend=pathlib.Path(${builtins.toJSON "${pythonSource}"}).resolve(strict=True)
+adapter=pathlib.Path(${builtins.toJSON "${pythonSource}"}).resolve(strict=True)
+entry=(backend/'scripts/reverie-owner-terminal-host').resolve(strict=True)
+assert value['hostProgram']['argvPrefix'][3]==str(entry)
+assert (backend/'python/reverie/__init__.py').is_file()
+files={}
+for name in ('python/reverie/owner_terminal_website.py','apps/host/website-update.py','scripts/owner-terminal-lifecycle.mjs'):
+    path=(adapter/name).resolve(strict=True)
+    files[name]={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+witness={'version':1,'purpose':'owner-terminal-website-source-pair-v1','nativeSource':str(backend),
+         'adapterSource':str(adapter),'runtimeManifest':pair,'nativeHostEntry':str(entry),'adapterFiles':files}
+(out/'share/reverie-owner-terminal/website-adapter-pair.json').write_text(json.dumps(witness,sort_keys=True)+'\n')
 script.write_text('import sys\n'
     'sys.path.insert(0,${builtins.toJSON "${pythonSource}/python"})\n'
     'from reverie.owner_terminal_website import main\n'

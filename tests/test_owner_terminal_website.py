@@ -33,6 +33,7 @@ class TerminalWebsiteStageTests(unittest.TestCase):
         self.fixture.setUp(); self.addCleanup(self.fixture.doCleanups)
         f = self.fixture
         self.events = []; self.phase_failure = None; self.after_created = lambda row: None
+        probe = patch.object(H, 'verify_private_tmpfs'); self.tmpfs_probe = probe.start(); self.addCleanup(probe.stop)
         self.root = f.root
         control = self.root / 'h-control'; ledger = self.root / 'h-ledger'; boot = self.root / 'h-bootstrap'
         for path in (control, ledger, boot):path.mkdir(mode=0o700)
@@ -127,6 +128,129 @@ class TerminalWebsiteStageTests(unittest.TestCase):
             return result
         self.engine = engine
         self.rebuild()
+
+    def test_docker_omitted_tmpfs_is_declared_and_running_proof_is_required(self):
+        self.after_created = lambda row: row.update(Mounts=[m for m in row['Mounts'] if m['Type'] != 'tmpfs'])
+        plan = self.approve()
+        result = self.stage.apply(plan, W.website.digest(plan))
+        self.assertEqual(result['state'], 'adopted')
+        self.tmpfs_probe.assert_called_once()
+        self.assertEqual(self.tmpfs_probe.call_args.args[1], plan['spec']['HostConfig']['Tmpfs'])
+
+    def test_retained_unstarted_candidate_continues_once_preserving_failure(self):
+        plan = self.approve(); original = self.profile.verify_mounts
+        with patch.object(self.profile, 'verify_mounts', side_effect=ValueError('controlled pre-stop validation failure')):
+            with self.assertRaises(W.website.WebsiteRefusal):self.stage.apply(plan, W.website.digest(plan))
+        initial = (self.fixture.state / 'website-active.json').read_bytes()
+        self.assertTrue(self.fixture.engine.containers[W.OLD]['State']['Running'])
+        self.rebuild()
+        self.engine.select_retained_candidate = lambda cid, saved: self.assertEqual((cid, saved), (W.NEW, plan))
+        result = self.stage.resume_created(plan, W.website.digest(plan))
+        self.assertEqual(result['state'], 'adopted')
+        operation = self.fixture.state / ('website-' + plan['operationId'])
+        self.assertEqual((operation / 'initial-unconfirmed.private.json').read_bytes(), initial)
+        self.assertTrue((operation / 'resume-created-ATTEMPT.private.json').is_file())
+        self.assertEqual(sum(path.startswith('/containers/create?') for _, path, _ in self.fixture.engine.calls), 1)
+        with self.assertRaises(W.website.WebsiteRefusal):self.stage.resume_created(plan, W.website.digest(plan))
+
+    def test_retained_candidate_refuses_start_evidence_changed_plan_or_active_receipt(self):
+        for mutation in ('started', 'old-stopped', 'phase-marker', 'active-receipt', 'plan'):
+            with self.subTest(mutation=mutation):
+                f = TerminalWebsiteStageTests(methodName='runTest'); f.setUp()
+                try:
+                    plan = f.approve()
+                    with patch.object(f.profile, 'verify_mounts', side_effect=ValueError('controlled failure')):
+                        with self.assertRaises(W.website.WebsiteRefusal):f.stage.apply(plan, W.website.digest(plan))
+                    folder = f.fixture.state / ('website-' + plan['operationId'])
+                    if mutation == 'started':f.fixture.engine.containers[W.NEW]['State']['StartedAt'] = '2026-11-03T00:00:00Z'
+                    elif mutation == 'old-stopped':f.fixture.engine.containers[W.OLD]['State']['Running'] = False
+                    elif mutation == 'phase-marker':(folder / 'H-settle-ATTEMPT.json').write_text('{}')
+                    elif mutation == 'active-receipt':(f.fixture.state / 'website-active.json').write_text('{}')
+                    else:(folder / 'plan.private.json').write_text('{}')
+                    f.rebuild(); f.engine.select_retained_candidate = lambda *_:None
+                    count = len(f.fixture.engine.mutations())
+                    with self.assertRaises(W.website.WebsiteRefusal):f.stage.resume_created(plan, W.website.digest(plan))
+                    self.assertEqual(len(f.fixture.engine.mutations()), count)
+                finally:f.doCleanups()
+
+    def test_retained_continue_crash_latch_and_kernel_tmpfs_failure_stay_held(self):
+        plan = self.approve()
+        with patch.object(self.profile, 'verify_mounts', side_effect=ValueError('controlled failure')):
+            with self.assertRaises(W.website.WebsiteRefusal):self.stage.apply(plan, W.website.digest(plan))
+        self.rebuild();self.engine.select_retained_candidate = lambda *_:None
+        self.tmpfs_probe.side_effect = ValueError('native mount unknown')
+        with self.assertRaises(W.website.WebsiteRefusal):self.stage.resume_created(plan, W.website.digest(plan))
+        self.assertFalse(self.fixture.engine.containers[W.NEW]['State']['Running'])
+        with self.assertRaises(W.website.WebsiteRefusal):self.stage.resume_created(plan, W.website.digest(plan))
+
+    def failed_local_validation_continuation(self):
+        plan=self.approve()
+        with patch.object(self.profile,'verify_mounts',side_effect=ValueError('controlled initial validation')):
+            with self.assertRaises(W.website.WebsiteRefusal):self.stage.apply(plan,W.website.digest(plan))
+        self.rebuild();self.engine.select_retained_candidate=lambda *_:None
+        refused=SimpleNamespace(returncode=1,stdout=b'',stderr=b'controlled local qualifier refusal')
+        with patch.object(H.subprocess,'run',return_value=refused):
+            with self.assertRaises(W.website.WebsiteRefusal):self.stage.resume_created(plan,W.website.digest(plan))
+        self.rebuild();self.engine.select_retained_candidate=lambda *_:None
+        return plan
+
+    def test_explicit_continue_created_preserves_each_prior_latch_and_raw_failure(self):
+        plan=self.failed_local_validation_continuation()
+        folder=self.fixture.state/('website-'+plan['operationId'])
+        original={name:(folder/name).read_bytes() for name in ('initial-unconfirmed.private.json','resume-created-ATTEMPT.private.json')}
+        failed=(folder/'receipt.private.json').read_bytes();attempt=str(uuid.uuid4())
+        receipt_sha='sha256:'+hashlib.sha256(failed).hexdigest()
+        result=self.stage.continue_created(plan,W.website.digest(plan),attempt,receipt_sha)
+        self.assertEqual(result['state'],'adopted')
+        for name,raw in original.items():self.assertEqual((folder/name).read_bytes(),raw)
+        self.assertEqual((folder/('continued-refusal-'+attempt+'.private.json')).read_bytes(),failed)
+        self.assertTrue((folder/('continue-created-'+attempt+'-ATTEMPT.private.json')).is_file())
+        self.assertEqual(sum(path.startswith('/containers/create?') for _,path,_ in self.fixture.engine.calls),1)
+        with self.assertRaises(W.website.WebsiteRefusal):self.stage.continue_created(plan,W.website.digest(plan),str(uuid.uuid4()),receipt_sha)
+        with self.assertRaises(W.website.WebsiteRefusal):self.stage.resume_created(plan,W.website.digest(plan))
+
+    def test_continue_created_refuses_bad_CAS_modified_qualifier_or_native_phase(self):
+        for change in ('receipt-cas','qualifier-file','qualifier-input','prior-latch','native-phase'):
+            with self.subTest(change=change):
+                f=TerminalWebsiteStageTests(methodName='runTest');f.setUp()
+                try:
+                    plan=f.failed_local_validation_continuation();folder=f.fixture.state/('website-'+plan['operationId'])
+                    failed=(folder/'receipt.private.json').read_bytes();sha='sha256:'+hashlib.sha256(failed).hexdigest()
+                    if change=='receipt-cas':sha='sha256:'+'0'*64
+                    elif change=='qualifier-file':next(folder.glob('H-qualifier-*')).joinpath('accepted.json').write_text('{}')
+                    elif change=='qualifier-input':next(folder.glob('H-qualifier-*')).joinpath('intent.json').write_text('{}')
+                    elif change=='prior-latch':(folder/'resume-created-ATTEMPT.private.json').write_text('{}')
+                    else:(folder/'H-settle-ATTEMPT.json').write_text('{}')
+                    count=len(f.fixture.engine.mutations())
+                    with self.assertRaises(W.website.WebsiteRefusal):f.stage.continue_created(plan,W.website.digest(plan),str(uuid.uuid4()),sha)
+                    self.assertEqual(len(f.fixture.engine.mutations()),count)
+                finally:f.doCleanups()
+
+    def test_owner_renewal_requalifies_fresh_native_only_and_preserves_parent_plan(self):
+        old=self.failed_local_validation_continuation();f=self.fixture
+        original=(f.state/('website-'+old['operationId'])/'plan.private.json').read_bytes()
+        failed=(f.state/'website-active.json').read_bytes();attempt=str(uuid.uuid4())
+        cas='sha256:'+hashlib.sha256(failed).hexdigest()
+        f.guard.value['freshObservation']='owner-reviewed current native facts; old full witness unavailable'
+        plan=self.stage.plan('reverie',W.NEW_IMAGE,W.OLD,W.OLD_IMAGE,_retained_plan=old,_continuation=(attempt,cas))
+        self.assertNotEqual(plan['guardPin'],old['guardPin'])
+        self.assertEqual([k for k in W.website.PLAN_KEYS if plan[k]!=old[k]],['guardPin'])
+        result=self.stage.continue_created(plan,W.website.digest(plan),attempt,cas,baseline_plan=old)
+        self.assertEqual(result['state'],'adopted')
+        folder=f.state/('website-'+old['operationId'])
+        self.assertEqual((folder/'initial-plan.private.json').read_bytes(),original)
+        self.assertEqual(json.loads((folder/'plan.private.json').read_bytes()),plan)
+        self.assertEqual(result['planDigest'],W.website.digest(plan))
+
+    def test_owner_renewal_refuses_authority_or_spec_changes_before_effects(self):
+        old=self.failed_local_validation_continuation();f=self.fixture
+        failed=(f.state/'website-active.json').read_bytes();cas='sha256:'+hashlib.sha256(failed).hexdigest()
+        changed=deepcopy(old);changed['spec']['HostConfig']['Memory']*=2
+        changed['specPin']=W.website.digest(changed['spec'])
+        count=len(f.engine.mutations())
+        with self.assertRaises(W.website.WebsiteRefusal):
+            self.stage.continue_created(changed,W.website.digest(changed),str(uuid.uuid4()),cas,baseline_plan=old)
+        self.assertEqual(len(f.engine.mutations()),count)
 
     def write_links(self, links):
         self.links.write_bytes(H.encoded({'version': 1, 'purpose': H.LINK_PURPOSE, 'links': links}))
@@ -426,7 +550,7 @@ class TerminalWebsiteStageTests(unittest.TestCase):
             'providerPIDs': [], 'expiresAtEpoch': time.time() + 300}))
         binding = {'unit': '/nix/store/unit/service', 'python': '/nix/store/python/bin/python',
                    'entry': '/nix/store/source/worker.py'}
-        plan = {'specPin': 'sha256:' + 'a' * 64, 'finalSpecApproval': 'approved'}
+        plan = {'specPin': 'sha256:' + 'a' * 64, 'finalSpecApproval': 'approved','guardPin':W.website.digest({'native':'fixture'})}
         for fail in (False, True):
             events = [];stdout = io.StringIO();stderr = io.StringIO()
             def close():
@@ -435,7 +559,7 @@ class TerminalWebsiteStageTests(unittest.TestCase):
             profile = SimpleNamespace(close=close)
             standard = SimpleNamespace(WebsiteStage=lambda *a, **k: SimpleNamespace(plan=lambda *a: plan),
                                        digest=W.website.digest)
-            native = SimpleNamespace(name='reverie', selection={'oldId':W.OLD}, _time=lambda: None, http_ready=lambda *a: True)
+            native = SimpleNamespace(name='reverie', selection={'oldId':W.OLD}, last_snapshot={'native':'fixture'}, _time=lambda: None, http_ready=lambda *a: True)
             with patch('reverie.website_image_provenance.immutable', side_effect=lambda path, *a: path), \
                  patch.object(Path, 'resolve', lambda path, strict=True: path), \
                  patch.object(L, 'RuntimeManifest', return_value=initial.runtime), \
@@ -781,3 +905,223 @@ class FixedNativeWebsiteAPITests(unittest.TestCase):
                 H.main(['--installation', '/unused', 'prepare', '--operation', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '--program', '/bin/sh'])
             self.assertEqual(H.main(['--installation', '/unused', 'describe-links']), 1)
             runtime.assert_not_called()
+
+
+class NativePrivateTmpfsTests(unittest.TestCase):
+    """Exercise the real native observer with bounded owned FD/kernel ports."""
+    raw = (b'20 10 0:228 / /tmp rw,nosuid,nodev,relatime - tmpfs tmpfs rw,size=262144k\n'
+           b'21 10 0:229 / /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=16384k,mode=755,uid=1000,gid=100\n')
+
+    def probe(self, *, raw=None, tmp=None, run=None, processes=None, reads=None):
+        raw = self.raw if raw is None else raw
+        attrs = {102: dict(st_mode=0o41777, st_uid=0, st_gid=0, st_dev=os.makedev(0,228)),
+                 103: dict(st_mode=0o40755, st_uid=1000, st_gid=100, st_dev=os.makedev(0,229))}
+        attrs[102].update(tmp or {});attrs[103].update(run or {})
+        def opened(path, flags, **kwargs):
+            if str(path) == '/proc/12/root':return 100
+            if str(path) == '/proc/12/mountinfo':return 101
+            self.assertEqual(kwargs.get('dir_fd'), 100)
+            self.assertTrue(flags & os.O_NOFOLLOW)
+            return {'tmp':102,'run':103}[path]
+        def read(fd, bound):
+            self.assertEqual((fd,bound),(101,(4<<20)+1))
+            return next(reads) if reads is not None else raw
+        container={'State':{'Pid':12,'Running':True},'Config':{'User':'1000:100'}}
+        with patch('reverie.owner_terminal_channel.read_proc', side_effect=processes or [{'pid':12,'start':1}]*2), \
+             patch.object(H.os,'open',side_effect=opened), patch.object(H.os,'read',side_effect=read), \
+             patch.object(H.os,'fstat',side_effect=lambda fd:SimpleNamespace(**attrs[fd])), patch.object(H.os,'close'):
+            H.verify_private_tmpfs(container, {'/tmp':'reviewed','/run':'reviewed'})
+
+    def test_real_observer_accepts_complete_kernel_facts(self):
+        self.probe()
+
+    def test_refuses_flags_filesystem_size_owner_mode_and_device_substitution(self):
+        cases=[{'raw':self.raw.replace(b'rw,nosuid,nodev,relatime',b'rw,nodev,relatime')},
+               {'raw':self.raw.replace(b'nodev,noexec',b'nodev')},
+               {'raw':self.raw.replace(b'- tmpfs tmpfs',b'- ext4 tmpfs')},
+               {'raw':self.raw.replace(b'size=16384k',b'size=16385k')},
+               {'raw':self.raw.splitlines(keepends=True)[0]},
+               {'raw':self.raw+self.raw.splitlines(keepends=True)[0]},
+               {'run':{'st_uid':0}}, {'tmp':{'st_gid':100}},
+               {'run':{'st_mode':0o40777}}, {'tmp':{'st_dev':os.makedev(0,229)}}]
+        for mutation in cases:
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):self.probe(**mutation)
+
+    def test_refuses_pid_reuse_changed_mounts_and_oversized_observation(self):
+        for mutation in ({'processes':[{'pid':12,'start':1},{'pid':12,'start':2}]},
+                         {'reads':iter([self.raw,self.raw+b'\n'])},
+                         {'raw':b'x'*((4<<20)+1)}):
+            with self.subTest(mutation=list(mutation)), self.assertRaises(ValueError):self.probe(**mutation)
+
+
+class ColdRenewalReviewTests(unittest.TestCase):
+    """Actual prepare/load and closed plan checks; synthetic native/process ports only."""
+    def setUp(self):
+        self.core = TerminalWebsiteStageTests(methodName='runTest')
+        self.core.setUp(); self.addCleanup(self.core.doCleanups)
+        selected_links = self.core.links.with_name('website-links.json')
+        self.core.links.rename(selected_links); self.core.links = selected_links
+        self.core.rebuild()
+        self.old = self.core.failed_local_validation_continuation()
+        self.fixture = f = self.core.fixture
+        self.ledger = self.core.initial.roots['ledgerBase']
+        self.operation = str(uuid.uuid4()); self.continuation = str(uuid.uuid4())
+        prepared = self.ledger/'website-prepared'/self.operation
+        prepared.mkdir(parents=True, mode=0o700); prepared.parent.chmod(0o700)
+        self.parent_plan = prepared/'PLAN.json'
+        self.write(self.parent_plan, self.old)
+        self.selection = {'version':1,'purpose':'owner-terminal-website-selection-v1',
+                          'oldId':W.OLD,'oldImage':W.OLD_IMAGE,'newImage':W.NEW_IMAGE,
+                          'providerPIDs':[123], 'expiresAtEpoch':time.time()-60}
+        self.write(self.ledger/'website-selection.json', self.selection)
+        self.baseline = self.core.root/'selected-provider-baseline.json'
+        self.write(self.baseline, [{'controlled':'fixture provider observations, not native proof'}])
+        self.provider_facts = [{'containerId':'f'*64,'initPid':456,'image':'sha256:'+'c'*64,
+                                'process':{'pid':123,'start':7,'exe':(1,2)}}]
+        self.folder = self.ledger/'website-renewals'/self.continuation
+        old_operation = f.state/('website-'+self.old['operationId'])
+        self.parents = {path:path.read_bytes() for path in old_operation.rglob('*') if path.is_file()}
+        receipt = (f.state/'website-active.json').read_bytes()
+        self.parents[f.state/'website-active.json'] = receipt
+        self.args = SimpleNamespace(operation=self.operation,continuation=self.continuation,
+                                    plan_sha256=W.website.digest(self.old),
+                                    receipt_sha256=H._raw_sha(receipt),provider_baseline=self.baseline)
+        self.mutations = len(f.engine.mutations())
+
+    @staticmethod
+    def write(path, value):
+        path.write_bytes(H.encoded(value)); path.chmod(0o600)
+
+    def tearDown(self):
+        self.assertEqual(len(self.fixture.engine.mutations()), self.mutations)
+        for path, raw in self.parents.items():
+            self.assertEqual(path.read_bytes(), raw, str(path))
+
+    def prepare(self):
+        core = self.core; fixture = self.fixture
+        fixture.guard.value['freshObservation'] = 'Explicit fresh review; original full guard witness unavailable'
+        class Native:
+            name = 'reverie'
+            def __init__(self, initial, selection, *unused):
+                self.selection = H.private_document(selection)[0]
+                self.plan = None; self.new_id = None
+            def bind_plan(self, plan): self.plan = deepcopy(plan)
+            def http_ready(self, *args): raise AssertionError('Review preparation has no readiness/effect port')
+            def select_retained_candidate(self, cid, plan):
+                if cid != W.NEW or plan != self.plan: raise ValueError('controlled retained candidate mismatch')
+                self.new_id = cid
+            def snapshot(self):
+                self.last_snapshot = fixture.guard.snapshot()
+                return deepcopy(self.last_snapshot)
+            def admit_control_custody(self, *args):
+                return fixture.guard.admit_control_custody(*args)
+        def stage(native, *args, **kwargs):
+            core.stage.guard = native
+            return core.stage
+        standard = SimpleNamespace(WebsiteStage=stage, strict=W.website.strict,
+                                   digest=W.website.digest, PLAN_KEYS=W.website.PLAN_KEYS)
+        profile_init = H.TerminalWebsiteProfile.__init__
+        def controlled_profile(profile, initial, links, *, old_id=None):
+            self.assertEqual(old_id, W.OLD)
+            # The existing fixture controls kernel mount custody separately;
+            # retain its ordinary profile without opening a real /proc root.
+            profile_init(profile, initial, links)
+        with patch.object(H,'_NativeControl',Native), \
+             patch.object(H.TerminalWebsiteProfile,'__init__',controlled_profile), \
+             patch('reverie.resource_actor_install.artifact',return_value=deepcopy(core.provenance)), \
+             patch.object(H,'qualify_provider_baseline',return_value=deepcopy(self.provider_facts)):
+            self.result = H.prepare_continuation(core.initial, standard, self.ledger, self.args)
+        self.args.plan_sha256 = self.result['planDigest']
+        return self.result
+
+    def load(self, facts=None):
+        with patch.object(H,'qualify_provider_baseline',return_value=deepcopy(self.provider_facts if facts is None else facts)):
+            return H.load_continuation(self.core.initial,W.website,self.ledger,self.args)
+
+    def test_prepare_retains_expired_parent_and_requires_honest_full_fresh_review(self):
+        raw_plan = self.parent_plan.read_bytes()
+        raw_selection = (self.ledger/'website-selection.json').read_bytes()
+        result = self.prepare()
+        self.assertEqual(result['changedPlanFields'], ['guardPin'])
+        self.assertFalse(result['effects']); self.assertFalse(result['oldNativeWitnessAvailable'])
+        self.assertEqual((self.folder/'ORIGINAL_PLAN.json').read_bytes(), raw_plan)
+        self.assertEqual((self.folder/'ORIGINAL_SELECTION.json').read_bytes(), raw_selection)
+        self.assertEqual(self.parent_plan.read_bytes(), raw_plan)
+        self.assertEqual((self.ledger/'website-selection.json').read_bytes(), raw_selection)
+        fresh = json.loads((self.folder/'selection.json').read_bytes())
+        self.assertGreater(fresh['expiresAtEpoch'],time.time())
+        self.assertEqual({k:v for k,v in fresh.items() if k!='expiresAtEpoch'},
+                         {k:v for k,v in self.selection.items() if k!='expiresAtEpoch'})
+        witness = json.loads((self.folder/'WITNESS.json').read_bytes())
+        self.assertFalse(witness['oldNativeWitnessAvailable'])
+        self.assertEqual(W.website.digest(json.loads((self.folder/'SNAPSHOT.json').read_bytes())),
+                         witness['nativeSnapshotDigest'])
+        selection, plan, old = self.load()
+        self.assertEqual(selection,self.folder/'selection.json')
+        self.assertEqual(old,self.old)
+        self.assertEqual([k for k in W.website.PLAN_KEYS if plan[k]!=old[k]],['guardPin'])
+
+    def test_load_refuses_wrong_approved_sha_and_missing_full_witness(self):
+        self.prepare()
+        expected = self.args.plan_sha256
+        self.args.plan_sha256 = 'sha256:'+'0'*64
+        with self.assertRaises(ValueError): self.load()
+        self.args.plan_sha256 = expected
+        (self.folder/'SNAPSHOT.json').unlink()
+        with self.assertRaises((OSError,ValueError)): self.load()
+
+    def test_load_refuses_baseline_source_inode_replacement_and_provider_birth_change(self):
+        self.prepare()
+        changed = deepcopy(self.provider_facts); changed[0]['process']['start'] += 1
+        with self.assertRaises(ValueError): self.load(changed)
+        replacement = self.baseline.with_suffix('.replacement')
+        replacement.write_bytes(self.baseline.read_bytes()); replacement.chmod(0o600)
+        replacement.replace(self.baseline)
+        with self.assertRaises(ValueError): self.load()
+
+    def test_load_refuses_selection_window_or_native_witness_changes(self):
+        self.prepare()
+        path = self.folder/'selection.json'; original = path.read_bytes()
+        value = json.loads(original); value['expiresAtEpoch'] += 60
+        self.write(path,value)
+        with self.assertRaises(ValueError): self.load()
+        path.write_bytes(original)
+        path = self.folder/'SNAPSHOT.json'; original = path.read_bytes()
+        value = json.loads(original); value['freshObservation'] = 'unreviewed replacement'
+        self.write(path,value)
+        with self.assertRaises(ValueError): self.load()
+        path.write_bytes(original)
+        path = self.folder/'WITNESS.json'
+        value = json.loads(path.read_bytes()); value['oldNativeWitnessAvailable'] = True
+        self.write(path,value)
+        with self.assertRaises(ValueError): self.load()
+
+    def test_load_refuses_raw_parent_cas_change(self):
+        self.prepare()
+        self.parent_plan.write_bytes(self.parent_plan.read_bytes()+b' ')
+        with self.assertRaises(ValueError): self.load()
+
+    def test_apply_refuses_changed_old_cid_spec_input_control_or_grants(self):
+        self.prepare()
+        plan = json.loads((self.folder/'PLAN.json').read_bytes())
+        mutations = {'oldId':'f'*64, 'specPin':'sha256:'+'0'*64,
+                     'inputPin':'sha256:'+'0'*64,'controlGrantDigest':'sha256:'+'0'*64,
+                     'controlBinding':{**plan['controlBinding'],'generation':'sha256:'+'0'*64}}
+        for key,value in mutations.items():
+            with self.subTest(key=key):
+                changed = deepcopy(plan); changed[key] = value
+                with self.assertRaises(W.website.WebsiteRefusal):
+                    self.core.stage.continue_created(changed,W.website.digest(changed),self.continuation,
+                                                     self.args.receipt_sha256,baseline_plan=self.old)
+
+    def test_new_latch_or_reused_prepare_uuid_never_admits_an_effect(self):
+        self.prepare()
+        plan = json.loads((self.folder/'PLAN.json').read_bytes())
+        operation = self.fixture.state/('website-'+self.old['operationId'])
+        self.write(operation/('continue-created-'+self.continuation+'-ATTEMPT.private.json'),
+                   {'state':'ATTEMPT_NO_REPLAY'})
+        with self.assertRaises(W.website.WebsiteRefusal):
+            self.core.stage.continue_created(plan,W.website.digest(plan),self.continuation,
+                                             self.args.receipt_sha256,baseline_plan=self.old)
+        self.args.plan_sha256 = W.website.digest(self.old)
+        with self.assertRaises((OSError,ValueError,RuntimeError)): self.prepare()

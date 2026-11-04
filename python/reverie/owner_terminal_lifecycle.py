@@ -385,8 +385,16 @@ class InitialInstallation:
             control=self.roots['controlBase']/generation;ledger=self.roots['ledgerBase']/generation
             # Exclusive namespace creation is consumed even on a partial failure.
             control.mkdir(mode=0o700);ledger.mkdir(mode=0o700)
+            # The fixed engine client must never inherit the owner's Docker
+            # credentials/plugins. Prepare its exclusive empty config before
+            # policy or unit publication, using the newly owned directory FD.
+            control_fd=open_directory(control)
+            try:
+                os.mkdir('docker',0o700,dir_fd=control_fd);os.fsync(control_fd)
+            finally:os.close(control_fd)
+            docker=control/'docker';docker_stamp=_stamp(docker)
             anchored_roots=self.phase_roots()
-            anchored_roots.update({path:_directory_identity(path) for path in (control,ledger)})
+            anchored_roots.update({path:_directory_identity(path) for path in (control,ledger,docker)})
             company_selection=_data_bytes(config['companyFile'],16<<20)
             company=_json(company_selection[0]);_company_signature=company_selection[1]
             employees=company.get('employees')
@@ -462,6 +470,7 @@ class InitialInstallation:
             entries.update(owner_entries)
         _terminal_files(entries,data_paths={spec_path:(8<<20,True),Path(config['companyFile']):(16<<20,False)},
                         root_identities=anchored_roots)
+        need(_stamp(docker)==docker_stamp,'H_LIFECYCLE_ENGINE_CONFIGURATION_CHANGED')
         os.unlink(pending)
         return {'version':1,'generation':generation,'policyPath':str(policy_path),'policySHA256':_sha(raw),
                 'containerId':cid,'listenerState':'NOT_STARTED','workerEffects':False}
@@ -541,7 +550,12 @@ class InitialInstallation:
             need(not os.path.lexists(self.roots['controlBase']/CONTROL_PENDING),'H_LIFECYCLE_TRANSITION_UNKNOWN')
             # Missing selector is initial only if no earlier generation exists.
             entries=list(self.roots['controlBase'].iterdir())
-            need(len(entries)<=4096 and entries==[self.path], 'H_LIFECYCLE_MISSING_CURRENT_GENERATION')
+            if len(entries)>1:
+                from .owner_terminal_cold_abort import verify,POINTER
+                need(os.path.lexists(self.roots['controlBase']/POINTER),'H_LIFECYCLE_MISSING_CURRENT_GENERATION')
+                verify(self)
+            else:
+                need(entries==[self.path], 'H_LIFECYCLE_MISSING_CURRENT_GENERATION')
             state=self.unit_state()
             need(state['MainPID']=='0' and state['ActiveState']=='inactive','H_LIFECYCLE_FOREIGN_SERVICE')
             return None

@@ -1,5 +1,12 @@
 # Optional protected laptop terminal
 
+Production activation is not qualified for raw Docker restarts, daemon restarts
+or host boot. Those paths bypass the owner-local generation lifecycle and can
+leave the website without a fresh protected listener. Keep the normal website
+profile when relying on automatic startup until restart/boot orchestration has
+its own native acceptance. `Restart=always` cannot repair a consumed generation
+and must not replace that orchestration.
+
 This is a separate owner terminal inside a selected laptop. It does not send
 keystrokes to the employee's provider session. Organizational titles do not
 provide access. The normal owner login, exact origin/transport, current employee
@@ -19,7 +26,10 @@ An independently qualified whole-image/archive proof still covers the remaining
 immutable application closure. Building the package does not install or
 start anything. Root-owned static ELF copies of the monitor and Bash are placed
 at `/opt/reverie/human/bin` in newly built worker images, outside writable `/nix`.
-Both binaries are checked for absence of an ELF interpreter or dynamic library
+The generated toolkit selection is a closed immutable `{path, sha256}` artifact
+pair. The native consumer verifies those exact manifest bytes before decoding
+the existing static-file contract; legacy immutable string paths remain
+supported. Both binaries are checked for absence of an ELF interpreter or dynamic library
 requirements. Existing laptops are not modified or automatically restarted.
 
 The owner prepares and reviews a fresh private installation namespace. Keep a

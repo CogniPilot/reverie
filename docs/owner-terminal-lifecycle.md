@@ -106,3 +106,115 @@ process births and Unix listeners with controlled service/engine namespace
 ports. They are not installed startup, service activation, native PTY, or
 employee acceptance. Standard start/update/restart integration and actual
 immutable package qualification must be reviewed before activation.
+
+A guarded initial-activation continuation is available as
+`reverie-owner-terminal-website ... resume-created --operation UUID --plan-sha256 sha256:...`.
+It accepts only the exact retained, never-started candidate after a pre-stop
+validation refusal, while the original website still matches its live CAS.
+The original plan, receipt and candidate must match; any H phase evidence,
+stop/start attempt, partial history or previous continuation refuses. The
+initial failure is preserved and a durable exclusive continuation attempt
+precedes effects. All ordinary admission, checkpoint, settlement and ready
+checks still run. It does not recover a started candidate or unknown native
+phase, and a failed continuation cannot be replayed.
+
+Docker may omit `--tmpfs` grants from `Mounts` even for a running container.
+The generated declaration is checked in full through `HostConfig.Tmpfs`; any
+reported mount entries must agree. Initial activation separately qualifies
+the live PID's `/tmp` and `/run` from kernel mountinfo and anchored directory
+metadata, including tmpfs type, flags, size, ownership and mode.
+
+If that first continuation itself refused only in the local, file-only create
+qualifier, a separate owner-reviewed `continue-created` action accepts a fresh
+`--continuation UUID` and `--receipt-sha256 sha256:...` CAS of the current raw
+failure receipt. It requires the exact closed initial/resume histories and
+three unchanged qualifier input files, the same never-started candidate and
+unchanged live original website. Any native phase marker, accepted qualifier
+result, extra file or changed fact refuses. This additional cold-validation
+attempt preserves both prior latches/failures and creates its own exclusive
+attempt; there is no further continuation, automatic retry or fresh-UUID loop.
+Prequalify the sealed actual inputs against the exact new immutable qualifier
+before invoking it. Empty/null Docker `UsernsMode` is a recognized default;
+nonempty namespace selections remain refused.
+
+If the observation window expires or its aggregate native fingerprint drifts
+before any new continuation is consumed, `prepare-continue` creates a separate
+private renewal for explicit owner review. It takes the original prepared UUID
+and plan SHA, a fresh continuation UUID, exact raw failed-receipt SHA and an
+explicit private prior provider-baseline input. It preserves the old selection,
+plan and baseline bytes and records a complete fresh native snapshot. The new
+plan may differ only in its native observation fingerprint; every old authority,
+command, image, mount, resource, owner-input, control, grant and old-container
+pin must match. The same provider PID births, executable paths, laptop IDs and
+init PIDs are independently requalified.
+
+The original full native witness was not available in older prepares; renewal
+honestly records that fact and makes no claim to identify or ignore the old
+fingerprint's drift. The owner reviews the complete new witness and exact new
+plan SHA before invoking `continue-created` with that renewal's UUID. Apply
+rechecks those private inputs and live facts, consumes the new exclusive latch,
+preserves the original canonical plan byte-for-byte, and CAS-publishes the
+reviewed new plan under the existing maintenance lock. Any partial publication
+remains held. The old failure and consumed attempts are never cleared, and the
+additional continuation remains bounded to one attempt. All future ordinary
+prepares also retain their full native snapshot.
+
+After an explicitly reviewed owner restoration of the original website, a
+never-started candidate can be closed as separate historical metadata with
+`prepare-abort-ack` and `ack-abort`. This does not perform the restoration or
+claim that the failed H preparation completed. Both commands are host-owner
+operations; neither changes containers, services, company data or permissions.
+
+The prepare command requires the original prepared UUID, exact current parent
+plan and raw failed-receipt SHA, a fresh acknowledgment UUID, private operator
+restoration evidence and the prior provider-baseline file:
+
+```bash
+reverie-owner-terminal-website --installation /private/control/installation.json \
+  prepare-abort-ack --operation PARENT_PREPARE_UUID \
+  --plan-sha256 sha256:PARENT_PLAN_HASH --receipt-sha256 sha256:RAW_RECEIPT_HASH \
+  --continuation FRESH_ACK_UUID --provider-baseline /private/provider-baseline.json \
+  --operator-abort-evidence /private/owner-cold-abort-evidence
+```
+
+Preparation preserves the expired original selector and creates a separately
+selected finite observation window. Its review plan includes the complete fresh
+native witness, current restored website incarnation, unchanged grants and
+configuration, provider PID births, sealed checkpoint, original histories and
+operator evidence. A restored original restart policy may be `no` or
+`unless-stopped`; all other captured host configuration must match. The retained
+candidate must still be exactly identified, never started and unchanged. No H
+unit, current/pending generation, bootstrap channel or issued ledger may exist;
+only the exact recorded unpublished policy namespace is eligible.
+
+After reviewing the returned exact acknowledgment-plan SHA, invoke `ack-abort`
+with the same installation, original prepared UUID, acknowledgment UUID and raw
+parent-receipt SHA. Pass the **new acknowledgment-plan SHA** as
+`--plan-sha256`; omit the two prepare-only evidence arguments. It requalifies the
+native facts under the maintenance lock, consumes exclusive owner-acknowledgment
+latches, and publishes a distinct `OWNER_ABORTED_NEVER_STARTED` receipt. Every
+parent failure, H phase attempt, unpublished policy and held candidate remains
+retained. Partial publication refuses further replay.
+
+Future ordinary preparation recognizes only that qualified historical closure.
+It still requires a fresh owner selection/window and a new schema review ID and
+operation with exact final-spec approval. The acknowledgment never resumes an
+old attempt, revives a consumed bootstrap or converts an unknown H phase into a
+successful phase result. Changing or losing any retained parent evidence,
+starting the held candidate, or finding a published/issued H context refuses.
+
+Raw `docker restart`, Docker's `unless-stopped` restart after daemon/host boot,
+and restarting only the H unit do not run this generation workflow. The only
+bootstrap listener is retired after handoff; website death ends that protected
+channel, and a consumed `START-ATTEMPT` prevents reuse. An exceptional website
+death may also leave no canonical drain receipt. These cases remain held, not
+automatically recovered. Production activation must therefore remain disabled
+for deployments relying on those restart paths.
+
+The next bounded acceptance must use a disposable instance with no personal
+mounts: qualify canonical stop/drain/new-generation ordering, an ordinary
+website restart, daemon restart and simulated host boot, and recovery readiness
+with the broker's startup requirements. Verify normal owner authentication and
+a real browser terminal, unchanged providers during website-only maintenance,
+retained employee/conversation bindings after cold boot, and preserved unknown
+fences. The existing synthetic PTY acceptance does not claim those results.
