@@ -29,7 +29,7 @@ async function setup() {
 it('groups existing controls, keeps a real associated save action, and supports keyboard tab navigation', async () => {
   const { h, dialog, writes } = await setup();
   const tabs = [...dialog.querySelectorAll('[role=tab]')];
-  expect(tabs.map((t: any) => t.textContent)).toEqual(['Profile', 'Permissions', 'Identity & context']);
+  expect(tabs.map((t: any) => t.textContent)).toEqual(['Profile', 'Permissions', 'GitHub PATs', 'Identity & context']);
   expect(dialog.querySelector('[role=tabpanel]:not([hidden])').id).toBe('ca-employee-panel-profile');
   const form = dialog.querySelector('form'), save = dialog.querySelector('button[type=submit]');
   expect(save.form).toBe(form); expect(save.closest('.ca-profile-footer')).not.toBeNull();
@@ -38,7 +38,7 @@ it('groups existing controls, keeps a real associated save action, and supports 
   expect(form.hidden).toBe(true); expect(dialog.querySelector('.ca-profile-management').hidden).toBe(false);
   expect(dialog.querySelector('[aria-label="Manage company board for River"]').form).toBeNull();
   tabs[1].dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-  expect(tabs[2].getAttribute('aria-selected')).toBe('true');
+  expect(tabs[3].getAttribute('aria-selected')).toBe('true');
   expect(dialog.querySelector('[aria-label="View startup context for River"]').closest('[role=tabpanel]').hidden).toBe(false);
   expect(writes).toEqual([]);
 });

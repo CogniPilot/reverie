@@ -19,6 +19,45 @@ const segments = get('chatTextSegments') as (t: string, names: Set<string>) => A
 const links = get('chatLinkSegments') as (t: string) => Array<{ text: string; href?: string }>;
 const plainLinks = (t: string) => JSON.parse(JSON.stringify(links(t)));
 const phrase = get('chatAttachmentPhrase') as (a: Array<{ type: string }>) => string;
+const named = (text: string) => JSON.parse(JSON.stringify(get('chatMarkdownLinkSegments')(text))) as Array<{ text: string; path?: string; href?: string; source?: string }>;
+
+describe('named Markdown links', () => {
+  it('uses short labels for shared files and safe external links while preserving the source', () => {
+    const text = 'Read [API fixture source review](/reverie_workspace/cases/example/REVIEW.txt) and [CI run](https://example.com/run).';
+    const parts = named(text);
+    expect(parts.filter(p => p.path || p.href)).toMatchObject([
+      { text: 'API fixture source review', path: '/reverie_workspace/cases/example/REVIEW.txt' },
+      { text: 'CI run', href: 'https://example.com/run' },
+    ]);
+    expect(parts.map(p => p.source || p.text).join('')).toBe(text);
+  });
+  it('handles Unicode labels, spaces, balanced parentheses and one decoding of file targets', () => {
+    expect(named('[résumé λ](</reverie_workspace/My Project/report (2).txt>)')[0]).toMatchObject({
+      text: 'résumé λ', path: '/reverie_workspace/My Project/report (2).txt',
+    });
+    expect(named('[report](/reverie_workspace/report_(2).txt)')[0].path).toBe('/reverie_workspace/report_(2).txt');
+    expect(named('[report](/reverie_workspace/report%2520x.txt)')[0].path).toBe('/reverie_workspace/report%20x.txt');
+    expect(named('[a\\]b](https://example.com/a_(b))')[0]).toMatchObject({ text:'a]b', href:'https://example.com/a_(b)' });
+  });
+  it('leaves malformed, invisible, impersonating and unsupported destinations as text', () => {
+    for (const text of ['[run](javascript:alert(1))', '[run](data:text/html,x)', '[run](file:///etc/passwd)',
+      '[run](//example.com/x)', '[run](/%2fexample.com/x)', '[run](/reverie_workspace/%00x)',
+      '[run](/reverie_workspace/x\u200by)', '[run](https://user:pw@example.com/)',
+      '[run](http://2130706433/)', '[run](http://xn--pypal-4ve.com/)', '[run](https://pаypal.com/)',
+      '[run](https://example.com', '[run](/bad%XX)', '[ ](/x)', '[a\u202eb](/x)',
+      '\\[literal](https://example.com)', '![image](https://example.com/p.png)']) {
+      expect(named(text).some(p => p.path || p.href), text).toBe(false);
+      expect(named(text).map(p => p.text).join('')).toBe(text);
+    }
+  });
+  it('bounds labels, targets and link count without dropping remaining text', () => {
+    for (const text of [`[${'a'.repeat(513)}](/x)`, `[x](/${'a'.repeat(2001)})`])
+      expect(named(text).some(p => p.path || p.href)).toBe(false);
+    const text = Array(100).fill('[short](/reverie_workspace/a)').join(' '), parts = named(text);
+    expect(parts.filter(p => p.path)).toHaveLength(50);
+    expect(parts.map(p => p.source || p.text).join('')).toBe(text);
+  });
+});
 
 describe('chatEmojiMatches', () => {
   it('ranks prefix matches before contains, and includes custom emotes', () => {

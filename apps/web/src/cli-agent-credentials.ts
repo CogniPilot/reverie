@@ -25,6 +25,10 @@ export interface GrantedCredentials {
   credentials: GrantedCredentialMetadata[];
 }
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+function hasLabelControl(value: string): boolean {
+  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  return false;
+}
 const same = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino;
 const descriptor = (f: FileHandle, name = '') => `/proc/self/fd/${f.fd}${name ? '/' + name : ''}`;
 
@@ -37,7 +41,7 @@ function refusal(deps: AgentDeps, unknown = false): number {
   return unknown ? AGENT_EXIT.error : AGENT_EXIT.refused;
 }
 
-/** Metadata only; independently binds current Board identity to the granted-name list. Never retrieves material. */
+/** Metadata only; independently binds current caller identity to the granted-name list. Never retrieves material. */
 export async function fetchGrantedCredentials(
   deps: Pick<AgentDeps, 'ctx' | 'request'>,
   /** Internal reuse of the same command's already validated Board identity; never a CLI option. */
@@ -47,12 +51,12 @@ export async function fetchGrantedCredentials(
   if (actor === undefined) {
     const identity = await deps.request(deps.ctx, {
       method: 'GET',
-      path: '/api/board',
-      bounds: { maxBytes: 1024 * 1024, deadlineMs: 10000 },
+      path: '/api/board/identity',
+      bounds: { maxBytes: 16 * 1024, deadlineMs: 10000 },
     });
     if (identity.status !== 200 || !identity.json?.success) throw Error();
     const data = identity.json.data;
-    actor = object(data) && object(data.capabilities) ? data.capabilities.identity : undefined;
+    actor = object(data) ? data.identity : undefined;
   }
   if (
     !object(actor) ||
@@ -93,7 +97,7 @@ export async function fetchGrantedCredentials(
       value.repositories.length > 50 ||
       value.repositories.some((r) => typeof r !== 'string' || !REPO.test(r)) ||
       (value.label !== undefined &&
-        (typeof value.label !== 'string' || value.label.length > 120 || /[\r\n\x00-\x1f]/.test(value.label))) ||
+        (typeof value.label !== 'string' || value.label.length > 120 || hasLabelControl(value.label))) ||
       !Number.isSafeInteger(value.createdAt) ||
       (value.createdAt as number) < 0 ||
       !Number.isSafeInteger(value.updatedAt) ||

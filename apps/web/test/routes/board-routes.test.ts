@@ -3,7 +3,7 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
  * The server board: audited writes (audit before save, fail closed), who may write, nothing deleted, the import of the
  * pre-console board files, and the derived parts of GET /api/board (roster, polls, pins, pace).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -81,6 +81,52 @@ describe('board routes', () => {
   const as = (session?: string) => (session ? { 'x-reverie-parent-session': session } : {});
   const post = (url: string, payload: unknown, session?: string) => app.inject({ method: 'POST', url, payload: payload as object, headers: as(session) });
   const patch = (url: string, payload: unknown, session?: string) => app.inject({ method: 'PATCH', url, payload: payload as object, headers: as(session) });
+
+  it.each([undefined, BUILDER, STRANGER])('reads the same caller identity without loading Board state (%s)', async (session) => {
+    const full = (await app.inject({ method: 'GET', url: '/api/board', headers: as(session) })).json().data.capabilities.identity;
+    const snapshot = vi.spyOn(store, 'snapshot').mockImplementation(() => { throw new Error('Board must not be read'); });
+    for (const r of rooms) Object.defineProperty(r, 'messages', { get: () => { throw new Error('Messages must not be read'); } });
+    try {
+      const result = await app.inject({ method: 'GET', url: '/api/board/identity', headers: as(session) });
+      expect(result.statusCode).toBe(200);
+      expect(result.json().data).toEqual({ identity: full });
+      expect(result.body.length).toBeLessThan(1024);
+      expect(snapshot).not.toHaveBeenCalled();
+      expect(audit).toEqual([]);
+    } finally { snapshot.mockRestore(); }
+  });
+
+  it('refuses unknown, partial and service callers on the identity-only route', async () => {
+    for (const headers of [as(BUILDER.slice(0, 8)), as('00000043-0053-4000-8000-00000000007b'),
+      { ...as(BUILDER), 'x-reverie-service-token': 'fixture-service-token' }]) {
+      const result = await app.inject({ method: 'GET', url: '/api/board/identity', headers });
+      expect(result.statusCode).toBe(403);
+      expect(result.json().data).toBeUndefined();
+    }
+  });
+
+  it('reads one full card with its committed revision without copying Board state or messages', async () => {
+    const created=await post('/api/board/issues',{title:'Exact card',owner:'e-builder',reason:'Keep the reason',tags:['important'],start:100,end:200},COORD);
+    const expected=created.json().data.item;
+    const auditCount=audit.length;
+    const snapshot=vi.spyOn(store,'snapshot').mockImplementation(()=>{throw new Error('Whole Board must not be copied');});
+    for(const r of rooms) Object.defineProperty(r,'messages',{get:()=>{throw new Error('Messages must not be read');}});
+    try {
+      for(const session of [undefined,BUILDER,STRANGER]) {
+        const result=await app.inject({method:'GET',url:'/api/board/issues/'+expected.id,headers:as(session)});
+        expect(result.statusCode).toBe(200);expect(result.json().data).toEqual({rev:store.rev,item:expected});
+        expect(result.body.length).toBeLessThan(2048);
+      }
+      expect(snapshot).not.toHaveBeenCalled();expect(audit).toHaveLength(auditCount);
+    } finally {snapshot.mockRestore();}
+  });
+  it('uses the full Board caller boundary for single-card reads and returns 404 without a fallback', async () => {
+    const id=(await post('/api/board/issues',{title:'exact'},COORD)).json().data.item.id;
+    for(const headers of [as(BUILDER.slice(0,8)),as('00000043-0053-4000-8000-00000000007b'),{...as(BUILDER),'x-reverie-service-token':'fixture'}])
+      expect((await app.inject({method:'GET',url:'/api/board/issues/'+id,headers})).statusCode).toBe(403);
+    expect((await app.inject({method:'GET',url:'/api/board/issues/i-does-not-exist',headers:as(BUILDER)})).statusCode).toBe(404);
+    expect((await app.inject({method:'GET',url:'/api/board/issues/'+('a'.repeat(65)),headers:as(BUILDER)})).statusCode).toBe(400);
+  });
 
   it('requires explicit distinct choices and validates named recommendations', async () => {
     for (const options of [undefined, [], ['Yes'], ['Yes', 'yes'], ['', 'No']]) {

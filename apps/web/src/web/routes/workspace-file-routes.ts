@@ -90,7 +90,7 @@ export function registerWorkspaceFileRoutes(
     }));
     scoped.get('/api/workspace/resolve', async (request) => ({
       success: true,
-      data: await files.resolve(query(request).path),
+      data: await files.resolve(query(request).path, query(request).locate === '1'),
     }));
     scoped.get('/api/workspace/file', async (request, reply) => {
       const result = await files.file(query(request).path, query(request).preview === '1', query(request).binding);

@@ -95,6 +95,40 @@ class SourceFilterTests(unittest.TestCase):
         self.assertIn("self.packages.", text)
         self.assertIn("self.nixosModules.", text)
 
+    def test_console_derivation_uses_only_its_source_and_explicit_fixtures(self):
+        """Unrelated edits reuse the checked console; consumed fixtures invalidate it."""
+        with tempfile.TemporaryDirectory(prefix="reverie-console-cache-") as tmp:
+            root = Path(tmp)
+            fixture_paths = (
+                "python/reverie/__init__.py", "python/reverie/resume_ledger.py",
+                "python/reverie/resume_ledger_rpc.py", "tests/__init__.py",
+                "tests/goal_private_fixture.py", "tests/goal_broker_fixture.py",
+                "skills/reverie/SKILL.md", "apps/web/src/example.ts",
+            )
+            for relative in fixture_paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("fixture\n")
+            (root / "apps/web/package.json").write_text('{"version":"1.0.0"}\n')
+            (root / "nix").mkdir()
+            shutil.copyfile(ROOT / "nix/package.nix", root / "nix/package.nix")
+            expression = f'''let pkgs = import {self.library.parent} {{}};
+              src = import {ROOT}/nix/source-filter.nix {{ inherit (pkgs) lib; src = {root}; }};
+              in (import {ROOT}/nix/package.nix {{ inherit pkgs src; }}).console.drvPath'''
+            baseline = self.evaluate(expression)
+            unrelated = root / "README.md"
+            unrelated.write_text("documentation edit\n")
+            self.assertEqual(self.evaluate(expression), baseline)
+            unrelated.unlink()
+            for relative in fixture_paths + ("nix/package.nix", "apps/web/package.json"):
+                with self.subTest(relative=relative):
+                    target = root / relative
+                    original = target.read_text()
+                    target.write_text(original.replace("1.0.0", "1.0.1") if relative.endswith("package.json")
+                                      else original + "changed input\n")
+                    self.assertNotEqual(self.evaluate(expression), baseline)
+                    target.write_text(original)
+
     @unittest.skipUnless(shutil.which("nix") and shutil.which("git"), "Nix/Git capture tools unavailable")
     def test_actual_git_capture_and_export_fallback(self):
         with tempfile.TemporaryDirectory(prefix="reverie-flake-capture-") as tmp:

@@ -20,7 +20,9 @@ permissions:
 
 concurrency:
   group: image-${{ github.ref }}
-  cancel-in-progress: false
+  # A newer PR commit supersedes its previous image build. Keep main and
+  # release builds running so accepted artifacts are still produced.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   image:
@@ -59,12 +61,24 @@ jobs:
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
 
       - name: Restore and save the Nix store
+        id: nix-cache
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
+          # PR caches are scoped to their merge ref and cannot warm main.
+          # Keep the shared main cache from competing with multi-GB PR copies.
+          save: ${{ github.ref == 'refs/heads/main' }}
+          gc-max-store-size-linux: 8G
           primary-key: nix-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-${{ github.sha }}
           restore-prefixes-first-match: |
             nix-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-
             nix-image-${{ runner.os }}-${{ runner.arch }}-
+            nix-voice-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-
+
+      - name: Report the restored Nix cache
+        env:
+          RESTORED_KEY: ${{ steps.nix-cache.outputs.restored-key }}
+        run: |
+          printf 'Nix cache restored: %s\n' "${RESTORED_KEY:-none}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check and build the flake on vanilla Ubuntu
         run: |
@@ -80,6 +94,10 @@ jobs:
           docker load --input "$HOME/scratch/reverie/build/docker-image"
           docker tag reverie:latest "reverie:$GITHUB_SHA"
           docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA" | tee image-id.txt
+          # The loaded image and offline artifact own the transport archive now.
+          # Retain the checked app and memory roots; let pre-save GC discard
+          # old outputs and the multi-GB image tar instead of caching it twice.
+          rm "$HOME/scratch/reverie/build/docker-image"
 
       - name: Start the native application with an empty instance
         run: |

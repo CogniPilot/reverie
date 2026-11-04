@@ -4522,19 +4522,39 @@ it('browser Back returns from a debug session to the full conversation shell', a
   h.dom.window.close();
 });
 
-it('previews shared workspace artifacts on ordinary click with a download fallback, including inline code but excluding fenced code', async () => {
+it('opens shared workspace artifacts in Drive on ordinary click, including inline code but excluding fenced code', async () => {
   const path = '/reverie_workspace/projects/example/clip.mp4';
   const h = await createHarness({ sessions, rooms: [room('r1', 'Office', [member(A, 'alpha')], { messages: [message('video', 'r1', agent(A, 'alpha'), 'Video: `' + path + '`\n```\n' + path + '\n```', 1000)] })] });
   const links = [...h.document.querySelectorAll('.ca-workspace-download')];
   expect(links).toHaveLength(1);
-  expect(links[0].getAttribute('href')).toBe('/api/filesystem/download?path=' + encodeURIComponent(path));
+  expect(links[0].getAttribute('href')).toBe('/workspace?file=' + encodeURIComponent(path));
   const preview = vi.fn(async () => {});
-  h.app.openWorkspaceFilePreview = preview;
+  h.app.openWorkspaceFileInDrive = preview;
   h.app.activeSessionId = B;
   const click = new h.window.MouseEvent('click', { button: 0, bubbles: true, cancelable: true });
   links[0].dispatchEvent(click);
   expect(click.defaultPrevented).toBe(true);
-  expect(preview).toHaveBeenCalledExactlyOnceWith(path, links[0]);
+  expect(preview).toHaveBeenCalledExactlyOnceWith(path);
   expect(h.document.querySelector('pre .ca-workspace-download')).toBeNull();
   h.dom.window.close();
+});
+
+it('renders named Markdown links as text labels, opens shared paths in Drive and keeps code literal', async () => {
+  const path='/reverie_workspace/cases/example/REVIEW.txt';
+  const text=`Read [API fixture source review](${path}) and [CI run](https://example.com/run).\n\`[literal](https://example.com/code)\`\n\`\`\`\n[fenced](${path})\n\`\`\`\n[<img src=x onerror=alert(1)>](https://example.com/safe)`;
+  const h=await createHarness({sessions,rooms:[room('r1','Office',[member(A,'alpha')],{messages:[message('named','r1',agent(A,'alpha'),text,1000)]})]});
+  try {
+    const links=[...h.document.querySelectorAll('.ca-msg a.chatroom-link')] as HTMLAnchorElement[];
+    expect(links.map(a=>a.textContent)).toEqual(['API fixture source review','CI run','<img src=x onerror=alert(1)>']);
+    expect(links[0].getAttribute('href')).toBe('/workspace?file='+encodeURIComponent(path));
+    expect(links[1].rel).toBe('noopener noreferrer nofollow');
+    expect(h.document.querySelector('.ca-msg img[src="x"]')).toBeNull();
+    expect(h.document.querySelector('pre a.chatroom-link')).toBeNull();
+    expect(h.document.querySelector('.chatroom-inline-code a.chatroom-link')).toBeNull();
+    const open=vi.fn(async()=>{});h.app.openWorkspaceFileInDrive=open;
+    const click=new h.window.MouseEvent('click',{button:0,bubbles:true,cancelable:true});links[0].dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);expect(open).toHaveBeenCalledExactlyOnceWith(path);
+    const modified=new h.window.MouseEvent('click',{button:0,ctrlKey:true,bubbles:true,cancelable:true});links[0].dispatchEvent(modified);
+    expect(modified.defaultPrevented).toBe(false);expect(open).toHaveBeenCalledTimes(1);
+  } finally {h.dom.window.close();}
 });

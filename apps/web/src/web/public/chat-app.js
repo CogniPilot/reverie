@@ -5821,12 +5821,12 @@ class ReverieChatApp {
   decorateWorkspaceFiles(root) {
     const makePreviewLink = (path) => {
       const link = this.el('a', 'chatroom-link ca-workspace-download', path);
-      link.href = '/api/filesystem/download?path=' + encodeURIComponent(path);
-      link.title = 'Preview ' + path.split('/').pop();
+      link.href = (this.doc.defaultView.__REVERIE_BASE__ || '') + '/workspace?file=' + encodeURIComponent(path);
+      link.title = 'Open in Drive: ' + path.split('/').pop();
       link.onclick = (event) => {
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        void this.app.openWorkspaceFilePreview(path, link);
+        void this.app.openWorkspaceFileInDrive(path);
       };
       return link;
     };
@@ -8413,7 +8413,9 @@ class ReverieChatApp {
     group.append(this.el('legend', '', 'Publication credentials'));
     const list = this.el('div');
     const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
-    group.append(this.el('p', 'ca-hint', 'Allow this expert to download selected named PATs through its scoped API. Repository declarations are notes; GitHub enforces the token’s actual permissions.'), list,
+    group.append(this.el('p', 'ca-hint', `Add a named GitHub PAT, then enable its access checkbox for ${employee.name}. Each change saves immediately; Save profile is not needed.`),
+      this.button('ca-btn is-primary', 'Manage PATs', () => this.openPublicationTokens(refresh, group), { text: 'Add / manage PATs' }),
+      this.el('p', 'ca-hint', 'Allow this expert to download selected named PATs through its scoped API. Repository declarations are notes; GitHub enforces the token’s actual permissions.'), list,
       this.el('p', 'ca-hint', 'Removing access prevents new downloads; previously copied tokens must be revoked or rotated at GitHub.'));
     let tokens = [], busy = false, inventoryFailed = false;
     const granted = () => Array.isArray(employee.permissions?.publicationTokenIds) ? employee.permissions.publicationTokenIds : [];
@@ -8460,14 +8462,15 @@ class ReverieChatApp {
       } catch { tokens = []; inventoryFailed = true; status.textContent = 'Token inventory unavailable. Existing grants can still be removed.'; }
       paint();
     };
-    group.append(this.button('ca-btn', 'Manage PATs', () => this.openPublicationTokens(refresh), { text: 'Manage PATs' }), status);
+    group.append(status);
     container.append(group); paint(); void refresh();
   }
 
-  async openPublicationTokens(onChanged) {
+  async openPublicationTokens(onChanged, container = null) {
     const existing = this.doc.querySelector('.ca-publication-tokens');
     if (existing) { existing.querySelector('button')?.focus(); return; }
-    const dialog = this.el('dialog', 'ca-dialog ca-publication-tokens'); dialog.setAttribute('aria-label', 'Manage PATs');
+    const dialog = this.el(container ? 'section' : 'dialog', 'ca-dialog ca-publication-tokens'); dialog.setAttribute('aria-label', 'Manage PATs');
+    if (container) dialog.setAttribute('role', 'region');
     dialog._companyOrigin = this.companyPage;
     const heading = this.el('header', 'ca-profile-edit-heading');
     heading.append(this.el('h2', '', 'Manage PATs'), this.button('ca-btn', 'Close Manage PATs', () => dialog.close(), { text: 'Close' }));
@@ -8479,7 +8482,10 @@ class ReverieChatApp {
       const wrap = this.el('label', 'ca-label'), input = this.el(tag, 'ca-field'); input.setAttribute('aria-label', label);
       wrap.append(this.el('span', '', label), input); form.append(wrap); return input;
     };
-    const name = field('PAT name'); name.required = true; name.maxLength = 48; name.pattern = '[a-z][a-z0-9-]{0,47}';
+    const name = field('PAT name'); name.required = true; name.maxLength = 48; name.pattern = '[a-z][a-z0-9\\-]{0,47}';
+    name.title = 'Start with a lowercase letter; use lowercase letters, numbers and hyphens.';
+    name.placeholder = 'github-release';
+    form.append(this.el('p', 'ca-hint', 'Name example: github-release. Use lowercase letters, numbers and hyphens.'));
     const note = field('Description (optional)'); note.maxLength = 120;
     const repositories = field('Declared repositories (optional)', 'textarea'); repositories.placeholder = 'owner/repository, owner/another';
     const secret = field('PAT value (write-only)'); secret.type = 'password'; secret.maxLength = 4096; secret.autocomplete = 'new-password'; secret.spellcheck = false;
@@ -8516,7 +8522,7 @@ class ReverieChatApp {
       }
       if (!result.data.tokens.length) list.append(this.el('p', 'ca-hint', 'No named PATs yet.'));
       status.textContent = `${result.data.tokens.length} named PATs. Values are never displayed.`;
-      if (!form.isConnected) dialog.append(form);
+      if (!form.isConnected) dialog.insertBefore(form, list);
     };
     form.addEventListener('submit', async event => {
       event.preventDefault(); if (!dialog.isConnected || busy || !form.reportValidity()) return;
@@ -8525,17 +8531,34 @@ class ReverieChatApp {
       const body = { name: name.value.trim(), repositories: repositories.value.split(/[\s,]+/).filter(Boolean), ...(note.value.trim() ? { label: note.value.trim() } : editing ? { label: null } : {}), ...(value ? { token: value } : {}) };
       setBusy(true); error.textContent = '';
       const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
+      let failureDetail = '';
       try {
         const result = await this.app._chatApi('/api/publication/tokens' + (editing ? '/' + encodeURIComponent(editing) : ''), { method: editing ? 'PUT' : 'POST', body, signal: controller.signal });
+        if (!result.ok) {
+          const code = Number.isInteger(result.status) && result.status >= 100 && result.status <= 599 ? result.status : null;
+          const hints = { 400: 'Check the lowercase PAT name, repository names and token format.',
+            403: 'Owner access was refused. Sign in again before retrying.',
+            409: 'The name or storage conflicts. Refresh the inventory before editing or choosing another name.',
+            503: 'Credential storage is unavailable. The website operator must check its storage configuration and permissions.' };
+          failureDetail = `PAT save was not confirmed${code ? ` (HTTP ${code})` : ''}. ${hints[code] || 'Refresh the inventory before retrying.'} The token value is not displayed.`;
+          throw new Error();
+        }
         const saved = result.data?.token;
         if (!result.ok || typeof saved?.id !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(saved.id) ||
           saved.name !== body.name || (editing && saved.id !== editing)) throw new Error('Save not confirmed. Refresh the inventory before trying again.');
         clear(); await inventory(); await onChanged?.(); status.textContent = 'Named PAT saved. Its value is not displayed.';
-      } catch { error.textContent = 'PAT could not be saved or confirmed. Check owner access and refresh before retrying; values are never displayed.'; }
+      } catch { error.textContent = failureDetail || 'PAT could not be saved or confirmed. Check owner access and refresh before retrying; values are never displayed.'; }
       finally { clearTimeout(timeout); delete body.token; secret.value = ''; setBusy(false); }
     });
-    dialog.addEventListener('close', () => { secret.value = ''; dialog.remove(); });
-    this.doc.body.append(dialog); dialog.showModal();
+    const opener = this.doc.activeElement;
+    const profile = container?.closest('dialog');
+    const close = () => { secret.value = ''; profile?.removeEventListener('close', close); dialog.remove(); opener?.focus?.(); };
+    dialog.addEventListener('close', close);
+    if (container) {
+      // Keep the owner in the profile instead of opening a second modal over it.
+      dialog.close = close; profile?.addEventListener('close', close, { once: true }); container.append(dialog);
+      dialog.scrollIntoView?.({ block: 'start' });
+    } else { this.doc.body.append(dialog); dialog.showModal(); }
     try { await inventory(); } catch (failure) { status.textContent = ''; error.textContent = failure.message; }
   }
 
@@ -8922,6 +8945,8 @@ class ReverieChatApp {
     });
     const management = this.el('section', 'ca-profile-management');
     const permissionStatus = this.el('p', 'ca-hint', 'Checking owner access…'); permissionStatus.setAttribute('role', 'status'); management.append(permissionStatus);
+    const credentials = this.el('section', 'ca-profile-management ca-profile-credentials');
+    const credentialStatus = this.el('p', 'ca-hint', 'Checking owner access…'); credentialStatus.setAttribute('role', 'status'); credentials.append(credentialStatus);
     // Keep the existing controls and submit handler; grouping never recreates fields
     // or changes immediate permission/session actions into profile writes.
     const profilePanel = this.el('section', 'ca-profile-panel ca-profile-fields');
@@ -8934,15 +8959,18 @@ class ReverieChatApp {
     form.id = 'ca-employee-profile-form'; form.classList.add('ca-profile-form');
     form.replaceChildren(profilePanel, identityPanel); save.setAttribute('form', form.id);
     const tabs = this.el('nav', 'ca-profile-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Employee profile sections');
-    const panels = [['profile', 'Profile', profilePanel], ['permissions', 'Permissions', management], ['identity', 'Identity & context', identityPanel]];
+    const panels = [['profile', 'Profile', profilePanel], ['permissions', 'Permissions', management], ['credentials', 'GitHub PATs', credentials], ['identity', 'Identity & context', identityPanel]];
     const selectTab = key => {
       for (const [id, , panel] of panels) {
         panel.hidden = id !== key;
         const tab = tabs.querySelector(`[data-profile-tab="${id}"]`);
         tab.setAttribute('aria-selected', String(id === key)); tab.tabIndex = id === key ? 0 : -1;
       }
-      form.hidden = key === 'permissions';
-      saveHint.textContent = key === 'permissions'
+      form.hidden = key === 'permissions' || key === 'credentials';
+      save.hidden = key === 'credentials';
+      saveHint.textContent = key === 'credentials'
+        ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
+        : key === 'permissions'
         ? 'Permissions save immediately. GPU requests show their own status. Cancel does not undo saved requests or session actions.'
         : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
       body.scrollTop = 0;
@@ -8960,7 +8988,7 @@ class ReverieChatApp {
       });
       tabs.append(tab);
     }
-    const body = this.el('div', 'ca-profile-editor-body'); body.append(form, management);
+    const body = this.el('div', 'ca-profile-editor-body'); body.append(form, management, credentials);
     const saveHint = this.el('span', 'ca-hint ca-profile-save-hint');
     profileActions.classList.add('ca-profile-footer'); profileActions.prepend(saveHint);
     error.classList.add('ca-profile-save-error');
@@ -8970,17 +8998,21 @@ class ReverieChatApp {
       if (!dialog.isConnected || (dialog._companyOrigin && this.companyPage !== dialog._companyOrigin)) return;
       const current = company.ok && company.data?.employees?.find(item => item.id === employee.id);
       if (!current || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) {
-        permissionStatus.textContent = 'Sign in as the owner to change permissions or manage this expert.'; return;
+        permissionStatus.textContent = 'Sign in as the owner to change permissions or manage this expert.';
+        credentialStatus.textContent = 'Sign in as the owner to add PATs or change access.'; return;
       }
       for (const key of ['permissions', 'effectiveBoardPermissions', 'boardPermissionSources', 'onVacation', 'desiredRunning', 'sessionId', 'sessionGeneration'])
         if (Object.hasOwn(current, key)) employee[key] = current[key];
       management.replaceChildren(); this.employeePermissionFields(management, employee);
       this.employeeGpuFields(management, employee, dialog);
-      this.publicationCredentialsFields(management, employee);
+      credentials.replaceChildren(); this.publicationCredentialsFields(credentials, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
       management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));
       if (company.data?.resourceReplacement === true) this.employeeMemoryFields(management, employee, dialog);
-    }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });
+    }).catch(() => { if (dialog.isConnected) {
+      permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.';
+      credentialStatus.textContent = 'PAT access could not be loaded. Reopen the profile to try again.';
+    } });
   }
 
   /**

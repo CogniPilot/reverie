@@ -280,8 +280,8 @@
   },
   {
     "id": "hands",
-    "label": "Hands (experimental chat)",
-    "shortBadge": "H",
+    "label": "Reverie Admin Harness",
+    "shortBadge": "RA",
     "enabled": true,
     "order": 110,
     "kind": "agent",

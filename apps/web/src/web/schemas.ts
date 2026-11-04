@@ -1147,6 +1147,8 @@ export const DockerQuickCreateSchema = z.object({
  */
 export const QuickStartSchema = z.object({
   pinned: z.boolean().optional(),
+  /** A new employee must never inherit an existing case, linked project or symlink. */
+  newCaseOnly: z.boolean().optional(),
   subscriptionProfileId: z
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)

@@ -13,7 +13,7 @@ import type { Command } from 'commander';
 import { EXIT, describeFailure, resolveChatRoom, runAgentVerb, type AgentDeps, type RequestOptions } from './cli-agent.js';
 import { GLYPH, palette } from './cli-style.js';
 import { zonedMs, zonedStamp } from './board-logic.js';
-import { DecisionOptionsSchema, ISSUE_STATUSES, ISSUE_TITLE_MAX, type BoardView, type Issue } from './board-types.js';
+import { DecisionOptionsSchema, IssueSchema, ISSUE_STATUSES, ISSUE_TITLE_MAX, type BoardView, type Issue } from './board-types.js';
 import { describeTrack, GATE_STATES, REVIEW_KINDS, REVIEW_VERDICTS, type TrackRecord } from './board-track.js';
 
 type Result = { ok: true; data: unknown } | { ok: false; code: number };
@@ -327,6 +327,27 @@ async function boardIssues(deps: AgentDeps, o: BoardShowOptions): Promise<number
   return EXIT.ok;
 }
 
+/** Read one complete card without the roster, other cards or room contents. */
+export async function boardIssueShow(deps: AgentDeps, id: string): Promise<number> {
+  if (!IssueSchema.shape.id.safeParse(id).success) return fail(deps, 'Use an exact issue id (1–64 letters, digits or _ . : -).');
+  const result = await call(deps, {
+    method: 'GET', path: `/api/board/issues/${encodeURIComponent(id)}`,
+    bounds: { maxBytes: 4 * 1024 * 1024, deadlineMs: 10000 },
+  });
+  if (!result.ok) return result.code;
+  const data = result.data as { rev?: unknown; item?: unknown } | null;
+  const rev = data?.rev;
+  const item = IssueSchema.safeParse(data?.item);
+  if (typeof rev !== 'number' || !Number.isSafeInteger(rev) || rev < 0 || !item.success || item.data.id !== id)
+    return fail(deps, 'Issue read was not confirmed. Refresh before using this result.');
+  if (deps.json) deps.io.out(JSON.stringify({ rev, item: item.data }, null, 2));
+  else {
+    deps.io.out(palette.emph(`Board rev ${rev} · ${id}`));
+    deps.io.out(JSON.stringify(item.data, null, 2));
+  }
+  return EXIT.ok;
+}
+
 export async function boardShow(deps: AgentDeps, options: BoardShowOptions = {}): Promise<number> {
   if (filtered(options)) return boardIssues(deps, options);
   const board = await view(deps);
@@ -478,7 +499,12 @@ Examples:
       runAgentVerb(json(o), (d) => boardTrackGate(d, { id, head, name, state: o.state, note: o.note }))
     );
 
-  const issue = board.command('issue').alias('card').description('File, move and tag issues');
+  const issue = board.command('issue').alias('card').description('Read, file, move and tag issues');
+  issue
+    .command('show <id>')
+    .description('Read one complete issue by exact id without downloading the whole Board')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, o: { json?: boolean }) => runAgentVerb(json(o), (d) => boardIssueShow(d, id)));
   issue
     .command('add')
     .description('File an issue (a non-coordinator always files into triage)')

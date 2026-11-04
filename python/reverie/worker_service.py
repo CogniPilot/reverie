@@ -542,6 +542,7 @@ def main(argv=None):
                                                  'prepare-resource-actor-enable', 'apply-resource-actor-enable',
                                                  'prepare-gpu-upgrade', 'apply-gpu-upgrade',
                                                  'prepare-transport-upgrade', 'apply-transport-upgrade',
+                                                 'prepare-mount-relocation', 'apply-mount-relocation',
                                                  'prepare-recovery-auth'))
     parser.add_argument('--lines', type=int, default=100)
     parser.add_argument('--resource-actor-provenance', type=Path,
@@ -567,7 +568,20 @@ def main(argv=None):
             return 0
         if args.action not in ('install', 'refresh-resource-actor') and (args.resource_actor_provenance is not None or args.resource_actor_engine_socket is not None):
             raise ValueError('Optional resource actor preparation applies only to explicit install or facts refresh')
-        if args.action in ('prepare-worker-image-switch', 'apply-worker-image-switch'):
+        if args.action in ('prepare-mount-relocation', 'apply-mount-relocation'):
+            from .worker_mount_relocation import MountRelocation
+            if args.operation is None:
+                raise ValueError('Select a fresh private mount-relocation operation directory')
+            migration = MountRelocation(service, args.operation)
+            if args.action == 'prepare-mount-relocation':
+                if args.selection is None or args.plan_sha256 is not None:
+                    raise ValueError('Select the closed private directory relocation input')
+                result = migration.prepare(args.selection)
+            else:
+                if args.selection is not None:
+                    raise ValueError('Apply uses only its exact prepared mount-relocation plan')
+                result = migration.apply(args.plan_sha256)
+        elif args.action in ('prepare-worker-image-switch', 'apply-worker-image-switch'):
             from .worker_image_switch import WorkerImageSwitch
             if args.operation is None:
                 raise ValueError('Select a fresh private worker-image operation directory')

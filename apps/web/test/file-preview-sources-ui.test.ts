@@ -58,6 +58,7 @@ function fixture(
     MobileDetection: {},
     Uint8Array,
     TextDecoder,
+    URLSearchParams,
     btoa,
     AbortController,
     Blob,
@@ -290,6 +291,35 @@ const metadata = {
     { name: 'reports', path: 'reports' },
   ],
 };
+
+it('opens the resolved Drive folder at the exact file, preserving the base path and binding', async () => {
+  const f = fixture(async () => Response.json({ success: true, data: metadata }));
+  const page = f.document.createElement('div');
+  const frame = f.document.createElement('iframe');
+  page.append(frame);
+  f.app._chatApp = { els: { page }, embed: '', openPage: vi.fn(function (this: any, kind: string) { this.embed = kind; }) };
+  expect(await f.app.openWorkspaceFileInDrive(metadata.absolutePath)).toBe(true);
+  expect(f.calls).toHaveLength(1);
+  expect(f.calls[0].url).toBe('/prefix/api/workspace/resolve?path=' + encodeURIComponent(metadata.absolutePath) + '&locate=1');
+  expect(f.calls[0].options).toMatchObject({ credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+  expect(f.app._chatApp.openPage).toHaveBeenCalledWith('workspace');
+  const target = new URL(frame.src, 'http://localhost');
+  expect(target.pathname).toBe('/prefix/workspace');
+  expect(Object.fromEntries(target.searchParams)).toEqual({ path: 'reports', select: 'reports/notes.md', binding, file: metadata.absolutePath });
+});
+
+it('refuses unavailable or mismatched Drive references without opening a page or falling back to a session', async () => {
+  for (const answer of [new Response('denied', { status: 403 }), Response.json({ success: true, data: { ...metadata, absolutePath: '/other' } })]) {
+    const f = fixture(async () => answer);
+    f.app.showToast = vi.fn();
+    f.app._chatApp = { openPage: vi.fn() };
+    expect(await f.app.openWorkspaceFileInDrive(metadata.absolutePath)).toBe(false);
+    expect(f.app._chatApp.openPage).not.toHaveBeenCalled();
+    expect(f.app.showToast).toHaveBeenCalled();
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls.some(c => c.url.includes('/sessions/'))).toBe(false);
+  }
+});
 
 it('renders snapshots through the shipping Markdown sanitizer with no session or fabricated location', async () => {
   const f = fixture(
@@ -578,15 +608,15 @@ it('routes actual shared-file text links to the explicit Workspace resolver on o
   const source = file('chat-app.js');
   const method = source.slice(source.indexOf('  decorateWorkspaceFiles(root) {'), source.indexOf('  /** Mark `@name`'));
   const Shell = vm.runInNewContext('class Shell { ' + method + ' }; Shell');
-  const shell = new Shell(); shell.doc = f.document; shell.app = {openWorkspaceFilePreview:vi.fn()};
+  const shell = new Shell(); shell.doc = f.document; shell.app = {openWorkspaceFileInDrive:vi.fn()};
   shell.el = (tag:string, cls:string, text:string) => {const el=f.document.createElement(tag);el.className=cls;el.textContent=text;return el;};
   const root=f.document.createElement('div');root.innerHTML='<p>See <code>/reverie_workspace/reports/notes.md</code>.</p>';
   shell.decorateWorkspaceFiles(root);
   const link=root.querySelector<HTMLAnchorElement>('a')!;
   const event=new f.dom.window.MouseEvent('click',{bubbles:true,cancelable:true});link.dispatchEvent(event);
   expect(event.defaultPrevented).toBe(true);
-  expect(shell.app.openWorkspaceFilePreview).toHaveBeenCalledWith('/reverie_workspace/reports/notes.md',link);
-  expect(link.href).toContain('/api/filesystem/download?path=');
+  expect(shell.app.openWorkspaceFileInDrive).toHaveBeenCalledWith('/reverie_workspace/reports/notes.md');
+  expect(link.href).toContain('/workspace?file=');
 });
 it('keeps document fragments inside the preview without changing the application hash', async () => {
   const f=fixture(async()=>new Response('[Jump](#section)\n\n<h2 id="section">Section</h2>'));

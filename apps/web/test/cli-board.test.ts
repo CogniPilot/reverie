@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 import { Command } from 'commander';
-import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueSet, boardIssueTag, boardScheduleSet, boardShow, memberRef, registerBoardCommands, wallTime } from '../src/cli-board.js';
+import { boardDecisionWrite, boardIssueAdd, boardIssueMove, boardIssueSet, boardIssueShow, boardIssueTag, boardScheduleSet, boardShow, memberRef, registerBoardCommands, wallTime } from '../src/cli-board.js';
 
 const board = {
   rev: 7,
@@ -41,6 +41,39 @@ function fake() {
 }
 
 describe('reverie board', () => {
+  it('reads only the exact complete issue and revision, without requesting the full Board', async () => {
+    const f=fake(), item={...board.issues[0],reason:'original reason',source:{roomId:'office',messageId:'message-1'},start:100,end:200};
+    f.deps.request=async(_ctx,request)=>{
+      f.calls.push(request);
+      if(request.path!=='/api/board/issues/i-1') throw new Error('Full Board must not be fetched');
+      return {status:200,text:'',json:{success:true,data:{rev:7,item}}};
+    };
+    expect(await boardIssueShow(f.deps,'i-1')).toBe(0);
+    expect(f.calls).toEqual([{method:'GET',path:'/api/board/issues/i-1',bounds:{maxBytes:4*1024*1024,deadlineMs:10000}}]);
+    expect(JSON.parse(f.out[0])).toEqual({rev:7,item});
+    f.deps.json=false;await boardIssueShow(f.deps,'i-1');expect(f.out.at(-1)).toContain('original reason');
+  });
+  it('registers exact issue show under both issue and card command paths', () => {
+    const program=new Command().exitOverride(), boardCommand=registerBoardCommands(program);
+    const issue=boardCommand.commands.find(command=>command.name()==='issue')!;
+    expect(issue.aliases()).toContain('card');
+    const show=issue.commands.find(command=>command.name()==='show')!;
+    let seen:unknown;show.action((id:string,options:unknown)=>{seen={id,options};});
+    program.parse(['board','card','show','i-1','--json'],{from:'user'});
+    expect(seen).toMatchObject({id:'i-1',options:{json:true}});
+  });
+  it('rejects invalid ids before any request and refuses mismatched or malformed cards', async () => {
+    const f=fake();
+    for(const id of ['','i/1','../i-1','a'.repeat(65)]) expect(await boardIssueShow(f.deps,id)).not.toBe(0);
+    expect(f.calls).toEqual([]);
+    for(const data of [{rev:7,item:{...board.issues[0],id:'i-other'}},{rev:-1,item:board.issues[0]},{rev:7,item:{id:'i-1'}}]) {
+      f.deps.request=async()=>({status:200,text:'',json:{success:true,data}});
+      expect(await boardIssueShow(f.deps,'i-1')).not.toBe(0);
+    }
+    f.deps.request=async()=>({status:404,text:'',json:{success:false,error:'No issue i-1'}});
+    expect(await boardIssueShow(f.deps,'i-1')).not.toBe(0);
+    expect(f.out.at(-1)).toContain('No issue i-1');
+  });
   it('decision choices and a named recommendation become structured fields, never question prose', async () => {
     const f = fake();
     expect(await boardDecisionWrite(f.deps, { id: 'snapshot', text: 'Publish?', option: ['Approve', 'Hold'], recommend: 'approve', reason: 'Checks passed' })).toBe(0);

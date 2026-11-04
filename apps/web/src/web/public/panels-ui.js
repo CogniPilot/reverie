@@ -4445,31 +4445,10 @@ Object.assign(ReverieApp.prototype, {
       if (source.kind === 'workspace-reference') {
         if (Object.keys(source).some((key) => !['kind', 'absolutePath'].includes(key)))
           throw new Error('Workspace source unavailable.');
-        const absolute = source.absolutePath;
-        if (typeof absolute !== 'string' || !absolute.startsWith('/') || absolute.length > 4096)
-          throw new Error('Workspace path unavailable.');
-        const response = await fetch(ReverieBase.url(`/api/workspace/resolve?path=${encodeURIComponent(absolute)}`), {
-          credentials: 'same-origin',
-          cache: 'no-store',
-          redirect: 'error',
-          signal: state.controller.signal,
-        });
-        const raw = await this._readFilePreviewMetadata(response, state.controller.signal);
+        const resolved = await this._resolveWorkspaceFileReference(source.absolutePath, state.controller.signal);
         if (!current()) return;
-        metadata = raw.data;
-        if (
-          raw.success !== true ||
-          metadata?.kind !== 'workspace' ||
-          metadata.absolutePath !== absolute ||
-          !Array.isArray(metadata.crumbs) ||
-          metadata.crumbs.length > 32 ||
-          metadata.crumbs.some(
-            (c) =>
-              typeof c.name !== 'string' || typeof c.path !== 'string' || c.name.length > 4096 || c.path.length > 2048
-          )
-        )
-          throw new Error('Workspace file metadata unavailable.');
-        source = { kind: 'workspace', path: metadata.path, name: metadata.name, binding: metadata.binding };
+        metadata = resolved.metadata;
+        source = resolved.source;
       }
       const descriptor = this._filePreviewSourceDescriptor(source);
       title.textContent = descriptor.name;
@@ -4619,6 +4598,55 @@ Object.assign(ReverieApp.prototype, {
 
   openWorkspaceFilePreview(absolutePath, trigger) {
     return this.openReadOnlyFilePreview({ kind: 'workspace-reference', absolutePath }, trigger);
+  },
+
+  /** Resolve through the owner-authorized Drive route; message text never grants file access. */
+  async _resolveWorkspaceFileReference(absolutePath, signal, locateOnly = false) {
+    if (typeof absolutePath !== 'string' || !absolutePath.startsWith('/') || absolutePath.length > 4096)
+      throw new Error('Workspace path unavailable.');
+    const response = await fetch(ReverieBase.url(`/api/workspace/resolve?path=${encodeURIComponent(absolutePath)}${locateOnly ? '&locate=1' : ''}`), {
+      credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal,
+    });
+    const raw = await this._readFilePreviewMetadata(response, signal);
+    const metadata = raw.data;
+    if (raw.success !== true || metadata?.kind !== 'workspace' || metadata.absolutePath !== absolutePath ||
+      !Array.isArray(metadata.crumbs) || metadata.crumbs.length > 32 || metadata.crumbs.some(c =>
+        typeof c.name !== 'string' || typeof c.path !== 'string' || c.name.length > 4096 || c.path.length > 2048))
+      throw new Error('Workspace file metadata unavailable.');
+    const source = { kind: 'workspace', path: metadata.path, name: metadata.name, binding: metadata.binding };
+    this._filePreviewSourceDescriptor(source);
+    return { metadata, source };
+  },
+
+  /** Open the actual Drive folder and select the referenced file, without uploading a copy. */
+  async openWorkspaceFileInDrive(absolutePath) {
+    this._workspaceDriveRequest?.abort();
+    const controller = new AbortController();
+    this._workspaceDriveRequest = controller;
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const { source } = await this._resolveWorkspaceFileReference(absolutePath, controller.signal, true);
+      if (controller.signal.aborted || this._workspaceDriveRequest !== controller) return false;
+      const folder = source.path.split('/').slice(0, -1).join('/');
+      const href = ReverieBase.url('/workspace?' + new URLSearchParams({
+        path: folder, select: source.path, binding: source.binding, file: absolutePath,
+      }));
+      const shell = this._chatApp;
+      if (shell?.openPage) {
+        shell.openPage('workspace');
+        const frame = shell.els?.page?.querySelector('iframe');
+        if (!frame || shell.embed !== 'workspace') throw new Error('Drive is unavailable.');
+        frame.src = href;
+      } else window.location.assign(href);
+      return true;
+    } catch (error) {
+      if (this._workspaceDriveRequest === controller)
+        this.showToast(controller.signal.aborted ? 'Opening Drive timed out. Try again.' : error.message, 'error');
+      return false;
+    } finally {
+      clearTimeout(timer);
+      if (this._workspaceDriveRequest === controller) this._workspaceDriveRequest = null;
+    }
   },
 
   async _readFilePreviewMetadata(response, signal) {

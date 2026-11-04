@@ -53,6 +53,20 @@ source mount does not automatically deploy edits to the running office.
 
 ## Build from source with Nix (development)
 
+The image and voice workflows reuse the Nix store through
+`nix-community/cache-nix-action`, backed by GitHub Actions cache storage. Only
+main saves caches; pull requests restore the accessible main cache without
+creating large copies scoped to each PR. Before saving, garbage collection
+targets an 8 GiB image store or a 4 GiB voice store, retaining rooted application
+and development outputs. These are collection targets, not hard limits: rooted
+closures cannot be removed. The image transport tar is uploaded as an artifact
+and is not kept as a cache root.
+
+Nix still runs the complete acceptance checks for changed inputs. The console
+depends on its web source and explicit Python, skill and test fixtures; unrelated
+documentation or workflow changes reuse its checked output. GitHub's cache is
+available to workflows, while local builds reuse the workstation's own Nix store.
+
 Reverie does not require NixOS or changes to a personal host configuration.
 The flake provides the application, tools and launchers. The native service runs
 as your user; container mode uses an existing container engine. Privileged host
@@ -260,6 +274,28 @@ For a deployment running autonomous agents, use a separate worker container for
 each employee. Think of these as the experts' office laptops: each has its own
 running tools, private home and restart boundary. Explicit project mounts are
 shared drives; the console is separate office infrastructure.
+
+Each employee name must be unique within its company, including names that
+normalize to the same spelling or case-directory component. New employees use
+name-based case folders, such as `cases/expert-alex`. Hiring refuses an existing
+folder or symlink instead of adopting its contents. Changing a display name
+preserves the saved working directory; existing role- or ID-based folders require
+an explicit migration.
+
+For an isolated deployment, the broker binds its configured mount sources into
+the admission policy. Editing the mount JSON alone cannot relocate a shared
+directory. The owner-host commands `prepare-mount-relocation` and
+`apply-mount-relocation` support a same-filesystem directory rename while the
+website, laptops and broker are stopped and task leases are released. Preparation
+uses a private selection JSON containing exactly `oldSource` and `newSource`; the
+destination must be absent. After preparation, rename the original directory and
+place an exact absolute compatibility symlink at its old path. Apply requires the
+returned plan SHA-256 and verifies the original directory identity, stopped fleet,
+leases, configuration and retained journals before changing the source binding.
+It never starts a laptop, copies files, deletes old paths or changes private homes.
+An interrupted attempt stays fenced for owner review. Keep the compatibility link
+until all website/laptop definitions and saved working directories use the new
+location; a historical log mentioning the old path does not by itself require it.
 
 Worker images include Nix with an independent writable store and database for
 each laptop. For example, `nix profile install nixpkgs#openssh` installs an SSH
