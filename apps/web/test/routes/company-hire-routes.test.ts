@@ -96,7 +96,7 @@ describe('fresh permanent expert hire', () => {
       codexConfig: { model: 'model-main', reasoningEffort: 'high' },
     });
     expect(start.mock.calls[0][1]).not.toHaveProperty('effort');
-    expect(start.mock.calls[0][1].caseName).toMatch(/^expert-/);
+    expect(start.mock.calls[0][1]).toMatchObject({ caseName: 'expert-reviewer', newCaseOnly: true });
     const restarted = new CompanyStore(store.file);
     await restarted.init();
     expect(restarted.snapshot().employees[0].id).toBe(employee.id);
@@ -204,6 +204,52 @@ describe('fresh permanent expert hire', () => {
     expect((await hire()).statusCode).toBe(200); start.mockClear();
     const result = await hire({ ...body, name: ' reviewer ' });
     expect(result.statusCode).toBe(409); expect(result.body).toContain('distinct name');
+    expect(start).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['Ada', 'expert-ada'],
+    ['ＡＤＡ', 'expert-ada'],
+    ['Ada Lovelace', 'expert-ada-lovelace'],
+    ['Áda', 'expert-ada'],
+    ['张伟', 'expert-u5f20-u4f1f'],
+    ['🦉', 'expert-u1f989'],
+    ['../Ada', 'expert-ada'],
+  ])('derives a portable case folder from the actual name %s', async (name, caseName) => {
+    expect((await hire({ ...body, name })).statusCode).toBe(200);
+    expect(start.mock.calls[0][1]).toMatchObject({ caseName, sessionName: name, newCaseOnly: true });
+  });
+  it.each(['ＲＥＶＩＥＷＥＲ', 'Réviewer', 'Reviewer!'])('refuses normalized name or case-folder collision %s', async name => {
+    expect((await hire()).statusCode).toBe(200);
+    start.mockClear();
+    expect((await hire({ ...body, name })).statusCode).toBe(409);
+    expect(start).not.toHaveBeenCalled();
+  });
+  it('reserves the name while the first hire is still starting and releases it on completion', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    start.mockImplementationOnce(async () => {
+      entered();
+      await gate;
+      sessions.set('new-runtime', { id: 'new-runtime', name: 'Expert' });
+      return 'new-runtime';
+    });
+    const first = hire().then(response => response);
+    await started;
+    const second = await hire({ ...body, name: 'Réviewer' });
+    release();
+    expect(second.statusCode).toBe(409);
+    expect((await first).statusCode).toBe(200);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+  it('releases a name reservation when profile validation refuses before launch', async () => {
+    expect((await hire({ ...body, source: { kind: 'subscription', profileId: 'missing' } })).statusCode).toBe(400);
+    expect((await hire()).statusCode).toBe(200);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a name whose portable directory spelling exceeds the filesystem component limit', async () => {
+    expect((await hire({ ...body, name: '张'.repeat(100) })).statusCode).toBe(400);
     expect(start).not.toHaveBeenCalled();
   });
   it('rejects oversized role/personality details', async () => {

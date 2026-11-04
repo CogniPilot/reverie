@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import type { ChatroomService } from './chatroom-service.js';
 import { CompanyStore } from './company-store.js';
+import { employeeNamesConflict } from './company-names.js';
 import { ChatroomError } from './chatroom-store.js';
 import { EmployeeVoiceSchema, type EmployeeVoice } from './employee-voice.js';
 import { GoalLifecycle } from './goal-lifecycle.js';
@@ -452,7 +453,7 @@ export class CompanyService {
       const { retiredAt: _retiredAt, ...record } = state.retired[index];
       if (state.employees.some((e) => e.sessionId === record.sessionId))
         throw new CompanyError('Session already bound', 409);
-      if (state.employees.some((e) => sameOwner(e.owner, owner) && e.name.toLowerCase() === record.name.toLowerCase()))
+      if (state.employees.some((e) => sameOwner(e.owner, owner) && employeeNamesConflict(e.name, record.name)))
         throw new CompanyError(`"${record.name}" is an existing employee; rename one of them first`, 409);
       validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, owner))?.coreBeliefs, record.coreBeliefs);
       state.retired.splice(index, 1);
@@ -479,7 +480,7 @@ export class CompanyService {
         state.employees.some(
           (e) =>
             sameOwner(e.owner, employee.owner) &&
-            e.name.normalize('NFKC').toLowerCase() === employee.name.normalize('NFKC').toLowerCase()
+            employeeNamesConflict(e.name, employee.name)
         )
       )
         throw new CompanyError('That name is already used in this company. Choose a distinct name.', 409);
@@ -885,6 +886,9 @@ export class CompanyService {
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Unknown agent session', 403);
     const result = await this.store.update((state) => {
       const employee = state.employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
+      if (change.name !== undefined && state.employees.some(e =>
+        e.id !== employee?.id && sameOwner(e.owner, owner) && employeeNamesConflict(e.name, change.name!)))
+        throw new CompanyError('That name or case folder is already used in this company. Choose a distinct name.', 409);
       let target: { name: string; icon: string } | undefined =
         employee ?? state.temporaryAgents.find((a) => a.sessionId === sessionId && sameOwner(a.owner, owner));
       if (!target && change.icon !== undefined) {
@@ -995,7 +999,7 @@ export class CompanyService {
       // Not a security check: a missing parent header counts as the owner and agent headers are self-asserted until agent tokens v3.
       if ((parentSessionId || input.agentCaller) && parentSessionId !== replaces.sessionId)
         throw new CompanyError("Only the owner or the employee's own session may replace its session", 403);
-    } else if (input.name && employees.some((e) => e.name.toLowerCase() === input.name!.trim().toLowerCase())) {
+    } else if (input.name && employees.some((e) => employeeNamesConflict(e.name, input.name!))) {
       throw new CompanyError(
         `"${input.name}" is an existing employee. Pass employeeId to replace that employee's session, or choose another name`,
         409
@@ -1046,12 +1050,16 @@ export class CompanyService {
     const full = (agents: { sessionId: string }[]) => agents.filter((a) => a.sessionId !== sessionId).length >= 500;
     if (full(this.store.snapshot().temporaryAgents))
       throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
-    // Join first: a refused join must not leave a temporary-worker record behind.
-    if (plan.channelId)
-      asCompanyError(() => this.deps.chatrooms.addMember(plan.channelId!, sessionId, { icon: plan.icon }));
     await this.store.update((state) => {
       if (full(state.temporaryAgents))
         throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
+      if (state.employees.some(e => sameOwner(e.owner, this.deps.getSession(sessionId)?.owner) &&
+        employeeNamesConflict(e.name, plan.name)))
+        throw new CompanyError('That name is an existing employee. Choose a distinct name.', 409);
+      // Recheck the name under the company transaction before creating a room seat.
+      // A refused join must not leave a temporary-worker record behind.
+      if (plan.channelId)
+        asCompanyError(() => this.deps.chatrooms.addMember(plan.channelId!, sessionId, { icon: plan.icon }));
       state.temporaryAgents = state.temporaryAgents.filter((a) => a.sessionId !== sessionId);
       state.temporaryAgents.push({
         sessionId,
