@@ -13,6 +13,9 @@ function fixture(manager = false) {
     muxName: id,
     isWorking: false,
     name: id,
+    mode: 'codex',
+    workingDir: '/synthetic',
+    getCustomModelForPersist: () => undefined,
     toState: () => ({ id, mode: 'codex', workingDir: '/synthetic', name: id }),
   });
   const sessions = new Map<string, any>([
@@ -219,4 +222,47 @@ describe('explicit agent plan delegation', () => {
       expect(h.invoke).toHaveBeenCalledTimes(1);
     } finally { clock.mockRestore(); }
   });
+});
+
+it.each([false,true])('native force preserves authorized source-to-candidate transition (manager=%s)', async manager => {
+  const h = fixture(manager);
+  for(const s of h.sessions.values()) Object.assign(s,{mode:'codex',workingDir:'/synthetic',getCustomModelForPersist:()=>undefined});
+  for(const e of h.employees) Object.assign(e,{sessionGeneration:1,desiredRunning:true});
+  const caller = h.employees[manager?1:0] as any;
+  let valid=true;
+  const native = {employeeId:caller.id,sessionId:caller.sessionId,sessionGeneration:1,owner:undefined,
+    assertCurrent:()=>{if(!valid)throw Error('revoked');},assertIssued:()=>{if(!valid)throw Error('revoked');}};
+  const execution=agentPlanRequestExecution(h.request,{...h.input,sessionGeneration:1},h.runtime,h.invoke,native)!;
+  expect(execution).toBeDefined();
+  await execution.executor.create({...move,forceBusy:true},undefined);
+  await execution.executor.stop('source');
+  expect(execution.authorized()).toBe(true);
+  await execution.executor.start('candidate');
+  valid=false; expect(execution.authorized()).toBe(false);
+});
+it('native force rejects stale target generation, caller generation and recipe drift', async () => {
+  const h=fixture(true);
+  for(const s of h.sessions.values()) Object.assign(s,{mode:'codex',workingDir:'/synthetic',getCustomModelForPersist:()=>undefined});
+  for(const e of h.employees) Object.assign(e,{sessionGeneration:1,desiredRunning:true});
+  const native={employeeId:'manager',sessionId:'manager-session',sessionGeneration:1,owner:undefined,assertCurrent:()=>{},assertIssued:()=>{}};
+  expect(agentPlanRequestExecution(h.request,{...h.input,sessionGeneration:2},h.runtime,h.invoke,native)).toBeUndefined();
+  const capture=()=>agentPlanRequestExecution(h.request,{...h.input,sessionGeneration:1},h.runtime,h.invoke,native)!;
+  const first=capture(); (h.employees[1] as any).sessionGeneration=2; expect(first.authorized()).toBe(false);
+  (h.employees[1] as any).sessionGeneration=1;
+  const second=capture(); h.sessions.get('source').workingDir='/changed'; expect(second.authorized()).toBe(false);
+});
+it.each(['working-directory','model','profile'])('native force refuses actual candidate %s drift even when its object and company projection stay unchanged', async kind => {
+  const h=fixture(true);
+  for(const e of h.employees) Object.assign(e,{sessionGeneration:1,desiredRunning:true});
+  const native={employeeId:'manager',sessionId:'manager-session',sessionGeneration:1,owner:undefined,assertCurrent:()=>{},assertIssued:()=>{}};
+  const execution=agentPlanRequestExecution(h.request,{...h.input,sessionGeneration:1},h.runtime,h.invoke,native)!;
+  await execution.executor.create({...move,forceBusy:true},undefined);
+  expect(execution.authorized()).toBe(true);
+  const candidate=h.sessions.get('candidate');
+  if(kind==='working-directory') candidate.workingDir='/unapproved-candidate';
+  if(kind==='model') { const state=candidate.toState(); candidate.toState=()=>({...state,codexConfig:{model:'unapproved-model'}}); }
+  if(kind==='profile') candidate.subscriptionProfile={id:'unapproved-plan',label:'other',provider:'openai'};
+  expect(execution.authorized()).toBe(false);
+  await expect(execution.executor.start('candidate')).rejects.toThrow();
+  expect(h.invoke).toHaveBeenCalledTimes(1);
 });

@@ -1,0 +1,18 @@
+{
+  "note": "Synthetic cross-language fixture. This fixed key is for tests only.",
+  "config": {
+    "version": 1,
+    "issuer": "recovery-test",
+    "epoch": "epoch-test",
+    "key": "1111111111111111111111111111111111111111111111111111111111111111",
+    "storeId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  },
+  "sessionId": "11111111-2222-3333-4444-555555555555",
+  "generation": 7,
+  "method": "POST",
+  "target": "/api/company/employees/66666666-7777-8888-9999-aaaaaaaaaaaa/reconnect",
+  "body": "{\"sessionId\":\"11111111-2222-3333-4444-555555555555\",\"sessionGeneration\":7}",
+  "issuedMs": 1000,
+  "nonce": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "assertion": "WzEsIndvcmtlci1yZWNvdmVyeS1yZXF1ZXN0IiwicmVjb3ZlcnktdGVzdCIsImVwb2NoLXRlc3QiLCIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLDcsIlBPU1QiLCIvYXBpL2NvbXBhbnkvZW1wbG95ZWVzLzY2NjY2NjY2LTc3NzctODg4OC05OTk5LWFhYWFhYWFhYWFhYS9yZWNvbm5lY3QiLCI0MjdmZWI5ZjUwYzYzNzE4NDZkYmU5NzJjZDAxMzU1ODY0NDk2MmMxNzMyZjg2YWMzODg5NTM3NTZkYzJkZjQwIiwxMDAwLDExMDAwLCJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiJd.7f65267941f94b54ddd07fa12f4f73556aa100b7f11702b38f144716d86d5c6a"
+}

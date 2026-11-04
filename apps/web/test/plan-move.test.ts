@@ -198,6 +198,18 @@ describe('plan move transaction', () => {
     expect(await test.moves.get(input.id)).toMatchObject({ phase: 'failed', error: 'Move cancelled by the owner' });
   });
 
+  it('does not abort a waiting move when delegated authority is revoked during its journal read', async () => {
+    const test = harness();
+    test.port.idle = vi.fn((_id, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+    await test.moves.begin(input);
+    await expect(test.moves.cancel(input.id, undefined, () => false)).rejects.toThrow('permission changed');
+    expect((await test.moves.get(input.id))?.phase).toBe('waiting');
+    expect(test.port.create).not.toHaveBeenCalled(); expect(test.port.stop).not.toHaveBeenCalled();
+    await test.moves.cancel(input.id); await flush();
+  });
+
   it('never launches when durable intent cannot be written', async () => {
     const test = harness();
     test.port.save = vi.fn(async () => {

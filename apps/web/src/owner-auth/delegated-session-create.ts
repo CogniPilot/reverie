@@ -71,3 +71,14 @@ export function consumeDelegatedSessionCreate(req: FastifyRequest): boolean | un
   return ownerFor(req) === grant.owner && req.headers['x-reverie-parent-session'] === grant.sessionId &&
     isDeepStrictEqual(req.body, grant.payload) && grant.authorized();
 }
+
+/** Carry only this consumed private start's fresh authority through slow setup.
+ * Capturing a callback never extends the grant's lifetime or admits another request. */
+export function delegatedSessionStartAdmission(req: FastifyRequest): (() => boolean) | undefined {
+  const grant = grants.getStore();
+  if (!grant) return undefined;
+  return () => !!grant.targetSessionId && grant.claimed === req && grant.consumed && !grant.closed &&
+    req.method === 'POST' && req.url === `/api/sessions/${encodeURIComponent(grant.targetSessionId)}/interactive` &&
+    req.routeOptions.url === '/api/sessions/:id/interactive' && ownerFor(req) === grant.owner &&
+    req.headers['x-reverie-parent-session'] === grant.sessionId && isDeepStrictEqual(req.body, grant.payload) && grant.authorized();
+}

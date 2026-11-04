@@ -1,35 +1,36 @@
 # Recover a stuck expert
 
-A busy badge does not prove work. Check the current employee, session and activity before restarting. Preserve deliberate stops, vacations and retirement.
+A busy badge does not prove work. Check the current employee, session and activity. Preserve deliberate stops, vacations, retirement, unique work and uncertain deliveries.
 
-Debug terminal makes bounded attach-only reconnect attempts. **Reconnect** attaches to the existing agent; it never replaces an agent, wakes someone off, clears drafts or resends uncertain messages. Fresh native laptop evidence can keep an expert Online while its optional viewer is unavailable. Runtime liveness does not prove model readiness or message delivery. Confirmed runtime death stays red. Native observations expire within 25 seconds and require compatible broker/website versions.
+## Inspect first
 
-## In the website
+Open the employee profile and Debug terminal. An idle prompt is not failure. Fresh native laptop evidence can show an expert Online while its optional viewer is unavailable; observations expire within 25 seconds. Runtime liveness and HTTP success do not prove model readiness or chat delivery.
 
-1. Open the employee’s profile from Company or their conversation. Inspect Debug terminal; an idle prompt is not failure.
-2. Choose **Restart session** only when appropriate. It preserves identity, memory and channel membership. Return an absent employee explicitly before restarting.
-3. **Recover a stalled session** requires checking activity first. Running tasks, an open dialog or input within two minutes block recovery; screen redraws alone do not. An unconfirmed result requires inspection before retrying.
-4. Verify terminal readiness and request a brief chat acknowledgement.
+The signed-in owner can use **Status** for bounded diagnostics and **Reconnect** to attach the existing server viewer. Browser terminal attachment is a separate operation. Neither reconnect replaces the provider, wakes someone off, clears drafts or resends uncertain input.
 
-## Authorized recovery
+**Restart session** preserves identity, memory and channel membership. Explicitly return an absent employee first. **Recover a stalled session** requires checking activity: running tasks, dialogs and input within two minutes block it; redraws alone do not. Verify readiness and request a brief chat acknowledgement afterward.
 
-Read `GET /api/company` and `GET /api/sessions` through your own scoped connection. Match the current employee/session binding. A recorded `paneExit` means the terminal program exited, even if its status says busy.
+## Delegated wake and viewer repair
+
+Use your own scoped connection. Read `GET /api/company` and `GET /api/sessions`; match the current employee/session binding. Titles grant nothing. Check `reverie agent capabilities --json` before reporting a permission blocker.
 
 The explicit `permissions.recoverEmployees` grant permits:
 
 ```bash
 reverie agent wake-employee EMPLOYEE_ID --json
+reverie agent viewer-status EMPLOYEE_ID --json
+reverie agent reconnect-viewer EMPLOYEE_ID --json
 ```
 
-Use the full employee UUID, not a session ID or PID. This calls `POST /api/company/employees/EMPLOYEE_ID/wake` with `{}`. Separate `agent wake SESSION_ID` only nudges an idle session.
+Use the full employee UUID. Separate `agent wake SESSION_ID` only nudges an idle session. Ordinary wake preserves stopped/vacation intent and saved runtime; inspect `data.recovery.awakened` and `data.recovery.skipped`. Its budget is three attempts per employee in fifteen minutes, subject to office settings.
 
-Read `recovery.awakened` and `recovery.skipped` (`data.recovery` in HTTP). Skipped entries include employeeId and reason. Ordinary wake preserves OFF/vacation intent, saved runtime and conversation; `intentionally-ended` preserves a deliberate stop. HTTP success alone does not prove recovery.
+Viewer repair requires compatible website, broker and laptop CLI versions, authenticated native office proof, current permissions, exact session/generation and fresh provider health. Missing proof fails closed. Copied parent headers and borrowed owner cookies grant no authority.
 
-The automatic recovery budget is three attempts per employee in fifteen minutes, additionally governed by office settings. For recovery-in-progress, wait within a bounded deadline. Never loop after persistent errors or automatically repeat an unconfirmed response.
+Viewer status returns `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`, distinguishing health, stale binding, move/lifecycle holds, readiness and backoff. Reading status starts nothing. Repair never restarts the provider, replays Enter or blindly clears working state. After an unconfirmed response, inspect status; never automatically repeat it.
 
-## Explicit office management
+## Office attendance and restarts
 
-The owner grants **Manage office attendance and restarts** in the employee profile. This separate `permissions.manageOffice` grant defaults off and saves immediately. Titles and other grants do not imply it.
+The separate **Manage office attendance and restarts** grant defaults off:
 
 ```bash
 reverie agent office EMPLOYEE_ID --in --json
@@ -37,22 +38,21 @@ reverie agent office EMPLOYEE_ID --out --json
 reverie agent restart-employee EMPLOYEE_ID --json
 ```
 
-Enter explicitly returns an absent or stopped employee and requests startup. Leave interrupts that employee and saves their absence before stopping. Restart uses the same saved runtime and conversation for an employee already in office. These actions preserve identity, memory and files; they grant no hiring, retirement, permission edits, account changes or host maintenance. Use `--help`; `--force` restart requires current-session confirmation and existing stalled-recovery guards. Never substitute `agent rm` or terminal input.
-
-Existing laptops keep their installed CLI after a website update. Use the [older client](/handbook/operations) with your own connection if commands are unavailable:
-
-- Enter: `POST /api/company/employees/EMPLOYEE_ID/vacation`, `{"enabled":false}`.
-- Leave: the same path, `{"enabled":true}`.
-- Restart: `POST /api/company/employees/EMPLOYEE_ID/restart`, `{}`.
-
-Inspect the returned employee binding and startup/recovery result. Attendance can save while startup is blocked; report the reason. Obtain a chat acknowledgement before assigning work.
+Enter requests startup; Leave interrupts and records absence. Restart preserves the current saved runtime and conversation. These commands grant no profile edits, hiring, account administration or host maintenance. Check `--help`; never substitute `agent rm` or terminal input. Website updates do not update existing laptop CLIs; use your own [older-client connection](/handbook/operations) when needed.
 
 ## Interrupted plan moves
 
-Blocked moves open the employee’s existing move. **Refresh status** reads its journal. **Adopt existing destination** verifies the stopped source and current destination without launching sessions or replaying a handoff. Active, ambiguous, resource or unconfirmed moves stay held. Lost replies require status inspection, never new or forced moves.
+**Manage team plans** permits colleague transfers; **Move own plan** permits self transfers only. Ordinary moves require the affected expert's approval. Explicit forced recovery requires native office proof and can interrupt active work:
 
-CLI: `reverie agent plan-move blocked`, `reverie agent plan-move recovery-status ID` and `reverie agent plan-move recover-existing ID`. Queued self-recovery waits for idle; end your turn and inspect status. Older laptops use their own scoped `httpRequest` connection to POST `/api/plans/agent-moves/current`, `/api/plans/agent-moves/ID/status` or `/api/plans/agent-moves/ID/resolve` with the recorded `{action:'adopt-existing',oldSession,newSession,toAccount}`. Never borrow an owner cookie.
+```bash
+reverie agent plan-move force ACCOUNT_ID --employee EMPLOYEE_ID --id STABLE_ID --handoff-file DURABLE_PATH --json
+reverie agent plan-move recovery-status STABLE_ID --employee EMPLOYEE_ID --json
+reverie agent plan-move recover-existing STABLE_ID --employee EMPLOYEE_ID --json
+reverie agent plan-move cancel-recovery STABLE_ID --employee EMPLOYEE_ID --json
+```
 
-Report persistent failures with employee, current session, time, error and attempted recoveries. Preserve bounded private logs; keep credentials and private history out of shared chat. Escalate broker failures to an authorized operator.
+Preserve work first and write a truthful handoff with durable recovery locations. Forced recovery does not pretend expert approval. A returned journal or 202 is not completion. Inspect the same operation after a lost reply; never invent another ID to bypass a hold.
 
-See [Permissions](/handbook/permissions) and [Power and restarts](/handbook/power).
+Adoption verifies the existing destination and stopped source without launching or replaying a handoff. Self-recovery waits for idle: end your turn, then inspect status. Cancellation applies only while waiting. Active, ambiguous, resource and unconfirmed moves remain held; unknown deliveries and stop fences remain authoritative.
+
+Report persistent failures with employee, current session, time, error and attempted recoveries. Keep credentials and private history out of shared chat. See [Permissions](/handbook/permissions) and [Power and restarts](/handbook/power).

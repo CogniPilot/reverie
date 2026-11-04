@@ -34,47 +34,45 @@ reverie agent plan-move reject REQUEST_ID
 
 The CLI reads the private approval credential itself; do not print or copy it. Approval reserves the replacement metadata, verifies source cleanup, then starts and checks the replacement before delivering the handoff. A request alone does not prove that a move completed. Model choice does not grant provider sign-in or account administration. Never paste an endpoint API key into chat or a public handbook page.
 
+## Transfer a stuck expert
+
+When an expert cannot complete the normal approval workflow, an owner can force
+the transfer. An agent with **Manage team plans**, or **Move own plan** for itself,
+can use the same guarded recovery through its authenticated native office connection:
+
+```bash
+reverie agent plan-move force ACCOUNT_ID --employee EMPLOYEE_ID --id STABLE_OPERATION_ID --handoff-file /path/to/handoff.md --json
+```
+
+Preserve work and write a truthful handoff with durable recovery locations. This
+can interrupt the expert without pretending approval. Permissions and bindings
+are rechecked. A returned operation is not completion: inspect its existing
+journal after a lost reply. Retain uncertain deliveries and stop fences; never
+bypass a hold with another ID. See [Recovery](/handbook/recovery) for commands.
+
 ## Refresh your current runtime
 
-A Codex or Claude expert with Move own plan (or Manage team plans) can request its
-own fresh runtime on the exact current account:
+A Codex or Claude expert with Move own plan or Manage team plans can request
+its own fresh conversation on the current account:
 
 ```bash
 reverie agent plan-move request CURRENT_ACCOUNT_ID --restart --id STABLE_REQUEST_ID
 reverie agent plan-move approve STABLE_REQUEST_ID --handoff-file /path/to/handoff.md
 ```
 
-`CURRENT_ACCOUNT_ID` is the actual ID from `reverie plans --json`, not a literal
-alias. `--restart` records the explicit `runtime-refresh` purpose. It cannot
-target another expert or another account. An ordinary same-account move is refused.
+Use the actual account ID from `reverie plans --json`. `--restart` records
+`runtime-refresh`, refusing another expert/account or an ordinary same-account
+move. Refresh preserves account, model, effort, directory and permissions while
+clearing provider resume linkage. Changed settings or grants refuse it. Approve
+with a safe handoff while running; do not quit first. Inspect lost responses and
+retain recovery holds.
 
-Refresh preserves account, model, effort, working directory and permission
-settings, clearing provider resume linkage for a fresh conversation. Changed
-settings or grants stop it. Approve with a safe handoff while still running;
-do not quit first. Inspect status after a lost response and retain recovery holds.
+Refresh grants no installation, worker-image change or stopped/vacation wake.
+Hands, custom endpoints, OpenCode, remote and Docker-case sessions are unsupported.
 
-This request does not install an update or choose a worker image. Any package or
-image update must already be separately authorized and prepared. Hands, custom
-model endpoints, OpenCode, remote and Docker-case sessions are unsupported by this
-initial refresh path. Vacation and stopped intent do not acquire new wake authority.
-
-Check `reverie agent plan-move request --help` before using `--restart`: updating
-the website does not update laptop CLIs. An older CLI can request through its
-existing agent context after the website supports refresh. Substitute your own
-employee ID, current account ID and stable request ID:
-
-```bash
-node --input-type=module <<'JS'
-import {httpRequest,resolveAgentContext} from '/opt/reverie/console/dist/cli-agent.js';
-const ctx=resolveAgentContext(),id='STABLE_REQUEST_ID';
-console.log(JSON.stringify({id}));
-const r=await httpRequest(ctx,{method:'POST',path:'/api/plans/agent-requests',body:{id,employeeId:'OWN_EMPLOYEE_ID',sessionId:ctx.selfId,toAccount:'CURRENT_ACCOUNT_ID',purpose:'runtime-refresh'}});
-if(!r.json?.success)throw Error('Refresh request refused; inspect before retrying');
-console.log(JSON.stringify(r.json.data));
-JS
-```
-
-Then use the existing approve command. Keep your own office connection; no owner
-cookie, borrowed identity or new grant is needed or supplied by this fallback.
+Check `reverie agent plan-move request --help`: website updates do not update
+laptop CLIs. Older clients can use their existing scoped office connection;
+operator examples are in the repository manual. Never borrow an owner cookie or
+another identity.
 
 See [Permissions](/handbook/permissions) and [Profiles](/handbook/profiles).

@@ -95,6 +95,12 @@ const AGENT_ROUTES = new Set([
   'POST /api/company/employees/:id/vacation', // route checks explicit manageOffice, never title/admin status
   'POST /api/company/employees/:id/restart', // unchanged-recipe only; runtime settings remain owner-only
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
+  'POST /api/company/employees/:id/reconnect', // purpose-authenticated native proof and explicit recovery permission
+  'POST /api/company/employees/:id/reconnect/status',
+  'POST /api/plans/moves/force', // route requires a purpose proof; raw parent headers grant nothing
+  'POST /api/plans/moves/:id/status',
+  'POST /api/plans/moves/:id/resolve',
+  'POST /api/plans/moves/:id/cancel',
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
   'GET /api/plans/move-impact', // read-only; the route admits only the owner and agents holding plans.view_all
   // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.

@@ -115,6 +115,12 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       officeLeave: 'reverie agent office "<employee-id>" --out --json',
       restartEmployee: 'reverie agent restart-employee "<employee-id>" --json',
       wakeEmployee: 'reverie agent wake-employee "<employee-id>" --json',
+      reconnectViewer: 'reverie agent reconnect-viewer "<employee-id>" --json',
+      viewerStatus: 'reverie agent viewer-status "<employee-id>" --json',
+      forcePlanMove: 'reverie agent plan-move force "<account-id>" --employee "<employee-id>" --id "<stable-operation-id>" --handoff-file "<durable-handoff-path>" --json',
+      inspectTeamMoveRecovery: 'reverie agent plan-move recovery-status "<move-id>" --employee "<employee-id>" --json',
+      recoverTeamMove: 'reverie agent plan-move recover-existing "<move-id>" --employee "<employee-id>" --json',
+      cancelWaitingMove: 'reverie agent plan-move cancel-recovery "<move-id>" --employee "<employee-id>" --json',
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
       publicationCredentials: 'reverie agent credentials list --json',
@@ -142,6 +148,8 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     deps.io.out(
       `Office attendance/restarts: ${capabilities.company.manageOffice === true ? 'allowed' : capabilities.company.manageOffice === false ? 'denied' : 'unknown (server does not report this grant)'}; recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
     );
+    deps.io.out(`Viewer-only recovery: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'} through the explicit recoverEmployees grant; current same-owner SID/generation, native health and asynchronous revocation checks still apply. Use viewer-status to inspect refusals/backoff.`);
+    deps.io.out('Forced plan/provider transfer requires the applicable explicit Move own plan or Manage plans grant, fresh native office proof, a stable operation ID and a truthful durable operator handoff. Unknown delivery/stop outcomes remain fenced; no owner identity or agent approval is synthesized.');
     deps.io.out(`Plan preconditions: ${capabilities.company.planPreconditions}`);
     deps.io.out(`Canonical team Goal management: ${capabilities.company.manageGoals === true ? 'allowed' : capabilities.company.manageGoals === false ? 'denied' : 'unknown (server does not report this grant)'}`);
     deps.io.out(`Goal preconditions: ${capabilities.company.goalPreconditions ?? 'Requires the separately authenticated canonical Goal broker and current grants; not provider-native /goal or PAUSED control.'}`);

@@ -3142,7 +3142,7 @@ class ReverieChatApp {
         const input = this.el('input'); input.type = 'checkbox'; input.name = key;
         wrap.append(input, this.el('span', '', text)); pages[2].append(wrap); planPermissions[key] = input;
       }
-      pages[2].append(this.el('p', 'ca-hint', 'Plan moves require the affected expert’s handoff and approval. A title alone grants no permission.'));
+      pages[2].append(this.el('p', 'ca-hint', 'Ordinary plan requests require the expert’s approval. These grants also permit explicit forced transfers and guarded journal recovery through an authenticated native office connection, within the selected self/team scope. A forced transfer can interrupt work and requires the caller’s handoff.'));
       const goalWrap = this.el('label', 'ca-label');
       const manageGoals = this.el('input'); manageGoals.type = 'checkbox'; manageGoals.name = 'manageGoals';
       goalWrap.append(manageGoals, this.el('span', '', 'Manage team goals'));
@@ -6491,6 +6491,10 @@ class ReverieChatApp {
       node.append(' ', warning);
     }
     node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
+    const recovery = this.viewerReconnectStatus(employee);
+    if (recovery && health.viewerUnavailable) {
+      node.append(this.el('span', 'ca-viewer-reconnect-status', ` · ${this.viewerReconnectDescription(recovery)}`));
+    }
     node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${health.detail}`);
     const card = node.closest('.ca-company-person');
     if (card) for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
@@ -6503,18 +6507,80 @@ class ReverieChatApp {
       if (wanted && !restart) card.append(this.button('ca-btn is-danger ca-dead-pane-restart', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, controls.onSaved), { text: 'Restart' }));
       else if (!wanted) restart?.remove();
       const reconnect = card.querySelector('.ca-reconnect-viewer');
-      const canReconnect = health.viewerOnly || (controls?.manage && this.canReconnectEmployee(employee));
+      const canReconnect = health.viewerOnly || this.canReconnectEmployee(employee);
       if (canReconnect && !reconnect) card.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
       else if (!canReconnect) reconnect?.remove();
+      const status = card.querySelector('.ca-viewer-status');
+      if (this.canReconnectEmployee(employee) && !status) card.append(this.viewerStatusButton(employee));
+      else if (!this.canReconnectEmployee(employee)) status?.remove();
     }
   }
 
   canReconnectEmployee(employee) {
     const session = this.app.sessions?.get?.(employee?.sessionId);
+    // Browser controls use the signed-in owner. Delegates use their native
+    // office CLI/API proof; company JSON and parent headers cannot authenticate it.
     return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation && !employee?.bindingMigration &&
       Number.isInteger(employee?.sessionGeneration) &&
       (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
       (this.employeeHealth(employee).state === 'disconnected' || this.employeeHealth(employee).viewerUnavailable === true);
+  }
+
+  viewerReconnectStatus(employee, value) {
+    const key = `${employee?.id}:${employee?.sessionId}:${employee?.sessionGeneration}`;
+    if (arguments.length === 1) return this._viewerReconnectStatuses?.get(key);
+    if (!value || !['idle', 'connecting', 'connected', 'blocked'].includes(value.state) ||
+      typeof value.reason !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value.reason) ||
+      !Number.isSafeInteger(value.attempts) || value.attempts < 0 || value.attempts > 1000 ||
+      !Number.isSafeInteger(value.retryAfterMs) || value.retryAfterMs < 0 || value.retryAfterMs > 60000) return null;
+    const status = { state: value.state, reason: value.reason, attempts: value.attempts, retryAfterMs: value.retryAfterMs };
+    this._viewerReconnectStatuses ||= new Map();
+    if (this._viewerReconnectStatuses.size > 128) this._viewerReconnectStatuses.clear();
+    this._viewerReconnectStatuses.set(key, status); return status;
+  }
+
+  viewerReconnectDescription(status) {
+    return `${status.state}: ${status.reason.replace(/[-_]/g, ' ')} · attempts ${status.attempts}` +
+      (status.retryAfterMs ? ` · retry in ${Math.ceil(status.retryAfterMs / 1000)}s` : '');
+  }
+
+  viewerStatusButton(employee) {
+    return this.button('ca-btn ca-viewer-status', 'Terminal reconnect status', () => this.showEmployeeViewerStatus(employee), { text: 'Status' });
+  }
+
+  async showEmployeeViewerStatus(employee) {
+    if (!this.canReconnectEmployee(employee)) return;
+    const dialog = this.el('dialog', 'ca-viewer-status-dialog');
+    const report = this.el('p', 'ca-viewer-status-report', 'Reading terminal status…');
+    report.setAttribute('role', 'status'); report.setAttribute('aria-live', 'polite');
+    const refresh = this.button('ca-btn', 'Refresh terminal status', () => { void load(); }, { text: 'Refresh status' });
+    const close = this.button('ca-btn', 'Close terminal status', () => dialog.close(), { text: 'Close' });
+    let pending = false;
+    const current = () => this.company?.employees?.some(e => e.id === employee.id && e.sessionId === employee.sessionId && e.sessionGeneration === employee.sessionGeneration);
+    const load = async () => {
+      if (pending || !dialog.isConnected) return;
+      if (!current() || !this.canManageOffice()) {
+        report.textContent = 'The current binding or recovery permission changed. Refresh Company.'; return;
+      }
+      pending = true; refresh.disabled = true;
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/reconnect/status`, {
+          method: 'POST', body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
+        });
+        if (!dialog.isConnected) return;
+        if (!current() || !this.canManageOffice()) {
+          report.textContent = 'The employee binding or recovery permission changed. Refresh Company.'; return;
+        }
+        const status = this.viewerReconnectStatus(employee, result.data?.reconnect ?? result.reconnect);
+        report.textContent = status ? this.viewerReconnectDescription(status) : (result.error || 'Terminal recovery status is unconfirmed.');
+        this.schedulePresence();
+      } catch { if (dialog.isConnected) report.textContent = 'Terminal recovery status is unavailable. Nothing was started.'; }
+      finally { pending = false; refresh.disabled = false; }
+    };
+    dialog.append(this.el('h2', '', `Terminal status for ${employee.name}`), report,
+      this.el('p', 'ca-hint', 'This status concerns the server terminal viewer. Provider health, browser terminal connection and chat acceptance remain separate. Unknown input and stop holds are preserved.'), refresh, close);
+    dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus(); void load();
   }
 
   async reconnectEmployeeViewer(employee) {
@@ -6533,8 +6599,13 @@ class ReverieChatApp {
       const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/reconnect`, {
         method: 'POST', body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
       });
+      const current = this.company?.employees?.find(e => e.id === employee.id);
+      if (!current || current.sessionId !== employee.sessionId || current.sessionGeneration !== employee.sessionGeneration) return;
+      const status = this.viewerReconnectStatus(employee, result.data?.reconnect ?? result.reconnect);
+      if (status) this.schedulePresence();
       if (!result.ok || result.data?.state !== 'viewer-connected') {
-        this.toast(result.error || 'Connection not confirmed. Check this expert’s status before trying again.', 'error');
+        this.toast(status ? `Connection not confirmed: ${this.viewerReconnectDescription(status)}.` :
+          (result.error || 'Connection not confirmed. Check this expert’s status before trying again.'), 'error');
         return;
       }
       // The canonical state event clears the viewer warning and input hold.
@@ -7161,7 +7232,7 @@ class ReverieChatApp {
           const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
           if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
             const group = this.el('div', 'ca-member-with-actions');
-            group.append(row, this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
+            group.append(row, this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }), this.viewerStatusButton(employee));
             box.append(group);
           } else box.append(row);
         }
@@ -7574,6 +7645,7 @@ class ReverieChatApp {
         this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
     if (employee && (this.employeeHealth(employee).viewerOnly || this.canReconnectEmployee(employee)))
       actions.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
+    if (employee && this.canReconnectEmployee(employee)) actions.append(this.viewerStatusButton(employee));
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
       actions.append(this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' }));
     card.append(actions, technical);
@@ -8591,7 +8663,8 @@ class ReverieChatApp {
   }
 
   employeePermissionFields(container, employee) {
-    const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
+    const label = this.el('label', 'ca-hint', ' May recover employees and reconnect terminal viewers');
+    label.title = 'Explicit recovery delegation. Viewer-only repair preserves the provider; current scoped office authentication and native checks still apply. This does not grant provider transfers or owner access.';
     const recovery = this.el('input', '');
     recovery.type = 'checkbox';
     recovery.checked = employee.permissions?.recoverEmployees === true;
@@ -8615,7 +8688,7 @@ class ReverieChatApp {
       const wrap = this.el('label', 'ca-hint', ` ${text}`);
       const input = this.el('input'); input.type = 'checkbox'; input.checked = employee.permissions?.[key] === true;
       input.setAttribute('aria-label', `${text} for ${employee.name}`);
-      wrap.title = 'Requests still require the affected expert’s handoff and approval. No account sign-in or plan administration access.';
+      wrap.title = 'Ordinary requests require the expert’s approval. Also permits explicit forced transfers and guarded journal recovery through an authenticated native office connection, within this self/team scope. Forced transfers can interrupt work and require the caller’s handoff. No account sign-in or account administration.';
       wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
     }
     const boardPermissions = {};

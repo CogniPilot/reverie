@@ -97,7 +97,7 @@ let
         test/selected-claude-profile.test.ts \
         test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts \
         test/chatroom-digest.test.ts test/chatroom-notice-state.test.ts test/chatroom-notice-history.test.ts test/chatroom-notice-cli.test.ts test/chat-db.test.ts test/chat-message-search.test.ts \
-        test/managed-codex-trust.test.ts test/codex-hook-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts test/worker-viewer-reconnect.test.ts test/worker-provider-health.test.ts \
+        test/managed-codex-trust.test.ts test/codex-hook-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts test/worker-viewer-reconnect.test.ts test/worker-recovery-auth.test.ts test/native-worker-viewer-acceptance.test.ts test/worker-provider-health.test.ts \
         test/command-failure-routes.test.ts test/command-failure-ui.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
@@ -109,7 +109,7 @@ let
         test/resource-owner-authority.test.ts test/resource-native-client.test.ts \
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
         test/resource-replacement-controller.test.ts test/company-laptop-memory-ui.test.ts \
-        test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/agent-plan-recovery.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
+        test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/agent-plan-recovery.test.ts test/agent-plan-journal-recovery.test.ts test/cli-agent-force.test.ts test/cli-agent-viewer.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
         test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/chat-code-highlighting.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \

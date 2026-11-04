@@ -542,7 +542,8 @@ def main(argv=None):
                                                  'prepare-resource-actor-enable', 'apply-resource-actor-enable',
                                                  'prepare-gpu-upgrade', 'apply-gpu-upgrade',
                                                  'prepare-transport-upgrade', 'apply-transport-upgrade',
-                                                 'prepare-mount-relocation', 'apply-mount-relocation'))
+                                                 'prepare-mount-relocation', 'apply-mount-relocation',
+                                                 'prepare-recovery-auth'))
     parser.add_argument('--lines', type=int, default=100)
     parser.add_argument('--resource-actor-provenance', type=Path,
                         help='On explicit install or facts refresh, select immutable Nix website-image provenance')
@@ -555,6 +556,16 @@ def main(argv=None):
     os.umask(0o077)
     service = WorkerService(args.config)
     try:
+        if args.action == 'prepare-recovery-auth':
+            if any(value is not None for value in (args.operation, args.selection, args.plan_sha256,
+                                                   args.resource_actor_provenance, args.resource_actor_engine_socket)):
+                raise ValueError('Recovery authentication uses only the registered private broker config')
+            from .worker_recovery_auth import provision
+            config = service.positive_preflight()
+            probe = service.resource_probe(config)
+            result = provision(config, probe.run_engine)
+            print(json.dumps(result))
+            return 0
         if args.action not in ('install', 'refresh-resource-actor') and (args.resource_actor_provenance is not None or args.resource_actor_engine_socket is not None):
             raise ValueError('Optional resource actor preparation applies only to explicit install or facts refresh')
         if args.action in ('prepare-mount-relocation', 'apply-mount-relocation'):
