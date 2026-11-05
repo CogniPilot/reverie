@@ -57,7 +57,12 @@ fn uid() -> u32 {
 fn name(value: &OsStr) -> io::Result<CString> {
     CString::new(value.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput.into())
 }
-fn open_at(parent: i32, path: &OsStr, flags: i32, mode: libc::mode_t) -> io::Result<File> {
+pub(crate) fn open_at(
+    parent: i32,
+    path: &OsStr,
+    flags: i32,
+    mode: libc::mode_t,
+) -> io::Result<File> {
     let path = name(path)?;
     // SAFETY: path is terminated, and successful openat returns one new owned fd.
     let fd = unsafe {
