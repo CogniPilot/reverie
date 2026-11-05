@@ -49,7 +49,13 @@ pub struct EffectiveWorkerConfig(Value);
 
 /// Python json.dumps(effective_config, sort_keys=True).encode(), including all keys.
 pub fn encode_config(config: &EffectiveWorkerConfig) -> Vec<u8> {
-    encode::encode(&config.0, false)
+    encode_data(&config.0)
+}
+pub(crate) fn encode_data(value: &Value) -> Vec<u8> {
+    encode::encode(value, false)
+}
+pub(crate) fn compact_data(value: &Value) -> Vec<u8> {
+    encode::compact(value)
 }
 /// Excludes only top-level image, maintenanceSessions and opsConfig.
 pub fn encode_policy(config: &EffectiveWorkerConfig) -> Vec<u8> {
