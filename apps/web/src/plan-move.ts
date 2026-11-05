@@ -189,6 +189,10 @@ export class PlanMoves {
       if (record.resourceIntent) return { ...record, phase: 'checking', resourcePhase: 'verifying' };
       if (record.recoveryAction === 'adopt-existing') return { ...record, phase: 'checking' };
     }
+    // An adoption keeps the held phase while its inspection and audit run: report it as checking, so a status read
+    // never offers a recovery that is already in flight.
+    if (record.phase === 'recovery-required' && !record.resourceIntent && (this.aborts.has(record.id) || this.intents.has(record.id)))
+      return { ...record, phase: 'checking' };
     return { ...record };
   }
 
