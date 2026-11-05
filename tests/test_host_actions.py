@@ -133,6 +133,26 @@ class FixedTargetsTests(unittest.TestCase):
                 with self.subTest(name=name),self.assertRaises(ValueError):proof.verify()
                 (root/name).write_text(old)
 
+    def test_pool_swap_ceiling_follows_laptop_swap_pool(self):
+        import hashlib
+        from reverie.host_action_targets import FixedTargets,RuntimePoolProof,UNIT,pool_limits,pool_unit
+        self.assertEqual(pool_unit(),UNIT)
+        self.assertIn(b'\nMemorySwapMax=0\n',UNIT)
+        self.assertEqual(pool_unit(32768),UNIT.replace(b'MemorySwapMax=0',b'MemorySwapMax=32768M'))
+        self.assertEqual(pool_limits(32768)['memory.swap.max'],str(32768*1048576))
+        for bad in [-1,1048577,True,'32768',None]:
+            with self.subTest(bad=bad),self.assertRaises(ValueError):pool_unit(bad)
+        op={'action':'apply-runtime-pool'}
+        default=self.targets.resolve(op)['desiredUnitSha256']
+        swapped=FixedTargets('reverie',lambda argv:'',self.targets.pool,32768).resolve(op)['desiredUnitSha256']
+        self.assertEqual(default,hashlib.sha256(UNIT).hexdigest())
+        self.assertEqual(swapped,hashlib.sha256(pool_unit(32768)).hexdigest())
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for name,value in {**pool_limits(32768),'cpu.max':'max 100000'}.items():(root/name).write_text(value)
+            RuntimePoolProof(root,32768).verify()
+            with self.assertRaises(ValueError):RuntimePoolProof(root).verify()
+
 class PrivateStorageTests(unittest.TestCase):
     def test_public_directory_and_symlink_database_refused(self):
         import os

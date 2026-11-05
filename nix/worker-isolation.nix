@@ -13,6 +13,11 @@ in {
     apiSocketRoot = lib.mkOption { type = lib.types.str; description = "Private per-laptop office connections."; };
     poolMemoryMiB = lib.mkOption { type = lib.types.ints.positive; description = "Shared hard memory ceiling; leave host and console headroom."; };
     poolTasksMax = lib.mkOption { type = lib.types.ints.positive; default = 8192; };
+    laptopSwapPoolMiB = lib.mkOption {
+      type = lib.types.ints.between 0 1048576;
+      default = 0;
+      description = "Slice swap ceiling; set it to the broker's laptopSwapPoolMiB. Zero keeps the pool swap-free.";
+    };
   };
   config = lib.mkIf cfg.enable {
     systemd.slices.reverie-workers = {
@@ -21,7 +26,8 @@ in {
         MemoryAccounting = true;
         MemoryHigh = "${toString (builtins.div (cfg.poolMemoryMiB * 9) 10)}M";
         MemoryMax = "${toString cfg.poolMemoryMiB}M";
-        MemorySwapMax = 0;
+        # Laptop swap allowances need an ancestor ceiling at least as large.
+        MemorySwapMax = if cfg.laptopSwapPoolMiB == 0 then 0 else "${toString cfg.laptopSwapPoolMiB}M";
         TasksMax = cfg.poolTasksMax;
         CPUWeight = 100; # Work-conserving, no CPU quota.
       };
