@@ -9,7 +9,7 @@ use reverie_contracts::subscription_profiles_v1::{
 };
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read as _};
 use std::path::PathBuf;
 
 const FILE: &str = "subscription-profiles.json";
