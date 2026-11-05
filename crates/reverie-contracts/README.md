@@ -59,3 +59,20 @@ The request carries what only TS owns: its memoized CLI-registry modes, `os.home
 `process.platform`, `getDataDir()` and the three environment values the route reads. Bounds TS lacks
 (request, file and response size) are typed refusals that the forwarder answers with its curated 503.
 `reverie-routes` holds the read-only handler; its byte goldens are recorded from the TS route.
+
+# Route frames v1
+
+`route_frames_v1` is the private channel between the TS front and a Rust route handler child on its
+stdin and stdout. A frame is a big-endian `u32 length`, an 18-byte header (`u8 version`, `u8 kind`,
+`u64 generation`, `u64 id`, no padding) and the kind's payload. Requests, cancels and observation
+answers go to the handler; responses, refusals and observation requests come back. Each kind has an
+exact length range, and a reader checks `length` against its direction after 4 bytes and against the
+kind after 6, before it allocates a payload. End of input between frames is clean; inside one it is
+`FRAME_TRUNCATED`. Every refused frame ends the generation; the codes are shared with TS.
+
+A response carries only a status and body: the route table fixes each route's content type and
+allowed statuses, so the handler sets no headers. An observation request names a TS-owned value the
+handler needs after its own read, such as the CLI-registry modes, so TS keeps its original read order.
+Both readers decode the shared cases in `tests/fixtures/route-frames-v1/cases.json`, which were
+written independently of either encoder.
+
