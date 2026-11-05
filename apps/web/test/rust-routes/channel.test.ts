@@ -121,6 +121,20 @@ describe('route channel', () => {
     expect(children.at(-1)!.kills).toBe(1);
   });
 
+  it('refuses a request the frame encoder cannot carry without throwing or stranding the head', async () => {
+    const routes = channel();
+    const oversized = routes.admit(ROUTE, Buffer.alloc(70_000, 0x20));
+    const next = routes.admit(ROUTE, Buffer.from('{}'));
+    expect(await done(oversized.next())).toMatchObject({
+      kind: 'unavailable',
+      reason: 'request not encodable: FRAME_LENGTH',
+    });
+    expect(await done(next.next())).toMatchObject({ kind: 'response', generation: 1, id: 1 });
+    expect(children).toHaveLength(1);
+    expect(children[0].received.map((frame) => frame.id)).toEqual([1n]);
+    expect(children[0].kills).toBe(0);
+  });
+
   it('refuses a call beyond the queue limit without enqueueing it', async () => {
     const routes = channel(() => {});
     const admitted = Array.from({ length: QUEUE_LIMIT }, () => routes.admit(ROUTE, Buffer.alloc(60 * 1024, 0x20)));

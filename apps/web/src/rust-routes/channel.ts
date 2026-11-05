@@ -145,9 +145,13 @@ export class RouteChannel {
     ticket.deliver({ kind: 'done', outcome });
   }
 
-  private write(body: Body, id: number): void {
+  private frame(body: Body, id: number): Buffer {
     const frame: Frame = { generation: BigInt(this.generation), id: BigInt(id), body };
-    this.child?.stdin.write(encode(frame));
+    return encode(frame);
+  }
+
+  private write(body: Body, id: number): void {
+    this.child?.stdin.write(this.frame(body, id));
   }
 
   private dispatch(): void {
@@ -156,10 +160,21 @@ export class RouteChannel {
     if (this.state !== 'live' || !this.child || this.child.stdin.writableNeedDrain) return;
     if (this.counter >= Number.MAX_SAFE_INTEGER) return this.invalidate('id budget exhausted');
     const ticket = this.queue[0];
+    let wire: Buffer;
+    try {
+      wire = this.frame({ kind: 'request', route: ticket.route, json: ticket.request }, this.counter + 1);
+    } catch (error) {
+      // Encoded before it becomes the head: a request the wire cannot carry is refused alone, takes no
+      // id, and the child never sees it.
+      this.queue.shift();
+      clearTimeout(ticket.timer);
+      this.settle(ticket, `request not encodable: ${error instanceof FrameError ? error.code : String(error)}`);
+      return this.dispatch();
+    }
     this.head = ticket;
     ticket.generation = this.generation;
     ticket.id = ++this.counter;
-    this.write({ kind: 'request', route: ticket.route, json: ticket.request }, ticket.id);
+    this.child.stdin.write(wire);
   }
 
   private start(): void {
