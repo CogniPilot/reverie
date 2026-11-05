@@ -55,8 +55,10 @@ ECMAScript `JSON.parse` (last duplicate key wins, lone surrogates kept, any nest
 zod 4.4.3 `subscriptionProfileSchema` (strict except `__proto__`, JS `trim`, UTF-16 lengths, Node
 `path.isAbsolute`), and the body is `JSON.stringify` output. Strings stay UTF-16 code units throughout.
 
-The request carries what only TS owns: its memoized CLI-registry modes, `os.homedir()`, `process.cwd()`,
-`process.platform`, `getDataDir()` and the three environment values the route reads. Bounds TS lacks
+The request carries what only TS owns: `os.homedir()`, `process.cwd()`, `process.platform`, `getDataDir()`
+and the three environment values the route reads. The memoized CLI-registry modes are not in it: TS reads
+them after the profile file and only when it found profiles, so the handler asks for them then, and
+`decode_modes` accepts exactly the providers it asked for. Bounds TS lacks
 (request, file and response size) are typed refusals that the forwarder answers with its curated 503.
 `reverie-routes` holds the read-only handler; its byte goldens are recorded from the TS route.
 

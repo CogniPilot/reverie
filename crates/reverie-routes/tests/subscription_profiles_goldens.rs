@@ -2,12 +2,11 @@
 //! goldens.json (apps/web/test/routes/subscription-profiles-rust-goldens.test.ts checks the same files).
 //! The handler implements Node `path.posix` only, so a win32 front is refused on every OS.
 use reverie_contracts::subscription_profiles_v1::{Refusal, decode_request};
-use reverie_routes::subscription_profiles::get;
+use reverie_routes::subscription_profiles::{Read, read};
 use serde_json::{Value, json};
 
 fn request(platform: &str, data_dir: &str) -> Value {
     json!({
-        "modesByProvider": {"anthropic": [], "openai": []},
         "env": {},
         "home": "/h",
         "cwd": "/",
@@ -23,7 +22,7 @@ fn decoded(value: &Value) -> Result<reverie_contracts::subscription_profiles_v1:
 #[test]
 fn refuses_requests_ts_has_no_reply_for() {
     let win32 = decoded(&request("win32", "/d")).expect("decodes");
-    assert_eq!(get(&win32), Err(Refusal::Platform));
+    assert_eq!(read(&win32), Err(Refusal::Platform));
     let mut unknown = request("linux", "/d");
     unknown["extra"] = json!(1);
     assert_eq!(decoded(&unknown), Err(Refusal::RequestSchema));
@@ -38,8 +37,11 @@ fn refuses_requests_ts_has_no_reply_for() {
 
 #[cfg(unix)]
 mod posix {
-    use super::{Value, decoded, get, json, request};
-    use reverie_contracts::subscription_profiles_v1::{CONTENT_TYPE, MAX_FILE_BYTES, Refusal};
+    use super::{Read, Value, decoded, json, read, request};
+    use reverie_contracts::subscription_profiles_v1::{
+        CONTENT_TYPE, MAX_FILE_BYTES, Refusal, Response, decode_modes,
+    };
+    use reverie_routes::subscription_profiles::finish;
     use std::fs;
     use std::io::ErrorKind;
     use std::os::unix::fs::{DirBuilderExt, symlink};
@@ -111,7 +113,7 @@ mod posix {
     }
 
     /// HOME is <root>/home, the data dir <root>/data and the TS cwd <root>, as in the TS capture.
-    fn case_request(root: &Path, case: &Value, modes: &Value) -> Value {
+    fn case_request(root: &Path, case: &Value) -> Value {
         let root_text = root.to_str().expect("UTF-8 temp root");
         let mut env = serde_json::Map::new();
         for (key, value) in case["env"].as_object().expect("env") {
@@ -122,13 +124,33 @@ mod posix {
             env.insert(key.clone(), Value::String(value));
         }
         json!({
-            "modesByProvider": modes,
             "env": env,
             "home": format!("{root_text}/home"),
             "cwd": root_text,
             "platform": std::env::consts::OS,
             "dataDir": format!("{root_text}/data"),
         })
+    }
+
+    /// Answers a modes observation as TS does: exactly the requested providers' recorded lists.
+    fn respond(read: Read, modes: &Value) -> Response {
+        let pending = match read {
+            Read::Done(response) => return response,
+            Read::NeedModes(pending) => pending,
+        };
+        let providers = pending.providers();
+        let observed: serde_json::Map<String, Value> = providers
+            .iter()
+            .map(|provider| {
+                (
+                    provider.as_str().to_string(),
+                    modes[provider.as_str()].clone(),
+                )
+            })
+            .collect();
+        let raw = serde_json::to_vec(&observed).expect("observed JSON");
+        let modes = decode_modes(&raw, &providers).expect("observed modes");
+        finish(pending, &modes).expect("finished")
     }
 
     #[test]
@@ -146,9 +168,8 @@ mod posix {
             let golden = &goldens["cases"][name];
             let root = temp_root(&index.to_string());
             materialize(&root, case["tree"].as_array().expect("tree"));
-            let response =
-                get(&decoded(&case_request(&root, case, &goldens["modes"])).expect("decodes"))
-                    .expect("handled");
+            let request = decoded(&case_request(&root, case)).expect("decodes");
+            let response = respond(read(&request).expect("handled"), &goldens["modes"]);
             let body = String::from_utf8(response.body).expect("UTF-8 body");
             let body = body.replace(root.to_str().expect("UTF-8 temp root"), "<ROOT>");
             fs::remove_dir_all(&root).expect("cleanup");
@@ -178,7 +199,7 @@ mod posix {
         .expect("big file");
         let big =
             decoded(&request("linux", data.to_str().expect("UTF-8 temp root"))).expect("decodes");
-        assert_eq!(get(&big), Err(Refusal::FileBound));
+        assert_eq!(read(&big), Err(Refusal::FileBound));
         fs::remove_dir_all(&root).expect("cleanup");
     }
 
