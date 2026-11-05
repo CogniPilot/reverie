@@ -31,9 +31,11 @@ export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: 
     const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
     if (result.status >= 400 || !body?.success) {
       const reason = serverReason(body);
-      const blocker = (result.json as { blocker?: { id?: unknown; action?: unknown } })?.blocker;
+      const blocker = (result.json as { blocker?: { id?: unknown; action?: unknown; scope?: unknown } })?.blocker;
       if (blocker?.action === 'inspect-existing' && typeof blocker.id === 'string' && PlanRequestId.safeParse(blocker.id).success)
         deps.io.err(`Existing move ${blocker.id}: use agent plan-move recovery-status ${blocker.id}, then explicitly recover-existing if eligible. Do not create another move.`);
+      else if (blocker?.action === 'inspect-journal' && (blocker.scope === 'other-owner' || blocker.scope === 'unrecorded'))
+        deps.io.err(`Blocking move is not visible to this caller (${blocker.scope}): the owner must inspect it on the Plans page. Do not create another move.`);
       deps.io.err(`Plan move request refused${reason ? `: ${reason}` : ''}. Check the destination ID and owner-granted plan permissions.`);
       return 1;
     }

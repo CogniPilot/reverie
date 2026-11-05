@@ -127,11 +127,16 @@ export interface PlanMovePort {
 
 export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed'>;
 
+/** Names the hold a refusal hit. An id is given only to its own owner; other holds are typed without one. */
+export type PlanMoveBlocker =
+  | { id: string; action: 'inspect-existing' }
+  | { action: 'inspect-journal'; scope: 'other-owner' | 'unrecorded' };
+
 export class PlanMoveError extends Error {
   constructor(
     message: string,
     readonly status = 409,
-    readonly blocker?: { id: string; action: 'inspect-existing' }
+    readonly blocker?: PlanMoveBlocker
   ) {
     super(message);
   }
@@ -215,10 +220,18 @@ export class PlanMoves {
 
   private assertUnlocked(employeeId: string, owner?: string): void {
     if (!this.locked.has(employeeId)) return;
-    const record = [...this.records.values()].find(row => row.employeeId === employeeId &&
-      row.owner === owner && !['completed', 'failed'].includes(row.phase));
-    throw new PlanMoveError('This employee already has a move in progress or requiring recovery; inspect its existing move',
-      409, record ? { id: record.id, action: 'inspect-existing' } : undefined);
+    const open = [...this.records.values()].filter(row => row.employeeId === employeeId &&
+      !['completed', 'failed'].includes(row.phase));
+    const record = open.find(row => row.owner === owner);
+    if (record)
+      throw new PlanMoveError('This employee already has a move in progress or requiring recovery; inspect its existing move',
+        409, { id: record.id, action: 'inspect-existing' });
+    if (open.length)
+      throw new PlanMoveError('This employee already has a move in progress or requiring recovery under another owner; ' +
+        'that owner must inspect it', 409, { action: 'inspect-journal', scope: 'other-owner' });
+    // Also briefly true while a new move is being prepared, before its journal record exists.
+    throw new PlanMoveError('This employee has a move being prepared or a hold without an open journal record; ' +
+      'the owner must inspect the move journal before another move', 409, { action: 'inspect-journal', scope: 'unrecorded' });
   }
 
   async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port,

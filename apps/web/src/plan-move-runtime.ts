@@ -390,8 +390,21 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (!mark) throw new PlanMoveError('This CLI has no verified readiness marker');
       if (runtime.mux.capturePaneText && current.muxName) {
         const deadline = Date.now() + 90000;
+        const stillCurrent = () => runtime.authorized() && runtime.sessions.get(id) === current;
         while (true) {
           assertAuthorized();
+          // A worker-backed candidate's pane is only a disposable viewer of the laptop's own
+          // terminal, so a dropped viewer is reattached rather than failing a move whose agent
+          // is still starting. The automatic reconnector stays fenced while this move holds the employee.
+          if (current.workerViewerReconnect === true && Date.now() < deadline &&
+            (!current.pid || runtime.mux.isPaneDead(current.muxName))) {
+            await current.reconnectWorkerViewer(stillCurrent);
+            assertAuthorized();
+            if (!current.pid || runtime.mux.isPaneDead(current.muxName)) {
+              await delay(500);
+              continue;
+            }
+          }
           assertAlive(id);
           const text = runtime.mux.capturePaneText(current.muxName);
           if (!current.isWorking && !current.paneDialog && typeof text === 'string' && nativeComposerReady(current.mode, text, mark)) break;

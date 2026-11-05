@@ -82,6 +82,12 @@ describe('own existing move CLI', () => {
     const d = deps({ status: 409, json: { success: false, error: 'Held', blocker: { id: 'held', action: 'inspect-existing' } } });
     expect(await agentRequestPlanMove(d, { toAccount: 'target', id: 'new' })).toBe(1);
     expect(err(d)).toContain('recovery-status held');
+    for (const scope of ['other-owner', 'unrecorded']) {
+      const typed = deps({ status: 409, json: { success: false, error: 'Held', blocker: { action: 'inspect-journal', scope } } });
+      expect(await agentRequestPlanMove(typed, { toAccount: 'target', id: 'new' })).toBe(1);
+      expect(err(typed)).toContain(`not visible to this caller (${scope})`);
+      expect(err(typed)).not.toContain('recovery-status');
+    }
     vi.mocked(d.request).mockReset().mockResolvedValueOnce({ status: 200, text: '', json: { success: true, data: existing } })
       .mockRejectedValueOnce(new Error('transport lost'));
     expect(await agentPlanRecovery(d, 'held', true)).toBe(1);
