@@ -273,6 +273,12 @@ describe('employee journal store', () => {
     expect(readOnlyRequest('This is read-only, please.')).toBe(true);
     expect(readOnlyRequest("Don't write anything yet")).toBe(true);
     expect(readOnlyRequest('Write it up when you can')).toBe(false);
+    for (const ask of ['This turn is read-only.', 'Read only: remember this but do not save it.', 'read-only, no writes please', 'do not save a journal'])
+      expect(readOnlyRequest(ask)).toBe(true);
+    // Describing read-only work is not a request to skip the journal: the assignment itself is worth keeping.
+    for (const work of ['Next task, as a **read-only diagnosis** for now.', 'Keep it read-only from source.', 'one read-only data point, not a qualification',
+      'or a --turn not addressed to you (the read-only gate)', 'a bounded read-only inventory', 'a read-only review of the exact diff'])
+      expect(readOnlyRequest(work)).toBe(false);
     expect(asksToRemember('Please remember this')).toBe(true);
     expect(asksToRemember('Do you remember the review?')).toBe(false);
   });

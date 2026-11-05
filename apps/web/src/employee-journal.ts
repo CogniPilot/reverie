@@ -53,8 +53,12 @@ export class EmployeeJournalError extends Error {
 }
 
 /** Conservative write veto from the turn message, never a write grant (same phrases as the hands journal). */
+/**
+ * A turn that asks for no writes. "Read-only" that only describes the work (a read-only review, a read-only data point,
+ * read-only from source) is not such a request, so the assignment can still be journaled.
+ */
 export function readOnlyRequest(text: string): boolean {
-  return /\bread[\s\-‐-―]+only\b|\b(?:do\s+not|don't|don’t|never)\s+(?:write|commit)\b|\b(?:do\s+not|don't|don’t|never)\s+(?:create|save)\s+(?:a\s+)?journal\b/i.test(text);
+  return /\bread[\s\-‐-―]+only\b(?![\s*_]*(?:diagnos[ie]s|inventory|inventories|reviews?|checks?|audits?|analys[ie]s|investigations?|inspections?|data\s+points?|scope|access|sources?|gates?|copy|view|probes?|pass|reports?|look|from|of|on|against)\b)|\b(?:do\s+not|don't|don’t|never)\s+(?:write|commit)\b|\b(?:do\s+not|don't|don’t|never)\s+(?:create|save)\s+(?:a\s+)?journal\b/i.test(text);
 }
 
 /** An explicit request to keep something, never inferred from topic. "Do you remember" is recall. */

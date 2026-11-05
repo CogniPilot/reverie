@@ -12,6 +12,8 @@ describe('memory brief', () => {
     expect(text).toContain('The model and runtime running you can change');
     expect(text).toContain('reverie agent journal recall "<topic>"');
     expect(text).toContain('--importance keystone');
+    expect(text).toContain('reverie agent journal save --reason "<why now>"');
+    expect(text).toContain('a message from someone else in that room');
     expect(text).toContain('Your journal has 3 entries.');
     expect(text).toContain('- #7 keystone, 2026-10-27 14:02 UTC [decision]: James merges; agents never merge.');
     expect(text).toContain('1 more: reverie agent journal map.');
