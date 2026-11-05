@@ -90,7 +90,12 @@ pub fn decode(raw: &[u8]) -> Result<BrokerResourceConfig> {
     if crate::worker_config::compact_data(&data).len() > crate::profiles_v1::MAX_BYTES {
         return Err(ResourceConfigError::StoreBound);
     }
-    let root = object(&data).ok_or(ResourceConfigError::ExpectedObject)?;
+    let projection = projection(&data)?;
+    Ok(BrokerResourceConfig { data, projection })
+}
+
+pub(crate) fn projection(data: &Value) -> Result<ResourceProjection> {
+    let root = object(data).ok_or(ResourceConfigError::ExpectedObject)?;
     let sessions = map(
         root,
         "sessionResources",
@@ -113,10 +118,7 @@ pub fn decode(raw: &[u8]) -> Result<BrokerResourceConfig> {
     } else {
         None
     };
-    Ok(BrokerResourceConfig {
-        data,
-        projection: ResourceProjection::try_new(sessions, employees, pool)?,
-    })
+    Ok(ResourceProjection::try_new(sessions, employees, pool)?)
 }
 impl BrokerResourceConfig {
     pub fn resources(&self) -> &ResourceProjection {
@@ -151,6 +153,23 @@ pub struct StagedBrokerResources {
     staged: StagedResourceProjection,
 }
 impl StagedBrokerResources {
+    /// Move the candidate into the application workflow without a JSON
+    /// serialize/parse clone, which could change raw surrogate codepoints.
+    pub fn into_configuration(
+        self,
+    ) -> (
+        crate::worker_config::EffectiveWorkerConfig,
+        StagedResourceProjection,
+    ) {
+        let mut data = self.data;
+        let Node::Object(fields) = std::mem::replace(&mut data.0, Node::Null) else {
+            unreachable!("checked object");
+        };
+        (
+            crate::worker_config::EffectiveWorkerConfig::from_object(fields),
+            self.staged,
+        )
+    }
     /// Private application data, potentially containing protected configuration.
     /// Do not expose this as a browser response or infer a current-host receipt.
     pub fn configuration_bytes(&self) -> Vec<u8> {
@@ -185,6 +204,9 @@ fn template(value: &Value) -> Result<ResourceTemplate> {
     {
         return Err(ResourceConfigError::ResourceShape);
     }
+    template_fields(fields)
+}
+pub(crate) fn template_fields(fields: &Object) -> Result<ResourceTemplate> {
     let mode = match fields.get(&key("budgetMode")) {
         Some(Value(Node::String(value))) if value.equals_ascii("admission") => {
             BudgetMode::Admission
@@ -256,6 +278,9 @@ fn replace(root: &mut Object, field: &str, id: &str, resource: &ResourceTemplate
     let Node::Object(values) = &mut value.0 else {
         unreachable!("checked resource map")
     };
+    values.insert(key(id), Value(Node::Object(resource_fields(resource))));
+}
+pub(crate) fn resource_fields(resource: &ResourceTemplate) -> Object {
     let mut fields = BTreeMap::new();
     let mode = match resource.budget_mode() {
         BudgetMode::Admission => "admission",
@@ -278,5 +303,5 @@ fn replace(root: &mut Object, field: &str, id: &str, resource: &ResourceTemplate
         CpuRepresentation::Float(value) => Number::Float(value),
     };
     fields.insert(key("cpus"), Value(Node::Number(cpu)));
-    values.insert(key(id), Value(Node::Object(fields)));
+    fields
 }

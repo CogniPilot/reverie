@@ -38,3 +38,11 @@ artifact custody or native/mounted execution. `peer-elf-python-interop.json`
 records 14 actual `peer_artifact.static_elf` outcomes with declared architecture
 patched for synthetic header-policy cases. It does not qualify a machine or
 execute any helper. No Python generator is added to the source tree.
+# Resource composition
+
+`resource-config-python-interop.json` contains actual existing Python
+`worker_resources.resource_config` results for synthetic configurations. Employee
+fallback identity is explicitly stubbed in those pure cases. The `staged` rows
+bind the six existing `broker-resource-staging.json` cases by index to actual
+`effective_config` bytes and both legacy hashes. These are format/behavior
+oracles, not evidence of live data migration or host permission.

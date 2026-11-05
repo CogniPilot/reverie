@@ -60,6 +60,9 @@ type Result<T> = std::result::Result<T, IdentityDataError>;
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct MetadataText(Text);
 impl MetadataText {
+    pub(crate) fn from_text(value: Text) -> Self {
+        Self(value)
+    }
     pub fn from_scalar_text(value: &str) -> Self {
         Self(Text(value.chars().map(u32::from).collect()))
     }

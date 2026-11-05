@@ -19,7 +19,30 @@ pub struct TaskPerfConfiguration {
 impl TaskPerfConfiguration {
     pub fn decode(raw: &[u8]) -> Result<Self> {
         std::str::from_utf8(raw).map_err(|_| TaskPerfError::Json)?;
-        let value = legacy_json::decode_utf8(raw)?;
+        Self::from_value(legacy_json::decode_utf8(raw)?)
+    }
+    /// Move already captured data into this feature without a JSON round trip.
+    pub fn capture(config: EffectiveWorkerConfig) -> Result<Self> {
+        Self::from_value(config.into_value())
+    }
+    /// resource_config applies perf to its already projected resources, with
+    /// only the original employeePerfPolicies control key temporarily restored.
+    pub fn for_resources(
+        source: &EffectiveWorkerConfig,
+        resources: EffectiveWorkerConfig,
+    ) -> Result<Self> {
+        let mut value = resources.into_value();
+        let Node::Object(fields) = &mut value.0 else {
+            unreachable!("worker object invariant");
+        };
+        if let Some(policies) =
+            object(source.as_value()).and_then(|source| source.get(&key("employeePerfPolicies")))
+        {
+            fields.insert(key("employeePerfPolicies"), policies.deep_clone());
+        }
+        Self::from_value(value)
+    }
+    fn from_value(value: Value) -> Result<Self> {
         let fields = object(&value).ok_or(TaskPerfError::PolicyMap)?;
         let policies = policy_entries(fields.get(&key("employeePerfPolicies")))?;
         let enabled = fields
@@ -147,6 +170,9 @@ pub struct TaskPerfProjection {
 impl TaskPerfProjection {
     pub fn configuration(&self) -> &EffectiveWorkerConfig {
         &self.config
+    }
+    pub fn into_configuration(self) -> EffectiveWorkerConfig {
+        self.config
     }
     pub fn selected(&self) -> bool {
         self.selected

@@ -140,3 +140,14 @@ acknowledging a selected projection. These values confer no peer invocation,
 socket service, lease, start authority or mounted/kernel proof. The artifact
 path remains the existing immutable owner configuration setting, not a new
 public administration path parameter.
+
+`resource_config` composes the existing resource selection and ten control-key
+omissions without JSON round trips. SID projections retain priority over trusted
+storage-EID fallback; selected resource values use the same checked parser and
+encoder as profile staging. The perf input seam restores only the original
+employee policy map onto already projected resource data. Native identity paths
+come from that same captured source, preserving Python codepoints for the native
+filesystem adapter. Twenty-three actual Python cases cover bytes, policy hashes
+and refusals; six original staging cases also retain final effective hashes.
+This feature view assumes the caller's validated worker domain; it is not the
+full worker schema validator or an authorization interface.
