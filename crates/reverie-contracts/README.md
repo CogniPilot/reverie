@@ -1,5 +1,14 @@
 # Named compatibility codecs
 
+`operations_v1` preserves the closed resource-operation journal, compact sorted
+ASCII bytes and named request/observation/operation/scope fingerprints. It uses
+the existing private JSON/encoding owners, rejects duplicate fields, JSON floats,
+nonfinite constants, signed integer tokens (including `-0`), unsafe counters and
+noncanonical decimal-string uint64 values. Python byte encoding detection is
+retained. Ninety-one actual reference cases cover successful states, bounds,
+capacity arithmetic, exact bytes/hashes and refusal codes. These data and hashes
+confer neither owner approval nor native effect or settlement authority.
+
 `profiles_v1` implements the closed
 `reverie-employee-resource-profiles-v1` document and single-profile encoding used
 by `python/reverie/employee_resource_profiles.py` at the frozen migration base.
