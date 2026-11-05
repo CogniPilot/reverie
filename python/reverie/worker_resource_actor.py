@@ -70,7 +70,8 @@ def _wire_result(verb,value):
 
 def _program(value, prefix=False):
     exact(value, ('executable', 'argv'))
-    R.need(type(value['argv']) is list and 2 <= len(value['argv']) <= 32 and
+    R.need(type(value['executable']) is str and type(value['argv']) is list and
+           (1 if prefix else 2) <= len(value['argv']) <= 32 and
            all(type(item) is str and 0 < len(item) <= 16384 and '\0' not in item for item in value['argv']),
            'RESOURCE_ACTOR_FIXED_PROGRAM')
     path=Path(value['executable'])
@@ -80,10 +81,7 @@ def _program(value, prefix=False):
     R.need(stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_mode & 0o222==0,
            'RESOURCE_ACTOR_FIXED_PROGRAM')
     if prefix:
-        R.need(value['argv'][-1]=='client' and value['argv'][1:3]==['-I','-B'] and
-               len(value['argv'])==5 and value['argv'][3].startswith('/nix/store/') and
-               Path(value['argv'][3]).resolve(strict=True)==Path(value['argv'][3]),
-               'RESOURCE_ACTOR_ISOLATED_CLIENT_REQUIRED')
+        R.need(value['argv']==[str(path)],'RESOURCE_ACTOR_NATIVE_CLIENT_REQUIRED')
     return Program(str(path),tuple(value['argv']))
 
 
@@ -99,22 +97,13 @@ def _client_program(pair):
     raw=path.read_bytes()
     R.need(len(raw)==info.st_size and
            hashlib.sha256(raw).hexdigest()==pair['sha256'],'RESOURCE_ACTOR_CLIENT_MANIFEST_CHANGED')
-    document=json.loads(raw)
-    exact(document,('version','purpose','pythonInvocation','pythonExecutable','entry','entrySHA256','argvPrefix'))
-    J.digest(document['entrySHA256'])
-    R.need(document['version']==1 and document['purpose']=='resource-replacement-client-v1' and
-           document['argvPrefix']==[document['pythonInvocation'],'-I','-B',document['entry'],'client'],
-           'RESOURCE_ACTOR_CLIENT_MANIFEST_CHANGED')
-    for name in ('pythonInvocation','entry'):
-        value=Path(document[name]);R.need(str(value).startswith('/nix/store/') and value.is_file(),
-                                         'RESOURCE_ACTOR_CLIENT_MANIFEST_CHANGED')
-    entry=Path(document['entry']);entry_info=entry.stat()
-    R.need(entry.resolve(strict=True)==entry and entry_info.st_uid==0 and entry_info.st_mode&0o222==0 and
-           entry_info.st_size<=1024*1024 and hashlib.sha256(entry.read_bytes()).hexdigest()==document['entrySHA256'],
-           'RESOURCE_ACTOR_CLIENT_MANIFEST_CHANGED')
-    R.need(Path(document['pythonInvocation']).resolve(strict=True)==Path(document['pythonExecutable']),
-           'RESOURCE_ACTOR_CLIENT_MANIFEST_CHANGED')
-    return _program({'executable':document['pythonExecutable'],'argv':document['argvPrefix']},True)
+    from .website_image_provenance import decode, native_client_manifest, native_client_code
+    try:
+        document=native_client_manifest(decode(raw))
+        native_client_code(document)
+    except (OSError, ValueError, TypeError, KeyError):
+        raise R.Refused('RESOURCE_ACTOR_CLIENT_MANIFEST_CHANGED') from None
+    return _program({'executable':document['executable'],'argv':document['argvPrefix']},True)
 
 
 class ResourceActorBootstrap:

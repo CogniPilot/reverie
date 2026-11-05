@@ -206,18 +206,48 @@ def startup_program(path, console, node, *, verify_files=False, input_validator=
     return value, {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
+def native_client_manifest(value):
+    """One native-client schema for the immutable producer and runtime consumer.
+
+    Data only: callers must separately verify the immutable file, hash and
+    current protected bootstrap. Version 2 never adopts a Python v1 binding.
+    """
+    require(type(value) is dict and set(value) == {'version', 'purpose', 'executable',
+            'executableSHA256', 'argvPrefix', 'brokerWireVersion'}
+            and type(value['version']) is int and value['version'] == 2
+            and value['purpose'] == 'resource-replacement-native-client-v2'
+            and type(value['brokerWireVersion']) is int and value['brokerWireVersion'] == 1,
+            'Fixed native resource client manifest required')
+    executable = value['executable']
+    require(type(executable) is str and executable.startswith('/nix/store/')
+            and str(Path(executable)) == executable and '..' not in Path(executable).parts
+            and '\0' not in executable and len(executable) <= 16384
+            and type(value['executableSHA256']) is str and SHA.fullmatch(value['executableSHA256'])
+            and type(value['argvPrefix']) is list and value['argvPrefix'] == [executable],
+            'Fixed native resource client binding required')
+    return value
+
+
+def native_client_code(manifest, *, input_validator=None):
+    """Verify the selected native ELF, using build-only custody only in Nix.
+
+    This does not authorize an installed bootstrap replacement or a live launch.
+    """
+    manifest = native_client_manifest(manifest)
+    name, selected = code(manifest['executable'], input_validator=input_validator)
+    require(selected['sha256'] == manifest['executableSHA256'], 'Native client bytes differ')
+    path = Path(name)
+    require(path.stat().st_mode & 0o111, 'Executable native client required')
+    with path.open('rb') as stream:
+        require(stream.read(4) == b'\x7fELF', 'Bare native client ELF required')
+    return name, selected
+
+
 def build(archive, console, node, client, program_manifest=None, *, input_validator=None):
     validate = immutable if input_validator is None else input_validator
     archive = validate(archive, MAX_ARCHIVE)
     manifest_path = validate(client, 8192)
-    raw = manifest_path.read_bytes(); manifest = decode(raw)
-    require(type(manifest) is dict and set(manifest) == {'version', 'purpose', 'pythonInvocation',
-            'pythonExecutable', 'entry', 'entrySHA256', 'argvPrefix'} and type(manifest['version']) is int
-            and manifest['version'] == 1 and manifest['purpose'] == 'resource-replacement-client-v1',
-            'Fixed packaged resource client required')
-    require(manifest['argvPrefix'] == [manifest['pythonInvocation'], '-I', '-B', manifest['entry'], 'client']
-            and Path(manifest['pythonInvocation']).resolve(strict=True) == Path(manifest['pythonExecutable']),
-            'Isolated packaged client binding required')
+    raw = manifest_path.read_bytes(); manifest = native_client_manifest(decode(raw))
     console = Path(console)
     require(console.is_absolute() and console.is_relative_to('/nix/store')
             and console.resolve(strict=True) == console and console.is_dir(), 'Fixed console output required')
@@ -226,11 +256,11 @@ def build(archive, console, node, client, program_manifest=None, *, input_valida
     require(Path(invocation).is_absolute() and Path(invocation).is_relative_to('/nix/store')
             and '..' not in Path(invocation).parts, 'Fixed Nix Node invocation required')
     executable = Path(node).resolve(strict=True)
-    files = dict(code(path, input_validator=validate) for path in [executable, entry, manifest['pythonExecutable'], manifest['entry']])
-    require(files[manifest['entry']]['sha256'] == manifest['entrySHA256'], 'Client entry bytes differ')
-    for program in (executable, Path(manifest['pythonExecutable'])):
-        with program.open('rb') as stream:
-            require(stream.read(4) == b'\x7fELF', 'Bare installed interpreter ELF required')
+    files = dict(code(path, input_validator=validate) for path in [executable, entry])
+    native_name, native_code = native_client_code(manifest, input_validator=validate)
+    files[native_name] = native_code
+    with executable.open('rb') as stream:
+        require(stream.read(4) == b'\x7fELF', 'Bare installed Node ELF required')
     startup = None; prefix = [invocation, str(entry)]
     if program_manifest is not None:
         selected, startup = startup_program(program_manifest, console, node, verify_files=True, input_validator=validate)
