@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/reverie-soft-limit-helper", "crates/reverie-laptop-tools", "crates/reverie-core", "crates/reverie-contracts", "crates/reverie-store", "crates/xtask"]
+members = ["crates/reverie-soft-limit-helper", "crates/reverie-laptop-tools", "crates/reverie-core", "crates/reverie-contracts", "crates/reverie-store", "crates/reverie-routes", "crates/reverie-worker-client", "crates/xtask"]
 resolver = "3"
 
 [workspace.package]
@@ -8,6 +8,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }

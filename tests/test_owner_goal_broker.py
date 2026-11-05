@@ -159,7 +159,15 @@ class OwnerGoalBrokerTests(unittest.TestCase):
             self.assertEqual(self.dispatch({'action': 'goal-custody'})[0], b'E')
             self.assertFalse(any(c.kwargs.get('limit') == 32 for c in entries.call_args_list))
 
-    def test_real_packaging_invocation_stream_uses_only_closed_g_and_fresh_response(self):
+    @staticmethod
+    def goal_stream_command():
+        # The package gate supplies the actual selected native ELF. The legacy
+        # command remains an explicit protocol reference during broker migration.
+        native = os.environ.get('NIX_REVERIE_TEST_WORKER_EXEC')
+        return ([native, '--goal-custody-stream'] if native else
+                [sys.executable, '-m', 'reverie.worker', 'client', '--goal-custody-stream'])
+
+    def test_goal_stream_uses_only_closed_g_and_fresh_response(self):
         endpoint = Path(self.config['socket'])
         listener = socket.socket(socket.AF_UNIX); self.addCleanup(listener.close)
         listener.bind(str(endpoint)); endpoint.chmod(0o600); listener.listen(1); listener.settimeout(3)
@@ -174,7 +182,7 @@ class OwnerGoalBrokerTests(unittest.TestCase):
         thread = threading.Thread(target=serve, daemon=True); thread.start()
         env = {'PATH': os.environ['PATH'], 'PYTHONPATH': str(Path(__file__).resolve().parents[1]/'python'),
                'REVERIE_WORKER_SOCKET': str(endpoint), 'PYTHONDONTWRITEBYTECODE': '1'}
-        result = subprocess.run([sys.executable, '-m', 'reverie.worker', 'client', '--goal-custody-stream'],
+        result = subprocess.run(self.goal_stream_command(),
                                 input=b'GG', capture_output=True, env=env, timeout=5)
         thread.join(3)
         self.assertFalse(thread.is_alive()); self.assertEqual(errors, [])
@@ -185,13 +193,10 @@ class OwnerGoalBrokerTests(unittest.TestCase):
             self.assertEqual(set(json.loads(data[5:5+length])), {'version', 'configDigest', 'identities'})
             data = data[5+length:]
         self.assertEqual(data, b''); self.assertEqual(len(self.inventory_calls), 4)
-        self.assertIn('exec ${memory}/bin/python3 -m reverie.worker client',
-                      (Path(__file__).resolve().parents[1]/'nix/package.nix').read_text())
-
-    def test_packaged_helper_mixed_arguments_and_bad_or_oversized_replies_fail_closed(self):
+    def test_goal_stream_mixed_arguments_and_bad_or_oversized_replies_fail_closed(self):
         env = {'PATH': os.environ['PATH'], 'PYTHONPATH': str(Path(__file__).resolve().parents[1]/'python'),
                'PYTHONDONTWRITEBYTECODE': '1'}
-        command = [sys.executable, '-m', 'reverie.worker', 'client', '--goal-custody-stream']
+        command = self.goal_stream_command()
         mixed = subprocess.run([*command, '--caller-session', SID], input=b'G', capture_output=True,
                                env=env, timeout=3)
         self.assertNotEqual(mixed.returncode, 0); self.assertEqual(mixed.stdout, b'')
