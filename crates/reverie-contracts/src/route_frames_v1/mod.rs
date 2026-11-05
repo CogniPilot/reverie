@@ -24,8 +24,10 @@ pub struct Route {
     pub content_type: &'static str,
 }
 
+pub const SUBSCRIPTION_PROFILES: &str = "GET /api/subscription-profiles";
+
 pub const ROUTES: &[Route] = &[Route {
-    key: "GET /api/subscription-profiles",
+    key: SUBSCRIPTION_PROFILES,
     statuses: &[200, 500],
     content_type: profiles::CONTENT_TYPE,
 }];
