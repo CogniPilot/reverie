@@ -61,7 +61,20 @@ After starting the new container's idle process, the host broker sets
 `memory.high` through its existing host cgroup hierarchy and verifies it before
 starting the agent. If the broker has no write authority over that file, launch
 refuses with the typed `LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY` error. Use a
-swap-only policy until the host provides that authority.
+swap-only policy until the host provides that authority. It checks the engine declaration, kernel RAM/swap/high limits,
+relevant ancestor constraints, and container/PID/cgroup identity. A missing or
+unwritable controller, ignored swap setting, tighter conflicting limit or changed
+identity refuses launch. Reattach and recovery verify the policy without
+rewriting a running laptop's limits. The host must provide the supported unified
+cgroup-v2 hierarchy and ordinary broker write authority; this code grants none.
+
+A soft threshold causes reclaim and throttling and may be exceeded. Swap is a
+slower backup, not a guarantee that jobs or the host cannot run out of memory.
+An operator still selects the finite RAM/swap budgets and protects the website,
+broker and other host workloads. CPU, process limits, mounts, credentials, GPU
+and perf policies are unaffected. Existing profiles without this opt-in retain
+their previous arguments and policy identities, including unrelated zero-swap
+host-action and terminal scopes.
 
 ### Root helper for soft thresholds
 
@@ -79,17 +92,5 @@ from its own root-owned policy (`/etc/reverie/soft-limit-policy.json`, generated
   later, or an attested backport, because the write uses `O_NONBLOCK`.
 - **Outcomes:** any refusal before the write has no effect. A failure after the write is reported as
   `EFFECT_UNCONFIRMED` and is never retried. In both cases the laptop does not start its agent.
-- **Rollout:** reboot into the qualified kernel, then canary one seat whose `memoryHighMiB` matches its entry. It checks the engine declaration, kernel RAM/swap/high limits,
-relevant ancestor constraints, and container/PID/cgroup identity. A missing or
-unwritable controller, ignored swap setting, tighter conflicting limit or changed
-identity refuses launch. Reattach and recovery verify the policy without
-rewriting a running laptop's limits. The host must provide the supported unified
-cgroup-v2 hierarchy and ordinary broker write authority; this code grants none.
-
-A soft threshold causes reclaim and throttling and may be exceeded. Swap is a
-slower backup, not a guarantee that jobs or the host cannot run out of memory.
-An operator still selects the finite RAM/swap budgets and protects the website,
-broker and other host workloads. CPU, process limits, mounts, credentials, GPU
-and perf policies are unaffected. Existing profiles without this opt-in retain
-their previous arguments and policy identities, including unrelated zero-swap
-host-action and terminal scopes.
+- **Rollout:** reboot into the qualified kernel, then canary one seat whose `memoryHighMiB` matches
+  its entry.
