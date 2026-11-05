@@ -98,7 +98,7 @@ def domain_digest(config):
     # intent. Removing it must not hide the durable intent or strand existing
     # transports; its presence never changes per-worker launch identity.
     ignored = RESOURCE_FIELDS | {'sessionResources', 'employeeResources', 'employeeMemoryPolicies',
-                                'laptopSwapPoolMiB', 'image', 'browserJobPolicy'}
+                                'laptopSwapPoolMiB', 'softLimitHelperSocket', 'image', 'browserJobPolicy'}
     return journal.fingerprint({k: v for k, v in config.items() if k not in ignored})
 
 
