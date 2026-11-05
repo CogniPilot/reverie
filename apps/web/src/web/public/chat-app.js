@@ -8574,7 +8574,8 @@ class ReverieChatApp {
     const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), { text: 'Save GPU request' });
     const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), { text: 'Refresh status' });
     save.disabled = true;
-    group.append(wrap, devices, facts, state, error, save, refresh,
+    const actions = this.el('div', 'ca-company-actions'); actions.append(save, refresh);
+    group.append(wrap, devices, facts, state, error, actions,
       this.el('p', 'ca-hint', 'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'));
     container.append(group);
     let report = null, busy = false, sequence = 0;
@@ -8780,7 +8781,7 @@ class ReverieChatApp {
     const general = this.el('fieldset', 'ca-profile-permissions');
     general.append(this.el('legend', '', 'Recovery, office, plans and goals'), label, officeLabel, ...planLabels, goalLabel);
     preferenceStatus.classList.add('ca-profile-permission-status');
-    container.append(this.el('p', 'ca-hint', 'Permission checkboxes save immediately. They do not need Save profile.'), general, boardFields, preferenceStatus);
+    container.append(general, boardFields, preferenceStatus);
   }
 
   employeeLifecycleFields(container, employee, onSaved, dialog) {
@@ -8871,7 +8872,8 @@ class ReverieChatApp {
     dialog._companyOrigin = this.companyPage;
     const heading = this.el('header', 'ca-profile-edit-heading');
     heading.append(this.literalText('h2', '', employee.name), this.button('ca-btn', `Close profile for ${employee.name}`, () => dialog.close(), { text: 'Close' }));
-    dialog.append(heading, this.employeeHealthBadge(employee), this.el('p', 'ca-hint', 'Profile details and Sleep / Dream use Save profile. Permission checkboxes below save immediately.'));
+    // The footer hint states the save rule for the selected tab; a second copy here repeated it.
+    dialog.append(heading, this.employeeHealthBadge(employee));
     const contextActions = this.el('div', 'ca-dialog-actions');
     contextActions.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }), this.button('ca-btn', `View startup context for ${employee.name}`, () => this.openStartupContext(employee), { text: 'View startup context' }));
     dialog.append(contextActions);
@@ -8967,7 +8969,8 @@ class ReverieChatApp {
         tab.setAttribute('aria-selected', String(id === key)); tab.tabIndex = id === key ? 0 : -1;
       }
       form.hidden = key === 'permissions' || key === 'credentials';
-      save.hidden = key === 'credentials';
+      // Permissions and PATs save as they change, so Save profile would do nothing on those tabs.
+      save.hidden = key === 'credentials' || key === 'permissions';
       saveHint.textContent = key === 'credentials'
         ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
         : key === 'permissions'
