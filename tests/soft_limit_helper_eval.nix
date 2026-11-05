@@ -4,12 +4,12 @@ let
   lib = nixpkgs.lib;
   employee = "22222222-2222-4222-8222-222222222222";
   other = "33333333-3333-4333-8333-333333333333";
-  # Only the kernel's version strings are read; no kernel is built.
-  withKernel = version: { pkgs, ... }: {
-    boot.kernelPackages = lib.mkForce (pkgs.linuxPackages // {
-      kernel = pkgs.linuxPackages.kernel // { inherit version; modDirVersion = version; };
-    });
-  };
+  # Only the kernel's version strings are read; no kernel is built. The option's apply step calls
+  # extend and kernel.override, which would rebuild the default kernel, so both keep the pinned one.
+  withKernel = version: { pkgs, ... }: let
+    kernel = pkgs.linuxPackages.kernel // { inherit version; modDirVersion = version; override = _: kernel; };
+    packages = pkgs.linuxPackages // { inherit kernel; extend = f: packages // f packages packages; };
+  in { boot.kernelPackages = lib.mkForce packages; };
   workers = {
     enable = true;
     user = "agent";
