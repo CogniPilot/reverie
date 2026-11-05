@@ -85,6 +85,53 @@ class ArchiveProvenanceTests(unittest.TestCase):
             archive, _ = self.image(raw=raw)
             with self.assertRaises(ValueError): P.archive_configuration(archive)
 
+    @staticmethod
+    def native_manifest():
+        executable = '/nix/store/synthetic-native-client/bin/reverie-worker-exec'
+        return {'version': 2, 'purpose': 'resource-replacement-native-client-v2',
+                'executable': executable, 'executableSHA256': 'a'*64,
+                'argvPrefix': [executable], 'brokerWireVersion': 1}
+
+    def test_native_client_schema_is_closed_and_separate_from_authority_and_wire_versions(self):
+        value = self.native_manifest()
+        self.assertEqual(P.native_client_manifest(value), value)
+        for change in ({'version': 1}, {'version': True}, {'version': 2.0},
+                       {'brokerWireVersion': True}, {'brokerWireVersion': 1.0},
+                       {'brokerWireVersion': 2}, {'purpose': 'resource-replacement-v1'},
+                       {'purpose': 'resource-replacement-client-v1'}, {'ownerApproved': True},
+                       {'pythonInvocation': '/nix/store/old/python'}, {'executableSHA256': 'A'*64},
+                       {'argvPrefix': value['argvPrefix'] + ['client']},
+                       {'argvPrefix': value['executable']}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                P.native_client_manifest({**value, **change})
+        for path in ('/tmp/native-client', '//nix/store/client', '/nix/store/client/../alias',
+                     '/nix/store/client//bin/exec', '/nix/store/client/./bin/exec',
+                     '/nix/store/client\0/bin/exec', ''):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                P.native_client_manifest({**value, 'executable': path, 'argvPrefix': [path]})
+
+    def test_native_client_code_checks_actual_hash_elf_and_executable_mode(self):
+        path = self.root/'native-client'
+        # The schema's immutable path and the file-custody port are separate.
+        fixed = self.native_manifest()
+        def validator(selected, maximum, *, allow_empty=False):
+            self.assertEqual(str(selected), fixed['executable'])
+            self.assertLessEqual(path.stat().st_size, maximum)
+            return path
+        for raw, mode, correct_hash in ((b'\x7fELFfixture', 0o555, True),
+                                        (b'#!/bin/sh\nexit 0\n', 0o555, True),
+                                        (b'\x7fELFfixture', 0o444, True),
+                                        (b'\x7fELFfixture', 0o555, False)):
+            if path.exists(): path.chmod(0o600)
+            path.write_bytes(raw); path.chmod(mode)
+            selected = {**fixed, 'executableSHA256': hashlib.sha256(raw).hexdigest() if correct_hash else 'b'*64}
+            with self.subTest(raw=raw, mode=mode, correct_hash=correct_hash):
+                if raw.startswith(b'\x7fELF') and mode == 0o555 and correct_hash:
+                    name, item = P.native_client_code(selected, input_validator=validator)
+                    self.assertEqual(name, str(path)); self.assertEqual(item['sha256'], selected['executableSHA256'])
+                else:
+                    with self.assertRaises(ValueError): P.native_client_code(selected, input_validator=validator)
+
     def test_distribution_manifest_and_archive_config_are_distinct_identities(self):
         archive, _ = self.image(); expected = P.archive_configuration(archive)
         actual = {**copy.deepcopy(expected['imageSpec']), 'Id': 'sha256:'+'b'*64,

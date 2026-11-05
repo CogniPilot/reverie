@@ -29,6 +29,11 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
           TMPDIR: ${{ runner.temp }}
         run: nix develop --command cargo xtask verify
+      - name: Qualify selected native worker executable and manifest
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
+          TMPDIR: ${{ runner.temp }}
+        run: nix develop --command cargo xtask verify-worker-package
 
   portable:
     name: Portable Rust (${{ matrix.os }})
