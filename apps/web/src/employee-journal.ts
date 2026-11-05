@@ -61,12 +61,14 @@ export class EmployeeJournalError extends Error {
 export function readOnlyRequest(text: string): boolean {
   const dash = '[\\s\\-‐-―]+';
   const directive = new RegExp(`\\b(?:this|the)\\s+(?:turn|message|request|reply|session|task|one)\\s+(?:is|stays|remains|must\\s+be|should\\s+be)\\s+read${dash}only\\b`
-    + `|(?:^|[.!?\\n]\\s*)[*_]*read${dash}only[*_]*\\s*(?:[:,.!]|$)`, 'i');
-  const descriptive = new RegExp(`\\bread${dash}only[\\s*_]+(?:diagnos[ie]s|inventory|inventories|reviews?|checks?|audits?|analys[ie]s|investigations?|`
+    + `|(?:^|[.!?\\n]\\s*)read${dash}only\\s*(?:[:,.!]|$)`, 'i');
+  const descriptive = new RegExp(`\\bread${dash}only\\s+(?:diagnos[ie]s|inventory|inventories|reviews?|checks?|audits?|analys[ie]s|investigations?|`
     + `inspections?|data\\s+points?|scope|access|sources?|gates?|copy|view|probes?|pass|reports?|look|from\\s+(?:the\\s+)?(?:source|code))\\b`, 'gi');
-  if (directive.test(text)) return true;
-  return /\bread[\s\-‐-―]+only\b/i.test(text.replace(descriptive, ''))
-    || /\b(?:do\s+not|don't|don’t|never)\s+(?:write|commit)\b|\b(?:do\s+not|don't|don’t|never)\s+(?:create|save)\s+(?:a\s+)?journal\b/i.test(text);
+  // Emphasis and code marks never change meaning: "is **read-only** from source" is still a directive.
+  const plain = text.replace(/[*_`~]+/g, '');
+  if (directive.test(plain)) return true;
+  return /\bread[\s\-‐-―]+only\b/i.test(plain.replace(descriptive, ''))
+    || /\b(?:do\s+not|don't|don’t|never)\s+(?:write|commit)\b|\b(?:do\s+not|don't|don’t|never)\s+(?:create|save)\s+(?:a\s+)?journal\b/i.test(plain);
 }
 
 /** An explicit request to keep something, never inferred from topic. "Do you remember" is recall. */
