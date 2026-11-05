@@ -5,7 +5,15 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { FrameError, FrameReader, decode, encode, type Direction, type Frame } from '../../src/rust-routes/frames.js';
+import {
+  FrameError,
+  FrameReader,
+  SUBSCRIPTION_PROFILES,
+  decode,
+  encode,
+  type Direction,
+  type Frame,
+} from '../../src/rust-routes/frames.js';
 
 // The Nix web derivation is flattened to apps/web, so package.nix copies the cases into test/fixtures.
 const copied = resolve(import.meta.dirname, '../fixtures/route-frames-v1');
@@ -117,5 +125,22 @@ describe('route-frames-v1 TS reader', () => {
     const length = Buffer.alloc(4);
     length.writeUInt32BE(65620);
     expect(errorCode(() => oversize.push(length))).toBe('FRAME_LENGTH');
+  });
+
+  it('refuses a route or refusal code beyond ASCII instead of encoding its low bytes', () => {
+    // U+0173 keeps the low byte of "s" and U+014C that of "L", so a one-byte encoding would turn
+    // each into an accepted string: the moved route key, and the channel's CANCELED code.
+    const route = 'GET /api/subscription-profileų';
+    const code = 'CANCEŌED';
+    const identity = { generation: 1n, id: 1n };
+    expect(errorCode(() => encode({ ...identity, body: { kind: 'request', route, json: Buffer.from('{}') } }))).toBe(
+      'FRAME_PAYLOAD'
+    );
+    expect(errorCode(() => encode({ ...identity, body: { kind: 'refusal', code } }))).toBe('FRAME_PAYLOAD');
+    const moved = encode({
+      ...identity,
+      body: { kind: 'request', route: SUBSCRIPTION_PROFILES, json: Buffer.from('{}') },
+    });
+    expect(decode(moved, 'to_handler').body).toMatchObject({ route: SUBSCRIPTION_PROFILES });
   });
 });

@@ -154,10 +154,17 @@ export class FrameReader {
   }
 }
 
+/** `text` as one byte per character. Anything beyond ASCII is refused here, because Node's one-byte
+ * encodings keep only a character's low byte, which could turn it into another valid string. */
+function ascii(text: string): Buffer {
+  if (![...text].every((character) => character.charCodeAt(0) <= 0x7f)) throw new FrameError('FRAME_PAYLOAD');
+  return Buffer.from(text, 'latin1');
+}
+
 function payload(frame: Body): Buffer {
   switch (frame.kind) {
     case 'request': {
-      const route = Buffer.from(frame.route, 'latin1');
+      const route = ascii(frame.route);
       return Buffer.concat([Buffer.from([route.length]), route, frame.json]);
     }
     case 'response': {
@@ -166,7 +173,7 @@ function payload(frame: Body): Buffer {
       return Buffer.concat([status, frame.body]);
     }
     case 'refusal':
-      return Buffer.from(frame.code, 'latin1');
+      return ascii(frame.code);
     case 'cancel':
       return Buffer.alloc(0);
     case 'observe':
