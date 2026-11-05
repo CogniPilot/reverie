@@ -307,6 +307,17 @@ describe('employee journal store', () => {
       'reason:not_evaluated', 'source_window:not_evaluated', 'source_quote:not_evaluated', 'links:not_evaluated', 'commit:not_evaluated']);
     expect(store.receipt(OWNER, SELF, 'm-ro')).toMatchObject({ status: 'not_found', attempts: [{ outcome: 'refused' }] });
 
+    // Emphasis cannot hide an explicit directive: refused at the read_only gate, and no entry is written.
+    for (const [id, text] of [['m-ro-bold', 'This turn is **read-only** from source.'], ['m-ro-italic', 'This turn is _read-only_ on purpose.']] as const) {
+      message(id, text, 300);
+      expect(refusal(() => store.save(OWNER, SELF, { roomId: ROOM, turnId: id, draft: draft() }, read)).code).toBe('JOURNAL_READ_ONLY');
+      expect(store.receipt(OWNER, SELF, id)).toMatchObject({ status: 'not_found', attempts: [{ outcome: 'refused' }] });
+    }
+    // Describing read-only work does not veto: the assignment itself saves (with a reason).
+    message('m-ro-work', 'Next task, as a **read-only diagnosis** for now.', 300);
+    expect(store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-ro-work', draft: draft({ annotations: { reason: 'Accepted assignment.' } }) }, read).status)
+      .toBe('committed');
+
     message('m-plain', 'Thanks for the review.', 300);
     expect(refusal(() => store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-plain', draft: draft() }, read)).message).toBe('save_needs_reason_this_turn');
     expect(store.save(OWNER, SELF, { roomId: ROOM, turnId: 'm-plain', draft: draft({ annotations: { reason: 'A standing promise.' } }) }, read).status).toBe('committed');
