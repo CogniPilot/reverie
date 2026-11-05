@@ -39,7 +39,11 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-async function serve(script: Script, owner: () => boolean = () => true): Promise<FastifyInstance> {
+async function serve(
+  script: Script,
+  owner: () => boolean = () => true,
+  setup: (app: FastifyInstance) => void = () => {}
+): Promise<FastifyInstance> {
   const channel = new RouteChannel({
     handlerPath: '/handler',
     statuses: ROUTE_STATUSES,
@@ -56,6 +60,7 @@ async function serve(script: Script, owner: () => boolean = () => true): Promise
   });
   registerSubscriptionProfileRoutes(app, new SubscriptionUsageReader('test'), async () => [], owner, NO_OWNER, channel);
   installRouteErrorHandler(app);
+  setup(app);
   app.addHook('onClose', async () => {
     await channel.close();
   });
@@ -162,6 +167,45 @@ describe('subscription profiles moved to the Rust handler', () => {
     await new Promise((wait) => setTimeout(wait, 100));
     expect(children[0].received.map((frame) => frame.body.kind)).toEqual(['request', 'request', 'cancel']);
     release?.();
+  });
+});
+
+describe('the forwarder detects only a real disconnect', () => {
+  // Once anything drains the request, Node closes the IncomingMessage while the response is still
+  // unwritten, so request close would cancel a healthy delayed reply.
+  it('keeps a delayed reply when the request stream closes early', async () => {
+    let release: (() => void) | undefined;
+    let requestClosedEarly = false;
+    const server = await serve(
+      (child, frame) => {
+        if (frame.body.kind !== 'request') return;
+        release = () => child.reply(frame.id, { kind: 'response', status: 200, body: Buffer.from('{"kept":true}') });
+      },
+      undefined,
+      (app) =>
+        app.addHook('onRequest', async (req, reply) => {
+          req.raw.once('close', () => (requestClosedEarly ||= !reply.raw.writableFinished));
+          req.raw.resume();
+        })
+    );
+    await server.listen({ port: 0, host: '127.0.0.1' });
+    const port = (server.server.address() as { port: number }).port;
+    const body = new Promise<string>((done) => {
+      const get = httpRequest(
+        { host: '127.0.0.1', port, path: '/api/subscription-profiles', headers: { 'content-length': 5 } },
+        (response) => {
+          let text = '';
+          response.on('data', (chunk) => (text += chunk));
+          response.on('end', () => done(text));
+        }
+      );
+      get.end('hello');
+    });
+    await new Promise((wait) => setTimeout(wait, 200));
+    expect(requestClosedEarly).toBe(true);
+    release?.();
+    expect(await body).toBe('{"kept":true}');
+    expect(children[0].received.map((frame) => frame.body.kind)).toEqual(['request']);
   });
 });
 
