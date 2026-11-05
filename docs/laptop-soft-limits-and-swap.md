@@ -26,17 +26,42 @@ declared swap allowances plus the next candidate. The broker also checks that
 this budget fits the host's actual swap capacity. This is admission accounting,
 not a reservation of free disk pages, and other host workloads still compete.
 
-The existing `memoryMiB` remains a finite RAM ceiling. The soft threshold must be
-at least 512 MiB and strictly below that ceiling. Docker receives the RAM ceiling
+The existing `memoryMiB` remains a finite RAM ceiling. `swapMiB` is required;
+`memoryHighMiB` is optional. When present, the soft threshold must be at least
+512 MiB and strictly below that ceiling. Docker receives the RAM ceiling
 and the **combined RAM plus swap total**; `swapMiB` itself always means swap-only
 space. Zero disables swap. Unlimited swap and removal of individual RAM ceilings
 are not part of this policy version. Shared-pool borrowing without individual
 ceilings needs a separate accounting migration; this change does not relax the
 existing reservation and host-headroom checks.
 
+### Swap-only policies
+
+A policy with only `swapMiB` needs no broker cgroup write. Docker applies the
+RAM ceiling and swap as usual, and the broker only reads back the limits. The
+laptop's `memory.high` must remain `max`. For example, a swap-only policy entry:
+
+```json
+{ "swapMiB": 8192 }
+```
+
+### Worker slice swap ceiling
+
+Every ancestor cgroup must allow at least a laptop's swap allowance, or launch
+refuses with `RESERVATION_EFFECTIVE_SWAP_CONFLICT`. The NixOS module option
+`services.reverieWorkers.laptopSwapPoolMiB` and the fixed host-action pool
+target (`pool_unit`/`pool_limits`) set the `reverie-workers.slice` swap ceiling.
+Set them to the broker's `laptopSwapPoolMiB`. Zero, the default, keeps the
+previous swap-free pool byte for byte. Workers enter this slice only in
+`budgetMode: "pool"`.
+
+### Soft threshold authority
+
 After starting the new container's idle process, the host broker sets
 `memory.high` through its existing host cgroup hierarchy and verifies it before
-starting the agent. It checks the engine declaration, kernel RAM/swap/high limits,
+starting the agent. If the broker has no write authority over that file, launch
+refuses with the typed `LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY` error. Use a
+swap-only policy until the host provides that authority. It checks the engine declaration, kernel RAM/swap/high limits,
 relevant ancestor constraints, and container/PID/cgroup identity. A missing or
 unwritable controller, ignored swap setting, tighter conflicting limit or changed
 identity refuses launch. Reattach and recovery verify the policy without

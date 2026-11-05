@@ -85,6 +85,55 @@ print(json.dumps(m.effective_config(json.load(sys.stdin),sys.argv[2])))
         self.assertEqual(observed['swapBytes'], 2048 * M.MIB)
         self.assertEqual(observed['memoryHighBytes'], 1024 * M.MIB)
 
+    def test_swap_only_policy_never_opens_soft_limit_and_requires_max_readback(self):
+        self.config['employeeMemoryPolicies'][F.EID] = {'swapMiB': 2048}
+        validate_config(self.config)
+        self.row['Config']['Labels']['reverie.worker-policy'] = policy_digest(self.config, F.SID)
+        import os
+        opened = os.open
+        def guarded(path, flags, *args, **kwargs):
+            if path == 'memory.high' and flags & os.O_WRONLY:
+                raise AssertionError('swap-only policy wrote memory.high')
+            return opened(path, flags, *args, **kwargs)
+        with patch.object(M.os, 'open', guarded):
+            M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+        self.assertEqual((self.leaf / 'memory.high').read_text(), 'max\n')
+        memory, observed = self.f.gate.native.limits(self.row)
+        self.assertEqual(observed['swapBytes'], 2048 * M.MIB)
+        self.assertNotIn('memoryHighBytes', observed)
+        (self.leaf / 'memory.high').write_text(str(1024 * M.MIB) + '\n')
+        with self.assertRaisesRegex(ValueError, 'SOFT_LIMIT'):
+            self.f.gate.native.limits(self.row)
+
+    def test_policy_requires_swap_and_soft_threshold_is_optional(self):
+        for policy in [{'memoryHighMiB': 1024}, {}]:
+            bad = copy.deepcopy(self.config)
+            bad['employeeMemoryPolicies'][F.EID] = policy
+            with self.subTest(policy=policy), self.assertRaises(ValueError):
+                validate_config(bad)
+        small = copy.deepcopy(self.config)
+        small['employeeMemoryPolicies'][F.EID] = {'swapMiB': 2048}
+        small['memoryMiB'] = 512  # No soft threshold to fit below the RAM ceiling.
+        self.assertEqual(effective_config(small, F.SID)['laptopMemoryPolicy'],
+                         {'swapMiB': 2048, 'swapPoolMiB': 4096})
+
+    def test_soft_threshold_without_write_authority_is_a_typed_refusal(self):
+        import errno
+        import os
+        opened = os.open
+        for code in [errno.EACCES, errno.EPERM, errno.EROFS]:
+            def denied(path, flags, *args, **kwargs):
+                if path == 'memory.high' and flags & os.O_WRONLY:
+                    raise OSError(code, os.strerror(code))
+                return opened(path, flags, *args, **kwargs)
+            with self.subTest(code=code), patch.object(M.os, 'open', denied), \
+                    self.assertRaises(M.SoftLimitAuthorityRefused) as caught:
+                M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+            self.assertIsInstance(caught.exception, RuntimeError)
+            self.assertEqual(caught.exception.code, 'LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY')
+            self.assertIn('LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY', str(caught.exception))
+            self.assertEqual((self.leaf / 'memory.high').read_text(), 'max\n')
+
     def test_foreign_identity_or_pid_change_never_writes_soft_limit(self):
         with self.assertRaisesRegex(RuntimeError, 'identity changed'):
             M.configure_started(self.f.native, self.row['Name'][1:], F.SID, '9' * 64)

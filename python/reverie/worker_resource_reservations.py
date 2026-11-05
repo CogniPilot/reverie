@@ -398,7 +398,8 @@ class NativeObserver:
              min(memory_limits) == memory and min(task_limits) == tasks,
              'RESERVATION_EFFECTIVE_LIMIT_CONFLICT')
         if policy is not None:
-            need(_read(leaf / 'memory.high', 128).strip() == str(policy['memoryHighMiB'] * MIB),
+            high = str(policy['memoryHighMiB'] * MIB) if 'memoryHighMiB' in policy else 'max'
+            need(_read(leaf / 'memory.high', 128).strip() == high,
                  'RESERVATION_EFFECTIVE_SOFT_LIMIT_CONFLICT')
             current = leaf
             while current != CGROUP:
@@ -412,7 +413,9 @@ class NativeObserver:
                         'cgroup': str(relative), 'memory': memory, 'tasks': tasks,
                         'nanoCpus': cpu, 'image': row['Image']}
         if policy is not None:
-            binding.update(swapBytes=swap_allowance, memoryHighBytes=policy['memoryHighMiB'] * MIB)
+            binding.update(swapBytes=swap_allowance)
+            if 'memoryHighMiB' in policy:
+                binding['memoryHighBytes'] = policy['memoryHighMiB'] * MIB
         return memory, binding
 
     @staticmethod

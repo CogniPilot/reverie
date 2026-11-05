@@ -4,12 +4,22 @@ Owner configuration and normal recreation only; no laptop/browser live writer.
 Legacy six-field resource profiles and unrelated zero-swap scopes stay unchanged.
 """
 import copy
+import errno
 import os
 from pathlib import Path
 import re
 
 MIB = 1048576
 UUID = re.compile(r'^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$')
+
+
+class SoftLimitAuthorityRefused(RuntimeError):
+    """The host gives this broker no write authority over the new laptop's memory.high."""
+    code = 'LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY'
+
+    def __init__(self):
+        super().__init__(self.code + ': laptop soft memory threshold needs host cgroup write authority; '
+                         'use a swap-only policy until it is provided')
 
 
 def validate(config):
@@ -20,8 +30,9 @@ def validate(config):
         raise ValueError('Invalid employee memory policy map or swap pool')
     for eid, policy in policies.items():
         if (type(eid) is not str or not UUID.fullmatch(eid) or type(policy) is not dict or
-                set(policy) != {'memoryHighMiB', 'swapMiB'} or
-                type(policy['memoryHighMiB']) is not int or not 512 <= policy['memoryHighMiB'] <= 1048576 or
+                set(policy) not in ({'swapMiB'}, {'memoryHighMiB', 'swapMiB'}) or
+                ('memoryHighMiB' in policy and (type(policy['memoryHighMiB']) is not int or
+                                               not 512 <= policy['memoryHighMiB'] <= 1048576)) or
                 type(policy['swapMiB']) is not int or not 0 <= policy['swapMiB'] <= pool):
             raise ValueError('Invalid employee memory policy')
 
@@ -45,7 +56,7 @@ def project(config, sid, resources):
     policy = config['employeeMemoryPolicies'].get(paths.identity) if paths.kind == 'employee' else None
     if policy is None:
         return resources
-    if not policy['memoryHighMiB'] < resources['memoryMiB']:
+    if 'memoryHighMiB' in policy and not policy['memoryHighMiB'] < resources['memoryMiB']:
         raise ValueError('Laptop soft memory threshold requires a higher finite RAM ceiling')
     result = dict(resources)
     result['laptopMemoryPolicy'] = dict(copy.deepcopy(policy), swapPoolMiB=config.get('laptopSwapPoolMiB', 0))
@@ -124,13 +135,19 @@ def configure_started(broker, name, sid, expected_id=None):
                 (os.stat(R.CGROUP / relative, follow_symlinks=False).st_dev,
                  os.stat(R.CGROUP / relative, follow_symlinks=False).st_ino)):
             raise RuntimeError('New laptop memory target identity changed')
-        high = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-        try:
-            raw = (str(policy['memoryHighMiB'] * MIB) + '\n').encode()
-            if os.write(high, raw) != len(raw):
-                raise RuntimeError('Laptop soft memory write unconfirmed')
-        finally:
-            os.close(high)
+        if 'memoryHighMiB' in policy:  # Swap-only policies need no broker cgroup write.
+            try:
+                high = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except OSError as error:
+                if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+                    raise SoftLimitAuthorityRefused() from None
+                raise
+            try:
+                raw = (str(policy['memoryHighMiB'] * MIB) + '\n').encode()
+                if os.write(high, raw) != len(raw):
+                    raise RuntimeError('Laptop soft memory write unconfirmed')
+            finally:
+                os.close(high)
         observer.limits(row)  # Kernel high, RAM, swap and ancestor readback.
         if (R._pid(pid) != start or R._read(R.PROC / str(pid) / 'cgroup').splitlines() != groups or
                 broker.inspect_container(name) != row or
