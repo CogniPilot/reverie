@@ -552,7 +552,16 @@ function showPlanMoveProgress(dialog, initial, name) {
   refresh.onclick = async () => {
     if (busy || !current()) return;
     busy = true; clearTimeout(timer); paint();
-    try { if (await readStatus(record)) feedback = unconfirmed ? 'Status checked; the unconfirmed recovery is retained.' : ''; }
+    try {
+      if (await readStatus(record)) {
+        // Still held after a lost response: no recovery completed and none is in flight (an in-flight one reads as
+        // checking), so adoption may be offered again; the server refuses an overlapping attempt.
+        if (unconfirmed && record.phase === 'recovery-required') {
+          unconfirmed = false;
+          feedback = 'Status shows the recovery did not take effect; the move is still held, so Adopt existing destination is available again.';
+        } else feedback = unconfirmed ? 'Status checked; the unconfirmed recovery is retained.' : '';
+      }
+    }
     catch (error) { if (current()) feedback = `Status unavailable: ${error.message}. The hold is retained.`; }
     finally { busy = false; if (current()) { stopped = false; if (!paint()) timer = setTimeout(poll, 1000); } }
   };
@@ -581,8 +590,12 @@ function showPlanMoveProgress(dialog, initial, name) {
       record = next; feedback = '';
     } catch (error) {
       if (!current()) return;
-      unconfirmed = dispatched;
-      feedback = `${error.message}${unconfirmed ? ' · Recovery outcome unconfirmed; refresh status without replaying.' : ' · The move journal is retained.'}`;
+      // A server answer (error.status) is a definite refusal: the move was rolled back to its held state. Only a lost
+      // or unreadable response leaves the outcome unknown.
+      unconfirmed = dispatched && !error.status;
+      feedback = unconfirmed
+        ? `${error.message} · Recovery outcome unconfirmed; refresh status without replaying.`
+        : `${dispatched ? 'Recovery refused: ' : ''}${error.message} · The move journal is retained.`;
     } finally { busy = false; if (current()) paint(); }
   };
   const poll = async () => {
