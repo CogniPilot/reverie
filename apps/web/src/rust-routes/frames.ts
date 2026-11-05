@@ -32,8 +32,15 @@ export interface Frame {
 
 type Kind = Body['kind'];
 
+/** A request's route key is 1 to MAX_ROUTE_BYTES ASCII bytes, behind a one-byte length. */
+const MAX_ROUTE_BYTES = 64;
+
 const KINDS: Record<Kind, { byte: number; direction: Direction; lengths: [number, number] }> = {
-  request: { byte: 1, direction: 'to_handler', lengths: [HEADER_BYTES + 2, HEADER_BYTES + 1 + 64 + 65536] },
+  request: {
+    byte: 1,
+    direction: 'to_handler',
+    lengths: [HEADER_BYTES + 2, HEADER_BYTES + 1 + MAX_ROUTE_BYTES + 65536],
+  },
   response: { byte: 2, direction: 'to_front', lengths: [HEADER_BYTES + 2, HEADER_BYTES + 2 + 8 * 1024 * 1024] },
   refusal: { byte: 3, direction: 'to_front', lengths: [HEADER_BYTES + 1, HEADER_BYTES + 64] },
   cancel: { byte: 4, direction: 'to_handler', lengths: [HEADER_BYTES, HEADER_BYTES] },
@@ -75,7 +82,7 @@ function body(kind: Kind, payload: Buffer): Body {
   switch (kind) {
     case 'request': {
       const length = payload[0];
-      if (length === 0 || length > 64 || payload.length - 1 < length) refuse();
+      if (length === 0 || length > MAX_ROUTE_BYTES || payload.length - 1 < length) refuse();
       const route = payload.subarray(1, 1 + length);
       if (route.some((byte) => byte > 0x7f)) refuse();
       return { kind, route: route.toString('latin1'), json: Buffer.from(payload.subarray(1 + length)) };
@@ -165,6 +172,8 @@ function payload(frame: Body): Buffer {
   switch (frame.kind) {
     case 'request': {
       const route = ascii(frame.route);
+      // Checked before the one-byte length is written, which would wrap a longer route into the JSON.
+      if (route.length === 0 || route.length > MAX_ROUTE_BYTES) throw new FrameError('FRAME_PAYLOAD');
       return Buffer.concat([Buffer.from([route.length]), route, frame.json]);
     }
     case 'response': {

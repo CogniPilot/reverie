@@ -127,16 +127,24 @@ describe('route-frames-v1 TS reader', () => {
     expect(errorCode(() => oversize.push(length))).toBe('FRAME_LENGTH');
   });
 
-  it('refuses a route or refusal code beyond ASCII instead of encoding its low bytes', () => {
+  it('refuses a route or refusal code the wire cannot carry exactly', () => {
     // U+0173 keeps the low byte of "s" and U+014C that of "L", so a one-byte encoding would turn
     // each into an accepted string: the moved route key, and the channel's CANCELED code.
-    const route = 'GET /api/subscription-profileų';
-    const code = 'CANCEŌED';
+    const route = 'GET /api/subscription-profile\u0173';
+    const code = 'CANCE\u014cED';
     const identity = { generation: 1n, id: 1n };
     expect(errorCode(() => encode({ ...identity, body: { kind: 'request', route, json: Buffer.from('{}') } }))).toBe(
       'FRAME_PAYLOAD'
     );
     expect(errorCode(() => encode({ ...identity, body: { kind: 'refusal', code } }))).toBe('FRAME_PAYLOAD');
+    // 257 bytes would wrap to a 1-byte route "A" with 256 bytes of "A" prepended to the JSON.
+    for (const length of [0, 65, 257]) {
+      const body = { kind: 'request' as const, route: 'A'.repeat(length), json: Buffer.from('{}') };
+      expect(
+        errorCode(() => encode({ ...identity, body })),
+        String(length)
+      ).toBe('FRAME_PAYLOAD');
+    }
     const moved = encode({
       ...identity,
       body: { kind: 'request', route: SUBSCRIPTION_PROFILES, json: Buffer.from('{}') },
