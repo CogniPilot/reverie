@@ -80,6 +80,36 @@ fn actual_python_derivative_and_numeric_equality_vectors_match() {
 }
 
 #[test]
+fn actual_python_raw_surrogate_pairs_preserve_two_codepoints_when_copied() {
+    let corpus: Value =
+        serde_json::from_str(include_str!("fixtures/task_perf/legacy-vectors.json")).unwrap();
+    for case in corpus["byteArtifactComparisons"].as_array().unwrap() {
+        let before = hex_bytes(case["baseHex"].as_str().unwrap());
+        let selected = hex_bytes(case["selectedHex"].as_str().unwrap());
+        assert_eq!(hash(&before), case["baseSHA256"].as_str().unwrap());
+        assert_eq!(hash(&selected), case["selectedSHA256"].as_str().unwrap());
+        let fixed = TaskPerfManifest::decode(
+            &serde_json::to_vec(&manifest(&before, &selected)).unwrap(),
+            PerfSystem::X86_64Linux,
+        )
+        .unwrap();
+        assert_eq!(
+            TaskPerfArtifactData::verify(fixed, &before, &selected).is_ok(),
+            case["valid"].as_bool().unwrap(),
+            "{}",
+            case["name"]
+        );
+    }
+}
+
+fn hex_bytes(text: &str) -> Vec<u8> {
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
+}
+
+#[test]
 fn closed_manifest_requires_real_version_supported_system_paths_and_lowercase_hash() {
     let base = base();
     let original = manifest(&base, &base);

@@ -1,5 +1,5 @@
 use super::TaskPerfManifest;
-use super::{Result, TaskPerfError, bounded_json, clone_value, key, object, string};
+use super::{Result, TaskPerfError, bounded_json, key, object, string};
 use crate::legacy_json::{self, Node, Value};
 use reverie_core::task_perf::TaskPerfPolicy;
 use sha2::{Digest, Sha256};
@@ -34,7 +34,7 @@ impl TaskPerfProfile {
         if rules.iter().any(|existing| existing.python_eq(&rule)) {
             return Err(TaskPerfError::AlreadyApplied);
         }
-        let mut derived = clone_value(&self.0)?;
+        let mut derived = self.0.deep_clone();
         let Node::Object(fields) = &mut derived.0 else {
             unreachable!("checked object");
         };

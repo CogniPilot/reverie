@@ -96,13 +96,6 @@ fn object(value: &Value) -> Option<&BTreeMap<Text, Value>> {
 fn scalar(text: &str) -> Value {
     Value(Node::String(key(text)))
 }
-fn clone_value(value: &Value) -> Result<Value> {
-    // Reuse the tested lossless ASCII serializer and iterative parser; avoid a
-    // recursive Clone implementation that introduces a shallow stack limit.
-    Ok(legacy_json::decode_utf8(
-        &crate::worker_config::encode_data(value),
-    )?)
-}
 fn bounded_json(raw: &[u8]) -> Result<Value> {
     if raw.len() > MAX_ARTIFACT_BYTES {
         return Err(TaskPerfError::ArtifactBound);
