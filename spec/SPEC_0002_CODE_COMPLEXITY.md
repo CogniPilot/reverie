@@ -1,4 +1,4 @@
-# SPEC_0021: Maintainability and Determinism
+# SPEC_0002: Maintainability and Determinism
 
 ## Status
 

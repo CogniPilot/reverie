@@ -1,4 +1,4 @@
-# SPEC_0036: Valid-by-Construction Runtime Contracts
+# SPEC_0006: Valid-by-Construction Runtime Contracts
 
 ## Status
 

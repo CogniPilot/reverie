@@ -65,8 +65,8 @@ claims a complete Rust backend or an installed rollout.
 ## Workspace and quality gate
 
 The [specification index](../spec/README.md) owns the adopted Rumoca rules:
-crate layout and DRY in SPEC_0029, complexity in SPEC_0021, valid construction
-in SPEC_0036, and thin task orchestration in SPEC_0033. Use the same entry point
+crate layout and DRY in SPEC_0004, complexity in SPEC_0002, valid construction
+in SPEC_0006, and thin task orchestration in SPEC_0005. Use the same entry point
 locally and in CI:
 
 ```sh

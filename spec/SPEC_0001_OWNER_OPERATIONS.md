@@ -180,7 +180,7 @@ A feature is complete when a fresh installation can perform it through the
 documented GUI/API with status and recovery. Requiring a private script is an
 unresolved product gap.
 
-Rust quality rules are owned by [SPEC_0021](SPEC_0021_CODE_COMPLEXITY.md) and
-task orchestration by [SPEC_0033](SPEC_0033_DEVELOPMENT_PROCESS.md). The pinned
+Rust quality rules are owned by [SPEC_0002](SPEC_0002_CODE_COMPLEXITY.md) and
+task orchestration by [SPEC_0005](SPEC_0005_DEVELOPMENT_PROCESS.md). The pinned
 Nix toolchain provides Cargo, Clippy and rustfmt; Rumoca's compiler-specific
 aliases, qualification cfg names and WASM nightly requirements do not apply.

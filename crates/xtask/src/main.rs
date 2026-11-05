@@ -21,7 +21,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     match arguments.as_slice() {
         [] => help(),
         [command] if ["help", "--help", "-h"].contains(&command.as_str()) => help(),
-        [command] if ["check", "verify"].contains(&command.as_str()) => verify()?,
+        [command] if ["check", "verify"].contains(&command.as_str()) => verify(false)?,
+        [command] if ["check-portable", "verify-portable"].contains(&command.as_str()) => {
+            verify(true)?
+        }
         _ => return Err("expected `cargo xtask check` or `cargo xtask verify` (or --help)".into()),
     }
     Ok(())
@@ -29,42 +32,37 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn help() {
     println!(
-        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies."
+        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts and task tooling; native Linux host acceptance is separate."
     );
 }
 
-fn verify() -> Result<(), Box<dyn Error>> {
+fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .ok_or("xtask is not inside the workspace crates directory")?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     step(&cargo, &["fmt", "--all", "--check"], root)?;
-    step(
-        &cargo,
+    let packages: &[&str] = if portable {
         &[
-            "clippy",
-            "--locked",
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-            "--",
-            "-D",
-            "warnings",
-        ],
-        root,
-    )?;
-    step(
-        &cargo,
-        &[
-            "test",
-            "--locked",
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-        ],
-        root,
-    )
+            "-p",
+            "reverie-core",
+            "-p",
+            "reverie-contracts",
+            "-p",
+            "xtask",
+        ]
+    } else {
+        &["--workspace"]
+    };
+    let mut clippy = vec!["clippy", "--locked"];
+    clippy.extend_from_slice(packages);
+    clippy.extend_from_slice(&["--all-targets", "--all-features", "--", "-D", "warnings"]);
+    step(&cargo, &clippy, root)?;
+    let mut tests = vec!["test", "--locked"];
+    tests.extend_from_slice(packages);
+    tests.extend_from_slice(&["--all-targets", "--all-features"]);
+    step(&cargo, &tests, root)
 }
 
 fn step(program: &OsStr, arguments: &[&str], root: &Path) -> Result<(), Box<dyn Error>> {

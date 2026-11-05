@@ -10,6 +10,11 @@ or shared container.
 Read the [specification index](spec/README.md) and the owning specs for the
 component being changed. DRY and valid-by-construction boundaries are explicit
 project requirements; use `cargo xtask` for shared development task orchestration.
+Preserve existing plans, experts, identifiers and data through the transition
+(SPEC_0007). Add no Python or shell scripts (SPEC_0008); Rust/TypeScript tools
+and platform adapters are the portability direction (SPEC_0009). CLI/help,
+welcome and notification/memory-hook direction is recorded in SPEC_0010; keep
+implementation focused on the Rust port and compatibility before adding features.
 
 All experts are generic AI agents with their own memories. CTO, COO and specialist
 titles are organizational roles. Tool permissions and chat/coding mode are separate;

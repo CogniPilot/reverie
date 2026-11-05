@@ -15,7 +15,7 @@ impl TestDir {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).expect("create unique owned fixture directory");
-        Self(path)
+        Self(fs::canonicalize(path).expect("canonical owned fixture directory"))
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -37,11 +37,12 @@ impl Drop for TestDir {
 }
 
 pub(crate) fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .expect("xtask workspace root")
-        .to_path_buf()
+        .to_path_buf();
+    fs::canonicalize(path).expect("canonical workspace path")
 }
 
 pub(crate) fn git(root: &Path, arguments: &[&str]) -> Output {
@@ -49,7 +50,10 @@ pub(crate) fn git(root: &Path, arguments: &[&str]) -> Output {
         .args(arguments)
         .current_dir(root)
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .expect("run Git in owned fixture or selected workspace")

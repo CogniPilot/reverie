@@ -13,6 +13,8 @@ Keep specifications small, explicit, traceable and useful to humans and agents.
 | Rule | Owner/Where | Brief justification |
 | --- | --- | --- |
 | Use numbered SPEC_NNNN_TOPIC.md files and an index | spec/ | Stable references |
+| Allocate the next sequential number in adoption order | New specs | Predictable navigation |
+| Keep adopted identifiers stable; retain a reference stub when retiring one | Spec index | Preserve links |
 | Include Status, Summary and Specification in that order | Each spec | Fast reading |
 | Use ACCEPTED, DRAFT or REFERENCE status | Each spec | Separate policy, plans and catalogs |
 | Express multiple rules in short tables | Normative sections | Rules remain visible |
