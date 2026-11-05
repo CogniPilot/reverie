@@ -2,6 +2,16 @@ use super::Error;
 use super::value::{Node, Number, Text, Value};
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
+mod journal;
+pub(crate) use journal::{JournalParseError, JournalParsed};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Purpose {
+    Default,
+    NoConstants,
+    Rootless,
+    Journal,
+}
 
 enum Phase {
     First,
@@ -18,6 +28,8 @@ enum Frame {
         values: BTreeMap<Text, Value>,
         key: Option<Text>,
         phase: Phase,
+        duplicate: bool,
+        order: Option<Vec<Text>>,
     },
 }
 enum Action {
@@ -29,36 +41,44 @@ enum Action {
 struct Cursor<'a> {
     source: &'a [u8],
     offset: usize,
-    reject_constants: bool,
-    replace_duplicates: bool,
+    purpose: Purpose,
+    journal_error: Option<JournalParseError>,
+    root_object_orders: BTreeMap<Text, Vec<Text>>,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, false, false)
+    decode_mode(source, Purpose::Default)
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, true, false)
+    decode_mode(source, Purpose::NoConstants)
 }
 pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, false, true)
+    decode_mode(source, Purpose::Rootless)
 }
-fn decode_mode(
-    source: &[u8],
-    reject_constants: bool,
-    replace_duplicates: bool,
-) -> Result<Value, Error> {
-    let mut cursor = Cursor {
-        source,
-        offset: 0,
-        reject_constants,
-        replace_duplicates,
-    };
-    let root = parse(&mut cursor)?;
+pub(super) fn decode_journal(source: &[u8]) -> Result<JournalParsed, JournalParseError> {
+    journal::decode(source)
+}
+fn decode_mode(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
+    finish(&mut Cursor::new(source, purpose))
+}
+fn finish(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
+    let root = parse(cursor)?;
     cursor.whitespace();
-    if cursor.offset != source.len() {
+    if cursor.offset != cursor.source.len() {
         return Err(Error::InvalidJson);
     }
     Ok(root)
+}
+impl<'a> Cursor<'a> {
+    fn new(source: &'a [u8], purpose: Purpose) -> Self {
+        Self {
+            source,
+            offset: 0,
+            purpose,
+            journal_error: None,
+            root_object_orders: BTreeMap::new(),
+        }
+    }
 }
 fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     let mut frames: Vec<Frame> = Vec::new();
@@ -66,15 +86,15 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     loop {
         match action {
             Action::Ready(value) => match frames.last_mut() {
-                Some(frame) => frame.attach(value, cursor.replace_duplicates)?,
+                Some(frame) => frame.attach(value, cursor.purpose)?,
                 None => return Ok(value),
             },
             Action::Push(frame) => frames.push(frame),
             Action::Close => {
-                let value = match frames.pop().ok_or(Error::InvalidJson)? {
-                    Frame::Array { values, .. } => Value(Node::Array(values)),
-                    Frame::Object { values, .. } => Value(Node::Object(values)),
-                };
+                let value = frames
+                    .pop()
+                    .ok_or(Error::InvalidJson)?
+                    .close(cursor, &frames)?;
                 action = Action::Ready(value);
                 continue;
             }
@@ -84,21 +104,58 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     }
 }
 impl Frame {
-    fn attach(&mut self, value: Value, replace_duplicates: bool) -> Result<(), Error> {
+    fn attach(&mut self, value: Value, purpose: Purpose) -> Result<(), Error> {
         match self {
             Self::Array { values, phase } => {
                 values.push(value);
                 *phase = Phase::Next;
             }
-            Self::Object { values, key, phase } => {
+            Self::Object {
+                values,
+                key,
+                phase,
+                duplicate,
+                order,
+            } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
-                if values.insert(key, value).is_some() && !replace_duplicates {
-                    return Err(Error::DuplicateKey);
+                if let Some(order) = order {
+                    order.push(key.clone());
+                }
+                let previous = values.insert(key, value);
+                if previous.is_some() {
+                    *duplicate = duplicate_value(purpose)?;
                 }
                 *phase = Phase::Next;
             }
         }
         Ok(())
+    }
+    fn close(self, cursor: &mut Cursor<'_>, parents: &[Frame]) -> Result<Value, Error> {
+        match self {
+            Self::Array { values, .. } => Ok(Value(Node::Array(values))),
+            Self::Object {
+                values,
+                duplicate,
+                order,
+                ..
+            } => {
+                if duplicate {
+                    return Err(Error::DuplicateKey);
+                }
+                if let (
+                    Some(order),
+                    [
+                        Frame::Object {
+                            key: Some(parent), ..
+                        },
+                    ],
+                ) = (order, parents)
+                {
+                    cursor.root_object_orders.insert(parent.clone(), order);
+                }
+                Ok(Value(Node::Object(values)))
+            }
+        }
     }
     fn step(&mut self, cursor: &mut Cursor<'_>) -> Result<Action, Error> {
         cursor.whitespace();
@@ -125,6 +182,13 @@ impl Frame {
                 Phase::Next => next(cursor, b'}', phase),
             },
         }
+    }
+}
+fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
+    match purpose {
+        Purpose::Rootless => Ok(false),
+        Purpose::Journal => Ok(true),
+        _ => Err(Error::DuplicateKey),
     }
 }
 fn next(cursor: &mut Cursor<'_>, closing: u8, phase: &mut Phase) -> Result<Action, Error> {
@@ -164,6 +228,8 @@ impl Cursor<'_> {
                     values: BTreeMap::new(),
                     key: None,
                     phase: Phase::First,
+                    duplicate: false,
+                    order: (self.purpose == Purpose::Journal).then(Vec::new),
                 })
             }
             Some(b'[') => {
@@ -177,7 +243,9 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
-            Some(b'N' | b'I') if self.reject_constants => return Err(Error::InvalidJson),
+            Some(b'N' | b'I') if self.purpose == Purpose::NoConstants => {
+                return Err(Error::InvalidJson);
+            }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
             Some(b'I') => self.literal("Infinity", Node::Number(Number::PositiveInfinity))?,
             Some(b'-' | b'0'..=b'9') => Action::Ready(Value(Node::Number(self.number()?))),
@@ -189,13 +257,19 @@ impl Cursor<'_> {
         if !self.source[self.offset..].starts_with(literal.as_bytes()) {
             return Err(Error::InvalidJson);
         }
+        if self.purpose == Purpose::Journal && matches!(literal, "NaN" | "Infinity") {
+            return self.journal_failure(JournalParseError::JsonNumber);
+        }
         self.offset += literal.len();
         Ok(Action::Ready(Value(node)))
     }
     fn number(&mut self) -> Result<Number, Error> {
+        if self.purpose == Purpose::Journal {
+            return journal::number(self);
+        }
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
-            if self.reject_constants {
+            if self.purpose == Purpose::NoConstants {
                 return Err(Error::InvalidJson);
             }
             self.offset += "-Infinity".len();
@@ -215,7 +289,7 @@ impl Cursor<'_> {
             // The rootless-purpose default Python decoder uses its runtime's
             // decimal conversion cap even for ignored/overwritten fields.
             // Other named readers keep their separately frozen number policy.
-            if self.replace_duplicates
+            if self.purpose == Purpose::Rootless
                 && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);
