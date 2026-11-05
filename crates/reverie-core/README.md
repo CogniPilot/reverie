@@ -58,3 +58,11 @@ effective `ResourcePolicy` RAM ceiling and must be strictly smaller. Unselected
 and swap-only projections do not inspect a RAM ceiling. Checked swap byte counts
 are commitment data; they provide no disk reservation, swap admission, cgroup
 write or start permission. These types do not resolve employee identity.
+## POSIX lexical data
+
+`posix_path::PosixPath` owns Python-compatible lexical path normalization,
+parent/join and descendant/overlap comparisons independently of the build OS.
+It preserves the double-slash anchor, '..' and Python codepoints. These values
+establish no filesystem resolution, custody or mount authority. The existing
+lease broker-parent comparison reuses this owner; source/control path policies
+remain the responsibility of their respective consumers.

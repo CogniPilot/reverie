@@ -137,28 +137,10 @@ impl LeaseControlContext {
     }
 }
 fn python_parent(value: &[u32]) -> Vec<u32> {
-    let leading = value.iter().take_while(|&&value| value == 47).count();
-    let anchor = match leading {
-        0 => 0,
-        2 => 2,
-        _ => 1,
-    };
-    let mut parts: Vec<_> = value
-        .split(|&value| value == 47)
-        .filter(|part| !part.is_empty() && *part != [46])
-        .collect();
-    parts.pop();
-    let mut result = vec![47; anchor];
-    for part in parts {
-        if !result.is_empty() && result.last() != Some(&47) {
-            result.push(47);
-        }
-        result.extend_from_slice(part);
-    }
-    if result.is_empty() {
-        result.push(46);
-    }
-    result
+    crate::posix_path::PosixPath::try_new(value)
+        .expect("context checked Python codepoints")
+        .parent()
+        .codepoints()
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeaseMountView {
