@@ -8,7 +8,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { employeeCaseNames, liveSessionsInside, removalErrorCode, removeCaseFolder } from '../src/web/case-removal.js';
+import {
+  CASE_FOLDER_NAME,
+  employeeCaseNames,
+  holdsEmployeeCase,
+  liveSessionsInside,
+  removalErrorCode,
+  removeCaseFolder,
+} from '../src/web/case-removal.js';
 import { ApiErrorCode } from '../src/types.js';
 
 let base: string;
@@ -122,10 +129,25 @@ describe('removeCaseFolder', () => {
     expect(removal).toMatchObject({ ok: false, status: 400, refusal: 'not-directory' });
   });
 
-  it('refuses the cases directory itself', async () => {
-    const removal = await removeCaseFolder(root, '.', noGuards, trash);
-    expect(removal).toMatchObject({ ok: false, status: 400, refusal: 'escapes-root' });
+  it('refuses the cases directory itself and its parent', async () => {
+    for (const name of ['.', '..', '']) {
+      const removal = await removeCaseFolder(root, name, noGuards, trash);
+      expect(removal).toMatchObject({ ok: false, status: 400, refusal: 'invalid-name' });
+    }
     await expect(fs.stat(root)).resolves.toBeTruthy();
+  });
+
+  it('refuses a nested name inside an employee case, even when its trash parent exists', async () => {
+    await makeCase('expert-robin/work');
+    await fs.mkdir(path.join(trash, 'expert-robin'), { recursive: true });
+    const guards = { sessions: [], employeeCases: employeeCaseNames([{ name: 'Robin' }]) };
+    for (const name of ['expert-robin/work', 'expert-robin\\work', 'other/../expert-robin']) {
+      const removal = await removeCaseFolder(root, name, guards, trash);
+      expect(removal).toMatchObject({ ok: false, status: 400, refusal: 'invalid-name' });
+    }
+    const kept = path.join(root, 'expert-robin', 'work', 'notes', 'work.md');
+    await expect(fs.readFile(kept, 'utf8')).resolves.toBe('unique work');
+    expect(await fs.readdir(path.join(trash, 'expert-robin'))).toEqual([]);
   });
 
   it('reports a missing folder as not found', async () => {
@@ -143,6 +165,22 @@ describe('removeCaseFolder', () => {
 });
 
 describe('case removal helpers', () => {
+  it('finds an employee case on either side of the target', () => {
+    const employees = new Set(['expert-robin']);
+    expect(holdsEmployeeCase('/c', '/c/expert-robin', employees)).toBe(true);
+    expect(holdsEmployeeCase('/c', '/c', employees)).toBe(true);
+    expect(holdsEmployeeCase('/c', '/c/expert-robin/work', employees)).toBe(true);
+    expect(holdsEmployeeCase('/c', '/c/expert-robin-two', employees)).toBe(false);
+    expect(holdsEmployeeCase('/c', '/c/other', employees)).toBe(false);
+  });
+
+  it('accepts only single-segment case names', () => {
+    for (const name of ['proj', 'proj-1', 'a.b', 'expert-robin']) expect(CASE_FOLDER_NAME.test(name)).toBe(true);
+    for (const name of ['', '.', '..', '.claude', 'a/b', 'a\\b', 'x'.repeat(129)]) {
+      expect(CASE_FOLDER_NAME.test(name)).toBe(false);
+    }
+  });
+
   it('counts sessions inside a folder only', () => {
     const sessions = [{ workingDir: '/c/a' }, { workingDir: '/c/a/sub' }, { workingDir: '/c/ab' }, {}];
     expect(liveSessionsInside(sessions, '/c/a')).toBe(2);

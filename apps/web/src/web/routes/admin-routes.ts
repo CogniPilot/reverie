@@ -38,7 +38,13 @@ import { getAuthUser, requireAdmin, revokeUserSessions } from '../route-helpers.
 import { webviewCapabilities } from '../../webview-capabilities.js';
 import { htmlViewCapabilities } from '../../html-view-capabilities.js';
 import { appendAdminAudit } from '../admin-audit.js';
-import { employeeCaseNames, liveSessionsInside, removalErrorCode, removeCaseFolder } from '../case-removal.js';
+import {
+  CASE_FOLDER_NAME,
+  employeeCaseNames,
+  liveSessionsInside,
+  removalErrorCode,
+  removeCaseFolder,
+} from '../case-removal.js';
 import { SseEvent } from '../sse-events.js';
 import type { AuthPort } from '../ports/auth-port.js';
 import type { SessionPort } from '../ports/session-port.js';
@@ -56,10 +62,6 @@ const UpdateUserSchema = z.object({
   canBypassPermissions: z.boolean().optional(),
 });
 const DeleteUserSchema = z.object({ deleteSpace: z.boolean().optional() });
-
-// Case-folder names: a single path segment, no separators, no leading dot (hidden
-// dirs like .claude are infrastructure, not cases), so '.'/'..' are excluded too.
-const SAFE_CASE_NAME = /^[^./\\][^/\\]{0,127}$/;
 
 /** Map a UserStoreError's code onto the API error code + status. */
 function storeError(reply: FastifyReply, err: unknown): ReturnType<typeof createErrorResponse> {
@@ -262,7 +264,7 @@ export function registerAdminRoutes(
       reply.code(404);
       return createErrorResponse(ApiErrorCode.USER_NOT_FOUND, 'No such user');
     }
-    if (!SAFE_CASE_NAME.test(params.caseName)) {
+    if (!CASE_FOLDER_NAME.test(params.caseName)) {
       reply.code(400);
       return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid case name');
     }

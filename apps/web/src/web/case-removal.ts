@@ -12,6 +12,12 @@ import { dataPath } from '../config/instance.js';
 import { ApiErrorCode } from '../types.js';
 import { employeeCaseName } from '../company-names.js';
 
+/**
+ * Case-folder names: a single path segment, no separators, no leading dot (hidden dirs like .claude
+ * are infrastructure, not cases), so '.'/'..' are excluded too.
+ */
+export const CASE_FOLDER_NAME = /^[^./\\][^/\\]{0,127}$/;
+
 /** Whether `path` is `dir` itself or lies inside it. */
 function isWithin(dir: string, path: string): boolean {
   const rel = relative(dir, path);
@@ -35,6 +41,15 @@ export function employeeCaseNames(employees: Iterable<{ name: string }>): Set<st
   return names;
 }
 
+/** Whether `target` is, contains or lies inside the case folder of an employee under `root`. */
+export function holdsEmployeeCase(root: string, target: string, employeeCases: Iterable<string>): boolean {
+  for (const employeeCase of employeeCases) {
+    const dir = join(root, employeeCase);
+    if (isWithin(target, dir) || isWithin(dir, target)) return true;
+  }
+  return false;
+}
+
 /** What a removal must not disturb: live sessions and the employees' own case folders. */
 export interface CaseRemovalGuards {
   sessions: Iterable<{ workingDir?: string }>;
@@ -42,6 +57,7 @@ export interface CaseRemovalGuards {
 }
 
 export type CaseRemovalRefusal =
+  | 'invalid-name'
   | 'not-found'
   | 'not-directory'
   | 'escapes-root'
@@ -70,9 +86,10 @@ export function removalErrorCode(removal: Extract<CaseRemoval, { ok: false }>): 
 
 /**
  * Move the case folder `caseName` of the cases directory `root` into `trashDir`, under a name that
- * cannot collide. Refuses a symlink or non-directory, a path that escapes `root`, a folder that is
- * or contains an employee's case, and a folder a live session works in. A rename across devices is
- * refused rather than replaced by a recursive delete.
+ * cannot collide. Refuses a name that is not a single path segment, a symlink or non-directory, a
+ * path that escapes `root`, a folder that is, contains or lies inside an employee's case, and a
+ * folder a live session works in. A rename across devices is refused rather than replaced by a
+ * recursive delete.
  */
 export async function removeCaseFolder(
   root: string,
@@ -80,6 +97,9 @@ export async function removeCaseFolder(
   guards: CaseRemovalGuards,
   trashDir: string = dataPath('case-trash')
 ): Promise<CaseRemoval> {
+  if (!CASE_FOLDER_NAME.test(caseName)) {
+    return { ok: false, status: 400, refusal: 'invalid-name', message: 'Invalid case name' };
+  }
   const target = join(root, caseName);
   let stats;
   try {
@@ -96,15 +116,13 @@ export async function removeCaseFolder(
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
     return { ok: false, status: 400, refusal: 'escapes-root', message: 'Case folder escapes the cases directory' };
   }
-  for (const employeeCase of guards.employeeCases) {
-    if (isWithin(realTarget, join(realRoot, employeeCase))) {
-      return {
-        ok: false,
-        status: 409,
-        refusal: 'employee-case',
-        message: `Case "${caseName}" holds the case of a company employee; remove the employee first`,
-      };
-    }
+  if (holdsEmployeeCase(realRoot, realTarget, guards.employeeCases)) {
+    return {
+      ok: false,
+      status: 409,
+      refusal: 'employee-case',
+      message: `Case "${caseName}" is or holds the case of a company employee; remove the employee first`,
+    };
   }
   const sessions = [...guards.sessions];
   const inUse = liveSessionsInside(sessions, target) || liveSessionsInside(sessions, realTarget);
@@ -127,7 +145,7 @@ export async function removeCaseFolder(
         ok: false,
         status: 500,
         refusal: 'cross-device',
-        message: 'Case folder is on a different filesystem than the trash; refusing to delete it',
+        message: `Case folder is on a different filesystem than the trash ${trashDir}; refusing to delete it`,
       };
     }
     return {

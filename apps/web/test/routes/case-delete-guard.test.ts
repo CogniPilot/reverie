@@ -67,6 +67,14 @@ describe('DELETE /api/cases/:name guard', () => {
     await expect(fs.readFile(path.join(dir, 'work.md'), 'utf8')).resolves.toBe('unique work');
   });
 
+  it('refuses an encoded nested name inside an employee case and keeps it', async () => {
+    const dir = await makeCase('expert-robin/work');
+    await fs.mkdir(path.join(dirs.data, 'case-trash', 'expert-robin'), { recursive: true });
+    const res = await remove('expert-robin%2Fwork');
+    expect(res.statusCode).toBe(400);
+    await expect(fs.readFile(path.join(dir, 'work.md'), 'utf8')).resolves.toBe('unique work');
+  });
+
   it('refuses a case with a live session and keeps it', async () => {
     const dir = await makeCase('busy');
     const session = createMockRouteContext({ sessionId: 'live' }).sessions.get('live')!;
