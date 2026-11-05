@@ -134,6 +134,32 @@ print(json.dumps(m.effective_config(json.load(sys.stdin),sys.argv[2])))
             self.assertIn('LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY', str(caught.exception))
             self.assertEqual((self.leaf / 'memory.high').read_text(), 'max\n')
 
+    def test_configured_root_helper_applies_soft_limit_and_broker_never_opens_writer(self):
+        self.config['softLimitHelperSocket'] = '/run/reverie-soft-limit/soft-limit.sock'
+        validate_config(self.config)
+        self.assertEqual(policy_digest(self.config, F.SID), self.row['Config']['Labels']['reverie.worker-policy'])
+        import os
+        opened = os.open
+        def guarded(path, flags, *args, **kwargs):
+            if path == 'memory.high' and flags & os.O_WRONLY:
+                raise AssertionError('broker wrote memory.high itself')
+            return opened(path, flags, *args, **kwargs)
+        calls = []
+        def helper(path, sid, cid):
+            calls.append((path, sid, cid))
+            (self.leaf / 'memory.high').write_text(str(1024 * M.MIB) + '\n')  # The root helper's effect.
+            return 1024 * M.MIB
+        with patch.object(M.os, 'open', guarded), patch.object(M, 'request_soft_limit', helper):
+            M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+        self.assertEqual(calls, [('/run/reverie-soft-limit/soft-limit.sock', F.SID, self.row['Id'])])
+        refused = M.SoftLimitHelperRefused('KERNEL_UNQUALIFIED')
+        (self.leaf / 'memory.high').write_text('max\n')
+        with patch.object(M, 'request_soft_limit', side_effect=refused), self.assertRaises(M.SoftLimitHelperRefused):
+            M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+        for bad in ['relative.sock', 7, '/run//x.sock']:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_config(dict(self.config, softLimitHelperSocket=bad))
+
     def test_foreign_identity_or_pid_change_never_writes_soft_limit(self):
         with self.assertRaisesRegex(RuntimeError, 'identity changed'):
             M.configure_started(self.f.native, self.row['Name'][1:], F.SID, '9' * 64)

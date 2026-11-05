@@ -252,6 +252,7 @@
       nixosModules.workerIsolation = { config, lib, pkgs, ... }: import ./nix/worker-isolation.nix {
         inherit config lib pkgs;
         brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
+        softLimitHelperPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.softLimitHelper;
       };
       nixosModules.reveriePrune = { config, lib, pkgs, ... }: {
         imports = [

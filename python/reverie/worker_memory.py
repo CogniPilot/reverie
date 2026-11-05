@@ -96,6 +96,41 @@ def check_swap_budget(config, rows, candidate=None, proc=Path('/proc')):
             raise RuntimeError('Laptop swap pool exceeds actual host swap capacity')
 
 
+class SoftLimitHelperRefused(RuntimeError):
+    """The root helper refused or could not confirm; the laptop must not start its agent."""
+
+    def __init__(self, code):
+        self.code = code if type(code) is str and re.fullmatch('[A-Z_]{1,40}', code) else 'EFFECT_UNCONFIRMED'
+        super().__init__('LAPTOP_SOFT_LIMIT_HELPER: ' + self.code)
+
+
+def request_soft_limit(path, sid, cid, timeout=10.0):
+    """One identity-only request to the root helper; any missing or odd reply refuses the launch."""
+    import json
+    import socket
+    payload = (json.dumps({'v': 1, 'sessionId': sid, 'containerId': cid}, separators=(',', ':')) + '\n').encode()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(timeout)
+            conn.connect(path)
+            conn.sendall(payload)
+            raw = b''
+            while not raw.endswith(b'\n') and len(raw) <= 512:
+                chunk = conn.recv(513 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+    except OSError:
+        raise SoftLimitHelperRefused('HELPER_UNAVAILABLE') from None
+    try:
+        reply = json.loads(raw.decode('utf-8', 'strict'))
+    except (ValueError, UnicodeDecodeError):
+        raise SoftLimitHelperRefused('EFFECT_UNCONFIRMED') from None
+    if reply == {'ok': True, 'memoryHighBytes': reply.get('memoryHighBytes')} and type(reply['memoryHighBytes']) is int:
+        return reply['memoryHighBytes']
+    raise SoftLimitHelperRefused(reply.get('code') if isinstance(reply, dict) and reply.get('ok') is False else 'EFFECT_UNCONFIRMED')
+
+
 def configure_started(broker, name, sid, expected_id=None):
     """Only the newly started sleep container, before any worker child is exec'd."""
     from . import worker_resource_reservations as R
@@ -135,7 +170,10 @@ def configure_started(broker, name, sid, expected_id=None):
                 (os.stat(R.CGROUP / relative, follow_symlinks=False).st_dev,
                  os.stat(R.CGROUP / relative, follow_symlinks=False).st_ino)):
             raise RuntimeError('New laptop memory target identity changed')
-        if 'memoryHighMiB' in policy:  # Swap-only policies need no broker cgroup write.
+        if 'memoryHighMiB' in policy and broker.config.get('softLimitHelperSocket'):
+            # The root helper applies only its own root-authorized value; readback below stays independent.
+            request_soft_limit(broker.config['softLimitHelperSocket'], sid, cid)
+        elif 'memoryHighMiB' in policy:  # Swap-only policies need no broker cgroup write.
             try:
                 high = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
             except OSError as error:

@@ -135,8 +135,11 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','employeePerfPolicies','employeeMemoryPolicies','laptopSwapPoolMiB','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','employeePerfPolicies','employeeMemoryPolicies','laptopSwapPoolMiB','softLimitHelperSocket','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
+    if 'softLimitHelperSocket' in config and (type(config['softLimitHelperSocket']) is not str or
+            not Path(config['softLimitHelperSocket']).is_absolute() or str(Path(config['softLimitHelperSocket'])) != config['softLimitHelperSocket']):
+        raise ValueError('Invalid soft limit helper socket')
     if 'employeeMemoryPolicies' in config or 'laptopSwapPoolMiB' in config:
         from .worker_memory import validate as validate_memory
         validate_memory(config)

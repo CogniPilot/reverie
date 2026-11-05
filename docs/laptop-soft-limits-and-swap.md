@@ -61,7 +61,25 @@ After starting the new container's idle process, the host broker sets
 `memory.high` through its existing host cgroup hierarchy and verifies it before
 starting the agent. If the broker has no write authority over that file, launch
 refuses with the typed `LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY` error. Use a
-swap-only policy until the host provides that authority. It checks the engine declaration, kernel RAM/swap/high limits,
+swap-only policy until the host provides that authority.
+
+### Root helper for soft thresholds
+
+`services.reverieWorkers.softLimitHelper` installs a socket-activated root helper, one instance per
+connection. Set the broker's `softLimitHelperSocket` to `/run/reverie-soft-limit/soft-limit.sock`.
+The broker then sends only `{sessionId, containerId}`, and the helper applies the soft threshold
+from its own root-owned policy (`/etc/reverie/soft-limit-policy.json`, generated from the module's
+`entries`).
+
+- **Matching:** a laptop is matched by the engine-reported `/home/agent` bind source, which must equal
+  exactly one entry's `<stateRoot>/employees/<id>/home`. This authorizes a path→(max, high) pair, not
+  an employee identity.
+- **Checks before the write:** the helper requires the leaf `memory.max` to equal the entry and the engine
+  limit, and the running kernel release to equal the build's kernel. The module requires Linux 6.16 or
+  later, or an attested backport, because the write uses `O_NONBLOCK`.
+- **Outcomes:** any refusal before the write has no effect. A failure after the write is reported as
+  `EFFECT_UNCONFIRMED` and is never retried. In both cases the laptop does not start its agent.
+- **Rollout:** reboot into the qualified kernel, then canary one seat whose `memoryHighMiB` matches its entry. It checks the engine declaration, kernel RAM/swap/high limits,
 relevant ancestor constraints, and container/PID/cgroup identity. A missing or
 unwritable controller, ignored swap setting, tighter conflicting limit or changed
 identity refuses launch. Reattach and recovery verify the policy without
