@@ -190,7 +190,10 @@ def configure_started(broker, name, sid, expected_id=None):
         if not (target.fences() and same()):
             raise RuntimeError('Laptop memory readback identity changed')
     finally:
-        target.close()
+        try:
+            target.close()
+        except OSError:
+            raise RuntimeError('Laptop memory target close unconfirmed') from None
 
 
 def verify_running(broker, sid, row):

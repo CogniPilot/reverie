@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
 
 MIB = 1048576
 REQUEST_MAX = 512
@@ -246,16 +247,22 @@ class LaptopTarget:
         self.relative = Path(self.groups[0][4:])
         need(str(self.relative) != '.' and not self.relative.is_absolute() and '..' not in self.relative.parts,
              'IDENTITY_MISMATCH')
+        fd = None
         try:
             fd = os.open(self.cgroup, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
             for part in self.relative.parts:
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
                 os.close(fd)
                 fd = child
+            leaf = os.fstat(fd)
         except OSError:
+            if fd is not None:
+                try:
+                    os.close(fd)  # Never leak the owned directory fd on a failed walk.
+                except OSError:
+                    pass
             raise Refused('IDENTITY_MISMATCH') from None
         self.fd = fd
-        leaf = os.fstat(fd)
         self.leaf = (leaf.st_dev, leaf.st_ino)
 
     def close(self):
@@ -274,7 +281,7 @@ class LaptopTarget:
         return _read_at(self.fd, name)
 
 
-def apply_high(entry, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), recheck=lambda: True):
+def apply_high(entry, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), recheck=lambda: True, deadline=None):
     """Write one laptop's memory.high after every fence, refreshed after the (slow) engine recheck.
 
     Returns the confirmed bytes. Raises Refused only before any write is attempted; once the write is
@@ -288,6 +295,8 @@ def apply_high(entry, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), re
         # The engine recheck may block; refresh all local facts after it, immediately before the writer.
         need(recheck() and target.fences(), 'IDENTITY_MISMATCH')
         need(target.read('memory.max') == hard, 'HARD_LIMIT_MISMATCH')
+        # The recheck and reads can be slow: the original request deadline is checked last, before the writer.
+        need(deadline is None or time.monotonic() < deadline, 'DEADLINE')
         try:
             writer = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
                              dir_fd=target.fd)
@@ -303,18 +312,30 @@ def apply_high(entry, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), re
         if not (written == len(raw) and recheck() and target.fences() and
                 target.read('memory.high') == str(high) and target.read('memory.max') == hard):
             raise EffectUnconfirmed()
-        return high
     except (OSError, Refused, UnicodeDecodeError) as error:
-        if attempted:
-            raise EffectUnconfirmed() from None
-        if isinstance(error, Refused):
-            raise
-        raise Refused('IDENTITY_MISMATCH') from None
-    except EffectUnconfirmed:
-        raise
-    except Exception:
-        if attempted:
-            raise EffectUnconfirmed() from None
-        raise
-    finally:
+        failure = error
+    except EffectUnconfirmed as error:
+        failure = error
+    except Exception as error:  # Unknown: treat like an OSError for classification.
+        failure = error
+    else:
+        failure = None
+    # Close the leaf fd last; a close error after an attempted write is still an uncertain effect.
+    try:
         target.close()
+    except OSError:
+        if attempted:
+            failure = EffectUnconfirmed()
+        elif failure is None:
+            failure = Refused('IDENTITY_MISMATCH')
+    if failure is None:
+        return high
+    if isinstance(failure, EffectUnconfirmed):
+        raise failure
+    if attempted:
+        raise EffectUnconfirmed() from None
+    if isinstance(failure, Refused):
+        raise failure
+    if isinstance(failure, (OSError, UnicodeDecodeError)):
+        raise Refused('IDENTITY_MISMATCH') from None
+    raise failure

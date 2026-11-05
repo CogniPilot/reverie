@@ -104,12 +104,11 @@ class RequestAndPolicyTests(unittest.TestCase):
         load = tree.loader()
         path = tree.write_policy()
         self.assertEqual(load(path)['entries'][0]['employeeId'], EID)  # A valid protected regular file.
-        untrusted = []
-        tree.write_policy(mode=0o664); untrusted.append(('group-writable file', path))
-        tree.write_policy(mode=0o646); untrusted.append(('other-writable file', path))
-        for label, candidate in untrusted:
+        for label, mode in [('group-writable file', 0o664), ('other-writable file', 0o646)]:
+            tree.write_policy(mode=mode)  # Each mode applied immediately before its own assertion.
+            self.assertEqual(path.stat().st_mode & 0o777, mode)
             with self.subTest(label), self.assertRaises(A.Refused) as caught:
-                load(candidate)
+                load(path)
             self.assertEqual(caught.exception.code, 'POLICY_UNTRUSTED')
         tree.write_policy()
         cases = {'symlinked file': tree.root / 'etc/link.json', 'fifo': tree.root / 'etc/fifo', 'outside anchor': Path('/etc/hostname'),
@@ -249,6 +248,58 @@ class SelectAndApplyTests(unittest.TestCase):
             raise OSError(11, 'write failed')
         with patch.object(A.os, 'write', failing_write), self.assertRaises(A.EffectUnconfirmed):
             A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
+
+    @staticmethod
+    def open_fds():
+        return len(os.listdir('/proc/self/fd'))
+
+    def test_target_walk_never_leaks_its_fd_on_a_failed_open_or_fstat(self):
+        tree = Tree(self)
+        before = self.open_fds()
+        real_open, real_fstat = os.open, os.fstat
+        def failing_child(path, flags, *args, **kwargs):
+            if path == 'laptop':
+                raise OSError(13, 'denied')
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(A.os, 'open', failing_child), self.assertRaises(A.Refused):
+            A.LaptopTarget(4242, tree.cgroup, tree.proc)
+        with patch.object(A.os, 'fstat', lambda fd: (_ for _ in ()).throw(OSError(5, 'io'))), self.assertRaises(A.Refused):
+            A.LaptopTarget(4242, tree.cgroup, tree.proc)
+        self.assertEqual(self.open_fds(), before)
+        target = A.LaptopTarget(4242, tree.cgroup, tree.proc)
+        target.close()
+        self.assertEqual(self.open_fds(), before)
+
+    def test_leaf_close_failure_after_a_write_is_unconfirmed_and_success_releases_the_fd(self):
+        tree = Tree(self)
+        before = self.open_fds()
+        self.assertEqual(A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc), 1024 * MIB)
+        self.assertEqual(self.open_fds(), before)
+        tree = Tree(self)
+        real_close = os.close
+        leaf_fds = []
+        real_init = A.LaptopTarget.__init__
+        def tracking_init(target, *args, **kwargs):
+            real_init(target, *args, **kwargs)
+            leaf_fds.append(target.fd)
+        def closer(fd):
+            real_close(fd)
+            if fd in leaf_fds:
+                raise OSError(5, 'leaf close failed')
+        with patch.object(A.LaptopTarget, '__init__', tracking_init), patch.object(A.os, 'close', closer), \
+                self.assertRaises(A.EffectUnconfirmed):
+            A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
+        self.assertEqual(tree.high(), str(1024 * MIB))  # The write happened; only the outcome is uncertain.
+
+    def test_request_deadline_crossed_by_the_slow_recheck_refuses_with_zero_writes(self):
+        tree = Tree(self)
+        clock = [100.0]
+        def slow_recheck():
+            clock[0] += 9.0  # The engine reinspection crosses the 8-second request deadline.
+            return True
+        with patch.object(A.time, 'monotonic', lambda: clock[0]), self.assertRaises(A.Refused) as caught:
+            A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc, slow_recheck, deadline=108.0)
+        self.assertEqual((caught.exception.code, tree.high()), ('DEADLINE', 'max'))
 
     def test_symlinked_leaf_is_not_followed(self):
         tree = Tree(self)

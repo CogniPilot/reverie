@@ -80,7 +80,7 @@ def serve(conn, pins, *, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), insp
             again = inspector(pins.engine, pins.endpoint, name, deadline)
             return A.select_entry(policy, again, session_id, container_id) == entry and again['State'] == row['State']
 
-        applied = A.apply_high(entry, row['State']['Pid'], cgroup, proc, still_same)
+        applied = A.apply_high(entry, row['State']['Pid'], cgroup, proc, still_same, deadline)
         reply = {'ok': True, 'memoryHighBytes': applied}
     except (A.Refused, A.EffectUnconfirmed) as error:
         reply = {'ok': False, 'code': error.code}
