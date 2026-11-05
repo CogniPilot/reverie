@@ -45,6 +45,53 @@ impl ProfileObservation {
 pub struct ProfileStore {
     pub(crate) directory: Directory,
 }
+
+/// A snapshot whose real profile lock remains held during application projection.
+///
+/// This carries no owner, binding or effect authority. Call `finish` and check
+/// its result before acknowledging a derived candidate. Dropping the guard
+/// releases the lock, but cannot acknowledge successful custody finalization.
+#[must_use = "finish the locked read before acknowledging any derived candidate"]
+pub struct LockedProfileRead<'store> {
+    store: &'store ProfileStore,
+    lock: File,
+    loaded: Loaded,
+    data: Option<File>,
+}
+impl LockedProfileRead<'_> {
+    pub fn document(&self) -> &ProfileDocument {
+        &self.loaded.document
+    }
+    /// Check the original observation, directory and lock, then close the lock.
+    /// A failure invalidates a derived candidate; it never authorizes retry.
+    pub fn finish(self) -> Result<()> {
+        let observed = self.check_observation();
+        let closed = close_data(self.data, &self.store.directory);
+        self.store
+            .finish_read(self.lock, finalized(observed, closed))
+    }
+    fn check_observation(&self) -> Result<()> {
+        need(
+            self.store.directory.stamp("profiles.json")? == self.loaded.stamp,
+            StoreFault::Changed,
+        )?;
+        if let Some(data) = &self.data {
+            need(
+                Some(private_fs::private_stamp(data)?) == self.loaded.stamp,
+                StoreFault::Changed,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn close_data(data: Option<File>, directory: &Directory) -> Result<()> {
+    match data {
+        Some(data) => private_fs::close(data, CloseRole::Data, directory.path()),
+        None => Ok(()),
+    }
+}
+
 impl ProfileStore {
     /// The selected directory must already exist, with current-euid ownership and mode0700.
     pub fn open(directory: impl AsRef<Path>) -> Result<Self> {
@@ -75,10 +122,28 @@ impl ProfileStore {
     /// A locked snapshot; a missing document is the legacy empty revisionzero.
     /// The existing profiles.lock may be created, exactly as in the legacy store.
     pub fn snapshot(&self) -> Result<ProfileDocument> {
+        let guard = self.locked_read()?;
+        let document = guard.document().clone();
+        guard.finish()?;
+        Ok(document)
+    }
+    /// Keep `profiles.lock` held through the application's pure staging work.
+    ///
+    /// This preserves the legacy stage_config lock extent. The outer admission
+    /// guard and trusted current identity inputs remain the caller's duties.
+    /// No profile or broker configuration write is possible through this guard.
+    pub fn locked_read(&self) -> Result<LockedProfileRead<'_>> {
         self.directory.check()?;
         let lock = self.directory.lock()?;
-        let result = self.load().map(|loaded| loaded.document);
-        self.finish_read(lock, result)
+        match self.load_pinned() {
+            Ok((loaded, data)) => Ok(LockedProfileRead {
+                store: self,
+                lock,
+                loaded,
+                data,
+            }),
+            Err(error) => self.finish_read(lock, Err(error)),
+        }
     }
     /// Commit a checked revision/version/binding-CAS intent to the existing store.
     /// No owner grant or native effect permission is created or consumed here.
@@ -90,7 +155,7 @@ impl ProfileStore {
     pub fn close(self) -> Result<()> {
         self.directory.close().map_err(StoreError::uncertain)
     }
-    fn finish_read(&self, lock: File, result: Result<ProfileDocument>) -> Result<ProfileDocument> {
+    fn finish_read<T>(&self, lock: File, result: Result<T>) -> Result<T> {
         let final_check = self
             .directory
             .check()
@@ -99,18 +164,26 @@ impl ProfileStore {
         finalized(finalized(result, final_check), closed)
     }
     pub(crate) fn load(&self) -> Result<Loaded> {
+        let (loaded, data) = self.load_pinned()?;
+        finalized(Ok(loaded), close_data(data, &self.directory))
+    }
+    fn load_pinned(&self) -> Result<(Loaded, Option<File>)> {
         self.directory.check()?;
         let named = self.directory.stamp("profiles.json")?;
         let Some(named) = named else {
-            return self.load_missing();
+            return self.load_missing().map(|loaded| (loaded, None));
         };
         need(named.private_file(), StoreFault::PrivateFile)?;
         let Some(mut file) = self.directory.read_file("profiles.json")? else {
             return Err(StoreError::Refused(StoreFault::FileRebound));
         };
-        let result = self.read_current(&mut file, &named);
-        let closed = private_fs::close(file, CloseRole::Data, self.directory.path());
-        finalized(result, closed)
+        match self.read_current(&mut file, &named) {
+            Ok(loaded) => Ok((loaded, Some(file))),
+            Err(error) => finalized(
+                Err(error),
+                private_fs::close(file, CloseRole::Data, self.directory.path()),
+            ),
+        }
     }
     fn load_missing(&self) -> Result<Loaded> {
         self.directory.check()?;
