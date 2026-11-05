@@ -125,14 +125,67 @@ struct Temporary<'a> {
     directory: &'a Directory,
     name: String,
     stamp: Stamp,
+    anchor: Option<std::fs::File>,
     armed: bool,
+    attempted: bool,
+}
+impl Temporary<'_> {
+    fn cleanup(&mut self) {
+        if self.armed {
+            // The anchor stays open through unlink so inode reuse cannot make a
+            // substituted leaf appear to be the original owned temporary.
+            self.directory.remove_owned(&self.name, &self.stamp);
+            self.armed = false;
+        }
+    }
+    fn finish(mut self) -> std::io::Result<()> {
+        self.cleanup();
+        self.anchor.take().map_or(Ok(()), close_anchor)
+    }
 }
 impl Drop for Temporary<'_> {
     fn drop(&mut self) {
-        if self.armed {
-            self.directory.remove_owned(&self.name, &self.stamp);
-        }
+        self.cleanup();
     }
+}
+fn close_anchor(anchor: std::fs::File) -> std::io::Result<()> {
+    let closed = fs::close(anchor);
+    #[cfg(test)]
+    if FAIL_ANCHOR_CLOSE.with(|failure| failure.replace(false)) {
+        return Err(std::io::ErrorKind::Other.into());
+    }
+    closed
+}
+fn finalized<T>(result: Result<T>, closed: std::io::Result<()>, attempted: bool) -> Result<T> {
+    if closed.is_err() {
+        Err(if attempted {
+            MergeError::Unconfirmed
+        } else {
+            MergeError::Io
+        })
+    } else {
+        result
+    }
+}
+fn anchor_temporary<'a>(
+    directory: &'a Directory,
+    name: String,
+    stamp: Stamp,
+) -> Result<Temporary<'a>> {
+    let anchor = directory.pin(&name).map_err(|_| MergeError::Io)?;
+    let anchored = anchor.metadata().map(|meta| Stamp::from_metadata(&meta));
+    if anchored.ok() != Some(stamp.clone()) || !stamp.owned_file() {
+        fs::close(anchor).map_err(|_| MergeError::Io)?;
+        return Err(MergeError::Changed);
+    }
+    Ok(Temporary {
+        directory,
+        name,
+        stamp,
+        anchor: Some(anchor),
+        armed: true,
+        attempted: false,
+    })
 }
 fn prepare<'a>(directory: &'a Directory, raw: &str) -> Result<Temporary<'a>> {
     let name = format!(
@@ -141,12 +194,17 @@ fn prepare<'a>(directory: &'a Directory, raw: &str) -> Result<Temporary<'a>> {
         TEMP.fetch_add(1, Ordering::Relaxed)
     );
     let mut file = directory.create(&name).map_err(|_| MergeError::Io)?;
-    let stamp = Stamp::from_metadata(&file.metadata().map_err(|_| MergeError::Io)?);
-    let mut temporary = Temporary {
-        directory,
-        name,
-        stamp,
-        armed: true,
+    let stamp = match file.metadata() {
+        Ok(meta) => Stamp::from_metadata(&meta),
+        Err(_) => return finalized(Err(MergeError::Io), fs::close(file), false),
+    };
+    let mut temporary = match anchor_temporary(directory, name.clone(), stamp.clone()) {
+        Ok(temporary) => temporary,
+        Err(error) => {
+            // The creator descriptor still pins the inode on this early path.
+            directory.remove_owned(&name, &stamp);
+            return finalized(Err(error), fs::close(file), false);
+        }
     };
     let written = file
         .write_all(raw.as_bytes())
@@ -156,11 +214,11 @@ fn prepare<'a>(directory: &'a Directory, raw: &str) -> Result<Temporary<'a>> {
     } else {
         Err(MergeError::Io)
     };
-    let closed = fs::close(file);
-    if closed.is_err() {
-        return Err(MergeError::Io);
+    let verified = finalized(verified, fs::close(file), false);
+    match verified {
+        Ok(stamp) => temporary.stamp = stamp,
+        Err(error) => return finalized(Err(error), temporary.finish(), false),
     }
-    temporary.stamp = verified?;
     Ok(temporary)
 }
 fn verify_prepared(file: &mut std::fs::File, expected: &str) -> Result<Stamp> {
@@ -216,6 +274,17 @@ fn merge_locked<F: FnOnce()>(
         return Ok(MergeOutcome::Preserved);
     };
     let mut temporary = prepare(directory, &updated)?;
+    let result = publish_prepared(home, directory, &before, &mut temporary, before_publish);
+    let attempted = temporary.attempted;
+    finalized(result, temporary.finish(), attempted)
+}
+fn publish_prepared<F: FnOnce()>(
+    home: &Path,
+    directory: &Directory,
+    before: &Snapshot,
+    temporary: &mut Temporary<'_>,
+    before_publish: F,
+) -> Result<MergeOutcome> {
     before_publish();
     if directory
         .stamp("config")
@@ -233,6 +302,7 @@ fn merge_locked<F: FnOnce()>(
     {
         return Err(MergeError::Changed);
     }
+    temporary.attempted = true;
     directory
         .publish(&temporary.name, "config.toml", before.stamp.is_none())
         .map_err(|error| {
@@ -284,5 +354,26 @@ fn merge_with_hook<F: FnOnce()>(home: &Path, before_publish: F) -> Result<MergeO
 
 #[cfg(test)]
 pub(super) fn test_merge<F: FnOnce()>(home: &Path, hook: F) -> Result<MergeOutcome> {
+    merge_with_hook(home, hook)
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_ANCHOR_CLOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(super) fn test_merge_with_anchor_close_failure<F: FnOnce()>(
+    home: &Path,
+    hook: F,
+) -> Result<MergeOutcome> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FAIL_ANCHOR_CLOSE.with(|failure| failure.set(false));
+        }
+    }
+    let _reset = Reset;
+    FAIL_ANCHOR_CLOSE.with(|failure| failure.set(true));
     merge_with_hook(home, hook)
 }

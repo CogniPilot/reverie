@@ -25,7 +25,12 @@ The Cargo update anchors filesystem operations to held directory descriptors,
 rejects symlinks and non-owned or multiply linked files, and requires private
 owned home/Cargo directories. A cooperating call takes an advisory directory
 lock. It writes and fsyncs an exclusive private temporary, verifies its bytes
-and final metadata, then rechecks the config, source and directory identities
+and final metadata, then closes its writer while retaining an `O_PATH` identity
+descriptor through publication and cleanup. This prevents inode-number reuse
+after an unlink from making a foreign replacement look like the owned temporary.
+Cleanup never removes a substituted temporary. The identity descriptor is closed
+explicitly; a close failure after a publication attempt reports uncertainty.
+The update rechecks the config, source and directory identities
 before publication. An absent config uses `RENAME_NOREPLACE`, so a concurrent
 creator is never overwritten. Existing-file replacement requires unrelated
 editors to remain quiescent: Linux rename does not provide an inode-conditional
