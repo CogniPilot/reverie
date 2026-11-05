@@ -105,13 +105,7 @@ impl Cursor<'_> {
         self.expect(b'{')?;
         let mut fields: [Option<Field>; 5] = Default::default();
         if !self.take(b'}') {
-            loop {
-                self.member(&mut fields)?;
-                if !self.take(b',') {
-                    self.expect(b'}')?;
-                    break;
-                }
-            }
+            self.members(&mut fields)?;
         }
         let [id, label, provider, config_dir, open_code_data_dir] =
             fields.map(|field| match field {
@@ -126,6 +120,15 @@ impl Cursor<'_> {
             open_code_data_dir: JsString(open_code_data_dir.ok_or(InvalidFile)?),
         };
         profile.checked(platform).ok_or(InvalidFile)
+    }
+    /// Members up to and including the closing `}`.
+    fn members(&mut self, fields: &mut [Option<Field>; 5]) -> Parsed<()> {
+        loop {
+            self.member(fields)?;
+            if !self.take(b',') {
+                return self.expect(b'}');
+            }
+        }
     }
     /// One `"key": value`. The last duplicate wins; zod's strict check skips `__proto__` and refuses others.
     fn member(&mut self, fields: &mut [Option<Field>; 5]) -> Parsed<()> {
@@ -200,15 +203,20 @@ impl Cursor<'_> {
     fn close(&mut self, open: &mut Vec<Open>) -> Parsed<bool> {
         while let Some(&container) = open.last() {
             if self.take(b',') {
-                if container == Open::Object {
-                    self.key()?;
-                }
+                self.open_member(container)?;
                 return Ok(true);
             }
             self.expect(if container == Open::Array { b']' } else { b'}' })?;
             open.pop();
         }
         Ok(false)
+    }
+    /// After `[`, `{` or a separating `,`: an object member starts with its key.
+    fn open_member(&mut self, container: Open) -> Parsed<()> {
+        if container == Open::Object {
+            self.key()?;
+        }
+        Ok(())
     }
     fn key(&mut self) -> Parsed<Vec<u16>> {
         self.space();
@@ -231,9 +239,7 @@ impl Cursor<'_> {
                 if self.take(close) {
                     return Ok(None);
                 }
-                if container == Open::Object {
-                    self.key()?;
-                }
+                self.open_member(container)?;
                 Ok(Some(container))
             }
             b't' => self.word("true").map(|()| None),
