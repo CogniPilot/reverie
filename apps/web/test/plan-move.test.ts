@@ -384,6 +384,15 @@ describe('owner journal recovery after restart', () => {
     await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('still active');
     test.port.verifyRecovery = vi.fn(async () => () => {}); release(); await first;
   });
+  it('reports a recovery in flight as checking, and the held phase again once it is refused', async () => {
+    const test = harness([interrupted()]); let release!: () => void;
+    test.port.verifyRecovery = vi.fn(async () => { await new Promise<void>(done => { release = done; }); throw new Error('revoked'); });
+    const first = test.moves.resolve('interrupted', expected); await flush();
+    expect(await test.moves.get('interrupted')).toMatchObject({phase: 'checking'});
+    expect((await test.moves.list()).find(r => r.id === 'interrupted')).toMatchObject({phase: 'checking'});
+    release(); await expect(first).rejects.toThrow('revoked');
+    expect(await test.moves.get('interrupted')).toMatchObject({phase: 'recovery-required'});
+  });
   it('refuses ambiguous multiple unfinished records for the same employee without releasing their shared hold', async () => {
     const test = harness([interrupted(), {...interrupted(), id: 'other'}]); test.port.verifyRecovery = vi.fn(async () => () => {});
     await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('Multiple unresolved');
