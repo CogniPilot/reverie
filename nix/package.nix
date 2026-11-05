@@ -161,6 +161,7 @@ let
         test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/routes/session-input-delivery.test.ts \
         test/input-send-order.test.ts test/reliable-input-dedup.test.ts test/input-size-limit.test.ts test/chatroom-archived-reply.test.ts \
         test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
+      npm test -- test/case-removal.test.ts test/routes/case-delete-guard.test.ts
       # Every other gate file; test/test-suite-partition.test.ts fails on a gate file that is in neither
       # an npm test line here nor NIX_UNCHECKED_TESTS (config/test-suites.ts).
       npm test -- test/admin-routes.test.ts test/admin-ui.test.ts test/agent-case-marker.test.ts test/agent-memory-brief-route-class.test.ts \
