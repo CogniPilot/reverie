@@ -96,6 +96,7 @@ export class RouteChannel {
   private stderrLines = 0;
   private stderrLine = Buffer.alloc(0);
   private reaping: Promise<boolean> | undefined;
+  private closing: Promise<{ terminated: boolean }> | undefined;
   private readonly now: () => number;
   private readonly spawn: (path: string, args: string[]) => ChildProcessWithoutNullStreams;
 
@@ -327,9 +328,14 @@ export class RouteChannel {
     });
   }
 
-  /** Server shutdown: no new calls, every admitted one settles, and the child is ended. */
-  async close(): Promise<{ terminated: boolean }> {
-    if (this.state === 'closing') return { terminated: true };
+  /** Server shutdown: no new calls, every admitted one settles, and the child is ended. Every caller
+   * gets the one shutdown's result; being in the closing state is not proof the child exited. */
+  close(): Promise<{ terminated: boolean }> {
+    this.closing ??= this.shutdown();
+    return this.closing;
+  }
+
+  private async shutdown(): Promise<{ terminated: boolean }> {
     const previous = this.state;
     this.state = 'closing';
     this.failAll('server closing');

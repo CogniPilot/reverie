@@ -216,4 +216,28 @@ describe('route channel', () => {
     for (const ticket of tickets) expect(await done(ticket.next())).toMatchObject({ reason: 'server closing' });
     expect(await done(routes.admit(ROUTE, Buffer.from('{}')).next())).toMatchObject({ reason: 'closing' });
   });
+
+  it('gives every close the one shutdown result, never a confirmation it did not get', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const held = channel((child) => {
+      child.killable = false;
+    });
+    held.admit(ROUTE, Buffer.from('{}'));
+    await flush();
+    const first = held.close();
+    const concurrent = held.close();
+    await vi.advanceTimersByTimeAsync(4 * 1000);
+    expect(await first).toEqual({ terminated: false });
+    expect(await concurrent).toEqual({ terminated: false });
+    expect(await held.close()).toEqual({ terminated: false });
+    expect(children[0].kills).toBe(1);
+
+    const ended = channel();
+    ended.admit(ROUTE, Buffer.from('{}'));
+    await flush();
+    const both = Promise.all([ended.close(), ended.close()]);
+    await vi.advanceTimersByTimeAsync(4 * 1000);
+    expect(await both).toEqual([{ terminated: true }, { terminated: true }]);
+    expect(children[1].kills).toBe(1);
+  });
 });
