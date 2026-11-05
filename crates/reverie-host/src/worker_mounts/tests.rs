@@ -6,18 +6,44 @@ use std::os::unix::{
     fs::{PermissionsExt, symlink},
 };
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+const LONGEST_SOCKET_SUFFIX: &str = "control/../control/broker.sock";
+fn fixture_root(preferred: &Path) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let name = format!(
+        "rwm-{}-{nonce:x}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    // These Linux-native fixtures exercise a real legacy socket spelling cap.
+    // A long TMPDIR must not make otherwise valid mount cases fail the header.
+    for parent in [preferred, Path::new("/tmp")] {
+        let Ok(parent) = fs::canonicalize(parent) else {
+            continue;
+        };
+        let root = parent.join(&name);
+        if root
+            .join(LONGEST_SOCKET_SUFFIX)
+            .to_str()
+            .is_some_and(|text| text.len() <= 100 && !text.contains([',', '\r', '\n', '\0']))
+        {
+            return root;
+        }
+    }
+    panic!("worker mount fixtures require a short canonical temporary directory");
+}
 
 struct Tree {
     root: PathBuf,
 }
 impl Tree {
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "rwm-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        let root = fixture_root(&std::env::temp_dir());
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         for name in [
@@ -61,7 +87,8 @@ impl Tree {
         Self { root }
     }
     fn substitute(&self, raw: &str) -> String {
-        raw.replace("$ROOT", self.root.to_str().unwrap())
+        let escaped = serde_json::to_string(self.root.to_str().unwrap()).unwrap();
+        raw.replace("$ROOT", &escaped[1..escaped.len() - 1])
     }
     fn provenance(&self) {
         let directory = self
@@ -104,6 +131,38 @@ impl Tree {
         result.extend_from_slice(&points[prefix.len()..]);
         result
     }
+}
+
+#[test]
+fn long_temporary_parent_keeps_native_fixture_socket_spelling_valid() {
+    let tree = Tree::new();
+    let long = tree.root.join("x".repeat(150));
+    fs::create_dir(&long).unwrap();
+    let selected = fixture_root(&long);
+    assert!(selected.join(LONGEST_SOCKET_SUFFIX).to_str().unwrap().len() <= 100);
+    assert_eq!(
+        selected.parent().unwrap(),
+        fs::canonicalize("/tmp").unwrap()
+    );
+    assert!(
+        !selected.exists(),
+        "path selection must not adopt existing fixture data"
+    );
+}
+
+#[test]
+fn native_fixture_root_is_escaped_when_inserted_into_json_strings() {
+    let parent = Tree::new();
+    let quoted = Tree {
+        root: parent.root.join("quoted\"\\name"),
+    };
+    fs::create_dir(&quoted.root).unwrap();
+    let raw = quoted.substitute(r#"{"path":"$ROOT/source"}"#);
+    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        parsed["path"].as_str().unwrap(),
+        quoted.root.join("source").to_str().unwrap()
+    );
 }
 impl Drop for Tree {
     fn drop(&mut self) {
