@@ -31,6 +31,10 @@ fn status(content: &str, identifier: &str) -> Result<String, String> {
 }
 
 fn check(root: &Path) -> Result<(), String> {
+    check_with_sequence(root, false)
+}
+
+fn check_with_sequence(root: &Path, require_sequence: bool) -> Result<(), String> {
     if !super::size::inspect(root)?.is_dir()
         || fs::canonicalize(root).map_err(|error| error.to_string())? != root
     {
@@ -86,12 +90,24 @@ fn check(root: &Path) -> Result<(), String> {
             "{active} ACCEPTED+DRAFT specs exceeds {ACTIVE_CAP}"
         ));
     }
+    if require_sequence {
+        for (expected, identifier) in identifiers.iter().enumerate() {
+            if identifier.parse::<usize>().ok() != Some(expected) {
+                return Err(format!(
+                    "spec adoption order must be sequential: expected SPEC_{expected:04}, found SPEC_{identifier}"
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
 #[test]
 fn repository_specs_stay_within_rumoca_budgets() {
-    assert_eq!(check(&workspace_root().join("spec")), Ok(()));
+    assert_eq!(
+        check_with_sequence(&workspace_root().join("spec"), true),
+        Ok(())
+    );
 }
 
 fn prefix(identifier: usize, value: &str) -> String {
@@ -210,4 +226,14 @@ fn spec_symlinks_and_unreadable_entries_do_not_bypass_the_gate() {
     let source = outside.write("spec.md", prefix(2, "DRAFT"));
     symlink(source, root.path().join("SPEC_0002_LINK.md")).expect("owned spec link");
     assert!(check(root.path()).is_err());
+}
+
+#[test]
+fn adoption_numbers_are_sequential_and_reference_slots_stay_reserved() {
+    let root = TestDir::new();
+    root.write("SPEC_0000_FIRST.md", prefix(0, "ACCEPTED"));
+    root.write("SPEC_0002_THIRD.md", prefix(2, "DRAFT"));
+    assert!(check_with_sequence(root.path(), true).is_err());
+    root.write("SPEC_0001_RETIRED.md", prefix(1, "REFERENCE"));
+    assert_eq!(check_with_sequence(root.path(), true), Ok(()));
 }

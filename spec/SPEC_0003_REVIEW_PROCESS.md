@@ -1,4 +1,4 @@
-# SPEC_0025: Evidence and Adversarial Review
+# SPEC_0003: Evidence and Adversarial Review
 
 ## Status
 

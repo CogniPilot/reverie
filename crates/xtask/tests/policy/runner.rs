@@ -5,7 +5,9 @@ use std::process::{Command, Output};
 
 fn fixture(root: &TestDir) -> PathBuf {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cargo_child.rs");
-    let executable = root.path().join("cargo-child");
+    let executable = root
+        .path()
+        .join(format!("cargo-child{}", std::env::consts::EXE_SUFFIX));
     let output = Command::new("rustc")
         .arg("--edition=2024")
         .arg(source)
@@ -94,4 +96,16 @@ fn unknown_arguments_or_missing_tools_fail() {
     assert!(!run(&root, &absent, "unknown", "", false).status.success());
     assert!(!run(&root, &absent, "verify", "", false).status.success());
     assert!(!root.path().join("trace").exists());
+}
+
+#[test]
+fn portable_verification_selects_only_portable_components() {
+    let root = TestDir::new();
+    let executable = fixture(&root);
+    let output = run(&root, &executable, "verify-portable", "", false);
+    assert!(output.status.success());
+    assert_eq!(
+        fs::read_to_string(root.path().join("trace")).expect("owned command trace"),
+        "fmt --all --check\nclippy --locked -p reverie-core -p reverie-contracts -p xtask --all-targets --all-features -- -D warnings\ntest --locked -p reverie-core -p reverie-contracts -p xtask --all-targets --all-features\n"
+    );
 }

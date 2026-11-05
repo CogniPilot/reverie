@@ -1,4 +1,4 @@
-# SPEC_0029: Crate Boundaries and Single Ownership
+# SPEC_0004: Crate Boundaries and Single Ownership
 
 ## Status
 
