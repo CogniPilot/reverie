@@ -1,14 +1,22 @@
 //! Legacy effective-worker JSON bytes, with Python's default spaces and ASCII.
 //! Inputs are projected data, never evidence of validation, readiness or authority.
-mod decode;
 mod encode;
-mod value;
 
+use crate::legacy_json::{self, Node, Value};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use value::Value;
 
-pub use decode::decode;
+pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
+    std::str::from_utf8(raw).map_err(|_| WorkerConfigError::InvalidJson)?;
+    let value = legacy_json::decode_utf8(raw).map_err(|error| match error {
+        legacy_json::Error::InvalidJson => WorkerConfigError::InvalidJson,
+        legacy_json::Error::DuplicateKey => WorkerConfigError::DuplicateKey,
+    })?;
+    if !matches!(value.0, Node::Object(_)) {
+        return Err(WorkerConfigError::ExpectedObject);
+    }
+    Ok(EffectiveWorkerConfig(value))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkerConfigError {
