@@ -124,6 +124,7 @@ dependencies = [
  "reverie-store",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
