@@ -21,6 +21,12 @@ not deserialize arbitrary JSON again or substitute another canonicalizer.
   missing-document result is an empty revision-zero profile document.
 - `snapshot` holds the real nonblocking `profiles.lock`; it may create that
   mode-0600 lock, preserving the legacy behavior.
+- `locked_read` retains that same lock through application staging. Its immutable
+  document is data; the caller must check `finish` before acknowledging a derived
+  candidate. An open read descriptor pins the observed data inode throughout
+  staging. Finalization checks its stamp, named data presence, directory and
+  named lock, then closes the lock with errors retained. Abandoning a guard
+  releases it without acknowledging the candidate or writing any configuration.
 - `put` applies a checked store-revision/profile-version/previous-binding CAS
   intent under that same lock. It never writes broker configuration or allocates
   a resource.
@@ -108,7 +114,7 @@ substitution/content/link/mode changes, named-data/ancestor replacement,
 post-finalizer same-bytes replacement, partial/zero writes, close failures,
 descriptor cleanup and missing-versus-present-empty observation.
 
-The pure `stage_config` consumer requirement is still open: B must preserve
+The full `stage_config` consumer requirement is still open: B must preserve
 employee/session projections, global pool policy, unrelated grants, ownership
 checks and the separate spaced-JSON worker policy digest. The current Python
 preparation, reservation, bootstrap, finalization and terminal-binding consumers

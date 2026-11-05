@@ -87,6 +87,13 @@ fn child_put() {
     let root = PathBuf::from(root);
     let mode = std::env::var("REVERIE_C1_CHILD_MODE").unwrap();
     let store = ProfileStore::open(&root).unwrap();
+    if mode == "read-guard" {
+        assert_eq!(
+            store.put(&new_intent()).unwrap_err().code(),
+            "STORE_LOCK_BUSY"
+        );
+        return;
+    }
     if mode == "umask" {
         let old = child_umask(0o200);
         let result = store.put(&new_intent());
@@ -179,4 +186,23 @@ fn restrictive_umask_cannot_break_first_data_or_lock_publication() {
             .get(),
         1
     );
+}
+
+#[test]
+fn application_read_guard_holds_the_same_lock_across_processes() {
+    let _exclusive = FORK_CASES.lock().unwrap();
+    let tree = Tree::new();
+    let store = ProfileStore::open(&tree.root).unwrap();
+    let reader = store.locked_read().unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "child_put", "--nocapture"])
+        .env("REVERIE_C1_CHILD_ROOT", &tree.root)
+        .env("REVERIE_C1_CHILD_MODE", "read-guard")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(reader.document().revision().get(), 0);
+    assert!(!tree.root.join("profiles.json").exists());
+    reader.finish().unwrap();
+    store.put(&new_intent()).unwrap();
 }

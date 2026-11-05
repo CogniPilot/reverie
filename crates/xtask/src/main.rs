@@ -5,6 +5,7 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, ExitCode};
+mod worker_package;
 
 fn main() -> ExitCode {
     match run() {
@@ -25,22 +26,28 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command] if ["check-portable", "verify-portable"].contains(&command.as_str()) => {
             verify(true)?
         }
-        _ => return Err("expected `cargo xtask check` or `cargo xtask verify` (or --help)".into()),
+        [command] if command == "verify-worker-package" => {
+            worker_package::verify(workspace_root()?)?
+        }
+        _ => return Err("expected a cargo xtask verification command (or --help)".into()),
     }
     Ok(())
 }
 
 fn help() {
     println!(
-        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, route handlers and task tooling; native Linux host acceptance is separate."
+        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability."
     );
 }
 
-fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn workspace_root() -> Result<&'static Path, Box<dyn Error>> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
-        .ok_or("xtask is not inside the workspace crates directory")?;
+        .ok_or_else(|| "xtask is not inside the workspace crates directory".into())
+}
+fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
+    let root = workspace_root()?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     step(&cargo, &["fmt", "--all", "--check"], root)?;
     let packages: &[&str] = if portable {
@@ -68,13 +75,17 @@ fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
 }
 
 fn step(program: &OsStr, arguments: &[&str], root: &Path) -> Result<(), Box<dyn Error>> {
-    eprintln!("+ cargo {}", arguments.join(" "));
-    let status = Command::new(program)
-        .args(arguments)
-        .current_dir(root)
-        .status()?;
+    run_command(Command::new(program).args(arguments).current_dir(root))
+}
+fn run_command(command: &mut Command) -> Result<(), Box<dyn Error>> {
+    eprintln!(
+        "+ {:?} {:?}",
+        command.get_program(),
+        command.get_args().collect::<Vec<_>>()
+    );
+    let status = command.status()?;
     if !status.success() {
-        return Err(format!("cargo {} failed: {status}", arguments.join(" ")).into());
+        return Err(format!("{:?} failed: {status}", command.get_program()).into());
     }
     Ok(())
 }

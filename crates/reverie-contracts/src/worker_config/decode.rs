@@ -1,0 +1,276 @@
+use super::value::{Node, Number, Text, Value};
+use super::{EffectiveWorkerConfig, WorkerConfigError as Error};
+use serde_json::value::RawValue;
+use std::collections::BTreeMap;
+
+enum Phase {
+    First,
+    Value,
+    Colon,
+    Next,
+}
+enum Frame {
+    Array {
+        values: Vec<Value>,
+        phase: Phase,
+    },
+    Object {
+        values: BTreeMap<Text, Value>,
+        key: Option<Text>,
+        phase: Phase,
+    },
+}
+enum Action {
+    Ready(Value),
+    Push(Frame),
+    Close,
+    Continue,
+}
+struct Cursor<'a> {
+    source: &'a str,
+    offset: usize,
+}
+
+/// Decode Python JSON data for the legacy effective-worker hash format. JSON
+/// duplicates are refused at every depth, including equivalent escaped keys.
+/// This does not run worker validation or any filesystem/host projection.
+pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, Error> {
+    let source = std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+    let mut cursor = Cursor { source, offset: 0 };
+    let root = parse(&mut cursor)?;
+    cursor.whitespace();
+    if cursor.offset != source.len() {
+        return Err(Error::InvalidJson);
+    }
+    if !matches!(root.0, Node::Object(_)) {
+        return Err(Error::ExpectedObject);
+    }
+    Ok(EffectiveWorkerConfig(root))
+}
+fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut action = cursor.start()?;
+    loop {
+        match action {
+            Action::Ready(value) => match frames.last_mut() {
+                Some(frame) => frame.attach(value)?,
+                None => return Ok(value),
+            },
+            Action::Push(frame) => frames.push(frame),
+            Action::Close => {
+                let value = match frames.pop().ok_or(Error::InvalidJson)? {
+                    Frame::Array { values, .. } => Value(Node::Array(values)),
+                    Frame::Object { values, .. } => Value(Node::Object(values)),
+                };
+                action = Action::Ready(value);
+                continue;
+            }
+            Action::Continue => {}
+        }
+        action = frames.last_mut().ok_or(Error::InvalidJson)?.step(cursor)?;
+    }
+}
+impl Frame {
+    fn attach(&mut self, value: Value) -> Result<(), Error> {
+        match self {
+            Self::Array { values, phase } => {
+                values.push(value);
+                *phase = Phase::Next;
+            }
+            Self::Object { values, key, phase } => {
+                let key = key.take().ok_or(Error::InvalidJson)?;
+                if values.insert(key, value).is_some() {
+                    return Err(Error::DuplicateKey);
+                }
+                *phase = Phase::Next;
+            }
+        }
+        Ok(())
+    }
+    fn step(&mut self, cursor: &mut Cursor<'_>) -> Result<Action, Error> {
+        cursor.whitespace();
+        match self {
+            Self::Array { phase, .. } => match phase {
+                Phase::First if cursor.take(b']') => Ok(Action::Close),
+                Phase::First | Phase::Value => cursor.start(),
+                Phase::Next => next(cursor, b']', phase),
+                Phase::Colon => Err(Error::InvalidJson),
+            },
+            Self::Object { key, phase, .. } => match phase {
+                Phase::First if cursor.take(b'}') => Ok(Action::Close),
+                Phase::First | Phase::Value => {
+                    *key = Some(cursor.string()?);
+                    *phase = Phase::Colon;
+                    Ok(Action::Continue)
+                }
+                Phase::Colon => {
+                    if !cursor.take(b':') {
+                        return Err(Error::InvalidJson);
+                    }
+                    cursor.start()
+                }
+                Phase::Next => next(cursor, b'}', phase),
+            },
+        }
+    }
+}
+fn next(cursor: &mut Cursor<'_>, closing: u8, phase: &mut Phase) -> Result<Action, Error> {
+    if cursor.take(closing) {
+        return Ok(Action::Close);
+    }
+    if !cursor.take(b',') {
+        return Err(Error::InvalidJson);
+    }
+    *phase = Phase::Value;
+    Ok(Action::Continue)
+}
+impl Cursor<'_> {
+    fn whitespace(&mut self) {
+        while self
+            .source
+            .as_bytes()
+            .get(self.offset)
+            .is_some_and(|b| b" \n\t\r".contains(b))
+        {
+            self.offset += 1;
+        }
+    }
+    fn take(&mut self, byte: u8) -> bool {
+        if self.source.as_bytes().get(self.offset) == Some(&byte) {
+            self.offset += 1;
+            true
+        } else {
+            false
+        }
+    }
+    fn start(&mut self) -> Result<Action, Error> {
+        self.whitespace();
+        let action = match self.source.as_bytes().get(self.offset) {
+            Some(b'{') => {
+                self.offset += 1;
+                Action::Push(Frame::Object {
+                    values: BTreeMap::new(),
+                    key: None,
+                    phase: Phase::First,
+                })
+            }
+            Some(b'[') => {
+                self.offset += 1;
+                Action::Push(Frame::Array {
+                    values: Vec::new(),
+                    phase: Phase::First,
+                })
+            }
+            Some(b'"') => Action::Ready(Value(Node::String(self.string()?))),
+            Some(b't') => self.literal("true", Node::Bool(true))?,
+            Some(b'f') => self.literal("false", Node::Bool(false))?,
+            Some(b'n') => self.literal("null", Node::Null)?,
+            Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
+            Some(b'I') => self.literal("Infinity", Node::Number(Number::PositiveInfinity))?,
+            Some(b'-' | b'0'..=b'9') => Action::Ready(Value(Node::Number(self.number()?))),
+            _ => return Err(Error::InvalidJson),
+        };
+        Ok(action)
+    }
+    fn literal(&mut self, literal: &str, node: Node) -> Result<Action, Error> {
+        if !self.source[self.offset..].starts_with(literal) {
+            return Err(Error::InvalidJson);
+        }
+        self.offset += literal.len();
+        Ok(Action::Ready(Value(node)))
+    }
+    fn number(&mut self) -> Result<Number, Error> {
+        let begin = self.offset;
+        if self.source[begin..].starts_with("-Infinity") {
+            self.offset += "-Infinity".len();
+            return Ok(Number::NegativeInfinity);
+        }
+        while self
+            .source
+            .as_bytes()
+            .get(self.offset)
+            .is_some_and(|b| b"0123456789-+.eE".contains(b))
+        {
+            self.offset += 1;
+        }
+        let text = &self.source[begin..self.offset];
+        serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
+        if !text.contains(['.', 'e', 'E']) {
+            return Ok(Number::Integer(
+                if text == "-0" { "0" } else { text }.to_owned(),
+            ));
+        }
+        let value: f64 = text.parse().map_err(|_| Error::InvalidJson)?;
+        if value == f64::INFINITY {
+            return Ok(Number::PositiveInfinity);
+        }
+        if value == f64::NEG_INFINITY {
+            return Ok(Number::NegativeInfinity);
+        }
+        Ok(Number::Float(value))
+    }
+    fn string(&mut self) -> Result<Text, Error> {
+        if !self.take(b'"') {
+            return Err(Error::InvalidJson);
+        }
+        let mut result = Vec::new();
+        loop {
+            let character = self.source[self.offset..]
+                .chars()
+                .next()
+                .ok_or(Error::InvalidJson)?;
+            self.offset += character.len_utf8();
+            match character {
+                '"' => return Ok(Text(result)),
+                '\\' => result.push(self.escape()?),
+                '\0'..='\u{1f}' => return Err(Error::InvalidJson),
+                _ => result.push(u32::from(character)),
+            }
+        }
+    }
+    fn escape(&mut self) -> Result<u32, Error> {
+        let byte = *self
+            .source
+            .as_bytes()
+            .get(self.offset)
+            .ok_or(Error::InvalidJson)?;
+        self.offset += 1;
+        match byte {
+            b'"' | b'\\' | b'/' => Ok(u32::from(byte)),
+            b'b' => Ok(8),
+            b'f' => Ok(12),
+            b'n' => Ok(10),
+            b'r' => Ok(13),
+            b't' => Ok(9),
+            b'u' => self.unicode_escape(),
+            _ => Err(Error::InvalidJson),
+        }
+    }
+    fn unicode_escape(&mut self) -> Result<u32, Error> {
+        let high = self.hex_unit()?;
+        if !(0xd800..=0xdbff).contains(&high) || !self.source[self.offset..].starts_with("\\u") {
+            return Ok(high);
+        }
+        let previous = self.offset;
+        self.offset += 2;
+        let low = self.hex_unit()?;
+        if (0xdc00..=0xdfff).contains(&low) {
+            return Ok(0x10000 + ((high - 0xd800) << 10) + low - 0xdc00);
+        }
+        self.offset = previous;
+        Ok(high)
+    }
+    fn hex_unit(&mut self) -> Result<u32, Error> {
+        let bytes = self
+            .source
+            .as_bytes()
+            .get(self.offset..self.offset + 4)
+            .ok_or(Error::InvalidJson)?;
+        let mut value = 0;
+        for &byte in bytes {
+            value = value * 16 + char::from(byte).to_digit(16).ok_or(Error::InvalidJson)?;
+        }
+        self.offset += 4;
+        Ok(value)
+    }
+}

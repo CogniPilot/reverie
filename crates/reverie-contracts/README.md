@@ -1,4 +1,4 @@
-# Profile v1 compatibility codec
+# Named compatibility codecs
 
 `profiles_v1` implements the closed
 `reverie-employee-resource-profiles-v1` document and single-profile encoding used
@@ -22,6 +22,30 @@ no owner permission, store custody or native completion authority.
 Interop tests use independently produced synthetic Python byte/hash fixtures,
 500 valid CPU float witnesses, malformed schemas and legacy encoding cases.
 The [fixture notes](tests/fixtures/README.md) describe the scope and provenance.
+
+`worker_config` owns the separate legacy effective-worker hash input used by
+`worker.py::create_args` and `worker_resources.py::policy_digest`. It emits sorted
+ASCII JSON with Python's default `, ` and `: ` separators. `WorkerConfigDigest`
+includes the entire effective object; `WorkerPolicyDigest` excludes only its
+top-level `image`, `maintenanceSessions` and `opsConfig` keys. Nested keys with
+those names remain included. Missing, null and empty values remain distinct.
+
+The decoder accepts a duplicate-free Python JSON object as already projected
+configuration **data**. It does not validate the worker schema, read host facts,
+run effective-config projections or approve any effect. It preserves arbitrary
+decimal integer precision, integer/float identity, signed float zero, Unicode
+codepoint key ordering and escaped lone surrogates. Those distinctions matter:
+accepted disabled-rootless configuration slots can contain unconstrained JSON,
+and some accepted legacy path strings need not be Unicode scalar strings.
+Python's legacy `NaN`, `Infinity` and `-Infinity` spellings (including exponent
+overflow to infinity) remain hashable data here because disabled-rootless slots
+accept them. Strict profile/resource and wire validators remain unchanged.
+Parsing, writing and cleanup use iterative traversal instead of imposing a new
+shallow nesting bound. Duplicate keys are explicitly refused; the existing
+legacy reader may accept them, so this codec is not its replacement without the
+owning migration's validation. Input text is UTF-8, matching the
+worker config's `Path.read_text()` followed by `json.loads`; profile byte-encoding
+detection is intentionally confined to `profiles_v1`.
 
 # Subscription profiles v1 JS codec
 

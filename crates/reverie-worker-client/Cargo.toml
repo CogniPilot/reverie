@@ -1,0 +1,19 @@
+[package]
+name = "reverie-worker-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "reverie-worker-exec"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

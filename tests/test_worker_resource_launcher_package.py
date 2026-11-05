@@ -43,24 +43,24 @@ class ResourceClientPackageTests(unittest.TestCase):
             'REVERIE_WORKER_SOCKET': str(self.socket_path),
         }
 
-    def test_manifest_pins_real_immutable_interpreter_and_entry(self):
+    def test_manifest_pins_real_immutable_native_client(self):
         value = self.manifest
         self.assertEqual(set(value), {
-            'version', 'purpose', 'pythonInvocation', 'pythonExecutable',
-            'entry', 'entrySHA256', 'argvPrefix',
+            'version', 'purpose', 'executable', 'executableSHA256', 'argvPrefix', 'brokerWireVersion',
         })
-        self.assertEqual(value['version'], 1)
-        self.assertEqual(value['purpose'], 'resource-replacement-client-v1')
-        executable, entry = Path(value['pythonExecutable']), Path(value['entry'])
-        for path in (executable, entry):
-            self.assertEqual(path.resolve(strict=True), path)
-            self.assertTrue(str(path).startswith('/nix/store/'))
-            self.assertFalse(path.stat().st_mode & 0o222)
-        self.assertEqual(Path(value['pythonInvocation']).resolve(strict=True), executable)
+        self.assertIs(type(value['version']), int)
+        self.assertEqual(value['version'], 2)
+        self.assertEqual(value['purpose'], 'resource-replacement-native-client-v2')
+        self.assertIs(type(value['brokerWireVersion']), int)
+        self.assertEqual(value['brokerWireVersion'], 1)
+        executable = Path(value['executable'])
+        self.assertEqual(executable.resolve(strict=True), executable)
+        self.assertTrue(str(executable).startswith('/nix/store/'))
+        self.assertFalse(executable.stat().st_mode & 0o222)
         with executable.open('rb') as stream:
             self.assertEqual(stream.read(4), b'\x7fELF')
-        self.assertEqual(hashlib.sha256(entry.read_bytes()).hexdigest(), value['entrySHA256'])
-        self.assertEqual(self.prefix, [value['pythonInvocation'], '-I', '-B', str(entry), 'client'])
+        self.assertEqual(hashlib.sha256(executable.read_bytes()).hexdigest(), value['executableSHA256'])
+        self.assertEqual(self.prefix, [str(executable)])
 
     def test_standalone_help_ignores_ambient_cwd_and_python_settings(self):
         result = subprocess.run(self.prefix + ['--help'], cwd=self.poison, env=self.env,
@@ -69,6 +69,24 @@ class ResourceClientPackageTests(unittest.TestCase):
         self.assertIn(b'--session-id', result.stdout)
         self.assertFalse(self.marker.exists())
         self.assertFalse(self.socket_path.exists())
+
+    def test_runtime_consumer_requires_the_exact_native_manifest_pair(self):
+        from reverie.worker_resource_actor import _client_program, _program
+        raw = Path(MANIFEST).read_bytes()
+        pair = {'path': MANIFEST, 'sha256': hashlib.sha256(raw).hexdigest()}
+        program = _client_program(pair)
+        self.assertEqual(program.executable, self.manifest['executable'])
+        self.assertEqual(program.argv, tuple(self.prefix))
+        with self.assertRaises(ValueError):
+            _client_program({**pair, 'sha256': '0'*64})
+        copied = self.root/'copied-manifest.json'
+        copied.write_bytes(raw); copied.chmod(0o444)
+        with self.assertRaises(ValueError):
+            _client_program({**pair, 'path': str(copied)})
+        for argv in ([*self.prefix, 'client'], [*self.prefix, '--resource-ref'],
+                     [self.prefix[0], '-I', '-B', '/nix/store/old/worker.py', 'client']):
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                _program({'executable': program.executable, 'argv': argv}, True)
 
     @staticmethod
     def receive(connection):
@@ -86,7 +104,7 @@ class ResourceClientPackageTests(unittest.TestCase):
             raise ValueError('Qualification frame bound exceeded')
         return header[:1], exact(length)
 
-    def test_private_launcher_has_exact_actual_elf_argv_and_resource_frame(self):
+    def _qualify_private_launcher(self):
         reference, sid = str(uuid.uuid4()), str(uuid.uuid4())
         command = 'resource-package-qualification-never-executed'
         arguments = ['--resource-ref', reference, '--session-id', sid,
@@ -119,7 +137,7 @@ class ResourceClientPackageTests(unittest.TestCase):
                     self.assertEqual((pid, uid, gid), (child.pid, os.getuid(), os.getgid()))
                     proc = Path('/proc') / str(pid)
                     self.assertEqual(str((proc / 'exe').resolve(strict=True)),
-                                     self.manifest['pythonExecutable'])
+                                     self.manifest['executable'])
                     actual = (proc / 'cmdline').read_bytes().split(b'\0')
                     self.assertEqual([value.decode() for value in actual if value],
                                      self.prefix + arguments)
@@ -149,6 +167,16 @@ class ResourceClientPackageTests(unittest.TestCase):
                     except subprocess.TimeoutExpired:
                         child.kill()
                         child.communicate(timeout=5)
+
+    def test_private_launcher_has_exact_actual_elf_argv_and_resource_frame(self):
+        self._qualify_private_launcher()
+
+    def test_path_alias_normalizes_to_the_same_actual_elf_and_canonical_argv(self):
+        alias = self.root/'reverie-worker-alias'
+        alias.symlink_to(self.launcher)
+        self.launcher = alias.name
+        self.env['PATH'] = str(self.root)
+        self._qualify_private_launcher()
 
     def test_malformed_private_requests_refuse_before_a_socket_connection(self):
         valid = str(uuid.uuid4())

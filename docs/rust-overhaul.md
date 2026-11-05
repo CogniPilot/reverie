@@ -52,11 +52,24 @@ ability to use scientific Python inside an employee laptop.
 | Backend application services | Current TypeScript owner/company/plan/resource services | Preserve documented HTTP envelopes, status/error codes, authentication, scoped grants and GUI behavior; one authoritative implementation per operation |
 | Numerical/model adapters and tooling | `embeddings.py`, `kokoro.py`, training adapters, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
 
-The narrow helper now has a Rust source/package replacement. Active laptop
-tooling and the shared xtask runner are the next bounded slices. The unused
+The narrow helper and active Cargo-default/build-job laptop tools now have Rust
+source/package replacements. The workspace uses the shared xtask runner, strict
+Clippy and file/spec/script-policy checks. The unused
 legacy supervisor was audited and retired rather than recreated as another
 control path. Every entry point needs an explicit active/opt-in/retired
 disposition; historical file counts are not a mandate to port dead code.
+
+The profile migration includes checked domain types, the existing v1 byte/hash
+codec and the private descriptor-anchored profile store. Its library consumers
+remain under migration: a profile snapshot alone does not replace configuration
+staging, admission, reservations, native effects or reconciliation. Staging must
+retain the real profile lock and current employee/storage/grant observations
+through its checks, and preserve the separate worker-policy digest format.
+The worker client replacement must cover terminal I/O, controls, resource launch
+references, telemetry and Goal custody, including streaming custody. Selecting a
+native resource client also requires coordinated protected manifests, bootstrap
+facts and image provenance; a Rust binary cannot inherit interpreter-shaped
+facts or bypass the existing supported activation workflow.
 
 The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
@@ -76,8 +89,11 @@ nix develop --command cargo xtask verify
 Use a task-specific `CARGO_TARGET_DIR` under temporary storage. Both Git and Nix
 exclude generated Cargo targets. Nix must package the same locked source that
 was tested, and CI checks the Rust workspace independently of image publishing.
-New first-party Python files and Python-shebang entry points are rejected by the
-Rust PR workflow while legacy implementations are being retired.
+New Python and shell scripts, including recognized interpreter shebangs and
+staged-index conversions, are rejected by the Rust PR workflow under SPEC_0008
+while legacy implementations are being retired. The portable gate exercises
+core/contracts/xtask on Linux, macOS and Windows; native host adapters have their
+separate Linux gate. Neither gate proves unported runtime paths are portable.
 
 Independent adversarial review is required for changed authorization and native
 effects. Cover malformed requests, revoked/stale authority, process/path swaps,
