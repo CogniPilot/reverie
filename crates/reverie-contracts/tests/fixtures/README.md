@@ -46,3 +46,8 @@ fallback identity is explicitly stubbed in those pure cases. The `staged` rows
 bind the six existing `broker-resource-staging.json` cases by index to actual
 `effective_config` bytes and both legacy hashes. These are format/behavior
 oracles, not evidence of live data migration or host permission.
+`posix-path-python-interop.json` records 106 actual pathlib.PurePosixPath
+normalizations/parents and 1,300 seeded join/descendant/overlap pairs. Codepoint
+arrays preserve lone surrogates and NUL without a JSON string decoder deciding
+their meaning. The fixtures qualify lexical data only, never native path
+existence, canonical control domains or mount permission.
