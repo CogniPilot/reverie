@@ -144,6 +144,83 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
+  function workerViewer(test: ReturnType<typeof harness>, reconnects: boolean) {
+    const candidate = test.sessions.get('new') as unknown as {
+      pid: number | null; workerViewerReconnect: boolean; reconnectWorkerViewer: ReturnType<typeof vi.fn>;
+    };
+    test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
+    candidate.pid = null; // The local viewer client dropped; the laptop agent keeps running.
+    candidate.workerViewerReconnect = true;
+    candidate.reconnectWorkerViewer = vi.fn(async (current: () => boolean) => {
+      if (!current() || !reconnects) return false;
+      candidate.pid = 124;
+      return true;
+    });
+    return candidate;
+  }
+
+  it('reattaches a dropped worker viewer during readiness instead of failing the move', async () => {
+    const test = harness();
+    await test.executor.create(input, undefined);
+    const candidate = workerViewer(test, true);
+    await test.executor.ready('new');
+    expect(candidate.reconnectWorkerViewer).toHaveBeenCalledTimes(1);
+    expect(test.sessions.get('new')?.writeViaMux).toHaveBeenCalledWith(input.handoff + '\r', expect.anything());
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a worker viewer that cannot be reattached by the deadline, or after authority ends', async () => {
+    for (const failure of ['deadline', 'authority']) {
+      const test = harness();
+      await test.executor.create(input, undefined);
+      const candidate = workerViewer(test, false);
+      let now = 0;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 30_000));
+      if (failure === 'authority') candidate.reconnectWorkerViewer.mockImplementation(async () => {
+        (test.runtime.authorized as ReturnType<typeof vi.fn>).mockReturnValue(false);
+        return false;
+      });
+      try {
+        await expect(test.executor.ready('new')).rejects.toThrow(failure === 'deadline' ? 'pane exited' : 'sign-in expired');
+      } finally { clock.mockRestore(); }
+      expect(test.sessions.get('new')?.writeViaMux).not.toHaveBeenCalled();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses a reattach that only succeeds after the deadline or after the session was replaced', async () => {
+    for (const failure of ['late', 'replaced']) {
+      const test = harness();
+      await test.executor.create(input, undefined);
+      const candidate = workerViewer(test, true);
+      let now = 0;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      candidate.reconnectWorkerViewer.mockImplementation(async () => {
+        candidate.pid = 124; // The viewer and composer are ready, but too late or on a stale object.
+        if (failure === 'late') now = 90_000;
+        else test.sessions.set('new', { ...test.sessions.get('new')! } as never);
+        return true;
+      });
+      try {
+        await expect(test.executor.ready('new')).rejects.toThrow(failure === 'late' ? 'before the deadline' : 'session changed');
+      } finally { clock.mockRestore(); }
+      expect(candidate.reconnectWorkerViewer).toHaveBeenCalledTimes(1);
+      expect((candidate as unknown as Session).writeViaMux).not.toHaveBeenCalled();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    }
+  });
+
+  it('never reattaches an ordinary candidate whose pane exited', async () => {
+    const test = harness();
+    await test.executor.create(input, undefined);
+    const candidate = test.sessions.get('new') as unknown as { pid: number | null; reconnectWorkerViewer: ReturnType<typeof vi.fn> };
+    test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
+    candidate.pid = null;
+    candidate.reconnectWorkerViewer = vi.fn(async () => true);
+    await expect(test.executor.ready('new')).rejects.toThrow('pane exited');
+    expect(candidate.reconnectWorkerViewer).not.toHaveBeenCalled();
+  });
+
   it('reserves cross-provider metadata through the normal API without starting its CLI', async () => {
     const test = harness();
     test.runtime.plans.account = vi.fn(async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);

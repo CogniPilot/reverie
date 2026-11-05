@@ -285,7 +285,8 @@ export class PlanMoveRequests {
         if (record.owner === owner && record.employeeId === input.employeeId) {
           await this.current(record);
           if (active(record.phase))
-            throw new PlanMoveError('This expert already has a pending move request or execution');
+            throw new PlanMoveError('This expert already has a pending move request or execution', 409,
+              { id: record.id, action: 'inspect-existing' });
         }
       const snapshot = await execution.executor.snapshot(input.employeeId, owner, input.purpose);
       if (snapshot.sessionId !== input.sessionId || (input.purpose === 'runtime-refresh'

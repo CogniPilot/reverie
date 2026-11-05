@@ -43,6 +43,26 @@ async function journal(h: ReturnType<typeof fixture>) {
 }
 const expected = { oldSession: 'source', newSession: 'destination', toAccount: 'target' };
 
+describe('refusals name the hold they hit', () => {
+  it('gives the id to its own owner and a typed, id-free blocker to anyone else', async () => {
+    const h = fixture();
+    h.record.owner = 'first-owner';
+    const j = await journal(h);
+    await expect(j.moves.assertAvailable('expert', 'first-owner'))
+      .rejects.toMatchObject({ blocker: { id: 'existing', action: 'inspect-existing' } });
+    const other = await j.moves.assertAvailable('expert', 'second-owner').catch((error: unknown) => error);
+    expect(other).toMatchObject({ status: 409, blocker: { action: 'inspect-journal', scope: 'other-owner' } });
+    expect(JSON.stringify((other as { blocker: unknown }).blocker)).not.toContain('existing');
+  });
+  it('types a hold that has no open journal record instead of refusing without a reason', async () => {
+    const h = fixture(), j = await journal(h);
+    await j.moves.resolve('existing', expected, undefined, j.actor.executor);
+    (j.moves as unknown as { locked: Set<string> }).locked.add('expert'); // As while a new move is being prepared.
+    await expect(j.moves.assertAvailable('expert'))
+      .rejects.toMatchObject({ status: 409, blocker: { action: 'inspect-journal', scope: 'unrecorded' } });
+  });
+});
+
 describe('current holder own existing plan recovery', () => {
   it('uses the real runtime verifier and durable ACK, then remains unlocked after journal reload without launches', async () => {
     const h = fixture(), j = await journal(h);

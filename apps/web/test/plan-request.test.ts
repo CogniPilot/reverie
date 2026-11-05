@@ -204,7 +204,8 @@ describe('expert-approved plan requests', () => {
       'destination'
     );
     await h.service.create(h.input, 'owner', h.execution);
-    await expect(h.service.create({ ...h.input, id: 'another' }, 'owner', h.execution)).rejects.toThrow('pending');
+    await expect(h.service.create({ ...h.input, id: 'another' }, 'owner', h.execution)).rejects.toMatchObject({
+      message: expect.stringContaining('pending'), status: 409, blocker: { id: 'request', action: 'inspect-existing' } });
     await expect(h.service.create({ ...h.input, toAccount: 'foreign' }, 'owner', h.execution)).rejects.toThrow(
       'identifier'
     );
