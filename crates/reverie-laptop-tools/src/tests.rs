@@ -1,7 +1,7 @@
 use super::*;
-use crate::cargo::{MergeError, MergeOutcome, test_merge};
+use crate::cargo::{MergeError, MergeOutcome, test_merge, test_merge_with_anchor_close_failure};
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -42,6 +42,14 @@ impl Drop for Tree {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.root).unwrap();
     }
+}
+
+fn inode_is_held(original: &fs::Metadata) -> bool {
+    fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .flatten()
+        .filter_map(|entry| fs::metadata(entry.path()).ok())
+        .any(|held| held.dev() == original.dev() && held.ino() == original.ino())
 }
 
 #[test]
@@ -319,6 +327,72 @@ fn cooperating_parallel_call_is_refused_without_changing_config() {
         Ok(MergeOutcome::Merged)
     );
     assert_eq!(tree.leftovers(), 0);
+}
+
+#[test]
+fn unlinked_prepared_inode_remains_pinned_until_foreign_leaf_cleanup_finishes() {
+    let tree = Tree::new();
+    tree.write("# owner original\n");
+    let result = test_merge(&tree.root, || {
+        let temporary = fs::read_dir(tree.cargo())
+            .unwrap()
+            .flatten()
+            .find(|entry| entry.file_name().to_string_lossy().starts_with(".config-"))
+            .unwrap()
+            .path();
+        let original = fs::metadata(&temporary).unwrap();
+        fs::remove_file(&temporary).unwrap();
+        assert!(
+            inode_is_held(&original),
+            "the retired prepared inode must remain pinned against inode-number reuse"
+        );
+        fs::write(&temporary, "# foreign replacement\n").unwrap();
+    });
+    assert_eq!(result, Err(MergeError::Changed));
+    assert_eq!(
+        fs::read_to_string(tree.config()).unwrap(),
+        "# owner original\n"
+    );
+    assert_eq!(tree.leftovers(), 1);
+    let replacement = fs::read_dir(tree.cargo())
+        .unwrap()
+        .flatten()
+        .find(|entry| entry.file_name().to_string_lossy().starts_with(".config-"))
+        .unwrap()
+        .path();
+    assert_eq!(
+        fs::read_to_string(replacement).unwrap(),
+        "# foreign replacement\n"
+    );
+}
+
+#[test]
+fn anchor_close_failure_refuses_prepublication_and_reports_postpublication_uncertainty() {
+    for changed in [false, true] {
+        let tree = Tree::new();
+        tree.write("# owner original\n");
+        let result = test_merge_with_anchor_close_failure(&tree.root, || {
+            if changed {
+                fs::write(tree.config(), "# owner edited\n").unwrap();
+            }
+        });
+        assert_eq!(
+            result,
+            Err(if changed {
+                MergeError::Io
+            } else {
+                MergeError::Unconfirmed
+            })
+        );
+        let actual = fs::read_to_string(tree.config()).unwrap();
+        if changed {
+            assert_eq!(actual, "# owner edited\n");
+        } else {
+            assert!(actual.contains("build-dir"));
+        }
+        assert_eq!(tree.leftovers(), 0);
+        assert!(!inode_is_held(&fs::metadata(tree.config()).unwrap()));
+    }
 }
 
 #[test]

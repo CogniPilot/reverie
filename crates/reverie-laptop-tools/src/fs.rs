@@ -186,6 +186,9 @@ impl Directory {
             0o600,
         )
     }
+    pub(super) fn pin(&self, name: &str) -> io::Result<File> {
+        open_at(self.0.as_raw_fd(), OsStr::new(name), libc::O_PATH, 0)
+    }
     pub(super) fn lock(&self) -> io::Result<()> {
         // SAFETY: flock changes only the advisory lock on this live directory descriptor.
         if unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
