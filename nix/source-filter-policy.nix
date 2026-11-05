@@ -15,6 +15,7 @@ let
   under = root: relative == root || lib.hasPrefix "${root}/" relative;
   metadata = builtins.any (part: builtins.elem part [ ".git" ".hg" ".svn" ]) parts;
   pythonCache = builtins.any (part: builtins.elem part [ "__pycache__" ".pytest_cache" ".mypy_cache" ".ruff_cache" ]) parts;
+  rustTarget = lib.hasPrefix "crates/" relative && builtins.elem "target" parts;
   rootResultLink = type == "symlink" && !(lib.hasInfix "/" relative)
     && (relative == "result" || lib.hasPrefix "result-" relative);
-in !(metadata || pythonCache || rootResultLink || builtins.any under generated)
+in !(metadata || pythonCache || rustTarget || rootResultLink || builtins.any under generated)

@@ -325,6 +325,13 @@ with reclaim pressure and a hard aggregate ceiling, allowing idle laptops to len
 (threads count), so orphaned or runaway tools cannot fill the console's process
 table. Optional per-worker CPU and memory caps remain available.
 
+In admission mode, optional employee soft-memory and swap policies supplement
+the hard ceilings and admission budget. A soft limit controls reclaim pressure;
+it does not expand the pool or remove a hard cap. The root helper requires its
+separate supported host installation before these policies can be applied.
+The [owner operations architecture](owner-operations.md) describes the target
+GUI/API workflow and the remaining installation and rollout gaps.
+
 Prepare a migration of the current bind-mounted Docker deployment with:
 
 ```bash

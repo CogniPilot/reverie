@@ -8,12 +8,10 @@ import socket
 import tempfile
 import threading
 import time
-import types
 import unittest
 from unittest.mock import patch
 
 from reverie import worker_memory_authority as A
-from reverie import soft_limit_helper as H
 from reverie import worker_memory as M
 
 SID = '11111111-1111-4111-8111-111111111111'
@@ -356,79 +354,6 @@ class SelectAndApplyTests(unittest.TestCase):
         with self.assertRaises(A.Refused):
             A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
         self.assertEqual((other / 'memory.high').read_text(), 'max\n')
-
-
-class HelperServeTests(unittest.TestCase):
-    def serve(self, tree, raw=None, uid=None, inspector=None):
-        server, client = socket.socketpair()
-        self.addCleanup(server.close)
-        self.addCleanup(client.close)
-        client.sendall(raw if raw is not None else request())
-        pins = types.SimpleNamespace(broker_uid=os.getuid() if uid is None else uid, deployment='reverie',
-                                     engine='/nix/store/x-docker/bin/docker', endpoint='unix:///run/docker.sock',
-                                     policy='/etc/reverie/soft-limit-policy.json', state_root=str(tree.state))
-        pins.policy = str(tree.write_policy())
-        reply = H.serve(server, pins, cgroup=tree.cgroup, proc=tree.proc, load_policy=tree.loader(),
-                        inspector=inspector or (lambda *_: copy.deepcopy(tree.row)))
-        self.assertEqual(json.loads(client.recv(1024)), reply)
-        return reply
-
-    def test_authorized_request_applies_only_policy_value(self):
-        tree = Tree(self, high=2048)
-        self.assertEqual(self.serve(tree), {'ok': True, 'memoryHighBytes': 2048 * MIB})
-        self.assertEqual(tree.high(), str(2048 * MIB))
-
-    def test_wrong_peer_uid_is_refused_before_reading(self):
-        tree = Tree(self)
-        self.assertEqual(self.serve(tree, uid=os.getuid() + 1), {'ok': False, 'code': 'PEER_REFUSED'})
-        self.assertEqual(tree.high(), 'max')
-
-    def test_unqualified_kernel_refuses_with_zero_writes_even_if_open_would_succeed(self):
-        tree = Tree(self)
-        (tree.proc / 'sys/kernel/osrelease').write_text('6.12.0\n')
-        opened = []
-        real_open = os.open
-        def watch(path, flags, *args, **kwargs):
-            if path == 'memory.high' and flags & os.O_WRONLY:
-                opened.append(path)
-            return real_open(path, flags, *args, **kwargs)
-        with patch.object(A.os, 'open', watch):
-            self.assertEqual(self.serve(tree), {'ok': False, 'code': 'KERNEL_UNQUALIFIED'})
-        self.assertEqual((opened, tree.high()), ([], 'max'))
-
-    def test_identity_change_before_write_refuses_and_after_write_is_unconfirmed(self):
-        moved_row = lambda tree: {**copy.deepcopy(tree.row), 'State': {'Running': True, 'Pid': 4343}}
-        tree = Tree(self)  # Initial inspection, then a changed pre-write fence: refused, nothing written.
-        rows = [copy.deepcopy(tree.row)]
-        reply = self.serve(tree, inspector=lambda *_: rows.pop(0) if rows else moved_row(tree))
-        self.assertEqual((reply, tree.high()), ({'ok': False, 'code': 'IDENTITY_MISMATCH'}, 'max'))
-        tree = Tree(self)  # Initial and pre-write match; the post-write fence changes: unconfirmed.
-        rows = [copy.deepcopy(tree.row), copy.deepcopy(tree.row)]
-        reply = self.serve(tree, inspector=lambda *_: rows.pop(0) if rows else moved_row(tree))
-        self.assertEqual(reply, {'ok': False, 'code': 'EFFECT_UNCONFIRMED'})
-
-    def test_fragmented_request_cannot_extend_the_fixed_read_deadline(self):
-        server, client = socket.socketpair()
-        self.addCleanup(server.close)
-        self.addCleanup(client.close)
-        def dribble():
-            for _ in range(8):
-                time.sleep(0.3)
-                try:
-                    client.sendall(b' ')
-                except OSError:
-                    return
-        threading.Thread(target=dribble, daemon=True).start()
-        began = time.monotonic()
-        with self.assertRaises(A.Refused):
-            H.read_request(server, time.monotonic() + H.TOTAL_SECONDS)
-        self.assertLess(time.monotonic() - began, H.READ_SECONDS + 0.5)
-
-    def test_malformed_request_and_second_request_are_refused(self):
-        tree = Tree(self)
-        self.assertEqual(self.serve(tree, raw=request(extra=1)), {'ok': False, 'code': 'REQUEST_INVALID'})
-        self.assertEqual(self.serve(tree, raw=request() + request()), {'ok': False, 'code': 'REQUEST_INVALID'})
-        self.assertEqual(tree.high(), 'max')
 
 
 class BrokerClientTests(unittest.TestCase):

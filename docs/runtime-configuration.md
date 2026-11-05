@@ -99,9 +99,6 @@ automatic room replies rather than falling back to a local guess.
 - `reverie.sleep` takes `--policy`; all chat database, state, instance and employee
   selection values are supplied by that private policy. `examples/sleep.json` is
   dry-run only, with a generic instance path and a synthetic employee identifier.
-- `reverie.supervise` takes `--state`, optional `--rollback-dist` and `--env-root`.
-  `REVERIE_RUNTIME_POLICY` is the only child.env override allowed and must resolve
-  to a regular file strictly within the supplied environment root.
 
 `scripts/reverie-restore` requires `--rescue DIR` or `REVERIE_RESCUE_DIR`
 (default empty), pointing at the owner-selected recovery snapshot.

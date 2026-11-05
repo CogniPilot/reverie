@@ -37,11 +37,7 @@ rec {
     text = ''exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -I -B ${workerBrokerSource}/python/reverie/worker.py broker "$@"'';
   };
   # Root soft-limit helper: one connection per instance, immutable source, no broker configuration.
-  softLimitHelper = pkgs.writeShellApplication {
-    name = "reverie-soft-limit-helper";
-    runtimeInputs = [ ];
-    text = ''exec ${pkgs.python3}/bin/python3 -I -B -c 'import sys; sys.path.insert(0, "${workerBrokerSource}/python"); from reverie.soft_limit_helper import main; sys.exit(main())' "$@"'';
-  };
+  softLimitHelper = import ./soft-limit-helper.nix { inherit pkgs src; };
   workerServiceCheck = pkgs.writeShellApplication {
     name = "reverie-worker-service-check";
     runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
