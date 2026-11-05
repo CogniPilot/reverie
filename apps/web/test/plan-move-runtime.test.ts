@@ -188,6 +188,28 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     }
   });
 
+  it('refuses a reattach that only succeeds after the deadline or after the session was replaced', async () => {
+    for (const failure of ['late', 'replaced']) {
+      const test = harness();
+      await test.executor.create(input, undefined);
+      const candidate = workerViewer(test, true);
+      let now = 0;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      candidate.reconnectWorkerViewer.mockImplementation(async () => {
+        candidate.pid = 124; // The viewer and composer are ready, but too late or on a stale object.
+        if (failure === 'late') now = 90_000;
+        else test.sessions.set('new', { ...test.sessions.get('new')! } as never);
+        return true;
+      });
+      try {
+        await expect(test.executor.ready('new')).rejects.toThrow(failure === 'late' ? 'before the deadline' : 'session changed');
+      } finally { clock.mockRestore(); }
+      expect(candidate.reconnectWorkerViewer).toHaveBeenCalledTimes(1);
+      expect((candidate as unknown as Session).writeViaMux).not.toHaveBeenCalled();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    }
+  });
+
   it('never reattaches an ordinary candidate whose pane exited', async () => {
     const test = harness();
     await test.executor.create(input, undefined);

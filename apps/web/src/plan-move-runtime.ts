@@ -399,7 +399,12 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           if (current.workerViewerReconnect === true && Date.now() < deadline &&
             (!current.pid || runtime.mux.isPaneDead(current.muxName))) {
             await current.reconnectWorkerViewer(stillCurrent);
+            // The repair may outlast the deadline or race a session replacement; never accept either.
             assertAuthorized();
+            if (runtime.sessions.get(id) !== current)
+              throw new PlanMoveError('The candidate session changed during readiness');
+            if (Date.now() >= deadline)
+              throw new PlanMoveError('The replacement did not reach its composer before the deadline');
             if (!current.pid || runtime.mux.isPaneDead(current.muxName)) {
               await delay(500);
               continue;
