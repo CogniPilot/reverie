@@ -200,6 +200,11 @@ class CanonicalMemoryLaunchTests(unittest.TestCase):
         self.pipeline = CanonicalResourceLaunch()
         self.pipeline.setUp()
         self.addCleanup(self.pipeline.doCleanups)
+        budget = self.pipeline.broker.check_creation_budget
+        # The canonical broker and reservation observer must read the same
+        # owned kernel fixture, never the CI runner's real swap capacity.
+        self.pipeline.broker.check_creation_budget = lambda sid, resources: budget(
+            sid, resources, proc_root=self.pipeline.f.proc)
 
     def test_real_canonical_launch_sets_high_before_any_agent_child(self):
         pipeline = self.pipeline
@@ -210,6 +215,14 @@ class CanonicalMemoryLaunchTests(unittest.TestCase):
         leaf = pipeline.f.cgroup / 'fixture-125'
         self.assertEqual((leaf / 'memory.high').read_text().strip(), str(1024 * M.MIB))
         self.assertEqual((leaf / 'memory.swap.max').read_text().strip(), str(2048 * M.MIB))
+
+    def test_zero_fixture_swap_refuses_before_any_agent_child(self):
+        meminfo = self.pipeline.f.proc / 'meminfo'
+        meminfo.write_text('MemTotal: 16777216 kB\nMemAvailable: 12582912 kB\nSwapTotal: 0 kB\n')
+        kind, body = self.pipeline.run_request()
+        self.assertEqual(kind, b'E')
+        self.assertIn(b'Laptop swap pool exceeds actual host swap capacity', body)
+        self.assertEqual(self.pipeline.events, [])
 
     def test_controller_write_refusal_prevents_the_agent_child(self):
         import os
