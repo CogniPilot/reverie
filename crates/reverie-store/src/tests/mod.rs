@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod failures;
+mod locked_read;
 mod storage;
 mod threaded;
 
