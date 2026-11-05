@@ -247,13 +247,13 @@ class LaptopTarget:
         self.relative = Path(self.groups[0][4:])
         need(str(self.relative) != '.' and not self.relative.is_absolute() and '..' not in self.relative.parts,
              'IDENTITY_MISMATCH')
-        fd = None
+        fd = None  # The one fd this walk owns at any moment.
         try:
             fd = os.open(self.cgroup, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
             for part in self.relative.parts:
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-                os.close(fd)
-                fd = child
+                parent, fd = fd, child  # Ownership moves to the child before the parent is released.
+                os.close(parent)  # Attempted once; a failure is never retried.
             leaf = os.fstat(fd)
         except OSError:
             if fd is not None:

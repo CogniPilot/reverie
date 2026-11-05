@@ -270,6 +270,48 @@ class SelectAndApplyTests(unittest.TestCase):
         target.close()
         self.assertEqual(self.open_fds(), before)
 
+    def test_parent_close_failure_releases_the_child_once_and_never_retries(self):
+        tree = Tree(self)
+        before = self.open_fds()
+        real_open, real_close = os.open, os.close
+        opened, closed, failed = [], [], []
+        def opener(path, flags, *args, **kwargs):
+            fd = real_open(path, flags, *args, **kwargs)
+            opened.append((path, fd))
+            return fd
+        def closer(fd):
+            closed.append(fd)
+            real_close(fd)
+            if not failed and len(opened) == 2 and fd == opened[0][1]:
+                failed.append(fd)  # The parent was released by the kernel, but close reports an error.
+                raise OSError(5, 'parent close failed')
+        with patch.object(A.os, 'open', opener), patch.object(A.os, 'close', closer), self.assertRaises(A.Refused) as caught:
+            A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
+        self.assertEqual(caught.exception.code, 'IDENTITY_MISMATCH')
+        child = opened[1][1]
+        self.assertEqual(closed.count(failed[0]), 1)  # One close attempt for the parent, never retried.
+        self.assertEqual(closed.count(child), 1)  # The acquired child is released exactly once.
+        self.assertFalse(any(path == 'memory.high' for path, _ in opened))  # No writer was opened.
+        self.assertEqual((tree.high(), self.open_fds()), ('max', before))
+
+    def test_failed_write_with_a_failing_leaf_close_stays_unconfirmed(self):
+        tree = Tree(self)
+        real_close = os.close
+        leaf_fds = []
+        real_init = A.LaptopTarget.__init__
+        def tracking_init(target, *args, **kwargs):
+            real_init(target, *args, **kwargs)
+            leaf_fds.append(target.fd)
+        def closer(fd):
+            real_close(fd)
+            if fd in leaf_fds:
+                raise OSError(5, 'leaf close failed')
+        def failing_write(fd, raw):
+            raise OSError(11, 'write failed')
+        with patch.object(A.LaptopTarget, '__init__', tracking_init), patch.object(A.os, 'close', closer), \
+                patch.object(A.os, 'write', failing_write), self.assertRaises(A.EffectUnconfirmed):
+            A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
+
     def test_leaf_close_failure_after_a_write_is_unconfirmed_and_success_releases_the_fd(self):
         tree = Tree(self)
         before = self.open_fds()
