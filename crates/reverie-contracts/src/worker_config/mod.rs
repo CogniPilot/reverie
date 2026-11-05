@@ -47,6 +47,11 @@ impl std::error::Error for WorkerConfigError {}
 /// Legacy nonfinite data spellings are preserved here, not admitted into resource
 /// policy types or strict wire schemas.
 pub struct EffectiveWorkerConfig(Value);
+impl Clone for EffectiveWorkerConfig {
+    fn clone(&self) -> Self {
+        Self(self.0.deep_clone())
+    }
+}
 impl EffectiveWorkerConfig {
     pub(crate) fn as_value(&self) -> &Value {
         &self.0

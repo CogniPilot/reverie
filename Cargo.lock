@@ -115,6 +115,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-application"
+version = "0.1.0"
+dependencies = [
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-host",
+ "reverie-store",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
