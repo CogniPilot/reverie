@@ -70,13 +70,13 @@ For private HTTPS access on port 443 and the Embassy address, see
 
 The native command `reverie service install --host 127.0.0.1 --port 3000` installs
 a user service that runs the Nix launcher, including its runtime environment and
-instance initialization. The host supervisor restarts a killed console process;
+instance initialization. The installed systemd service restarts a killed console process;
 `systemctl --user stop reverie-web.service` remains an explicit stop. User services
 start at login unless the host administrator separately enables lingering.
 
 For Docker, use `--restart unless-stopped` so the engine restarts the container
-after an unexpected exit. An explicit container stop remains stopped. Host-level
-supervision brings the console back. In **Company → Company settings**, the owner can turn
+after an unexpected exit. An explicit container stop remains stopped. The engine
+restart policy brings the console back. In **Company → Company settings**, the owner can turn
 **Automatic recovery** off or choose **Wake after a crash**. Only the selected
 expert wakes automatically. Without a selection, a sole top-level expert is used;
 multiple top-level experts require a choice. The selected expert can wake reports

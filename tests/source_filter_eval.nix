@@ -8,6 +8,14 @@ let
     hgMetadata = !(keep ".hg/store" "directory");
     webDependencies = !(keep "apps/web/node_modules/x/index.js" "regular");
     rootBuild = !(keep "build/x.o" "regular");
+    rustTarget = !(keep "target/debug/reverie-soft-limit-helper" "regular");
+    nestedRustTarget = !(keep "crates/soft-limit-helper/target/debug/helper" "regular");
+    futureRustTarget = !(keep "crates/runtime/target/.rustc_info.json" "regular");
+    rustSource = keep "crates/soft-limit-helper/src/main.rs" "regular";
+    rustManifest = keep "Cargo.toml" "regular";
+    rustLock = keep "Cargo.lock" "regular";
+    rustPolicy = keep "clippy.toml" "regular";
+    similarlyNamedRust = keep "crates/target-policy/src/lib.rs" "regular";
     pythonBuild = !(keep "python/build/lib/reverie.py" "regular");
     webDist = !(keep "apps/web/dist/index.js" "regular");
     gestureDist = !(keep "apps/web/packages/gesture-control/dist-reverie/index.js" "regular");

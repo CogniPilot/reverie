@@ -84,6 +84,11 @@ work in isolated checkouts and test instances; the running company stays on a
 reviewed release. Keep private company data and credentials outside this source
 repository.
 
+Contributors should follow the [owner operations architecture](docs/owner-operations.md):
+Rust for the core/backend and TypeScript for the frontend, with existing Python
+being retired in tested stages. Configuration and recovery belong in the supported
+GUI/API; instance-specific deployment programs are not a product interface.
+
 ## Credits
 
 Reverie's console originated from [Codeman](https://github.com/Ark0N/Codeman).

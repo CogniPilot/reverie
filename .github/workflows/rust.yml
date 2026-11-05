@@ -1,0 +1,31 @@
+name: Rust
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - name: Verify Rust and repository policies through cargo xtask
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
+          TMPDIR: ${{ runner.temp }}
+        run: nix develop --command cargo xtask verify

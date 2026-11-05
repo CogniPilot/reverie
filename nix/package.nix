@@ -532,6 +532,7 @@ let
       hash = "sha256-PsK00kDcEsdH6vRQBh24SvdXxIO72jAvninOtdcL5RA=";
     };
   });
+  laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
     paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
@@ -612,4 +613,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest laptopTools; }

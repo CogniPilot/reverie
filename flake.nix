@@ -464,7 +464,7 @@
         let pkgs = pkgsFor system; in {
           voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
           default = pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl ];
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

@@ -7,12 +7,45 @@ required for the native runtime. Bootstrap/engine control and private migration
 brokers run on the host. Never mount personal instance data into a development
 or shared container.
 
+Read the [specification index](spec/README.md) and the owning specs for the
+component being changed. DRY and valid-by-construction boundaries are explicit
+project requirements; use `cargo xtask` for shared development task orchestration.
+
 All experts are generic AI agents with their own memories. CTO, COO and specialist
 titles are organizational roles. Tool permissions and chat/coding mode are separate;
 a title grants no authority.
 Identity, relationships, model selection, credentials and memory are owner-selected
 instance data. Keep them outside this shareable repository.
-Use `python/reverie/` for the shared runtime and `python/experts/` for specialist templates.
+The target is a Rust core/backend and TypeScript frontend, with no first-party
+Python and no Python interpreter in Reverie's shipped service runtime. Implement
+new host services, supervision, privileged helpers, resource
+enforcement and core backend components in Rust. Existing TypeScript application
+services remain the integration boundary until their own bounded migration;
+keep GUI/API behavior compatible. Do not introduce first-party Python, including
+new numerical or model-computation implementations. Existing Python is migration
+debt: replace it in bounded, tested slices before removing an active entry point.
+Replace Python-dependent model/runtime adapters as part of the migration.
+Inventory third-party and build-time tooling separately; do not claim a runtime
+dependency disappeared merely because a first-party wrapper migrated.
+Keep existing specialist templates until their consumers have migrated.
+
+Rust crates must inherit workspace lints. Complexity/visibility/unsafe rules are
+derived from the owner's Rumoca settings and checked by strict Clippy in CI.
+Split large functions; do not suppress complexity lints to make a port pass.
+Any necessary unsafe syscall boundary needs a narrow, documented safety argument
+and independent adversarial review, never a blanket crate-wide exemption.
+
+Owner operations must use curated product GUI/API workflows backed by the same
+application services. The GUI is a thin API client: permission, validation,
+capacity, rollout and recovery decisions live behind the API and must also work
+for an authorized headless client. An appointed agent requires an explicit scoped grant;
+titles, guest access and host access never substitute for that grant. Do not add
+instance-specific deployment/recovery scripts or rewrite private runtime files
+to work around a missing endpoint. Implement the missing product capability.
+Packaged bootstrap tools may establish the host trust boundary once; routine
+configuration, updates and recovery belong to the supported product workflow.
+See [owner operations](docs/owner-operations.md) for the target architecture,
+current gaps and migration acceptance requirements.
 
 Put temporary builds, disposable source checkouts, dependency caches and
 regenerable downloads in a task-specific directory under `/tmp`. Check shared
@@ -39,6 +72,9 @@ Run `python3 -m unittest discover -s tests` and
 `node --test tests/test_opencode_plugin.mjs` in the flake environment (or the
 optional development container). Use explicit file
 paths when staging; do not stage instance data, runtime metadata or local receipts.
+For Rust changes run `nix develop --command cargo xtask verify`, the canonical
+format, strict Clippy and workspace-test gate. Set `CARGO_TARGET_DIR` to
+task-specific temporary storage.
 
 The host boundary is controlled outside the container. Container sudo does not grant
 host sudo. Optional NixOS account changes need ordinary owner activation; never use

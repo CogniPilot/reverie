@@ -110,7 +110,7 @@ describe('the Laptop memory section of the owner profile', () => {
     const { h, calls, confirm, section, button, status } = await setup(true, {
       preview: () => ({ ok: true, data: draft }),
       apply: () => ({ ok: true, data: { id: draft.operationId, phase: 'starting' } }),
-      result: () => ({ ok: true, data: { id: draft.operationId, phase: 'completed' } }),
+      result: () => ({ ok: true, data: { id: draft.operationId, phase: 'completed', blocksFurtherChanges: false } }),
     });
     const input = section()!.querySelector('input[type="number"]') as HTMLInputElement;
     input.value = '8192';
@@ -118,7 +118,7 @@ describe('the Laptop memory section of the owner profile', () => {
     await h.flush();
     expect(calls).toEqual([{ path: '/api/company/resources/preview', body: { employeeId, memoryMiB: 8192 } }]);
     expect(status()).toBe('Preview: 4,096 MiB now, 8,192 MiB after the restart. Nothing has changed yet.');
-    expect(section()!.textContent).toContain('Kept: 1024 processes, 4 CPUs. Shared pool: 65,536 MiB, 8192 tasks.');
+    expect(section()!.textContent).toContain('Kept: 1024 tasks, 4 CPUs. Shared pool: 65,536 MiB, 8192 tasks.');
     const note = section()!.querySelector('textarea') as HTMLTextAreaElement;
     expect(note.value).toContain('8,192 MiB');
     note.value = 'Resume the review from your journal.';
@@ -139,11 +139,109 @@ describe('the Laptop memory section of the owner profile', () => {
     expect(status()).toBe("River's laptop now has the new memory.");
   });
 
+  it('explains the hard ceiling and shows zero CPU quota as uncapped', async () => {
+    const { h, section, button } = await setup(true, {
+      preview: () => ({ ok: true, data: { ...draft, resources: { ...draft.resources, cpus: 0 } } }),
+    });
+    expect(section()!.textContent).toContain('Hard memory ceiling (MiB)');
+    expect(section()!.textContent).toContain('does not remove the hard ceiling or increase pool capacity');
+    (section()!.querySelector('input[type="number"]') as HTMLInputElement).value = '8192';
+    button('Preview laptop memory for River').click(); await h.flush();
+    expect(section()!.textContent).toContain('1024 tasks, uncapped CPU');
+    expect(section()!.textContent).not.toContain('0 CPUs');
+  });
+
+  it('allows the same integer MiB values as the API instead of imposing a 512 MiB policy', async () => {
+    const { h, section, button, calls } = await setup(true, {
+      preview: () => ({ ok: true, data: { ...draft, resources: { ...draft.resources, memoryMiB: 768 } } }),
+    });
+    const input = section()!.querySelector('input[type="number"]') as HTMLInputElement;
+    input.value = '768';
+    expect(input.checkValidity()).toBe(true);
+    button('Preview laptop memory for River').click(); await h.flush();
+    expect(calls).toEqual([{ path: '/api/company/resources/preview', body: { employeeId, memoryMiB: 768 } }]);
+    expect(button('Restart River with 768 MiB')).not.toBeNull();
+  });
+
+  it.each(['RESOURCE_PREVIEW_HOST_UNCONFIGURED', 'RESOURCE_PREVIEW_HOST_UNAVAILABLE', 'RESOURCE_PREVIEW_BUSY'])(
+    'shows the curated API diagnosis for %s without issuing another request', async errorCode => {
+      const message = 'Check the supported server setup. This preview did not dispatch a restart.';
+      const { h, section, button, status, calls } = await setup(true, {
+        preview: () => ({ ok: false, status: 503, errorCode, error: message }),
+      });
+      (section()!.querySelector('input[type="number"]') as HTMLInputElement).value = '8192';
+      button('Preview laptop memory for River').click(); await h.flush();
+      expect(status()).toBe(message);
+      expect(calls.map(call => call.path)).toEqual(['/api/company/resources/preview']);
+      expect(section()!.querySelector('textarea')).toBeNull();
+    }
+  );
+
+  it('keeps an earlier operation fenced when Preview reports it needs inspection', async () => {
+    const message = 'An earlier memory change needs inspection. Use Check status.';
+    let priorPhase = 'none';
+    let priorBlocks = true;
+    const { h, section, button, status, calls } = await setup(true, {
+      preview: () => ({ ok: false, status: 503, errorCode: 'RESOURCE_PREVIEW_PENDING', error: message }),
+      operations: () => ({ ok: true, data: priorPhase === 'none' ? [] : [{
+        id: draft.operationId, employeeId, phase: priorPhase, blocksFurtherChanges: priorBlocks,
+      }] }),
+      result: () => ({ ok: true, data: { id: draft.operationId, phase: priorPhase, blocksFurtherChanges: priorBlocks } }),
+    });
+    // Begin with no earlier operation known to this open profile; Preview then
+    // observes the server's newer pending attempt.
+    priorPhase = 'unknown';
+    (section()!.querySelector('input[type="number"]') as HTMLInputElement).value = '8192';
+    button('Preview laptop memory for River').click(); await h.flush();
+    expect(status()).toBe(message);
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    expect(button('Check laptop memory change for River').hidden).toBe(false);
+    expect(calls.map(call => call.path)).toEqual(['/api/company/resources/preview']);
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    priorPhase = 'not-started';
+    priorBlocks = false;
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(false);
+    expect(status()).toContain('not dispatched');
+  });
+
+  it.each([{}, { blocksFurtherChanges: true }])(
+    'does not infer permission to clear an operation from its completed phase (%j)', async decision => {
+      const { h, button, status } = await setup(true, {
+        operations: () => ({ ok: true, data: [{ id: draft.operationId, employeeId, phase: 'unknown', blocksFurtherChanges: true }] }),
+        result: () => ({ ok: true, data: { id: draft.operationId, phase: 'completed', ...decision } }),
+      });
+      expect(button('Preview laptop memory for River').disabled).toBe(true);
+      button('Check laptop memory change for River').click(); await h.flush();
+      expect(button('Preview laptop memory for River').disabled).toBe(true);
+      expect(status()).toContain('do not start another');
+    }
+  );
+
+  it('renders the server decision for a new settled phase without knowing a client phase policy', async () => {
+    const { h, button, status } = await setup(true, {
+      operations: () => ({ ok: true, data: [{ id: draft.operationId, employeeId, phase: 'unknown', blocksFurtherChanges: true }] }),
+      result: () => ({ ok: true, data: { id: draft.operationId, phase: 'future-settled', blocksFurtherChanges: false } }),
+    });
+    button('Check laptop memory change for River').click(); await h.flush();
+    expect(button('Preview laptop memory for River').disabled).toBe(false);
+    expect(status()).toContain('earlier operation is settled');
+  });
+
+  it('keeps discovery closed when an older response has no server decision', async () => {
+    const { button, status } = await setup(true, {
+      operations: () => ({ ok: true, data: [{ id: draft.operationId, employeeId, phase: 'completed' }] }),
+    });
+    expect(button('Preview laptop memory for River').disabled).toBe(true);
+    expect(status()).toContain('Previous memory changes could not be checked');
+  });
+
   it('an unconfirmed Apply is never retried and says to check the status first', async () => {
     const { h, calls, section, button, status } = await setup(true, {
       preview: () => ({ ok: true, data: draft }),
       apply: () => ({ ok: false, status: 503, errorCode: 'RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY' }),
-      result: () => ({ ok: true, data: { id: draft.operationId, phase: 'recovery-required' } }),
+      result: () => ({ ok: true, data: { id: draft.operationId, phase: 'recovery-required', blocksFurtherChanges: true } }),
     });
     (section()!.querySelector('input[type="number"]') as HTMLInputElement).value = '8192';
     button('Preview laptop memory for River').click();
@@ -210,8 +308,8 @@ describe('the Laptop memory section of the owner profile', () => {
 
   it('discovers a pending server operation on a fresh page with no browser recovery state', async () => {
     const { h, button, status, calls } = await setup(true, {
-      operations: () => ({ok: true, data: [{id: draft.operationId, employeeId, phase: 'recovery-required'}]}),
-      result: () => ({ok: true, data: {id: draft.operationId, phase: 'completed'}}),
+      operations: () => ({ok: true, data: [{id: draft.operationId, employeeId, phase: 'recovery-required', blocksFurtherChanges: true}]}),
+      result: () => ({ok: true, data: {id: draft.operationId, phase: 'completed', blocksFurtherChanges: false}}),
     });
     expect(button('Preview laptop memory for River').disabled).toBe(true);
     button('Check laptop memory change for River').click(); await h.flush();
@@ -224,7 +322,7 @@ describe('the Laptop memory section of the owner profile', () => {
   it('allows a fresh Preview only after authoritative not-started, never a 503', async () => {
     const { h, section, button, status } = await setup(true, {
       preview: () => ({ok: true, data: draft}), apply: () => ({ok: false, status: 503}),
-      result: () => ({ok: true, data: {id: draft.operationId, phase: 'not-started'}}),
+      result: () => ({ok: true, data: {id: draft.operationId, phase: 'not-started', blocksFurtherChanges: false}}),
     });
     (section()!.querySelector('input') as HTMLInputElement).value = '8192';
     button('Preview laptop memory for River').click(); await h.flush();
@@ -240,7 +338,7 @@ describe('the Laptop memory section of the owner profile', () => {
     const { h, section, button, calls } = await setup(true, {
       preview: () => ({ok: true, data: draft}),
       apply: () => new Promise(resolve => {finish = resolve;}),
-      result: () => ({ok: true, data: {id: draft.operationId, phase: 'completed'}}),
+      result: () => ({ok: true, data: {id: draft.operationId, phase: 'completed', blocksFurtherChanges: false}}),
     });
     (section()!.querySelector('input') as HTMLInputElement).value = '8192';
     button('Preview laptop memory for River').click(); await h.flush();
@@ -316,7 +414,7 @@ describe('the Laptop memory section of the owner profile', () => {
 
   it('preserves unattributable legacy unknown IDs and fences rather than assigning them to an owner', async () => {
     let pending = false;
-    const { h, button, status } = await setup(true, {operations: () => ({ok: true, data: pending ? [{id: draft.operationId, employeeId, phase: 'unknown'}] : []})});
+    const { h, button, status } = await setup(true, {operations: () => ({ok: true, data: pending ? [{id: draft.operationId, employeeId, phase: 'unknown', blocksFurtherChanges: true}] : []})});
     const legacy = `reverie:laptop-memory:${employeeId}`;
     h.window.localStorage.setItem(legacy, JSON.stringify([draft.operationId]));
     const scoped = `reverie:laptop-memory:owner:${employeeId}`;
@@ -367,7 +465,7 @@ describe('the Laptop memory section of the owner profile', () => {
     owner.response.data!.identity = {id: bOwner, role: 'owner', primary: false};
     (h.document.querySelector('.ca-expert-profile') as HTMLDialogElement).close();
     h.document.querySelector<HTMLButtonElement>('[aria-label="Edit profile for River"]')!.click(); await h.flush();
-    finish({ok: true, data: {id: draft.operationId, phase: 'completed'}}); await h.flush();
+    finish({ok: true, data: {id: draft.operationId, phase: 'completed', blocksFurtherChanges: false}}); await h.flush();
     expect(button('Preview laptop memory for River').disabled).toBe(true);
     button('Check laptop memory change for River').click(); await h.flush();
     expect(calls.filter(call => call.path.endsWith('/result')).at(-1)?.body).toEqual({operationId: b});

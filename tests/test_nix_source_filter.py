@@ -27,7 +27,8 @@ class SourceFilterTests(unittest.TestCase):
 
     def test_policy_cases(self):
         checks = self.evaluate(f"import {ROOT}/tests/source_filter_eval.nix {{ lib = import {self.library}; }}")
-        self.assertEqual(len(checks), 25)
+        self.assertTrue({"rustTarget", "nestedRustTarget", "futureRustTarget", "rustSource",
+                         "rustManifest", "rustLock", "rustPolicy", "similarlyNamedRust"} <= checks.keys())
         self.assertTrue(all(checks.values()))
 
     def test_every_tracked_input_is_preserved(self):

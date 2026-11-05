@@ -88,6 +88,58 @@ the HTTP status.
 
 Adding a new error code is non-breaking; removing or renaming one is a major change.
 
+## Employee laptop memory
+
+These optional routes exist when the server enables resource replacement.
+`GET /api/company` reports `resourceReplacement: true` only to a verified owner;
+that flag means the routes are registered, not that host installation or native
+readiness has been verified. The routes currently require a current,
+unrestricted human owner session and same-origin POST. Apply must match the
+session that created its Preview; operations/result also accept a fresh owner
+session for recovery after restart. Agent role labels and ordinary
+employee-management grants do not authorize these operations.
+
+| Method | Path | Request body | Purpose |
+| --- | --- | --- | --- |
+| POST | `/api/v1/company/resources/preview` | `{ employeeId, memoryMiB }` | Derive an exact draft; do not dispatch a restart |
+| POST | `/api/v1/company/resources/apply` | `{ previewId, handoff }` | Dispatch the approved replacement once |
+| POST | `/api/v1/company/resources/operations` | `{ employeeId }` | Discover retained operations before another change |
+| POST | `/api/v1/company/resources/result` | `{ operationId }` | Inspect an operation; do not replay Apply |
+
+`memoryMiB` is the laptop's hard RAM ceiling. This employee operation preserves
+the shared pool and CPU/task limits. A soft memory limit controls reclaim
+pressure; it does not remove the hard ceiling or increase admission capacity.
+The CPU value `0` means uncapped CPU. Task limits count threads too.
+The API accepts integer MiB values from 512 through 1048576; the GUI accepts the
+same values and imposes no additional allocation increments.
+
+Each operations row and result includes `blocksFurtherChanges: boolean`. The
+server derives this from its operation journal and uses the same predicate when
+admitting another preview or Apply. Clients must use that field rather than
+interpret phase names as permission to clear a retained operation. Missing or
+malformed decision metadata stays unresolved. `false` settles only the reported
+operation; authorization, concurrency and capacity are checked again by the
+server for every subsequent request. The GUI retains operation IDs for request
+correlation across reloads, not as an alternate source of operation truth.
+
+Preview can return these closed, public diagnostics with HTTP 503 and the normal
+`{ success: false, errorCode, error }` envelope. `error` is a curated explanation
+also shown by the GUI, never native exception text or private host paths.
+
+| `errorCode` | Meaning and next action |
+| --- | --- |
+| `RESOURCE_PREVIEW_HOST_UNCONFIGURED` | Complete supported host resource-service setup |
+| `RESOURCE_PREVIEW_HOST_UNAVAILABLE` | The service connection could not be verified; inspect server setup and status |
+| `RESOURCE_PREVIEW_BUSY` | The employee is working or an Apply is being prepared; wait before previewing |
+| `RESOURCE_PREVIEW_PENDING` | An earlier operation is unresolved; inspect its status first |
+
+Each diagnostic describes this preview refusal only. It does not settle an
+earlier operation, prove host readiness, or authorize a retry of Apply. Once a
+draft request or Apply may have been sent, unconfirmed failures retain
+`RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY`. Keep the operation ID and
+inspect status; a lost response is not proof that nothing happened. An owner
+authorization failure remains HTTP 403, including logout during host connection.
+
 ## Cron jobs
 
 Saved jobs and their launch history are separate from the legacy `/api/scheduled`
