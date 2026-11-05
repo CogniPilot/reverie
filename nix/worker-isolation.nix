@@ -5,7 +5,7 @@ let
   cfg = config.services.reverieWorkers;
   helper = cfg.softLimitHelper;
   kernel = config.boot.kernelPackages.kernel;
-  policyFile = pkgs.writeText "reverie-soft-limit-policy.json" (builtins.toJSON {
+  policyText = builtins.toJSON {
     v = 1;
     deployment = helper.deployment;
     stateRoot = cfg.stateRoot;
@@ -16,7 +16,7 @@ let
       memoryMaxMiB = e.memoryMaxMiB;
       memoryHighMiB = e.memoryHighMiB;
     }) helper.entries;
-  });
+  };
 in {
   options.services.reverieWorkers = {
     enable = lib.mkEnableOption "Reverie agent resource isolation";
@@ -43,7 +43,7 @@ in {
         }; });
       };
       backportAttested = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
+        type = lib.types.nullOr lib.types.nonEmptyStr;
         default = null;
         description = "For a kernel older than 6.16: the build identity and source reference proving memory_high_write honors O_NONBLOCK.";
       };
@@ -76,7 +76,7 @@ in {
       { assertion = lib.length (lib.unique (map (e: e.employeeId) helper.entries)) == lib.length helper.entries;
         message = "softLimitHelper entries need one entry per employee."; }
     ];
-    environment.etc."reverie/soft-limit-policy.json" = lib.mkIf helper.enable { source = policyFile; mode = "0444"; };
+    environment.etc."reverie/soft-limit-policy.json" = lib.mkIf helper.enable { text = policyText; mode = "0444"; };
     systemd.tmpfiles.rules = lib.mkIf helper.enable [ "d /run/reverie-soft-limit 0755 root root -" ];
     systemd.slices.reverie-soft-limit = lib.mkIf helper.enable {
       description = "Reverie soft-limit helper instances";

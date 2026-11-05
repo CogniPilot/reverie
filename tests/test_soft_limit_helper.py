@@ -1,11 +1,13 @@
 """Root soft-limit helper: owned fixture trees only; no host cgroup, engine or root effect."""
 import copy
+import functools
 import json
 import os
 from pathlib import Path
 import socket
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -59,6 +61,17 @@ class Tree:
     def high(self):
         return (self.leaf / 'memory.high').read_text().strip()
 
+    def write_policy(self, policy=None, mode=0o644):
+        etc = self.root / 'etc'
+        etc.mkdir(mode=0o755, exist_ok=True)
+        path = etc / 'policy.json'
+        path.write_text(json.dumps(self.policy if policy is None else policy))
+        path.chmod(mode)
+        return path
+
+    def loader(self):
+        return functools.partial(A.load_policy, trusted_uid=os.getuid(), anchor=self.root)
+
 
 class RequestAndPolicyTests(unittest.TestCase):
     def test_request_is_one_strict_identity_line(self):
@@ -86,16 +99,53 @@ class RequestAndPolicyTests(unittest.TestCase):
         with self.assertRaises(A.Refused):
             A.validate_policy(twice)
 
-    def test_policy_file_must_be_root_owned_regular_and_unlinked(self):
+    def test_protected_policy_file_controls_reach_each_branch(self):
         tree = Tree(self)
-        path = tree.root / 'policy.json'
-        path.write_text(json.dumps(tree.policy))
-        link = tree.root / 'link.json'
-        link.symlink_to(path)
-        for candidate in [path, link, tree.root / 'missing.json', Path('relative.json')]:
-            with self.subTest(candidate=candidate), self.assertRaises(A.Refused) as caught:
-                A.load_policy(candidate)  # Fixture files are not root-owned: always untrusted here.
+        load = tree.loader()
+        path = tree.write_policy()
+        self.assertEqual(load(path)['entries'][0]['employeeId'], EID)  # A valid protected regular file.
+        untrusted = []
+        tree.write_policy(mode=0o664); untrusted.append(('group-writable file', path))
+        tree.write_policy(mode=0o646); untrusted.append(('other-writable file', path))
+        for label, candidate in untrusted:
+            with self.subTest(label), self.assertRaises(A.Refused) as caught:
+                load(candidate)
             self.assertEqual(caught.exception.code, 'POLICY_UNTRUSTED')
+        tree.write_policy()
+        cases = {'symlinked file': tree.root / 'etc/link.json', 'fifo': tree.root / 'etc/fifo', 'outside anchor': Path('/etc/hostname'),
+                 'missing': tree.root / 'etc/missing.json'}
+        cases['symlinked file'].symlink_to(path)
+        os.mkfifo(cases['fifo'])
+        for label, candidate in cases.items():
+            with self.subTest(label), self.assertRaises(A.Refused) as caught:
+                load(candidate)
+            self.assertEqual(caught.exception.code, 'POLICY_UNTRUSTED')
+        (tree.root / 'etc').chmod(0o775)  # A writable parent.
+        with self.assertRaises(A.Refused):
+            load(path)
+        (tree.root / 'etc').chmod(0o755)
+        real_fstat = os.fstat
+        def foreign_owner(fd):
+            st = real_fstat(fd)
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink, os.getuid() + 1) + tuple(st)[5:])
+        with patch.object(A.os, 'fstat', foreign_owner), self.assertRaises(A.Refused):
+            load(path)  # A file owned by neither root nor the trusted uid.
+        real_read = os.read
+        def changed_during_read(fd, n):
+            raw = real_read(fd, n)
+            path.write_text(json.dumps(tree.policy) + ' ')
+            return raw
+        with patch.object(A.os, 'read', changed_during_read), self.assertRaises(A.Refused) as caught:
+            load(path)
+        self.assertEqual(caught.exception.code, 'POLICY_UNTRUSTED')
+        path.write_text('{"v":1,"v":1}')
+        with self.assertRaises(A.Refused) as caught:
+            load(path)
+        self.assertEqual(caught.exception.code, 'POLICY_INVALID')
+        path.write_text(' ' * (A.POLICY_MAX + 1))
+        with self.assertRaises(A.Refused) as caught:
+            load(path)
+        self.assertEqual(caught.exception.code, 'POLICY_UNTRUSTED')
 
     def test_kernel_release_must_equal_owner_qualified_release(self):
         tree = Tree(self)
@@ -164,6 +214,42 @@ class SelectAndApplyTests(unittest.TestCase):
         with self.assertRaises(A.EffectUnconfirmed):
             A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc, recheck)
 
+    def test_changes_during_the_slow_engine_recheck_never_reach_the_writer(self):
+        for change, code in [('max', 'HARD_LIMIT_MISMATCH'), ('cgroup', 'IDENTITY_MISMATCH'), ('pid', 'IDENTITY_MISMATCH')]:
+            tree = Tree(self)
+            def recheck():
+                if change == 'max':
+                    (tree.leaf / 'memory.max').write_text(f'{8192 * MIB}\n')
+                elif change == 'cgroup':
+                    (tree.proc / '4242/cgroup').write_text('0::/system.slice/other\n')
+                else:
+                    (tree.proc / '4242/stat').write_text('4242 (sleep) ' + ' '.join(['S'] + ['9'] * 29))
+                return True  # The engine metadata itself looks unchanged.
+            with self.subTest(change=change), self.assertRaises(A.Refused) as caught:
+                A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc, recheck)
+            self.assertEqual((caught.exception.code, tree.high()), (code, 'max'))
+
+    def test_any_failure_once_the_write_is_attempted_is_unconfirmed(self):
+        tree = Tree(self)
+        writers = []
+        real_open, real_close = os.open, os.close
+        def opener(path, flags, *args, **kwargs):
+            fd = real_open(path, flags, *args, **kwargs)
+            if path == 'memory.high' and flags & os.O_WRONLY:
+                writers.append(fd)
+            return fd
+        def closer(fd):
+            real_close(fd)
+            if fd in writers:
+                raise OSError(5, 'close failed after write')
+        with patch.object(A.os, 'open', opener), patch.object(A.os, 'close', closer), self.assertRaises(A.EffectUnconfirmed):
+            A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
+        tree = Tree(self)
+        def failing_write(fd, raw):
+            raise OSError(11, 'write failed')
+        with patch.object(A.os, 'write', failing_write), self.assertRaises(A.EffectUnconfirmed):
+            A.apply_high(tree.policy['entries'][0], 4242, tree.cgroup, tree.proc)
+
     def test_symlinked_leaf_is_not_followed(self):
         tree = Tree(self)
         other = tree.root / 'other'
@@ -188,9 +274,9 @@ class HelperServeTests(unittest.TestCase):
         pins = types.SimpleNamespace(broker_uid=os.getuid() if uid is None else uid, deployment='reverie',
                                      engine='/nix/store/x-docker/bin/docker', endpoint='unix:///run/docker.sock',
                                      policy='/etc/reverie/soft-limit-policy.json', state_root=str(tree.state))
-        with patch.object(A, 'load_policy', lambda path: A.validate_policy(copy.deepcopy(tree.policy))):
-            reply = H.serve(server, pins, cgroup=tree.cgroup, proc=tree.proc,
-                            inspector=inspector or (lambda *_: copy.deepcopy(tree.row)))
+        pins.policy = str(tree.write_policy())
+        reply = H.serve(server, pins, cgroup=tree.cgroup, proc=tree.proc, load_policy=tree.loader(),
+                        inspector=inspector or (lambda *_: copy.deepcopy(tree.row)))
         self.assertEqual(json.loads(client.recv(1024)), reply)
         return reply
 
@@ -228,6 +314,23 @@ class HelperServeTests(unittest.TestCase):
         reply = self.serve(tree, inspector=lambda *_: rows.pop(0) if rows else moved_row(tree))
         self.assertEqual(reply, {'ok': False, 'code': 'EFFECT_UNCONFIRMED'})
 
+    def test_fragmented_request_cannot_extend_the_fixed_read_deadline(self):
+        server, client = socket.socketpair()
+        self.addCleanup(server.close)
+        self.addCleanup(client.close)
+        def dribble():
+            for _ in range(8):
+                time.sleep(0.3)
+                try:
+                    client.sendall(b' ')
+                except OSError:
+                    return
+        threading.Thread(target=dribble, daemon=True).start()
+        began = time.monotonic()
+        with self.assertRaises(A.Refused):
+            H.read_request(server, time.monotonic() + H.TOTAL_SECONDS)
+        self.assertLess(time.monotonic() - began, H.READ_SECONDS + 0.5)
+
     def test_malformed_request_and_second_request_are_refused(self):
         tree = Tree(self)
         self.assertEqual(self.serve(tree, raw=request(extra=1)), {'ok': False, 'code': 'REQUEST_INVALID'})
@@ -257,20 +360,60 @@ class BrokerClientTests(unittest.TestCase):
 
     def test_broker_sends_identities_only_and_accepts_exact_success(self):
         path, seen = self.helper(b'{"ok":true,"memoryHighBytes":1073741824}\n')
-        self.assertEqual(M.request_soft_limit(path, SID, CID, timeout=5), 1024 * MIB)
+        self.assertEqual(M.request_soft_limit(path, SID, CID, 1024 * MIB, timeout=5), 1024 * MIB)
         self.assertEqual(json.loads(seen[0]), {'v': 1, 'sessionId': SID, 'containerId': CID})
+
+    def test_only_an_exact_framed_matching_reply_is_accepted(self):
+        good = b'{"ok":true,"memoryHighBytes":1073741824}\n'
+        self.assertEqual(A.parse_reply(good, 1024 * MIB), 1024 * MIB)
+        unconfirmed = [b'{"ok":true,"memoryHighBytes":2147483648}\n', b'{"ok":1,"memoryHighBytes":1073741824}\n',
+                       b'{"ok":true,"memoryHighBytes":true}\n', b'{"ok":true,"ok":true,"memoryHighBytes":1073741824}\n',
+                       b'{"ok":true,"memoryHighBytes":1073741824,"x":1}\n', good[:-1], good + good, b'[]\n', b'null\n',
+                       b' ' * 600 + good, b'{"ok":false,"code":"EFFECT_UNCONFIRMED"}\n', b'{"ok":false,"code":"bad code"}\n',
+                       b'{"ok":false,"code":"KERNEL_UNQUALIFIED","x":1}\n', b'\xff\n']
+        for raw in unconfirmed:
+            with self.subTest(raw=raw[:50]), self.assertRaises(A.EffectUnconfirmed):
+                A.parse_reply(raw, 1024 * MIB)
+        with self.assertRaises(A.Refused) as caught:
+            A.parse_reply(b'{"ok":false,"code":"KERNEL_UNQUALIFIED"}\n', 1024 * MIB)
+        self.assertEqual(caught.exception.code, 'KERNEL_UNQUALIFIED')
 
     def test_refusal_odd_or_missing_reply_refuses_launch(self):
         for reply, code in [(b'{"ok":false,"code":"KERNEL_UNQUALIFIED"}\n', 'KERNEL_UNQUALIFIED'),
                             (b'{"ok":true}\n', 'EFFECT_UNCONFIRMED'), (b'not json\n', 'EFFECT_UNCONFIRMED'),
-                            (b'{"ok":false,"code":"bad code!"}\n', 'EFFECT_UNCONFIRMED')]:
+                            (b'{"ok":true,"memoryHighBytes":1}\n', 'EFFECT_UNCONFIRMED')]:
             path, _ = self.helper(reply)
             with self.subTest(reply=reply), self.assertRaises(M.SoftLimitHelperRefused) as caught:
-                M.request_soft_limit(path, SID, CID, timeout=5)
+                M.request_soft_limit(path, SID, CID, 1024 * MIB, timeout=5)
             self.assertEqual(caught.exception.code, code)
         with self.assertRaises(M.SoftLimitHelperRefused) as caught:
-            M.request_soft_limit('/nonexistent/helper.sock', SID, CID, timeout=1)
+            M.request_soft_limit('/nonexistent/helper.sock', SID, CID, 1024 * MIB, timeout=1)
         self.assertEqual(caught.exception.code, 'HELPER_UNAVAILABLE')
+
+    def test_fragmented_reply_cannot_extend_the_absolute_client_deadline(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, 'slow.sock')
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(path)
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        def run():
+            conn, _ = listener.accept()
+            with conn:
+                conn.recv(1024)
+                for byte in b'{"ok":true,"memoryHighBytes":1073741824}':
+                    time.sleep(0.3)
+                    try:
+                        conn.sendall(bytes([byte]))
+                    except OSError:
+                        return
+        threading.Thread(target=run, daemon=True).start()
+        began = time.monotonic()
+        with self.assertRaises(M.SoftLimitHelperRefused) as caught:
+            M.request_soft_limit(path, SID, CID, 1024 * MIB, timeout=1)
+        self.assertEqual(caught.exception.code, 'EFFECT_UNCONFIRMED')
+        self.assertLess(time.monotonic() - began, 1.6)
 
 
 if __name__ == '__main__':

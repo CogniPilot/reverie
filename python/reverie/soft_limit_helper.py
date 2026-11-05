@@ -31,9 +31,11 @@ def peer_uid(conn):
 
 
 def read_request(conn, deadline):
+    """One line within a single fixed read deadline; fragments never extend it."""
+    until = min(deadline, time.monotonic() + READ_SECONDS)
     data = b''
     while not data.endswith(b'\n'):
-        remaining = min(deadline, time.monotonic() + READ_SECONDS) - time.monotonic()
+        remaining = until - time.monotonic()
         A.need(remaining > 0 and select.select([conn], [], [], remaining)[0], 'REQUEST_INVALID')
         chunk = conn.recv(A.REQUEST_MAX + 1 - len(data))
         A.need(chunk and len(data) + len(chunk) <= A.REQUEST_MAX, 'REQUEST_INVALID')
@@ -60,12 +62,13 @@ def inspect(engine, endpoint, name, deadline):
     return row
 
 
-def serve(conn, pins, *, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), inspector=inspect, host_root=A.check_host_root):
+def serve(conn, pins, *, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), inspector=inspect, host_root=A.check_host_root,
+          load_policy=A.load_policy):
     deadline = time.monotonic() + TOTAL_SECONDS
     try:
         A.need(peer_uid(conn) == pins.broker_uid, 'PEER_REFUSED')
         session_id, container_id = A.parse_request(read_request(conn, deadline))
-        policy = A.load_policy(pins.policy)
+        policy = load_policy(pins.policy)
         A.need(policy['deployment'] == pins.deployment and policy['stateRoot'] == pins.state_root, 'POLICY_INVALID')
         A.check_kernel(policy, proc)
         host_root(proc, cgroup)

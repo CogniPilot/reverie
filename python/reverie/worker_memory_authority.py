@@ -64,32 +64,61 @@ def parse_request(raw):
     return value['sessionId'], value['containerId']
 
 
-def _root_only(st):
-    return st.st_uid == 0 and not st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+CODE = re.compile(r'^[A-Z_]{1,40}$')
 
 
-def load_policy(path):
-    """Root-owned regular file with root-owned, non-writable parents; unchanged while read."""
-    path = Path(path)
-    need(path.is_absolute() and '..' not in path.parts, 'POLICY_UNTRUSTED')
-    for parent in reversed(path.parents):
+def parse_reply(raw, expected_bytes):
+    """Exactly one bounded line: {"ok":true,"memoryHighBytes":expected} or {"ok":false,"code":CODE}.
+
+    Returns the confirmed bytes, raises Refused(code) for a typed refusal, and raises EffectUnconfirmed for
+    anything else, including a success that names a different value.
+    """
+    try:
+        if not (type(raw) is bytes and 0 < len(raw) <= REQUEST_MAX and raw.endswith(b'\n') and raw.count(b'\n') == 1):
+            raise ValueError('frame')
+        reply = _strict_json(raw[:-1])
+    except (ValueError, UnicodeDecodeError):
+        raise EffectUnconfirmed() from None
+    if type(reply) is dict and reply.get('ok') is True and set(reply) == {'ok', 'memoryHighBytes'}:
+        if type(reply['memoryHighBytes']) is int and reply['memoryHighBytes'] == expected_bytes:
+            return expected_bytes
+    elif (type(reply) is dict and reply.get('ok') is False and set(reply) == {'ok', 'code'} and
+          type(reply['code']) is str and CODE.fullmatch(reply['code']) and reply['code'] != 'EFFECT_UNCONFIRMED'):
+        raise Refused(reply['code'])
+    raise EffectUnconfirmed()
+
+
+def _trusted(st, uid):
+    return st.st_uid in (0, uid) and not st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+
+
+def load_policy(path, *, trusted_uid=0, anchor=Path('/')):
+    """Root-owned regular file with root-owned, non-writable parents; unchanged while read.
+
+    Production uses the defaults. Fixtures pass their own uid and an owned anchor so the protected-file
+    checks run against real files.
+    """
+    path, anchor = Path(path), Path(anchor)
+    need(path.is_absolute() and '..' not in path.parts and anchor in path.parents, 'POLICY_UNTRUSTED')
+    for parent in [anchor, *[q for q in reversed(path.parents) if anchor in q.parents]]:
         try:
             st = os.lstat(parent)
         except OSError:
             raise Refused('POLICY_UNTRUSTED') from None
-        need(stat.S_ISDIR(st.st_mode) and _root_only(st), 'POLICY_UNTRUSTED')
+        need(stat.S_ISDIR(st.st_mode) and _trusted(st, trusted_uid), 'POLICY_UNTRUSTED')
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     except OSError:
         raise Refused('POLICY_UNTRUSTED') from None
     try:
         before = os.fstat(fd)
-        need(stat.S_ISREG(before.st_mode) and _root_only(before) and before.st_size <= POLICY_MAX, 'POLICY_UNTRUSTED')
+        need(stat.S_ISREG(before.st_mode) and _trusted(before, trusted_uid) and before.st_size <= POLICY_MAX,
+             'POLICY_UNTRUSTED')
         raw = os.read(fd, POLICY_MAX + 1)
         after = os.fstat(fd)
         need(len(raw) == before.st_size and
-             (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns),
-             'POLICY_UNTRUSTED')
+             (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) ==
+             (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns), 'POLICY_UNTRUSTED')
     finally:
         os.close(fd)
     try:
@@ -195,59 +224,97 @@ def _pid_start(proc, pid):
         return stream.read(4096).rsplit(b')', 1)[1].split()[19]
 
 
-def apply_high(entry, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), recheck=lambda: True):
-    """Walk to the laptop leaf without following links, check the hard limit, then write one file.
+def _groups(proc, pid):
+    with open(proc / str(pid) / 'cgroup', 'rb') as stream:
+        return stream.read(4096).decode('ascii').splitlines()
 
-    Returns the confirmed bytes. Raises Refused before any write, EffectUnconfirmed after one.
+
+class LaptopTarget:
+    """One laptop's PID start, unified cgroup and leaf directory, held open without following links.
+
+    Shared by the broker's own write path and the root helper. ``fences()`` re-reads every local fact.
     """
-    try:
-        start = _pid_start(proc, pid)
-        with open(proc / str(pid) / 'cgroup', 'rb') as stream:
-            groups = stream.read(4096).decode('ascii').splitlines()
-    except (OSError, UnicodeDecodeError, IndexError):
-        raise Refused('IDENTITY_MISMATCH') from None
-    need(len(groups) == 1 and groups[0].startswith('0::/'), 'IDENTITY_MISMATCH')
-    relative = Path(groups[0][4:])
-    need(str(relative) != '.' and not relative.is_absolute() and '..' not in relative.parts, 'IDENTITY_MISMATCH')
-    high = entry['memoryHighMiB'] * MIB
-    fd = os.open(cgroup, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        for part in relative.parts:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-            os.close(fd)
-            fd = child
-        leaf = os.fstat(fd)
 
-        def fenced():
-            current = os.stat(cgroup / relative, follow_symlinks=False)
-            with open(proc / str(pid) / 'cgroup', 'rb') as stream:
-                same = stream.read(4096).decode('ascii').splitlines() == groups
-            return (same and _pid_start(proc, pid) == start and
-                    (current.st_dev, current.st_ino) == (leaf.st_dev, leaf.st_ino) and recheck())
-
-        need(_read_at(fd, 'memory.max') == str(entry['memoryMaxMiB'] * MIB), 'HARD_LIMIT_MISMATCH')
-        need(fenced(), 'IDENTITY_MISMATCH')
+    def __init__(self, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc')):
+        self.pid, self.cgroup, self.proc = pid, Path(cgroup), Path(proc)
         try:
-            writer = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
+            self.start = _pid_start(self.proc, pid)
+            self.groups = _groups(self.proc, pid)
+        except (OSError, UnicodeDecodeError, IndexError):
+            raise Refused('IDENTITY_MISMATCH') from None
+        need(len(self.groups) == 1 and self.groups[0].startswith('0::/'), 'IDENTITY_MISMATCH')
+        self.relative = Path(self.groups[0][4:])
+        need(str(self.relative) != '.' and not self.relative.is_absolute() and '..' not in self.relative.parts,
+             'IDENTITY_MISMATCH')
+        try:
+            fd = os.open(self.cgroup, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            for part in self.relative.parts:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+                os.close(fd)
+                fd = child
+        except OSError:
+            raise Refused('IDENTITY_MISMATCH') from None
+        self.fd = fd
+        leaf = os.fstat(fd)
+        self.leaf = (leaf.st_dev, leaf.st_ino)
+
+    def close(self):
+        os.close(self.fd)
+
+    def fences(self):
+        """Same PID incarnation, same cgroup line and the same leaf directory, read fresh now."""
+        try:
+            current = os.stat(self.cgroup / self.relative, follow_symlinks=False)
+            return (_pid_start(self.proc, self.pid) == self.start and _groups(self.proc, self.pid) == self.groups and
+                    (current.st_dev, current.st_ino) == self.leaf)
+        except (OSError, UnicodeDecodeError, IndexError):
+            return False
+
+    def read(self, name):
+        return _read_at(self.fd, name)
+
+
+def apply_high(entry, pid, cgroup=Path('/sys/fs/cgroup'), proc=Path('/proc'), recheck=lambda: True):
+    """Write one laptop's memory.high after every fence, refreshed after the (slow) engine recheck.
+
+    Returns the confirmed bytes. Raises Refused only before any write is attempted; once the write is
+    attempted, every failure (write, close, fences, readback) is EffectUnconfirmed.
+    """
+    high = entry['memoryHighMiB'] * MIB
+    hard = str(entry['memoryMaxMiB'] * MIB)
+    target = LaptopTarget(pid, cgroup, proc)
+    attempted = False
+    try:
+        # The engine recheck may block; refresh all local facts after it, immediately before the writer.
+        need(recheck() and target.fences(), 'IDENTITY_MISMATCH')
+        need(target.read('memory.max') == hard, 'HARD_LIMIT_MISMATCH')
+        try:
+            writer = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                             dir_fd=target.fd)
         except OSError as error:
             raise Refused('WRITE_REFUSED' if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS)
                           else 'IDENTITY_MISMATCH') from None
+        attempted = True
         try:
             raw = (str(high) + '\n').encode()
             written = os.write(writer, raw)
-        except OSError:
-            raise EffectUnconfirmed() from None
         finally:
             os.close(writer)
-        try:
-            confirmed = (written == len(raw) and _read_at(fd, 'memory.high') == str(high) and
-                         _read_at(fd, 'memory.max') == str(entry['memoryMaxMiB'] * MIB) and fenced())
-        except (OSError, Refused):
-            confirmed = False
-        if not confirmed:
+        if not (written == len(raw) and recheck() and target.fences() and
+                target.read('memory.high') == str(high) and target.read('memory.max') == hard):
             raise EffectUnconfirmed()
         return high
-    except OSError:
+    except (OSError, Refused, UnicodeDecodeError) as error:
+        if attempted:
+            raise EffectUnconfirmed() from None
+        if isinstance(error, Refused):
+            raise
         raise Refused('IDENTITY_MISMATCH') from None
+    except EffectUnconfirmed:
+        raise
+    except Exception:
+        if attempted:
+            raise EffectUnconfirmed() from None
+        raise
     finally:
-        os.close(fd)
+        target.close()

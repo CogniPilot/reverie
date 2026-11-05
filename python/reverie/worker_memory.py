@@ -4,7 +4,6 @@ Owner configuration and normal recreation only; no laptop/browser live writer.
 Legacy six-field resource profiles and unrelated zero-swap scopes stay unchanged.
 """
 import copy
-import errno
 import os
 from pathlib import Path
 import re
@@ -100,35 +99,49 @@ class SoftLimitHelperRefused(RuntimeError):
     """The root helper refused or could not confirm; the laptop must not start its agent."""
 
     def __init__(self, code):
-        self.code = code if type(code) is str and re.fullmatch('[A-Z_]{1,40}', code) else 'EFFECT_UNCONFIRMED'
-        super().__init__('LAPTOP_SOFT_LIMIT_HELPER: ' + self.code)
+        self.code = code
+        super().__init__('LAPTOP_SOFT_LIMIT_HELPER: ' + code)
 
 
-def request_soft_limit(path, sid, cid, timeout=10.0):
-    """One identity-only request to the root helper; any missing or odd reply refuses the launch."""
+def request_soft_limit(path, sid, cid, expected_bytes, timeout=10.0):
+    """One identity-only request within one absolute deadline; only an exact, matching reply is accepted."""
     import json
     import socket
+    import time
+    from . import worker_memory_authority as A
+    end = time.monotonic() + timeout
+    remaining = lambda: max(end - time.monotonic(), 0.0)  # noqa: E731
     payload = (json.dumps({'v': 1, 'sessionId': sid, 'containerId': cid}, separators=(',', ':')) + '\n').encode()
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-            conn.settimeout(timeout)
+        try:
+            conn.settimeout(remaining() or 1e-6)
             conn.connect(path)
+        except OSError:
+            raise SoftLimitHelperRefused('HELPER_UNAVAILABLE') from None
+        raw = b''
+        try:
+            conn.settimeout(remaining() or 1e-6)
             conn.sendall(payload)
-            raw = b''
-            while not raw.endswith(b'\n') and len(raw) <= 512:
-                chunk = conn.recv(513 - len(raw))
+            while not raw.endswith(b'\n') and len(raw) <= A.REQUEST_MAX:
+                left = remaining()
+                if not left:
+                    raise TimeoutError('reply deadline')
+                conn.settimeout(left)
+                chunk = conn.recv(A.REQUEST_MAX + 1 - len(raw))
                 if not chunk:
                     break
                 raw += chunk
-    except OSError:
-        raise SoftLimitHelperRefused('HELPER_UNAVAILABLE') from None
+        except OSError:
+            raise SoftLimitHelperRefused('EFFECT_UNCONFIRMED') from None
+    finally:
+        conn.close()
     try:
-        reply = json.loads(raw.decode('utf-8', 'strict'))
-    except (ValueError, UnicodeDecodeError):
+        return A.parse_reply(raw, expected_bytes)
+    except A.Refused as refused:
+        raise SoftLimitHelperRefused(refused.code) from None
+    except A.EffectUnconfirmed:
         raise SoftLimitHelperRefused('EFFECT_UNCONFIRMED') from None
-    if reply == {'ok': True, 'memoryHighBytes': reply.get('memoryHighBytes')} and type(reply['memoryHighBytes']) is int:
-        return reply['memoryHighBytes']
-    raise SoftLimitHelperRefused(reply.get('code') if isinstance(reply, dict) and reply.get('ok') is False else 'EFFECT_UNCONFIRMED')
 
 
 def configure_started(broker, name, sid, expected_id=None):
@@ -151,50 +164,33 @@ def configure_started(broker, name, sid, expected_id=None):
             labels.get('reverie.worker') != broker.config['deployment'] or labels.get('reverie.session') != sid or
             labels.get('reverie.worker-policy') != policy_digest(broker.config, sid)):
         raise RuntimeError('New laptop memory target identity changed')
-    start = R._pid(pid)
-    groups = R._read(R.PROC / str(pid) / 'cgroup').splitlines()
-    if len(groups) != 1 or not groups[0].startswith('0::/'):
-        raise RuntimeError('Unified laptop cgroup required')
-    relative = Path(groups[0][4:])
-    if relative.is_absolute() or '..' in relative.parts or str(relative) == '.':
-        raise RuntimeError('Invalid laptop cgroup')
-    fd = os.open(R.CGROUP, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    from . import worker_memory_authority as A
     try:
-        for part in relative.parts:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-            os.close(fd)
-            fd = child
-        if (R._pid(pid) != start or R._read(R.PROC / str(pid) / 'cgroup').splitlines() != groups or
-                broker.inspect_container(name) != row or
-                (os.fstat(fd).st_dev, os.fstat(fd).st_ino) !=
-                (os.stat(R.CGROUP / relative, follow_symlinks=False).st_dev,
-                 os.stat(R.CGROUP / relative, follow_symlinks=False).st_ino)):
+        target = A.LaptopTarget(pid, R.CGROUP, R.PROC)
+    except A.Refused as refused:
+        raise RuntimeError('New laptop memory target identity changed: ' + refused.code) from None
+    same = lambda: broker.inspect_container(name) == row  # noqa: E731
+    try:
+        if not (target.fences() and same()):
             raise RuntimeError('New laptop memory target identity changed')
         if 'memoryHighMiB' in policy and broker.config.get('softLimitHelperSocket'):
             # The root helper applies only its own root-authorized value; readback below stays independent.
-            request_soft_limit(broker.config['softLimitHelperSocket'], sid, cid)
-        elif 'memoryHighMiB' in policy:  # Swap-only policies need no broker cgroup write.
+            request_soft_limit(broker.config['softLimitHelperSocket'], sid, cid, policy['memoryHighMiB'] * MIB)
+        elif 'memoryHighMiB' in policy:  # Swap-only policies need no cgroup write at all.
+            entry = {'memoryMaxMiB': resources['memoryMiB'], 'memoryHighMiB': policy['memoryHighMiB']}
             try:
-                high = os.open('memory.high', os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-            except OSError as error:
-                if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+                A.apply_high(entry, pid, R.CGROUP, R.PROC, same)
+            except A.Refused as refused:
+                if refused.code == 'WRITE_REFUSED':
                     raise SoftLimitAuthorityRefused() from None
-                raise
-            try:
-                raw = (str(policy['memoryHighMiB'] * MIB) + '\n').encode()
-                if os.write(high, raw) != len(raw):
-                    raise RuntimeError('Laptop soft memory write unconfirmed')
-            finally:
-                os.close(high)
+                raise RuntimeError('New laptop memory target identity changed: ' + refused.code) from None
+            except A.EffectUnconfirmed:
+                raise RuntimeError('Laptop soft memory write unconfirmed') from None
         observer.limits(row)  # Kernel high, RAM, swap and ancestor readback.
-        if (R._pid(pid) != start or R._read(R.PROC / str(pid) / 'cgroup').splitlines() != groups or
-                broker.inspect_container(name) != row or
-                (os.fstat(fd).st_dev, os.fstat(fd).st_ino) !=
-                (os.stat(R.CGROUP / relative, follow_symlinks=False).st_dev,
-                 os.stat(R.CGROUP / relative, follow_symlinks=False).st_ino)):
+        if not (target.fences() and same()):
             raise RuntimeError('Laptop memory readback identity changed')
     finally:
-        os.close(fd)
+        target.close()
 
 
 def verify_running(broker, sid, row):
