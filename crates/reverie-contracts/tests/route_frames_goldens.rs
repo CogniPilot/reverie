@@ -2,7 +2,7 @@
 //! (apps/web/test/rust-routes/frames.test.ts) reads the same file, so both readers agree on every
 //! accepted frame and refuse every malformed one with the same code.
 use reverie_contracts::route_frames_v1::{
-    Body, Direction, Frame, HEADER_BYTES, Observation, VERSION, read_frame,
+    Body, Direction, Frame, HEADER_BYTES, Observation, ROUTES, VERSION, read_frame,
 };
 use reverie_contracts::subscription_profiles_v1::Provider;
 use serde_json::Value;
@@ -67,9 +67,10 @@ fn expected(expect: &Value) -> Frame {
         },
         other => panic!("unknown kind {other}"),
     };
+    // Decimal strings: a JSON number cannot carry every u64 through every reader.
     Frame {
-        generation: expect["generation"].as_u64().expect("generation"),
-        id: expect["id"].as_u64().expect("id"),
+        generation: text(expect, "generation").parse().expect("generation"),
+        id: text(expect, "id").parse().expect("id"),
         body,
     }
 }
@@ -150,4 +151,40 @@ fn each_kind_maximum_is_accepted_and_one_more_byte_is_not() {
             None => assert!(matches!(decoded, Ok(Some(_))), "{name}: {decoded:?}"),
         }
     }
+}
+
+#[test]
+fn the_route_table_is_the_shared_one() {
+    let cases = cases();
+    let shared: Vec<(String, Vec<u64>, String)> = cases["routes"]
+        .as_array()
+        .expect("routes")
+        .iter()
+        .map(|route| {
+            let statuses = route["statuses"].as_array().expect("statuses");
+            (
+                text(route, "key"),
+                statuses
+                    .iter()
+                    .map(|status| status.as_u64().expect("status"))
+                    .collect(),
+                text(route, "content_type"),
+            )
+        })
+        .collect();
+    let table: Vec<(String, Vec<u64>, String)> = ROUTES
+        .iter()
+        .map(|route| {
+            (
+                route.key.to_string(),
+                route
+                    .statuses
+                    .iter()
+                    .map(|status| u64::from(*status))
+                    .collect(),
+                route.content_type.to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(table, shared);
 }

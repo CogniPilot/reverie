@@ -1,5 +1,15 @@
 {
  "spec": "route-frames-v1 (D1b spec r2)",
+ "routes": [
+  {
+   "key": "GET /api/subscription-profiles",
+   "statuses": [
+    200,
+    500
+   ],
+   "content_type": "application/json; charset=utf-8"
+  }
+ ],
  "cases": [
   {
    "name": "request",
@@ -7,8 +17,8 @@
    "hex": "0000003b0101000000000000000100000000000000011e474554202f6170692f737562736372697074696f6e2d70726f66696c65737b22656e76223a7b7d7d",
    "expect": {
     "kind": "request",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "route": "GET /api/subscription-profiles",
     "json_hex": "7b22656e76223a7b7d7d"
    }
@@ -19,8 +29,8 @@
    "hex": "000000140101000000000000000700000000000000090158",
    "expect": {
     "kind": "request",
-    "generation": 7,
-    "id": 9,
+    "generation": "7",
+    "id": "9",
     "route": "X",
     "json_hex": ""
    }
@@ -31,8 +41,8 @@
    "hex": "00000012010400000000000000020000000000000003",
    "expect": {
     "kind": "cancel",
-    "generation": 2,
-    "id": 3
+    "generation": "2",
+    "id": "3"
    }
   },
   {
@@ -41,8 +51,8 @@
    "hex": "0000001401020000000000000001000000000000000100c8",
    "expect": {
     "kind": "response",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "status": 200,
     "body_hex": ""
    }
@@ -53,8 +63,8 @@
    "hex": "0000002501020000000000000001000000000000000101f47b2273756363657373223a66616c73657d",
    "expect": {
     "kind": "response",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "status": 500,
     "body_hex": "7b2273756363657373223a66616c73657d"
    }
@@ -65,8 +75,8 @@
    "hex": "0000001301030000000000000001000000000000000158",
    "expect": {
     "kind": "refusal",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "code": "X"
    }
   },
@@ -76,8 +86,8 @@
    "hex": "0000001f010300000000000000010000000000000002554e4b4e4f574e5f524f555445",
    "expect": {
     "kind": "refusal",
-    "generation": 1,
-    "id": 2,
+    "generation": "1",
+    "id": "2",
     "code": "UNKNOWN_ROUTE"
    }
   },
@@ -87,8 +97,8 @@
    "hex": "00000015010500000000000000010000000000000001010102",
    "expect": {
     "kind": "observe",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "observation": "subscription_modes",
     "providers": [
      "openai"
@@ -101,8 +111,8 @@
    "hex": "0000001601050000000000000001000000000000000101020102",
    "expect": {
     "kind": "observe",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "observation": "subscription_modes",
     "providers": [
      "anthropic",
@@ -116,8 +126,8 @@
    "hex": "00000020010600000000000000010000000000000001017b226f70656e6169223a5b5d7d",
    "expect": {
     "kind": "observed",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "observation": "subscription_modes",
     "json_hex": "7b226f70656e6169223a5b5d7d"
    }
@@ -128,8 +138,8 @@
    "hex": "000000120104ffffffffffffffffffffffffffffffff",
    "expect": {
     "kind": "cancel",
-    "generation": 18446744073709551615,
-    "id": 18446744073709551615
+    "generation": "18446744073709551615",
+    "id": "18446744073709551615"
    }
   },
   {
@@ -162,8 +172,8 @@
    "hex": "0000005201030000000000000001000000000000000141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
    "expect": {
     "kind": "refusal",
-    "generation": 1,
-    "id": 1,
+    "generation": "1",
+    "id": "1",
     "code": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
    }
   },

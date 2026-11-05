@@ -233,6 +233,9 @@ import { SubscriptionUsageReader } from '../subscription-usage.js';
 import { readSubscriptionProfiles } from '../subscription-profiles.js';
 import { scanCodexSessionsHistory, codexThreadBySessionId } from '../codex-transcript.js';
 import { registerSubscriptionProfileRoutes } from './routes/subscription-profile-routes.js';
+import { RouteChannel } from '../rust-routes/channel.js';
+import { ROUTE_STATUSES, rustRoutes } from '../rust-routes/config.js';
+import { SUBSCRIPTION_PROFILES } from '../rust-routes/frames.js';
 import { telemetrySignature } from '../usage-telemetry.js';
 import { readCodexPlanUsage, resolveCodexBinaryPath } from '../utils/codex-cli-resolver.js';
 import type { CronPort, ScheduledRun } from './ports/index.js';
@@ -752,6 +755,21 @@ export class WebServer extends EventEmitter {
    * transcript, which contains the exact Task tool call with the description parameter.
    * This is more reliable than the previous timing-based correlation approach.
    */
+  /** The Rust handler channel for `route` when the owner moved it, closed with the server; otherwise none. */
+  private rustRouteChannel(route: string): RouteChannel | undefined {
+    const config = rustRoutes(process.env);
+    if (!config?.moved.has(route)) return undefined;
+    const channel = new RouteChannel({
+      handlerPath: config.handlerPath,
+      statuses: ROUTE_STATUSES,
+      log: (message) => this.app.log.warn(message),
+    });
+    this.app.addHook('onClose', async () => {
+      await channel.close();
+    });
+    return channel;
+  }
+
   private setupSubagentWatcherListeners(): void {
     // Store handlers for cleanup on shutdown
     this.subagentWatcherHandlers = {
@@ -1409,7 +1427,8 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       (req) =>
         !isMultiUserMode() &&
-        ['plan-usage', 'routines'].some((name) => serviceVerifier({ service: ownerAuth, ctx }, name)(req))
+        ['plan-usage', 'routines'].some((name) => serviceVerifier({ service: ownerAuth, ctx }, name)(req)),
+      this.rustRouteChannel(SUBSCRIPTION_PROFILES)
     );
     registerSystemRoutes(this.app, ctx, verifiedOwner);
     registerLaptopPowerRoutes(this.app, {

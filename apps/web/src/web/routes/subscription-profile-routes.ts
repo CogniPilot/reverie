@@ -1,6 +1,6 @@
 import { NO_OWNER, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 /** Account profile selection and read-only quota lookup. Admin-owned in multi-user mode. */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { canUsernameRunPrivilegedCommands } from '../../user-store.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
@@ -15,6 +15,10 @@ import {
   type SubscriptionSelection,
 } from '../../subscription-profiles.js';
 import { SubscriptionUsageReader } from '../../subscription-usage.js';
+import type { RouteChannel } from '../../rust-routes/channel.js';
+import { SUBSCRIPTION_PROFILES } from '../../rust-routes/frames.js';
+import { getDataDir } from '../../config/instance.js';
+import { homedir } from 'node:os';
 import type { SessionMode } from '../../types.js';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { getAuthUser, isAdmin, ownerFor, parseBody } from '../route-helpers.js';
@@ -38,9 +42,12 @@ export function registerSubscriptionProfileRoutes(
   reader: SubscriptionUsageReader,
   sessionsOn: SessionsOnProfile,
   verifiedOwner: OwnerVerifier = NO_OWNER,
-  usageService: ServiceVerifier = NO_OWNER
+  usageService: ServiceVerifier = NO_OWNER,
+  /** Present only when the owner moved this route to the Rust handler. */
+  rust?: RouteChannel
 ): void {
   const authorize = (req: FastifyRequest): boolean => verifiedOwner(req) && (!isMultiUserMode() || isAdmin(req));
+  const forbidden = () => createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are admin-only');
   app.addHook('preHandler', async (req, reply) => {
     if (req.method !== 'POST' || !['/api/sessions', '/api/quick-start'].includes(req.routeOptions.url ?? '')) return;
     const body = req.body as
@@ -85,8 +92,8 @@ export function registerSubscriptionProfileRoutes(
   });
 
   app.get('/api/subscription-profiles', async (req, reply) => {
-    if (!authorize(req))
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are admin-only'));
+    if (!authorize(req)) return reply.code(403).send(forbidden());
+    if (rust) return forwardSubscriptionProfiles(rust, req, reply, () => authorize(req), forbidden);
     const profiles = await readSubscriptionProfiles();
     return { success: true, data: { profiles: profiles.map((p) => ({ ...p, modes: subscriptionModes(p.provider) })) } };
   });
@@ -152,7 +159,9 @@ export function registerSubscriptionProfileRoutes(
     try {
       removed = await removeSubscriptionProfile(id);
     } catch (error) {
-      return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'Could not remove the account; nothing was changed'));
+      return reply
+        .code(500)
+        .send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'Could not remove the account; nothing was changed'));
     }
     if (!removed) return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'No such account profile'));
     await appendAdminAudit({
@@ -177,4 +186,63 @@ export function registerSubscriptionProfileRoutes(
     }
     return { success: true, data: { accounts } };
   });
+}
+
+const RUST_CONTENT_TYPE = 'application/json; charset=utf-8';
+const FORWARDED_ENV = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'XDG_DATA_HOME'] as const;
+
+/**
+ * The moved GET: the Rust handler reads the profiles, and this route keeps everything only TS owns.
+ * `getDataDir()` runs where the TS route calls it, before any await; the CLI-registry modes are read
+ * only when the handler asks, after its read found profiles, as the TS route reads them. A reply is
+ * published only if its generation is still live, the response can still be written and the caller
+ * is still authorized; the TS route itself is never run as a fallback.
+ */
+async function forwardSubscriptionProfiles(
+  channel: RouteChannel,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  authorized: () => boolean,
+  forbidden: () => unknown
+): Promise<unknown> {
+  const env = Object.fromEntries(
+    FORWARDED_ENV.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]])
+  );
+  const request = { env, home: homedir(), cwd: process.cwd(), platform: process.platform, dataDir: getDataDir() };
+  const ticket = channel.admit(SUBSCRIPTION_PROFILES, Buffer.from(JSON.stringify(request)));
+  const gone = () => {
+    if (!reply.raw.writableFinished) ticket.abandon();
+  };
+  reply.raw.once('close', gone);
+  try {
+    let step = await ticket.next();
+    if (step.kind === 'observe') {
+      const modes = Object.fromEntries(step.providers.map((provider) => [provider, subscriptionModes(provider)]));
+      step = await ticket.answer(Buffer.from(JSON.stringify(modes)));
+    }
+    if (step.kind !== 'done') throw new Error('the Rust route handler asked twice');
+    // One synchronous tick: generation, then liveness, then authorization, then publication.
+    const outcome = step.outcome;
+    const current = outcome.kind === 'response' && channel.isCurrent(outcome.generation);
+    if (reply.sent || reply.raw.destroyed || reply.raw.writableEnded || req.raw.socket?.destroyed) {
+      reply.hijack();
+      return undefined;
+    }
+    if (!authorized()) return reply.code(403).send(forbidden());
+    if (current && outcome.kind === 'response')
+      return reply.code(outcome.status).type(RUST_CONTENT_TYPE).send(outcome.body);
+    return reply
+      .code(503)
+      .send(
+        createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          `The Rust route handler could not answer (request ${outcome.generation}-${outcome.id}). Nothing was changed.`
+        )
+      );
+  } catch (error) {
+    ticket.abandon();
+    throw error;
+  } finally {
+    reply.raw.removeListener('close', gone);
+  }
 }
