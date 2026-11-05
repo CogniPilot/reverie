@@ -1,4 +1,5 @@
 //! Private lossless Python JSON primitives shared by named compatibility readers.
+mod copy;
 mod decode;
 mod equality;
 #[cfg(test)]

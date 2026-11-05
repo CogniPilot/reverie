@@ -1,6 +1,6 @@
 use super::{
-    MARKER, Result, TaskPerfArtifactData, TaskPerfError, TaskPerfProfile, clone_value, key, object,
-    scalar, string,
+    MARKER, Result, TaskPerfArtifactData, TaskPerfError, TaskPerfProfile, key, object, scalar,
+    string,
 };
 use crate::legacy_json::{self, Node, Value};
 use crate::worker_config::EffectiveWorkerConfig;
@@ -47,7 +47,7 @@ impl TaskPerfConfiguration {
         employee: Option<&ProfileEmployeeId>,
         artifact: Option<&TaskPerfArtifactData>,
     ) -> Result<TaskPerfProjection> {
-        let mut result = clone_value(&self.value)?;
+        let mut result = self.value.deep_clone();
         let Node::Object(fields) = &mut result.0 else {
             unreachable!("checked configuration object");
         };
