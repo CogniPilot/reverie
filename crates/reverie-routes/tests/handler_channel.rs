@@ -176,7 +176,7 @@ fn profiles_ask_for_their_providers_modes_then_answer_once() {
     let answered = run(&[read.clone(), observed(1, br#"{"anthropic":["claude"]}"#)]);
     let canceled = run(&[read.clone(), frame(1, Body::Cancel)]);
     let malformed = run(&[read.clone(), observed(1, br#"{"openai":[]}"#)]);
-    let abandoned = run(&[read.clone()]);
+    let abandoned = run(std::slice::from_ref(&read));
     let interrupted = run(&[read, request(2, &json!({}))]);
     fs::remove_dir_all(&root).expect("cleanup");
 
