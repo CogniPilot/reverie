@@ -7,7 +7,7 @@ mod tests;
 mod text;
 mod value;
 pub(crate) use equality::numeric_key;
-pub(crate) use value::{Node, Number, Text, Value};
+pub(crate) use value::{Node, Number, Text, Value, truthy};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
     InvalidJson,

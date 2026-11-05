@@ -2,8 +2,9 @@
 //! Inputs are projected data, never evidence of validation, readiness or authority.
 mod encode;
 
-use crate::legacy_json::{self, Node, Value};
+use crate::legacy_json::{self, Node, Text, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fmt;
 
 pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
@@ -47,9 +48,13 @@ impl std::error::Error for WorkerConfigError {}
 /// policy types or strict wire schemas.
 pub struct EffectiveWorkerConfig(Value);
 impl EffectiveWorkerConfig {
-    pub(crate) fn from_object(
-        value: std::collections::BTreeMap<crate::legacy_json::Text, Value>,
-    ) -> Self {
+    pub(crate) fn as_value(&self) -> &Value {
+        &self.0
+    }
+    pub(crate) fn into_value(self) -> Value {
+        self.0
+    }
+    pub(crate) fn from_object(value: BTreeMap<Text, Value>) -> Self {
         Self(Value(Node::Object(value)))
     }
 }

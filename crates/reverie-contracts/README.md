@@ -90,3 +90,37 @@ configuration fields remain lossless. These are data transforms, not native
 artifact custody, owner permission, full Docker validation or a kernel grant.
 The separate Linux host adapter supplies fixed package observation and current
 employee bracketing; current production Python consumers remain selected.
+
+## GPU and soft-memory projections
+
+`device_policy::{gpu,memory}` exposes named feature validation/projection over
+the existing lossless `EffectiveWorkerConfig` data. Only projected `gpuGrants`
+or `laptopMemoryPolicy` entries change. Other strings, numeric kinds and opaque
+configuration remain in their existing data nodes; projections never clone JSON
+through serialization or impose the stage-only finite/128-KiB clone guard.
+
+Direct GPU validation checks both explicit maps and the combined bound. The
+`resource_config` callsite separately requires the employee GPU map to be an
+object, then skips GPU projection when it is empty; inactive malformed legacy
+GPU data is retained as before. Direct memory validation checks the map and pool
+even when empty, while its `resource_config` callsite uses existing Python
+truthiness before invoking that feature. The shared private JSON truthiness
+helper also remains the owner of storage-identity truthiness behavior.
+
+GPU projection accepts current employee observation data, checks its SID when
+needed, and retains legacy SID priority and absent-versus-empty map shape.
+Native composition must obtain that data freshly; historical storage alone
+cannot select an employee GPU grant. Memory selection instead uses the trusted
+storage identity, including historical employee storage.
+
+Selected memory-high projection accepts the actual checked effective
+`ResourcePolicy` and binds its integer RAM ceiling to resource data. It does not
+claim compatibility with malformed arbitrary Python private-helper arguments
+such as floating or infinite RAM values. Unselected and swap-only paths leave
+RAM data untouched. `swap_bytes` operates on checked projected policy data, with
+the existing zero default for no selected policy; it is not an admission check.
+
+Nineteen synthetic old-Python `resource_config` and `policy_digest` cases qualify
+exact bytes and hashes. Only current/storage identity observations are stubbed
+in these pure oracles; native read custody and drift tests are separate. These
+projections expose no owner authority, host fact receipt, endpoint or writer.
