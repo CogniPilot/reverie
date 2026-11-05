@@ -1,0 +1,152 @@
+{
+  "reference": "python/reverie/worker_perf.py at fa85f52dfc67520d042a0a0364c7c7b15f2ee85b",
+  "sourceSHA256": "bd74272f1a97cf3af2d469e05bbe2ff9d5a601bde75edcc6afe85326835a6b7f",
+  "derivatives": [
+    {
+      "name": "ordinary",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "error": false,
+      "expected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}"
+    },
+    {
+      "name": "empty-syscalls",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": []}",
+      "error": false,
+      "expected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}"
+    },
+    {
+      "name": "unknown-unicode",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"lone\": \"\\ud800\", \"nested\": [true, 1, 1.0, -0.0], \"\\u00e9\": \"\\ud834\\udd1e\"}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "error": false,
+      "expected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"lone\": \"\\ud800\", \"nested\": [true, 1, 1.0, -0.0], \"\\u00e9\": \"\\ud834\\udd1e\"}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}"
+    },
+    {
+      "name": "nonfinite",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": [NaN, Infinity, -Infinity], \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "error": false,
+      "expected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": [NaN, Infinity, -Infinity], \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}"
+    },
+    {
+      "name": "large-int",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 9007199254740993, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "error": false,
+      "expected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 9007199254740993, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}"
+    },
+    {
+      "name": "not-object",
+      "base": "[]",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "wrong-default",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ALLOW\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "bad-syscalls",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": {}}",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "already-rule",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "already-numeric-index",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2.0, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "already-numeric-value",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295.0, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "already-numeric-valueTwo",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295.0}], \"names\": [\"perf_event_open\"]}]}",
+      "error": true,
+      "expected": null
+    },
+    {
+      "name": "rule-with-extra-is-different",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"extra\": \"preserved\", \"names\": [\"perf_event_open\"]}]}",
+      "error": false,
+      "expected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"extra\": \"preserved\", \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}"
+    }
+  ],
+  "artifactComparisons": [
+    {
+      "name": "bool-int",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": true, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 1, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "bool-float",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": false, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 0.0, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "integral",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 2, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 2.0, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "signed-zero",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": -0.0, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 0, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "large-rounded",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 9007199254740993, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 9007199254740992.0, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": false
+    },
+    {
+      "name": "large-exact",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 1e+100, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": false
+    },
+    {
+      "name": "large-float-exact-int",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815104, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 1e+100, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "nan",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": NaN, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": NaN, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "nested-nan",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"x\": [NaN]}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"x\": [NaN]}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "inf",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": Infinity, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": Infinity, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": true
+    },
+    {
+      "name": "wrong-extra",
+      "base": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 1, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}]}",
+      "selected": "{\"archMap\": [], \"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": 2, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"read\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"includes\": {\"caps\": [\"CAP_PERFMON\"]}, \"names\": [\"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}",
+      "valid": false
+    }
+  ]
+}
