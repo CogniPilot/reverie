@@ -157,3 +157,7 @@ mount declaration unit while retaining the captured data exactly. Its separate
 feature method reuses existing map/lease policy owners. Native source custody,
 remaining optional domains and full ordered validation remain open; see the
 [source-backed ownership audit](src/worker_schema/README.md).
+
+`rootless` ports the rootless option/profile/syscall, image-label and subordinate
+grant data rules, sharing mount and fixed perf owners. Its [compatibility audit](src/rootless/README.md)
+records parsing quirks, native observations and the remaining engine boundary.

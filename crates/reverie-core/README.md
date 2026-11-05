@@ -9,6 +9,9 @@ mount target, immutable-rootless and account-target rules. It reuses resource
 bounds and retains codepoints, without filesystem/seccomp/start qualification.
 See the contracts [validation audit](../reverie-contracts/src/worker_schema/README.md).
 
+`rootless` owns arbitrary-precision subordinate-ID containment. Checked decimal
+data and containment results are neither host observations nor access grants.
+
 - `ProfileEmployeeId` and `ProfileSessionId` preserve lexical UUID compatibility,
   including nil. `NativeOperationId` rejects nil. These purpose-specific values
   do not redefine general legacy company/session identifiers.

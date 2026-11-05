@@ -3,8 +3,11 @@ mod config;
 mod manifest;
 mod profile;
 
-pub use config::{TaskPerfConfiguration, TaskPerfProjection};
+pub use config::{
+    TaskPerfConfiguration, TaskPerfProjection, recognize_configuration, validate_selection_marker,
+};
 pub use manifest::{PerfSystem, TaskPerfManifest};
+pub(crate) use profile::is_task_perf_rule;
 pub use profile::{TaskPerfArtifactData, TaskPerfProfile};
 
 use crate::legacy_json::{self, Node, Text, Value};

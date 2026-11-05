@@ -30,19 +30,28 @@ struct Cursor<'a> {
     source: &'a [u8],
     offset: usize,
     reject_constants: bool,
+    replace_duplicates: bool,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, false)
+    decode_mode(source, false, false)
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, true)
+    decode_mode(source, true, false)
 }
-fn decode_mode(source: &[u8], reject_constants: bool) -> Result<Value, Error> {
+pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, false, true)
+}
+fn decode_mode(
+    source: &[u8],
+    reject_constants: bool,
+    replace_duplicates: bool,
+) -> Result<Value, Error> {
     let mut cursor = Cursor {
         source,
         offset: 0,
         reject_constants,
+        replace_duplicates,
     };
     let root = parse(&mut cursor)?;
     cursor.whitespace();
@@ -57,7 +66,7 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     loop {
         match action {
             Action::Ready(value) => match frames.last_mut() {
-                Some(frame) => frame.attach(value)?,
+                Some(frame) => frame.attach(value, cursor.replace_duplicates)?,
                 None => return Ok(value),
             },
             Action::Push(frame) => frames.push(frame),
@@ -75,7 +84,7 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     }
 }
 impl Frame {
-    fn attach(&mut self, value: Value) -> Result<(), Error> {
+    fn attach(&mut self, value: Value, replace_duplicates: bool) -> Result<(), Error> {
         match self {
             Self::Array { values, phase } => {
                 values.push(value);
@@ -83,7 +92,7 @@ impl Frame {
             }
             Self::Object { values, key, phase } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
-                if values.insert(key, value).is_some() {
+                if values.insert(key, value).is_some() && !replace_duplicates {
                     return Err(Error::DuplicateKey);
                 }
                 *phase = Phase::Next;
@@ -203,6 +212,14 @@ impl Cursor<'_> {
             .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
+            // The rootless-purpose default Python decoder uses its runtime's
+            // decimal conversion cap even for ignored/overwritten fields.
+            // Other named readers keep their separately frozen number policy.
+            if self.replace_duplicates
+                && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
+            {
+                return Err(Error::InvalidJson);
+            }
             return Ok(Number::Integer(
                 if text == "-0" { "0" } else { text }.to_owned(),
             ));
