@@ -473,49 +473,12 @@ let
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
-  # The protected resource bootstrap pins this manifest, rather than inferring
-  # an interpreter or package import path from the website's environment.
-  workerResourceClientManifest = pkgs.runCommand "reverie-resource-client-manifest" {
-    nativeBuildInputs = [ pkgs.buildPackages.python3 ];
-  } ''
-    mkdir -p "$out/share/reverie"
-    export REVERIE_RESOURCE_CLIENT_OUTPUT="$out/share/reverie/resource-client.json"
-    ${pkgs.buildPackages.python3}/bin/python3 -I -B <<'PY'
-    import hashlib, json, os
-    from pathlib import Path
-    invocation = "${pkgs.python3}/bin/python3"
-    executable = Path(invocation).resolve(strict=True)
-    entry = Path("${workerPythonSource}/python/reverie/worker.py")
-    assert str(executable).startswith('/nix/store/') and executable.is_file()
-    with executable.open('rb') as stream:
-        assert stream.read(4) == b'\x7fELF', 'The private client requires a native Python ELF'
-    assert entry.resolve(strict=True) == entry and entry.is_file()
-    value = {
-        'version': 1,
-        'purpose': 'resource-replacement-client-v1',
-        'pythonInvocation': invocation,
-        'pythonExecutable': str(executable),
-        'entry': str(entry),
-        'entrySHA256': hashlib.sha256(entry.read_bytes()).hexdigest(),
-        'argvPrefix': [invocation, '-I', '-B', str(entry), 'client'],
-    }
-    Path(os.environ['REVERIE_RESOURCE_CLIENT_OUTPUT']).write_text(json.dumps(value, indent=2) + '\n')
-    PY
-  '';
-  # The resource client runs worker.py by path beside its sibling modules. Ship
-  # only the Python tree: referencing the whole source tree put the checkout
-  # (about 300 MB) into every image that carries the runtime.
-  workerPythonSource = pkgs.runCommand "reverie-worker-python-source" { } ''
-    mkdir -p "$out"
-    cp -R ${src}/python "$out/python"
-  '';
-  workerExec = pkgs.writeShellScriptBin "reverie-worker-exec" ''
-    # Protected bootstrap metadata: ${workerResourceClientManifest}/share/reverie/resource-client.json
-    if [ "''${1:-}" = --resource-ref ]; then
-      exec ${pkgs.python3}/bin/python3 -I -B ${workerPythonSource}/python/reverie/worker.py client "$@"
-    fi
-    exec ${memory}/bin/python3 -m reverie.worker client "$@"
-  '';
+  nativeClient = import ./worker-client.nix { inherit pkgs src; };
+  workerNativeClient = nativeClient.program;
+  workerNativeClientManifest = nativeClient.manifest;
+  # All client modes and the protected manifest move together; no Python branch.
+  workerResourceClientManifest = workerNativeClientManifest;
+  workerExec = workerNativeClient;
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -613,4 +576,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest laptopTools; }

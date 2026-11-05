@@ -16,6 +16,29 @@ contracts and xtask. CI exercises this command on Linux, macOS and Windows.
 The full native workspace gate remains separate; Linux host adapters are not
 claimed to work on other operating systems. Both commands invoke Cargo directly.
 
+Linux CI also runs the same selected-artifact gate available locally:
+
+```text
+nix develop --command cargo xtask verify-worker-package
+```
+
+This thin runner makes two explicit `nix build` calls for `.#workerExec` and
+`.#workerResourceClientManifest`, using fresh private temporary out-links. It
+canonicalizes the executable and manifest paths and supplies them to the existing
+`tests.test_worker_resource_launcher_package` unittest module and two qualified
+Goal-stream tests in `tests.test_owner_goal_broker` through its two qualification
+environment variables. These eight cases own ELF, manifest, exact kernel argv,
+inert-broker validation and interoperability with the existing Python broker.
+The runner parses no product metadata and
+contains no deployment or privileged operation. It stops at any build, path or
+test failure and removes only its own temporary symlinks and empty directory;
+Nix store outputs remain intact. Unexpected scratch entries are retained with an
+error. Unsupported platforms fail explicitly without claiming checks ran.
+
+The Python test invocation is existing migration-debt qualification, not a
+shipped runtime dependency or a new Python implementation. `verify-portable`
+continues to run without Nix or this native package gate on macOS and Windows.
+
 Repository policies run as Rust integration tests in that workspace test step:
 
 - Production Rust below `crates/` has a **2000-line** budget. Exactly 2000 lines

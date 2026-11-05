@@ -52,8 +52,8 @@ class InactivePublicationTests(unittest.TestCase):
         self.item = copy.deepcopy(f.native.rows[1]); self.item['Config']['User'] = str(os.getuid())+':'+str(os.getgid())
         self.item['HostConfig']['OomKillDisable'] = False
         self.provenance_path = f.control/'synthetic-provenance.json'; self.provenance_path.write_text('owned input port')
-        self.client = Program('/nix/store/synthetic-python/bin/python3.13',
-                              ('/nix/store/synthetic-python/bin/python3', '-I', '-B', '/nix/store/synthetic-source/worker.py', 'client'))
+        self.client = Program('/nix/store/synthetic-native/bin/reverie-worker-exec',
+                              ('/nix/store/synthetic-native/bin/reverie-worker-exec',))
         self.prefix = ['/nix/store/synthetic-node/bin/node', '/nix/store/synthetic-console/lib/reverie/dist/index.js']
         self.provenance = {'clientManifest': {'path': '/nix/store/synthetic-client/manifest.json', 'sha256': 'a'*64},
                            'node': {'executable': self.prefix[0], 'argvPrefix': self.prefix},
