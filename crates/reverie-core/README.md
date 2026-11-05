@@ -4,6 +4,11 @@ This crate provides the checked identities, counters, resource policies and pure
 profile CAS projection used by the Rust profile-store migration. Fields carrying
 invariants are private; public constructors return checked values.
 
+`worker_schema` owns checked worker base identity/count/UID data and pure POSIX
+mount target, immutable-rootless and account-target rules. It reuses resource
+bounds and retains codepoints, without filesystem/seccomp/start qualification.
+See the contracts [validation audit](../reverie-contracts/src/worker_schema/README.md).
+
 - `ProfileEmployeeId` and `ProfileSessionId` preserve lexical UUID compatibility,
   including nil. `NativeOperationId` rejects nil. These purpose-specific values
   do not redefine general legacy company/session identifiers.

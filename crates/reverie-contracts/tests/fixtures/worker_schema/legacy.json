@@ -1,0 +1,562 @@
+{
+  "provenance": "Actual frozen worker.validate_config and worker_docker.require_immutable_mounts on synthetic data; only source paths replaced with an owned existing temporary directory during validation.",
+  "envelope": [
+    {
+      "name": "base",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "version_bool",
+      "raw": "{\"version\": true, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "version_float",
+      "raw": "{\"version\": 1.0, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "signed_cpu_zero",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": -0.0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "float_cpu",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 11.764508228891675, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "lexical_paths",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"//state//./tail/../state\", \"companyFile\": \"/company\\tfile\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/scratch\\ud800\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "duplicate_nil_maintenance",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": [\"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\"]}",
+      "accepted": true
+    },
+    {
+      "name": "many_maintenance",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": [\"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\", \"00000000-0000-0000-0000-000000000000\"]}",
+      "accepted": true
+    },
+    {
+      "name": "disabled_docker_arbitrary",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": [], \"rootlessDocker\": {\"enabled\": false, \"seccompProfile\": {\"x\": NaN}, \"seccompSha256\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}}",
+      "accepted": true
+    },
+    {
+      "name": "proc_descendant",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/proc/sub\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "unicode_target",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/projects/\\ud83d\\ude80\\ud800\", \"readOnly\": true}], \"maintenanceSessions\": []}",
+      "accepted": true
+    },
+    {
+      "name": "extra_header",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": [], \"unexpected\": true}",
+      "accepted": false
+    },
+    {
+      "name": "bad_version",
+      "raw": "{\"version\": false, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "uid_bool",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": true, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "uid_float",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1.0, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "uid_zero",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 0, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "uid_big",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 2147483648, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "max_big",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 33, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "uppercase_deployment",
+      "raw": "{\"version\": 1, \"deployment\": \"Office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mutable_image",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"latest\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "cpu_bool",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": true, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "cpu_nan",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": NaN, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "cpu_tiny",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0.125, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "cross_pool",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 513, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "admission_low",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"admission\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "wrong_cgroup",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"other.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "relative_path",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"relative\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "nul_path",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/x\\u0000y\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "socket_surrogate",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/x\\ud800\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "socket_byte_bound",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\\u03bb\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "bad_sid",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": [\"opaque\"]}",
+      "accepted": false
+    },
+    {
+      "name": "no_mounts",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_bool_int",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": 1}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "duplicate_dest",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}, {\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "missing_header",
+      "raw": "{\"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_root",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_reserved",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/home/agent\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_attachments",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/reverie_workspace/attachments/a\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_double",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"//workspace\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_dot",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/a/./b\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_parent",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/a/../b\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_trailing",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/a/\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_run",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/run/other\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    },
+    {
+      "name": "mount_comma",
+      "raw": "{\"version\": 1, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"serverContainer\": \"office.Server-1\", \"socket\": \"/synthetic/control/worker.sock\", \"stateRoot\": \"/synthetic/state\", \"companyFile\": \"/synthetic/company.json\", \"companyRoot\": \"/synthetic/company\", \"scratchRoot\": \"/synthetic/scratch\", \"apiSocketRoot\": \"/synthetic/api\", \"budgetMode\": \"pool\", \"uid\": 1000, \"gid\": 1000, \"memoryMiB\": 0, \"poolMemoryMiB\": 512, \"poolTasksMax\": 128, \"cgroupParent\": \"reverie-workers.slice\", \"pidsLimit\": 64, \"cpus\": 0, \"maxWorkers\": 1, \"mounts\": [{\"source\": \"/synthetic/source\", \"destination\": \"/a,b\", \"readOnly\": false}], \"maintenanceSessions\": []}",
+      "accepted": false
+    }
+  ],
+  "rootless": [
+    {
+      "name": "empty",
+      "raw": "{\"mounts\": []}",
+      "accepted": true
+    },
+    {
+      "name": "/workspaceTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/workspaceFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace\", \"readOnly\": false}]}",
+      "accepted": true
+    },
+    {
+      "name": "/workspace1",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace\", \"readOnly\": 1}]}",
+      "accepted": true
+    },
+    {
+      "name": "/workspaceNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace\", \"readOnly\": null}]}",
+      "accepted": true
+    },
+    {
+      "name": "/reverie_workspaceTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/reverie_workspace\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/reverie_workspaceFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "accepted": true
+    },
+    {
+      "name": "/reverie_workspace1",
+      "raw": "{\"mounts\": [{\"destination\": \"/reverie_workspace\", \"readOnly\": 1}]}",
+      "accepted": true
+    },
+    {
+      "name": "/reverie_workspaceNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/reverie_workspace\", \"readOnly\": null}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projectsTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projectsFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects\", \"readOnly\": false}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projects1",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects\", \"readOnly\": 1}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projectsNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects\", \"readOnly\": null}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projects/a-1_.True",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a-1_.\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projects/a-1_.False",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a-1_.\", \"readOnly\": false}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projects/a-1_.1",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a-1_.\", \"readOnly\": 1}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projects/a-1_.None",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a-1_.\", \"readOnly\": null}]}",
+      "accepted": true
+    },
+    {
+      "name": "/projects/.hiddenTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/.hidden\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/.hiddenFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/.hidden\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/.hidden1",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/.hidden\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/.hiddenNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/.hidden\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/a/subTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a/sub\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/a/subFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a/sub\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/a/sub1",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a/sub\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/projects/a/subNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a/sub\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etcTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etcFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etc1",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etcNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etc/passwd/subTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc/passwd/sub\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etc/passwd/subFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc/passwd/sub\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etc/passwd/sub1",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc/passwd/sub\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/etc/passwd/subNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/etc/passwd/sub\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/binTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/bin\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/binFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/bin\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/bin1",
+      "raw": "{\"mounts\": [{\"destination\": \"/bin\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/binNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/bin\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/host-publishedTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/host-published\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/host-publishedFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/host-published\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/host-published1",
+      "raw": "{\"mounts\": [{\"destination\": \"/host-published\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/host-publishedNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/host-published\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/run/reverie-modelTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/run/reverie-model\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/run/reverie-modelFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/run/reverie-model\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/run/reverie-model1",
+      "raw": "{\"mounts\": [{\"destination\": \"/run/reverie-model\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/run/reverie-modelNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/run/reverie-model\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/instances/default/toolsTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/instances/default/tools\", \"readOnly\": true}]}",
+      "accepted": true
+    },
+    {
+      "name": "/instances/default/toolsFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/instances/default/tools\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/instances/default/tools1",
+      "raw": "{\"mounts\": [{\"destination\": \"/instances/default/tools\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/instances/default/toolsNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/instances/default/tools\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/workspace/True",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace/\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/workspace/False",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace/\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/workspace/1",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace/\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/workspace/None",
+      "raw": "{\"mounts\": [{\"destination\": \"/workspace/\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "//workspaceTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"//workspace\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "//workspaceFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"//workspace\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "//workspace1",
+      "raw": "{\"mounts\": [{\"destination\": \"//workspace\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "//workspaceNone",
+      "raw": "{\"mounts\": [{\"destination\": \"//workspace\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/unknownTrue",
+      "raw": "{\"mounts\": [{\"destination\": \"/unknown\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/unknownFalse",
+      "raw": "{\"mounts\": [{\"destination\": \"/unknown\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/unknown1",
+      "raw": "{\"mounts\": [{\"destination\": \"/unknown\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/unknownNone",
+      "raw": "{\"mounts\": [{\"destination\": \"/unknown\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "/True",
+      "raw": "{\"mounts\": [{\"destination\": \"/\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "/False",
+      "raw": "{\"mounts\": [{\"destination\": \"/\", \"readOnly\": false}]}",
+      "accepted": false
+    },
+    {
+      "name": "/1",
+      "raw": "{\"mounts\": [{\"destination\": \"/\", \"readOnly\": 1}]}",
+      "accepted": false
+    },
+    {
+      "name": "/None",
+      "raw": "{\"mounts\": [{\"destination\": \"/\", \"readOnly\": null}]}",
+      "accepted": false
+    },
+    {
+      "name": "disjoint_conflict",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects\", \"readOnly\": false}, {\"destination\": \"/projects/a\", \"readOnly\": true}]}",
+      "accepted": false
+    },
+    {
+      "name": "siblings",
+      "raw": "{\"mounts\": [{\"destination\": \"/projects/a\", \"readOnly\": false}, {\"destination\": \"/projects/b\", \"readOnly\": false}]}",
+      "accepted": true
+    }
+  ]
+}
