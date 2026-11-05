@@ -1,0 +1,32 @@
+{
+  "reference": "actual nix/worker-perf-profile.py at77c4c1a7; owned temporary inputs/outputs only",
+  "cases": [
+    {
+      "name": "0",
+      "system": "x86_64-linux",
+      "basePath": "/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/base-0.json",
+      "selectedPath": "/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/out-0/task-perf-seccomp.json",
+      "base": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"lone\": \"\\ud800\", \"numeric\": [true, 1.0, -0.0, 9007199254740993], \"unicode\": \"\\u00e9\\ud83d\\ude00\"}, \"syscalls\": []}",
+      "profile": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"lone\": \"\\ud800\", \"numeric\": [true, 1.0, -0.0, 9007199254740993], \"unicode\": \"\\u00e9\\ud83d\\ude00\"}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}\n",
+      "manifest": "{\"baseProfile\": \"/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/base-0.json\", \"baseSHA256\": \"0ead560b10eab1108d6bfb46526c1fe1bb473bd05972b70f8e5684e6a8b021e4\", \"profile\": \"/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/out-0/task-perf-seccomp.json\", \"profileSHA256\": \"172b03db40868c9cc68dcd9804f26c6f67faee159f6724aa7ad5006c9e72008b\", \"purpose\": \"worker-task-perf-profile-v1\", \"system\": \"x86_64-linux\", \"version\": 1}\n"
+    },
+    {
+      "name": "1",
+      "system": "aarch64-linux",
+      "basePath": "/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/base-1.json",
+      "selectedPath": "/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/out-1/task-perf-seccomp.json",
+      "base": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"special\": [NaN, Infinity, -Infinity]}, \"syscalls\": []}",
+      "profile": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {\"special\": [NaN, Infinity, -Infinity]}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}\n",
+      "manifest": "{\"baseProfile\": \"/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/base-1.json\", \"baseSHA256\": \"04f1684465e2e489f73163f73ae90a93be0c956fac60e91bf1dcdc1025880b1c\", \"profile\": \"/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/out-1/task-perf-seccomp.json\", \"profileSHA256\": \"bb3ab6e35a9abe2978540b15a9c63d09ea8ad71a47658debd13de93ed0b122a2\", \"purpose\": \"worker-task-perf-profile-v1\", \"system\": \"aarch64-linux\", \"version\": 1}\n"
+    },
+    {
+      "name": "2",
+      "system": "x86_64-linux",
+      "basePath": "/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/base-2.json",
+      "selectedPath": "/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/out-2/task-perf-seccomp.json",
+      "base": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {}, \"syscalls\": []}",
+      "profile": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"extra\": {}, \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"args\": [{\"index\": 2, \"op\": \"SCMP_CMP_MASKED_EQ\", \"value\": 4294967295, \"valueTwo\": 4294967295}], \"names\": [\"perf_event_open\"]}]}\n",
+      "manifest": "{\"baseProfile\": \"/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/base-2.json\", \"baseSHA256\": \"da2d04f7de75025022d0f18f192b8e742aa589264d6d8c9c100070b952b5fb2d\", \"profile\": \"/tmp/reverie-adversarial-review-20261105/perf-producer-oracle-yp0s1z54/out-2/task-perf-seccomp.json\", \"profileSHA256\": \"e91e520b0e0860d0c2a90dcff711587208e17e1a1281da1ec0c1ea9ecf1ec852\", \"purpose\": \"worker-task-perf-profile-v1\", \"system\": \"x86_64-linux\", \"version\": 1}\n"
+    }
+  ]
+}

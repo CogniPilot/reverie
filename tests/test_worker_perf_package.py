@@ -2,9 +2,11 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,17 +19,36 @@ class WorkerPerfPackageTests(unittest.TestCase):
             work = Path(directory)
             def source(name, *, builder_extra='', module_extra='', unrelated='website A'):
                 target = work / name
-                for relative, extra in [('nix/worker-perf-profile.py', builder_extra),
-                                        ('python/reverie/worker_perf.py', module_extra)]:
+                target.mkdir()
+                for filename in ('Cargo.toml', 'Cargo.lock'):
+                    shutil.copyfile(ROOT / filename, target / filename)
+                for crate_name in ('reverie-core', 'reverie-contracts', 'reverie-policy-artifacts'):
+                    shutil.copytree(ROOT / 'crates' / crate_name, target / 'crates' / crate_name)
+                for relative, extra in [('crates/reverie-policy-artifacts/src/main.rs', builder_extra),
+                                        ('crates/reverie-core/src/task_perf.rs', module_extra)]:
                     path = target / relative
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes((ROOT / relative).read_bytes() + extra.encode())
+                    path.write_bytes(path.read_bytes() + extra.encode())
+                if name == 'release':
+                    # New excluded workspace members/dependencies and unrelated
+                    # lock entries must not select a different artifact.
+                    cargo = target / 'Cargo.toml'
+                    original = cargo.read_text()
+                    members = tomllib.loads(original)['workspace']['members']
+                    self.assertNotIn('crates/unrelated', members)
+                    array = re.search(r'(?m)^members\s*=\s*\[', original)
+                    self.assertIsNotNone(array, 'workspace members declaration must be perturbed')
+                    updated = original[:array.end()] + '\n"crates/unrelated",\n' + original[array.end():]
+                    self.assertEqual(tomllib.loads(updated)['workspace']['members'], ['crates/unrelated', *members])
+                    self.assertEqual(updated.count('[workspace.dependencies]'), 1)
+                    cargo.write_text(updated.replace('[workspace.dependencies]', '[workspace.dependencies]\nunrelated = "1"'))
+                    with (target / 'Cargo.lock').open('a') as file:
+                        file.write('\n[[package]]\nname = "unrelated"\nversion = "1.0.0"\n')
                 (target / 'unrelated-website.txt').write_text(unrelated)
                 return target
             sources = {name: source(name, **changes) for name, changes in {
                 'before': {}, 'release': {'unrelated': 'website B'},
-                'builder': {'builder_extra': '\n# changed builder input\n'},
-                'module': {'module_extra': '\n# changed policy module input\n'},
+                'builder': {'builder_extra': '\n// changed builder input\n'},
+                'module': {'module_extra': '\n// changed policy module input\n'},
             }.items()}
             paths = {name: json.dumps(str(path)) for name, path in sources.items()}
             root = json.dumps(str(ROOT))
@@ -46,7 +67,10 @@ class WorkerPerfPackageTests(unittest.TestCase):
               module = make pkgs base MODULE;
               otherBase = make pkgs (pkgs.writeText "different-base.json" "changed base bytes") BEFORE;
               otherPkgs = make (pkgs // {
-                python3 = pkgs.python3.overrideAttrs (old: { pname = old.pname + "-identity-control"; });
+                rustPlatform = pkgs.rustPlatform // {
+                  buildRustPackage = attrs: pkgs.rustPlatform.buildRustPackage
+                    (attrs // { RUSTFLAGS = "-Ccodegen-units=2"; });
+                };
               }) base BEFORE;
               identity = value: { drv = value.drvPath; out = value.outPath; };
             in { inherit (pkgs.stdenv.hostPlatform) system;
@@ -58,7 +82,7 @@ class WorkerPerfPackageTests(unittest.TestCase):
                 expression = expression.replace(name, value)
             result = subprocess.run(['nix', '--extra-experimental-features', 'nix-command flakes',
                                      'eval', '--offline', '--impure', '--json', '--expr', expression],
-                                    capture_output=True, text=True, timeout=45)
+                                    capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stderr)
             value = json.loads(result.stdout)
             self.assertEqual(value['before'], value['release'])

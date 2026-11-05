@@ -72,12 +72,12 @@ broker must still retain its supported admission and execution guards. This
 cohort does not replace `worker_memory.check_swap_budget`, `configure_started`,
 soft-limit requests or running-kernel verification.
 
-The existing Python broker and artifact producer remain selected. Migrating the
-build-time first-party Python producer is **required remaining work**, preserving
-its filtered policy/builder/base/toolchain identity so unrelated workspace edits
-do not churn installed profile paths. Neither this library nor its tests claim
-that producer retirement, a consumer cutover, activation, a live syscall canary
-or the complete Python-free backend has finished.
+The existing Python broker remains selected. The task-perf artifact is now built
+by the separate Rust build-only policy-artifacts package, with filtered actual
+crate/dependency inputs. The separate Docker base-profile Python producer and
+other build-time tooling remain migration debt. Neither this library nor its
+tests claim a consumer cutover, activation, a live syscall canary or the complete
+Python-free backend has finished.
 
 `lease_policy::project_lease` consumes a captured `LeaseConfig` and session,
 obtaining the company path and UID comparison only from that same configuration.

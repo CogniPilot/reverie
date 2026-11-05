@@ -91,6 +91,11 @@ artifact custody, owner permission, full Docker validation or a kernel grant.
 The separate Linux host adapter supplies fixed package observation and current
 employee bracketing; current production Python consumers remain selected.
 
+`produce_task_perf` reuses that derivative and the existing private encoder/hash
+owners for build-only selected-profile/manifest bytes. Its declared paths are
+data, not installed custody. The Rust Nix producer adds only the original
+trailing newline and refuses output exceeding the installed artifact bound.
+
 ## GPU and soft-memory projections
 
 `device_policy::{gpu,memory}` exposes named feature validation/projection over
