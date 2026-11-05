@@ -1,5 +1,12 @@
 # Checked profile domain
 
+`operations` owns the existing resource journal's checked nonnil identifiers,
+unsigned memory references, phase/receipt rules, conservative positive deltas,
+idempotency uniqueness and shared pool accounting. Core completion candidates
+are data only; they cannot publish a journal or mint native settlement proof.
+The named contracts codec separately owns canonical fingerprints. Operation
+records expose immutable checked observations rather than mutable file state.
+
 This crate provides the checked identities, counters, resource policies and pure
 profile CAS projection used by the Rust profile-store migration. Fields carrying
 invariants are private; public constructors return checked values.
