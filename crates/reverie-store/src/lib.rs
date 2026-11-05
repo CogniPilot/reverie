@@ -7,6 +7,7 @@
 mod error;
 mod private_fs;
 pub mod profiles;
+pub mod storage_identity;
 mod transaction;
 
 pub use error::{StoreError, StoreFault};
