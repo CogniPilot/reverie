@@ -1,6 +1,7 @@
 //! Checked domain values. No wire decoder, process authority or host effects.
 pub mod ids;
 pub mod profiles;
+pub mod resource_projection;
 pub mod resources;
 pub mod revision;
 

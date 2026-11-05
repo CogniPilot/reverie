@@ -49,16 +49,40 @@ impl PartialEq for CpuQuota {
 }
 impl Eq for CpuQuota {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PoolLimits {
+    memory_mib: u32,
+    tasks_max: u32,
+}
+impl PoolLimits {
+    pub fn try_new(memory_mib: u32, tasks_max: u32) -> Result<Self, ValueError> {
+        if !(512..=1_048_576).contains(&memory_mib) || !(128..=32768).contains(&tasks_max) {
+            return Err(ValueError::ResourceLimit);
+        }
+        Ok(Self {
+            memory_mib,
+            tasks_max,
+        })
+    }
+    pub fn memory_mib(self) -> u32 {
+        self.memory_mib
+    }
+    pub fn tasks_max(self) -> u32 {
+        self.tasks_max
+    }
+}
+
+/// Checked six-field configuration data before the reservation pool override.
+/// Its local pool may be smaller than memory; only `resolve` yields a policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResourcePolicy {
+pub struct ResourceTemplate {
     mode: BudgetMode,
     memory_mib: u32,
     pids_limit: u32,
     cpus: CpuQuota,
-    pool_memory_mib: u32,
-    pool_tasks_max: u32,
+    pool: PoolLimits,
 }
-impl ResourcePolicy {
+impl ResourceTemplate {
     pub fn try_new(
         mode: BudgetMode,
         memory_mib: u32,
@@ -69,9 +93,6 @@ impl ResourcePolicy {
     ) -> Result<Self, ValueError> {
         if memory_mib > 1_048_576
             || !(64..=4096).contains(&pids_limit)
-            || !(512..=1_048_576).contains(&pool_memory_mib)
-            || !(128..=32768).contains(&pool_tasks_max)
-            || memory_mib > pool_memory_mib
             || (mode == BudgetMode::Admission && memory_mib < 512)
         {
             return Err(ValueError::ResourceLimit);
@@ -81,9 +102,21 @@ impl ResourcePolicy {
             memory_mib,
             pids_limit,
             cpus,
-            pool_memory_mib,
-            pool_tasks_max,
+            pool: PoolLimits::try_new(pool_memory_mib, pool_tasks_max)?,
         })
+    }
+    pub fn resolve(
+        &self,
+        reservation_pool: Option<PoolLimits>,
+    ) -> Result<ResourcePolicy, ValueError> {
+        let mut resolved = self.clone();
+        if let Some(pool) = reservation_pool {
+            resolved.pool = pool;
+        }
+        if resolved.memory_mib > resolved.pool.memory_mib {
+            return Err(ValueError::ResourceLimit);
+        }
+        Ok(ResourcePolicy(resolved))
     }
     pub fn budget_mode(&self) -> BudgetMode {
         self.mode
@@ -98,10 +131,56 @@ impl ResourcePolicy {
         self.cpus
     }
     pub fn pool_memory_mib(&self) -> u32 {
-        self.pool_memory_mib
+        self.pool.memory_mib
     }
     pub fn pool_tasks_max(&self) -> u32 {
-        self.pool_tasks_max
+        self.pool.tasks_max
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourcePolicy(ResourceTemplate);
+impl ResourcePolicy {
+    pub fn try_new(
+        mode: BudgetMode,
+        memory_mib: u32,
+        pids_limit: u32,
+        cpus: CpuQuota,
+        pool_memory_mib: u32,
+        pool_tasks_max: u32,
+    ) -> Result<Self, ValueError> {
+        ResourceTemplate::try_new(
+            mode,
+            memory_mib,
+            pids_limit,
+            cpus,
+            pool_memory_mib,
+            pool_tasks_max,
+        )?
+        .resolve(None)
+    }
+    pub fn budget_mode(&self) -> BudgetMode {
+        self.0.budget_mode()
+    }
+    pub fn memory_mib(&self) -> u32 {
+        self.0.memory_mib()
+    }
+    pub fn pids_limit(&self) -> u32 {
+        self.0.pids_limit()
+    }
+    pub fn cpus(&self) -> CpuQuota {
+        self.0.cpus()
+    }
+    pub fn pool_memory_mib(&self) -> u32 {
+        self.0.pool_memory_mib()
+    }
+    pub fn pool_tasks_max(&self) -> u32 {
+        self.0.pool_tasks_max()
+    }
+}
+impl From<&ResourcePolicy> for ResourceTemplate {
+    fn from(policy: &ResourcePolicy) -> Self {
+        policy.0.clone()
     }
 }
 
