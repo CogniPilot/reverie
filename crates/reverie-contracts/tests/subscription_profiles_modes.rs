@@ -27,6 +27,9 @@ fn refuses_anything_else_by_name() {
         (br#"{"openai":[],"extra":[]}"#, &[Provider::Openai]),
         (br#"{"openai":[1]}"#, &[Provider::Openai]),
         (br#"{"openai":[],"openai":[]}"#, &[Provider::Openai]),
+        (br#"{"openai":[],"anthropic":null}"#, &[Provider::Openai]),
+        (br#"{"anthropic":[],"openai":null}"#, &[Provider::Anthropic]),
+        (br#"{"openai":null}"#, &[Provider::Openai]),
         (br#"["openai"]"#, &[Provider::Openai]),
     ] {
         assert_eq!(

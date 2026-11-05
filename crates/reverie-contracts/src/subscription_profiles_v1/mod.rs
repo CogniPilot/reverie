@@ -157,11 +157,17 @@ pub struct Modes {
     pub anthropic: Vec<String>,
     pub openai: Vec<String>,
 }
+/// `None` only for an absent key: a present key must hold a list, so `null` is refused, not unread.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ObservedModes {
+    #[serde(default, deserialize_with = "present")]
     anthropic: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
     openai: Option<Vec<String>>,
+}
+fn present<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<Vec<String>>, D::Error> {
+    Vec::deserialize(input).map(Some)
 }
 impl Modes {
     pub fn of(&self, provider: Provider) -> &[String] {
