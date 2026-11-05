@@ -18,7 +18,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { readdirSync, promises as fsp } from 'node:fs';
-import { isAbsolute, join, relative } from 'node:path';
+import { join } from 'node:path';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { isMultiUserMode, userCasesDir } from '../../config/multiuser.js';
 import {
@@ -38,6 +38,7 @@ import { getAuthUser, requireAdmin, revokeUserSessions } from '../route-helpers.
 import { webviewCapabilities } from '../../webview-capabilities.js';
 import { htmlViewCapabilities } from '../../html-view-capabilities.js';
 import { appendAdminAudit } from '../admin-audit.js';
+import { employeeCaseNames, liveSessionsInside, removalErrorCode, removeCaseFolder } from '../case-removal.js';
 import { SseEvent } from '../sse-events.js';
 import type { AuthPort } from '../ports/auth-port.js';
 import type { SessionPort } from '../ports/session-port.js';
@@ -73,7 +74,11 @@ function storeError(reply: FastifyReply, err: unknown): ReturnType<typeof create
   return createErrorResponse(ApiErrorCode.INTERNAL_ERROR, err instanceof Error ? err.message : 'error');
 }
 
-export function registerAdminRoutes(app: FastifyInstance, ctx: SessionPort & AuthPort & EventPort): void {
+export function registerAdminRoutes(
+  app: FastifyInstance,
+  ctx: SessionPort & AuthPort & EventPort,
+  deps: { employees?: () => Iterable<{ name: string }> } = {}
+): void {
   // Gate: admin routes exist only in multi-user mode, and only for admins.
   const gate = (req: FastifyRequest, reply: FastifyReply): boolean => {
     if (!isMultiUserMode()) {
@@ -218,17 +223,6 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: SessionPort & Aut
     }
   });
 
-  // Count live sessions whose workingDir sits inside `dir` (any owner: a folder
-  // in use by ANYONE must not be deleted out from under a running agent).
-  const liveSessionsInside = (dir: string): number => {
-    let n = 0;
-    for (const s of ctx.sessions.values()) {
-      const rel = relative(dir, s.workingDir || '');
-      if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) n++;
-    }
-    return n;
-  };
-
   app.get('/api/admin/users/:username/cases', async (req, reply) => {
     if (!gate(req, reply)) return;
     const username = normalizeUsername((req.params as { username: string }).username);
@@ -246,7 +240,11 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: SessionPort & Aut
           .map(async (e) => {
             const p = join(dir, e.name);
             const st = await fsp.stat(p).catch(() => null);
-            return { name: e.name, modifiedAt: st ? Math.floor(st.mtimeMs) : 0, liveSessions: liveSessionsInside(p) };
+            return {
+              name: e.name,
+              modifiedAt: st ? Math.floor(st.mtimeMs) : 0,
+              liveSessions: liveSessionsInside(ctx.sessions.values(), p),
+            };
           })
       );
     } catch {
@@ -268,38 +266,15 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: SessionPort & Aut
       reply.code(400);
       return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid case name');
     }
-    // Same guard rails as deleteUserSpace: never follow a symlink, and the
-    // realpath must stay strictly inside the user's cases dir.
-    const root = userCasesDir(username);
-    const target = join(root, params.caseName);
-    let lst;
-    try {
-      lst = await fsp.lstat(target);
-    } catch {
-      reply.code(404);
-      return createErrorResponse(ApiErrorCode.NOT_FOUND, 'No such case folder');
+    const removal = await removeCaseFolder(userCasesDir(username), params.caseName, {
+      sessions: ctx.sessions.values(),
+      employeeCases: employeeCaseNames(deps.employees?.() ?? []),
+    });
+    if (!removal.ok) {
+      reply.code(removal.status);
+      return createErrorResponse(removalErrorCode(removal), removal.message);
     }
-    if (lst.isSymbolicLink() || !lst.isDirectory()) {
-      reply.code(400);
-      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Refusing to delete: not a plain directory');
-    }
-    const realRoot = await fsp.realpath(root).catch(() => root);
-    const realTarget = await fsp.realpath(target);
-    const rel = relative(realRoot, realTarget);
-    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-      reply.code(400);
-      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Case folder escapes the user space');
-    }
-    const inUse = liveSessionsInside(target) || liveSessionsInside(realTarget);
-    if (inUse > 0) {
-      reply.code(409);
-      return createErrorResponse(
-        ApiErrorCode.CONFLICT,
-        `Case folder is in use by ${inUse} live session(s), close them first`
-      );
-    }
-    await fsp.rm(realTarget, { recursive: true, force: true });
-    audit(req, 'user.case-delete', username, { caseName: params.caseName });
+    audit(req, 'user.case-delete', username, { caseName: params.caseName, trashPath: removal.trashPath });
     ctx.broadcast(SseEvent.AdminUsersChanged, {});
     return { success: true, data: { username, caseName: params.caseName } };
   });
