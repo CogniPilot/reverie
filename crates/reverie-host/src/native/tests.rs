@@ -3,6 +3,24 @@ use crate::task_perf::allowed_metadata;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[test]
+fn python_native_path_encoding_is_lossless_and_separate_from_path_policy() {
+    use std::os::unix::ffi::OsStrExt;
+    assert_eq!(
+        python_path(&[47, 0x20ac, 0xdc80, 0xdcff])
+            .unwrap()
+            .as_os_str()
+            .as_bytes(),
+        b"/\xe2\x82\xac\x80\xff"
+    );
+    assert_eq!(python_path(&[0]).unwrap().as_os_str().as_bytes(), b"\0");
+    for invalid in [0xd800, 0xdc7f, 0x110000] {
+        assert_eq!(
+            python_path(&[invalid]).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+    }
+}
 struct Tree {
     root: PathBuf,
 }

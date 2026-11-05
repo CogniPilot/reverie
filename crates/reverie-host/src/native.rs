@@ -3,19 +3,39 @@
 #![allow(unsafe_code)]
 
 use crate::observation::{ObservationError, ObservationFault, Result, finalized, need};
-use std::ffi::CStr;
+use std::ffi::{CStr, OsString};
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::Read;
 use std::os::fd::IntoRawFd;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+mod lease;
+pub(crate) use lease::observe_with_ancestors;
+
+/// Python os.fsencode's POSIX surrogateescape conversion, without replacement
+/// characters or normalization. Path policy/opening independently rejects NUL.
+pub(crate) fn python_path(points: &[u32]) -> std::io::Result<PathBuf> {
+    let mut bytes = Vec::new();
+    for &point in points {
+        if (0xdc80..=0xdcff).contains(&point) {
+            bytes.push((point - 0xdc00) as u8);
+            continue;
+        }
+        let character = char::from_u32(point).ok_or(std::io::ErrorKind::InvalidInput)?;
+        let mut encoded = [0; 4];
+        bytes.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+    }
+    Ok(OsString::from_vec(bytes).into())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Stamp {
     device: u64,
     inode: u64,
     uid: u32,
+    gid: u32,
     mode: u32,
     links: u64,
     size: u64,
@@ -28,6 +48,7 @@ impl Stamp {
             device: metadata.dev(),
             inode: metadata.ino(),
             uid: metadata.uid(),
+            gid: metadata.gid(),
             mode: metadata.mode(),
             links: metadata.nlink(),
             size: metadata.len(),
@@ -78,19 +99,30 @@ pub(crate) fn observe(
     maximum: usize,
     allowed: impl Fn(&Metadata) -> bool,
 ) -> Result<Vec<u8>> {
+    Ok(observe_snapshot(path, maximum, allowed)?.bytes)
+}
+pub(crate) struct Snapshot {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) metadata: Metadata,
+}
+pub(crate) fn observe_snapshot(
+    path: &Path,
+    maximum: usize,
+    allowed: impl Fn(&Metadata) -> bool,
+) -> Result<Snapshot> {
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)?;
-    let result = read_stable(&mut file, path, maximum, allowed);
+    let result = read_snapshot(&mut file, path, maximum, allowed);
     finalized(result, close(file))
 }
-fn read_stable(
+fn read_snapshot(
     file: &mut File,
     path: &Path,
     maximum: usize,
     allowed: impl Fn(&Metadata) -> bool,
-) -> Result<Vec<u8>> {
+) -> Result<Snapshot> {
     let before = file.metadata()?;
     need(
         before.is_file() && allowed(&before),
@@ -116,7 +148,10 @@ fn read_stable(
             && Stamp::of(&before) == Stamp::of(&named),
         ObservationFault::Changed,
     )?;
-    Ok(bytes)
+    Ok(Snapshot {
+        bytes,
+        metadata: after,
+    })
 }
 fn close(file: File) -> Result<()> {
     let fd = file.into_raw_fd();

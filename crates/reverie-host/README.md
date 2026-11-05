@@ -22,7 +22,8 @@ supplies the actual system/machine; only x86_64-linux and aarch64-linux qualify.
 Reads remain descriptor-pinned through the final identity checks. Close errors
 are checked once and both primary and finalizer failures are retained. No file,
 symlink, directory, socket or temporary is created, removed, repaired or changed
-by production observation. Unsafe Linux calls are confined to `src/native.rs`.
+by production observation. Unsafe Linux calls are confined to `src/native.rs`
+and its private `native/lease.rs` descriptor-walk module.
 Test ports and fault injection are private and compiled only into owning tests.
 
 `project_task_perf` accepts a captured perf configuration, storage identity
@@ -77,3 +78,29 @@ its filtered policy/builder/base/toolchain identity so unrelated workspace edits
 do not churn installed profile paths. Neither this library nor its tests claim
 that producer retirement, a consumer cutover, activation, a live syscall canary
 or the complete Python-free backend has finished.
+
+`lease_policy::project_lease` consumes a captured `LeaseConfig` and session,
+obtaining the company path and UID comparison only from that same configuration.
+The enabled option's company read preserves its distinct legacy policy:
+descriptor-relative no-follow readable ancestors, one-MiB bound, configured UID,
+single-link regular type and stable observations, without adding the employee
+metadata reader's write-mode gate. The selected current EID/SID lookup adds no
+owner, generation, retired-registry, vacation or unrelated-deduplication rules.
+Absent/null options preserve identity; foreign SIDs never read the peer artifact.
+
+For a selected SID, `observe_peer_artifact` checks the existing owner-selected
+peerBinary setting, canonical root-owned Nix output custody (including the
+sticky-store exception), a regular executable with no write bits, a four-MiB
+bound, stable descriptor/name metadata, native static ELF64 headers and SHA-256.
+Stable Nix hardlinks remain allowed. The returned artifact hash/inode/header
+facts accompany exactly one readonly single-file mount in the projected data.
+No public endpoint, arbitrary-file service or new artifact-path configuration
+knob is introduced; this preserves the existing immutable owner setting.
+
+The lease observer never invokes the peer, serves a socket, acquires a lease,
+changes capabilities, mounts an artifact or proves its guest/kernel identity.
+Those original `peer_artifact.mounted` and acceptance-process checks remain
+separate required work. The native source-package integration test is explicitly
+ignored by default and requires a separately built immutable artifact plus an
+independent legacy hash/inode receipt; running it qualifies readonly source
+observation only, not execution or mounted proof.
