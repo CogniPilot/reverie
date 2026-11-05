@@ -19,7 +19,7 @@ import time
 
 from . import laptop_resource_operations as journal
 from .employee_resource_profiles import ProfileStore
-from .worker_resources import RESOURCE_FIELDS, effective_config, policy_digest, project_resource_policy, validate_resource_reload
+from .worker_resources import RESOURCE_FIELDS, SESSION, effective_config, policy_digest, project_resource_policy, validate_resource_reload
 from .worker_storage import read_metadata, storage_paths, storage_start_allowed
 from .worker_cold_tmp import read_mount_table, _mount_location
 from .worker_capacity_policy import explicit_host_headroom_fits, pool_headroom_fits
@@ -97,7 +97,8 @@ def domain_digest(config):
     # This host-only request policy is independently pinned by each host-job
     # intent. Removing it must not hide the durable intent or strand existing
     # transports; its presence never changes per-worker launch identity.
-    ignored = RESOURCE_FIELDS | {'sessionResources', 'employeeResources', 'image', 'browserJobPolicy'}
+    ignored = RESOURCE_FIELDS | {'sessionResources', 'employeeResources', 'employeeMemoryPolicies',
+                                'laptopSwapPoolMiB', 'image', 'browserJobPolicy'}
     return journal.fingerprint({k: v for k, v in config.items() if k not in ignored})
 
 
@@ -351,8 +352,20 @@ class NativeObserver:
         need(type(state['Running']) is bool and state['Running'] is True,
              'RESERVATION_SOURCE_NOT_RUNNING')
         memory, swap, tasks, cpu = host['Memory'], host['MemorySwap'], host['PidsLimit'], host['NanoCpus']
+        policy = None
+        labels = row.get('Config', {}).get('Labels') or {}
+        sid = labels.get('reverie.session')
+        if (self.broker.config.get('employeeMemoryPolicies') and
+                labels.get('reverie.worker') == self.broker.config['deployment'] and
+                type(sid) is str and SESSION.fullmatch(sid)):
+            resources = effective_config(self.broker.config, sid)
+            policy = resources.get('laptopMemoryPolicy')
+            if policy is not None:
+                need(labels.get('reverie.worker-policy') == policy_digest(self.broker.config, sid) and
+                     memory == resources['memoryMiB'] * MIB, 'RESERVATION_SOURCE_POLICY')
+        swap_allowance = 0 if policy is None else policy['swapMiB'] * MIB
         need(type(memory) is int and memory >= 512 * MIB and memory % MIB == 0
-             and type(swap) is int and swap == memory and type(tasks) is int and tasks > 0
+             and type(swap) is int and swap == memory + swap_allowance and type(tasks) is int and tasks > 0
              and type(cpu) is int and cpu >= 0,
              'RESERVATION_NATIVE_FINITE_LIMITS')
         pid = state['Pid']; start = _pid(pid)
@@ -380,15 +393,27 @@ class NativeObserver:
                 break
             current = current.parent
         need(_read(leaf / 'memory.max', 128).strip() == str(memory) and
-             _read(leaf / 'memory.swap.max', 128).strip() == '0' and
+             _read(leaf / 'memory.swap.max', 128).strip() == str(swap_allowance) and
              _read(leaf / 'pids.max', 128).strip() == str(tasks) and
              min(memory_limits) == memory and min(task_limits) == tasks,
              'RESERVATION_EFFECTIVE_LIMIT_CONFLICT')
+        if policy is not None:
+            need(_read(leaf / 'memory.high', 128).strip() == str(policy['memoryHighMiB'] * MIB),
+                 'RESERVATION_EFFECTIVE_SOFT_LIMIT_CONFLICT')
+            current = leaf
+            while current != CGROUP:
+                raw = _read(current / 'memory.swap.max', 128).strip()
+                need(raw == 'max' or raw.isascii() and raw.isdecimal() and int(raw) >= swap_allowance,
+                     'RESERVATION_EFFECTIVE_SWAP_CONFLICT')
+                current = current.parent
         need(_pid(pid) == start and _read(PROC / str(pid) / 'cgroup').splitlines() == group,
              'RESERVATION_NATIVE_PID_CHANGED')
-        return memory, {'containerId': row['Id'], 'pid': pid, 'start': start,
+        binding = {'containerId': row['Id'], 'pid': pid, 'start': start,
                         'cgroup': str(relative), 'memory': memory, 'tasks': tasks,
                         'nanoCpus': cpu, 'image': row['Image']}
+        if policy is not None:
+            binding.update(swapBytes=swap_allowance, memoryHighBytes=policy['memoryHighMiB'] * MIB)
+        return memory, binding
 
     @staticmethod
     def stopped_website_limits(row,cid):
@@ -441,6 +466,9 @@ class NativeObserver:
                 _, binding = self.limits(row)
                 commitments.append(binding)
         total = sum(row['memory'] for row in commitments)
+        if config.get('employeeMemoryPolicies'):
+            from .worker_memory import check_swap_budget
+            check_swap_budget(config, rows, proc=PROC)
         budget = config['poolMemoryMiB'] * MIB
         need(explicit_host_headroom_fits(pool_bytes=budget, site_bytes=site_memory,
              reserve_bytes=selected['hostReserveMiB'] * MIB, total_bytes=host['MemTotal'],

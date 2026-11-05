@@ -1,0 +1,52 @@
+# Laptop soft memory limits and swap
+
+The owner can opt an employee laptop into a soft RAM threshold and a finite
+swap allowance in the private worker configuration. Changes take effect through
+the normal stop, configuration reload and recreation flow. This is separate from
+live GUI editing. It does not change an existing laptop behind its running agent.
+
+For example, this **illustrative** policy permits 8 GiB of swap for a laptop with
+a separately configured RAM ceiling greater than 4 GiB:
+
+```json
+{
+  "laptopSwapPoolMiB": 32768,
+  "employeeMemoryPolicies": {
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+      "memoryHighMiB": 4096,
+      "swapMiB": 8192
+    }
+  }
+}
+```
+
+Use the actual employee UUID and measured host capacity. The example does not
+select production values. `laptopSwapPoolMiB` bounds the sum of running laptops'
+declared swap allowances plus the next candidate. The broker also checks that
+this budget fits the host's actual swap capacity. This is admission accounting,
+not a reservation of free disk pages, and other host workloads still compete.
+
+The existing `memoryMiB` remains a finite RAM ceiling. The soft threshold must be
+at least 512 MiB and strictly below that ceiling. Docker receives the RAM ceiling
+and the **combined RAM plus swap total**; `swapMiB` itself always means swap-only
+space. Zero disables swap. Unlimited swap and removal of individual RAM ceilings
+are not part of this policy version. Shared-pool borrowing without individual
+ceilings needs a separate accounting migration; this change does not relax the
+existing reservation and host-headroom checks.
+
+After starting the new container's idle process, the host broker sets
+`memory.high` through its existing host cgroup hierarchy and verifies it before
+starting the agent. It checks the engine declaration, kernel RAM/swap/high limits,
+relevant ancestor constraints, and container/PID/cgroup identity. A missing or
+unwritable controller, ignored swap setting, tighter conflicting limit or changed
+identity refuses launch. Reattach and recovery verify the policy without
+rewriting a running laptop's limits. The host must provide the supported unified
+cgroup-v2 hierarchy and ordinary broker write authority; this code grants none.
+
+A soft threshold causes reclaim and throttling and may be exceeded. Swap is a
+slower backup, not a guarantee that jobs or the host cannot run out of memory.
+An operator still selects the finite RAM/swap budgets and protects the website,
+broker and other host workloads. CPU, process limits, mounts, credentials, GPU
+and perf policies are unaffected. Existing profiles without this opt-in retain
+their previous arguments and policy identities, including unrelated zero-swap
+host-action and terminal scopes.

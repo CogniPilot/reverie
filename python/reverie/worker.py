@@ -135,8 +135,11 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','employeePerfPolicies','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','employeeGpuGrants','employeePerfPolicies','employeeMemoryPolicies','laptopSwapPoolMiB','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy','resourceActorConfig'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
+    if 'employeeMemoryPolicies' in config or 'laptopSwapPoolMiB' in config:
+        from .worker_memory import validate as validate_memory
+        validate_memory(config)
     from reverie.worker_resource_reservations import option as reservation_option
     reservation_option(config)
     if 'opsConfig' in config:
@@ -273,7 +276,8 @@ def create_args(config, session_id, home, *, scratch=None, storage=None):
     if config['budgetMode'] == 'pool':
         args += ['--cgroup-parent', config['cgroupParent']]
     if config['memoryMiB']:
-        args += ['--memory', str(config['memoryMiB']) + 'm', '--memory-swap', str(config['memoryMiB']) + 'm']
+        swap = config.get('laptopMemoryPolicy', {}).get('swapMiB', 0)
+        args += ['--memory', str(config['memoryMiB']) + 'm', '--memory-swap', str(config['memoryMiB'] + swap) + 'm']
     if config['cpus']:
         args += ['--cpus', str(config['cpus'])]
     for mount in config['mounts']:
@@ -1294,6 +1298,10 @@ class Broker:
         if len(names)!=len(set(names)):raise RuntimeError('Duplicate laptop recovery inventory')
         selected={name.removeprefix(self.config['deployment']+'-agent-'):name for name in names
                   if SESSION.fullmatch(name.removeprefix(self.config['deployment']+'-agent-'))}
+        if self.config.get('employeeMemoryPolicies'):
+            from .worker_memory import verify_running
+            for sid,name in selected.items():
+                verify_running(self,sid,self.inspect_container(name))
         if self.resource_reservations is not None:
             for sid in selected:
                 self.resource_reservations.check_launch(sid)
@@ -1498,6 +1506,7 @@ class Broker:
         listed=set(self.run_engine(['ps','--filter','label=reverie.worker='+self.config['deployment'],'--format','{{.Names}}']).stdout.splitlines())
         names=listed|set(self.laptops.values())
         peers=0
+        swap_rows=[]
         outside=0
         has_pool=resources['budgetMode']=='pool'
         for name in names:
@@ -1522,6 +1531,7 @@ class Broker:
             if item['State']['Running'] is False:
                 continue
             peers+=1
+            swap_rows.append(item)
             pid=item['State']['Pid']
             if type(pid) is not int or pid<=0:
                 raise RuntimeError('Unknown peer process during resource admission')
@@ -1533,11 +1543,20 @@ class Broker:
                 continue
             memory=item['HostConfig']['Memory']
             swap=item['HostConfig']['MemorySwap']
-            if type(memory) is not int or memory<=0 or swap!=memory:
+            expected_swap = memory
+            if self.config.get('employeeMemoryPolicies'):
+                from .worker_memory import swap_bytes
+                expected_swap += swap_bytes(effective_config(self.config,sid))
+            if type(memory) is not int or memory<=0 or swap!=expected_swap:
                 raise RuntimeError('Outside-pool peer requires finite RAM and zero swap')
             outside+=memory
         if peers+1>self.config['maxWorkers']:
             raise RuntimeError('Worker capacity is full')
+        if self.config.get('employeeMemoryPolicies'):
+            from .worker_memory import check_swap_budget
+            from .worker_resource_reservations import NativeObserver
+            NativeObserver(self).host_root()
+            check_swap_budget(self.config,swap_rows,resources,proc_root)
         gate = getattr(self, 'resource_reservations', None)
         if gate is not None or 'resourceReservations' in self.config:
             if gate is None:
@@ -1944,6 +1963,9 @@ class Broker:
                         policy = args[args.index('reverie.worker-config='+digest)+2].split('=', 1)[1]
                         if labels.get('reverie.worker-policy') != policy:
                             raise ValueError('Running laptop policy differs; explicitly stop it before changing its grants')
+                        if self.config.get('employeeMemoryPolicies'):
+                            from .worker_memory import verify_running
+                            verify_running(self,session_id,old)
                         metadata = json.loads(metadata_path.read_text())
                         exit_file = home/'.reverie-launch'/metadata['exit']
                         if not exit_file.exists():
@@ -2105,6 +2127,9 @@ class Broker:
                     if not storage_start_allowed(self.config,paths):
                         raise RuntimeError('Current employee running intent changed before startup')
                     self.run_engine(['start', name])
+                    if self.config.get('employeeMemoryPolicies'):
+                        from .worker_memory import configure_started
+                        configure_started(self,name,session_id,viewer_container_id)
                     if retention_ready is not None:
                         finish_retained(self.config, paths, retention_ready,
                                         lambda: self.confirm_retained_temporary(paths, retention_ready, retention_container_id))
