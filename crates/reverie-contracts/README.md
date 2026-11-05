@@ -78,3 +78,15 @@ digest or publishing any configuration. Candidate bytes are protected applicatio
 data, not a browser response, owner grant or native effect receipt. Six existing
 Python staging vectors cover exact configuration bytes and unchanged original
 profile digests, without using live company data.
+
+`task_perf_v1` owns the closed fixed manifest and whole-base task-v1 seccomp
+derivative. It verifies exact raw profile hashes and compares the entire decoded
+profile with Python's numeric/container equality, including bool/int/float,
+large integers and nested parsed NaN. It preserves all other rules and fields;
+applying the rule twice refuses. A named perf configuration view checks the
+bounded employee policy map and literal rootless enabled flag, then replaces
+only the selected fixed profile/hash and adds the task-v1 marker. Unknown worker
+configuration fields remain lossless. These are data transforms, not native
+artifact custody, owner permission, full Docker validation or a kernel grant.
+The separate Linux host adapter supplies fixed package observation and current
+employee bracketing; current production Python consumers remain selected.

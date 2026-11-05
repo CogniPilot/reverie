@@ -4,6 +4,7 @@ pub mod profiles;
 pub mod resource_projection;
 pub mod resources;
 pub mod revision;
+pub mod task_perf;
 
 use std::fmt;
 

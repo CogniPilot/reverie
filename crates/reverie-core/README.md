@@ -11,6 +11,9 @@ invariants are private; public constructors return checked values.
   versions and generations, retaining JavaScript-safe bounds.
 - Resource policies preserve admission/pool differences and finite CPU limits.
   CPU values retain integer versus float encoding identity and signed float zero.
+- `TaskPerfPolicies` validates the bounded employee task-v1 map and its rootless
+  Docker prerequisite. Its fixed rule matches only the low signed32-bit CPU=-1
+  argument; selection and rule data never grant a capability or start permission.
 - `ResourceTemplate` validates six-field configuration before a reservation-pool
   override. `PoolLimits` owns pool bounds; resolving a template enforces the
   effective memory/pool relationship and yields a strict `ResourcePolicy`.

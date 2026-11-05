@@ -46,6 +46,13 @@ impl std::error::Error for WorkerConfigError {}
 /// Legacy nonfinite data spellings are preserved here, not admitted into resource
 /// policy types or strict wire schemas.
 pub struct EffectiveWorkerConfig(Value);
+impl EffectiveWorkerConfig {
+    pub(crate) fn from_object(
+        value: std::collections::BTreeMap<crate::legacy_json::Text, Value>,
+    ) -> Self {
+        Self(Value(Node::Object(value)))
+    }
+}
 
 /// Python json.dumps(effective_config, sort_keys=True).encode(), including all keys.
 pub fn encode_config(config: &EffectiveWorkerConfig) -> Vec<u8> {
