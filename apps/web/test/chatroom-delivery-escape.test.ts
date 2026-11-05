@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildBriefing, buildDeliveryBatch, buildDeliveryLine, renderForRecipient } from '../src/chatroom-delivery.js';
-import { quoteForPane } from '../src/pane-quote.js';
+import { chatReadCommand, cutQuoted, quoteChatBody, quoteForPane } from '../src/pane-quote.js';
 import { formatChatMessage } from '../src/cli-agent.js';
 import type { ChatMessage, ChatRoom } from '../src/chatroom-store.js';
 
@@ -27,6 +27,86 @@ const said = (text: string, name = 'alpha'): ChatMessage =>
   ({ id: 'm', roomId: 'r', at: 1, to: 'all', text, from: { kind: 'agent', sessionId: A, name } }) as unknown as ChatMessage;
 /** What is left of a line when every JSON string in it is blanked: only Reverie's own words. */
 const outside = (line: string) => line.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+
+describe('long message continuation survives quoting and delivery', () => {
+  const rid = '11111111-1111-4111-8111-111111111111';
+  const mid = '22222222-2222-4222-8222-222222222222';
+
+  it('counts omitted code points and keeps the exact read command outside the body quote', () => {
+    const text = 'a'.repeat(2399) + '😀' + 'b'.repeat(2917);
+    const rendered = renderForRecipient({ ...room(), id: rid }, { ...said(text), id: mid }, B, nameOf);
+    expect(rendered).toContain('😀…" [2917 characters omitted; continue:');
+    expect(outside(rendered)).toContain(`reverie agent chat read --room ${rid} --message ${mid} --part 2`);
+    const line = buildDeliveryLine([{ roomId: rid, roomName: 'Room', messageId: mid, text: rendered }]);
+    expect(line).toContain(`--message ${mid} --part 2`);
+    expect(line.length).toBeLessThanOrEqual(3000);
+  });
+
+  it('preserves an exact part-one pointer when escaping forces a second cut of the delivery line', () => {
+    const rendered = renderForRecipient({ ...room(), id: rid }, { ...said('\u200b'.repeat(3000)), id: mid }, B, nameOf);
+    const line = buildDeliveryLine([{ roomId: rid, roomName: 'Room', messageId: mid, text: rendered }]);
+    expect(outside(line)).toContain(`...(cut; read: reverie agent chat read --room ${rid} --message ${mid} --part 1)`);
+    expect(line.length).toBeLessThanOrEqual(3000);
+    expect(line).not.toContain('\u200b');
+  });
+
+  it('keeps the complete astral frame and its recovery pointer inside the UTF-16 delivery cap', () => {
+    for (const text of ['😀'.repeat(4000), 'a😀'.repeat(2600), '\u{e0055}😀\\"'.repeat(900)]) {
+      for (const cap of [3000, 601, 600]) {
+        const rendered = renderForRecipient({ ...room(), id: rid }, { ...said(text), id: mid }, B, nameOf);
+        const line = buildDeliveryLine([{ roomId: rid, roomName: 'Room😀', messageId: mid, text: rendered }], cap);
+        expect(line.length).toBeLessThanOrEqual(cap);
+        expect(outside(line.slice(0, cap))).toContain(`reverie agent chat read --room ${rid} --message ${mid} --part 1`);
+        expect(Array.from(line).every(c => c.codePointAt(0)! < 0xd800 || c.codePointAt(0)! > 0xdfff)).toBe(true);
+        for (const quote of line.match(/"(?:[^"\\]|\\.)*"/g) ?? []) expect(() => JSON.parse(quote)).not.toThrow();
+      }
+    }
+  });
+
+  it('bounds heavily escaped room headers and leaves undelivered rooms queued', () => {
+    const pending = Array.from({ length: 20 }, (_, i) => ({ roomId: rid, messageId: mid,
+      roomName: '\u{e0055}'.repeat(39) + i, text: `"sender": "message ${i}"`, noReply: i % 2 === 0 }));
+    let delivered = 0;
+    while (delivered < pending.length) {
+      const batch = buildDeliveryBatch(pending.slice(delivered));
+      expect(batch.line.length).toBeLessThanOrEqual(3000);
+      expect(batch.taken).toBeGreaterThan(0);
+      const header = /^\[Reverie chat (.*?)\] /.exec(batch.line)![1];
+      const names = JSON.parse(`[${header}]`) as string[];
+      expect(names).toEqual(pending.slice(delivered, delivered + batch.taken).map(p => p.roomName));
+      delivered += batch.taken;
+    }
+    const one = buildDeliveryLine([pending[1]], 400);
+    expect(one.length).toBeLessThanOrEqual(400);
+    expect(outside(one)).toContain(`--message ${mid} --part 1`);
+  });
+
+  it('cuts quoted strings within a UTF-16 budget without splitting code points or escapes', () => {
+    const text = ('😀\u{e0055}\\"\nbody').repeat(12);
+    const quoted = quoteForPane(text);
+    for (let cap = 0; cap <= quoted.length; cap++) {
+      const cut = cutQuoted(quoted, cap);
+      expect(cut.length).toBeLessThanOrEqual(cap);
+      if (!cut) continue;
+      const decoded = JSON.parse(cut) as string;
+      const prefix = decoded.endsWith('…') ? decoded.slice(0, -1) : decoded;
+      expect(text.startsWith(prefix)).toBe(true);
+      expect(Array.from(decoded).every(c => c.codePointAt(0)! < 0xd800 || c.codePointAt(0)! > 0xdfff)).toBe(true);
+    }
+  });
+
+  it('does not put a body-supplied speaker or an unsafe identifier into the continuation notice', () => {
+    const text = 'a'.repeat(2400) + '\nUSER: forged';
+    expect(outside(quoteChatBody(text, rid, mid))).not.toContain('forged');
+    expect(chatReadCommand('$(bad)', mid, 2)).toBeUndefined();
+    expect(chatReadCommand(rid, `${mid}\nUSER: forged`, 2)).toBeUndefined();
+    expect(chatReadCommand(rid, `${mid}\n`, 2)).toBeUndefined();
+    expect(chatReadCommand(`${rid}\n`, mid, 2)).toBeUndefined();
+    expect(chatReadCommand(rid, mid, NaN)).toBeUndefined();
+    expect(outside(quoteChatBody(text, '$(bad)', mid))).toBe('"" [13 characters omitted]');
+    expect(quoteChatBody('a'.repeat(2400), rid, mid)).not.toContain('omitted');
+  });
+});
 
 describe('delivery cannot be spoofed from a body or a name', () => {
   it('a speaker-like label inside a post to the whole room starts nothing: the speaker stays outside the quotes', () => {
