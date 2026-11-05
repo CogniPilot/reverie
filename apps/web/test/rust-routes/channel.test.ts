@@ -148,6 +148,24 @@ describe('route channel', () => {
     expect(children[1].generation).toBe(2);
   });
 
+  it('keeps the deadline of a canceled head whose child never answers', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const routes = channel(() => {});
+    const canceled = routes.admit(ROUTE, Buffer.from('{}'));
+    const queued = routes.admit(ROUTE, Buffer.from('{}'));
+    await flush();
+    canceled.abandon();
+    expect(await done(canceled.next())).toMatchObject({ kind: 'unavailable', reason: 'abandoned' });
+    vi.advanceTimersByTime(TIMEOUT_MS);
+    expect(await done(queued.next())).toMatchObject({ kind: 'unavailable', reason: 'dispatched request timed out' });
+    expect(children[0].received.map((frame) => frame.body.kind)).toEqual(['request', 'cancel']);
+    expect(children[0].kills).toBe(1);
+    await flush();
+    clock += RESPAWN_THROTTLE_MS;
+    routes.admit(ROUTE, Buffer.from('{}'));
+    expect(children).toHaveLength(2);
+  });
+
   it('never starts a successor while an old child may still be alive', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const routes = channel((child) => {

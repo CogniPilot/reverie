@@ -44,6 +44,8 @@ export class Ticket {
   settled = false;
   private waiting: ((step: Step) => void) | undefined;
   private ready: Step | undefined;
+  /** Armed at admission and cleared only when the ticket leaves the channel, never by settling it:
+   * an abandoned head stays dispatched until its child answers or this deadline ends the generation. */
   timer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -134,7 +136,6 @@ export class RouteChannel {
   private settle(ticket: Ticket, reason: string | Outcome): void {
     if (ticket.settled) return;
     ticket.settled = true;
-    clearTimeout(ticket.timer);
     const outcome: Outcome =
       typeof reason === 'string'
         ? { kind: 'unavailable', generation: ticket.generation, id: ticket.id, reason }
@@ -230,6 +231,7 @@ export class RouteChannel {
       return this.invalidate('status outside the route table');
     this.head = undefined;
     this.queue.shift();
+    clearTimeout(head.timer);
     if (head.head !== 'canceled') {
       if (body.kind === 'response')
         this.settle(head, {
@@ -261,6 +263,7 @@ export class RouteChannel {
       this.write({ kind: 'cancel' }, ticket.id);
     } else {
       this.queue = this.queue.filter((queued) => queued !== ticket);
+      clearTimeout(ticket.timer);
     }
     this.settle(ticket, 'abandoned');
   }
@@ -275,7 +278,10 @@ export class RouteChannel {
     const tickets = this.queue;
     this.queue = [];
     this.head = undefined;
-    for (const ticket of tickets) this.settle(ticket, reason);
+    for (const ticket of tickets) {
+      clearTimeout(ticket.timer);
+      this.settle(ticket, reason);
+    }
   }
 
   /** Ends the current generation: settle everything, then kill and wait for the child to exit. */
