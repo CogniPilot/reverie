@@ -62,3 +62,19 @@ retain the existing exact-false and truthiness semantics.
 These are data readers. The owning native store checks file custody and read
 stability; the application still owns authorization, leases, outer admission and
 operation completion. No reader grants storage publication or execution rights.
+
+`broker_resources` bridges captured broker configuration data to the checked
+core resource-map projection. It preserves every unrelated value, including
+numeric kind, lone surrogates and unrelated resource-entry bytes after canonical
+encoding. Only the selected employee/target-session entries change. The source
+clone retains the legacy compact-ASCII 128-KiB input bound and finite-value
+requirement; this differs intentionally from general worker hash data. Staged
+output may grow beyond that clone bound, as in the existing implementation.
+
+This is neither a full worker schema validator nor a completed `stage_config`
+workflow. The application must retain checked profile-store custody and resolve
+current storage/GPU/perf/memory/lease facts before deriving an effective policy
+digest or publishing any configuration. Candidate bytes are protected application
+data, not a browser response, owner grant or native effect receipt. Six existing
+Python staging vectors cover exact configuration bytes and unchanged original
+profile digests, without using live company data.
