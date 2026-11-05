@@ -50,6 +50,29 @@ function refused(deps: AgentDeps, error: string, gates?: JournalGate[]): number 
   else deps.io.err(gates ? `${error}\n${gateLines(gates)}` : error);
   return AGENT_EXIT.refused;
 }
+/** One actionable line per refusal code, so a refused save cannot be mistaken for a saved one. */
+const SAVE_HINTS: Record<string, string> = {
+  JOURNAL_NEEDS_REASON: 'add --reason "<why save now>"',
+  JOURNAL_READ_ONLY: 'the turn asked for no writes, so nothing was saved',
+  JOURNAL_TURN_SELF: 'cite as --turn a message from someone else, not your own',
+  JOURNAL_TURN_UNREADABLE: 'check that -r is the room the --turn message is in',
+  JOURNAL_SOURCE_WINDOW: 'cite only sources sent no later than the --turn message',
+  JOURNAL_SOURCE_QUOTE: 'each --quote must be exact words from its --source',
+  JOURNAL_RATE_LIMITED: 'too many attempts this hour; try later',
+  JOURNAL_TURN_CONFLICT: 'this turn already holds a different entry; repeat the identical save or use another turn',
+};
+
+function saveRefused(deps: AgentDeps, error: string, code: string | undefined, gates?: JournalGate[]): number {
+  const failed = gates?.find(gate => gate.outcome === 'fail')?.gate;
+  const hint = code ? SAVE_HINTS[code] : undefined;
+  if (deps.json) {
+    deps.io.out(JSON.stringify({ success: false, saved: false, error, ...(code ? { code } : {}), ...(hint ? { hint } : {}), ...(gates ? { gates } : {}) }));
+  } else {
+    deps.io.err([`NOT SAVED: ${failed ?? 'refused'}: ${error}`, ...(hint ? [`hint: ${hint}`] : []), ...(gates ? [gateLines(gates)] : [])].join('\n'));
+  }
+  return AGENT_EXIT.refused;
+}
+
 const gateLines = (gates: JournalGate[]) => gates.map(gate => `  ${gate.gate}: ${gate.outcome}${gate.detail ? ` (${gate.detail})` : ''}`).join('\n');
 
 async function call(deps: AgentDeps, method: 'GET' | 'POST', path: string, extra: { query?: Record<string, string | number | undefined>; body?: Record<string, unknown> }) {
@@ -117,7 +140,7 @@ export async function agentJournalSave(deps: AgentDeps, options: JournalSaveOpti
   try {
     const result = await call(deps, 'POST', '/api/agent/journal/save', { body: { roomId: options.room, turnId: options.turn, draft,
       ...(options.project ? { project: options.project } : {}) } });
-    if (!result.ok) return refused(deps, result.error, result.gates);
+    if (!result.ok) return saveRefused(deps, result.error, result.code, result.gates);
     const data = result.data as { entryId: number; turnId: string; replayed: boolean; payloadSha256: string };
     if (deps.json) deps.io.out(JSON.stringify({ success: true, data }));
     else deps.io.out(`${data.replayed ? 'Already saved' : 'Saved'} entry #${data.entryId} for turn ${data.turnId} (sha256 ${data.payloadSha256}). Sources checked; interpretation is not verified.`);

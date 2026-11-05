@@ -47,7 +47,7 @@ export function renderMemoryBrief(name: string, brief: { total: number; entries:
   const who = clean(name, 60) || 'a Reverie employee';
   const head = [
     `Your memory: you are ${who}, a persistent Reverie employee. It is now ${minute(now)} UTC. The model and runtime running you can change; your journal stays on the office server and is yours across those changes.`,
-    'Use it: before acting on an earlier decision, rule or preference, run `reverie agent journal recall "<topic>"` (or `reverie agent journal map`). When something is settled, save it with `reverie agent journal save` and the message it came from; save standing rules and owner decisions with `--importance keystone` so they open every session.',
+    'Use it: before acting on an earlier decision, rule or preference, run `reverie agent journal recall "<topic>"` (or `reverie agent journal map`). When something is settled, save it with `reverie agent journal save --reason "<why now>"`, citing as the turn a message from someone else in that room (`-r` takes the room id or name); save standing rules and owner decisions with `--importance keystone` so they open every session.',
   ];
   if (!brief.total) return [...head, 'Your journal has no entries yet.'].join('\n');
   const lines = [
