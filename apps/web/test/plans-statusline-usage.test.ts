@@ -25,9 +25,10 @@ describe('Plans Claude usage from the status line', () => {
   let history: string;
   const savedHome = process.env.HOME;
   let clock = NOW;
+  const services: PlanService[] = [];
 
-  const service = (usageError?: string) =>
-    new PlanService({
+  const service = (usageError?: string) => {
+    const created = new PlanService({
       reader: {
         // Same as the live reader: signed in, no usage of its own.
         read: async (p: SubscriptionProfile) => ({
@@ -55,6 +56,9 @@ describe('Plans Claude usage from the status line', () => {
         lastHolder: null,
       }),
     });
+    services.push(created);
+    return created;
+  };
 
   const report = (at: number, week = 42, five = 11) =>
     setLatestAccountPlanUsage({
@@ -82,7 +86,9 @@ describe('Plans Claude usage from the status line', () => {
     resetLatestAccountPlanUsage();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Rows queue history writes; drain every service before deleting its home.
+    await Promise.all(services.splice(0).map((service) => service.settled()));
     process.env.HOME = savedHome;
     resetLatestAccountPlanUsage();
     rmSync(home, { recursive: true, force: true });
