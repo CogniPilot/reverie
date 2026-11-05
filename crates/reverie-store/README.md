@@ -125,3 +125,35 @@ that selection remains pending.
 Run `nix develop --command cargo xtask verify` with a task-specific temporary
 `CARGO_TARGET_DIR`. Source/fixture results do not activate a host or establish a
 successful native resource operation.
+
+## Read-side employee storage identity
+
+`storage_identity` resolves the existing employee/session storage namespace from
+trusted native configuration paths. Its `read_metadata` walks without following
+symlinks and verifies configured UID, single-link regular type, non-group/world
+write permissions, byte bounds and fd/named-file stamps. This metadata policy
+intentionally differs from the private profile store's exact mode0600 policy;
+no profile-store custody requirement is relaxed. Checked close failures refuse
+the read, retaining both primary and finalizer failures where necessary.
+
+Current and retired company records, persistent `storage-owner.json` lineage and
+historical `plan-moves.json` edges resolve an employee's stable data identity.
+Unbound sessions retain their separate legacy SID namespace. Canonical state
+and scratch paths may have nonexistent or inaccessible tails, retaining Python's
+`resolve(strict=False)` data behavior. Lexical normalization and observed-symlink
+checks do not prove custody or usability beneath an inaccessible directory;
+`read_metadata` independently traverses no-follow descriptors and refuses
+unknown/inaccessible read paths. Resolving facts creates no files or directories.
+Unrelated opaque IDs are retained instead of being forced into
+UUID types. A selected employee/session storage identity is checked separately.
+
+`storage_start_allowed` rechecks storage facts and current running/vacation flags;
+it is only one input to the existing outer session/owner/admission gates.
+`current_employee` repeats current-registry and storage selection to refuse
+binding/generation drift, while retaining arbitrary positive integer generation
+values. It deliberately does not use running intent as a GPU identity gate.
+
+The resolver neither prepares storage nor writes lineage, acquires lifetime
+leases, publishes a migration, creates a sidecar/endpoint or selects a new
+production consumer. The caller supplies trusted native paths and remains
+responsible for authorization and consistency across its complete workflow.
