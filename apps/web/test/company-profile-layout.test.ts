@@ -42,6 +42,26 @@ it('groups existing controls, keeps a real associated save action, and supports 
   expect(dialog.querySelector('[aria-label="View startup context for River"]').closest('[role=tabpanel]').hidden).toBe(false);
   expect(writes).toEqual([]);
 });
+it('states the save rule once, in the footer, and offers Save profile only where it saves something', async () => {
+  const { h, dialog } = await setup();
+  const save = dialog.querySelector('button[type=submit]');
+  // One statement of the rule, in the footer; the header and the Permissions panel no longer repeat it.
+  // (The PAT panel keeps its own setup instructions, which mention it in passing.)
+  const hints = [...dialog.querySelectorAll('.ca-hint')].filter((p: any) => /save[sd]? immediately/i.test(p.textContent)
+    && !p.closest('#ca-employee-panel-credentials'));
+  expect(hints.map((p: any) => p.className)).toEqual([]);
+  expect(dialog.querySelector(':scope > .ca-hint')).toBeNull();
+  expect(save.hidden).toBe(false);
+  for (const [tab, visible] of [['permissions', false], ['credentials', false], ['identity', true], ['profile', true]] as const) {
+    dialog.querySelector(`[data-profile-tab=${tab}]`).click();
+    expect(save.hidden, tab).toBe(!visible);
+    expect(dialog.querySelector('.ca-profile-save-hint').textContent.length, tab).toBeGreaterThan(0);
+  }
+  dialog.querySelector('[data-profile-tab=permissions]').click();
+  expect(dialog.querySelector('.ca-profile-save-hint').textContent).toContain('Permissions save immediately');
+  expect([...dialog.querySelectorAll('.ca-profile-footer button')].some((b: any) => b.textContent === 'Cancel' && !b.hidden)).toBe(true);
+  void h;
+});
 it('keeps permission autosaves when Cancel discards unsaved profile and rest edits', async () => {
   const { h, dialog, employee, writes, open } = await setup();
   dialog.querySelector('[name=position]').value = 'Unsaved role'; dialog.querySelector('[name=sleepEnabled]').checked = true;

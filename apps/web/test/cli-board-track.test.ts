@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { boardTrackApplied, boardTrackGate, boardTrackHead, boardTrackReview } from '../src/cli-board.js';
+import { boardTrackApplied, boardTrackCi, boardTrackGate, boardTrackHead, boardTrackIdentify, boardTrackReview } from '../src/cli-board.js';
 import { EXIT, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 
 const HEAD = 'a'.repeat(40);
@@ -95,6 +95,25 @@ describe('board track', () => {
     expect(await boardTrackApplied(approved.d, { id: 'i-1', head: HEAD, bodySha: '1'.repeat(64) })).toBe(EXIT.ok);
     expect(approved.out).toContain('  body applied 11111111: approved when applied');
     expect(approved.calls.at(-1)!.body).toEqual({ op: 'applied', head: HEAD, bodySha256: '1'.repeat(64) });
+  });
+
+  it('identify, head --base/--seal and ci send their fields; bad values refuse before any request', async () => {
+    const { d, calls } = deps();
+    expect(await boardTrackIdentify(d, { id: 'i-1', repository: 'acme/widgets', number: '#7' })).toBe(EXIT.ok);
+    expect(calls.at(-1)!.body).toEqual({ op: 'identify', repository: 'acme/widgets', number: 7 });
+    expect(await boardTrackHead(d, { id: 'i-1', sha: HEAD, base: 'B'.repeat(40), seal: '3'.repeat(64) })).toBe(EXIT.ok);
+    expect(calls.at(-1)!.body).toEqual({ op: 'head', sha: HEAD, base: 'b'.repeat(40), seal: '3'.repeat(64) });
+    expect(await boardTrackCi(d, { id: 'i-1', head: HEAD, name: 'Test', conclusion: 'success', url: 'https://ci.example/1' })).toBe(EXIT.ok);
+    expect(calls.at(-1)!.body).toEqual({ op: 'ci', head: HEAD, name: 'Test', conclusion: 'success', url: 'https://ci.example/1' });
+    for (const run of [
+      (x: AgentDeps) => boardTrackIdentify(x, { id: 'i-1', repository: 'acme/widgets', number: 'seven' }),
+      (x: AgentDeps) => boardTrackHead(x, { id: 'i-1', sha: HEAD, seal: 'abc' }),
+      (x: AgentDeps) => boardTrackCi(x, { id: 'i-1', head: HEAD, name: 'Test', conclusion: 'green' }),
+    ]) {
+      const fresh = deps();
+      expect(await run(fresh.d)).toBe(EXIT.error);
+      expect(fresh.calls).toHaveLength(0);
+    }
   });
 
   it('head and gate send their fields', async () => {

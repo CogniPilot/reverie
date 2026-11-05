@@ -135,6 +135,21 @@ describe('board track route', () => {
     expect(record.reviews).toEqual([]);
   });
 
+  it('identity and CI results are the owner\'s or a lead\'s; a second identity is refused; a bad CI URL is 400', async () => {
+    const id = await card();
+    expect((await track(id, { op: 'identify', repository: 'acme/widgets', number: 7 }, REVIEWER)).statusCode).toBe(403);
+    expect((await track(id, { op: 'identify', repository: 'acme/widgets', number: 7 }, AUTHOR)).statusCode).toBe(200);
+    expect((await track(id, { op: 'identify', repository: 'acme/widgets', number: 8 }, LEAD)).statusCode).toBe(409);
+    await track(id, { op: 'head', sha: HEAD, seal: '3'.repeat(64) }, AUTHOR);
+    expect((await track(id, { op: 'ci', head: HEAD, name: 'Test', conclusion: 'success' }, REVIEWER)).statusCode).toBe(403);
+    expect((await track(id, { op: 'ci', head: HEAD, name: 'Test', conclusion: 'success', url: 'javascript:alert(1)' }, LEAD)).statusCode).toBe(400);
+    const ci = await track(id, { op: 'ci', head: HEAD, name: 'Test', conclusion: 'success', url: 'https://ci.example/run/1' }, LEAD);
+    expect(ci.statusCode).toBe(200);
+    const record = ci.json().data.item.track;
+    expect(record.pr).toEqual({ repository: 'acme/widgets', number: 7 });
+    expect(record.heads[0]).toMatchObject({ seal: '3'.repeat(64), ci: [expect.objectContaining({ by: 'Lead', conclusion: 'success' })] });
+  });
+
   it('an unknown card is 404, and a malformed change is 400 before anything is written', async () => {
     expect((await track('missing-card', { op: 'head', sha: HEAD }, LEAD)).statusCode).toBe(404);
     const id = await card();

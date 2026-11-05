@@ -966,7 +966,9 @@ export class AssignmentStatusWatch {
       this.post(
         bot,
         room.id,
-        `Assignment attention ${id} tracks task ${task.id}, check-in ${entry.id}. ${manager ? safeName(manager.name) : 'Owner'}: ` +
+        // The check-in's own message id lets the reader open it with `chat read --message`.
+        `Assignment attention ${id} tracks task ${task.id}, check-in ${entry.id}` +
+          `${entry.promptId ? ` (message ${entry.promptId})` : ''}. ${manager ? safeName(manager.name) : 'Owner'}: ` +
           `${safeName(employee.name)} ${escalationReason(entry)} ${task.id} (${escalationRole(employee, manager, task)}). ` +
           'Please review the Board attention item. No work completion was inferred.',
         [recipient],

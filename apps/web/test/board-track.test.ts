@@ -133,6 +133,49 @@ describe('track record', () => {
       .heads[1]!.gates[0]!.state).toBe('covered');
   });
 
+  it('names the pull request once: the same identity again is fine, a different one is refused', () => {
+    const track = run([{ op: 'identify', repository: 'acme/widgets', number: 7 }]);
+    expect(track.pr).toEqual({ repository: 'acme/widgets', number: 7 });
+    expect(applyTrackOp(track, { op: 'identify', repository: 'acme/widgets', number: 7 }, 'R', 2).pr).toEqual(track.pr);
+    expect(() => applyTrackOp(track, { op: 'identify', repository: 'acme/widgets', number: 8 }, 'R', 2)).toThrow(/already tracks acme\/widgets#7/);
+    expect(() => applyTrackOp(track, { op: 'identify', repository: 'other/widgets', number: 7 }, 'R', 2)).toThrow(TrackError);
+  });
+
+  it('keeps each head\'s base and packet seal, and shows them with the pull request', () => {
+    const SEAL = '3'.repeat(64);
+    const track = run([
+      { op: 'identify', repository: 'acme/widgets', number: 7 },
+      { op: 'head', sha: A, branch: 'feature', base: B, seal: SEAL },
+    ]);
+    expect(track.heads[0]).toMatchObject({ sha: A, base: B, seal: SEAL, ci: [] });
+    expect(describeTrack(track)).toEqual(
+      expect.arrayContaining(['pull request acme/widgets#7', `base ${B}`, 'packet seal 33333333'])
+    );
+  });
+
+  it('records CI as an appended observation on the latest head only, never as authority', () => {
+    const track = run([
+      { op: 'head', sha: A },
+      { op: 'head', sha: B },
+      { op: 'ci', head: B, name: 'Test', conclusion: 'failure', url: 'https://ci.example/run/1' },
+      { op: 'ci', head: B, name: 'Test', conclusion: 'success' },
+    ]);
+    expect(() => applyTrackOp(track, { op: 'ci', head: A, name: 'Test', conclusion: 'success' }, 'R', 9)).toThrow(/older head/);
+    expect(track.heads[1]!.ci.map((c) => c.conclusion)).toEqual(['failure', 'success']);
+    expect(track.heads[1]!.ci[0]).toMatchObject({ url: 'https://ci.example/run/1', by: 'Reviewer' });
+    expect(track.heads[0]!.ci).toEqual([]);
+    const lines = describeTrack(track);
+    expect(lines).toContain('CI Test: success (observed by Reviewer; not merge authority)');
+    expect(lines.filter((l) => l.startsWith('CI Test'))).toHaveLength(1);
+  });
+
+  it('accepts a CI result on a head stored before CI results existed', () => {
+    const track = run([{ op: 'head', sha: A }]);
+    delete (track.heads[0] as { ci?: unknown }).ci;
+    expect(describeTrack(track)).toContain(`head ${A}, 1 head(s) so far`);
+    expect(applyTrackOp(track, { op: 'ci', head: A, name: 'Test', conclusion: 'pending' }, 'R', 9).heads[0]!.ci).toHaveLength(1);
+  });
+
   it('needs a head before a review, a body or a gate', () => {
     for (const op of [
       { op: 'review', head: A, kind: 'source', verdict: 'GO' },
