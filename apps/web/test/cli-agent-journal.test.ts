@@ -108,7 +108,8 @@ describe('journal CLI', () => {
       gates: [{ gate: 'read_only', outcome: 'fail' }] } });
     expect(await agentJournalSave(quiet.deps, { room: 'r', turn: 't', text: 'T', tag: ['lesson'], source: ['m'], quote: ['q'] })).toBe(4);
     expect(JSON.parse(quiet.output[0]!)).toMatchObject({ success: false, saved: false, code: 'JOURNAL_READ_ONLY',
-      hint: 'the turn asks for no writes; cite a different turn' });
+      hint: 'the turn asked for no writes, so nothing was saved' });
+    expect(JSON.stringify(JSON.parse(quiet.output[0]!))).not.toMatch(/different turn|another turn/);
     const recall = fixture(false, { status: 200, json: { success: true, data: { entries: [entry] } } });
     expect(await agentJournalRecall(recall.deps, ['re-test'])).toBe(0);
     expect(recall.output[0]).toContain('#4 2026-10-30T04:00:00.000Z (10 h ago) [lesson]');

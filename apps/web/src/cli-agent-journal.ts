@@ -53,7 +53,7 @@ function refused(deps: AgentDeps, error: string, gates?: JournalGate[]): number 
 /** One actionable line per refusal code, so a refused save cannot be mistaken for a saved one. */
 const SAVE_HINTS: Record<string, string> = {
   JOURNAL_NEEDS_REASON: 'add --reason "<why save now>"',
-  JOURNAL_READ_ONLY: 'the turn asks for no writes; cite a different turn',
+  JOURNAL_READ_ONLY: 'the turn asked for no writes, so nothing was saved',
   JOURNAL_TURN_SELF: 'cite as --turn a message from someone else, not your own',
   JOURNAL_TURN_UNREADABLE: 'check that -r is the room the --turn message is in',
   JOURNAL_SOURCE_WINDOW: 'cite only sources sent no later than the --turn message',
