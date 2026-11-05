@@ -3,7 +3,7 @@
 #![allow(unsafe_code)]
 
 use crate::error::{Result, StoreError, StoreFault, finalized, need};
-use std::ffi::{CString, OsStr};
+use std::ffi::{CStr, CString, OsStr};
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
@@ -142,20 +142,37 @@ impl Directory {
         )
         .map_err(StoreError::io)?;
         for part in path.components().skip(1) {
-            let child = open_at(
+            let child = match open_at(
                 file.as_raw_fd(),
                 part.as_os_str(),
                 libc::O_RDONLY | libc::O_DIRECTORY,
                 0,
-            )
-            .map_err(StoreError::io)?;
+            ) {
+                Ok(child) => child,
+                Err(error) => {
+                    return finalized(
+                        Err(StoreError::io(error)),
+                        close(file, CloseRole::Walk, path),
+                    );
+                }
+            };
             if let Err(error) = close(file, CloseRole::Walk, path) {
                 return finalized(Err(error), close(child, CloseRole::Walk, path));
             }
             file = child;
         }
-        let identity = Stamp::from_metadata(&file.metadata().map_err(StoreError::io)?);
-        need(identity.private_directory(), StoreFault::PrivateDirectory)?;
+        let checked = file
+            .metadata()
+            .map_err(StoreError::io)
+            .and_then(|metadata| {
+                let identity = Stamp::from_metadata(&metadata);
+                need(identity.private_directory(), StoreFault::PrivateDirectory)?;
+                Ok(identity)
+            });
+        let identity = match checked {
+            Ok(identity) => identity,
+            Err(error) => return finalized(Err(error), close(file, CloseRole::Walk, path)),
+        };
         Ok(Self {
             file,
             path: path.to_owned(),
@@ -166,8 +183,9 @@ impl Directory {
         &self.path
     }
     pub(crate) fn check(&self) -> Result<()> {
-        let other = Self::open(&self.path)
-            .map_err(|_| StoreError::Refused(StoreFault::DirectoryRebound))?;
+        let other = Self::open(&self.path).map_err(|cause| StoreError::DirectoryRecheck {
+            cause: Box::new(cause),
+        })?;
         let same = self.identity.same_inode(&other.identity);
         other.close_as(CloseRole::Recheck)?;
         need(same, StoreFault::DirectoryRebound)
@@ -237,30 +255,33 @@ impl Directory {
         open_at(self.file.as_raw_fd(), OsStr::new(leaf), libc::O_PATH, 0).map_err(StoreError::io)
     }
     pub(crate) fn lock(&self) -> Result<File> {
-        let file = match self.create_file("profiles.lock") {
+        self.lock_named("profiles.lock")
+    }
+    pub(crate) fn lock_named(&self, leaf: &str) -> Result<File> {
+        let file = match self.create_file(leaf) {
             Ok(file) => file,
             Err(StoreError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
-                self.read_write_lock()?
+                self.read_write_lock(leaf)?
             }
             Err(error) => return Err(error),
         };
-        let result = self.lock_file(&file);
+        let result = self.lock_file(&file, leaf);
         if let Err(error) = result {
             return finalized(Err(error), close(file, CloseRole::Lock, &self.path));
         }
         Ok(file)
     }
-    fn read_write_lock(&self) -> Result<File> {
+    fn read_write_lock(&self, leaf: &str) -> Result<File> {
         open_at(
             self.file.as_raw_fd(),
-            OsStr::new("profiles.lock"),
+            OsStr::new(leaf),
             libc::O_RDWR | libc::O_NONBLOCK,
             0,
         )
         .map_err(StoreError::io)
     }
-    fn lock_file(&self, file: &File) -> Result<()> {
-        self.check_lock(file)?;
+    fn lock_file(&self, file: &File, leaf: &str) -> Result<()> {
+        self.check_lock_named(file, leaf)?;
         // SAFETY: flock locks the held descriptor only; its lifetime remains owned.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             let source = io::Error::last_os_error();
@@ -270,20 +291,26 @@ impl Directory {
             });
         }
         self.check()?;
-        self.check_lock(file)
+        self.check_lock_named(file, leaf)
     }
     pub(crate) fn check_lock(&self, file: &File) -> Result<()> {
+        self.check_lock_named(file, "profiles.lock")
+    }
+    pub(crate) fn check_lock_named(&self, file: &File, leaf: &str) -> Result<()> {
         let value = private_stamp(file)?;
         need(
-            self.stamp("profiles.lock")?.as_ref() == Some(&value),
+            self.stamp(leaf)?.as_ref() == Some(&value),
             StoreFault::LockRebound,
         )
     }
     pub(crate) fn publish(&self, source: &str, absent: bool) -> Result<()> {
+        self.publish_named(source, "profiles.json", absent)
+    }
+    pub(crate) fn publish_named(&self, source: &str, target: &str, absent: bool) -> Result<()> {
         #[cfg(test)]
         crate::faults::hit(crate::faults::Point::BeforeRename, &self.path)?;
         let source = name(OsStr::new(source)).map_err(StoreError::io)?;
-        let target = name(OsStr::new("profiles.json")).map_err(StoreError::io)?;
+        let target = name(OsStr::new(target)).map_err(StoreError::io)?;
         let flags = if absent { libc::RENAME_NOREPLACE } else { 0 };
         // SAFETY: both names are terminated leaves in this held private directory.
         if unsafe {
@@ -307,6 +334,40 @@ impl Directory {
         crate::faults::hit(crate::faults::Point::DirectorySync, &self.path)?;
         self.file.sync_all().map_err(StoreError::io)
     }
+    pub(crate) fn only_lock_leaf(&self, expected: &str) -> Result<bool> {
+        let file = open_at(
+            self.file.as_raw_fd(),
+            OsStr::new("."),
+            libc::O_RDONLY | libc::O_DIRECTORY,
+            0,
+        )
+        .map_err(StoreError::io)?;
+        let fd = file.into_raw_fd();
+        // SAFETY: fdopendir takes sole ownership of this newly opened descriptor
+        // on success; on failure it remains ours and is closed exactly once.
+        let directory = unsafe { libc::fdopendir(fd) };
+        if directory.is_null() {
+            let error = StoreError::io(io::Error::last_os_error());
+            return finalized(
+                Err(error),
+                close(
+                    unsafe { File::from_raw_fd(fd) },
+                    CloseRole::Walk,
+                    &self.path,
+                ),
+            );
+        }
+        let result = directory_names(directory, expected.as_bytes());
+        // SAFETY: this is the one live DIR allocated above. No use follows close.
+        let closed = if unsafe { libc::closedir(directory) } == 0 {
+            Ok(())
+        } else {
+            Err(StoreError::io(io::Error::last_os_error()))
+        };
+        #[cfg(test)]
+        let closed = finalized(closed, crate::faults::closed(CloseRole::Walk, &self.path));
+        finalized(result, closed)
+    }
     pub(crate) fn remove_temporary(&self, leaf: &str, owned: &Stamp) -> Result<()> {
         let Some(current) = self.stamp(leaf)? else {
             return Ok(());
@@ -327,20 +388,68 @@ impl Directory {
         close(self.file, role, &self.path)
     }
 }
-pub(crate) fn random_temporary_name() -> Result<String> {
+pub(crate) fn random_name(prefix: &str) -> Result<String> {
+    let bytes = random_bytes()?;
+    Ok(format!(
+        "{prefix}{}",
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
+}
+pub(crate) fn random_uuid() -> Result<String> {
+    let mut bytes = random_bytes()?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    ))
+}
+pub(crate) fn random_bytes() -> Result<[u8; 16]> {
     let mut bytes = [0u8; 16];
     // SAFETY: bytes is writable for exactly its supplied length; no descriptor is returned.
     let count = unsafe { libc::getrandom(bytes.as_mut_ptr().cast(), bytes.len(), 0) };
     if count != bytes.len() as isize {
         return Err(StoreError::io(io::Error::last_os_error()));
     }
-    Ok(format!(
-        ".profiles-{}",
-        bytes
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    ))
+    Ok(bytes)
+}
+fn directory_names(directory: *mut libc::DIR, expected: &[u8]) -> Result<bool> {
+    let mut seen = false;
+    loop {
+        // SAFETY: Linux's thread-local errno pointer is valid. readdir returns
+        // either a valid DIR-owned entry until its next call, or null+errno.
+        unsafe {
+            *libc::__errno_location() = 0;
+        }
+        let entry = unsafe { libc::readdir(directory) };
+        if entry.is_null() {
+            let error = io::Error::last_os_error();
+            return if error.raw_os_error() == Some(0) {
+                Ok(seen)
+            } else {
+                Err(StoreError::io(error))
+            };
+        }
+        let leaf = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if leaf == b"." || leaf == b".." {
+            continue;
+        }
+        if leaf != expected || seen {
+            return Ok(false);
+        }
+        seen = true;
+    }
 }
 pub(crate) fn read_bounded(file: &mut File, maximum: usize) -> Result<Vec<u8>> {
     #[cfg(test)]
