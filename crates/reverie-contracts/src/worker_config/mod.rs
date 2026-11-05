@@ -1,0 +1,70 @@
+//! Legacy effective-worker JSON bytes, with Python's default spaces and ASCII.
+//! Inputs are projected data, never evidence of validation, readiness or authority.
+mod decode;
+mod encode;
+mod value;
+
+use sha2::{Digest, Sha256};
+use std::fmt;
+use value::Value;
+
+pub use decode::decode;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkerConfigError {
+    InvalidJson,
+    DuplicateKey,
+    ExpectedObject,
+}
+impl WorkerConfigError {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::InvalidJson => "WORKER_CONFIG_JSON",
+            Self::DuplicateKey => "DUPLICATE_KEY",
+            Self::ExpectedObject => "WORKER_CONFIG_OBJECT",
+        }
+    }
+}
+impl fmt::Display for WorkerConfigError {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        output.write_str(self.code())
+    }
+}
+impl std::error::Error for WorkerConfigError {}
+
+/// A duplicate-free Python JSON object supplied as an already projected worker
+/// configuration. This codec does not validate the worker schema or resolve any
+/// GPU/perf/memory/storage/lease facts; its name identifies the legacy hash format.
+/// Legacy nonfinite data spellings are preserved here, not admitted into resource
+/// policy types or strict wire schemas.
+pub struct EffectiveWorkerConfig(Value);
+
+/// Python json.dumps(effective_config, sort_keys=True).encode(), including all keys.
+pub fn encode_config(config: &EffectiveWorkerConfig) -> Vec<u8> {
+    encode::encode(&config.0, false)
+}
+/// Excludes only top-level image, maintenanceSessions and opsConfig.
+pub fn encode_policy(config: &EffectiveWorkerConfig) -> Vec<u8> {
+    encode::encode(&config.0, true)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkerConfigDigest([u8; 32]);
+impl WorkerConfigDigest {
+    pub fn to_hex(&self) -> String {
+        crate::digest::hex(&self.0)
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkerPolicyDigest([u8; 32]);
+impl WorkerPolicyDigest {
+    pub fn to_hex(&self) -> String {
+        crate::digest::hex(&self.0)
+    }
+}
+pub fn config_digest(config: &EffectiveWorkerConfig) -> WorkerConfigDigest {
+    WorkerConfigDigest(Sha256::digest(encode_config(config)).into())
+}
+pub fn policy_digest(config: &EffectiveWorkerConfig) -> WorkerPolicyDigest {
+    WorkerPolicyDigest(Sha256::digest(encode_policy(config)).into())
+}

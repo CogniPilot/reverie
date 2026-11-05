@@ -58,7 +58,7 @@ impl std::error::Error for CodecError {}
 pub struct ProfileDigest([u8; 32]);
 impl ProfileDigest {
     pub fn to_hex(&self) -> String {
-        hex(&self.0)
+        crate::digest::hex(&self.0)
     }
 }
 
@@ -66,22 +66,10 @@ impl ProfileDigest {
 pub struct ProfileDocumentDigest([u8; 32]);
 impl ProfileDocumentDigest {
     pub fn to_hex(&self) -> String {
-        hex(&self.0)
+        crate::digest::hex(&self.0)
     }
 }
 
-fn hex(bytes: &[u8; 32]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    bytes
-        .iter()
-        .flat_map(|byte| {
-            [
-                char::from(HEX[(byte >> 4) as usize]),
-                char::from(HEX[(byte & 15) as usize]),
-            ]
-        })
-        .collect()
-}
 pub fn profile_digest(profile: &ResourceProfile) -> Result<ProfileDigest, CodecError> {
     Ok(ProfileDigest(
         Sha256::digest(encode_profile(profile)?).into(),
