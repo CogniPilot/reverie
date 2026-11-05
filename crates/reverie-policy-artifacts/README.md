@@ -26,8 +26,9 @@ actual policy/producer dependency or toolchain intentionally do. The initial
 Rust migration changes the output store pathname; profile bytes, raw hashes,
 manifest schema and location-dependent manifest formatting remain compatible.
 
-The old `nix/worker-perf-profile.py` remains an unselected compatibility oracle.
-The current Python broker and the separate first-party Docker base-profile
+The old `nix/worker-perf-profile.py` was retired after byte qualification against
+its historical source at `77c4c1a7`; sealed oracle fixtures and receipts retain
+that provenance. The current Python broker and the separate Docker base-profile
 producer still need migration. Nix's third-party TOML generator and other build
 tools can themselves use Python; this cohort removes the selected first-party
 task-perf producer, not every build-time interpreter. No deployment, engine
