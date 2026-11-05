@@ -9142,9 +9142,9 @@ class ReverieChatApp {
     const host = this.el('section', 'ca-profile-memory');
     const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
     const row = this.el('div', 'ca-company-actions');
-    const label = this.el('label', 'ca-hint', 'Memory (MiB) ');
+    const label = this.el('label', 'ca-hint', 'Hard memory ceiling (MiB) ');
     const input = this.el('input', 'ca-field');
-    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '512'; input.required = true;
+    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '1'; input.required = true;
     input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`); label.append(input);
     const draftBox = this.el('div', 'ca-profile-memory-draft');
     const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
@@ -9204,8 +9204,9 @@ class ReverieChatApp {
         const result = await this.app._chatApi('/api/company/resources/operations', { method: 'POST', body: { employeeId: employee.id } });
         if (!await currentOwner()) return;
         if (!result.ok || !Array.isArray(result.data) || result.data.length > 200 || result.data.some(item =>
-          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string')) throw new Error();
-        for (const item of result.data) if (!['completed', 'not-started'].includes(item.phase)) tracked.add(item.id);
+          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string'
+          || typeof item.blocksFurtherChanges !== 'boolean')) throw new Error();
+        for (const item of result.data) if (item.blocksFurtherChanges) tracked.add(item.id);
         discoveryFailed = false;
         if (tracked.size) { retain(); status.textContent = unconfirmed; }
         else status.textContent = storageFailed ? 'The local recovery record is unavailable. Do not start another change; inspect owner operations.' : '';
@@ -9226,11 +9227,14 @@ class ReverieChatApp {
             if (!await currentOwner()) return;
             const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
             if (!await currentOwner()) return;
-            const phase = result.ok && result.data?.id === operationId ? result.data.phase : null;
-            if (phase === 'completed' || phase === 'not-started') {
+            const confirmed = result.ok && result.data?.id === operationId
+              && typeof result.data.phase === 'string' && typeof result.data.blocksFurtherChanges === 'boolean';
+            const phase = confirmed ? result.data.phase : null;
+            if (confirmed && result.data.blocksFurtherChanges === false) {
               tracked.delete(operationId); retain(operationId);
               status.textContent = phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
-                : 'The restart was not dispatched. You can prepare a new preview.';
+                : phase === 'not-started' ? 'The restart was not dispatched. You can prepare a new preview.'
+                  : 'The earlier operation is settled. You can prepare a new preview.';
             } else status.textContent = !result.ok
               ? `Status could not be read (${result.status ?? 'network'}). The outcome is unknown; do not start another change.`
               : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
@@ -9249,6 +9253,15 @@ class ReverieChatApp {
         const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
         if (!dialog.isConnected || !await currentOwner()) return;
         if (!result.ok) {
+          const blockers = ['RESOURCE_PREVIEW_HOST_UNCONFIGURED', 'RESOURCE_PREVIEW_HOST_UNAVAILABLE',
+            'RESOURCE_PREVIEW_BUSY', 'RESOURCE_PREVIEW_PENDING'];
+          if (blockers.includes(result.errorCode) && typeof result.error === 'string') {
+            status.textContent = result.error;
+            // Only Preview's closed pre-dispatch diagnostics reach here. Apply
+            // uncertainty always keeps its retained operation and retry fence.
+            if (result.errorCode === 'RESOURCE_PREVIEW_PENDING') { discoveryFailed = true; sync(); }
+            return;
+          }
           status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
             : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
               : 'No preview: the laptop may be busy, or a previous change needs inspection. Check status before trying again.';
@@ -9258,7 +9271,8 @@ class ReverieChatApp {
         const draft = result.data, r = draft?.resources || {};
         if (!uuid.test(draft?.operationId) || !uuid.test(draft?.draftId)) throw new Error();
         status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
-        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} processes, ${r.cpus} CPUs. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
+        const cpu = r.cpus === 0 ? 'uncapped CPU' : `${r.cpus} CPUs`;
+        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} tasks, ${cpu}. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
         const note = this.el('textarea', 'ca-field');
         note.rows = 3; note.maxLength = 12000; note.required = true;
         note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
@@ -9286,7 +9300,7 @@ class ReverieChatApp {
     }, { text: 'Preview' });
     row.append(label, preview, check);
     host.append(this.el('h3', '', 'Laptop memory'),
-      this.el('p', 'ca-hint', 'Changes this expert\'s laptop memory by restarting it on a new laptop. Processes, CPUs and the shared pool stay as they are.'),
+      this.el('p', 'ca-hint', 'Changes this expert\'s hard memory ceiling by restarting the laptop. Task limits, CPU limits and the shared pool stay as they are. A soft memory limit controls reclaim pressure; it does not remove the hard ceiling or increase pool capacity.'),
       row, draftBox, status);
     container.append(host); status.textContent = 'Checking previous memory changes…'; sync(); void discover();
   }

@@ -40,7 +40,7 @@ let rejectAt: string | undefined;
 let nativeSettled: boolean;
 let occupyCandidate: boolean, composerBodies: Map<string, string>, handoffScreens: string[], handoffMuxCalls: string[];
 const codexPane = (body: string) => `› ${body}\n\nGPT-6.1-Sol high · /owned/resource-fixture\n? for shortcuts`;
-let restartController: () => Promise<void>;
+let restartController: (options?: {socket?: string}) => Promise<void>;
 type Frame = Record<string, unknown>;
 const encoded = (value: unknown) => {const raw = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4);
   header.writeUInt32BE(raw.length); return Buffer.concat([header, raw]);};
@@ -158,7 +158,7 @@ beforeEach(async () => {
           profileVersion: draft.profileVersion, profileDigest: draft.profileDigest, previewDigest: draft.previewDigest,
           settlementDigest: 'd'.repeat(64), currentBindingDigest: 'e'.repeat(64), readOnly: true});
       }
-      else if (verb === 'draft') {expect(pending.memoryMiB).toBe(3072); reply(draft);}
+      else if (verb === 'draft') {expect(pending.memoryMiB).toBe((draft.resources as Frame).memoryMiB); reply(draft);}
       else if (verb === 'claim') {expect(pending.approval).toEqual(approve());
         reply({reference, sessionId: draft.targetSid, state: 'PREPARING', publicationIntentDigest: 'c'.repeat(64)});}
       else if (verb === 'publication') {expect(company.registeredEmployees()[0].sessionId).toBe(draft.targetSid);
@@ -211,12 +211,13 @@ beforeEach(async () => {
   app = Fastify(); await app.register(cookie); registerOwnerRoutes(app, auth, false);
   controller = new ResourceReplacementController(app, auth, company, plans, chat, moves, journal, port, mux, path);
   registerResourceReplacementRoutes(app, controller);
-  restartController = async () => {
+  restartController = async options => {
     controller.close(); await app.close();
     journal = new PlanMoveStore(join(directory, 'plan-moves.json'));
     moves = new PlanMoves({load: () => journal.load(), save: rows => journal.save(rows)} as PlanMovePort);
     app = Fastify(); await app.register(cookie); registerOwnerRoutes(app, auth, false);
-    controller = new ResourceReplacementController(app, auth, company, plans, chat, moves, journal, port, mux, path);
+    controller = new ResourceReplacementController(app, auth, company, plans, chat, moves, journal, port, mux,
+      options ? options.socket : path);
     registerResourceReplacementRoutes(app,controller);
   };
 });
@@ -234,6 +235,83 @@ it('registers a real current-owner preview with visible limits and no executing 
   expect(verbs).toEqual(['draft']); expect(sessions.size).toBe(1);
   expect(company.registeredEmployees()[0].sessionId).toBe(source.id);
 });
+it('accepts integer MiB values between the GUI display increments', async () => {
+  (draft.resources as Record<string, unknown>).memoryMiB = 768;
+  const response = await post('preview', {employeeId: eid, memoryMiB: 768});
+  expect(response.statusCode).toBe(200);
+  expect(response.json().data.resources.memoryMiB).toBe(768);
+  expect(verbs).toEqual(['draft']);
+});
+it('explains an unconfigured host only after verifying the current owner', async () => {
+  await restartController({});
+  const refused = await post('preview', {employeeId: eid, memoryMiB: 3072}, {cookie: ''});
+  expect(refused.statusCode).toBe(403);
+  expect(refused.json().errorCode).not.toBe('RESOURCE_PREVIEW_HOST_UNCONFIGURED');
+  const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+  expect(response.statusCode).toBe(503);
+  expect(response.json()).toEqual({success: false, errorCode: 'RESOURCE_PREVIEW_HOST_UNCONFIGURED',
+    error: 'Laptop memory changes need the host resource service. Complete the supported server setup before previewing a change.'});
+  expect(verbs).toEqual([]);
+});
+it('reports a working source without creating a host draft', async () => {
+  vi.spyOn(source, 'isWorking', 'get').mockReturnValue(true);
+  const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+  expect(response.statusCode).toBe(503);
+  expect(response.json().errorCode).toBe('RESOURCE_PREVIEW_BUSY');
+  expect(verbs).toEqual([]);
+});
+it('explains an earlier unknown attempt without dispatching a new draft', async () => {
+  await journal.resourceAttemptStart(String(draft.operationId), eid, undefined, []);
+  await restartController();
+  const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+  expect(response.statusCode).toBe(503);
+  expect(response.json().errorCode).toBe('RESOURCE_PREVIEW_PENDING');
+  expect(response.json().error).toContain('Use Check status');
+  expect(verbs).toEqual([]);
+});
+it('reports a refused host connection without publishing private path or exception details', async () => {
+  await chmod(path, 0o666);
+  const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+  expect(response.statusCode).toBe(503);
+  expect(response.json().errorCode).toBe('RESOURCE_PREVIEW_HOST_UNAVAILABLE');
+  expect(response.json().error).toContain('This preview did not dispatch a restart');
+  expect(response.body).not.toContain(path);
+  expect(verbs).toEqual([]);
+});
+it('keeps a lost draft acknowledgement uncertain instead of claiming a pre-dispatch refusal', async () => {
+  vi.spyOn(ResourceNativeClient.prototype, 'request').mockRejectedValue(new Error('private-path-and-native-facts'));
+  const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+  expect(response.statusCode).toBe(503);
+  expect(response.json()).toEqual({success: false, errorCode: 'RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY'});
+  expect(response.body).not.toContain('private-path-and-native-facts');
+});
+it('keeps logout during host opening an authorization refusal', async () => {
+  vi.spyOn(ResourceNativeClient, 'open').mockImplementation(async () => {
+    auth.logout(token); throw new Error('private host failure');
+  });
+  const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+  expect(response.statusCode).toBe(403);
+  expect(response.json().errorCode).not.toBe('RESOURCE_PREVIEW_HOST_UNAVAILABLE');
+  expect(verbs).toEqual([]);
+});
+it('reclaims expired preview slots without making their old Apply handles executable', async () => {
+  let now = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  let oldPreview: string | undefined;
+  for (let index = 0; index < 256; index++) {
+    draft.draftId = randomUUID();
+    const response = await post('preview', {employeeId: eid, memoryMiB: 3072});
+    expect(response.statusCode).toBe(200);
+    oldPreview ??= String(draft.draftId);
+  }
+  expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(503);
+  now += 300_001;
+  draft.draftId = randomUUID();
+  expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(200);
+  expect((await post('apply', {previewId: oldPreview, handoff: 'Expired preview must not execute'})).statusCode).toBe(503);
+  expect(verbs).toHaveLength(257);
+  expect(verbs.every(verb => verb === 'draft')).toBe(true);
+}, 20_000);
 it('rejects owner-shaped input, another origin, and a stale session before a host request', async () => {
   for (const extra of [{origin: 'http://other.invalid'}, {'x-reverie-parent-session': source.id},
     {authorization: 'Basic fixture'}, {cookie: ''}]) {
@@ -257,11 +335,13 @@ it('runs normal metadata, explicit source stop, Session readiness, handoff and p
   const record = await until(async () => (await post('result', {operationId: draft.operationId})).json().data as PlanMoveRecord,
     value => ['completed','recovery-required'].includes(value?.phase));
   expect(record.phase, record.error).toBe('completed');
+  expect(record).toMatchObject({blocksFurtherChanges: false});
   expect(verbs).toEqual(['draft','claim','publication','prepare','source-stop','start','verify','finalize']);
   expect(handoffs).toEqual(['Resume the preserved work and inspect its checkpoint.\r']);
   expect(handoffScreens).toEqual([codexPane('Resume the preserved work and inspect its checkpoint.'), codexPane('')]);
   expect(candidateCommands).toHaveLength(1); expect(candidateCommands[0]).toContain('--resource-ref');
   expect((await journal.resourceRecord(String(draft.operationId))).resourcePhase).toBe('verified');
+  expect(await journal.resourceRecord(String(draft.operationId))).not.toHaveProperty('blocksFurtherChanges');
   expect(company.registeredEmployees()[0].sessionId).toBe(draft.targetSid);
 }, 20_000);
 
@@ -340,7 +420,7 @@ it('persists a known pre-begin refusal and permits a fresh preview after control
   const result = await post('result', {operationId: draft.operationId});
   expect(result.statusCode).toBe(200); expect(result.json().data.phase).toBe('not-started');
   expect((await post('operations', {employeeId: eid})).json().data).toEqual([
-    {id: draft.operationId, employeeId: eid, phase: 'not-started'}]);
+    {id: draft.operationId, employeeId: eid, phase: 'not-started', blocksFurtherChanges: false}]);
   expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(200);
 });
 
@@ -348,9 +428,10 @@ it.each(['preparing', 'dispatching'] as const)('retains %s crash uncertainty wit
   await journal.resourceAttemptStart(String(draft.operationId), eid, undefined, []);
   if (phase === 'dispatching') await journal.resourceAttemptPhase(String(draft.operationId), undefined, phase);
   await restartController();
-  expect((await post('result', {operationId: draft.operationId})).json().data.phase).toBe('unknown');
+  expect((await post('result', {operationId: draft.operationId})).json().data).toMatchObject({
+    phase: 'unknown', blocksFurtherChanges: true});
   expect((await post('operations', {employeeId: eid})).json().data).toEqual([
-    {id: draft.operationId, employeeId: eid, phase: 'unknown'}]);
+    {id: draft.operationId, employeeId: eid, phase: 'unknown', blocksFurtherChanges: true}]);
   expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(503);
   expect(verbs).toEqual([]);
   expect((await post('operations', {employeeId: eid}, {cookie: ''})).statusCode).toBe(403);
@@ -420,7 +501,8 @@ it('a live pre-begin attempt cannot be mistaken for not-started or overtaken by 
   vi.spyOn(ResourceNativeClient, 'open').mockImplementation(() => new Promise((_resolve, reject) => {rejectOpen = reject;}));
   const applying = post('apply', {previewId: preview.draftId, handoff: 'Keep work'}).then(value => value);
   await until(async () => (await journal.resourceAttempts(undefined))[0]?.phase, value => value === 'preparing');
-  expect((await post('result', {operationId: draft.operationId})).json().data.phase).toBe('preparing');
+  expect((await post('result', {operationId: draft.operationId})).json().data).toMatchObject({
+    phase: 'preparing', blocksFurtherChanges: true});
   expect((await post('preview', {employeeId: eid, memoryMiB: 3072})).statusCode).toBe(503);
   rejectOpen(new Error('Owned pre-begin refusal'));
   expect((await applying).statusCode).toBe(503);
@@ -434,7 +516,8 @@ it('keeps a known no-dispatch receipt discoverable when a later unrelated attemp
   await journal.resourceAttemptPhase(id, undefined, 'not-started');
   await journal.resourceAttemptStart(randomUUID(), randomUUID(), undefined, []);
   await restartController();
-  expect((await post('result', {operationId: id})).json().data).toEqual({id, employeeId: eid, phase: 'not-started'});
+  expect((await post('result', {operationId: id})).json().data).toEqual({
+    id, employeeId: eid, phase: 'not-started', blocksFurtherChanges: false});
 });
 
 async function fillAttemptHistory(count: number): Promise<string[]> {
@@ -454,7 +537,8 @@ it('still answers not-started for a receipt that aged out of the attempt history
   await fillAttemptHistory(100);
   expect((await journal.resourceAttempts(undefined)).some(row => row.operationId === id)).toBe(false);
   await restartController();
-  expect((await post('result', {operationId: id})).json().data).toEqual({id, employeeId: eid, phase: 'not-started'});
+  expect((await post('result', {operationId: id})).json().data).toEqual({
+    id, employeeId: eid, phase: 'not-started', blocksFurtherChanges: false});
   expect((await post('operations', {employeeId: eid})).json().data).toEqual([]);
   expect((await post('result', {operationId: randomUUID()})).statusCode).toBe(503);
   expect(await journal.settledResourceAttempt(id, 'another-owner')).toBeUndefined();
