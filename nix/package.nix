@@ -36,6 +36,10 @@ let
       cp ${consoleFixture "tests/__init__.py"} test/fixtures/goal-source/tests/__init__.py
       cp ${consoleFixture "tests/goal_private_fixture.py"} test/fixtures/goal-source/tests/goal_private_fixture.py
       cp ${consoleFixture "tests/goal_broker_fixture.py"} test/fixtures/goal-source/tests/goal_broker_fixture.py
+      # The Rust handler's TS byte goldens live with its crate.
+      mkdir -p test/fixtures/subscription-profiles
+      cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
+      cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/goldens.json"} test/fixtures/subscription-profiles/goldens.json
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
@@ -127,6 +131,7 @@ let
         test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts \
         test/github-watches-ui.test.ts test/office-footer-panel.test.ts
       npm test -- test/chat-reply-releases-hold.test.ts
+      npm test -- test/routes/subscription-profiles-rust-goldens.test.ts
       npm test -- test/board-permissions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
