@@ -2,6 +2,7 @@
 pub mod broker_resources;
 pub mod device_policy;
 mod digest;
+pub mod lease_policy;
 mod legacy_json;
 pub mod profiles_v1;
 pub mod storage_identity;

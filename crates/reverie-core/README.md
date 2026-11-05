@@ -30,6 +30,13 @@ These values are data. Owner authorization, current binding provenance and nativ
 effect authority remain responsibilities of their application/runtime owners.
 See the [specification index](../../spec/README.md).
 
+`lease_policy` owns the legacy lease grant's pure POSIX lexical path rules,
+control-directory and mount namespace/alias checks, and native ELF64 static
+header policy. Codepoint path data retain lone surrogates; the lease socket's
+UTF-8 byte bound is checked separately. A canonical nil employee/session UUID
+remains accepted. ELF header acceptance neither executes the binary nor proves
+its immutable host custody, mounted identity or kernel behavior.
+
 Resource staging here is only the pure resource-map portion of Python
 `ProfileStore.stage_config`. Its input binding and owner map are data, not grants.
 The application must obtain them from current trusted sources and retain store

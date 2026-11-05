@@ -29,10 +29,21 @@ enum Action {
 struct Cursor<'a> {
     source: &'a [u8],
     offset: usize,
+    reject_constants: bool,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
-    let mut cursor = Cursor { source, offset: 0 };
+    decode_mode(source, false)
+}
+pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, true)
+}
+fn decode_mode(source: &[u8], reject_constants: bool) -> Result<Value, Error> {
+    let mut cursor = Cursor {
+        source,
+        offset: 0,
+        reject_constants,
+    };
     let root = parse(&mut cursor)?;
     cursor.whitespace();
     if cursor.offset != source.len() {
@@ -157,6 +168,7 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
+            Some(b'N' | b'I') if self.reject_constants => return Err(Error::InvalidJson),
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
             Some(b'I') => self.literal("Infinity", Node::Number(Number::PositiveInfinity))?,
             Some(b'-' | b'0'..=b'9') => Action::Ready(Value(Node::Number(self.number()?))),
@@ -174,6 +186,9 @@ impl Cursor<'_> {
     fn number(&mut self) -> Result<Number, Error> {
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
+            if self.reject_constants {
+                return Err(Error::InvalidJson);
+            }
             self.offset += "-Infinity".len();
             return Ok(Number::NegativeInfinity);
         }

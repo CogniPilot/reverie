@@ -29,3 +29,12 @@ rootless-Docker configuration. Their recorded validation outcome demonstrates
 why this named hash-data codec must retain Python's default `allow_nan=True`
 spellings. The real `worker_resources.policy_digest` is also compared to the
 recorded policy hash. Fixtures contain no live host paths or company data.
+
+`lease-policy-python-interop.json` records actual frozen `peer_port.validate_option`
+and `worker_config` data behavior: 53 option and 22 projection cases. The
+projection oracle reads only owned temporary synthetic company files and stubs
+artifact observation explicitly; it proves projection bytes, not immutable
+artifact custody or native/mounted execution. `peer-elf-python-interop.json`
+records 14 actual `peer_artifact.static_elf` outcomes with declared architecture
+patched for synthetic header-policy cases. It does not qualify a machine or
+execute any helper. No Python generator is added to the source tree.

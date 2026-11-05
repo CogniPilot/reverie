@@ -124,3 +124,19 @@ Nineteen synthetic old-Python `resource_config` and `policy_digest` cases qualif
 exact bytes and hashes. Only current/storage identity observations are stubbed
 in these pure oracles; native read custody and drift tests are separate. These
 projections expose no owner authority, host fact receipt, endpoint or writer.
+
+`lease_policy` captures the existing `leaseAcceptance` option from already
+projected worker data. Absent/null options retain the original configuration;
+an enabled option is removed for both selected and unselected SIDs. Only its
+exact current selected SID receives the one readonly peer mount. Current lease
+selection intentionally adds no owner, generation, retirement, running-intent
+or unrelated-ID uniqueness gates from the separate GPU/storage readers.
+The company reader preserves `I.decoded`'s rejection of literal nonfinite
+constants while retaining Python exponent-overflow behavior.
+
+Pure lease projections are candidates with an explicit required-artifact path.
+Native observation must validate the owner-selected immutable peer binary before
+acknowledging a selected projection. These values confer no peer invocation,
+socket service, lease, start authority or mounted/kernel proof. The artifact
+path remains the existing immutable owner configuration setting, not a new
+public administration path parameter.

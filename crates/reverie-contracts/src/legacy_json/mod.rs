@@ -19,3 +19,6 @@ pub(crate) fn decode_utf8(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode(&text::python_bytes(raw)?)
 }
+pub(crate) fn decode_bytes_without_constants(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_without_constants(&text::python_bytes(raw)?)
+}
