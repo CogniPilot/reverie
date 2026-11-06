@@ -921,7 +921,11 @@ dependencies = [
 name = "reverie-laptop-tools"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "libc",
+ "reverie-contracts",
+ "reverie-core",
+ "sha2",
  "toml",
 ]
 
