@@ -92,7 +92,7 @@ impl Configuration {
 fn canonical_text(text: &MetadataText) -> Result<PathBuf> {
     Ok(native::python_path(&canonical_posix(text)?.codepoints())?)
 }
-fn canonical_posix(text: &MetadataText) -> Result<PosixPath> {
+pub(crate) fn canonical_posix(text: &MetadataText) -> Result<PosixPath> {
     let path = PosixPath::try_new(text.codepoints())
         .map_err(|_| StorageError::Refused(StorageFault::CanonicalPath))?;
     need(
@@ -284,4 +284,10 @@ impl StorageLease {
 pub fn validate_storage(source: &EffectiveWorkerConfig, paths: &StoragePaths) -> Result<()> {
     let config = Configuration::capture(source)?;
     prepare::validate(&config, paths)
+}
+
+/// Same source private_directory owner for the telemetry's fixed sink phases.
+/// No path/UID from a telemetry request reaches this crate-private boundary.
+pub(crate) fn telemetry_directory(path: &Path, uid: u32, create: bool) -> Result<()> {
+    directory(path, uid, create, &mut false)?.close()
 }

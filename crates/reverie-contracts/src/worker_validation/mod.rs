@@ -4,13 +4,8 @@ use crate::legacy_json::{Node, Number, Text, Value};
 use crate::storage_identity::MetadataText;
 use crate::worker_config::EffectiveWorkerConfig;
 pub use ops::{OpsBindingConfig, OpsPrivateDocument};
-use reverie_core::worker_options::{
-    ReservationOption, TelemetryKey, WorkerOptionError, WorkerPathPolicy,
-};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-};
+use reverie_core::worker_options::{ReservationOption, WorkerOptionError, WorkerPathPolicy};
+use std::{collections::BTreeMap, fmt};
 
 type Object = BTreeMap<Text, Value>;
 type Result<T> = std::result::Result<T, WorkerValidationError>;
@@ -97,7 +92,7 @@ impl<'a> WorkerValidationData<'a> {
         optional_path(root(self.0), name, WorkerPathPolicy::Selector)
     }
     pub fn telemetry_and_maps(&self) -> Result<()> {
-        telemetry(root(self.0))?;
+        crate::command_telemetry::configuration(self.0)?;
         crate::device_policy::gpu::validate_config(self.0).map_err(WorkerValidationError::Gpu)?;
         crate::task_perf_v1::TaskPerfConfiguration::validate(self.0)
             .map_err(WorkerValidationError::Perf)?;
@@ -201,41 +196,6 @@ impl<'a> ColdPolicy<'a> {
             .collect::<Result<_>>()?;
         Ok((paths, mount_sources(fields)?))
     }
-}
-fn telemetry(fields: &Object) -> Result<()> {
-    let Some(value) = field(fields, "commandTelemetry") else {
-        return Ok(());
-    };
-    if matches!(value.0, Node::Null) {
-        return Ok(());
-    }
-    let error = WorkerOptionError::Telemetry;
-    let fields = object(value).ok_or(error)?;
-    let Some(Value(Node::Bool(enabled))) = field(fields, "enabled") else {
-        return Err(error.into());
-    };
-    if fields
-        .keys()
-        .any(|name| !name.equals_ascii("enabled") && !name.equals_ascii("keys"))
-    {
-        return Err(error.into());
-    }
-    let keys = match field(fields, "keys") {
-        None => &[][..],
-        Some(Value(Node::Array(values))) => values.as_slice(),
-        _ => return Err(error.into()),
-    };
-    if keys.len() > TelemetryKey::ALL.len() || *enabled && keys.is_empty() {
-        return Err(error.into());
-    }
-    let mut seen = BTreeSet::new();
-    for value in keys {
-        let key = TelemetryKey::parse(&scalar(Some(value)).map_err(|_| error)?)?;
-        if !seen.insert(key) {
-            return Err(error.into());
-        }
-    }
-    Ok(())
 }
 fn optional_path(
     fields: &Object,
