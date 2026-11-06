@@ -95,3 +95,36 @@ not exclusive-writer custody or a linearizable compare-and-swap against arbitrar
 concurrent writers. Real installing lifecycle/writer exclusion remains required.
 Unconfirmed finalizers retain partial-effect status; no rollback, automatic retry,
 launch/completion permit or selected runtime is implied.
+
+`WorkerRuntime::resolve_storage` now produces a private-field `StorageSelection`
+from the service's current configuration and the actual shared engine origin.
+Its employee branch acquires a real move-only lease; its original legacy branch
+retains resolver-produced paths without inventing a lock or employee registry
+entry. Fresh guard resolution may legitimately change the initial identity/kind.
+`LaunchStorage` binding compares the same service origin, selected SID and fixed
+namespace, while permitting the source's image/resource refresh. It never turns
+storage into API authorization or permission to start a container.
+
+The named writer observations use that same captured native client, running-only
+`ps --quiet --no-trunc`, the original 128-ID bound, whole inspect response and
+source-ordered native mount resolution. They deliberately do not reuse the
+stricter reservation inventory schema. A successful census is a current
+observation, not permanent exclusion of all future engine writers. The separate
+launch-wait reader uses the existing strict 16MiB metadata custody owner and
+the exact nine-field comparison bytes, preserving accepted JSON encodings and
+normalizing only Python Path spelling before custody checks.
+
+Consuming `LaunchStorage::close` settles the SAME retained constructor/client/
+pipe context before closing lifetime descriptors. Unknown settlement returns
+the actual held owner; a failed consumed descriptor close returns a latched
+unconfirmed owner and cannot retry the numeric FD or fabricate a live lease.
+Local checked close alone does not prove a global unlock while another process
+still holds an inherited open-file description. Callers must retain returned
+owners and uncertainty. The actual installing-broker registry/claim/release and
+Nix/laptop effect consumers remain separate, unfinished integration here.
+
+Qualification includes 66 actual unmodified Python writer cases through a
+controlled compiled Rust child on the same captured client, real owned symlink
+resolution, 21 strict native launch-binding reads, exact argv/error phase
+comparison and held-flock/late-constructor/finalizer controls. No live company
+data or container engine is used by these tests.

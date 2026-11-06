@@ -11,6 +11,21 @@ use std::collections::{BTreeMap, BTreeSet};
 /// validated by storage operations; each original phase reads its own fields.
 pub struct StorageConfiguration(crate::worker_config::EffectiveWorkerConfig);
 impl StorageConfiguration {
+    /// Pure immutable service binding only. Image/resources remain with the
+    /// current selected snapshot; this comparison supplies no authority.
+    pub fn matches_service_namespace(
+        &self,
+        expected: &reverie_core::worker_schema::WorkerServiceIdentity,
+    ) -> bool {
+        let root = object(self.0.as_value()).expect("worker object invariant");
+        let scalar = |name: &str, wanted: &str| matches!(root.get(&key(name)),Some(Value(Node::String(value))) if value.equals_ascii(wanted));
+        let integer = |name: &str, wanted: u64| matches!(root.get(&key(name)),Some(Value(Node::Number(Number::Integer(value)))) if value==&wanted.to_string());
+        scalar("deployment", expected.deployment())
+            && scalar("serverContainer", expected.container())
+            && integer("uid", u64::from(expected.ids().uid()))
+            && integer("gid", u64::from(expected.ids().gid()))
+            && integer("maxWorkers", u64::from(expected.max_workers()))
+    }
     pub fn storage_path_text(
         &self,
         identity: crate::reservation_engine::StorageIdentityRef<'_>,

@@ -5,7 +5,15 @@
 //! actual broker integration obligations.
 mod error;
 mod fs;
+mod owner;
+mod wait_binding;
+mod writers;
+pub use wait_binding::read_launch_wait_binding;
 mod prepare;
+pub use owner::{
+    LaunchStorage, StorageAcquireFailure, StorageCloseFailure, StorageOwnerError,
+    StorageOwnershipKind, StorageSelection,
+};
 mod temporary;
 #[cfg(test)]
 mod tests;

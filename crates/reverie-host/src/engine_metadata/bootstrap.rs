@@ -10,7 +10,7 @@ use std::{
 pub struct EngineBootstrap {
     command: InstalledCommand,
     #[cfg(test)]
-    pub(super) hooks: super::tests::Hooks,
+    pub(crate) hooks: super::tests::Hooks,
 }
 impl EngineBootstrap {
     pub fn capture(program: &OsStr) -> Result<Self> {

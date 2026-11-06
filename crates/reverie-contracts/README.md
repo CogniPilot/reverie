@@ -248,6 +248,16 @@ separate permissive company JSON text and strict detached plan-data rules of
 None of these data objects mint an applied receipt, registered native laptop or
 effect authority.
 
+`storage_writers` owns the separate Broker writer census and launch-wait data
+rules: running-only 128-ID selection, default Python JSON string decoding,
+global ID-set checks followed by each row's original labels/tuple/mount phases,
+and the strict-metadata nine-field default-spaced binding projection. It keeps
+Python structural errors distinct from ordinary inventory refusals. Resolved
+mount inputs remain DATA and must come from the native resolver; no parsed
+labels, comparison bytes or empty inventory proves writer exclusion, registry
+ownership or launch permission. Synthetic fixtures record 66 actual source
+writer cases and 21 actual launch-binding cases, with source/interpreter hashes.
+
 ## Memory instance and document data
 
 `memory_instance` preserves the closed instance schema, owner-selected text,

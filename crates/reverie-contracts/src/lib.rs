@@ -26,6 +26,7 @@ pub mod resource_config;
 pub mod resource_reload;
 pub mod rootless;
 pub mod storage_identity;
+pub mod storage_writers;
 pub mod subscription_profiles_v1;
 pub mod task_perf_v1;
 pub mod worker_child;
