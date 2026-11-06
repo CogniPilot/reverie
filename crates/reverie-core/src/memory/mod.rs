@@ -53,6 +53,12 @@ pub struct Belief {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectName(String);
+/// Checked selection data beneath an installed memory namespace, not a grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MemoryScope {
+    Private,
+    Project(ProjectName),
+}
 impl ProjectName {
     pub fn parse(raw: &str) -> Option<Self> {
         if raw.is_empty()

@@ -157,10 +157,23 @@ impl MemoryConfiguration {
     /// Explicit startup probe only. Read services receive the already selected
     /// backend and never call this method or silently change model identity.
     pub fn select_embeddings(&self) -> crate::embeddings::EmbeddingSelection {
+        self.embedding_candidates().select_at_startup()
+    }
+    /// Restore only the actual persisted startup-selected backend. There is no
+    /// probe, fallback selection or inference here. The profile is data, not a
+    /// launch/scope grant; the lifecycle owner holds its scope lock separately.
+    pub fn embedding_candidates(&self) -> crate::embeddings::EmbeddingCandidates {
+        use reverie_core::memory_configuration::IntegerSetting;
+        crate::embeddings::EmbeddingCandidates::configured(
+            self.llama_configuration(),
+            self.settings.integer(IntegerSetting::EmbedDimensions),
+        )
+    }
+    fn llama_configuration(&self) -> Option<crate::embeddings::LlamaConfig> {
         use reverie_contracts::storage_identity::MetadataText;
-        use reverie_core::memory_configuration::{IntegerSetting, TextSetting};
+        use reverie_core::memory_configuration::TextSetting;
         let text = |key| MetadataText::from_python_text(self.settings.text(key).clone());
-        let config = if self
+        if self
             .settings
             .text(TextSetting::EmbedUrl)
             .codepoints()
@@ -175,11 +188,7 @@ impl MemoryConfiguration {
             config.document_prefix = text(TextSetting::EmbedDocumentPrefix);
             config.query_prefix = text(TextSetting::EmbedQueryPrefix);
             Some(config)
-        };
-        crate::embeddings::make_configured_embedder(
-            config,
-            self.settings.integer(IntegerSetting::EmbedDimensions),
-        )
+        }
     }
     /// Explicit startup operation; recall never calls this method. Match the
     /// source's private data leaf and ordinary recursively created ancestors.

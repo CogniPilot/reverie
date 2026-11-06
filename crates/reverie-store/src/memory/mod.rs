@@ -10,7 +10,7 @@ pub use documents::{
 };
 mod query;
 mod reader;
-pub use reader::MemoryReader;
+pub use reader::{MemoryReadProfile, MemoryReader};
 #[cfg(test)]
 mod tests;
 mod writes;

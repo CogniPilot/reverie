@@ -19,6 +19,16 @@ fn contains_point(ranges: &[(u32, u32)], value: u32) -> bool {
     let index = ranges.partition_point(|&(start, _)| start <= value);
     index > 0 && value <= ranges[index - 1].1
 }
+pub(crate) fn word_point(value: u32) -> bool {
+    value == 95 || contains_point(tables::ALNUM, value)
+}
+pub(crate) fn space_point(value: u32) -> bool {
+    contains_point(tables::WHITESPACE, value)
+}
+pub(crate) fn decimal_point(value: u32) -> bool {
+    let index = decimal::DECIMAL.partition_point(|&(start, _, _)| start <= value);
+    index > 0 && value <= decimal::DECIMAL[index - 1].1
+}
 fn whitespace(value: char) -> bool {
     contains(tables::WHITESPACE, value)
 }

@@ -13,6 +13,7 @@ pub mod operations;
 pub mod persona;
 pub mod posix_path;
 pub mod posix_text;
+pub mod privacy_floor;
 pub mod profiles;
 pub(crate) mod python_text;
 pub use python_text::{python_lowercase_character, python_lowercase_string, python_numeric_text};

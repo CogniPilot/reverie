@@ -179,6 +179,62 @@ pub struct EmbeddingSelection {
     pub embedder: Arc<dyn Embedder>,
     pub fallback: Option<EmbeddingFallback>,
 }
+/// Configuration captured at service installation without inference. Matching
+/// a persisted name cannot probe, reselect or authorize access to a namespace.
+pub struct EmbeddingCandidates {
+    hashed: Arc<dyn Embedder>,
+    configured: Option<Arc<LlamaEmbedder>>,
+}
+impl EmbeddingCandidates {
+    pub fn configured(
+        config: Option<LlamaConfig>,
+        dimensions: &reverie_core::memory_configuration::ConfigInteger,
+    ) -> Self {
+        Self::new(
+            config,
+            HashedEmbedder::from_configured_dimensions(dimensions),
+        )
+    }
+    fn new(config: Option<LlamaConfig>, hashed: HashedEmbedder) -> Self {
+        Self {
+            hashed: Arc::new(hashed),
+            configured: config
+                .filter(|config| !config.url.codepoints().is_empty())
+                .map(LlamaEmbedder::new)
+                .map(Arc::new),
+        }
+    }
+    pub fn for_profile(&self, name: &MetadataText) -> Option<Arc<dyn Embedder>> {
+        if self.hashed.name().codepoints().as_ref() == name.codepoints() {
+            return Some(Arc::clone(&self.hashed));
+        }
+        self.configured
+            .as_ref()
+            .filter(|backend| backend.name().codepoints().as_ref() == name.codepoints())
+            .map(|backend| Arc::clone(backend) as Arc<dyn Embedder>)
+    }
+    pub fn select_at_startup(&self) -> EmbeddingSelection {
+        if let Some(configured) = &self.configured {
+            if configured
+                .request_embedding("probe", EmbeddingKind::Document)
+                .is_ok()
+            {
+                return EmbeddingSelection {
+                    embedder: Arc::clone(configured) as Arc<dyn Embedder>,
+                    fallback: None,
+                };
+            }
+            return EmbeddingSelection {
+                embedder: Arc::clone(&self.hashed),
+                fallback: Some(EmbeddingFallback::ProbeFailed),
+            };
+        }
+        EmbeddingSelection {
+            embedder: Arc::clone(&self.hashed),
+            fallback: None,
+        }
+    }
+}
 /// Exactly one startup probe selects the configured model or lexical fallback.
 /// Later requests never silently fall back or substitute vector/model identity.
 pub fn make_embedder(config: Option<LlamaConfig>, dimensions: usize) -> EmbeddingSelection {
@@ -194,24 +250,5 @@ pub fn make_configured_embedder(
     )
 }
 fn select(config: Option<LlamaConfig>, fallback: HashedEmbedder) -> EmbeddingSelection {
-    if let Some(config) = config.filter(|config| !config.url.codepoints().is_empty()) {
-        let embedder = LlamaEmbedder::new(config);
-        if embedder
-            .request_embedding("probe", EmbeddingKind::Document)
-            .is_ok()
-        {
-            return EmbeddingSelection {
-                embedder: Arc::new(embedder),
-                fallback: None,
-            };
-        }
-        return EmbeddingSelection {
-            embedder: Arc::new(fallback),
-            fallback: Some(EmbeddingFallback::ProbeFailed),
-        };
-    }
-    EmbeddingSelection {
-        embedder: Arc::new(fallback),
-        fallback: None,
-    }
+    EmbeddingCandidates::new(config, fallback).select_at_startup()
 }

@@ -8,6 +8,8 @@ pub mod host_jobs;
 pub mod lease_policy;
 pub mod memory_configuration;
 pub mod memory_instance;
+pub mod memory_lifecycle;
+pub mod memory_namespace;
 pub mod memory_profile;
 mod native;
 mod observation;
