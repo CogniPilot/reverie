@@ -55,12 +55,10 @@ impl Drop for Tree {
         fs::remove_dir_all(&self.0).unwrap();
     }
 }
+#[path = "support/owned_child.rs"]
+mod owned_child;
 fn successful(output: Output) {
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    owned_child::successful(output, ENTRY);
 }
 #[test]
 fn service_entry() {

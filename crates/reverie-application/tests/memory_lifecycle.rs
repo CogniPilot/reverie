@@ -56,13 +56,10 @@ impl Drop for Tree {
         fs::remove_dir_all(&self.0).unwrap();
     }
 }
+#[path = "support/owned_child.rs"]
+mod owned_child;
 fn successful(output: Output) {
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    owned_child::successful(output, ENTRY);
 }
 #[test]
 fn explicit_private_boot_is_idempotent_and_readonly_cli_count_stays_eight() {
