@@ -229,6 +229,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-application"
+version = "0.1.0"
+dependencies = [
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-host",
+ "reverie-store",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
@@ -241,6 +254,18 @@ dependencies = [
 [[package]]
 name = "reverie-core"
 version = "0.1.0"
+
+[[package]]
+name = "reverie-host"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-store",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "reverie-laptop-tools"
