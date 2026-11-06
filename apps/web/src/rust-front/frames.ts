@@ -118,10 +118,11 @@ function flag(byte: number): boolean {
   return byte === 1;
 }
 
-/** Bytes that must be valid UTF-8; Node would otherwise substitute U+FFFD and accept them. */
+/** Bytes that must be valid UTF-8; Node would otherwise substitute U+FFFD and accept them. A leading
+ * U+FEFF is text like any other character here, as it is to Rust's `str::from_utf8`. */
 function utf8(bytes: Buffer): string {
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     return refuse();
   }
