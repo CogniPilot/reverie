@@ -488,6 +488,9 @@ let
   # Candidate only: source preparation/admission consumers still select the
   # existing child entry point until the complete broker transition is reviewed.
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
+  # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
+  # consumers qualify together. No Python fallback inside this native package.
+  memoryNativeCli = import ./memory-cli.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -585,4 +588,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild memoryNativeCli laptopTools; }

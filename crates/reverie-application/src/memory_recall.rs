@@ -31,6 +31,9 @@ impl MemoryRecall {
         count: i64,
     ) -> Result<Self, MemoryError> {
         let reader = MemoryReader::open_with(path, embedder, decay_per_hour)?;
+        Self::from_reader(reader, count)
+    }
+    pub(crate) fn from_reader(reader: MemoryReader, count: i64) -> Result<Self, MemoryError> {
         let readiness = require_ready(&reader);
         if let Err(primary) = readiness {
             return match reader.close() {
@@ -41,11 +44,14 @@ impl MemoryRecall {
                 }),
             };
         }
-        Ok(Self {
+        Ok(Self::bind_existing(reader, count))
+    }
+    pub(crate) fn bind_existing(reader: MemoryReader, count: i64) -> Self {
+        Self {
             reader,
             count,
             lifecycle: None,
-        })
+        }
     }
     pub fn recall(&self, query: &str) -> Result<Vec<MemoryView>, MemoryError> {
         self.recall_text(EmbeddingText::from_scalar_text(query))

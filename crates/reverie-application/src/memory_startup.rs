@@ -32,6 +32,7 @@ pub struct MemorySeed {
     pub text: MetadataText,
     pub weight: f64,
 }
+#[derive(Clone)]
 pub struct StartupReport {
     pub reembedded: usize,
     pub imported: usize,
@@ -89,6 +90,13 @@ impl StartedMemory {
     ) -> Result<Self, StartupError> {
         configuration.ensure_directories()?;
         let selection = configuration.select_embeddings();
+        Self::initialize_selected(configuration, seeds, selection)
+    }
+    pub(crate) fn initialize_selected(
+        configuration: &MemoryConfiguration,
+        seeds: &[MemorySeed],
+        selection: reverie_host::embeddings::EmbeddingSelection,
+    ) -> Result<Self, StartupError> {
         let store = MemoryStore::open_with(
             configuration.native_path(MemoryPath::Database)?,
             selection.embedder,

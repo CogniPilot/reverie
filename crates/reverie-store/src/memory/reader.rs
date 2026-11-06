@@ -8,6 +8,43 @@ pub struct MemoryReader {
     embedder: Arc<dyn Embedder>,
     decay_per_hour: f64,
 }
+/// Existing database/profile data before binding its startup-selected backend.
+/// This owns the same read-only connection subsequently moved into the reader;
+/// opening does not probe a model or create/migrate any database/schema.
+pub struct MemoryReadProfile {
+    connection: Option<Connection>,
+}
+impl MemoryReadProfile {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            connection: Some(open_existing(path.as_ref())?),
+        })
+    }
+    pub fn get_state(&self, key: &str) -> Result<Option<String>> {
+        state(self.connection.as_ref().ok_or(MemoryError::Closed)?, key)
+    }
+    pub fn bind(
+        mut self,
+        embedder: Arc<dyn Embedder>,
+        decay_per_hour: f64,
+    ) -> Result<MemoryReader> {
+        let db = self.connection.take().ok_or(MemoryError::Closed)?;
+        Ok(MemoryReader {
+            connection: Mutex::new(Some(db)),
+            embedder,
+            decay_per_hour,
+        })
+    }
+    pub fn close(&mut self) -> Result<()> {
+        if let Some(db) = self.connection.take()
+            && let Err((db, error)) = db.close()
+        {
+            self.connection = Some(db);
+            return Err(error.into());
+        }
+        Ok(())
+    }
+}
 impl MemoryReader {
     pub fn embedder_name(&self) -> MetadataText {
         embedding_text(self.embedder.name())
@@ -19,30 +56,7 @@ impl MemoryReader {
         embedder: Arc<dyn Embedder>,
         decay_per_hour: f64,
     ) -> Result<Self> {
-        let path = normalized_store_path(path.as_ref());
-        if is_memory_name(&path) {
-            return Err(MemoryError::NotInitialized);
-        }
-        match std::fs::metadata(&path) {
-            Ok(_) => (),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(MemoryError::NotInitialized);
-            }
-            Err(error) => return Err(error.into()),
-        }
-        let db = Connection::open_with_flags(
-            sqlite_path(&path)?,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        let checked = qualify(&db);
-        if let Err(primary) = checked {
-            return finalized(Err(primary), db.close().map_err(|(_, error)| error.into()));
-        }
-        Ok(Self {
-            connection: Mutex::new(Some(db)),
-            embedder,
-            decay_per_hour,
-        })
+        MemoryReadProfile::open(path)?.bind(embedder, decay_per_hour)
     }
     /// Same ranking and embedding as the existing writer, with no touch/update.
     /// Inference happens before taking the SQLite connection mutex.
@@ -63,12 +77,7 @@ impl MemoryReader {
     }
     pub fn get_state(&self, key: &str) -> Result<Option<String>> {
         let connection = self.connection.lock().map_err(|_| MemoryError::Poisoned)?;
-        let db = connection.as_ref().ok_or(MemoryError::Closed)?;
-        Ok(db
-            .query_row("SELECT value FROM state WHERE key=?", [key], |row| {
-                row.get(0)
-            })
-            .optional()?)
+        state(connection.as_ref().ok_or(MemoryError::Closed)?, key)
     }
     pub fn close(&self) -> Result<()> {
         let mut connection = self.connection.lock().map_err(|_| MemoryError::Poisoned)?;
@@ -80,6 +89,35 @@ impl MemoryReader {
         }
         Ok(())
     }
+}
+fn open_existing(path: &Path) -> Result<Connection> {
+    let path = normalized_store_path(path);
+    if is_memory_name(&path) {
+        return Err(MemoryError::NotInitialized);
+    }
+    match std::fs::metadata(&path) {
+        Ok(_) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(MemoryError::NotInitialized);
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let db = Connection::open_with_flags(
+        sqlite_path(&path)?,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let checked = qualify(&db);
+    if let Err(primary) = checked {
+        return finalized(Err(primary), db.close().map_err(|(_, error)| error.into()));
+    }
+    Ok(db)
+}
+fn state(db: &Connection, key: &str) -> Result<Option<String>> {
+    Ok(db
+        .query_row("SELECT value FROM state WHERE key=?", [key], |row| {
+            row.get(0)
+        })
+        .optional()?)
 }
 fn qualify(db: &Connection) -> Result<()> {
     db.busy_timeout(Duration::from_secs(30))?;

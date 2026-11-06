@@ -20,6 +20,14 @@ pub(super) struct Process {
     opaque: bool,
 }
 impl Process {
+    /// Observation only: opaque consumed failures remain negative, but cannot
+    /// be mistaken for a constructor, child or descriptor still owned here.
+    pub(super) fn has_pending_native_work(&self) -> bool {
+        self.handshake.is_some()
+            || self.identity.is_some()
+            || self.streams.iter().any(Option::is_some)
+            || (self.attempted && self.status.is_none())
+    }
     pub(super) fn start(&mut self, bootstrap: &InstalledCommand, args: &[OsString]) -> Result<()> {
         let preparation = native::Handshake::new();
         #[cfg(test)]

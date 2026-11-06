@@ -44,7 +44,12 @@ impl MemoryConfiguration {
     /// Capture once at bootstrap instead of consulting mutable process env on
     /// individual API requests. Organizational instance labels grant no scope.
     pub fn capture() -> Result<Self, InstanceLoadError> {
-        let environment = std::env::vars_os()
+        Self::capture_instance(None)
+    }
+    /// Existing CLI --instance selection is bootstrap data. Request bodies
+    /// cannot call this path or override selected models/dimensions/prefixes.
+    pub fn capture_instance(instance: Option<&Path>) -> Result<Self, InstanceLoadError> {
+        let mut environment = std::env::vars_os()
             .filter_map(|(key, value)| {
                 let key = key.to_str()?;
                 if key == "HOME" || key.starts_with("REVERIE_") {
@@ -58,6 +63,17 @@ impl MemoryConfiguration {
                 }
             })
             .collect::<BTreeMap<_, _>>();
+        if let Some(instance) = instance {
+            let instance = if instance.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                instance
+            };
+            environment.insert(
+                "REVERIE_INSTANCE_CONFIG".into(),
+                PythonText::try_new(native::python_text(instance)).expect("OS text"),
+            );
+        }
         let home = match environment.get("HOME") {
             Some(home) => home.clone(),
             None => PythonText::try_new(native::home_directory(None)?).expect("NSS codepoints"),
@@ -157,10 +173,23 @@ impl MemoryConfiguration {
     /// Explicit startup probe only. Read services receive the already selected
     /// backend and never call this method or silently change model identity.
     pub fn select_embeddings(&self) -> crate::embeddings::EmbeddingSelection {
+        self.embedding_candidates().select_at_startup()
+    }
+    /// Restore only the actual persisted startup-selected backend. There is no
+    /// probe, fallback selection or inference here. The profile is data, not a
+    /// launch/scope grant; the lifecycle owner holds its scope lock separately.
+    pub fn embedding_candidates(&self) -> crate::embeddings::EmbeddingCandidates {
+        use reverie_core::memory_configuration::IntegerSetting;
+        crate::embeddings::EmbeddingCandidates::configured(
+            self.llama_configuration(),
+            self.settings.integer(IntegerSetting::EmbedDimensions),
+        )
+    }
+    fn llama_configuration(&self) -> Option<crate::embeddings::LlamaConfig> {
         use reverie_contracts::storage_identity::MetadataText;
-        use reverie_core::memory_configuration::{IntegerSetting, TextSetting};
+        use reverie_core::memory_configuration::TextSetting;
         let text = |key| MetadataText::from_python_text(self.settings.text(key).clone());
-        let config = if self
+        if self
             .settings
             .text(TextSetting::EmbedUrl)
             .codepoints()
@@ -175,11 +204,7 @@ impl MemoryConfiguration {
             config.document_prefix = text(TextSetting::EmbedDocumentPrefix);
             config.query_prefix = text(TextSetting::EmbedQueryPrefix);
             Some(config)
-        };
-        crate::embeddings::make_configured_embedder(
-            config,
-            self.settings.integer(IntegerSetting::EmbedDimensions),
-        )
+        }
     }
     /// Explicit startup operation; recall never calls this method. Match the
     /// source's private data leaf and ordinary recursively created ancestors.

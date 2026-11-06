@@ -14,6 +14,7 @@ mod child_record;
 pub(crate) mod child_signals;
 mod control;
 mod lease;
+mod memory_namespace;
 mod memory_profile;
 pub(crate) mod ordered_exec;
 pub(crate) mod owned_process;
@@ -23,6 +24,8 @@ pub(crate) use child_record::{
 };
 pub(crate) use lease::open_at;
 pub(crate) use lease::open_at_mode;
+pub(crate) use memory_namespace::memory_credentials;
+pub(crate) use memory_namespace::{memory_lock, memory_lock_entry, memory_lock_file};
 mod passwd;
 pub(crate) use memory_profile::publish as publish_memory_profile;
 pub(crate) use memory_profile::{

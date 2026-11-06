@@ -69,6 +69,14 @@ pub(crate) fn decode_memory_str(raw: &[u8]) -> Result<ordered::OrderedValue, Err
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_ordered(raw, decode::Purpose::Rootless)
 }
+/// The memory CLI consumes TextIOWrapper's already-decoded Python str. Keep
+/// literal surrogate codepoints distinct: this is not bytes JSON/BOM detection
+/// or a serialize/reparse clone. The normal JSON lexer still owns all syntax.
+pub(crate) fn decode_memory_cli_text(
+    raw: reverie_core::PythonTextRef<'_>,
+) -> Result<ordered::OrderedValue, Error> {
+    decode::decode_ordered(&text::python_text(raw), decode::Purpose::Rootless)
+}
 pub(crate) fn decode_embedding_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Rootless)
 }
