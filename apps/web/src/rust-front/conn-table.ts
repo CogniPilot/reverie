@@ -126,9 +126,13 @@ export class ConnTable {
   }
 
   /** Checks a frame this side is about to send for `id`. `false` means the connection has already
-   * closed (a crossing `abort`), so the frame is not sent. The front calls this for a `written` as
-   * the frame goes to the channel, not when it is queued: the receipt that drains a connection is the
-   * one that closes it. */
+   * closed (a crossing `abort`), so the frame is not sent.
+   *
+   * `written` is the exception. The front calls this for it only after the complete encoded frame has
+   * been written to the channel, never when it is queued or partly written: the receipt that drains a
+   * connection closes it, so calling earlier could close the connection on a receipt that never reaches
+   * TS. So for `written`, `false` cannot mean "not sent": an abort closed the id while the frame was
+   * finishing, the frame has crossed anyway, and TS settles it as a late frame. */
   send(id: bigint, frame: ConnFrame): boolean {
     if (frame.kind === 'abort' && this.open.delete(id)) return true;
     const ends = this.open.get(id);
