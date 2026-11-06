@@ -38,6 +38,14 @@ impl Stamp {
     pub(crate) fn same_inode(&self, other: &Self) -> bool {
         self.dev == other.dev && self.ino == other.ino
     }
+    /// The existing reservation terminal fence compares this five-field data
+    /// generation after its final native observation, without retaining a file.
+    pub(crate) fn same_generation(&self, other: &Self) -> bool {
+        self.same_inode(other)
+            && self.size == other.size
+            && self.mtime == other.mtime
+            && self.ctime == other.ctime
+    }
     fn private_directory(&self) -> bool {
         self.mode & libc::S_IFMT == libc::S_IFDIR
             && self.mode & 0o7777 == 0o700

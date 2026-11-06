@@ -10,9 +10,11 @@ use std::os::fd::IntoRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+mod control;
 mod lease;
 mod passwd;
 mod reservation;
+pub(crate) use control::{HeldAdmission, control_directory, open_admission};
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use reservation::{read_reservation, reservation_identity, reservation_location};
@@ -147,7 +149,7 @@ fn read_snapshot(
         metadata: after,
     })
 }
-fn close(file: File) -> Result<()> {
+pub(crate) fn close(file: File) -> Result<()> {
     let fd = file.into_raw_fd();
     // SAFETY: sole descriptor ownership is consumed before this one close.
     let result = if unsafe { libc::close(fd) } == 0 {
@@ -171,7 +173,7 @@ pub(crate) mod test_faults {
         close: bool,
     }
     thread_local! {static STATE:RefCell<Faults>=RefCell::new(Faults::default());}
-    pub(super) fn after_read(path: &Path) -> Result<()> {
+    pub(crate) fn after_read(path: &Path) -> Result<()> {
         let hook = STATE.with(|state| state.borrow_mut().hook.take());
         match hook {
             Some(mut hook) => hook(path),

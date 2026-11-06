@@ -152,5 +152,5 @@ fn scalar_text(value: &Text) -> Option<String> {
     value.0.iter().map(|&c| char::from_u32(c)).collect()
 }
 fn decode(raw: &[u8]) -> Result<Value> {
-    crate::legacy_json::decode_ops_bytes(raw).map_err(|_| WorkerValidationError::Ops)
+    crate::legacy_json::decode_strict_bytes(raw).map_err(|_| WorkerValidationError::Ops)
 }

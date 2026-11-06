@@ -6,7 +6,7 @@ mod resolver;
 mod tests;
 
 use crate::StoreError;
-pub use metadata::{DEFAULT_METADATA_LIMIT, canonical, read_metadata};
+pub use metadata::{DEFAULT_METADATA_LIMIT, canonical, read_metadata, read_ordered_metadata};
 pub use resolver::{
     StorageIdentityConfig, StorageKind, StoragePaths, company_records, current_employee,
     storage_paths, storage_start_allowed,

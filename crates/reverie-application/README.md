@@ -49,3 +49,13 @@ native observation handles. This is an internal broker service, without a wire
 constructor, request-selected proc/cgroup roots or arbitrary engine arguments.
 The [observation audit](src/reservation_observer/README.md) maps each legacy
 method and its remaining effect/admission obligations.
+
+Captured observation contexts retain the same persistent engine/kernel source
+and shared cancellation after the installing handle is moved or dropped. Census
+data may be compared across contexts using Python structural equality, but row
+handles remain bound to their original context and cannot be rebound by equal
+data. The owner loader retains its optional source path only after full
+validation; embedded captured configurations retain no file binding. The actual
+reader and recorded path share Python's lexical `Path` spelling, including
+relative and '..' components and the exact double-slash anchor. This is source
+data, not configuration custody or a permission grant.

@@ -30,6 +30,9 @@ pub(crate) fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_metadata(&text::python_bytes(raw)?)
 }
+pub(crate) fn decode_ordered_metadata_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Metadata)
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {
@@ -50,9 +53,9 @@ pub(crate) fn decode_python_str(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_last_wins(raw)
 }
-/// OPS private metadata uses strict json.loads(bytes), with the default integer
-/// cap. Keep its encoding detection and constant rules purpose-local.
-pub(crate) fn decode_ops_bytes(raw: &[u8]) -> Result<Value, Error> {
+/// Shared strict Python bytes hooks: close-time duplicates, default integer
+/// cap and literal constant refusal; exponent overflow remains data.
+pub(crate) fn decode_strict_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_engine_stopped(&text::python_bytes(raw)?)
 }
 pub(crate) fn decode_ops_private_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {

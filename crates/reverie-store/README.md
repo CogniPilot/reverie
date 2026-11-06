@@ -202,3 +202,15 @@ The resolver neither prepares storage nor writes lineage, acquires lifetime
 leases, publishes a migration, creates a sidecar/endpoint or selects a new
 production consumer. The caller supplies trusted native paths and remains
 responsible for authorization and consistency across its complete workflow.
+
+`read_ordered_metadata` shares the exact native metadata reader and its named
+parser, retaining Python insertion order only for consumers whose subsequent
+native observations depend on that order. It exposes no parser choice or editor.
+`OperationStore::into_exact_terminal_stamp` consumes a fresh exact journal
+reader, closes both its reader lock and owned store, and retains dual errors
+before returning opaque original named-generation data. The terminal admission
+hook defaults to the ordinary full scope guard; only the actual Gate may supply
+its narrower held-admission check for this readonly phase. Ordinary snapshots
+and mutations retain their existing checks. The stamp cannot grant completion,
+capacity credit or effects; the caller must still perform its final native
+guards and then assert the original named stamp without reopening the journal.

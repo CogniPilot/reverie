@@ -56,9 +56,21 @@ type Result<T> = std::result::Result<T, WorkerValidationHostError>;
 /// Actual owner-only regular-file capture; no full worker validation, host
 /// startup, migration or authority is implied by successful decoding.
 pub fn load_owner_configuration(path: &std::path::Path) -> Result<EffectiveWorkerConfig> {
-    let raw = native::read_worker_config(path)?;
-    reverie_contracts::worker_config::decode_owner_text(&raw)
-        .map_err(WorkerValidationHostError::Loader)
+    Ok(load_owner_configuration_with_source(path)?.0)
+}
+/// Retain the same loader-selected Python Path spelling used for native reads.
+/// Relative paths and '..' remain relative; this neither resolves aliases nor
+/// imposes OPS/control ancestor rules, and returns no retained file custody.
+pub fn load_owner_configuration_with_source(
+    path: &std::path::Path,
+) -> Result<(EffectiveWorkerConfig, std::path::PathBuf)> {
+    let normalized = PosixPath::try_new(&native::python_text(path))
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let source = native::python_path(&normalized.codepoints())?;
+    let raw = native::read_worker_config(&source)?;
+    let config = reverie_contracts::worker_config::decode_owner_text(&raw)
+        .map_err(WorkerValidationHostError::Loader)?;
+    Ok((config, source))
 }
 
 pub fn observe_ops_binding(config: &EffectiveWorkerConfig) -> Result<()> {

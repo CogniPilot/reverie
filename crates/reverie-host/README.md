@@ -158,3 +158,14 @@ Descriptors receive explicit checked close handling on both success and failure.
 The adapter cannot grant admission, retain a storage lease, start a container or
 turn a snapshot into a native effect permit. Its private owned-source test seam
 does not introduce a production root/path override.
+
+`reservation_control` observes the exact reservation control directory/file
+layout and owns a real nonblocking admission flock until explicit checked close.
+The stored directory iteration order is retained; root-owned sticky ancestors
+remain distinct from final owner-only mode0700 directories. Marker contents and
+stored inode data alone grant no admission. `capture_current_image` independently
+binds the loader-selected file with the original bounded strict-byte reader,
+parse/close/image-comparison order and final named-file stamp. Ancestor aliases
+are permitted there while leaf aliases and multiply-linked files refuse; this
+does not relax the separate control, OPS or metadata traversal policies. The
+application still owns pending-transition, full census and terminal fences.

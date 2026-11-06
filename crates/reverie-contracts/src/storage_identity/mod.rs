@@ -92,13 +92,37 @@ impl EmployeeGeneration {
 /// Duplicate-free json.loads(bytes) data. Named views validate their own shapes;
 /// successful decoding alone is neither a registry nor a host-effect capability.
 pub struct Metadata(Value);
+/// Metadata data retaining actual object order where a named native workflow
+/// must preserve its filesystem observation order. No editing API is exposed.
+pub struct OrderedMetadata(legacy_json::ordered::OrderedValue);
+impl OrderedMetadata {
+    pub(crate) fn as_value(&self) -> &Value {
+        &self.0.value
+    }
+    pub(crate) fn object_field_order(&self, name: &str) -> Option<Vec<Text>> {
+        let name = Text(name.chars().map(u32::from).collect());
+        let index = self.0.root_child_index(&name)?;
+        let legacy_json::ordered::OrderNode::Object(order) = self.0.graph.nodes.get(index)? else {
+            return None;
+        };
+        Some(order.iter().map(|(name, _)| name.clone()).collect())
+    }
+}
+pub fn decode_ordered_metadata(raw: &[u8]) -> Result<OrderedMetadata> {
+    legacy_json::decode_ordered_metadata_bytes(raw)
+        .map(OrderedMetadata)
+        .map_err(decode_error)
+}
 pub fn decode_metadata(raw: &[u8]) -> Result<Metadata> {
     legacy_json::decode_metadata_bytes(raw)
         .map(Metadata)
-        .map_err(|error| match error {
-            legacy_json::Error::InvalidJson => IdentityDataError::InvalidJson,
-            legacy_json::Error::DuplicateKey => IdentityDataError::DuplicateKey,
-        })
+        .map_err(decode_error)
+}
+fn decode_error(error: legacy_json::Error) -> IdentityDataError {
+    match error {
+        legacy_json::Error::InvalidJson => IdentityDataError::InvalidJson,
+        legacy_json::Error::DuplicateKey => IdentityDataError::DuplicateKey,
+    }
 }
 type Object = BTreeMap<Text, Value>;
 fn object(value: &Value) -> Option<&Object> {

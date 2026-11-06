@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests_terminal.rs"]
+mod terminal_cases;
 
 #[test]
 fn actual_python_store_transcript_matches_each_durable_state_and_cold_view() {

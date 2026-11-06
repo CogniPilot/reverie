@@ -114,8 +114,14 @@ impl WorkerValidationStage {
 pub struct ValidatedWorkerSnapshot {
     envelope: WorkerEnvelope,
     mounts: worker_mounts::WorkerMountSources,
+    source_path: Option<std::path::PathBuf>,
 }
 impl ValidatedWorkerSnapshot {
+    /// Actual loader-selected entry data. None preserves the embedded captured
+    /// configuration mode; this path is not authorization or retained custody.
+    pub fn source_path(&self) -> Option<&std::path::Path> {
+        self.source_path.as_deref()
+    }
     pub fn envelope(&self) -> &WorkerEnvelope {
         &self.envelope
     }
@@ -153,10 +159,16 @@ pub fn validate_captured(config: EffectiveWorkerConfig) -> Result<ValidatedWorke
     reverie_contracts::lease_policy::LeaseConfig::validate_option(envelope.configuration())
         .map_err(|e| Stage::Lease.error(e))?;
     host::observe_cold_policy(envelope.configuration()).map_err(|e| Stage::Cold.error(e))?;
-    Ok(ValidatedWorkerSnapshot { envelope, mounts })
+    Ok(ValidatedWorkerSnapshot {
+        envelope,
+        mounts,
+        source_path: None,
+    })
 }
 pub fn load_owner_config(path: &std::path::Path) -> Result<ValidatedWorkerSnapshot> {
-    let config =
-        host::load_owner_configuration(path).map_err(|e| WorkerValidationStage::Loader.error(e))?;
-    validate_captured(config)
+    let (config, source) = host::load_owner_configuration_with_source(path)
+        .map_err(|e| WorkerValidationStage::Loader.error(e))?;
+    let mut captured = validate_captured(config)?;
+    captured.source_path = Some(source);
+    Ok(captured)
 }

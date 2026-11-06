@@ -126,7 +126,7 @@ fn directory(path: &Path, uid: Option<u32>) -> Result<File> {
     }
     Ok(parent)
 }
-fn open_at(parent: i32, name: &OsStr, flags: i32) -> std::io::Result<File> {
+pub(super) fn open_at(parent: i32, name: &OsStr, flags: i32) -> std::io::Result<File> {
     let name = CString::new(name.as_bytes()).map_err(|_| std::io::ErrorKind::InvalidInput)?;
     // SAFETY: name remains a valid terminated byte string throughout openat;
     // parent is a borrowed live directory descriptor (or AT_FDCWD). These

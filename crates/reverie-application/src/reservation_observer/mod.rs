@@ -27,14 +27,15 @@ use std::{
 
 /// Keep one persistent engine context for the service lifetime. Failed queries
 /// remain failures even after explicit owned-client cleanup completes.
+#[derive(Clone)]
 pub struct NativeObserver {
-    source: Box<dyn Source>,
+    source: Arc<dyn Source>,
     cancellation: CancellationToken,
 }
 impl NativeObserver {
     pub fn new(engine: ReadonlyEngine) -> Self {
         Self {
-            source: Box::new(Installed::new(engine)),
+            source: Arc::new(Installed::new(engine)),
             cancellation: CancellationToken::new(),
         }
     }
@@ -50,17 +51,17 @@ impl NativeObserver {
         &self,
         config: EffectiveWorkerConfig,
         inherited: Option<Instant>,
-    ) -> ObservationContext<'_> {
+    ) -> ObservationContext {
         ObservationContext {
-            observer: self,
+            observer: self.clone(),
             config: ReservationConfiguration::capture(config),
             inherited,
             origin: Arc::new(()),
         }
     }
 }
-pub struct ObservationContext<'a> {
-    observer: &'a NativeObserver,
+pub struct ObservationContext {
+    observer: NativeObserver,
     config: ReservationConfiguration,
     inherited: Option<Instant>,
     origin: Arc<()>,
@@ -76,6 +77,11 @@ pub struct ObservedRow<'a> {
     origin: &'a Arc<()>,
 }
 impl ObservedInventory {
+    /// Python structural equality of census DATA, independent of the sealed
+    /// per-context row origin. This never makes another context's rows usable.
+    pub fn equivalent(&self, other: &Self) -> bool {
+        self.rows.equivalent(&other.rows)
+    }
     pub fn rows(&self) -> impl Iterator<Item = ObservedRow<'_>> {
         self.rows.rows().iter().map(|row| ObservedRow {
             row,
@@ -88,7 +94,7 @@ impl ObservedRow<'_> {
         self.row
     }
 }
-impl ObservationContext<'_> {
+impl ObservationContext {
     fn check(&self, end: Instant) -> Result<()> {
         need(
             !self.observer.cancellation.is_cancelled(),

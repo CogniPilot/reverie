@@ -36,7 +36,7 @@ impl CapacityFacts {
         &self.commitments
     }
 }
-impl ObservationContext<'_> {
+impl ObservationContext {
     pub(super) fn capacity_at(
         &self,
         inventory: &ObservedInventory,

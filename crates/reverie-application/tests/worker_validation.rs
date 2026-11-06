@@ -129,6 +129,65 @@ fn real_owner_loader_matches_python_text_duplicates_limits_and_encoding() {
     }
 }
 
+#[derive(Deserialize)]
+struct LoaderPathCase {
+    name: String,
+    path: String,
+    normalized: String,
+    accepted: bool,
+}
+
+#[test]
+fn owner_loader_reads_python_path_spelling_and_retains_the_same_source() {
+    let cases: Vec<LoaderPathCase> =
+        serde_json::from_str(include_str!("fixtures/worker_validation/loader-paths.json")).unwrap();
+    assert_eq!(cases.len(), 10);
+    let tree = Tree::new();
+    let corpus: Vec<LoaderCase> =
+        serde_json::from_str(include_str!("fixtures/worker_validation/loader.json")).unwrap();
+    let raw = tree.substitute(corpus[0].expected.as_ref().unwrap());
+    let file = tree.0.join("owner-config.json");
+    fs::write(&file, &raw).unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    symlink("owner-config.json", tree.0.join("alias.json")).unwrap();
+    let cwd = std::env::current_dir().unwrap();
+    // Reach the filesystem root without mutating process-global current_dir.
+    // The original Path retains these '..' components in the saved spelling.
+    let up = "../".repeat(cwd.components().count() - 1);
+    let relative = format!("{up}{}", tree.0.to_str().unwrap().trim_start_matches('/'));
+    let substitute = |value: &str| {
+        value
+            .replace("$ROOT", tree.0.to_str().unwrap())
+            .replace("$REL", &relative)
+    };
+    for case in cases {
+        let path = PathBuf::from(substitute(&case.path));
+        let result = load_owner_config(&path);
+        assert_eq!(
+            result.is_ok(),
+            case.accepted,
+            "{}: {:?}",
+            case.name,
+            result.as_ref().err()
+        );
+        if let Ok(snapshot) = result {
+            let expected = PathBuf::from(substitute(&case.normalized));
+            assert_eq!(
+                snapshot.source_path().unwrap().as_os_str(),
+                expected.as_os_str(),
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                worker_config::encode_config(snapshot.configuration()),
+                raw.as_bytes()
+            );
+        }
+    }
+    let embedded = validate_captured(worker_config::decode(raw.as_bytes()).unwrap()).unwrap();
+    assert!(embedded.source_path().is_none());
+}
+
 #[test]
 fn paired_failures_preserve_source_phase_and_per_mount_native_order() {
     let cases: serde_json::Value =

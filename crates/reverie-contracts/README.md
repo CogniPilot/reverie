@@ -193,3 +193,13 @@ application service now composes those purpose owners; see the
 `rootless` ports the rootless option/profile/syscall, image-label and subordinate
 grant data rules, sharing mount and fixed perf owners. Its [compatibility audit](src/rootless/README.md)
 records parsing quirks, native observations and the remaining engine boundary.
+
+`reservation_control` retains the original READY binding's complete data and
+directory insertion order, arbitrary nonnegative inode integers, Python option
+equality and distinct configuration-domain digest. The domain excludes only
+the legacy top-level resource/image/browser fields; nested names remain hashed.
+Nonfinite included values and Python integer-to-string overflow refuse. The
+current-image data reader reuses strict bytes hooks separately from its image
+comparison so native code can preserve the required checked-close ordering.
+Neither schema, digest, insertion order nor parsed image conveys custody,
+held admission, completion or an effect grant.

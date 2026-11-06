@@ -28,7 +28,7 @@ impl Fixture {
     }
     fn observer(self: &Arc<Self>) -> NativeObserver {
         NativeObserver {
-            source: Box::new(self.clone()),
+            source: Arc::new(self.clone()),
             cancellation: CancellationToken::new(),
         }
     }
@@ -179,6 +179,35 @@ fn complete_batched_census_has_one_deadline_and_cannot_be_rebound_to_another_con
         Some("RESERVATION_OBSERVATION_CONTEXT")
     );
     assert_eq!(fixture.events().len(), 3);
+}
+#[test]
+fn owned_context_retains_one_engine_origin_but_equal_data_does_not_rebind_rows() {
+    let fixture = Fixture::new();
+    fixture.inventory(&[row(1, true)]);
+    fixture.inventory(&[row(1, true)]);
+    let observer = fixture.observer();
+    let retained = observer.capture(configuration(), None);
+    let second = observer.clone().capture(configuration(), None);
+    let cancellation = observer.cancellation();
+    drop(observer);
+    let first = retained.inventory(None).unwrap();
+    let equal = second.inventory(None).unwrap();
+    assert!(first.equivalent(&equal));
+    assert_eq!(
+        result_code(second.limits(&first.rows().next().unwrap())),
+        Some("RESERVATION_OBSERVATION_CONTEXT")
+    );
+    assert_eq!(fixture.events(), ["ps", "inspect", "ps", "inspect"]);
+    cancellation.cancel();
+    assert_eq!(
+        result_code(retained.host_root()),
+        Some("RESERVATION_OBSERVATION_CANCELLED")
+    );
+    assert_eq!(
+        result_code(second.host_root()),
+        Some("RESERVATION_OBSERVATION_CANCELLED")
+    );
+    assert_eq!(fixture.events().len(), 4);
 }
 #[test]
 fn invalid_earlier_batch_json_prevents_a_later_native_query() {

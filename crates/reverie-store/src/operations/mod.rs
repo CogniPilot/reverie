@@ -4,6 +4,7 @@ mod claim;
 mod completion;
 mod error;
 mod io;
+mod terminal;
 mod transition;
 use crate::private_fs::{self, CloseRole, Directory, Stamp};
 pub use completion::NativeCompletionProof;
@@ -16,11 +17,18 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
+pub use terminal::TerminalJournalStamp;
 
 /// Must be fixed by trusted service installation and retain its live owner scope
 /// and outer native-admission guard. Directory custody is never authorization.
 pub trait ScopeGuard: Send + Sync {
     fn assert_scope(&self, scope: &OperationScope) -> Result<()>;
+    /// Fixed read-only terminal-reader seam. A production gate may assert its
+    /// actual held admission and scope without introducing fresh engine I/O at
+    /// this phase. Ordinary readers and every write still call assert_scope.
+    fn assert_terminal_admission(&self, scope: &OperationScope) -> Result<()> {
+        self.assert_scope(scope)
+    }
 }
 /// Repeated capacity checks do not replace the native host admission transaction.
 pub trait CapacityObserver: Send + Sync {
