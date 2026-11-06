@@ -59,6 +59,11 @@ async function eventually(check: () => boolean, ms: number, what: string): Promi
   }
 }
 
+/** Finishes on a live socket. A finish whose socket was already destroyed is a truncation: Node completes the
+ * cancelled writes and still emits `finish`. Delivery itself is judged from the bytes the client received. */
+const genuine = (events: Running['events']) =>
+  events.filter((event) => event.event === 'response_finish' && event.socketDestroyed === false);
+
 /** The lifecycle events in order, without the per-response ones. */
 const lifecycle = (events: Running['events']) =>
   events.map((event) => event.event).filter((event) => !event.startsWith('response_'));
@@ -120,9 +125,9 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     });
     // Each response logs the shared app's events once its last byte is handed to the channel.
     expect(finishes()).toEqual([
-      { event: 'response_finish', method: 'GET', url: '/hello', status: 200 },
-      { event: 'response_finish', method: 'POST', url: '/echo', status: 200 },
-      { event: 'response_finish', method: 'GET', url: '/peer', status: 200 },
+      { event: 'response_finish', method: 'GET', url: '/hello', status: 200, socketDestroyed: false },
+      { event: 'response_finish', method: 'POST', url: '/echo', status: 200, socketDestroyed: false },
+      { event: 'response_finish', method: 'GET', url: '/peer', status: 200, socketDestroyed: false },
     ]);
   }, 20_000);
 
@@ -216,7 +221,9 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     expect(await running.exited).toBe(0);
     expect(held.aborted).toBe('destroy');
     expect(Buffer.concat(held.received).length).toBeLessThan(total);
-    expect(running.events.some((event) => event.event === 'response_finish')).toBe(false);
+    // The destroy fails the held write with ECANCELED and Node still emits `finish`, as on TCP; that finish is on a
+    // destroyed socket, so it is a truncation, and no genuine one occurs.
+    expect(genuine(running.events)).toEqual([]);
   }, 20_000);
 
   it('exits 71, not 0, when the channel cannot flush before the deadline', async () => {
@@ -257,5 +264,44 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
       { kind: 'unbind', listener: 'main' },
       { kind: 'unbind', listener: 'bridge' },
     ]);
+  }, 20_000);
+
+  it('E5: an SSE write completes on its receipt, so backpressure and drain follow written, not framing or credit', async () => {
+    const running = start();
+    await ready(running);
+    const events = 32;
+    const size = 16 * 1024;
+    // Credit for the whole stream, but no receipts: every byte can be framed, none is reported written.
+    const stream = running.fake.open({ credit: 16 * 1024 * 1024, receipts: false });
+    await running.fake.write(
+      stream,
+      `GET /sse?n=${events}&size=${size} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`
+    );
+    const writes = () => running.events.filter((event) => event.event === 'sse_write');
+    const drains = () => running.events.filter((event) => event.event === 'sse_drain');
+    await eventually(() => writes().some((event) => event.ok === false), 5000, 'an SSE write to report backpressure');
+    await sleep(300);
+    expect(Buffer.concat(stream.received).length).toBeGreaterThan(0);
+    expect(drains()).toEqual([]);
+    expect(writes().length).toBeLessThan(events);
+    // The front now reports everything sent so far as written, and every later byte as it arrives.
+    stream.receipts = true;
+    running.fake.receipt(stream);
+    await running.fake.closed(stream, 10_000);
+    await eventually(() => genuine(running.events).length === 1, 5000, 'the SSE response to finish');
+    const text = running.fake.text(stream);
+    expect(text.split('data: ').length - 1).toBe(events);
+    expect(writes().map((event) => event.seq)).toEqual([...Array(events).keys()]);
+    expect(drains().map((event) => event.seq)).toEqual(
+      writes()
+        .filter((event) => event.ok === false)
+        .map((event) => event.seq)
+    );
+  }, 20_000);
+
+  it('E3: asks the front for a TLS listener when FRONT_CHILD_TLS=1; the front terminates TLS', async () => {
+    const running = start({ FRONT_CHILD_TLS: '1' });
+    const request = await running.fake.next('bind_request');
+    expect(request.body).toEqual({ kind: 'bind_request', listener: 'main', tls: true, port: 0, host: '127.0.0.1' });
   }, 20_000);
 });

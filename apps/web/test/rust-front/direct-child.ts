@@ -9,7 +9,10 @@
  *   FRONT_CHILD_HOST       bind host (default 127.0.0.1)
  *   FRONT_CHILD_PORT       bind port (default 0)
  *   FRONT_CHILD_FINISH_MS  how long shutdown waits for Fastify to close (default 5000)
- * No TLS and no bridge: those are the front's.
+ *   FRONT_CHILD_TLS        "1" serves the app over Node https, the direct pair of the front's TLS listener; it then
+ *                          needs FRONT_CHILD_TLS_CERT and FRONT_CHILD_TLS_KEY, PEM file paths
+ *                          (test/rust-front/fixtures/tls holds a fixed pair for 127.0.0.1 and localhost)
+ * No bridge: that is the front's.
  *
  * Routes and the per-response events: fixture-app.ts.
  *
@@ -22,9 +25,17 @@
  * still queued behind a slow client, and destroys it, truncating the response. Bytes the kernel had already accepted
  * may also still be in flight.
  */
+import { readFileSync } from 'node:fs';
 import { bounded, finishMs, fixtureApp, log, shutdownOnce } from './fixture-app.js';
 
-const app = fixtureApp();
+function tlsPair(): { cert: Buffer; key: Buffer } | undefined {
+  if (process.env.FRONT_CHILD_TLS !== '1') return undefined;
+  const { FRONT_CHILD_TLS_CERT: cert, FRONT_CHILD_TLS_KEY: key } = process.env;
+  if (!cert || !key) throw new Error('FRONT_CHILD_TLS=1 needs FRONT_CHILD_TLS_CERT and FRONT_CHILD_TLS_KEY');
+  return { cert: readFileSync(cert), key: readFileSync(key) };
+}
+
+const app = fixtureApp(tlsPair());
 
 const shutdown = shutdownOnce(() => {
   const ms = finishMs();

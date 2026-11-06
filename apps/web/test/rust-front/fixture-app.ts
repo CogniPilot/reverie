@@ -10,15 +10,22 @@
  *   GET  /slow?ms=M        200 "slow" after M ms (M up to 60 s)
  *   GET  /destroy          destroys its socket without a response
  *   GET  /peer             200 JSON of the peer and local facts the request arrived with
+ *   GET  /sse?n&size&ms    200 text/event-stream: n events of `size` bytes of data, `ms` apart (n up to 4096,
+ *                          size up to 256 KiB, ms up to 10 s), waiting for `drain` whenever a write reports backpressure
  *
  * Every response logs one JSON object per line on stderr:
- *   {"event":"response_finish","method","url","status"} when Node's `finish` fires on the response, and
- *   {"event":"response_close","method","url","finished"} when it closes, `finished` being its writableFinished.
- * `finish` means the response's last byte has been accepted by its socket's write path: by the kernel for a direct
- * TCP socket; by the front channel's per-connection queue, within granted credit, for a fronted one. Neither says the
- * client has received the bytes, and for a fronted socket it does not say the front has written them.
+ *   {"event":"response_finish","method","url","status","socketDestroyed"} when Node's `finish` fires on the response,
+ *   and {"event":"response_close","method","url","finished"} when it closes, `finished` being its writableFinished.
+ * With `socketDestroyed: false`, `finish` means the response's last byte has been accepted by its socket's write path:
+ * by the kernel for a direct TCP socket, and by the OS for the front's client socket (its `written` receipt) for a
+ * fronted one. Neither says the client has read the bytes. With `socketDestroyed: true` the socket was destroyed with
+ * bytes still queued: Node completes the pending writes with ECANCELED and still emits `finish`, on TCP as through the
+ * front, so that event is a truncation, not a delivery.
+ * /sse also logs {"event":"sse_write","seq","bytes","ok"} per event, `ok` being the write's backpressure result, and
+ * {"event":"sse_drain","seq"} when a write that reported backpressure drains.
  */
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { ServerResponse } from 'node:http';
 
 export const log = (event: string, fields: Record<string, unknown> = {}) =>
   process.stderr.write(`${JSON.stringify({ event, ...fields })}\n`);
@@ -27,13 +34,32 @@ export const bounded = (value: unknown, max: number) => Math.min(Math.max(Number
 /** FRONT_CHILD_FINISH_MS, the bound on a shutdown's wait (default 5000). */
 export const finishMs = () => bounded(process.env.FRONT_CHILD_FINISH_MS, 600_000) || 5000;
 
-export function fixtureApp(): FastifyInstance {
-  const app = Fastify({ bodyLimit: 8 * 1024 * 1024 });
+/** Resolves on `drain`, or on `close` if the response is destroyed first; false then. */
+function drained(res: ServerResponse): Promise<boolean> {
+  return new Promise((done) => {
+    const settle = (ok: boolean) => () => {
+      res.off('drain', onDrain);
+      res.off('close', onClose);
+      done(ok);
+    };
+    const onDrain = settle(true);
+    const onClose = settle(false);
+    res.once('drain', onDrain);
+    res.once('close', onClose);
+  });
+}
+
+/** The fixture app, served over Node `https` when given a certificate and key (the direct child's TLS listener). */
+export function fixtureApp(https?: { cert: Buffer; key: Buffer }): FastifyInstance {
+  const app = (https
+    ? Fastify({ bodyLimit: 8 * 1024 * 1024, https })
+    : Fastify({ bodyLimit: 8 * 1024 * 1024 })) as unknown as FastifyInstance;
   app.addHook('onRequest', (req, reply, done) => {
     const res = reply.raw;
+    const socket = res.socket;
     const fields = { method: req.method, url: req.url };
     res.once('finish', () => {
-      log('response_finish', { ...fields, status: res.statusCode });
+      log('response_finish', { ...fields, status: res.statusCode, socketDestroyed: socket?.destroyed !== false });
     });
     res.once('close', () => log('response_close', { ...fields, finished: res.writableFinished }));
     done();
@@ -47,6 +73,25 @@ export function fixtureApp(): FastifyInstance {
   app.get('/slow', async (req) => {
     await new Promise((resolve) => setTimeout(resolve, bounded((req.query as { ms?: string }).ms, 60_000)));
     return 'slow';
+  });
+  app.get('/sse', async (req, reply) => {
+    const query = req.query as { n?: string; size?: string; ms?: string };
+    const n = bounded(query.n, 4096);
+    const data = `data: ${'x'.repeat(bounded(query.size, 256 * 1024))}\n\n`;
+    const ms = bounded(query.ms, 10_000);
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    for (let seq = 0; seq < n && !res.destroyed; seq++) {
+      const ok = res.write(data);
+      log('sse_write', { seq, bytes: Buffer.byteLength(data), ok });
+      if (!ok) {
+        if (!(await drained(res))) return;
+        log('sse_drain', { seq });
+      }
+      if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    if (!res.destroyed) res.end();
   });
   app.get('/destroy', (req) => {
     req.raw.socket.destroy();

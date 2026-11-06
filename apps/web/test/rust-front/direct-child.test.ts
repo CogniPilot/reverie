@@ -4,10 +4,19 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { resolve } from 'node:path';
+import { connect as connectTls } from 'node:tls';
 
 const web = resolve(import.meta.dirname, '../..');
+const tlsDir = resolve(import.meta.dirname, 'fixtures/tls');
+const tlsEnv = {
+  FRONT_CHILD_TLS: '1',
+  FRONT_CHILD_TLS_CERT: resolve(tlsDir, 'cert.pem'),
+  FRONT_CHILD_TLS_KEY: resolve(tlsDir, 'key.pem'),
+};
+const ca = readFileSync(resolve(tlsDir, 'cert.pem'));
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const children: ChildProcess[] = [];
 const sockets: Socket[] = [];
@@ -57,6 +66,10 @@ async function until(check: () => boolean, ms: number, what: string): Promise<vo
 }
 
 const has = (running: Running, event: string) => running.events.some((entry) => entry.event === event);
+/** Finishes on a live socket. A finish whose socket was already destroyed is a truncation: Node completes the
+ * cancelled writes and still emits `finish`. Delivery itself is judged from the bytes the client read. */
+const genuine = (running: Running) =>
+  running.events.filter((entry) => entry.event === 'response_finish' && entry.socketDestroyed === false);
 
 async function ready(running: Running): Promise<number> {
   await until(() => has(running, 'service_ready'), 15_000, 'service_ready');
@@ -70,6 +83,39 @@ async function send(port: number, request: string): Promise<Socket> {
   await new Promise<void>((done, fail) => socket.once('connect', done).once('error', fail));
   socket.write(request);
   return socket;
+}
+
+/** Waits until the SSE stream is stopped on backpressure: its last write reported it, that write has not drained,
+ * and no write follows for 300 ms. */
+async function stalled(writes: () => Event[], drains: () => Event[]): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the SSE stream to stall');
+    const before = writes().length;
+    await sleep(300);
+    const last = writes().at(-1);
+    if (writes().length === before && last?.ok === false && !drains().some((entry) => entry.seq === last.seq)) return;
+  }
+}
+
+/** As `send`, over TLS to the fixed test certificate. */
+async function sendTls(port: number, request: string): Promise<Socket> {
+  const socket = connectTls({ port, host: '127.0.0.1', ca, servername: 'localhost' });
+  sockets.push(socket);
+  await new Promise<void>((done, fail) => socket.once('secureConnect', done).once('error', fail));
+  socket.write(request);
+  return socket;
+}
+
+/** Reads slowly, at most one buffered chunk every 2 ms, until the child logs a genuine finish. */
+async function readUntilFinish(running: Running, socket: Socket, chunks: Buffer[]): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (genuine(running).length === 0) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for response_finish');
+    const chunk = socket.read() as Buffer | null;
+    if (chunk) chunks.push(chunk);
+    await sleep(2);
+  }
 }
 
 /** Reads everything until the peer ends, resolving with the bytes and whether the socket ended cleanly. */
@@ -117,9 +163,9 @@ describe.runIf(process.platform !== 'win32')('the direct-Node child of the paire
 
     await until(() => running.events.filter((entry) => entry.event === 'response_close').length === 3, 5000, 'closes');
     expect(running.events.filter((entry) => entry.event === 'response_finish')).toEqual([
-      { event: 'response_finish', method: 'GET', url: '/hello', status: 200 },
-      { event: 'response_finish', method: 'POST', url: '/echo', status: 200 },
-      { event: 'response_finish', method: 'GET', url: '/peer', status: 200 },
+      { event: 'response_finish', method: 'GET', url: '/hello', status: 200, socketDestroyed: false },
+      { event: 'response_finish', method: 'POST', url: '/echo', status: 200, socketDestroyed: false },
+      { event: 'response_finish', method: 'GET', url: '/peer', status: 200, socketDestroyed: false },
     ]);
     expect(running.events.filter((entry) => entry.event === 'response_close').map((entry) => entry.finished)).toEqual([
       true,
@@ -152,16 +198,10 @@ describe.runIf(process.platform !== 'win32')('the direct-Node child of the paire
     const port = await ready(running);
     const total = 8 * 1024 * 1024;
     const socket = await send(port, get(`/bytes?n=${total}`));
-    // Read slowly, at most one buffered chunk every 2 ms, until the child logs finish: Node's socket has handed the
-    // last byte to the kernel, but the client has not read it all.
+    // Read slowly until the child logs a genuine finish: Node's socket has handed the last byte to the kernel, but the
+    // client has not read it all.
     const chunks: Buffer[] = [];
-    const deadline = Date.now() + 15_000;
-    while (!has(running, 'response_finish')) {
-      if (Date.now() > deadline) throw new Error('timed out waiting for response_finish');
-      const chunk = socket.read() as Buffer | null;
-      if (chunk) chunks.push(chunk);
-      await sleep(2);
-    }
+    await readUntilFinish(running, socket, chunks);
     const readAtShutdown = Buffer.concat(chunks).length;
     running.child.kill('SIGTERM');
     await sleep(300);
@@ -185,12 +225,13 @@ describe.runIf(process.platform !== 'win32')('the direct-Node child of the paire
     const total = 64 * 1024 * 1024;
     const socket = await send(port, get(`/bytes?n=${total}`));
     await sleep(500);
-    expect(has(running, 'response_finish')).toBe(false);
+    expect(genuine(running)).toEqual([]);
     running.child.kill('SIGTERM');
     expect(await running.exited).toBe(0);
     const { bytes } = await drain(socket);
     expect(bodyOf(bytes).length).toBeLessThan(total);
-    expect(has(running, 'response_finish')).toBe(false);
+    // Any finish here is Node completing the cancelled writes of the destroyed socket, not a delivery.
+    expect(genuine(running)).toEqual([]);
     // The response's own close event can land after the exit, so only the lifecycle end is pinned here.
     expect(running.events.at(-1)).toEqual({ event: 'closed' });
   }, 30_000);
@@ -218,5 +259,72 @@ describe.runIf(process.platform !== 'win32')('the direct-Node child of the paire
     const order = running.events.map((entry) => entry.event);
     expect(order.indexOf('shutdown')).toBeLessThan(order.indexOf('response_finish'));
     expect(order.at(-1)).toBe('closed');
+  }, 30_000);
+
+  it('E3: serves the same app over TLS with the fixed certificate, and reports the request as encrypted', async () => {
+    const running = start(tlsEnv);
+    const port = await ready(running);
+    const hello = await drain(await sendTls(port, get('/hello')));
+    expect(bodyOf(hello.bytes).toString()).toBe('hello');
+    const peer = JSON.parse(bodyOf((await drain(await sendTls(port, get('/peer')))).bytes).toString()) as Record<
+      string,
+      unknown
+    >;
+    expect(peer).toMatchObject({ ip: '127.0.0.1', localPort: port, encrypted: true, protocol: 'https' });
+  }, 20_000);
+
+  it('E3 with E1: over TLS, SIGTERM after the genuine finish still delivers the whole 8 MiB', async () => {
+    const running = start(tlsEnv);
+    const port = await ready(running);
+    const total = 8 * 1024 * 1024;
+    const socket = await sendTls(port, get(`/bytes?n=${total}`));
+    const chunks: Buffer[] = [];
+    await readUntilFinish(running, socket, chunks);
+    expect(Buffer.concat(chunks).length).toBeLessThan(total);
+    running.child.kill('SIGTERM');
+    await sleep(300);
+    const { bytes, clean } = await drain(socket, chunks);
+    expect(bodyOf(bytes).equals(Buffer.alloc(total, 0x78))).toBe(true);
+    expect(clean).toBe(true);
+    expect(await running.exited).toBe(0);
+  }, 30_000);
+
+  it('E3 with E2: over TLS, SIGTERM before finish behind a client that reads nothing truncates and exits 0', async () => {
+    const running = start(tlsEnv);
+    const port = await ready(running);
+    const total = 64 * 1024 * 1024;
+    const socket = await sendTls(port, get(`/bytes?n=${total}`));
+    await sleep(500);
+    expect(genuine(running)).toEqual([]);
+    running.child.kill('SIGTERM');
+    expect(await running.exited).toBe(0);
+    const { bytes } = await drain(socket);
+    expect(bodyOf(bytes).length).toBeLessThan(total);
+    expect(genuine(running)).toEqual([]);
+  }, 30_000);
+
+  it('E5: an SSE stream behind a slow reader stalls on backpressure, drains as the client reads, and arrives whole', async () => {
+    const running = start();
+    const port = await ready(running);
+    // 16 MiB, more than the loopback socket buffers can absorb, so the stream must stall until the client reads.
+    const events = 256;
+    const size = 64 * 1024;
+    const socket = await send(port, get(`/sse?n=${events}&size=${size}`));
+    const writes = () => running.events.filter((entry) => entry.event === 'sse_write');
+    const drains = () => running.events.filter((entry) => entry.event === 'sse_drain');
+    await stalled(writes, drains);
+    expect(writes().length).toBeLessThan(events);
+    const { bytes } = await drain(socket);
+    const text = bodyOf(bytes).toString('latin1');
+    expect(text.split('data: ').length - 1).toBe(events);
+    expect(text.split('').filter((char) => char === 'x').length).toBe(events * size);
+    await until(() => genuine(running).length === 1, 5000, 'the SSE response to finish');
+    expect(writes().map((entry) => entry.seq)).toEqual([...Array(events).keys()]);
+    // Every write that reported backpressure drained before the next one.
+    expect(drains().map((entry) => entry.seq)).toEqual(
+      writes()
+        .filter((entry) => entry.ok === false)
+        .map((entry) => entry.seq)
+    );
   }, 30_000);
 });
