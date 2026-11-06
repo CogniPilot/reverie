@@ -22,6 +22,8 @@ pkgs.rustPlatform.buildRustPackage {
     cp ${src}/vendor/rustpython-wtf8/RUST-LICENSE-MIT "$regexNotices/RUST-WTF8-LICENSE-MIT"
     cp ${src}/vendor/rustpython-wtf8/RUST-LICENSE-APACHE "$regexNotices/RUST-WTF8-LICENSE-APACHE"
     cp ${src}/crates/reverie-core/src/python_text/UNICODE_LICENSE.txt "$regexNotices/UNICODE-LICENSE"
+    cp ${src}/vendor/regex-licenses/unicode_names2-1.2.2/LICENSE-MIT "$regexNotices/UNICODE-NAMES2-LICENSE-MIT"
+    cp ${src}/vendor/regex-licenses/unicode_names2-1.2.2/LICENSE-APACHE "$regexNotices/UNICODE-NAMES2-LICENSE-APACHE"
   '';
   meta = {
     description = "Native explicitly scoped memory and authenticated journal bridge candidate";

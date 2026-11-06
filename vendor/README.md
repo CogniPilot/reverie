@@ -41,3 +41,8 @@ in `crates/reverie-python-regex/CPYTHON-LICENSE`. Frozen Unicode facts retain
 their existing Core provenance/license owner. Qualification artifacts bind the
 exact upstream and modified source hashes; updating this fork requires reviewing
 that delta and the actual runtime dependency tree again.
+
+The pinned `unicode_names2` 1.2.2 package's own unmodified MIT/Apache notices are
+retained under `regex-licenses/unicode_names2-1.2.2/` and copied into the memory
+CLI's notice directory. These are that dependency's actual copyright/license
+files, separate from the Rust standard-library WTF8 notices.
