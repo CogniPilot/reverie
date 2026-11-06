@@ -151,20 +151,80 @@ fn first_service_stop_keeps_cleanup_on_the_same_context_before_permanent_sealing
     let tree = Tree::new();
     let runtime = Arc::new(tree.runtime("running", Hooks::default()));
     let workflow = tree.retain(&runtime, 'a');
+    let gate = Arc::new(crate::captured_client::test_hooks::Gate::default());
+    workflow.record.lock().unwrap().after_running_state = Some(gate.clone());
     let handle = workflow.clone();
     let other = runtime.clone();
     let task = std::thread::spawn(move || other.run_nix_store(&handle));
-    tree.wait("inspected");
+    let ceiling = Instant::now() + Duration::from_secs(10);
+    while !gate.entered.load(Ordering::Acquire) {
+        assert!(
+            Instant::now() < ceiling,
+            "owning setup observes a fully checked running-state call"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let first = runtime.request_stop();
-    assert_eq!(runtime.request_stop(), first);
-    let _ = runtime.close(end());
-    assert_eq!(task.join().unwrap().unwrap(), NixProgress::Rejected);
+    let repeated = runtime.request_stop();
+    let initial = runtime.close(end());
+    gate.released.store(true, Ordering::Release);
+    let progress = task.join().unwrap().unwrap();
+    runtime.close(end()).unwrap();
+    let (guard, storage, result) = returned(&runtime, workflow);
+    close_resources(guard, storage);
+    eprintln!(
+        "checked-state stop: initial_close_error={} progress={progress:?} logs={} rm={} removed={}",
+        initial.is_err(),
+        count(&tree, "logs"),
+        count(&tree, "rm"),
+        tree.root.join("removed").exists()
+    );
+    assert!(
+        initial.is_err(),
+        "the actual workflow still owns its record"
+    );
+    assert_eq!(progress, NixProgress::Rejected);
     assert_eq!(count(&tree, "logs"), 1);
     assert_eq!(count(&tree, "rm"), 1);
     assert!(tree.root.join("removed").exists());
-    runtime.close(end()).unwrap();
     assert_eq!(runtime.stop_deadline(), Some(first));
-    let (guard, storage, result) = returned(&runtime, workflow);
+    assert_eq!(repeated, first);
     assert!(result.is_err());
-    close_resources(guard, storage);
+}
+
+#[test]
+fn concurrent_close_during_dispatched_removal_retains_unknown_and_never_replays_rm() {
+    let tree = Tree::new();
+    let runtime = Arc::new(tree.runtime("rm-finalizer", Hooks::default()));
+    let workflow = tree.retain(&runtime, 'a');
+    let alias = workflow.clone();
+    let other = runtime.clone();
+    let task = std::thread::spawn(move || other.run_nix_store(&alias));
+    tree.wait("rm-entered");
+    let first = runtime.request_stop();
+    let initial = runtime.close(end());
+    let progress = task.join().unwrap().unwrap();
+    let final_close = runtime.close(end());
+    let failed = runtime.reclaim_nix_store(workflow.clone()).err().unwrap();
+    let retained = failed.into_parts().0;
+    let record = retained.record.lock().unwrap();
+    eprintln!(
+        "dispatched-removal stop: initial_close_error={} final_close_error={} progress={progress:?} unknown_effect={} pending_call={} logs={} rm={} removed={}",
+        initial.is_err(),
+        final_close.is_err(),
+        record.unknown_effect,
+        record.pending_call.is_some(),
+        count(&tree, "logs"),
+        count(&tree, "rm"),
+        tree.root.join("removed").exists()
+    );
+    drop(record);
+    assert!(retained.same_workflow(&workflow));
+    assert!(initial.is_err() && final_close.is_err());
+    assert_eq!(progress, NixProgress::Retained);
+    assert_eq!(runtime.stop_deadline(), Some(first));
+    assert_eq!(count(&tree, "logs"), 1);
+    assert_eq!(count(&tree, "rm"), 1);
+    assert!(!tree.root.join("removed").exists());
+    assert!(NixStoreGuard::acquire_migration(&tree.source('a'), workflow.session()).is_err());
 }
