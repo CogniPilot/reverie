@@ -1,4 +1,4 @@
-use super::conn::{ConnFault, ConnFrame, ConnTable, Received};
+use super::conn::{ConnFault, ConnFrame, ConnTable, Received, Side};
 use super::*;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -131,6 +131,8 @@ fn every_kind() -> Vec<(Frame, Direction)> {
             Direction::ToTs,
         ),
         (frame(1, Body::Credit(u32::MAX)), Direction::ToFront),
+        (frame(1, Body::Written(1)), Direction::ToTs),
+        (frame(1, Body::Written(MAX_STREAM_BYTES)), Direction::ToTs),
     ]
 }
 
@@ -290,6 +292,12 @@ fn payloads_are_finite_and_checked() {
         (raw(VERSION, 7, 1, 0, &[4]), to_ts),
         (raw(VERSION, 19, 1, 1, &[4]), to_ts),
         (raw(VERSION, 20, 1, 1, &[0, 0, 0, 0]), to_ts),
+        // written 0, and one past the stream bound.
+        (raw(VERSION, 27, 1, 1, &0u64.to_be_bytes()), to_ts),
+        (
+            raw(VERSION, 27, 1, 1, &(MAX_STREAM_BYTES + 1).to_be_bytes()),
+            to_ts,
+        ),
         (
             raw(
                 VERSION,
@@ -344,18 +352,20 @@ fn a_truncated_frame_and_a_clean_end_differ() {
 
 #[test]
 fn half_closes_close_only_when_both_directions_end() {
-    let mut front = ConnTable::new(4);
+    let mut front = ConnTable::new(Side::Front, 4);
     let id = front.open_next().expect("room");
     assert_eq!(front.send(id, ConnFrame::End), Ok(true));
     assert_eq!(front.receive(id, ConnFrame::Data(5)), Ok(Received::Data(5)));
     assert_eq!(front.send(id, ConnFrame::Data(1)), Err(ConnFault::AfterEnd));
+    // Both ends are in, but the 5 stream bytes are not yet reported: the connection drains.
     assert_eq!(
         front.receive(id, ConnFrame::End),
-        Ok(Received::Ended { closed: true })
+        Ok(Received::Ended { closed: false })
     );
+    assert_eq!(front.send(id, ConnFrame::Written(5)), Ok(true));
     assert_eq!(front.open_count(), 0);
 
-    let mut ts = ConnTable::new(4);
+    let mut ts = ConnTable::new(Side::Ts, 4);
     assert_eq!(ts.receive(1, ConnFrame::Open), Ok(Received::Opened));
     assert_eq!(
         ts.receive(1, ConnFrame::End),
@@ -366,7 +376,7 @@ fn half_closes_close_only_when_both_directions_end() {
 
 #[test]
 fn crossed_aborts_and_late_frames_are_normal() {
-    let mut ts = ConnTable::new(4);
+    let mut ts = ConnTable::new(Side::Ts, 4);
     ts.receive(1, ConnFrame::Open).expect("opens");
     // TS destroys the socket while the front's reset is in flight: both send abort.
     assert_eq!(ts.send(1, ConnFrame::Abort), Ok(true));
@@ -390,7 +400,7 @@ fn crossed_aborts_and_late_frames_are_normal() {
 
 #[test]
 fn ids_are_monotone_and_never_reused() {
-    let mut ts = ConnTable::new(4);
+    let mut ts = ConnTable::new(Side::Ts, 4);
     assert_eq!(ts.receive(2, ConnFrame::Open), Err(ConnFault::Unopened));
     ts.receive(1, ConnFrame::Open).expect("opens");
     assert_eq!(ts.receive(1, ConnFrame::Open), Err(ConnFault::Unopened));
@@ -403,14 +413,149 @@ fn ids_are_monotone_and_never_reused() {
 
 #[test]
 fn the_connection_bound_holds_on_both_sides() {
-    let mut front = ConnTable::new(2);
+    let mut front = ConnTable::new(Side::Front, 2);
     let first = front.open_next().expect("room");
     front.open_next().expect("room");
     assert_eq!(front.open_next(), Err(ConnFault::Full));
     front.send(first, ConnFrame::Abort).expect("aborts");
     assert_eq!(front.open_next(), Ok(3));
 
-    let mut ts = ConnTable::new(1);
+    let mut ts = ConnTable::new(Side::Ts, 1);
     ts.receive(1, ConnFrame::Open).expect("opens");
     assert_eq!(ts.receive(2, ConnFrame::Open), Err(ConnFault::Full));
+}
+
+#[test]
+fn a_connection_drains_after_both_ends_until_its_last_receipt() {
+    // The client half-closed early, so the front's end comes first; TS then sends and ends.
+    let mut ts = ConnTable::new(Side::Ts, 4);
+    ts.receive(1, ConnFrame::Open).expect("opens");
+    assert_eq!(
+        ts.receive(1, ConnFrame::End),
+        Ok(Received::Ended { closed: false })
+    );
+    assert_eq!(ts.send(1, ConnFrame::Data(100)), Ok(true));
+    assert_eq!(ts.send(1, ConnFrame::End), Ok(true));
+    assert_eq!(
+        ts.open_count(),
+        1,
+        "both ends are in, but 100 bytes are unreported"
+    );
+    // Credit may still cross; data and end are faults as after any end.
+    assert_eq!(ts.receive(1, ConnFrame::Credit(7)), Ok(Received::Credit(7)));
+    assert_eq!(ts.receive(1, ConnFrame::Data(1)), Err(ConnFault::AfterEnd));
+    assert_eq!(ts.send(1, ConnFrame::Data(1)), Err(ConnFault::AfterEnd));
+    assert_eq!(
+        ts.receive(1, ConnFrame::Written(60)),
+        Ok(Received::Written {
+            bytes: 60,
+            closed: false
+        })
+    );
+    assert_eq!(
+        ts.receive(1, ConnFrame::Written(100)),
+        Ok(Received::Written {
+            bytes: 100,
+            closed: true
+        })
+    );
+    assert_eq!(ts.open_count(), 0);
+
+    let mut front = ConnTable::new(Side::Front, 4);
+    let id = front.open_next().expect("room");
+    assert_eq!(front.send(id, ConnFrame::End), Ok(true));
+    front.receive(id, ConnFrame::Data(100)).expect("data");
+    front.receive(id, ConnFrame::End).expect("end");
+    assert_eq!(front.send(id, ConnFrame::Written(60)), Ok(true));
+    assert_eq!(front.open_count(), 1);
+    assert_eq!(front.send(id, ConnFrame::Written(100)), Ok(true));
+    assert_eq!(front.open_count(), 0);
+    // Closed by its last receipt, so nothing more is sent for it.
+    assert_eq!(front.send(id, ConnFrame::Written(101)), Ok(false));
+}
+
+#[test]
+fn without_stream_bytes_the_second_end_still_closes() {
+    let mut ts = ConnTable::new(Side::Ts, 4);
+    ts.receive(1, ConnFrame::Open).expect("opens");
+    ts.receive(1, ConnFrame::Data(9))
+        .expect("front to TS bytes are not the counted stream");
+    ts.send(1, ConnFrame::End).expect("end");
+    assert_eq!(
+        ts.receive(1, ConnFrame::End),
+        Ok(Received::Ended { closed: true })
+    );
+}
+
+#[test]
+fn abort_closes_a_draining_connection_and_a_late_receipt_is_settled() {
+    let mut ts = ConnTable::new(Side::Ts, 4);
+    ts.receive(1, ConnFrame::Open).expect("opens");
+    ts.send(1, ConnFrame::Data(10)).expect("data");
+    ts.send(1, ConnFrame::End).expect("end");
+    ts.receive(1, ConnFrame::End).expect("end");
+    assert_eq!(ts.send(1, ConnFrame::Abort), Ok(true));
+    assert_eq!(ts.open_count(), 0);
+    // A receipt the front had already handed to its writer arrives after TS's abort.
+    assert_eq!(
+        ts.receive(1, ConnFrame::Written(10)),
+        Ok(Received::Late { data: 0 })
+    );
+}
+
+#[test]
+fn receipts_advance_strictly_within_the_stream_and_only_one_way() {
+    let mut ts = ConnTable::new(Side::Ts, 4);
+    ts.receive(1, ConnFrame::Open).expect("opens");
+    ts.send(1, ConnFrame::Data(10)).expect("data");
+    assert_eq!(
+        ts.receive(1, ConnFrame::Written(11)),
+        Err(ConnFault::Written)
+    );
+    ts.receive(1, ConnFrame::Written(4)).expect("advances");
+    assert_eq!(
+        ts.receive(1, ConnFrame::Written(4)),
+        Err(ConnFault::Written)
+    );
+    assert_eq!(
+        ts.receive(1, ConnFrame::Written(3)),
+        Err(ConnFault::Written)
+    );
+    assert_eq!(ts.send(1, ConnFrame::Written(5)), Err(ConnFault::Written));
+    assert_eq!(
+        ts.receive(2, ConnFrame::Written(1)),
+        Err(ConnFault::Unopened)
+    );
+
+    let mut front = ConnTable::new(Side::Front, 4);
+    let id = front.open_next().expect("room");
+    front.receive(id, ConnFrame::Data(10)).expect("data");
+    assert_eq!(
+        front.send(id, ConnFrame::Written(11)),
+        Err(ConnFault::Written)
+    );
+    assert_eq!(
+        front.receive(id, ConnFrame::Written(1)),
+        Err(ConnFault::Written)
+    );
+}
+
+#[test]
+fn the_stream_bound_holds_where_the_bytes_are_counted() {
+    let bound = usize::try_from(MAX_STREAM_BYTES).expect("64-bit");
+    let mut front = ConnTable::new(Side::Front, 4);
+    let id = front.open_next().expect("room");
+    front
+        .receive(id, ConnFrame::Data(bound - 1))
+        .expect("below");
+    front.receive(id, ConnFrame::Data(1)).expect("at the bound");
+    assert_eq!(
+        front.receive(id, ConnFrame::Data(1)),
+        Err(ConnFault::StreamBound)
+    );
+
+    let mut ts = ConnTable::new(Side::Ts, 4);
+    ts.receive(1, ConnFrame::Open).expect("opens");
+    ts.send(1, ConnFrame::Data(bound)).expect("at the bound");
+    assert_eq!(ts.send(1, ConnFrame::Data(1)), Err(ConnFault::StreamBound));
 }

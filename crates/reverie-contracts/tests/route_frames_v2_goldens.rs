@@ -1,7 +1,7 @@
 //! Shared route-frames-v2 cases in fixtures/route-frames-v2/cases.json. The TS reader test
 //! (apps/web/test/rust-front/frames.test.ts) reads the same file, so both readers agree on every
 //! accepted frame, refuse every malformed one with the same code, and apply the same connection rules.
-use reverie_contracts::route_frames_v2::conn::{ConnFrame, ConnTable, Received};
+use reverie_contracts::route_frames_v2::conn::{ConnFrame, ConnTable, Received, Side};
 use reverie_contracts::route_frames_v2::{
     AbortReason, Body, Direction, Frame, HEADER_BYTES, Listener, Signal, SocketFacts, VERSION,
     read_frame,
@@ -102,6 +102,7 @@ fn expected(expect: &Value) -> Frame {
             other => panic!("unknown reason {other}"),
         }),
         "credit" => Body::Credit(number(expect, "bytes") as u32),
+        "written" => Body::Written(number(expect, "bytes")),
         other => panic!("unknown kind {other}"),
     };
     // Decimal strings: a JSON number cannot carry every u64 through every reader.
@@ -205,6 +206,7 @@ fn conn_frame(frame: &Value) -> ConnFrame {
         "end" => ConnFrame::End,
         "abort" => ConnFrame::Abort,
         "credit" => ConnFrame::Credit(number(frame, "bytes") as u32),
+        "written" => ConnFrame::Written(number(frame, "bytes")),
         other => panic!("unknown connection frame {other}"),
     }
 }
@@ -218,6 +220,10 @@ fn received(expect: &Value) -> Received {
         },
         "aborted" => Received::Aborted,
         "credit" => Received::Credit(number(expect, "bytes") as u32),
+        "written" => Received::Written {
+            bytes: number(expect, "bytes"),
+            closed: flag(expect, "closed"),
+        },
         "late" => Received::Late {
             data: number(expect, "data") as usize,
         },
@@ -230,7 +236,12 @@ fn the_connection_rules_run_every_shared_sequence() {
     let cases = cases();
     for sequence in cases["conn"].as_array().expect("conn") {
         let name = text(sequence, "name");
-        let mut table = ConnTable::new(number(sequence, "max_open") as usize);
+        let side = match text(sequence, "side").as_str() {
+            "front" => Side::Front,
+            "ts" => Side::Ts,
+            other => panic!("unknown side {other}"),
+        };
+        let mut table = ConnTable::new(side, number(sequence, "max_open") as usize);
         for (at, step) in sequence["steps"]
             .as_array()
             .expect("steps")

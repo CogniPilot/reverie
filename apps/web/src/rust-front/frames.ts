@@ -17,6 +17,8 @@ export const MAX_DATA_BYTES = 64 * 1024;
 export const MAX_HOST_BYTES = 255;
 export const MAX_ERRNO_BYTES = 32;
 export const MAX_MESSAGE_BYTES = 512;
+/** The most TS→front stream bytes one connection may carry, and so the largest `written`. */
+export const MAX_STREAM_BYTES = Number.MAX_SAFE_INTEGER;
 const CONN_OPEN_BYTES = 39;
 
 /** `to_front` is this server writing to the Rust front; `to_ts` is the front writing to us. */
@@ -43,7 +45,9 @@ export type Body =
   | { kind: 'data'; bytes: Buffer }
   | { kind: 'end' }
   | { kind: 'abort'; reason: AbortReason }
-  | { kind: 'credit'; bytes: number };
+  | { kind: 'credit'; bytes: number }
+  /** The TS→front stream bytes of this connection the OS has accepted for the client, in total. */
+  | { kind: 'written'; bytes: number };
 
 export interface Frame {
   generation: bigint;
@@ -73,6 +77,7 @@ const KINDS: Record<Kind, { byte: number; directions: Direction[]; connection: b
   end: { byte: 18, directions: BOTH, connection: true, payload: [0, 0] },
   abort: { byte: 19, directions: BOTH, connection: true, payload: [1, 1] },
   credit: { byte: 20, directions: BOTH, connection: true, payload: [4, 4] },
+  written: { byte: 27, directions: ['to_ts'], connection: true, payload: [8, 8] },
 };
 
 /** The largest length any frame read in `direction` may declare. */
@@ -239,6 +244,11 @@ function body(kind: Kind, payload: Buffer): Body {
       if (bytes === 0) refuse();
       return { kind, bytes };
     }
+    case 'written': {
+      const bytes = payload.readBigUInt64BE(0);
+      if (bytes === 0n || bytes > BigInt(MAX_STREAM_BYTES)) refuse();
+      return { kind, bytes: Number(bytes) };
+    }
   }
 }
 
@@ -358,6 +368,12 @@ function payload(frame: Body): Buffer {
       const bytes = Buffer.alloc(4);
       if (!Number.isInteger(frame.bytes) || frame.bytes < 0 || frame.bytes > 0xffffffff) refuse();
       bytes.writeUInt32BE(frame.bytes);
+      return bytes;
+    }
+    case 'written': {
+      const bytes = Buffer.alloc(8);
+      if (!Number.isSafeInteger(frame.bytes) || frame.bytes < 0) refuse();
+      bytes.writeBigUInt64BE(BigInt(frame.bytes));
       return bytes;
     }
   }
