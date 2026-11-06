@@ -71,6 +71,14 @@ native resource client also requires coordinated protected manifests, bootstrap
 facts and image provenance; a Rust binary cannot inherit interpreter-shaped
 facts or bypass the existing supported activation workflow.
 
+The application resource-staging service now composes profile-store custody,
+resource selection and native GPU/perf/memory/lease observations before deriving
+the separate profile/config/policy digests. It returns a candidate only. The
+current Python broker remains selected until its full worker validation,
+admission, reservation, effect and reconciliation consumers migrate. See
+[`reverie-application`](../crates/reverie-application/README.md) for the exact
+service boundary and compatibility evidence.
+
 The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
 claims a complete Rust backend or an installed rollout.

@@ -7,7 +7,32 @@ enum Part<'a> {
     Text(&'a Text),
     Literal(&'static str),
 }
+#[derive(Clone, Copy)]
+enum Separators {
+    Spaced,
+    Compact,
+}
+impl Separators {
+    fn comma(self) -> &'static str {
+        match self {
+            Self::Spaced => ", ",
+            Self::Compact => ",",
+        }
+    }
+    fn colon(self) -> &'static str {
+        match self {
+            Self::Spaced => ": ",
+            Self::Compact => ":",
+        }
+    }
+}
 pub(super) fn encode(root: &Value, policy: bool) -> Vec<u8> {
+    encode_with(root, policy, Separators::Spaced)
+}
+pub(super) fn compact(root: &Value) -> Vec<u8> {
+    encode_with(root, false, Separators::Compact)
+}
+fn encode_with(root: &Value, policy: bool, separators: Separators) -> Vec<u8> {
     let mut result = String::new();
     let mut pending = vec![Part::Value(root)];
     while let Some(part) = pending.pop() {
@@ -23,10 +48,11 @@ pub(super) fn encode(root: &Value, policy: bool) -> Vec<u8> {
                 Node::Number(Number::Nan) => result.push_str("NaN"),
                 Node::Number(Number::PositiveInfinity) => result.push_str("Infinity"),
                 Node::Number(Number::NegativeInfinity) => result.push_str("-Infinity"),
-                Node::Array(values) => array(values, &mut pending, &mut result),
+                Node::Array(values) => array(values, separators, &mut pending, &mut result),
                 Node::Object(values) => object(
                     values,
                     policy && std::ptr::eq(value, root),
+                    separators,
                     &mut pending,
                     &mut result,
                 ),
@@ -43,6 +69,7 @@ fn excluded(key: &Text) -> bool {
 fn object<'a>(
     values: &'a BTreeMap<Text, Value>,
     policy: bool,
+    separators: Separators,
     pending: &mut Vec<Part<'a>>,
     result: &mut String,
 ) {
@@ -54,20 +81,25 @@ fn object<'a>(
         .collect();
     for (index, (key, value)) in selected.into_iter().enumerate().rev() {
         pending.push(Part::Value(value));
-        pending.push(Part::Literal(": "));
+        pending.push(Part::Literal(separators.colon()));
         pending.push(Part::Text(key));
         if index > 0 {
-            pending.push(Part::Literal(", "));
+            pending.push(Part::Literal(separators.comma()));
         }
     }
 }
-fn array<'a>(values: &'a [Value], pending: &mut Vec<Part<'a>>, result: &mut String) {
+fn array<'a>(
+    values: &'a [Value],
+    separators: Separators,
+    pending: &mut Vec<Part<'a>>,
+    result: &mut String,
+) {
     result.push('[');
     pending.push(Part::Literal("]"));
     for (index, value) in values.iter().enumerate().rev() {
         pending.push(Part::Value(value));
         if index > 0 {
-            pending.push(Part::Literal(", "));
+            pending.push(Part::Literal(separators.comma()));
         }
     }
 }
