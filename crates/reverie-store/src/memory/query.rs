@@ -23,12 +23,12 @@ impl Default for RetrievalOptions<'_> {
         }
     }
 }
-struct QueryVector {
+pub(super) struct QueryVector {
     vector: Vec<f64>,
-    model: MetadataText,
+    pub(super) model: MetadataText,
     now: f64,
 }
-fn prepare_query(
+pub(super) fn prepare_query(
     query: EmbeddingText<'_>,
     options: &RetrievalOptions<'_>,
     embedder: &dyn Embedder,
@@ -41,7 +41,7 @@ fn prepare_query(
         now,
     })
 }
-fn score(
+pub(super) fn score(
     candidates: Vec<Memory>,
     query: &QueryVector,
     options: &RetrievalOptions<'_>,
@@ -222,22 +222,28 @@ impl MemoryTransaction<'_> {
         model: &MetadataText,
         options: &RetrievalOptions<'_>,
     ) -> Result<Vec<Memory>> {
-        let model = model.scalar_text().ok_or(EmbeddingError::InvalidText)?;
-        let placeholders = vec!["?"; options.kinds.len()].join(",");
-        let sql =
-            format!("SELECT * FROM memories WHERE kind IN ({placeholders}) AND embed_model=?");
-        let mut values = options.kinds.to_vec();
-        values.push(&model);
-        let mut statement = self.db.prepare(&sql)?;
-        let mut rows = statement.query(params_from_iter(values))?;
-        let mut candidates = Vec::new();
-        while let Some(row) = rows.next()? {
-            if !options.exclude_ids.contains(&row.get::<_, i64>("id")?) {
-                candidates.push(memory(row)?);
-            }
-        }
-        Ok(candidates)
+        candidates(self.db, model, options)
     }
+}
+pub(super) fn candidates(
+    db: &Connection,
+    model: &MetadataText,
+    options: &RetrievalOptions<'_>,
+) -> Result<Vec<Memory>> {
+    let model = model.scalar_text().ok_or(EmbeddingError::InvalidText)?;
+    let placeholders = vec!["?"; options.kinds.len()].join(",");
+    let sql = format!("SELECT * FROM memories WHERE kind IN ({placeholders}) AND embed_model=?");
+    let mut values = options.kinds.to_vec();
+    values.push(&model);
+    let mut statement = db.prepare(&sql)?;
+    let mut rows = statement.query(params_from_iter(values))?;
+    let mut candidates = Vec::new();
+    while let Some(row) = rows.next()? {
+        if !options.exclude_ids.contains(&row.get::<_, i64>("id")?) {
+            candidates.push(memory(row)?);
+        }
+    }
+    Ok(candidates)
 }
 impl MemoryStore {
     pub fn get(&self, id: i64) -> Result<Memory> {

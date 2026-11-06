@@ -2,8 +2,15 @@
 mod backup;
 mod beliefs;
 mod claims;
+mod documents;
 mod error;
+pub use documents::{
+    BallotHistory, BallotOutcome, DocumentEnvelope, DocumentHistory, MemoryDocuments,
+    RecordedBallot, TransactionDocuments,
+};
 mod query;
+mod reader;
+pub use reader::MemoryReader;
 #[cfg(test)]
 mod tests;
 mod writes;
@@ -34,6 +41,7 @@ pub struct MemoryStore {
     decay_per_hour: f64,
 }
 pub struct MemoryTransaction<'a> {
+    origin: &'a MemoryStore,
     db: &'a Connection,
     embedder: &'a dyn Embedder,
     decay: f64,
@@ -100,6 +108,10 @@ impl MemoryStore {
         Ok(())
     }
     fn current_embedder(&self) -> Result<Arc<dyn Embedder>> {
+        self.selected_embedder()
+    }
+    /// The already selected backend; obtaining it never probes or falls back.
+    pub fn selected_embedder(&self) -> Result<Arc<dyn Embedder>> {
         Ok(Arc::clone(
             &*self.embedder.read().map_err(|_| MemoryError::Poisoned)?,
         ))
@@ -110,6 +122,7 @@ impl MemoryStore {
         let db = connection.as_ref().ok_or(MemoryError::Closed)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run(&mut MemoryTransaction {
+                origin: self,
                 db,
                 embedder: embedder.as_ref(),
                 decay: self.decay_per_hour,
@@ -132,6 +145,21 @@ impl MemoryStore {
         run: impl FnOnce(&mut MemoryTransaction<'_>) -> Result<T>,
     ) -> Result<T> {
         self.session(|session| session.atomic(run))
+    }
+    /// Explicit startup/migration CAS. Acquire SQLite's writer reservation
+    /// before reading an idempotency marker; this never joins an outer scope.
+    /// The application owns the workflow through the existing named methods.
+    pub fn atomic_immediate<T>(
+        &self,
+        run: impl FnOnce(&mut MemoryTransaction<'_>) -> Result<T>,
+    ) -> Result<T> {
+        self.session(|tx| {
+            if !tx.db.is_autocommit() {
+                return Err(MemoryError::ActiveTransaction);
+            }
+            tx.db.execute_batch("BEGIN IMMEDIATE")?;
+            tx.transaction_scope(run, true)
+        })
     }
     pub fn close(&self) -> Result<()> {
         let mut connection = self.connection.lock().map_err(|_| MemoryError::Poisoned)?;
@@ -186,6 +214,22 @@ fn migrate(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 impl MemoryTransaction<'_> {
+    fn connection_scope<T>(&mut self, run: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(self)));
+        match result {
+            Ok(Ok(value)) => match self.commit() {
+                Ok(()) => Ok(value),
+                Err(error) => finalized(Err(error), self.rollback()),
+            },
+            Ok(Err(error)) => finalized(Err(error), self.rollback()),
+            Err(payload) => {
+                if let Err(error) = self.rollback() {
+                    std::panic::panic_any(MemoryError::RollbackAfterPanic(Box::new(error)));
+                }
+                std::panic::resume_unwind(payload)
+            }
+        }
+    }
     fn begin_write(&self) -> Result<()> {
         if self.db.is_autocommit() {
             self.db.execute_batch("BEGIN DEFERRED")?;

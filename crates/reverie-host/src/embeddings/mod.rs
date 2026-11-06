@@ -182,6 +182,18 @@ pub struct EmbeddingSelection {
 /// Exactly one startup probe selects the configured model or lexical fallback.
 /// Later requests never silently fall back or substitute vector/model identity.
 pub fn make_embedder(config: Option<LlamaConfig>, dimensions: usize) -> EmbeddingSelection {
+    select(config, HashedEmbedder::new(dimensions))
+}
+pub fn make_configured_embedder(
+    config: Option<LlamaConfig>,
+    dimensions: &reverie_core::memory_configuration::ConfigInteger,
+) -> EmbeddingSelection {
+    select(
+        config,
+        HashedEmbedder::from_configured_dimensions(dimensions),
+    )
+}
+fn select(config: Option<LlamaConfig>, fallback: HashedEmbedder) -> EmbeddingSelection {
     if let Some(config) = config.filter(|config| !config.url.codepoints().is_empty()) {
         let embedder = LlamaEmbedder::new(config);
         if embedder
@@ -194,12 +206,12 @@ pub fn make_embedder(config: Option<LlamaConfig>, dimensions: usize) -> Embeddin
             };
         }
         return EmbeddingSelection {
-            embedder: Arc::new(HashedEmbedder::new(dimensions)),
+            embedder: Arc::new(fallback),
             fallback: Some(EmbeddingFallback::ProbeFailed),
         };
     }
     EmbeddingSelection {
-        embedder: Arc::new(HashedEmbedder::new(dimensions)),
+        embedder: Arc::new(fallback),
         fallback: None,
     }
 }

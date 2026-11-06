@@ -34,6 +34,16 @@ port. No positive-only decay or finite-only weight restriction is introduced.
 This component performs no SQLite, HTTP, provider selection, re-embedding or
 deployment. Persistence and service workflows remain separate owners.
 
+`memory_configuration` captures the existing named integer, float and text
+settings without clamping accepted Python integers to i64. It shares the frozen
+Unicode numeric facts and float parser. Configured negative hashed dimensions
+retain their original model name and empty-feature behavior; out-of-Py_ssize_t
+counts fail at embedding allocation instead of changing configuration identity.
+`memory_instance` owns identifier/kind/tone data only. `memory_documents` owns
+document revisions, developer names, ballot categories and runtime week math.
+`persona` renders the existing deterministic reflection profile, sharing the
+pinned ranking and Unicode owners. None of these labels supplies a permission.
+
 Retrieval ordering pins CPython3.13.15's powersort/count-run/gallop policy in
 safe Rust. NaN keys make the exact run schedule observable, so a different
 stable sorter changes retained results. Eighty actual Python rank vectors span

@@ -2,6 +2,12 @@ use super::*;
 use reverie_core::memory::normalize_utterance_text;
 use rusqlite::{OptionalExtension, params};
 impl MemoryTransaction<'_> {
+    /// Historical importer had per-episode commits followed by one marker.
+    /// Presence without that marker is ambiguous, never proof of a complete
+    /// source import or permission to append that source again.
+    pub fn has_legacy_history_rows(&self) -> Result<bool> {
+        Ok(self.db.query_row("SELECT 1 FROM memories WHERE kind='episode' AND importance_source='migrated' LIMIT 1", [], |_| Ok(())).optional()?.is_some())
+    }
     pub fn get_state(&self, key: &str, default: Option<&str>) -> Result<Option<String>> {
         Ok(self
             .db

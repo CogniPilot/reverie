@@ -8,6 +8,8 @@ pub mod kernel_mounts;
 pub mod lease_policy;
 mod legacy_json;
 pub mod memory;
+pub mod memory_documents;
+pub mod memory_instance;
 pub mod operations_v1;
 pub mod profiles_v1;
 pub mod reservation_baseline;

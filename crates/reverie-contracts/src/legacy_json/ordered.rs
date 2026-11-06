@@ -34,6 +34,45 @@ impl Clone for OrderedValue {
     }
 }
 impl OrderedValue {
+    pub(crate) fn overlay_object(&mut self, overlay: &Self) -> bool {
+        let (Node::Object(values), Node::Object(other)) = (&mut self.value.0, &overlay.value.0)
+        else {
+            return false;
+        };
+        let OrderNode::Object(order) = &overlay.graph.nodes[overlay.graph.root] else {
+            unreachable!("private overlay object graph");
+        };
+        let offset = self.graph.nodes.len();
+        for node in &overlay.graph.nodes {
+            self.graph.nodes.push(match node {
+                OrderNode::Leaf => OrderNode::Leaf,
+                OrderNode::Array(indices) => {
+                    OrderNode::Array(indices.iter().map(|i| i + offset).collect())
+                }
+                OrderNode::Object(fields) => OrderNode::Object(
+                    fields
+                        .iter()
+                        .map(|(key, i)| (key.clone(), i + offset))
+                        .collect(),
+                ),
+            });
+        }
+        let OrderNode::Object(target) = &mut self.graph.nodes[self.graph.root] else {
+            unreachable!("private target object graph");
+        };
+        for (key, index) in order {
+            values.insert(
+                key.clone(),
+                other.get(key).expect("private overlay key").deep_clone(),
+            );
+            if let Some((_, old)) = target.iter_mut().find(|(name, _)| name == key) {
+                *old = index + offset;
+            } else {
+                target.push((key.clone(), index + offset));
+            }
+        }
+        true
+    }
     pub(crate) fn root_child_index(&self, key: &Text) -> Option<usize> {
         let OrderNode::Object(order) = &self.graph.nodes[self.graph.root] else {
             return None;
@@ -106,19 +145,27 @@ impl OrderedValue {
         true
     }
     pub(crate) fn encode(&self) -> Vec<u8> {
-        encode(self, false)
+        encode(self, Format::Ascii)
+            .0
+            .into_iter()
+            .map(|cp| u8::try_from(cp).expect("ASCII JSON"))
+            .collect()
+    }
+    pub(crate) fn unicode_text(&self, sorted_compact: bool) -> Text {
+        encode(
+            self,
+            if sorted_compact {
+                Format::UnicodeSortedCompact
+            } else {
+                Format::UnicodeSpaced
+            },
+        )
     }
     pub(crate) fn python_string(&self) -> Text {
         if let Node::String(value) = &self.value.0 {
             return value.clone();
         }
-        Text(
-            String::from_utf8(encode(self, true))
-                .expect("repr output is scalar UTF8")
-                .chars()
-                .map(u32::from)
-                .collect(),
-        )
+        encode(self, Format::Repr)
     }
 }
 fn graft(target: &mut Vec<OrderNode>, child: OrderedValue) -> (Value, usize) {
@@ -144,41 +191,67 @@ enum Piece<'a> {
     Text(&'a Text),
     Raw(&'static [u8]),
 }
-fn encode(source: &OrderedValue, repr: bool) -> Vec<u8> {
+#[derive(Clone, Copy)]
+enum Format {
+    Ascii,
+    Repr,
+    UnicodeSpaced,
+    UnicodeSortedCompact,
+}
+impl Format {
+    fn comma(self) -> &'static [u8] {
+        if matches!(self, Self::UnicodeSortedCompact) {
+            b","
+        } else {
+            b", "
+        }
+    }
+    fn colon(self) -> &'static [u8] {
+        if matches!(self, Self::UnicodeSortedCompact) {
+            b":"
+        } else {
+            b": "
+        }
+    }
+}
+fn encode(source: &OrderedValue, format: Format) -> Text {
     let mut output = Vec::new();
     let mut pending = vec![Piece::Value(&source.value, source.graph.root)];
     while let Some(piece) = pending.pop() {
         match piece {
-            Piece::Raw(raw) => output.extend_from_slice(raw),
-            Piece::Text(text) => emit_text(text, repr, &mut output),
+            Piece::Raw(raw) => output.extend(raw.iter().copied().map(u32::from)),
+            Piece::Text(text) => emit_text(text, format, &mut output),
             Piece::Value(value, index) => match (&value.0, &source.graph.nodes[index]) {
                 (Node::Array(values), OrderNode::Array(order)) => {
-                    push_array(values, order, &mut pending, &mut output);
+                    push_array(values, order, &mut pending, &mut output, format);
                 }
                 (Node::Object(values), OrderNode::Object(order)) => {
-                    push_object(values, order, &mut pending, &mut output);
+                    push_object(values, order, &mut pending, &mut output, format);
                 }
-                (Node::String(text), OrderNode::Leaf) => emit_text(text, repr, &mut output),
-                (_, OrderNode::Leaf) => emit_scalar(value, repr, &mut output),
+                (Node::String(text), OrderNode::Leaf) => emit_text(text, format, &mut output),
+                (_, OrderNode::Leaf) => {
+                    emit_scalar(value, matches!(format, Format::Repr), &mut output)
+                }
                 _ => unreachable!("private order companion matches its value"),
             },
         }
     }
-    output
+    Text(output)
 }
 fn push_array<'a>(
     values: &'a [Value],
     order: &[usize],
     pending: &mut Vec<Piece<'a>>,
-    output: &mut Vec<u8>,
+    output: &mut Vec<u32>,
+    format: Format,
 ) {
     assert_eq!(values.len(), order.len(), "private array order");
-    output.push(b'[');
+    output.push(91);
     pending.push(Piece::Raw(b"]"));
     for (at, (value, &index)) in values.iter().zip(order).enumerate().rev() {
         pending.push(Piece::Value(value, index));
         if at > 0 {
-            pending.push(Piece::Raw(b", "));
+            pending.push(Piece::Raw(format.comma()));
         }
     }
 }
@@ -186,37 +259,41 @@ fn push_object<'a>(
     values: &'a BTreeMap<Text, Value>,
     order: &'a [(Text, usize)],
     pending: &mut Vec<Piece<'a>>,
-    output: &mut Vec<u8>,
+    output: &mut Vec<u32>,
+    format: Format,
 ) {
     assert_eq!(values.len(), order.len(), "private object order");
-    output.push(b'{');
+    output.push(123);
     pending.push(Piece::Raw(b"}"));
-    for (at, (key, index)) in order.iter().enumerate().rev() {
+    let mut selected = order.iter().collect::<Vec<_>>();
+    if matches!(format, Format::UnicodeSortedCompact) {
+        selected.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    for (at, (key, index)) in selected.into_iter().enumerate().rev() {
         pending.push(Piece::Value(
             values.get(key).expect("private ordered key"),
             *index,
         ));
-        pending.push(Piece::Raw(b": "));
+        pending.push(Piece::Raw(format.colon()));
         pending.push(Piece::Text(key));
         if at > 0 {
-            pending.push(Piece::Raw(b", "));
+            pending.push(Piece::Raw(format.comma()));
         }
     }
 }
-fn emit_text(text: &Text, repr: bool, output: &mut Vec<u8>) {
-    if repr {
-        output.extend_from_slice(
+fn emit_text(text: &Text, format: Format, output: &mut Vec<u32>) {
+    if matches!(format, Format::Repr) {
+        output.extend(
             reverie_core::memory::quoted_memory_text(&text.0)
                 .expect("checked JSON codepoints")
-                .as_bytes(),
+                .chars()
+                .map(u32::from),
         );
     } else {
-        output.extend_from_slice(&crate::worker_config::encode_data(&Value(Node::String(
-            text.clone(),
-        ))));
+        output.extend(crate::worker_config::quoted_text(text, matches!(format, Format::Ascii)).0);
     }
 }
-fn emit_scalar(value: &Value, repr: bool, output: &mut Vec<u8>) {
+fn emit_scalar(value: &Value, repr: bool, output: &mut Vec<u32>) {
     let literal = if repr {
         match &value.0 {
             Node::Null => Some("None"),
@@ -234,8 +311,12 @@ fn emit_scalar(value: &Value, repr: bool, output: &mut Vec<u8>) {
         None
     };
     if let Some(literal) = literal {
-        output.extend_from_slice(literal.as_bytes());
+        output.extend(literal.chars().map(u32::from));
     } else {
-        output.extend_from_slice(&crate::worker_config::encode_data(value));
+        output.extend(
+            crate::worker_config::encode_data(value)
+                .into_iter()
+                .map(u32::from),
+        );
     }
 }

@@ -1,5 +1,5 @@
 use reverie_application::{
-    memory_import::migrate_history,
+    memory_import::{migrate_history, migrate_history_atomic},
     project_memory::{ProjectMemory, ProjectMemoryError},
 };
 use reverie_store::memory::MemoryStore;
@@ -21,6 +21,80 @@ impl Tree {
         fs::create_dir(&path).unwrap();
         Self(path)
     }
+}
+#[test]
+fn explicit_atomic_history_import_rolls_back_a_failed_batch_and_refuses_ambiguous_legacy_rows() {
+    let tree = Tree::new();
+    let store = MemoryStore::open(tree.0.join("memory.sqlite")).unwrap();
+    let path = tree.0.join("history.json");
+    fs::write(&path,br#"[{"role":"user","content":"valid"},{"role":"assistant","content":"answer"},{"role":"user","content":"\ud800"},{"role":"assistant","content":"not SQL text"}]"#).unwrap();
+    assert!(migrate_history_atomic(&store, &path, 3.0).is_err());
+    assert_eq!(store.count(None).unwrap(), 0);
+    assert!(
+        store
+            .get_state("migrated_legacy_history", None)
+            .unwrap()
+            .is_none()
+    );
+    // Paired legacy witness retains its first episode but no completion marker.
+    assert!(migrate_history(&store, &path, 3.0).is_err());
+    assert_eq!(store.count(None).unwrap(), 1);
+    fs::write(
+        &path,
+        br#"[{"role":"user","content":"valid"},{"role":"assistant","content":"answer"}]"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        migrate_history_atomic(&store, &path, 3.0),
+        Err(reverie_store::memory::MemoryError::AmbiguousLegacyHistory)
+    ));
+    assert_eq!(store.count(None).unwrap(), 1);
+    assert!(
+        store
+            .get_state("migrated_legacy_history", None)
+            .unwrap()
+            .is_none()
+    );
+    store.close().unwrap();
+}
+#[test]
+fn atomic_history_marker_is_idempotent_across_real_concurrent_connections() {
+    use std::sync::{Arc, Barrier};
+    let tree = Tree::new();
+    let path = tree.0.join("history.json");
+    fs::write(&path,br#"[{"role":"user","content":"one"},{"role":"assistant","content":"answer"},{"role":"user","content":"two"},{"role":"assistant","content":"answer"}]"#).unwrap();
+    let db = tree.0.join("memory.sqlite");
+    MemoryStore::open(&db).unwrap().close().unwrap();
+    let gate = Arc::new(Barrier::new(2));
+    let workers = (0..2)
+        .map(|_| {
+            let store = MemoryStore::open(&db).unwrap();
+            let path = path.clone();
+            let gate = Arc::clone(&gate);
+            std::thread::spawn(move || {
+                gate.wait();
+                let count = migrate_history_atomic(&store, &path, 3.0).unwrap();
+                store.close().unwrap();
+                count
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut counts = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect::<Vec<_>>();
+    counts.sort_unstable();
+    assert_eq!(counts, [0, 2]);
+    let store = MemoryStore::open(&db).unwrap();
+    assert_eq!(store.count(None).unwrap(), 2);
+    assert_eq!(
+        store
+            .get_state("migrated_legacy_history", None)
+            .unwrap()
+            .as_deref(),
+        Some("2")
+    );
+    store.close().unwrap();
 }
 impl Drop for Tree {
     fn drop(&mut self) {

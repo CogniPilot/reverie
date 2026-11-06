@@ -1,8 +1,27 @@
-# Read-only Linux host observations
+# Linux native adapters
+
+`memory_configuration::MemoryConfiguration` captures named settings once in
+the actual calling namespace. Explicit instance paths use the shared Python
+path resolver and fixed NSS home lookup; relative data is placed beside the
+resolved config and never falls back to personal memory. Capture performs no
+directory creation, DB initialization, model probe or profile writing. Named
+directory creation and the existing one-probe embedding selection are explicit
+startup methods. Model/dimensions/document-prefix/query-prefix remain separate.
+
+`memory_profile::ProfileFile` can target only the captured profile.md. It
+preserves an existing owner profile; new derived data uses an exclusive private
+temporary, held directory/writer descriptors, exact prepared/readback stamps,
+no-replace rename, directory fsync and checked closes. All leaf operations are
+relative to the held directory. Swapped/edited/link/mode-drifted preparation is
+refused without deleting foreign data. A failure after attempting publication
+reports uncertainty, never rollback. This is an observation in an installed
+namespace, not protection against arbitrary same-UID namespace mutation or an
+owner grant. No arbitrary destination/file editor is introduced.
 
 This crate observes installed artifact and current storage identity facts for
 native broker composition. It creates no service, editor, deployment command,
-owner grant, execution permit or writable configuration path.
+owner grant, execution permit or writable configuration path. The separately
+named derived-memory-profile writer below is an explicit startup effect.
 
 `worker_launch` resolves selected account namespace paths and observes the
 employee hostname metadata in the source order. It reads no credential contents,
@@ -28,7 +47,7 @@ Reads remain descriptor-pinned through the final identity checks. Close errors
 are checked once and both primary and finalizer failures are retained. No file,
 symlink, directory, socket or temporary is created, removed, repaired or changed
 by production observation. Unsafe Linux calls are confined to `src/native.rs`
-and its private `native/lease.rs` descriptor-walk module.
+and purpose-specific private modules under `native/`.
 Test ports and fault injection are private and compiled only into owning tests.
 
 `project_task_perf` accepts a captured perf configuration, storage identity

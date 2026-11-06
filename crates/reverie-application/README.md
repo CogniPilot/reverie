@@ -105,3 +105,32 @@ the existing user/assistant pairing, idle marker, file-mtime-derived timestamps,
 per-episode commits and final one-time state marker. It does not reset a database
 or silently re-embed records. Trusted service installation selects these paths;
 the library is not an arbitrary-file operator API or a selected product route.
+
+`memory_startup::StartedMemory` is an explicit installed-instance workflow:
+selected embedding probe/re-embedding, atomic selected seeds plus initial-self
+CAS, one atomic new history batch/marker, and deterministic missing-profile
+publication. It preserves IDs/BLOBs, existing self documents and owner profiles.
+Unlike the old per-episode importer, an unmarked historical partial import is
+an explicit ambiguity refusal; it is never reset or imported a second time.
+Seed membership uses the actual normalized persisted text and includes this
+new batch, avoiding the old duplicate insertion on repeated/whitespace seeds.
+These are intentional curated startup corrections, qualified separately from
+the retained legacy helper.
+
+`memory_recall::MemoryRecall` receives the already selected model and opens only
+an existing READ_ONLY store. It never runs startup, probes/reselects a model,
+re-embeds, seeds, imports, initializes documents or refreshes a profile. Pending
+initialization, required profile refresh and selected model mismatch return
+typed refusals. Readiness is checked before/after recall. Closing its originating
+StartedMemory fences attached recall handles; each reader still requires its
+own checked close. Readiness and local closed flags are functional state, never
+owner/admission/shutdown evidence.
+
+No request selects an employee ID, DB path, profile path or model. The real
+installed namespace lifecycle/caller integration remains a required successor:
+authenticate the current caller, serialize startup against recall, retain and
+close all handles before shutdown, and replace the existing memory_cli consumers
+through a path-free API. A host must not reinterpret a guest's filesystem or
+loopback endpoint. Current Python/CLI consumers remain selected. Hands room
+memory and the Office employee journal are separate stores and are not routed
+through this legacy-memory service.

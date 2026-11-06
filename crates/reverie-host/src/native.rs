@@ -14,6 +14,7 @@ mod child_record;
 pub(crate) mod child_signals;
 mod control;
 mod lease;
+mod memory_profile;
 pub(crate) mod ordered_exec;
 pub(crate) mod owned_process;
 pub(crate) use child_record::unlink as unlink_child_record;
@@ -22,6 +23,10 @@ pub(crate) use child_record::{
 };
 pub(crate) use lease::open_at;
 mod passwd;
+pub(crate) use memory_profile::publish as publish_memory_profile;
+pub(crate) use memory_profile::{
+    create as create_memory_profile, entry as memory_profile_entry, remove as remove_memory_profile,
+};
 mod reservation;
 pub(crate) use control::{HeldAdmission, control_directory, open_admission};
 pub(crate) use lease::observe_ops_private;
@@ -33,6 +38,7 @@ mod text;
 pub(crate) use text::{python_path, python_text};
 mod resolve;
 mod worker_config;
+pub(crate) use passwd::home_directory;
 pub(crate) use passwd::username;
 pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};
 pub(crate) use worker_config::read_worker_config;

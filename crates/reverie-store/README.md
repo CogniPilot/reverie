@@ -267,3 +267,25 @@ destination replacement reports uncertainty and retains the selected snapshot;
 it does not claim rollback or remove a recovery file. Checked connection-close
 errors retain primary and finalizer failures. Synthetic Python-created databases
 and an explicit reverse-interop qualification cover both language directions.
+
+`MemoryReader` opens an existing SQLite database READ_ONLY, including its live
+WAL. It never creates directories/tables, migrates, seeds, imports, reselects a
+model or touches last_accessed. Its retrieval shares the writer's exact query,
+scoring and ranking owners. Missing/partial boot data and a legacy assistant
+column refuse explicitly. Read-only SQLite may coordinate existing WAL/shared
+memory files; this does not promise a filesystem with no ancillary changes.
+
+`MemoryDocuments` implements the existing Reverie document/history/ballot tables
+on the same private connection. Revisions use real SQLite writer-reserved CAS;
+raw archived bodies, IDs, extra developer suffixes and tables survive. A
+`RecordedBallot` is constructed only by an actual vote on that same store and
+week; a core revision rechecks the three-week persisted streak and exact proposal
+inside its writer transaction. Digests, wire fields and booleans cannot mint it.
+Ordinary document operations retain source Connection-context commit/rollback
+semantics. The separate initial-identity CAS preserves a real outer transaction
+for curated startup; it never replaces an existing self document.
+
+`atomic_immediate` reserves the writer before a startup idempotency-marker read.
+It preserves named transaction methods and exposes no SQL callback. Explicit
+checked connection closure remains required; dropping a handle is not a
+namespace shutdown acknowledgement.

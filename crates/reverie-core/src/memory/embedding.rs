@@ -53,6 +53,7 @@ fn tokenize_embedding_text(source: EmbeddingText<'_>) -> Vec<String> {
 pub struct HashedEmbedder {
     dimensions: usize,
     name: String,
+    allocation_overflow: bool,
 }
 impl HashedEmbedder {
     pub fn name(&self) -> &str {
@@ -62,6 +63,20 @@ impl HashedEmbedder {
         Self {
             dimensions,
             name: format!("hashed-v1-{dimensions}"),
+            allocation_overflow: false,
+        }
+    }
+    /// Preserve the configured Python integer/name without narrowing negative
+    /// repeat counts or huge values at configuration capture. Python list
+    /// multiplication first converts to Py_ssize_t; overflow fails even when
+    /// the query has no features. In-range negative counts produce [] until
+    /// a feature actually attempts to index that empty vector.
+    pub fn from_configured_dimensions(value: &crate::memory_configuration::ConfigInteger) -> Self {
+        let physical = value.as_str().parse::<isize>();
+        Self {
+            dimensions: physical.as_ref().ok().copied().unwrap_or(0).max(0) as usize,
+            name: format!("hashed-v1-{}", value.as_str()),
+            allocation_overflow: physical.is_err(),
         }
     }
 }
@@ -82,6 +97,9 @@ impl Embedder for HashedEmbedder {
         source: EmbeddingText<'_>,
         _kind: EmbeddingKind,
     ) -> Result<Vec<f64>, EmbeddingError> {
+        if self.allocation_overflow {
+            return Err(EmbeddingError::Allocation);
+        }
         let mut vector = Vec::new();
         vector
             .try_reserve_exact(self.dimensions)

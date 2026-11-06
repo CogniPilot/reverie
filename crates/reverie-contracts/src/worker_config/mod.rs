@@ -88,6 +88,12 @@ pub(crate) fn encode_data(value: &Value) -> Vec<u8> {
 pub(crate) fn compact_data(value: &Value) -> Vec<u8> {
     encode::compact(value)
 }
+pub(crate) fn quoted_text(
+    text: &crate::legacy_json::Text,
+    ascii: bool,
+) -> crate::legacy_json::Text {
+    encode::quoted_text(text, ascii)
+}
 /// Excludes only top-level image, maintenanceSessions and opsConfig.
 pub fn encode_policy(config: &EffectiveWorkerConfig) -> Vec<u8> {
     encode::encode(&config.0, true)

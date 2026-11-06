@@ -7,6 +7,15 @@ pub enum MemoryError {
     Embedding(EmbeddingError),
     Math(MemoryMathError),
     Ranking(reverie_core::memory::MemoryRankError),
+    DocumentCodec(reverie_contracts::memory_documents::DocumentCodecError),
+    DocumentPolicy(reverie_core::memory_documents::DocumentPolicyError),
+    DocumentConflict {
+        expected: i64,
+        current: i64,
+    },
+    BallotConflict,
+    CoreChangeRequiresVote,
+    DocumentContextMismatch,
     Json(reverie_contracts::memory::MemoryJsonError),
     Missing(i64),
     ProtectedBelief(i64),
@@ -16,6 +25,10 @@ pub enum MemoryError {
     NotDream(i64),
     AmbiguousAssistantColumns,
     MissingAssistantColumn,
+    NotInitialized,
+    NeedsMigration,
+    NeedsProfileRefresh,
+    AmbiguousLegacyHistory,
     Closed,
     Poisoned,
     RollbackAfterPanic(Box<Self>),
@@ -60,6 +73,8 @@ impl std::error::Error for MemoryError {
             Self::Embedding(e) => Some(e),
             Self::Math(e) => Some(e),
             Self::Ranking(e) => Some(e),
+            Self::DocumentCodec(e) => Some(e),
+            Self::DocumentPolicy(e) => Some(e),
             Self::Json(e) => Some(e),
             Self::Finalization { primary, .. } => Some(primary),
             Self::BackupUncertain(e) | Self::RestoreUncertain(e) | Self::RollbackAfterPanic(e) => {
@@ -72,6 +87,16 @@ impl std::error::Error for MemoryError {
 impl From<rusqlite::Error> for MemoryError {
     fn from(e: rusqlite::Error) -> Self {
         Self::Sqlite(e)
+    }
+}
+impl From<reverie_contracts::memory_documents::DocumentCodecError> for MemoryError {
+    fn from(error: reverie_contracts::memory_documents::DocumentCodecError) -> Self {
+        Self::DocumentCodec(error)
+    }
+}
+impl From<reverie_core::memory_documents::DocumentPolicyError> for MemoryError {
+    fn from(error: reverie_core::memory_documents::DocumentPolicyError) -> Self {
+        Self::DocumentPolicy(error)
     }
 }
 impl From<io::Error> for MemoryError {

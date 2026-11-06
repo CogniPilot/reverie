@@ -231,3 +231,20 @@ fields/codepoints and nil profile-ID namespaces; the existing journal role
 decoder checks nonnil IDs only at its actual claim boundary. Resource CPU
 numeric equality remains distinct from kind-sensitive profile/hash identity.
 These data objects and digests cannot construct admission or native permits.
+
+## Memory instance and document data
+
+`memory_instance` preserves the closed instance schema, owner-selected text,
+initial-self extensions, nil employee IDs and identity-context formatting. Its
+phased header lets the host resolve/separate data_dir before later field checks.
+Organizational role/kind metadata always selects the ordinary chat harness and
+grants no tool or memory scope.
+
+`memory_documents` owns immutable document bodies, self-model drafts, sorted
+proposal bytes/hashes and the existing bounded developer brief. Unicode-false
+JSON shares the same private string/traversal owners as existing ASCII codecs;
+no serialize/reparse clone loses surrogate codepoints. Length bounds count
+Python characters; actual SQL text encoding remains a separate binding step.
+The original document fields/order, arbitrary historical names and unknown
+initial-self extensions remain data. No generic JSON mutation API, raw SQL,
+ballot approval boolean or owner/execution permit is exposed.
