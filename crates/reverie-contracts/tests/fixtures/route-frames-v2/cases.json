@@ -603,6 +603,64 @@
    "direction": "to_ts",
    "hex": "000000120212000000000000000100000000000000",
    "error": "FRAME_TRUNCATED"
+  },
+  {
+   "name": "written-one",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000010000000000000001",
+   "expect": {
+    "kind": "written",
+    "bytes": 1,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "written-max",
+   "direction": "to_ts",
+   "hex": "0000001a021b00000000000000010000000000000001001fffffffffffff",
+   "expect": {
+    "kind": "written",
+    "bytes": 9007199254740991,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "payload-written-0",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000010000000000000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-written-past-stream-bound",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000010020000000000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "kind-written-to-front",
+   "direction": "to_front",
+   "hex": "0000001a021b000000000000000100000000000000010000000000000001",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "identity-written-id-0",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000000000000000000001",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "length-written-7",
+   "direction": "to_ts",
+   "hex": "00000019021b0000000000000001000000000000000100000000000001",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-written-9",
+   "direction": "to_ts",
+   "hex": "0000001b021b00000000000000010000000000000001000000000000000001",
+   "error": "FRAME_LENGTH"
   }
  ],
  "boundaries": {
@@ -670,6 +728,7 @@
  "conn": [
   {
    "name": "front-half-closes-then-late-data",
+   "side": "front",
    "max_open": 4,
    "steps": [
     {
@@ -704,8 +763,17 @@
      },
      "expect": {
       "received": "ended",
-      "closed": true
+      "closed": false
      }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 5
+     },
+     "expect": true
     },
     {
      "op": "receive",
@@ -745,6 +813,7 @@
   },
   {
    "name": "ts-peer-ends-first-then-replies",
+   "side": "ts",
    "max_open": 4,
    "steps": [
     {
@@ -801,6 +870,19 @@
      "op": "receive",
      "id": 1,
      "frame": {
+      "kind": "written",
+      "bytes": 100
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 100,
+      "closed": true
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
       "kind": "credit",
       "bytes": 1
      },
@@ -814,6 +896,7 @@
   },
   {
    "name": "crossed-abort-front",
+   "side": "front",
    "max_open": 4,
    "steps": [
     {
@@ -856,6 +939,7 @@
   },
   {
    "name": "crossed-abort-ts",
+   "side": "ts",
    "max_open": 4,
    "steps": [
     {
@@ -899,6 +983,7 @@
   },
   {
    "name": "never-opened-ids",
+   "side": "ts",
    "max_open": 4,
    "steps": [
     {
@@ -959,6 +1044,7 @@
   },
   {
    "name": "nothing-after-end",
+   "side": "ts",
    "max_open": 4,
    "steps": [
     {
@@ -1012,6 +1098,7 @@
   },
   {
    "name": "no-send-after-own-end",
+   "side": "front",
    "max_open": 4,
    "steps": [
     {
@@ -1057,6 +1144,7 @@
   },
   {
    "name": "front-bound-frees-on-close",
+   "side": "front",
    "max_open": 2,
    "steps": [
     {
@@ -1088,6 +1176,7 @@
   },
   {
    "name": "ts-bound-refuses-open",
+   "side": "ts",
    "max_open": 1,
    "steps": [
     {
@@ -1110,6 +1199,513 @@
     }
    ],
    "open_count": 1
+  },
+  {
+   "name": "ts-drains-after-an-early-front-end",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 100
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 7
+     },
+     "expect": {
+      "received": "credit",
+      "bytes": 7
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_AFTER_END"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 60
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 60,
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 100
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 100,
+      "closed": true
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 1
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "front-drains-until-its-last-receipt-is-sent",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 100
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 100
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 5
+     },
+     "expect": {
+      "received": "credit",
+      "bytes": 5
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 60
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 100
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 101
+     },
+     "expect": false
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "ts-abort-while-draining-settles-a-late-receipt",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 10
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 10
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "ts-receipts-advance-strictly-within-the-stream",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 10
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 11
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 4
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 4,
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 4
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 3
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 5
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "receive",
+     "id": 2,
+     "frame": {
+      "kind": "written",
+      "bytes": 1
+     },
+     "error": "CONN_UNOPENED"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "front-sends-receipts-and-never-receives-them",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 10
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 10
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 1
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 11
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 10
+     },
+     "expect": true
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "front-refuses-stream-bytes-past-the-bound",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 9007199254740991
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 9007199254740991
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_STREAM_BOUND"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "ts-never-sends-stream-bytes-past-the-bound",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 9007199254740991
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_STREAM_BOUND"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "ts-front-to-ts-bytes-do-not-hold-the-close",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 9
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 9
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": true
+     }
+    }
+   ],
+   "open_count": 0
   }
  ]
 }

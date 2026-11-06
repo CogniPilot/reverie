@@ -83,8 +83,6 @@ interface Connection {
   granted: number;
   /** Bytes received and not yet read by the consumer. */
   unread: number;
-  /** The front has sent `end`, so TS's own `end` closes the connection. */
-  remoteEnded: boolean;
 }
 
 interface ControlItem {
@@ -135,7 +133,7 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
     this.poolBytes = options.poolBytes ?? POOL_BYTES;
     this.grantBytes = Math.min(options.grantBytes ?? GRANT_BYTES, this.poolBytes);
     this.controlReserveBytes = options.controlReserveBytes ?? CONTROL_RESERVE_BYTES;
-    this.table = new ConnTable(options.maxConnections ?? MAX_CONNECTIONS);
+    this.table = new ConnTable('ts', options.maxConnections ?? MAX_CONNECTIONS);
     this.link = {
       data: (id, bytes) => this.sendData(id, bytes),
       end: (id) => this.sendEnd(id),
@@ -302,10 +300,9 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
       case 'end': {
         const outcome = this.table.receive(id, { kind: 'end' });
         if (outcome.received !== 'ended') return;
-        const connection = this.connection(id);
-        connection.remoteEnded = true;
+        const { socket } = this.connection(id);
         if (outcome.closed) this.settle(id);
-        connection.socket.receiveEnd();
+        socket.receiveEnd();
         return;
       }
       case 'abort': {
@@ -322,6 +319,15 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
         if (outcome.received === 'credit') this.connection(id).socket.grant(body.bytes);
         return;
       }
+      case 'written': {
+        const outcome = this.table.receive(id, { kind: 'written', bytes: body.bytes });
+        if (outcome.received !== 'written') return;
+        const { socket } = this.connection(id);
+        // The receipt that drains a connection after both ends is the one that closes it.
+        if (outcome.closed) this.settle(id);
+        socket.receipt(body.bytes);
+        return;
+      }
     }
   }
 
@@ -330,7 +336,7 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
     const target = this.bindings.get(body.listener);
     if (target?.state !== 'accepting' && target?.state !== 'unbound') throw new FrontFault('LIFECYCLE');
     const socket = new ChannelSocket(id, body, this.link);
-    this.connections.set(id, { socket, granted: 0, unread: 0, remoteEnded: false });
+    this.connections.set(id, { socket, granted: 0, unread: 0 });
     if (target.state === 'unbound') {
       // Accepted before the front saw `unbind`: refuse it as a closed listener would.
       socket.destroy();
@@ -415,8 +421,8 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   private sendEnd(id: bigint): void {
     if (this.ended || !this.check(() => this.table.send(id, { kind: 'end' }))) return;
     this.queueStream(id, encode({ generation: this.generation, id, body: { kind: 'end' } }, 'to_front'));
-    // Ending the second direction closes the connection.
-    if (this.connections.get(id)?.remoteEnded) this.settle(id);
+    // Ending the second direction closes the connection once every byte is covered; until then it drains.
+    if (!this.table.isOpen(id)) this.settle(id);
     this.pump();
   }
 

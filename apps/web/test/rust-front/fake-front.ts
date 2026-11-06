@@ -23,6 +23,11 @@ export interface FakeConnection {
   credit: number;
   /** Grant back every response byte as it arrives, as a front draining to a fast client would. */
   replenish: boolean;
+  /** Report each response byte as accepted by the OS the moment it arrives, as a front writing to a
+   * socket with room would. Off, receipts wait for `receipt()`, as behind a client that reads nothing. */
+  receipts: boolean;
+  /** The last `written` sent. */
+  written: number;
 }
 
 export const LOOPBACK: SocketFacts = { address: '127.0.0.1', port: 50000 };
@@ -92,6 +97,7 @@ export class FakeFront {
       encrypted?: boolean;
       credit?: number;
       replenish?: boolean;
+      receipts?: boolean;
     } = {}
   ): FakeConnection {
     const id = this.nextId++;
@@ -102,6 +108,8 @@ export class FakeFront {
       aborted: undefined,
       credit: 0,
       replenish: options.replenish ?? false,
+      receipts: options.receipts ?? true,
+      written: 0,
     };
     this.connections.set(id, connection);
     this.send(id, {
@@ -127,6 +135,12 @@ export class FakeFront {
       this.send(connection.id, { kind: 'data', bytes: rest.subarray(0, size) });
       rest = rest.subarray(size);
     }
+  }
+
+  /** Reports `bytes` of `connection`'s response as accepted by the OS, as the front's `written` does. */
+  receipt(connection: FakeConnection, bytes = Buffer.concat(connection.received).length): void {
+    connection.written = bytes;
+    this.send(connection.id, { kind: 'written', bytes });
   }
 
   text(connection: FakeConnection): string {
@@ -159,6 +173,7 @@ export class FakeFront {
       if (frame.body.kind === 'data') {
         connection.received.push(frame.body.bytes);
         if (connection.replenish) this.send(frame.id, { kind: 'credit', bytes: frame.body.bytes.length });
+        if (connection.receipts && connection.aborted === undefined) this.receipt(connection);
       }
       if (frame.body.kind === 'end') connection.ended = true;
       if (frame.body.kind === 'abort') connection.aborted = frame.body.reason;

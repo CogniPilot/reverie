@@ -136,7 +136,8 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
 
   /** A response far larger than the socket buffers, read by nobody: the child's writes back up behind it. */
   async function congest(running: Running): Promise<FakeConnection> {
-    const big = running.fake.open({ credit: 16 * 1024 * 1024 });
+    // A client that reads nothing gets no receipts either: the front could not write to it.
+    const big = running.fake.open({ credit: 16 * 1024 * 1024, receipts: false });
     await running.fake.write(big, 'GET /bytes?n=8388608 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
     // Stop reading only once the request (which needs TS's request credit) is out.
     running.fake.peer.pause();
