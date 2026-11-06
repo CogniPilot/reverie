@@ -263,3 +263,13 @@ and permanent close are shared, with no recapture or replacement runner. The
 service's cancellation token is independent of API authorization; bootstrap,
 UIDs and filesystem leases do not authorize a laptop start. Named Nix/laptop
 effects still require their actual owned-resource and native-phase producers.
+
+The installing service's `request_stop` captures its first stop once, publishes
+the original 34-second shared budget before launch cancellation, and never
+extends it on repeated calls. Readonly cleanup observations may still use the
+same captured client before final close; no replacement runner is created.
+Both `settle_owned` and `close` share the same first-deadline clamp; close also
+permanently seals the context. This cut has no retained Nix/laptop workflows: their real consumer must
+settle actual resource-owning cleanup before the final client seal, or retain an
+explicit unconfirmed result. A deadline bounds the wait/kill attempt, not kernel
+completion or a guaranteed reap.

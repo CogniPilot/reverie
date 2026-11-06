@@ -40,6 +40,63 @@ fn deadline() -> Instant {
     Instant::now() + Duration::from_secs(2)
 }
 #[test]
+fn actual_first_stop_is_shared_without_restarting_budget_or_sealing_cleanup_reads() {
+    let tree = Tree::new();
+    let bootstrap = tree.bootstrap("argv");
+    let starts = bootstrap.hooks.starts.clone();
+    let installed = InstalledWorkerEngine::new(bootstrap);
+    assert!(installed.stop_deadline().is_none());
+    let before = Instant::now();
+    let deadlines = std::thread::scope(|scope| {
+        (0..8)
+            .map(|_| {
+                scope.spawn(|| {
+                    let deadline = installed.request_stop();
+                    assert!(installed.cancellation().is_cancelled());
+                    assert_eq!(installed.stop_deadline(), Some(deadline));
+                    deadline
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|task| task.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    let after = Instant::now();
+    let stop = deadlines[0];
+    assert!(deadlines.iter().all(|deadline| *deadline == stop));
+    assert!(stop >= before + Duration::from_secs(34));
+    assert!(stop <= after + Duration::from_secs(34));
+    assert!(
+        installed
+            .readonly()
+            .query(
+                EngineQuery::InventoryIds,
+                deadline(),
+                &installed.cancellation()
+            )
+            .is_err()
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 0);
+    // A separate cleanup-purpose cancellation token can still use the SAME
+    // process context before final sealing. It grants no new effect command.
+    assert_eq!(
+        installed
+            .readonly()
+            .query(
+                EngineQuery::InventoryIds,
+                deadline(),
+                &CancellationToken::new()
+            )
+            .unwrap(),
+        "ps\0-aq\0--no-trunc"
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    assert_eq!(installed.request_stop(), stop);
+    installed.close(deadline()).unwrap();
+    assert_eq!(installed.stop_deadline(), Some(stop));
+}
+#[test]
 fn actual_service_readers_share_capture_and_permanent_close_fence() {
     let tree = Tree::new();
     let bootstrap = tree.bootstrap("argv");
@@ -61,6 +118,7 @@ fn actual_service_readers_share_capture_and_permanent_close_fence() {
     assert_eq!(starts.load(Ordering::SeqCst), 1);
     installed.close(deadline()).unwrap();
     assert!(installed.cancellation().is_cancelled());
+    assert!(installed.stop_deadline().is_some());
     for reader in [first, second, installed.readonly()] {
         assert!(
             reader
@@ -126,4 +184,43 @@ fn pending_constructor_remains_owned_across_all_clones_and_close_never_reopens()
             .is_err()
     );
     assert_eq!(starts.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn settlement_after_expired_actual_stop_does_not_take_the_callers_fresh_budget() {
+    let tree = Tree::new();
+    let mut bootstrap = tree.bootstrap("stall");
+    let gate = Arc::new(super::tests::Gate::default());
+    bootstrap.hooks.gate = Some(gate.clone());
+    let installed = InstalledWorkerEngine::new(bootstrap);
+    let reader = installed.readonly();
+    let task = std::thread::spawn(move || {
+        reader.query(
+            EngineQuery::InventoryIds,
+            Instant::now() + Duration::from_millis(40),
+            &CancellationToken::new(),
+        )
+    });
+    let end = deadline();
+    while !gate.entered.load(Ordering::Acquire) {
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(task.join().unwrap().unwrap_err().is_uncertain());
+    installed.expire_stop_for_owned_test();
+    let before = Instant::now();
+    assert!(installed.settle_owned(deadline()).is_err());
+    assert!(
+        before.elapsed() < Duration::from_millis(500),
+        "controlled blocked constructor must not get a fresh2s budget"
+    );
+    gate.released.store(true, Ordering::Release);
+    // Cleanup may be observed later, but every service attempt retains the
+    // SAME expired deadline; the test never grants it a replacement budget.
+    let end = deadline();
+    while installed.settle_owned(deadline()).is_err() {
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    installed.close(deadline()).unwrap();
 }
