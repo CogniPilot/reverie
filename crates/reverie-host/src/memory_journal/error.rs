@@ -100,6 +100,8 @@ impl std::fmt::Display for JournalClientError {
             "journal save was not confirmed; inspect the journal before another save"
         } else if self.process_uncertain {
             "journal client cleanup is unconfirmed"
+        } else if self.fault == JournalClientFault::Bootstrap {
+            "the packaged TypeScript journal client is unavailable; no journal request was dispatched"
         } else {
             "journal client refused"
         })

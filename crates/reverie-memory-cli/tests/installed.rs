@@ -1,5 +1,6 @@
 //! Actual candidate ELF in owned synthetic namespaces and public-client inputs.
-//! The compiled journal child is transport evidence, not API authorization.
+//! PATH is a refusal witness only. Real journal caller qualification uses the
+//! TypeScript API/auth/store test against the compile-bound candidate package.
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -10,7 +11,6 @@ use std::{
         OnceLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
 static FIXTURE: OnceLock<PathBuf> = OnceLock::new();
@@ -153,64 +153,16 @@ fn configured_rules_are_never_skipped_and_fixed_floors_precede_journal() {
     assert!(!tree.0.join("state").exists());
 }
 #[test]
-fn remember_uses_the_actual_public_command_without_initializing_legacy_memory() {
-    let tree = Tree::new();
-    tree.journal("normal");
-    let mut command = tree.command();
-    command
-        .env("REVERIE_SESSION_ID", "synthetic-session")
-        .env("OWNED_JOURNAL_TRACE", tree.0.join("trace"));
-    let value = success(run(command, &save_request()));
-    assert_eq!(value["entryId"], "synthetic-id");
-    let argv = value["argv"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|value| decode_hex(value.as_str().unwrap()))
-        .collect::<Vec<_>>();
-    assert_eq!(&argv[..3], ["agent", "journal", "save"]);
-    assert_eq!(argv.last().unwrap(), "--json");
-    assert_eq!(
-        fs::read_to_string(tree.0.join("trace")).unwrap(),
-        "started\n"
-    );
-    assert!(!tree.0.join("state").exists());
-}
-#[test]
 fn missing_source_or_session_never_dispatches_and_retains_copyable_command() {
     let tree = Tree::new();
-    tree.journal("normal");
     let request = save_request();
     assert!(failure(tree.run(&request)).contains("Nothing was saved"));
     let mut missing = request;
     missing.as_object_mut().unwrap().remove("quote");
-    let mut command = tree.command();
-    command
-        .env("REVERIE_SESSION_ID", "synthetic-session")
-        .env("OWNED_JOURNAL_TRACE", tree.0.join("trace"));
-    let error = failure(run(command, &missing));
-    assert!(error.contains("quote or source"));
+    let error = failure(tree.run(&missing));
+    assert!(error.contains("Nothing was saved"));
     assert!(error.contains("reverie agent journal save"));
     assert!(!tree.0.join("trace").exists());
-    assert!(!tree.0.join("state").exists());
-}
-#[test]
-fn lost_save_reply_is_unknown_and_never_replayed() {
-    let tree = Tree::new();
-    tree.journal("empty");
-    let mut command = tree.command();
-    command
-        .env("REVERIE_SESSION_ID", "synthetic-session")
-        .env("OWNED_JOURNAL_TRACE", tree.0.join("trace"))
-        .env("OWNED_JOURNAL_EFFECT", tree.0.join("effect"));
-    let error = failure(run(command, &save_request()));
-    assert!(error.contains("not confirmed"));
-    assert!(!error.contains("Nothing was saved"));
-    assert!(tree.0.join("effect").exists());
-    assert_eq!(
-        fs::read_to_string(tree.0.join("trace")).unwrap(),
-        "started\n"
-    );
     assert!(!tree.0.join("state").exists());
 }
 #[test]
@@ -238,9 +190,8 @@ fn missing_recall_is_not_initialized_and_explicit_startup_is_idempotent() {
     assert_eq!(database_rows(&tree.0.join("state/memory.sqlite")), before);
 }
 #[test]
-fn actual_recall_merges_journal_data_and_project_scope_stays_separate() {
+fn actual_project_recall_without_a_session_stays_read_only_and_separate() {
     let tree = Tree::new();
-    tree.journal("normal");
     success(
         tree.command()
             .args(["--initialize", "--project", "project-one"])
@@ -250,71 +201,29 @@ fn actual_recall_merges_journal_data_and_project_scope_stays_separate() {
     assert!(!tree.0.join("state/memory.sqlite").exists());
     let database = tree.0.join("state/projects/project-one/memory.sqlite");
     let before = database_rows(&database);
-    let mut command = tree.command();
-    command.env("REVERIE_SESSION_ID", "synthetic-session");
     let reply = success(run(
-        command,
+        tree.command(),
         &json!({"action":"recall","project":"project-one","query":"decision"}),
     ));
-    assert_eq!(reply["journal"], json!([{"entryId":"synthetic-id"}]));
-    assert_eq!(reply["legacy"], json!([]));
+    assert_eq!(reply, json!([]));
     assert_eq!(database_rows(&database), before);
     assert!(!tree.0.join("state/memory.sqlite").exists());
 }
 #[test]
-fn sigterm_cancels_the_real_journal_child_before_cli_exit() {
+fn path_frontends_never_select_the_journal_client() {
     let tree = Tree::new();
-    tree.journal("hold");
+    tree.journal("normal");
     let mut command = tree.command();
     command
         .env("REVERIE_SESSION_ID", "synthetic-session")
+        .env("REVERIE_API_URL", "http://127.0.0.1:0")
+        .env("REVERIE_NO_AUTOSTART", "1")
+        .env("REVERIE_MUX", "1")
         .env("OWNED_JOURNAL_TRACE", tree.0.join("trace"));
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(serde_json::to_string(&save_request()).unwrap().as_bytes())
-        .unwrap();
-    let limit = Instant::now() + Duration::from_secs(5);
-    while !tree.0.join("trace").exists() && Instant::now() < limit {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(tree.0.join("trace").exists());
-    let before = Instant::now();
-    assert!(
-        Command::new("kill")
-            .args(["-TERM", &child.id().to_string()])
-            .status()
-            .unwrap()
-            .success()
-    );
-    while child.try_wait().unwrap().is_none() && before.elapsed() < Duration::from_secs(5) {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    if child.try_wait().unwrap().is_none() {
-        child.kill().unwrap();
-        panic!("candidate did not settle after SIGTERM");
-    }
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(143));
-    assert!(before.elapsed() < Duration::from_secs(5));
-    assert!(failure(output).contains("interrupted"));
-}
-fn decode_hex(value: &str) -> String {
-    String::from_utf8(
-        value
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-            .collect(),
-    )
-    .unwrap()
+    let error = failure(run(command, &save_request()));
+    assert!(!error.contains("synthetic-id"));
+    assert!(!tree.0.join("trace").exists());
+    assert!(!tree.0.join("state").exists());
 }
 fn database_rows(path: &std::path::Path) -> Vec<(String, Vec<Vec<rusqlite::types::Value>>)> {
     let database =

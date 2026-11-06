@@ -57,6 +57,7 @@ let
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-office-enforced-auth.test.ts test/company-hierarchy.test.ts \
+        test/native-memory-journal-api.test.ts \
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
         test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
@@ -490,7 +491,7 @@ let
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
-  memoryNativeCli = import ./memory-cli.nix { inherit pkgs src; };
+  memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
