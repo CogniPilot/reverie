@@ -4,6 +4,8 @@
 mod bootstrap;
 mod control;
 #[cfg(test)]
+mod installed_context_tests;
+#[cfg(test)]
 pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;
 pub use control::{CancellationToken, ReadonlyEngine};

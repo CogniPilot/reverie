@@ -256,3 +256,10 @@ or billing API is used by qualification. Incidental non-HTTP urllib transports
 inventoried through supported settings before cutover, then covered by named
 adapters or an explicit reviewed compatibility decision. No Python fallback is
 hidden behind unsupported transports.
+
+`InstalledWorkerEngine` captures one installing-service engine once. Its readonly
+handles clone the same `Arc<CapturedClient>`: pending constructors, owned cleanup
+and permanent close are shared, with no recapture or replacement runner. The
+service's cancellation token is independent of API authorization; bootstrap,
+UIDs and filesystem leases do not authorize a laptop start. Named Nix/laptop
+effects still require their actual owned-resource and native-phase producers.

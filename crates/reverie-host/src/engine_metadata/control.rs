@@ -3,17 +3,21 @@ use super::{
 };
 pub use crate::captured_client::CancellationToken;
 use crate::captured_client::{CapturedClient, Policy};
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 /// Closed metadata-only wrapper over the shared exact-client supervisor. Keep
 /// retained contexts and check settle_owned before acknowledging shutdown.
 #[must_use = "retain the engine context and check settle_owned before shutdown acknowledgement"]
+#[derive(Clone)]
 pub struct ReadonlyEngine {
-    pub(crate) client: CapturedClient,
+    pub(crate) client: Arc<CapturedClient>,
 }
 impl ReadonlyEngine {
     pub fn new(bootstrap: EngineBootstrap) -> Self {
         Self {
-            client: CapturedClient::new(bootstrap.into_command()),
+            client: Arc::new(CapturedClient::new(bootstrap.into_command())),
         }
     }
     pub fn query(
