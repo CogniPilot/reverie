@@ -19,6 +19,10 @@ pub enum StorageFault {
     StoredLineage,
     DirectoryChanged,
     ClosedLease,
+    TemporaryIdentity,
+    TemporaryChanged,
+    InstructionCustody,
+    InstructionChanged,
 }
 #[derive(Debug)]
 pub enum StorageError {
@@ -27,6 +31,9 @@ pub enum StorageError {
     Identity(IdentityError),
     Data(IdentityDataError),
     Settings(ResourceConfigError),
+    Instructions(reverie_contracts::worker_storage::InstructionDataError),
+    Entropy(reverie_store::StoreError),
+    PathText(reverie_contracts::reservation_engine::EngineDataError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -51,7 +58,21 @@ impl fmt::Display for StorageError {
         write!(f, "STORAGE_LEASE: {self:?}")
     }
 }
-impl std::error::Error for StorageError {}
+impl std::error::Error for StorageError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Identity(error) => Some(error),
+            Self::Data(error) => Some(error),
+            Self::Settings(error) => Some(error),
+            Self::Instructions(error) => Some(error),
+            Self::Entropy(error) => Some(error),
+            Self::PathText(error) => Some(error),
+            Self::Finalization { primary, .. } | Self::PartialEffects(primary) => Some(primary),
+            Self::Refused(_) => None,
+        }
+    }
+}
 impl From<io::Error> for StorageError {
     fn from(v: io::Error) -> Self {
         Self::Io(v)

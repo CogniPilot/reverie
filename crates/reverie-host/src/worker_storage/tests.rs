@@ -8,6 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 mod compatibility;
+mod temporary;
 const E: &str = "11111111-2222-4333-8444-555555555555";
 const A: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const B: &str = "00000000-0000-0000-0000-000000000000";

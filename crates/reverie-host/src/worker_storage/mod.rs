@@ -6,6 +6,7 @@
 mod error;
 mod fs;
 mod prepare;
+mod temporary;
 #[cfg(test)]
 mod tests;
 use crate::native;

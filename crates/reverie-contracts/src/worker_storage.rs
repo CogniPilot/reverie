@@ -1,7 +1,9 @@
 //! Storage publication and related-lineage DATA. No filesystem/lease authority.
+mod instructions;
 use crate::legacy_json::{Node, Number, Text, Value, truthy};
 use crate::storage_identity::{IdentityDataError, Metadata, MetadataText};
 use crate::worker_config::encode_data;
+pub use instructions::{InstructionDataError, storage_instruction_bytes};
 use reverie_core::ids::{ProfileEmployeeId, ProfileSessionId};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,6 +11,35 @@ use std::collections::{BTreeMap, BTreeSet};
 /// validated by storage operations; each original phase reads its own fields.
 pub struct StorageConfiguration(crate::worker_config::EffectiveWorkerConfig);
 impl StorageConfiguration {
+    pub fn storage_path_text(
+        &self,
+        identity: crate::reservation_engine::StorageIdentityRef<'_>,
+    ) -> std::result::Result<
+        crate::reservation_engine::StoragePathText,
+        crate::reservation_engine::EngineDataError,
+    > {
+        crate::reservation_engine::ReservationConfiguration::capture(self.0.clone())
+            .storage_text(identity)
+    }
+    pub fn has_shared_workspace(&self) -> Result<bool> {
+        let root = object(self.0.as_value()).expect("worker object invariant");
+        let Some(Value(Node::Array(rows))) = root.get(&key("mounts")) else {
+            return Err(IdentityDataError::Registry);
+        };
+        for row in rows {
+            let Some(row) = object(row) else {
+                return Err(IdentityDataError::Registry);
+            };
+            let destination = row
+                .get(&key("destination"))
+                .ok_or(IdentityDataError::Registry)?;
+            if matches!(destination,Value(Node::String(text)) if text.equals_ascii("/reverie_workspace"))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     pub fn capture(source: &crate::worker_config::EffectiveWorkerConfig) -> Self {
         Self(source.clone())
     }
