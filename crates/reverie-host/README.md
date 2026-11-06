@@ -146,3 +146,15 @@ inspection remains input data, and each effect consumer must freshly bind it
 and requalify before use. No engine call, capability change or selected product
 consumer is added. The [compatibility audit](../reverie-contracts/src/rootless/README.md)
 records accepted Python quirks, observation hardening and remaining boundaries.
+
+`reservation_kernel` provides fixed `/proc` and `/sys/fs/cgroup` observations
+for the application's reservation observer. It qualifies the whole host
+hierarchy, brackets namespace and PID metadata, reads every applicable finite
+ancestor limit, and checks source/container directory identities with O_PATH.
+Full mount-row data and same-device coordinates remain distinct from device
+identity alone. Storage observations retain original Python path text beside
+native bytes and compare it with the existing storage resolver's paths.
+Descriptors receive explicit checked close handling on both success and failure.
+The adapter cannot grant admission, retain a storage lease, start a container or
+turn a snapshot into a native effect permit. Its private owned-source test seam
+does not introduce a production root/path override.

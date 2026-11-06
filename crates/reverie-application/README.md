@@ -33,3 +33,12 @@ Python native-filesystem vectors cover current GPU/memory and historical memory
 without current GPU/perf. Refusal tests exercise stale profiles, custody changes
 during resolution, dual failures and inactive/legacy feature bypasses. All
 fixtures use owned synthetic files, never company instance data.
+
+`reservation_observer::NativeObserver` owns the complete read-side reservation
+observation workflow over one persistent supervised engine client and the fixed
+Linux kernel adapter. A captured context binds all censuses and row handles to
+the same configuration snapshot. Public contract rows cannot be submitted as
+native observation handles. This is an internal broker service, without a wire
+constructor, request-selected proc/cgroup roots or arbitrary engine arguments.
+The [observation audit](src/reservation_observer/README.md) maps each legacy
+method and its remaining effect/admission obligations.

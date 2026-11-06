@@ -1,5 +1,5 @@
 //! Actual legacy NativeObserver inventory ordering counterexamples.
-use reverie_contracts::reservation_engine::InventoryRows;
+use reverie_contracts::reservation_engine::{InventoryDecoder, InventoryRows};
 use reverie_core::ids::ContainerId;
 
 fn code(ids: &[&str], raw: &str) -> Option<&'static str> {
@@ -36,4 +36,25 @@ fn every_json_line_is_parsed_before_any_mount_validation() {
     let b = "b".repeat(64);
     let raw = format!("{{\"Id\":\"{a}\",\"Mounts\":null}}\n{{");
     assert_eq!(code(&[&a, &b], &raw), Some("RESERVATION_ENGINE_JSON"));
+}
+#[test]
+fn failed_incremental_batch_cannot_be_replaced_or_finished_as_valid() {
+    let ids = [ContainerId::parse(&"a".repeat(64)).unwrap()];
+    let mut decoder = InventoryDecoder::new(&ids).unwrap();
+    assert_eq!(
+        decoder.push("{").err().unwrap().code(),
+        "RESERVATION_ENGINE_JSON"
+    );
+    assert_eq!(
+        decoder
+            .push(&format!("{{\"Id\":\"{}\",\"Mounts\":[]}}", ids[0].as_str()))
+            .err()
+            .unwrap()
+            .code(),
+        "RESERVATION_ENGINE_JSON"
+    );
+    assert_eq!(
+        decoder.finish().err().unwrap().code(),
+        "RESERVATION_ENGINE_JSON"
+    );
 }

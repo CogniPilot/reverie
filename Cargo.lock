@@ -262,6 +262,7 @@ dependencies = [
  "reverie-contracts",
  "reverie-core",
  "reverie-store",
+ "serde",
  "serde_json",
  "sha2",
 ]

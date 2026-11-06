@@ -4,6 +4,7 @@ pub mod engine_metadata;
 pub mod lease_policy;
 mod native;
 mod observation;
+pub mod reservation_kernel;
 pub mod rootless;
 pub mod task_perf;
 pub mod worker_identity;
