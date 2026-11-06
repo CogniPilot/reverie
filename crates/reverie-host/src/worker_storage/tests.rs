@@ -107,6 +107,11 @@ fn employee_preparation_publishes_exact_bytes_and_preserves_existing_home() {
 }
 #[test]
 fn migration_and_all_transports_share_exclusive_employee_lock() {
+    if crate::test_process::isolate_case(
+        "worker_storage::tests::migration_and_all_transports_share_exclusive_employee_lock",
+    ) {
+        return;
+    }
     let tree = Tree::new();
     tree.journal("completed");
     let lease = acquire(&tree);
@@ -259,6 +264,11 @@ fn owner_private_modes_are_not_narrowed_to_exact_0700() {
 }
 #[test]
 fn off_current_lineage_survives_journal_pruning_and_rejects_historical_publication() {
+    if crate::test_process::isolate_case(
+        "worker_storage::tests::off_current_lineage_survives_journal_pruning_and_rejects_historical_publication",
+    ) {
+        return;
+    }
     let tree = Tree::new();
     tree.journal("completed");
     tree.company(A, "null", false);

@@ -23,6 +23,8 @@ pub mod rootless;
 pub mod task_perf;
 #[cfg(target_os = "linux")]
 pub mod terminal_pty;
+#[cfg(test)]
+mod test_process;
 pub mod worker_child;
 pub mod worker_identity;
 pub mod worker_intent;
