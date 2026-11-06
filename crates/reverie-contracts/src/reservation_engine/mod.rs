@@ -79,36 +79,69 @@ impl InventoryDigest {
 pub struct InventoryRows {
     rows: Vec<ContainerRow>,
 }
-impl InventoryRows {
-    /// IDs come from the complete ps query. Decode one fixed inspect result per
-    /// supplied batch, retaining default JSON last-wins and Python number kinds.
-    pub fn decode(ids: &[ContainerId], batches: &[String]) -> Result<Self> {
+/// Incremental data decoder. Each native batch is counted and JSON-decoded
+/// before the application may issue its next query. Global IDs and mount
+/// normalization remain deferred until the complete census is available.
+pub struct InventoryDecoder {
+    ids: Vec<ContainerId>,
+    received: usize,
+    values: Vec<Value>,
+    failure: Option<EngineDataError>,
+}
+impl InventoryDecoder {
+    pub fn new(ids: &[ContainerId]) -> Result<Self> {
         if ids.len() > MAX_CONTAINERS
             || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
         {
             return Err(EngineDataError::Inventory);
         }
-        let mut values = Vec::new();
-        if batches.len() != ids.len().div_ceil(32) {
+        Ok(Self {
+            ids: ids.to_vec(),
+            received: 0,
+            values: Vec::new(),
+            failure: None,
+        })
+    }
+    pub fn push(&mut self, stdout: &str) -> Result<()> {
+        if let Some(error) = self.failure {
+            return Err(error);
+        }
+        let result = self.decode_batch(stdout);
+        if let Err(error) = result {
+            self.failure = Some(error);
+        }
+        result
+    }
+    fn decode_batch(&mut self, stdout: &str) -> Result<()> {
+        if self.received >= self.ids.len() {
             return Err(EngineDataError::Inventory);
         }
-        for (batch, selected) in batches.iter().zip(ids.chunks(32)) {
-            if batch.len() > MAX_NATIVE_BYTES {
-                return Err(EngineDataError::Bound);
-            }
-            let lines = splitlines(batch);
-            if lines.len() != selected.len() {
-                return Err(EngineDataError::Inventory);
-            }
-            for line in lines {
-                values.push(default_json(line.as_bytes())?);
-            }
+        if stdout.len() > MAX_NATIVE_BYTES {
+            return Err(EngineDataError::Bound);
         }
-        let mut rows = values
+        let lines = splitlines(stdout);
+        if lines.len() != (self.ids.len() - self.received).min(32) {
+            return Err(EngineDataError::Inventory);
+        }
+        for line in &lines {
+            self.values.push(default_json(line.as_bytes())?);
+        }
+        self.received += lines.len();
+        Ok(())
+    }
+    pub fn finish(self) -> Result<InventoryRows> {
+        if let Some(error) = self.failure {
+            return Err(error);
+        }
+        if self.received != self.ids.len() {
+            return Err(EngineDataError::Inventory);
+        }
+        let mut rows = self
+            .values
             .into_iter()
             .map(ContainerRow::capture)
             .collect::<Result<Vec<_>>>()?;
-        let mut expected = ids.to_vec();
+        let mut expected = self.ids;
         expected.sort();
         let mut observed = rows.iter().map(ContainerRow::id).collect::<Vec<_>>();
         observed.sort();
@@ -119,7 +152,21 @@ impl InventoryRows {
             sorted_mounts(&mut row.value)?;
         }
         rows.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(Self { rows })
+        Ok(InventoryRows { rows })
+    }
+}
+impl InventoryRows {
+    /// IDs come from the complete ps query. Decode one fixed inspect result per
+    /// supplied batch, retaining default JSON last-wins and Python number kinds.
+    pub fn decode(ids: &[ContainerId], batches: &[String]) -> Result<Self> {
+        let mut decoder = InventoryDecoder::new(ids)?;
+        if batches.len() != ids.len().div_ceil(32) {
+            return Err(EngineDataError::Inventory);
+        }
+        for batch in batches {
+            decoder.push(batch)?;
+        }
+        decoder.finish()
     }
     pub fn rows(&self) -> &[ContainerRow] {
         &self.rows

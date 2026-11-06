@@ -7,6 +7,8 @@ pub enum ObservationFault {
     ArtifactBound,
     Changed,
     System,
+    ReservationBound,
+    ReservationStorageDirectory,
 }
 impl ObservationFault {
     pub fn code(self) -> &'static str {
@@ -16,6 +18,8 @@ impl ObservationFault {
             Self::ArtifactBound => "HOST_ARTIFACT_BOUND",
             Self::Changed => "HOST_ARTIFACT_CHANGED",
             Self::System => "HOST_ARTIFACT_SYSTEM",
+            Self::ReservationBound => "RESERVATION_NATIVE_BOUND",
+            Self::ReservationStorageDirectory => "RESERVATION_NATIVE_STORAGE_DIRECTORY",
         }
     }
 }
