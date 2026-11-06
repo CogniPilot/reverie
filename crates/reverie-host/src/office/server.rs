@@ -16,11 +16,7 @@ use std::{
     task::Poll,
     time::{Duration, Instant},
 };
-use tokio::{
-    net::{UnixListener, UnixStream},
-    sync::Semaphore,
-    task::JoinSet,
-};
+use tokio::{net::UnixStream, sync::Semaphore, task::JoinSet};
 pub(super) struct Context {
     pub(super) company: Arc<Company>,
     pub(super) session: ProfileSessionId,
@@ -61,43 +57,100 @@ impl Context {
         true
     }
 }
-pub(super) fn run(
-    listener: std::os::unix::net::UnixListener,
-    mut socket: SocketEntry,
+type NativeListener = std::os::unix::net::UnixListener;
+pub(super) type SpawnPayload = Arc<Mutex<Option<PreparedOffice>>>;
+pub(super) struct PreparedOffice {
+    runtime: tokio::runtime::Runtime,
+    listener: NativeListener,
+    socket: SocketEntry,
     context: Arc<Context>,
-) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    let result = runtime.block_on(async {
-        let listener = UnixListener::from_std(listener)?;
-        let result = serve(&listener, context).await;
-        let closed = listener
-            .into_std()
-            .map_err(OfficeError::Io)
-            .and_then(|listener| {
-                let descriptor: std::os::fd::OwnedFd = listener.into();
-                crate::native::close(std::fs::File::from(descriptor))
-                    .map_err(|_| OfficeError::Unconfirmed)
-            });
-        super::finalized(result, closed)
-    });
-    let removed = socket.remove();
-    super::finalized(result, removed)
 }
-async fn serve(listener: &UnixListener, context: Arc<Context>) -> Result<()> {
+pub(super) fn runtime() -> Result<tokio::runtime::Runtime> {
+    #[cfg(test)]
+    super::test_hooks::fail(super::test_hooks::Failure::Runtime)?;
+    Ok(tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?)
+}
+impl PreparedOffice {
+    pub(super) fn new(
+        runtime: tokio::runtime::Runtime,
+        listener: NativeListener,
+        socket: SocketEntry,
+        context: Arc<Context>,
+    ) -> Self {
+        Self {
+            runtime,
+            listener,
+            socket,
+            context,
+        }
+    }
+    fn run(mut self) -> Result<()> {
+        // AsyncFd borrows the actual listener. Registration failure cannot
+        // consume/drop its sole descriptor before our checked finalizer.
+        let result = self.runtime.block_on(serve(&self.listener, self.context));
+        let closed = close_listener(self.listener);
+        let removed = self.socket.remove();
+        super::finalized(result, super::finalized(closed, removed))
+    }
+    fn close(mut self) -> Result<()> {
+        super::finalized(close_listener(self.listener), self.socket.remove())
+    }
+}
+pub(super) fn spawn(
+    payload: &SpawnPayload,
+) -> std::io::Result<std::thread::JoinHandle<Result<()>>> {
+    #[cfg(test)]
+    super::test_hooks::fail(super::test_hooks::Failure::Spawn)?;
+    let payload = Arc::clone(payload);
+    std::thread::Builder::new()
+        .name("reverie-office".into())
+        .spawn(move || {
+            let prepared = payload
+                .lock()
+                .map_err(|_| OfficeError::Unconfirmed)?
+                .take()
+                .ok_or(OfficeError::Unconfirmed)?;
+            prepared.run()
+        })
+}
+pub(super) fn cleanup_payload(payload: &SpawnPayload) -> Result<()> {
+    let prepared = payload
+        .lock()
+        .map_err(|_| OfficeError::Unconfirmed)?
+        .take()
+        .ok_or(OfficeError::Unconfirmed)?;
+    prepared.close()
+}
+pub(super) fn close_listener(listener: NativeListener) -> Result<()> {
+    let descriptor: std::os::fd::OwnedFd = listener.into();
+    crate::native::close(std::fs::File::from(descriptor)).map_err(|_| OfficeError::Unconfirmed)
+}
+async fn accept(readiness: &crate::native::OfficeListenerReady<'_>) -> Result<UnixStream> {
+    let stream = readiness.accept().await?;
+    if let Err(error) = stream.set_nonblocking(true) {
+        let descriptor: std::os::fd::OwnedFd = stream.into();
+        let closed = crate::native::close(std::fs::File::from(descriptor))
+            .map_err(|_| OfficeError::Unconfirmed);
+        return super::finalized(Err(error.into()), closed);
+    }
+    UnixStream::from_std(stream).map_err(|_| OfficeError::Unconfirmed)
+}
+async fn serve(listener: &NativeListener, context: Arc<Context>) -> Result<()> {
+    let readiness = crate::native::OfficeListenerReady::register(listener)?;
     let mut requests = JoinSet::new();
     let mut failed = false;
     while !context.closing() {
         while let Some(result) = requests.try_join_next() {
             failed |= result.is_err();
         }
-        match tokio::time::timeout(Duration::from_millis(50), listener.accept()).await {
-            Ok(Ok((stream, _))) => admit(stream, &context, &mut requests),
+        match tokio::time::timeout(Duration::from_millis(50), accept(&readiness)).await {
+            Ok(Ok(stream)) => admit(stream, &context, &mut requests),
             Ok(Err(error)) => {
                 requests.abort_all();
                 while requests.join_next().await.is_some() {}
-                return Err(error.into());
+                return Err(error);
             }
             Err(_) => (),
         }

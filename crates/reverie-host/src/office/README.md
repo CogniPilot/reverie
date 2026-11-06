@@ -18,6 +18,20 @@ and retains outstanding owners for process lifetime; it is never a capacity or
 all-context release acknowledgement. Registry-lock waits respect the caller's
 deadline. Native filesystem operations themselves have no hard latency guarantee.
 
+The filesystem socket inode is held by an actual `O_PATH|O_NOFOLLOW` descriptor
+through removal and checked finalization. Its identity cannot be recycled after
+the distinct listener socket closes. Mode changes use that held descriptor's
+fixed procfs reference. This pin still does not make a pathname comparison and
+unlink atomic against a separate writer.
+
+Runtime construction precedes bind. The listener/leaf are adopted before any
+fallible metadata lookup. Reactor registration borrows the listener instead of
+consuming its sole descriptor on an error. A retained spawn payload remains
+recoverable when thread creation fails; every prepared listener/anchor/entry
+gets a checked cleanup attempt and secondary errors remain attached. An
+unidentified created leaf or unconfirmed finalizer retains a failed registry
+owner rather than disappearing from the global close result.
+
 Hyper owns HTTP request/response parsing and framing. Each phone admits at most
 four connections, the process admits32, and the existing40-token/10-per-second
 request budget is retained. An admitted request body is bounded to8MiB and one

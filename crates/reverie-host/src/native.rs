@@ -49,6 +49,8 @@ pub(crate) use reservation::{
 mod text;
 pub(crate) use text::{python_path, python_text};
 mod office;
+mod office_listener;
+pub(crate) use office_listener::OfficeListenerReady;
 mod resolve;
 mod worker_config;
 pub(crate) use office::office_plan_capability;

@@ -24,6 +24,8 @@ mod proxy;
 mod server;
 mod socket;
 #[cfg(test)]
+mod test_hooks;
+#[cfg(test)]
 mod tests;
 
 #[derive(Debug)]
@@ -75,6 +77,7 @@ struct OwnedOffice {
     closing: Arc<AtomicBool>,
     first_close: OnceLock<Instant>,
     thread: Mutex<Option<JoinHandle<Result<()>>>>,
+    _preparation: Option<server::SpawnPayload>,
 }
 /// Own one registry for the installing broker. Dropping an individual phone
 /// never drops its actual server/request ownership. Explicit close is required;
@@ -125,22 +128,57 @@ impl OfficeService {
     }
     pub fn bind(&self, directory: PathBuf, session: ProfileSessionId) -> Result<OfficePhone> {
         self.require_running()?;
+        let runtime = server::runtime()?;
         let mut offices = self.offices.lock().map_err(|_| OfficeError::Unconfirmed)?;
         self.require_running()?;
-        let (listener, socket) = socket::bind(&directory)?;
         let closing = Arc::new(AtomicBool::new(false));
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let (listener, socket) = match socket::bind(&directory) {
+            Ok(bound) => bound,
+            Err(error) => {
+                if matches!(
+                    error,
+                    OfficeError::Finalization { .. } | OfficeError::Unconfirmed
+                ) {
+                    offices.insert(
+                        id,
+                        Arc::new(OwnedOffice {
+                            closing,
+                            first_close: OnceLock::new(),
+                            thread: Mutex::new(None),
+                            _preparation: None,
+                        }),
+                    );
+                }
+                return Err(error);
+            }
+        };
         let context =
             server::Context::new(Arc::clone(&self.company), session, Arc::clone(&closing));
-        let thread = std::thread::Builder::new()
-            .name("reverie-office".into())
-            .spawn(move || server::run(listener, socket, context))?;
+        let payload = Arc::new(Mutex::new(Some(server::PreparedOffice::new(
+            runtime, listener, socket, context,
+        ))));
         let owned = Arc::new(OwnedOffice {
             closing,
             first_close: OnceLock::new(),
-            thread: Mutex::new(Some(thread)),
+            thread: Mutex::new(None),
+            _preparation: Some(Arc::clone(&payload)),
         });
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
         offices.insert(id, Arc::clone(&owned));
+        // Acquire the fresh slot before starting a thread; no failed lock can
+        // cause an already-created JoinHandle to be dropped and detached.
+        let mut slot = owned.thread.lock().map_err(|_| OfficeError::Unconfirmed)?;
+        match server::spawn(&payload) {
+            Ok(thread) => *slot = Some(thread),
+            Err(error) => {
+                let cleanup = server::cleanup_payload(&payload);
+                if cleanup.is_ok() {
+                    offices.remove(&id);
+                }
+                return finalized(Err(error.into()), cleanup);
+            }
+        }
+        drop(slot);
         let phone = OfficePhone { id, owned };
         if let Err(error) = self.require_running() {
             phone.request_close();

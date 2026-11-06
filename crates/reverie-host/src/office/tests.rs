@@ -601,3 +601,66 @@ fn stop_deadline_does_not_wait_for_a_registry_lock_or_erase_its_owner() {
         .close(Instant::now() + Duration::from_secs(2))
         .unwrap();
 }
+#[test]
+fn runtime_and_spawn_failures_finalize_actual_prepared_socket_owners() {
+    for failure in [test_hooks::Failure::Runtime, test_hooks::Failure::Spawn] {
+        let fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
+        test_hooks::set(failure);
+        assert!(
+            fixture
+                .service
+                .bind(
+                    fixture.root.join("phone"),
+                    ProfileSessionId::parse(SID).unwrap()
+                )
+                .is_err()
+        );
+        assert!(fixture.service.offices.lock().unwrap().is_empty());
+        assert!(!fixture.root.join("phone/office.sock").exists());
+    }
+}
+#[test]
+fn unidentified_post_bind_failures_close_listener_and_retain_the_created_leaf_fence() {
+    for failure in [
+        test_hooks::Failure::BeforeAnchor,
+        test_hooks::Failure::AfterAnchor,
+    ] {
+        let mut fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
+        test_hooks::set(failure);
+        let result = fixture.service.bind(
+            fixture.root.join("phone"),
+            ProfileSessionId::parse(SID).unwrap(),
+        );
+        assert!(matches!(result, Err(OfficeError::Finalization { .. })));
+        assert_eq!(fixture.service.offices.lock().unwrap().len(), 1);
+        assert!(fixture.root.join("phone/office.sock").exists());
+        assert!(UnixStream::connect(fixture.root.join("phone/office.sock")).is_err());
+        assert!(
+            fixture
+                .service
+                .close(Instant::now() + Duration::from_secs(2))
+                .is_err()
+        );
+        fixture.close_ok = false;
+    }
+}
+#[test]
+fn failed_spawn_preserves_primary_and_actual_close_failure_without_forgetting_owner() {
+    let mut fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
+    test_hooks::set(test_hooks::Failure::Spawn);
+    crate::native::test_faults::set(None, true);
+    let result = fixture.service.bind(
+        fixture.root.join("phone"),
+        ProfileSessionId::parse(SID).unwrap(),
+    );
+    assert!(matches!(result, Err(OfficeError::Finalization { .. })));
+    assert_eq!(fixture.service.offices.lock().unwrap().len(), 1);
+    assert!(!fixture.root.join("phone/office.sock").exists());
+    assert!(
+        fixture
+            .service
+            .close(Instant::now() + Duration::from_secs(2))
+            .is_err()
+    );
+    fixture.close_ok = false;
+}
