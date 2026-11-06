@@ -4,6 +4,12 @@ This crate observes installed artifact and current storage identity facts for
 native broker composition. It creates no service, editor, deployment command,
 owner grant, execution permit or writable configuration path.
 
+`engine_metadata::ReadonlyEngine` retains its closed CID/query allowlist,
+20-second clamp, 4 MiB combined stdout/stderr capture bound and UTF-8/exit checks.
+This matches `Broker.run_engine` through `worker_cleanup.run_client`; the separate
+reservation JSON/schema decoder keeps its existing 8 MiB bound. A decoder
+allowance does not widen subprocess capture.
+
 `task_perf::observe_installed_task_perf` reads only the manifest bound at compile
 time by `REVERIE_FIXED_TASK_PERF_MANIFEST`. The trusted native package should
 inherit [the fixed Nix bindings](../../nix/host-artifact-bindings.nix), which derive

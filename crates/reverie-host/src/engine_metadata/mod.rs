@@ -12,7 +12,9 @@ pub use control::{CancellationToken, ReadonlyEngine};
 use reverie_core::ids::ContainerId;
 use std::{ffi::OsString, fmt};
 
-pub const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+// Broker.run_engine delegates to worker_cleanup.run_client's combined 4 MiB
+// subprocess bound. The reservation JSON/schema decoder's 8 MiB is distinct.
+pub const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_QUERY_SECONDS: u64 = 20;
 const ENGINE_FORMAT: &str = concat!(
     "{\"Id\":{{json .Id}},\"Name\":{{json .Name}},\"Image\":{{json .Image}},",
