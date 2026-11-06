@@ -20,7 +20,7 @@ import { isChatRaster } from './chat-image-paths.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
 import { randomUUID } from 'node:crypto';
 import type { PendingDeliveryStore } from './chatroom-pending-delivery.js';
-import { cutQuoted, quoteForPane } from './pane-quote.js';
+import { chatReadCommand, cutQuoted, quoteChatBody, quoteForPane } from './pane-quote.js';
 import type { ChatMember, ChatMessage, ChatRoom } from './chatroom-store.js';
 import { USER_RECIPIENT, isDm, textMentions } from './chatroom-store.js';
 import { getCli } from './config/cli-registry/registry.js';
@@ -232,7 +232,7 @@ export function renderForRecipient(
   const text = message.poll
     ? quoteForPane(pollSummary(message))
     : message.text
-      ? quoteForPane(message.text)
+      ? quoteChatBody(message.text, room.id, message.id)
       : files
         ? '(attachment only)'
         : '""';
@@ -263,31 +263,41 @@ export function buildDeliveryLine(pending: Pending[], maxChars = MAX_DELIVERY_CH
  * the next delivery. A single fragment longer than the line is cut on whole characters and its open quote closed again.
  */
 export function buildDeliveryBatch(pending: Pending[], maxChars = MAX_DELIVERY_CHARS): { line: string; taken: number } {
-  const rooms = [...new Set(pending.map((p) => p.roomName))];
-  const head = `[Reverie chat ${rooms.map((r) => quoteForPane(r, 80)).join(', ')}] `;
-  const tail = pending.length > 0 && pending.every((p) => p.noReply)
-    ? '' : ' (reply: reverie agent chat say "..."; full history: reverie agent chat read)';
-  const budget = Math.max(200, maxChars - head.length - tail.length);
-  const parts: string[] = [];
-  let used = 0;
-  let taken = 0;
-  for (let i = 0; i < pending.length; i++) {
-    const p = pending[i];
-    const text = pendingText(p);
-    const fragment = rooms.length > 1 ? `[${quoteForPane(p.roomName, 80)}] ${text}` : text;
-    const cost = fragment.length + (parts.length ? 3 : 0);
-    if (used + cost > budget) {
-      if (parts.length === 0) {
-        parts.push(`${cutQuoted(fragment, budget - 20)} ...(cut)`);
-        taken = 1;
-      }
-      break;
+  const replyHint = ' (reply: reverie agent chat say "..."; full history: reverie agent chat read)';
+  const selected: Array<Pending & { text: string }> = [];
+  const frame = (items: typeof selected): string => {
+    const rooms = [...new Set(items.map(p => p.roomName))];
+    const head = `[Reverie chat ${rooms.map(r => quoteForPane(r, 80)).join(', ')}] `;
+    const tail = items.length > 0 && items.every(p => p.noReply) ? '' : replyHint;
+    return head + items.map(p => `${rooms.length > 1 ? `[${quoteForPane(p.roomName, 80)}] ` : ''}${p.text}`).join(' | ') + tail;
+  };
+  let line = frame(selected);
+  for (const p of pending) {
+    // Render each lazy fragment once. Count the entire candidate frame, including
+    // room tags and a footer that can change when a replyable message is added.
+    const item = { ...p, text: pendingText(p) };
+    const candidate = frame([...selected, item]);
+    if (candidate.length <= maxChars) {
+      selected.push(item);
+      line = candidate;
+      continue;
     }
-    parts.push(fragment);
-    used += cost;
-    taken = i + 1;
+    if (selected.length) break;
+    const read = chatReadCommand(p.roomId, p.messageId, 1);
+    const hint = read ? ` ...(cut; read: ${read})` : ' ...(cut)';
+    const prefix = '[Reverie chat ';
+    const suffix = '] ';
+    const minimum = prefix.length + 2 + suffix.length + hint.length;
+    if (maxChars < minimum) throw new RangeError('Delivery limit is too small for its read pointer');
+    // Prefer the standard footer, but the exact read pointer is required even
+    // for a small explicit cap or a room name that expands heavily when quoted.
+    const tail = !p.noReply && minimum + replyHint.length <= maxChars ? replyHint : '';
+    const label = cutQuoted(quoteForPane(p.roomName, 80), maxChars - minimum + 2 - tail.length) || '""';
+    const head = `${prefix}${label}${suffix}`;
+    line = `${head}${cutQuoted(item.text, maxChars - head.length - hint.length - tail.length)}${hint}${tail}`;
+    return { line, taken: 1 };
   }
-  return { line: `${head}${parts.join(' | ')}${tail}`, taken };
+  return { line, taken: selected.length };
 }
 
 /** When an unconfirmed line is looked for in the session's transcript, after its outcome; then it stays held. */

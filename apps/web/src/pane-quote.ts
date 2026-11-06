@@ -55,14 +55,54 @@ export function quoteForPane(text: unknown, max = 2400): string {
   return result;
 }
 
-/** A fragment cut to `max` characters on whole code points, never inside an escape, with an open quote closed again. */
+/** Message parts count Unicode code points, before quoting expands control characters. */
+export const CHAT_MESSAGE_PART_CHARS = 2400;
+export interface ChatBodyOptions {
+  full?: boolean;
+  part?: number;
+}
+
+/** Only stored UUIDs may appear unquoted in a suggested shell command. */
+export function chatReadCommand(roomId?: string, messageId?: string, part?: number): string | undefined {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!roomId || !messageId || roomId.length !== 36 || messageId.length !== 36 || !uuid.test(roomId) || !uuid.test(messageId)) return undefined;
+  if (part !== undefined && (!Number.isSafeInteger(part) || part < 1)) return undefined;
+  return `reverie agent chat read --room ${roomId} --message ${messageId}${part === undefined ? '' : ` --part ${part}`}`;
+}
+
+/** A quoted body followed by Reverie's own continuation notice, outside the quote. */
+export function quoteChatBody(text: string, roomId?: string, messageId?: string, options: ChatBodyOptions = {}): string {
+  const chars = Array.from(text);
+  if (options.part !== undefined) {
+    const count = Math.max(1, Math.ceil(chars.length / CHAT_MESSAGE_PART_CHARS));
+    if (!Number.isSafeInteger(options.part) || options.part < 1 || options.part > count)
+      throw new RangeError(`--part must be between 1 and ${count}`);
+    const start = (options.part - 1) * CHAT_MESSAGE_PART_CHARS;
+    const next = options.part < count ? chatReadCommand(roomId, messageId, options.part + 1) : undefined;
+    return `${quoteForPane(chars.slice(start, start + CHAT_MESSAGE_PART_CHARS).join(''), Infinity)} [part ${options.part} of ${count}${next ? `; next: ${next}` : ''}]`;
+  }
+  if (options.full || chars.length <= CHAT_MESSAGE_PART_CHARS) return quoteForPane(text, Infinity);
+  const next = chatReadCommand(roomId, messageId, 2);
+  return `${quoteForPane(text, CHAT_MESSAGE_PART_CHARS)} [${chars.length - CHAT_MESSAGE_PART_CHARS} characters omitted${next ? `; continue: ${next}` : ''}]`;
+}
+
+/** A fragment within `max` UTF-16 units, including quote closure; code points and JSON escapes stay whole. */
 export function cutQuoted(fragment: string, max: number): string {
-  const chars = Array.from(fragment);
-  if (chars.length <= max) return fragment;
-  let cut = chars.slice(0, max).join('');
-  // Drop a half-written escape (`\u20`, a lone backslash) at the end.
-  cut = cut.replace(/\\(?:u[0-9a-fA-F]{0,3})?$/, '');
-  // An odd number of unescaped quotes means the cut is inside a string: close it.
-  const quotes = (cut.replace(/\\./g, '').match(/"/g) || []).length;
-  return quotes % 2 === 1 ? `${cut}${ELLIPSIS}"` : cut;
+  if (fragment.length <= max) return fragment;
+  let end = 0;
+  let quoted = false;
+  while (end < fragment.length) {
+    const c = fragment[end];
+    let size = (fragment.codePointAt(end) ?? 0) > 0xffff ? 2 : 1;
+    if (quoted && c === '\\') {
+      size = fragment[end + 1] === 'u' ? 6 : 2;
+      // Escaped astral characters are two \uXXXX sequences representing one code point.
+      if (/^\\u[dD][89aAbB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}/.test(fragment.slice(end, end + 12))) size = 12;
+    }
+    const nextQuoted: boolean = size === 1 && c === '"' ? !quoted : quoted;
+    if (end + size + (nextQuoted ? 2 : 0) > max) break;
+    end += size;
+    quoted = nextQuoted;
+  }
+  return `${fragment.slice(0, end)}${quoted ? `${ELLIPSIS}"` : ''}`;
 }
