@@ -12,6 +12,33 @@ fn bytes(raw: &str) -> Vec<u8> {
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect()
 }
+// These helpers compare results of normalization arithmetic, not stored data.
+// Inf/Inf in the 1e999 fixture has no source NaN sign to preserve. Rust permits
+// either NaN sign after arithmetic/casts; payload/quiet bits stay checked here.
+// https://doc.rust-lang.org/std/primitive.f32.html#nan-bit-patterns
+fn arithmetic_bits(value: f64) -> u64 {
+    let bits = value.to_bits();
+    if value.is_nan() {
+        bits & !(1 << 63)
+    } else {
+        bits
+    }
+}
+fn arithmetic_blob(raw: &[u8]) -> Vec<u8> {
+    assert!(raw.len().is_multiple_of(4));
+    raw.chunks_exact(4)
+        .flat_map(|part| {
+            let value = f32::from_ne_bytes(part.try_into().unwrap());
+            let bits = value.to_bits();
+            let bits = if value.is_nan() {
+                bits & !(1 << 31)
+            } else {
+                bits
+            };
+            bits.to_ne_bytes()
+        })
+        .collect()
+}
 fn record(meta: MemoryMetadata) -> Memory {
     Memory {
         id: 1,
@@ -103,16 +130,21 @@ fn real_http_python_response_shape_dimensions_coercion_and_vector_bytes_match() 
                     assert_eq!(
                         vector
                             .iter()
-                            .map(|v| format!("{:016x}", v.to_bits()))
+                            .map(|v| arithmetic_bits(*v))
                             .collect::<Vec<_>>(),
                         case["bits"]
                             .as_array()
                             .unwrap()
                             .iter()
-                            .map(|v| v.as_str().unwrap())
+                            .map(|v| arithmetic_bits(f64::from_bits(
+                                u64::from_str_radix(v.as_str().unwrap(), 16).unwrap()
+                            )))
                             .collect::<Vec<_>>()
                     );
-                    assert_eq!(pack(&vector), bytes(case["blob"].as_str().unwrap()));
+                    assert_eq!(
+                        arithmetic_blob(&pack(&vector)),
+                        arithmetic_blob(&bytes(case["blob"].as_str().unwrap()))
+                    );
                 }
             }
         }
@@ -127,6 +159,48 @@ fn real_http_python_response_shape_dimensions_coercion_and_vector_bytes_match() 
         encode_embedding_request("custom: é", "model-😀"),
         br#"{"input": "custom: \u00e9", "model": "model-\ud83d\ude00"}"#
     );
+}
+#[test]
+fn arithmetic_oracle_relaxes_only_nan_sign_and_keeps_every_other_bit() {
+    assert_eq!(
+        arithmetic_bits(f64::from_bits(0x7ff8_0000_0000_0000)),
+        arithmetic_bits(f64::from_bits(0xfff8_0000_0000_0000))
+    );
+    for bits in [0, 1, 0x3ff0_0000_0000_0000, 0x7ff0_0000_0000_0000] {
+        assert_eq!(arithmetic_bits(f64::from_bits(bits)), bits);
+        assert_eq!(
+            arithmetic_bits(f64::from_bits(bits | (1 << 63))),
+            bits | (1 << 63)
+        );
+    }
+    for payload in [1, 0x0001_0000_0000_0000] {
+        assert_ne!(
+            arithmetic_bits(f64::from_bits(0x7ff8_0000_0000_0000)),
+            arithmetic_bits(f64::from_bits(0x7ff8_0000_0000_0000 | payload))
+        );
+    }
+    assert_ne!(
+        arithmetic_bits(f64::from_bits(0x7ff8_0000_0000_0000)),
+        arithmetic_bits(f64::from_bits(0x7ff0_0000_0000_0001))
+    );
+    let blob = |bits: u32| bits.to_ne_bytes();
+    assert_eq!(
+        arithmetic_blob(&blob(0x7fc0_0000)),
+        arithmetic_blob(&blob(0xffc0_0000))
+    );
+    for bits in [0, 1, 0x3f80_0000, 0x7f80_0000] {
+        assert_eq!(arithmetic_blob(&blob(bits)), blob(bits));
+        assert_eq!(
+            arithmetic_blob(&blob(bits | (1 << 31))),
+            blob(bits | (1 << 31))
+        );
+    }
+    for bits in [0x7fc0_0001, 0x7fe0_0000, 0x7f80_0001] {
+        assert_ne!(
+            arithmetic_blob(&blob(0x7fc0_0000)),
+            arithmetic_blob(&blob(bits))
+        );
+    }
 }
 #[test]
 fn nested_replacement_and_surrogate_keys_keep_first_insertion_order() {
