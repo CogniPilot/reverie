@@ -2,11 +2,13 @@
 pub mod device_policy;
 pub mod ids;
 pub mod lease_policy;
+pub mod posix_path;
 pub mod profiles;
 pub mod resource_projection;
 pub mod resources;
 pub mod revision;
 pub mod task_perf;
+pub mod worker_schema;
 
 use std::fmt;
 

@@ -104,3 +104,35 @@ separate required work. The native source-package integration test is explicitly
 ignored by default and requires a separately built immutable artifact plus an
 independent legacy hash/inode receipt; running it qualifies readonly source
 observation only, not execution or mounted proof.
+## Worker mount source observations
+
+`worker_mounts::observe_mount_sources` borrows the captured `WorkerEnvelope` and
+performs the existing strict native source resolution, lexical control-root
+exclusions, and shared-attachment real-directory/alias checks. It preserves
+accepted source files and symlink aliases; attachments specifically require a
+real directory. Both lexical and resolved overlap checks use the same pure
+POSIX path owner. The native path conversion owner preserves arbitrary POSIX
+bytes through Python-compatible UTF-8 surrogateescape without replacement.
+The strict resolver separately preserves Python string provenance of untouched
+components and decodes only symlink targets. Native byte paths cannot recover
+that distinction. Keep `resolved_path_text()` for the legacy lexical comparisons;
+`resolved_source()` provides native lookup bytes and is not an equivalent text
+view. Resolution follows the flake Python 3.13 strict realpath behavior,
+including non-directory intermediates, cycles and long acyclic link chains.
+
+The observations are protected configuration data, not a public API response,
+mount permit, pinned inode or completed whole-worker validator. No descriptor
+remains pinned. Preserve the original source spelling for hashes/engine args,
+and reobserve under the actual admitted native-effect workflow. The existing
+validator's lexical interpretation of weak control paths (including double
+slash anchors and '..') remains explicit; these observations alone cannot
+establish control-root custody. No new source path policy or count limit is
+introduced in this compatibility unit.
+
+Fifty-eight actual Python full-validator filesystem cases cover regular and
+symlink sources, missing sources, control roots, workspace attachments and
+resolved/lexical aliases. Twenty specifically discriminate resolved string
+provenance, relative versus absolute symlink targets, strict file suffixes,
+cycles and a 100-link acyclic chain. Another 136 actual Python filesystem-byte vectors
+qualify the shared surrogateescape decoder/encoder. Only owned synthetic files
+are created. No engine call, mount, real socket or company instance data is used.

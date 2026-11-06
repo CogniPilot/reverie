@@ -159,6 +159,12 @@ and refusals; six original staging cases also retain final effective hashes.
 This feature view assumes the caller's validated worker domain; it is not the
 full worker schema validator or an authorization interface.
 
+`worker_schema::WorkerEnvelope` now checks the complete pure envelope/base and
+mount declaration unit while retaining the captured data exactly. Its separate
+feature method reuses existing map/lease policy owners. Native source custody,
+remaining optional domains and full ordered validation remain open; see the
+[source-backed ownership audit](src/worker_schema/README.md).
+
 # Subscription profiles v1 JS codec
 
 `subscription_profiles_v1` is the forwarded request and the exact response bytes of the TS route
