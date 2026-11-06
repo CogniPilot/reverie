@@ -1,12 +1,14 @@
 //! Named task-v1 artifact and projection data, never host or effect authority.
 mod config;
 mod manifest;
+mod producer;
 mod profile;
 
 pub use config::{
     TaskPerfConfiguration, TaskPerfProjection, recognize_configuration, validate_selection_marker,
 };
 pub use manifest::{PerfSystem, TaskPerfManifest};
+pub use producer::{TaskPerfProducedBytes, produce_task_perf};
 pub(crate) use profile::is_task_perf_rule;
 pub use profile::{TaskPerfArtifactData, TaskPerfProfile};
 
@@ -17,6 +19,7 @@ use std::fmt;
 
 pub const MAX_ARTIFACT_BYTES: usize = 65_536;
 pub const MARKER: &str = "_taskPerfPolicy";
+const MANIFEST_PURPOSE: &str = "worker-task-perf-profile-v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskPerfError {
