@@ -248,6 +248,7 @@ dependencies = [
  "reverie-store",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -312,6 +313,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "reverie-core",
  "serde",
  "serde_json",
 ]

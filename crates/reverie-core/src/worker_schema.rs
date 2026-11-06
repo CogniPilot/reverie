@@ -94,7 +94,7 @@ impl WorkerBase {
         &self.resources
     }
 }
-fn name(value: &str, maximum: usize, container: bool) -> bool {
+pub(crate) fn name(value: &str, maximum: usize, container: bool) -> bool {
     let alphanumeric = |b: u8| {
         b.is_ascii_digit() || b.is_ascii_lowercase() || (container && b.is_ascii_uppercase())
     };

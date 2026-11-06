@@ -65,6 +65,11 @@ pub(crate) fn decode_memory_str(raw: &[u8]) -> Result<ordered::OrderedValue, Err
 pub(crate) fn decode_embedding_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Rootless)
 }
+/// The broker's J/L request frame uses default json.loads(bytes), retaining
+/// first-key insertion order and last values. The transport bound is separate.
+pub(crate) fn decode_worker_request_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Rootless)
+}
 pub(crate) fn decode_engine_stopped(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_engine_stopped(raw)

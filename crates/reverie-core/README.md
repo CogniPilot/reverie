@@ -114,3 +114,8 @@ It preserves the double-slash anchor, '..' and Python codepoints. These values
 establish no filesystem resolution, custody or mount authority. The existing
 lease broker-parent comparison reuses this owner; source/control path policies
 remain the responsibility of their respective consumers.
+
+`worker_launch` owns the worker environment-key vocabulary, checked request text,
+cwd/terminal/account-namespace rules, derived worker/container references and
+ASCII employee hostname labels. The native client reuses the key owner without
+inheriting broker value/frame bounds. These values are data, never peer grants.

@@ -40,3 +40,7 @@ Python native-filesystem vectors cover current GPU/memory and historical memory
 without current GPU/perf. Refusal tests exercise stale profiles, custody changes
 during resolution, dual failures and inactive/legacy feature bypasses. All
 fixtures use owned synthetic files, never company instance data.
+
+`worker_launch` prepares checked request/create/tmux/account data with actual
+readonly account/hostname observations. See its [boundary and consumer
+inventory](src/worker_launch/README.md); plans are never admission/effect permits.

@@ -7,6 +7,7 @@ mod observation;
 pub mod rootless;
 pub mod task_perf;
 pub mod worker_identity;
+pub mod worker_launch;
 pub mod worker_mounts;
 pub mod worker_validation;
 
