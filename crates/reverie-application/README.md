@@ -86,3 +86,7 @@ nix develop --command env TMPDIR="$TMPDIR" \
 This only reads the immutable sources and owned synthetic company metadata.
 It never executes the peer, invokes an engine, creates a socket, mounts anything,
 changes a profile or qualifies an owner permission or live kernel effect.
+
+`worker_launch` prepares checked request/create/tmux/account data with actual
+readonly account/hostname observations. See its [boundary and consumer
+inventory](src/worker_launch/README.md); plans are never admission/effect permits.

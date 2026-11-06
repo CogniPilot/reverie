@@ -4,6 +4,11 @@ This crate observes installed artifact and current storage identity facts for
 native broker composition. It creates no service, editor, deployment command,
 owner grant, execution permit or writable configuration path.
 
+`worker_launch` resolves selected account namespace paths and observes the
+employee hostname metadata in the source order. It reads no credential contents,
+retains no directory custody and creates no mounts. Containment compares the
+shared resolver's Python path text, including surrogate provenance.
+
 `task_perf::observe_installed_task_perf` reads only the manifest bound at compile
 time by `REVERIE_FIXED_TASK_PERF_MANIFEST`. The trusted native package should
 inherit [the fixed Nix bindings](../../nix/host-artifact-bindings.nix), which derive

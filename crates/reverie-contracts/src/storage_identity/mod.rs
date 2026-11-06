@@ -113,6 +113,12 @@ pub fn decode_ordered_metadata(raw: &[u8]) -> Result<OrderedMetadata> {
         .map(OrderedMetadata)
         .map_err(decode_error)
 }
+
+impl Metadata {
+    pub(crate) fn as_value(&self) -> &Value {
+        &self.0
+    }
+}
 pub fn decode_metadata(raw: &[u8]) -> Result<Metadata> {
     legacy_json::decode_metadata_bytes(raw)
         .map(Metadata)

@@ -1,5 +1,10 @@
 # Named compatibility codecs
 
+`worker_launch` decodes default bounded broker request bytes and prepares
+lossless create/tmux/account argv data from checked upstream configuration.
+Environment insertion order and raw path spelling survive; no plan is an
+admission, mount, owner or execution grant.
+
 `memory` preserves the existing SQLite memory metadata/source fields and the
 embedding request/response data contract. The one shared private JSON parser can
 retain a flat insertion-order companion graph: last-value duplicate replacement
