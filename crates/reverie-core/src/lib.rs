@@ -8,6 +8,7 @@ pub mod memory;
 pub mod operations;
 pub mod posix_path;
 pub mod profiles;
+pub(crate) mod python_text;
 pub mod resource_projection;
 pub mod resources;
 pub mod revision;

@@ -2,7 +2,7 @@
 mod embedding;
 mod float_text;
 mod numeric;
-mod text;
+use crate::python_text as text;
 pub use embedding::{
     Embedder, EmbeddingError, EmbeddingKind, HashedEmbedder, cosine, normalize, pack, tokenize,
     unpack,

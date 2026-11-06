@@ -1,13 +1,15 @@
-#[path = "text_decimal.rs"]
+//! Shared frozen Python text facts for scalar and lossless codepoint consumers.
+//! No host/HTTP dependencies, normalization, identity or authority is supplied.
 mod decimal;
-#[path = "text_lower.rs"]
 mod lower_table;
-#[path = "text_printable.rs"]
 mod printable;
-#[path = "text_properties.rs"]
 mod tables;
+#[cfg(test)]
+mod tests;
 fn contains(ranges: &[(u32, u32)], value: char) -> bool {
-    let value = u32::from(value);
+    contains_point(ranges, u32::from(value))
+}
+fn contains_point(ranges: &[(u32, u32)], value: u32) -> bool {
     let index = ranges.partition_point(|&(start, _)| start <= value);
     index > 0 && value <= ranges[index - 1].1
 }
@@ -24,29 +26,29 @@ pub fn collapse_whitespace(text: &str) -> String {
         .join(" ")
 }
 pub(super) fn lower(text: &str) -> String {
-    let chars = text.chars().collect::<Vec<_>>();
-    let mut output = String::new();
+    lower_codepoints(&text.chars().map(u32::from).collect::<Vec<_>>())
+        .into_iter()
+        .map(|cp| char::from_u32(cp).expect("scalar lower mapping"))
+        .collect()
+}
+/// Frozen Python str.lower over lossless metadata codepoints. Lone surrogates
+/// remain unchanged, including their noncased/nonignorable context behavior.
+pub(crate) fn lower_codepoints(chars: &[u32]) -> Vec<u32> {
+    let mut output = Vec::new();
     for (index, &value) in chars.iter().enumerate() {
-        if value == 'Σ' {
+        if value == u32::from('Σ') {
             let before = chars[..index]
                 .iter()
                 .rev()
-                .find(|&&cp| !contains(tables::IGNORABLE, cp))
-                .is_some_and(|&cp| contains(tables::CASED, cp));
+                .find(|&&cp| !contains_point(tables::IGNORABLE, cp))
+                .is_some_and(|&cp| contains_point(tables::CASED, cp));
             let after = chars[index + 1..]
                 .iter()
-                .find(|&&cp| !contains(tables::IGNORABLE, cp))
-                .is_some_and(|&cp| contains(tables::CASED, cp));
-            output.push(if before && !after { 'ς' } else { 'σ' });
-        } else if let Ok(index) =
-            lower_table::LOWER.binary_search_by_key(&u32::from(value), |&(key, _)| key)
-        {
-            output.extend(
-                lower_table::LOWER[index]
-                    .1
-                    .iter()
-                    .map(|&cp| char::from_u32(cp).expect("frozen scalar mapping")),
-            );
+                .find(|&&cp| !contains_point(tables::IGNORABLE, cp))
+                .is_some_and(|&cp| contains_point(tables::CASED, cp));
+            output.push(u32::from(if before && !after { 'ς' } else { 'σ' }));
+        } else if let Ok(index) = lower_table::LOWER.binary_search_by_key(&value, |&(key, _)| key) {
+            output.extend_from_slice(lower_table::LOWER[index].1);
         } else {
             output.push(value);
         }
