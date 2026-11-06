@@ -145,6 +145,15 @@ pub struct NixReturned {
     prepared_store: Option<PathBuf>,
 }
 impl NixReturned {
+    /// Bind the actual returned resource owner, independently of reply status,
+    /// paths or SID. This observation is not admission/start authorization.
+    pub fn assert_create_plan(
+        &self,
+        runtime: &WorkerRuntime,
+        plan: &crate::worker_launch::ObservedCreatePlan,
+    ) -> std::result::Result<(), crate::worker_launch::CreateObservationError> {
+        plan.assert_storage_owner(runtime, &self.resources.storage)
+    }
     /// Exact private_store result used by the actual helper, exposed only for
     /// confirmed Prepared. This path is DATA, not a guard or effect capability.
     /// It is never reconstructed from a status or later rollback metadata.

@@ -1,6 +1,110 @@
 use super::*;
 
 #[test]
+fn stale_plan_refuses_new_same_path_owner_after_actual_successful_nix_preparation() {
+    if crate::test_process::isolate_case(
+        "worker_nix::workflow::tests::retained::stale_plan_refuses_new_same_path_owner_after_actual_successful_nix_preparation",
+    ) {
+        return;
+    }
+    for employee in [false, true] {
+        check_same_path_reacquisition(employee);
+    }
+}
+fn acquire_storage(
+    runtime: &WorkerRuntime,
+    source: &EffectiveWorkerConfig,
+    employee: bool,
+) -> LaunchStorage {
+    let selected = runtime
+        .resolve_storage(source, &ProfileSessionId::parse(SID).unwrap())
+        .unwrap();
+    if employee {
+        selected.acquire().unwrap()
+    } else {
+        selected.into_legacy().unwrap()
+    }
+}
+fn check_same_path_reacquisition(employee: bool) {
+    let tree = Tree::new();
+    if employee {
+        fs::write(tree.root.join("company.json"), serde_json::to_vec(&json!({"employees":[{
+            "id":"11111111-2222-4333-8444-555555555555","sessionId":SID,"owner":null,"desiredRunning":true
+        }]})).unwrap()).unwrap();
+    }
+    let runtime = tree.runtime("success", Hooks::default());
+    let mut raw: serde_json::Value = serde_json::from_slice(
+        &reverie_contracts::worker_config::encode_config(&tree.source('a')),
+    )
+    .unwrap();
+    raw["apiSocketRoot"] = json!(tree.root.join("api"));
+    raw["companyRoot"] = json!(tree.root.join("company"));
+    let source =
+        reverie_contracts::worker_config::decode(&serde_json::to_vec(&raw).unwrap()).unwrap();
+    let sid = ProfileSessionId::parse(SID).unwrap();
+    let mut a = acquire_storage(&runtime, &source, employee);
+    a.prepare_storage().unwrap();
+    a.record_storage_binding().unwrap();
+    let plan_a = runtime
+        .prepare_laptop_plan(source.clone(), source.clone(), &a)
+        .unwrap();
+    let original = a.paths().clone();
+    plan_a.assert_storage_owner(&runtime, &a).unwrap();
+    a.close(end()).unwrap();
+    let b = acquire_storage(&runtime, &source, employee);
+    let plan_b = runtime
+        .prepare_laptop_plan(source.clone(), source.clone(), &b)
+        .unwrap();
+    let same_paths = b.paths() == &original;
+    let guard = NixStoreGuard::acquire_launch(&source, &sid).unwrap();
+    let workflow = runtime
+        .retain_nix_store(guard, b, source)
+        .unwrap_or_else(|_| panic!("retain real owner B"));
+    let progress = runtime.run_nix_store(&workflow).unwrap();
+    let capsule = runtime
+        .reclaim_nix_store(workflow)
+        .unwrap_or_else(|_| panic!("settled actual helper"));
+    let stale = capsule.assert_create_plan(&runtime, &plan_a);
+    let current = capsule.assert_create_plan(&runtime, &plan_b);
+    let (guard, owner, outcome) = capsule.into_parts();
+    let consumed_refused = if employee {
+        native::test_faults::set(None, true);
+        let (owner, _) = owner.close(end()).unwrap_err().into_parts();
+        let refused = plan_b.assert_storage_owner(&runtime, &owner);
+        guard.close().unwrap();
+        matches!(
+            refused,
+            Err(crate::worker_launch::CreateObservationError::Owner(
+                crate::worker_storage::StorageOwnerError::Refused(
+                    "WORKER_STORAGE_CLOSE_UNCONFIRMED"
+                )
+            ))
+        )
+    } else {
+        close_resources(guard, owner);
+        true
+    };
+    runtime.close(end()).unwrap();
+    assert!(same_paths);
+    assert_eq!(progress, NixProgress::Prepared);
+    assert_eq!(outcome.unwrap(), NixDisposition::Prepared);
+    assert!(matches!(
+        stale,
+        Err(crate::worker_launch::CreateObservationError::StorageOwner)
+    ));
+    assert!(current.is_ok());
+    assert!(
+        consumed_refused,
+        "the same token cannot revive a consumed-unconfirmed owner"
+    );
+    assert_eq!(
+        count(&tree, "create"),
+        1,
+        "only the real Nix helper was created"
+    );
+}
+
+#[test]
 fn unknown_create_and_failed_remove_keep_actual_guards_and_never_replay_effects() {
     for mode in ["unknown-create", "rm-failure"] {
         let tree = Tree::new();

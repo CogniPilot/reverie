@@ -25,6 +25,7 @@ pub enum CreateObservationError {
     Host(LaunchHostError),
     Identity(storage_identity::IdentityError),
     Owner(StorageOwnerError),
+    StorageOwner,
     StorageSession,
 }
 impl std::fmt::Display for CreateObservationError {
@@ -36,6 +37,7 @@ impl std::fmt::Display for CreateObservationError {
             Self::Host(_) => "LAUNCH_HOST",
             Self::Identity(_) => "LAUNCH_IDENTITY",
             Self::Owner(_) => "LAUNCH_OWNER",
+            Self::StorageOwner => "LAUNCH_STORAGE_OWNER_CHANGED",
             Self::StorageSession => "LAUNCH_STORAGE_SESSION",
         })
     }
@@ -49,7 +51,7 @@ impl std::error::Error for CreateObservationError {
             Self::Host(e) => Some(e),
             Self::Identity(e) => Some(e),
             Self::Owner(e) => Some(e),
-            Self::StorageSession => None,
+            Self::StorageSession | Self::StorageOwner => None,
         }
     }
 }
@@ -90,6 +92,7 @@ type Result<T> = std::result::Result<T, CreateObservationError>;
 /// Same-origin provenance is NOT owner authorization or permission to start.
 pub struct ObservedCreatePlan {
     origin: Arc<InstalledWorkerEngine>,
+    storage_owner: Arc<()>,
     source: EffectiveWorkerConfig,
     effective: EffectiveWorkerConfig,
     session: ProfileSessionId,
@@ -97,6 +100,21 @@ pub struct ObservedCreatePlan {
     arguments: CreateArguments,
 }
 impl ObservedCreatePlan {
+    /// Pure same-owner provenance, not filesystem freshness or launch approval.
+    /// Paths/SID and a successful later Nix result cannot reconstruct this
+    /// identity. A consumed-unconfirmed owner still refuses independently.
+    pub fn assert_storage_owner(
+        &self,
+        runtime: &WorkerRuntime,
+        storage: &LaunchStorage,
+    ) -> Result<()> {
+        storage.assert_binding(runtime, &self.source, &self.session)?;
+        storage.assert_binding(runtime, &self.effective, &self.session)?;
+        if !Arc::ptr_eq(&self.storage_owner, storage.owner_identity()) {
+            return Err(CreateObservationError::StorageOwner);
+        }
+        Ok(())
+    }
     pub fn same_runtime(&self, runtime: &WorkerRuntime) -> bool {
         Arc::ptr_eq(&self.origin, runtime.installed_engine())
     }
@@ -132,6 +150,7 @@ impl WorkerRuntime {
         let arguments = observe_create_arguments(&effective, session, storage.paths())?;
         Ok(ObservedCreatePlan {
             origin: self.installed_engine().clone(),
+            storage_owner: storage.owner_identity().clone(),
             source,
             effective,
             session: session.clone(),
