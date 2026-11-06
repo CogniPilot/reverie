@@ -6,11 +6,24 @@
 import { statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { envValue } from '../config/reverie-env.js';
-import { SUBSCRIPTION_PROFILES } from './frames.js';
+import { ApiErrorCode, httpStatusForErrorCode } from '../types/api.js';
+import { SETTINGS, SUBSCRIPTION_PROFILES, type Media } from './frames.js';
+
+/** 200, 400, 500 and every status the error-code table maps to, ascending. */
+function settingsStatuses(): number[] {
+  const statuses = new Set([200, 400, 500, ...Object.values(ApiErrorCode).map(httpStatusForErrorCode)]);
+  return [...statuses].sort((a, b) => a - b);
+}
 
 /** Statuses each route's handler may answer with; mirrors `route_frames_v1::ROUTES`. */
 export const ROUTE_STATUSES: Record<string, readonly number[]> = {
   [SUBSCRIPTION_PROFILES]: [200, 500],
+  [SETTINGS]: settingsStatuses(),
+};
+
+/** The routes answered with typed responses and their media; mirrors `route_frames_v1::Reply::Typed`. */
+export const ROUTE_MEDIA: Record<string, readonly Media[]> = {
+  [SETTINGS]: [1, 2],
 };
 
 export interface RustRoutes {

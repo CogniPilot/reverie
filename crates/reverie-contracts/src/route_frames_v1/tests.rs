@@ -25,11 +25,13 @@ fn kind_lengths_are_the_spec_table() {
             (19, 82),
             (18, 18),
             (21, 22),
-            (20, 65555)
+            (20, 65555),
+            (21, 8388629)
         ]
     );
     assert_eq!(Direction::ToHandler.max_length(), 65619);
-    assert_eq!(Direction::ToFront.max_length(), 8388628);
+    // The typed response's media byte is the only growth.
+    assert_eq!(Direction::ToFront.max_length(), 8388629);
 }
 
 #[test]
@@ -94,6 +96,11 @@ fn every_kind_round_trips_through_its_reader() {
             observation: Observation::SubscriptionModes,
             json: b"{}".to_vec(),
         },
+        Body::TypedResponse {
+            media: Media::TextPlainUtf8,
+            status: 200,
+            body: b"hello".to_vec(),
+        },
     ];
     for body in frames {
         let frame = Frame {
@@ -125,4 +132,27 @@ fn encode_refuses_what_a_reader_refuses() {
         body: Body::Cancel,
     };
     assert_eq!(frame.encode(), Err(FrameError::Identity));
+}
+
+#[test]
+fn a_typed_response_names_one_of_the_finite_media() {
+    for byte in [0u8, 3, 255] {
+        let mut wire = (HEADER_BYTES as u32 + 3).to_be_bytes().to_vec();
+        wire.extend_from_slice(&[VERSION, Kind::TypedResponse.byte()]);
+        wire.extend_from_slice(&1u64.to_be_bytes());
+        wire.extend_from_slice(&1u64.to_be_bytes());
+        wire.extend_from_slice(&[byte, 0, 200]);
+        assert_eq!(
+            read_frame(&mut wire.as_slice(), Direction::ToFront),
+            Err(FrameError::Payload),
+            "media {byte}"
+        );
+    }
+    for media in MEDIA {
+        assert_eq!(Media::from_byte(media.byte()), Some(media));
+    }
+    assert_eq!(
+        Media::ApplicationJsonUtf8.content_type(),
+        profiles::CONTENT_TYPE
+    );
 }
