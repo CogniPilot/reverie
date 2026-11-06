@@ -306,3 +306,11 @@ has no argv/reply-data constructor. Mutable image/resources are not frozen into
 the bootstrap identity. This observation still grants no API/admission/start
 permission; real moved resource owners and supervised lifecycle results remain
 necessary. The compatibility argument API delegates the same observation owner.
+
+Each actual `LaunchStorage` also has a private per-acquisition identity, minted
+only after successful lease acquisition or genuine service legacy resolution.
+The observed plan retains that identity across moves and Nix preparation; a
+new owner at the same paths/SID cannot satisfy it. `NixReturned` compares its
+actual owner independently of status/path DATA. A consumed-unconfirmed owner
+still refuses even with a matching identity. These are provenance checks, not
+filesystem freshness, admission or permission to launch.

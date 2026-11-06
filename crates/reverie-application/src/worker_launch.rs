@@ -21,6 +21,7 @@ pub enum LaunchPreparationError {
     Gpu(device_policy::DevicePolicyHostError),
     Identity(IdentityError),
     Owner(reverie_host::worker_storage::StorageOwnerError),
+    StorageOwner,
     StorageSession,
 }
 impl std::fmt::Display for LaunchPreparationError {
@@ -33,6 +34,7 @@ impl std::fmt::Display for LaunchPreparationError {
             Self::Gpu(_) => "LAUNCH_GPU",
             Self::Identity(_) => "LAUNCH_IDENTITY",
             Self::Owner(_) => "LAUNCH_OWNER",
+            Self::StorageOwner => "LAUNCH_STORAGE_OWNER_CHANGED",
             Self::StorageSession => "LAUNCH_STORAGE_SESSION",
         })
     }
@@ -47,7 +49,7 @@ impl std::error::Error for LaunchPreparationError {
             Self::Gpu(e) => Some(e),
             Self::Identity(e) => Some(e),
             Self::Owner(e) => Some(e),
-            Self::StorageSession => None,
+            Self::StorageSession | Self::StorageOwner => None,
         }
     }
 }
@@ -85,6 +87,7 @@ impl From<host::CreateObservationError> for LaunchPreparationError {
             host::CreateObservationError::Host(e) => Self::Host(e),
             host::CreateObservationError::Identity(e) => Self::Identity(e),
             host::CreateObservationError::Owner(e) => Self::Owner(e),
+            host::CreateObservationError::StorageOwner => Self::StorageOwner,
             host::CreateObservationError::StorageSession => Self::StorageSession,
         }
     }

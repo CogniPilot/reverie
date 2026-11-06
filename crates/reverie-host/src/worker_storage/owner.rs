@@ -117,6 +117,7 @@ impl StorageSelection {
             ));
         }
         Ok(LaunchStorage {
+            identity: Arc::new(()),
             engine: self.engine,
             source: self.source,
             namespace: self.namespace,
@@ -135,6 +136,7 @@ impl StorageSelection {
         }
         match StorageLease::acquire_launch(&self.source, self.paths.session()) {
             Ok(lease) => Ok(LaunchStorage {
+                identity: Arc::new(()),
                 paths: lease.paths().clone(),
                 engine: self.engine,
                 source: self.source,
@@ -192,6 +194,9 @@ pub enum StorageOwnershipKind {
 /// Move-only lifetime resources, never a native launch/authorization permit.
 /// A genuine legacy result owns paths DATA and no fabricated no-op lease.
 pub struct LaunchStorage {
+    // Minted only by actual legacy resolution or successful lease acquisition.
+    // Moves retain it; a new owner at identical paths receives a new identity.
+    identity: Arc<()>,
     engine: Arc<InstalledWorkerEngine>,
     source: EffectiveWorkerConfig,
     namespace: Namespace,
@@ -199,6 +204,9 @@ pub struct LaunchStorage {
     ownership: Ownership,
 }
 impl LaunchStorage {
+    pub(crate) fn owner_identity(&self) -> &Arc<()> {
+        &self.identity
+    }
     pub fn paths(&self) -> &StoragePaths {
         &self.paths
     }
