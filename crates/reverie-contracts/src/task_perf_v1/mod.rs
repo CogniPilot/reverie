@@ -100,5 +100,5 @@ fn bounded_json(raw: &[u8]) -> Result<Value> {
     if raw.len() > MAX_ARTIFACT_BYTES {
         return Err(TaskPerfError::ArtifactBound);
     }
-    Ok(legacy_json::decode_bytes(raw)?)
+    Ok(legacy_json::decode_metadata_bytes(raw)?)
 }

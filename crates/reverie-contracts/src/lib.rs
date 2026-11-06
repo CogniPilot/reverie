@@ -7,6 +7,7 @@ mod legacy_json;
 pub mod profiles_v1;
 pub mod resource_config;
 pub mod storage_identity;
+pub mod subscription_profiles_v1;
 pub mod task_perf_v1;
 pub mod worker_config;
 pub mod worker_schema;

@@ -1,0 +1,348 @@
+{
+ "modes": {
+  "anthropic": [
+   "claude"
+  ],
+  "openai": [
+   "opencode",
+   "codex"
+  ]
+ },
+ "cases": {
+  "file-empty-array": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[]}}"
+  },
+  "file-one": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p0\",\"label\":\"Plan 0\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-pretty-written-form": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p0\",\"label\":\"Plan 0\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p1\",\"label\":\"Plan 1\",\"provider\":\"openai\",\"configDir\":\"/accounts/p1\",\"openCodeDataDir\":\"/accounts/p1/opencode-data\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "file-32": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p0\",\"label\":\"Plan 0\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p1\",\"label\":\"Plan 1\",\"provider\":\"openai\",\"configDir\":\"/accounts/p1\",\"openCodeDataDir\":\"/accounts/p1/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p2\",\"label\":\"Plan 2\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p2\",\"openCodeDataDir\":\"/accounts/p2/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p3\",\"label\":\"Plan 3\",\"provider\":\"openai\",\"configDir\":\"/accounts/p3\",\"openCodeDataDir\":\"/accounts/p3/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p4\",\"label\":\"Plan 4\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p4\",\"openCodeDataDir\":\"/accounts/p4/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p5\",\"label\":\"Plan 5\",\"provider\":\"openai\",\"configDir\":\"/accounts/p5\",\"openCodeDataDir\":\"/accounts/p5/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p6\",\"label\":\"Plan 6\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p6\",\"openCodeDataDir\":\"/accounts/p6/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p7\",\"label\":\"Plan 7\",\"provider\":\"openai\",\"configDir\":\"/accounts/p7\",\"openCodeDataDir\":\"/accounts/p7/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p8\",\"label\":\"Plan 8\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p8\",\"openCodeDataDir\":\"/accounts/p8/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p9\",\"label\":\"Plan 9\",\"provider\":\"openai\",\"configDir\":\"/accounts/p9\",\"openCodeDataDir\":\"/accounts/p9/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p10\",\"label\":\"Plan 10\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p10\",\"openCodeDataDir\":\"/accounts/p10/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p11\",\"label\":\"Plan 11\",\"provider\":\"openai\",\"configDir\":\"/accounts/p11\",\"openCodeDataDir\":\"/accounts/p11/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p12\",\"label\":\"Plan 12\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p12\",\"openCodeDataDir\":\"/accounts/p12/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p13\",\"label\":\"Plan 13\",\"provider\":\"openai\",\"configDir\":\"/accounts/p13\",\"openCodeDataDir\":\"/accounts/p13/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p14\",\"label\":\"Plan 14\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p14\",\"openCodeDataDir\":\"/accounts/p14/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p15\",\"label\":\"Plan 15\",\"provider\":\"openai\",\"configDir\":\"/accounts/p15\",\"openCodeDataDir\":\"/accounts/p15/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p16\",\"label\":\"Plan 16\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p16\",\"openCodeDataDir\":\"/accounts/p16/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p17\",\"label\":\"Plan 17\",\"provider\":\"openai\",\"configDir\":\"/accounts/p17\",\"openCodeDataDir\":\"/accounts/p17/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p18\",\"label\":\"Plan 18\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p18\",\"openCodeDataDir\":\"/accounts/p18/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p19\",\"label\":\"Plan 19\",\"provider\":\"openai\",\"configDir\":\"/accounts/p19\",\"openCodeDataDir\":\"/accounts/p19/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p20\",\"label\":\"Plan 20\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p20\",\"openCodeDataDir\":\"/accounts/p20/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p21\",\"label\":\"Plan 21\",\"provider\":\"openai\",\"configDir\":\"/accounts/p21\",\"openCodeDataDir\":\"/accounts/p21/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p22\",\"label\":\"Plan 22\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p22\",\"openCodeDataDir\":\"/accounts/p22/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p23\",\"label\":\"Plan 23\",\"provider\":\"openai\",\"configDir\":\"/accounts/p23\",\"openCodeDataDir\":\"/accounts/p23/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p24\",\"label\":\"Plan 24\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p24\",\"openCodeDataDir\":\"/accounts/p24/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p25\",\"label\":\"Plan 25\",\"provider\":\"openai\",\"configDir\":\"/accounts/p25\",\"openCodeDataDir\":\"/accounts/p25/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p26\",\"label\":\"Plan 26\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p26\",\"openCodeDataDir\":\"/accounts/p26/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p27\",\"label\":\"Plan 27\",\"provider\":\"openai\",\"configDir\":\"/accounts/p27\",\"openCodeDataDir\":\"/accounts/p27/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p28\",\"label\":\"Plan 28\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p28\",\"openCodeDataDir\":\"/accounts/p28/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p29\",\"label\":\"Plan 29\",\"provider\":\"openai\",\"configDir\":\"/accounts/p29\",\"openCodeDataDir\":\"/accounts/p29/opencode-data\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"p30\",\"label\":\"Plan 30\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p30\",\"openCodeDataDir\":\"/accounts/p30/opencode-data\",\"modes\":[\"claude\"]},{\"id\":\"p31\",\"label\":\"Plan 31\",\"provider\":\"openai\",\"configDir\":\"/accounts/p31\",\"openCodeDataDir\":\"/accounts/p31/opencode-data\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "file-33": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-duplicate-id": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-duplicate-key-last-wins": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"dup\",\"label\":\"Last\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-duplicate-key-last-loses": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-reversed-key-order": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"rev\",\"label\":\"Rev\",\"provider\":\"openai\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "file-label-trimmed": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p0\",\"label\":\"Padded\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-label-all-space": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-label-zero-width-kept": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p0\",\"label\":\"​᠎X​\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-label-64-units-astral": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p0\",\"label\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-label-65-units-astral": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-label-escapes": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"esc\",\"label\":\"q\\\"b\\\\s/c\\u0001\\u001f\\b\\f\\n\\r\\tx é\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-label-lone-surrogates": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"sur\",\"label\":\"a\\ud800b\\udfffc\\udbff\",\"provider\":\"anthropic\",\"configDir\":\"/a\\udc00\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-bom": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-invalid-utf8-label": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"bad\",\"label\":\"a��(�z\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-invalid-utf8-outside-string": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-extra-key": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-proto-key": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p\",\"label\":\"L\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-missing-key": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-relative-config-dir": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-windows-drive-config-dir": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-empty-config-dir": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-bad-provider": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-id-uppercase": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-id-64": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"Plan 0\",\"provider\":\"anthropic\",\"configDir\":\"/accounts/p0\",\"openCodeDataDir\":\"/accounts/p0/opencode-data\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-id-65": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-id-trailing-newline": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-label-number": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-element-array": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-element-null": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-top-object": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-top-null": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-empty": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-whitespace-tokens": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"w\",\"label\":\"W\",\"provider\":\"openai\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "file-nbsp-between-tokens": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-trailing-comma": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-comment": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-trailing-garbage": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-raw-control-in-string": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-bad-escape": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-numbers-skipped": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"n\",\"label\":\"N\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-bad-number": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-deep-skipped-value": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"deep\",\"label\":\"D\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-literals-skipped": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"lit\",\"label\":\"T\",\"provider\":\"anthropic\",\"configDir\":\"/a\",\"openCodeDataDir\":\"/b\",\"modes\":[\"claude\"]}]}}"
+  },
+  "file-bad-literal": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-is-directory": {
+   "status": 500,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":false,\"error\":\"Subscription profile file is invalid; it has not been changed\",\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  "file-symlink-to-valid": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"p3\",\"label\":\"Plan 3\",\"provider\":\"openai\",\"configDir\":\"/accounts/p3\",\"openCodeDataDir\":\"/accounts/p3/opencode-data\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "file-dangling-symlink": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[]}}"
+  },
+  "enoent-no-logins": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[]}}"
+  },
+  "enoent-empty-default-dirs": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[]}}"
+  },
+  "enoent-both-defaults": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-zero-byte-credential": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-credential-is-directory": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-credential-symlink": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]}]}}"
+  },
+  "enoent-env-dirs": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/custom-claude//\",\"openCodeDataDir\":\"<ROOT>/xdg\",\"modes\":[\"claude\"]},{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/custom-codex\",\"openCodeDataDir\":\"<ROOT>/xdg\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-env-empty-is-unset": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-env-relative": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"rel/claude\",\"openCodeDataDir\":\"rel-xdg\",\"modes\":[\"claude\"]},{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"./rel/../rel/codex\",\"openCodeDataDir\":\"rel-xdg\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-accounts": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-anthropic--dash\",\"label\":\"-dash\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/-dash\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-work\",\"label\":\"Work\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/Work\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-zed\",\"label\":\"Zed\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/Zed\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-_under\",\"label\":\"_under\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/_under\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-a-b_c-d\",\"label\":\"a.b_c-d\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/a.b_c-d\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"label\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-openai-alias\",\"label\":\"alias\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/alias\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-accounts-only": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"acct-anthropic-one\",\"label\":\"one\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/one\",\"openCodeDataDir\":\"<ROOT>/xdg\",\"modes\":[\"claude\"]},{\"id\":\"acct-openai-two\",\"label\":\"two\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/two\",\"openCodeDataDir\":\"<ROOT>/xdg\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-accounts-relative-xdg": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude\",\"openCodeDataDir\":\"rel-xdg\",\"modes\":[\"claude\"]}]}}"
+  },
+  "enoent-accounts-dir-is-file": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"acct-openai-two\",\"label\":\"two\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/two\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-account-symlink-to-default-env-dir": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/custom\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]}]}}"
+  },
+  "enoent-discovered-id-collision": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"acct-anthropic-a-b\",\"label\":\"a-b\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/a-b\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-a-b\",\"label\":\"a.b\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/a.b\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-openai-a-b\",\"label\":\"a.b\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/a.b\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  },
+  "enoent-discovered-over-32": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"success\":true,\"data\":{\"profiles\":[{\"id\":\"anthropic-default\",\"label\":\"Default Claude\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"openai-default\",\"label\":\"Default Codex\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-anthropic-acct00\",\"label\":\"acct00\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct00\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct01\",\"label\":\"acct01\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct01\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct02\",\"label\":\"acct02\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct02\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct03\",\"label\":\"acct03\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct03\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct04\",\"label\":\"acct04\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct04\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct05\",\"label\":\"acct05\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct05\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct06\",\"label\":\"acct06\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct06\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct07\",\"label\":\"acct07\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct07\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct08\",\"label\":\"acct08\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct08\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct09\",\"label\":\"acct09\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct09\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct10\",\"label\":\"acct10\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct10\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct11\",\"label\":\"acct11\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct11\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct12\",\"label\":\"acct12\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct12\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct13\",\"label\":\"acct13\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct13\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct14\",\"label\":\"acct14\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct14\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct15\",\"label\":\"acct15\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct15\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct16\",\"label\":\"acct16\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct16\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct17\",\"label\":\"acct17\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct17\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct18\",\"label\":\"acct18\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct18\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct19\",\"label\":\"acct19\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct19\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct20\",\"label\":\"acct20\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct20\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct21\",\"label\":\"acct21\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct21\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct22\",\"label\":\"acct22\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct22\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-anthropic-acct23\",\"label\":\"acct23\",\"provider\":\"anthropic\",\"configDir\":\"<ROOT>/home/.claude-accounts/acct23\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"claude\"]},{\"id\":\"acct-openai-team00\",\"label\":\"team00\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team00\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team01\",\"label\":\"team01\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team01\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team02\",\"label\":\"team02\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team02\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team03\",\"label\":\"team03\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team03\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team04\",\"label\":\"team04\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team04\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team05\",\"label\":\"team05\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team05\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team06\",\"label\":\"team06\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team06\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team07\",\"label\":\"team07\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team07\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team08\",\"label\":\"team08\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team08\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team09\",\"label\":\"team09\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team09\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team10\",\"label\":\"team10\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team10\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team11\",\"label\":\"team11\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team11\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team12\",\"label\":\"team12\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team12\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team13\",\"label\":\"team13\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team13\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team14\",\"label\":\"team14\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team14\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]},{\"id\":\"acct-openai-team15\",\"label\":\"team15\",\"provider\":\"openai\",\"configDir\":\"<ROOT>/home/.codex-accounts/team15\",\"openCodeDataDir\":\"<ROOT>/home/.local/share\",\"modes\":[\"opencode\",\"codex\"]}]}}"
+  }
+ }
+}

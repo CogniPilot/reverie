@@ -36,6 +36,10 @@ let
       cp ${consoleFixture "tests/__init__.py"} test/fixtures/goal-source/tests/__init__.py
       cp ${consoleFixture "tests/goal_private_fixture.py"} test/fixtures/goal-source/tests/goal_private_fixture.py
       cp ${consoleFixture "tests/goal_broker_fixture.py"} test/fixtures/goal-source/tests/goal_broker_fixture.py
+      # The Rust handler's TS byte goldens live with its crate.
+      mkdir -p test/fixtures/subscription-profiles
+      cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
+      cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/goldens.json"} test/fixtures/subscription-profiles/goldens.json
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
@@ -127,6 +131,7 @@ let
         test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts \
         test/github-watches-ui.test.ts test/office-footer-panel.test.ts
       npm test -- test/chat-reply-releases-hold.test.ts
+      npm test -- test/routes/subscription-profiles-rust-goldens.test.ts
       npm test -- test/board-permissions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
@@ -161,6 +166,7 @@ let
         test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/routes/session-input-delivery.test.ts \
         test/input-send-order.test.ts test/reliable-input-dedup.test.ts test/input-size-limit.test.ts test/chatroom-archived-reply.test.ts \
         test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
+      npm test -- test/case-removal.test.ts test/routes/case-delete-guard.test.ts
       # Every other gate file; test/test-suite-partition.test.ts fails on a gate file that is in neither
       # an npm test line here nor NIX_UNCHECKED_TESTS (config/test-suites.ts).
       npm test -- test/admin-routes.test.ts test/admin-ui.test.ts test/agent-case-marker.test.ts test/agent-memory-brief-route-class.test.ts \
