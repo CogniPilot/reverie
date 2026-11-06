@@ -1,12 +1,11 @@
 //! The handler's frame state machine, in process and through the real `reverie-route-handler` binary.
 use reverie_contracts::route_frames_v1::{
-    Body, Direction, Frame, Observation, SUBSCRIPTION_PROFILES, read_frame,
+    Body, Direction, Frame, SUBSCRIPTION_PROFILES, read_frame,
 };
-use reverie_contracts::subscription_profiles_v1::Provider;
-use reverie_routes::channel::{CANCELED, Fatal, UNKNOWN_ROUTE, serve};
+use reverie_routes::channel::{Fatal, UNKNOWN_ROUTE, serve};
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -28,16 +27,6 @@ fn request(id: u64, json: &Value) -> Vec<u8> {
         Body::Request {
             route: SUBSCRIPTION_PROFILES.to_string(),
             json: serde_json::to_vec(json).expect("request JSON"),
-        },
-    )
-}
-
-fn observed(id: u64, json: &[u8]) -> Vec<u8> {
-    frame(
-        id,
-        Body::Observed {
-            observation: Observation::SubscriptionModes,
-            json: json.to_vec(),
         },
     )
 }
@@ -68,39 +57,6 @@ fn refusal(id: u64, code: &str) -> Frame {
         },
     }
 }
-
-/// A root this test created; an existing name is never adopted.
-fn temp_root(label: &str) -> PathBuf {
-    for attempt in 0..100 {
-        let root = std::env::temp_dir().join(format!(
-            "route-channel-{}-{label}-{attempt}",
-            std::process::id()
-        ));
-        match fs::create_dir(&root) {
-            Ok(()) => {
-                fs::create_dir(root.join("home")).expect("home");
-                fs::create_dir(root.join("data")).expect("data");
-                return root;
-            }
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-            Err(error) => panic!("temp root: {error}"),
-        }
-    }
-    panic!("no unused temp root name");
-}
-
-fn profiles_request(root: &Path) -> Value {
-    let root = root.to_str().expect("UTF-8 temp root");
-    json!({
-        "env": {},
-        "home": format!("{root}/home"),
-        "cwd": root,
-        "platform": std::env::consts::OS,
-        "dataDir": format!("{root}/data"),
-    })
-}
-
-const ONE_PROFILE: &str = r#"[{"id": "p0", "label": "Plan 0", "provider": "anthropic", "configDir": "/accounts/p0", "openCodeDataDir": "/accounts/p0/opencode-data"}]"#;
 
 #[test]
 fn end_of_input_while_idle_is_clean() {
@@ -141,66 +97,142 @@ fn idle_accepts_only_the_next_request_or_a_late_cancel() {
     );
 }
 
+/// The handler serves only a posix TS front, and only on a unix host; anything else is refused by
+/// platform before any file is read.
 #[test]
-fn no_profiles_is_answered_without_an_observation() {
-    let root = temp_root("none");
-    let (outcome, frames) = run(&[request(1, &profiles_request(&root))]);
-    fs::remove_dir_all(&root).expect("cleanup");
-    assert_eq!(outcome, Ok(()));
+fn a_front_it_cannot_serve_is_refused_by_platform() {
+    fn front(platform: &str) -> Value {
+        json!({"env": {}, "home": "/h", "cwd": "/", "platform": platform, "dataDir": "/d"})
+    }
     assert_eq!(
-        frames,
-        [Frame {
-            generation: GENERATION,
-            id: 1,
-            body: Body::Response {
-                status: 200,
-                body: br#"{"success":true,"data":{"profiles":[]}}"#.to_vec(),
-            },
-        }]
+        run(&[request(1, &front("win32"))]),
+        (Ok(()), vec![refusal(1, "PLATFORM")])
     );
+    if !cfg!(unix) {
+        assert_eq!(
+            run(&[request(1, &front("linux"))]),
+            (Ok(()), vec![refusal(1, "PLATFORM")])
+        );
+    }
 }
 
-#[test]
-fn profiles_ask_for_their_providers_modes_then_answer_once() {
-    let root = temp_root("one");
-    fs::write(root.join("data/subscription-profiles.json"), ONE_PROFILE).expect("profiles");
-    let ask = Frame {
-        generation: GENERATION,
-        id: 1,
-        body: Body::Observe {
-            observation: Observation::SubscriptionModes,
-            providers: vec![Provider::Anthropic],
-        },
-    };
-    let read = request(1, &profiles_request(&root));
-    let answered = run(&[read.clone(), observed(1, br#"{"anthropic":["claude"]}"#)]);
-    let canceled = run(&[read.clone(), frame(1, Body::Cancel)]);
-    let malformed = run(&[read.clone(), observed(1, br#"{"openai":[]}"#)]);
-    let abandoned = run(std::slice::from_ref(&read));
-    let interrupted = run(&[read, request(2, &json!({}))]);
-    fs::remove_dir_all(&root).expect("cleanup");
+/// Reading profiles needs a unix host, since the handler refuses every front elsewhere; these tests
+/// run there against a real temporary data directory.
+#[cfg(unix)]
+mod posix {
+    use super::{GENERATION, frame, refusal, request, run};
+    use reverie_contracts::route_frames_v1::{Body, Frame, Observation};
+    use reverie_contracts::subscription_profiles_v1::Provider;
+    use reverie_routes::channel::{CANCELED, Fatal};
+    use serde_json::{Value, json};
+    use std::fs;
+    use std::io::ErrorKind;
+    use std::path::{Path, PathBuf};
 
-    let (outcome, frames) = answered;
-    assert_eq!(outcome, Ok(()));
-    assert_eq!(frames[0], ask);
-    let Body::Response { status, body } = &frames[1].body else {
-        panic!("expected a response, got {:?}", frames[1]);
-    };
-    assert_eq!(*status, 200);
-    assert!(
-        String::from_utf8_lossy(body).contains(r#""modes":["claude"]"#),
-        "{}",
-        String::from_utf8_lossy(body)
-    );
-    assert_eq!(frames.len(), 2);
+    fn observed(id: u64, json: &[u8]) -> Vec<u8> {
+        frame(
+            id,
+            Body::Observed {
+                observation: Observation::SubscriptionModes,
+                json: json.to_vec(),
+            },
+        )
+    }
 
-    assert_eq!(canceled, (Ok(()), vec![ask.clone(), refusal(1, CANCELED)]));
-    assert_eq!(
-        malformed,
-        (Ok(()), vec![ask.clone(), refusal(1, "OBSERVATION_SCHEMA")])
-    );
-    assert_eq!(abandoned, (Err(Fatal::Abandoned), vec![ask.clone()]));
-    assert_eq!(interrupted, (Err(Fatal::Sequence), vec![ask]));
+    /// A root this test created; an existing name is never adopted.
+    fn temp_root(label: &str) -> PathBuf {
+        for attempt in 0..100 {
+            let root = std::env::temp_dir().join(format!(
+                "route-channel-{}-{label}-{attempt}",
+                std::process::id()
+            ));
+            match fs::create_dir(&root) {
+                Ok(()) => {
+                    fs::create_dir(root.join("home")).expect("home");
+                    fs::create_dir(root.join("data")).expect("data");
+                    return root;
+                }
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("temp root: {error}"),
+            }
+        }
+        panic!("no unused temp root name");
+    }
+
+    fn profiles_request(root: &Path) -> Value {
+        let root = root.to_str().expect("UTF-8 temp root");
+        json!({
+            "env": {},
+            "home": format!("{root}/home"),
+            "cwd": root,
+            "platform": "linux",
+            "dataDir": format!("{root}/data"),
+        })
+    }
+
+    const ONE_PROFILE: &str = r#"[{"id": "p0", "label": "Plan 0", "provider": "anthropic", "configDir": "/accounts/p0", "openCodeDataDir": "/accounts/p0/opencode-data"}]"#;
+
+    #[test]
+    fn no_profiles_is_answered_without_an_observation() {
+        let root = temp_root("none");
+        let (outcome, frames) = run(&[request(1, &profiles_request(&root))]);
+        fs::remove_dir_all(&root).expect("cleanup");
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(
+            frames,
+            [Frame {
+                generation: GENERATION,
+                id: 1,
+                body: Body::Response {
+                    status: 200,
+                    body: br#"{"success":true,"data":{"profiles":[]}}"#.to_vec(),
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn profiles_ask_for_their_providers_modes_then_answer_once() {
+        let root = temp_root("one");
+        fs::write(root.join("data/subscription-profiles.json"), ONE_PROFILE).expect("profiles");
+        let ask = Frame {
+            generation: GENERATION,
+            id: 1,
+            body: Body::Observe {
+                observation: Observation::SubscriptionModes,
+                providers: vec![Provider::Anthropic],
+            },
+        };
+        let read = request(1, &profiles_request(&root));
+        let answered = run(&[read.clone(), observed(1, br#"{"anthropic":["claude"]}"#)]);
+        let canceled = run(&[read.clone(), frame(1, Body::Cancel)]);
+        let malformed = run(&[read.clone(), observed(1, br#"{"openai":[]}"#)]);
+        let abandoned = run(std::slice::from_ref(&read));
+        let interrupted = run(&[read, request(2, &json!({}))]);
+        fs::remove_dir_all(&root).expect("cleanup");
+
+        let (outcome, frames) = answered;
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(frames[0], ask);
+        let Body::Response { status, body } = &frames[1].body else {
+            panic!("expected a response, got {:?}", frames[1]);
+        };
+        assert_eq!(*status, 200);
+        assert!(
+            String::from_utf8_lossy(body).contains(r#""modes":["claude"]"#),
+            "{}",
+            String::from_utf8_lossy(body)
+        );
+        assert_eq!(frames.len(), 2);
+
+        assert_eq!(canceled, (Ok(()), vec![ask.clone(), refusal(1, CANCELED)]));
+        assert_eq!(
+            malformed,
+            (Ok(()), vec![ask.clone(), refusal(1, "OBSERVATION_SCHEMA")])
+        );
+        assert_eq!(abandoned, (Err(Fatal::Abandoned), vec![ask.clone()]));
+        assert_eq!(interrupted, (Err(Fatal::Sequence), vec![ask]));
+    }
 }
 
 fn handler(arguments: &[&str], input: &[u8]) -> (Option<i32>, Vec<u8>, String) {
