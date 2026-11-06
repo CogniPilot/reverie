@@ -143,3 +143,30 @@ fn null_and_lone_surrogate_owners_survive_native_registry_and_lineage_matching()
         );
     }
 }
+#[test]
+fn native_metadata_reader_enforces_scoped_parse_hooks_and_checks_close_failure() {
+    let tree = Tree::new();
+    let raw = format!("{{\"opaque\":{}}}", "7".repeat(4301));
+    tree.write(&tree.company_file(), &raw);
+    assert_eq!(
+        read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+            .err()
+            .unwrap()
+            .code(),
+        "METADATA_JSON"
+    );
+    assert_eq!(tree.fd_count(), 0);
+    tree.write(&tree.company_file(), r#"{"x":0,"x":1,"tail":[}"#);
+    faults::STATE.with(|state| state.borrow_mut().close = Some(private_fs::CloseRole::Data));
+    let error = read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+        .err()
+        .unwrap();
+    match error {
+        IdentityError::Finalization { primary, secondary } => {
+            assert_eq!(primary.code(), "METADATA_JSON");
+            assert_eq!(secondary.code(), "STORE_IO");
+        }
+        other => panic!("expected parse and close failures, got{other:?}"),
+    }
+    assert_eq!(tree.fd_count(), 0);
+}
