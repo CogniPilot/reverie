@@ -2,7 +2,7 @@
 //! goldens.json (apps/web/test/routes/subscription-profiles-rust-goldens.test.ts checks the same files).
 //! The handler implements Node `path.posix` only, so a win32 front is refused on every OS.
 use reverie_contracts::subscription_profiles_v1::{Refusal, decode_request};
-use reverie_routes::subscription_profiles::{Read, read};
+use reverie_routes::subscription_profiles::read;
 use serde_json::{Value, json};
 
 fn request(platform: &str, data_dir: &str) -> Value {
@@ -37,11 +37,11 @@ fn refuses_requests_ts_has_no_reply_for() {
 
 #[cfg(unix)]
 mod posix {
-    use super::{Read, Value, decoded, json, read, request};
+    use super::{Value, decoded, json, read, request};
     use reverie_contracts::subscription_profiles_v1::{
         CONTENT_TYPE, MAX_FILE_BYTES, Refusal, Response, decode_modes,
     };
-    use reverie_routes::subscription_profiles::finish;
+    use reverie_routes::subscription_profiles::{Read, finish};
     use std::fs;
     use std::io::ErrorKind;
     use std::os::unix::fs::{DirBuilderExt, symlink};
