@@ -48,8 +48,10 @@ pub(crate) use reservation::{
 };
 mod text;
 pub(crate) use text::{python_path, python_text};
+mod office;
 mod resolve;
 mod worker_config;
+pub(crate) use office::office_plan_capability;
 pub(crate) use passwd::home_directory;
 pub(crate) use passwd::username;
 pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};

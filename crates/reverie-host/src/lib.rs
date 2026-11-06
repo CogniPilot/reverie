@@ -17,6 +17,7 @@ pub mod memory_profile;
 pub mod memory_screen;
 mod native;
 mod observation;
+pub mod office;
 pub mod reservation_control;
 pub mod reservation_kernel;
 pub mod rootless;
