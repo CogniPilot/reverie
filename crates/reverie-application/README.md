@@ -221,3 +221,23 @@ Actual storage waiting, owned Nix/laptop/Office/viewer registration, fresh
 canonical invocation points and final settlement remain required before
 selecting the complete worker service. No live company/engine or installed
 runtime qualification is inferred from these tests.
+
+`InstallingBroker::refresh_launch_configuration` implements the existing normal
+launch's image-only refresh through the actual retained-path loader. It loads
+before the lifecycle mutex, then compares against current RAM with Python's
+full equality for `{**current, "image": loaded["image"]}`. It publishes only after
+that check, under lifecycle → Gate state → active context → current-state order.
+An entry that captured older data may adopt only this same image-only projection
+under its original entry ceiling. The native origin, engine context, existing
+operation bound and all previously retained snapshots remain unchanged.
+
+Actual loader fixtures reproduce thirteen old `Broker.handle` prefixes, including
+inactive NaN data, integer/float/bool equality and absent-vs-null refusal. Owned
+race controls cover an old entry capture, a real pending client at the unlocked
+preparation boundary and an older load publishing after a newer one. The latter
+can leave RAM behind disk, as the source permits; reserved admission independently
+refuses the image mismatch. The controlled pending-client case does not qualify
+the full Nix workflow or laptop launch. There is no file write, engine create,
+authorization, registration or global-release acknowledgement in this operation;
+no-reservations policy reload and the canonical launch/lifecycle consumer remain
+required before complete worker-service selection.

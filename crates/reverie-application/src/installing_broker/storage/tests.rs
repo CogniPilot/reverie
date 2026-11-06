@@ -13,18 +13,13 @@ use std::{
     collections::BTreeMap,
     fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
-    path::{Path, PathBuf},
-    process::Command,
-    sync::{
-        OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const NEXT_SID: &str = "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const EID: &str = "11111111-2222-4333-8444-555555555555";
 static NEXT: AtomicUsize = AtomicUsize::new(0);
-static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
 type BeforeLock = Box<dyn FnOnce()>;
 thread_local! {static BEFORE_BLOCKING_LOCK:std::cell::RefCell<Option<BeforeLock>>=std::cell::RefCell::new(None);}
 pub(super) fn before_blocking_lock() {
@@ -40,33 +35,7 @@ fn sid(value: &str) -> ProfileSessionId {
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(2)
 }
-fn program() -> &'static Path {
-    PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!(
-            "reverie-storage-registry-program-{}",
-            std::process::id()
-        ));
-        fs::create_dir(&root).unwrap();
-        let source = root.join("child.rs");
-        fs::write(
-            &source,
-            include_str!("../../../../reverie-host/tests/support/engine_metadata_child.rs"),
-        )
-        .unwrap();
-        let binary = root.join("storage-writer");
-        assert!(
-            Command::new("rustc")
-                .arg("--edition=2024")
-                .arg(&source)
-                .arg("-o")
-                .arg(&binary)
-                .status()
-                .unwrap()
-                .success()
-        );
-        binary
-    })
-}
+use crate::test_process::engine_program as program;
 use crate::test_process::isolate_case as isolate;
 struct Tree(PathBuf);
 impl Tree {

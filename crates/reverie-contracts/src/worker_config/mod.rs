@@ -107,6 +107,27 @@ impl EffectiveWorkerConfig {
 pub fn equivalent(left: &EffectiveWorkerConfig, right: &EffectiveWorkerConfig) -> bool {
     left.0.python_eq(&right.0)
 }
+/// Exact Broker.handle image-refresh comparison: {**current,image:loaded.image}
+/// == loaded, using Python container/numeric equality. This is DATA comparison,
+/// never a loaded-file/native/start approval or a generic configuration editor.
+pub fn image_only_equivalent(
+    current: &EffectiveWorkerConfig,
+    loaded: &EffectiveWorkerConfig,
+) -> bool {
+    let Node::Object(after) = &loaded.as_value().0 else {
+        unreachable!("worker object");
+    };
+    let name = Text("image".chars().map(u32::from).collect());
+    let Some(image) = after.get(&name) else {
+        return false;
+    };
+    let mut before = current.as_value().deep_clone();
+    let Node::Object(before_fields) = &mut before.0 else {
+        unreachable!("worker object");
+    };
+    before_fields.insert(name, image.deep_clone());
+    before.python_eq(loaded.as_value())
+}
 
 /// Python json.dumps(effective_config, sort_keys=True).encode(), including all keys.
 pub fn encode_config(config: &EffectiveWorkerConfig) -> Vec<u8> {

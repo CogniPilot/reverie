@@ -160,3 +160,71 @@ fn data_encoding_adds_no_shallow_nesting_limit_and_error_cleanup_is_iterative() 
     );
     assert!(decode(invalid.as_bytes()).is_err());
 }
+
+#[test]
+fn launch_image_equivalence_preserves_full_python_equality_and_only_replaces_root_image() {
+    use reverie_contracts::worker_config::image_only_equivalent;
+    let pairs = [
+        (
+            r#"{"image":"a","cpus":0,"version":true}"#,
+            r#"{"version":1.0,"cpus":0.0,"image":"b"}"#,
+            true,
+        ),
+        (
+            r#"{"image":"a","extra":{"x":NaN,"image":"nested"}}"#,
+            r#"{"image":"b","extra":{"image":"nested","x":NaN}}"#,
+            true,
+        ),
+        (
+            r#"{"image":"a","extra":"\ud800\udc00"}"#,
+            r#"{"image":"b","extra":"𐀀"}"#,
+            true,
+        ),
+        (
+            r#"{"image":"a","extra":"\ud800"}"#,
+            r#"{"image":"b","extra":"\ud801"}"#,
+            false,
+        ),
+        (
+            r#"{"image":"a","extra":{"image":"old"}}"#,
+            r#"{"image":"b","extra":{"image":"new"}}"#,
+            false,
+        ),
+        (
+            r#"{"image":"a","revision":1}"#,
+            r#"{"image":"b","revision":2}"#,
+            false,
+        ),
+        (
+            r#"{"image":"a","owner":"one"}"#,
+            r#"{"image":"b","owner":"two"}"#,
+            false,
+        ),
+        (
+            r#"{"image":"a","resourceReservations":null}"#,
+            r#"{"image":"b"}"#,
+            false,
+        ),
+        (
+            r#"{"image":"a","memoryMiB":1024}"#,
+            r#"{"image":"b","memoryMiB":2048}"#,
+            false,
+        ),
+        (r#"{"image":"a"}"#, r#"{}"#, false),
+    ];
+    for (before, after, expected) in pairs {
+        let before = decode(before.as_bytes()).unwrap();
+        let after = decode(after.as_bytes()).unwrap();
+        let original_before = encode_config(&before);
+        let original_after = encode_config(&after);
+        assert_eq!(
+            image_only_equivalent(&before, &after),
+            expected,
+            "{:?} vs {:?}",
+            original_before,
+            original_after
+        );
+        assert_eq!(encode_config(&before), original_before);
+        assert_eq!(encode_config(&after), original_after);
+    }
+}

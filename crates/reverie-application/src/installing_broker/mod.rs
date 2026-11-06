@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod bootstrap_tests;
 mod creation;
+mod image_refresh;
 mod storage;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
@@ -11,6 +12,7 @@ use crate::{
     worker_validation::ValidatedWorkerSnapshot,
 };
 pub use creation::CreationBudgetError;
+pub(crate) use image_refresh::LoadedLaunchImage;
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -36,9 +38,13 @@ struct LaptopRegistration {
 /// Ordered real installing lifecycle state. No raw registry setter or public
 /// registration constructor exists; native launch/recovery producers own it.
 pub(crate) struct LaptopLifecycle<'a> {
+    owner: &'a InstalledWorker,
     guard: MutexGuard<'a, Vec<LaptopRegistration>>,
 }
 impl LaptopLifecycle<'_> {
+    pub(crate) fn belongs_to(&self, owner: &InstalledWorker) -> bool {
+        std::ptr::eq(self.owner, owner)
+    }
     pub(crate) fn entries(
         &self,
     ) -> impl Iterator<Item = (&ProfileSessionId, &WorkerContainerName)> {
@@ -50,6 +56,9 @@ impl LaptopLifecycle<'_> {
 pub(crate) struct InstalledWorker {
     current: RwLock<CurrentInstalled>,
     laptops: Mutex<Vec<LaptopRegistration>>,
+    #[cfg(test)]
+    image_loaded_pause:
+        Mutex<Option<crate::test_process::PausePoint<Arc<ValidatedWorkerSnapshot>>>>,
 }
 impl InstalledWorker {
     #[cfg(test)]
@@ -65,10 +74,13 @@ impl InstalledWorker {
         Arc::new(Self {
             current: RwLock::new(CurrentInstalled::capture(Arc::new(snapshot))),
             laptops: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            image_loaded_pause: Mutex::new(None),
         })
     }
     pub(crate) fn lifecycle(&self) -> Result<LaptopLifecycle<'_>, GateError> {
         Ok(LaptopLifecycle {
+            owner: self,
             guard: self
                 .laptops
                 .lock()

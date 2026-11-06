@@ -8,6 +8,7 @@ mod error;
 mod guard;
 mod history;
 mod host_jobs;
+mod image_refresh;
 mod launch;
 mod observation;
 mod preparation;
@@ -64,6 +65,8 @@ struct Inner {
     identity: reverie_store::storage_identity::StorageIdentityConfig,
     state: Mutex<State>,
     changed: Condvar,
+    #[cfg(test)]
+    entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
 }
 #[derive(Default)]
 struct State {
@@ -134,6 +137,8 @@ impl ReservationGate {
                 identity,
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
+                #[cfg(test)]
+                entry_capture_pause: Mutex::new(None),
             }),
         })
     }

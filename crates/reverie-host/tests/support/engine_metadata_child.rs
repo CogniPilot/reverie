@@ -15,10 +15,18 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
-        "storage-writer" => {
+        "storage-writer" | "image-refresh" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "image-refresh" && fs::remove_file("hold.next").is_ok() {
+                fs::write("query-started", b"actual owned child reached query").unwrap();
+                let ceiling = std::time::Instant::now() + Duration::from_secs(15);
+                while !std::path::Path::new("query-release").exists() {
+                    assert!(std::time::Instant::now() < ceiling, "bounded owning setup releases child");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
             let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",_=>std::process::exit(81)};
             io::stdout().write_all(&fs::read(name).unwrap()).unwrap();
             if let Ok(status)=fs::read_to_string(format!("{name}.status")){std::process::exit(status.parse().unwrap());}
