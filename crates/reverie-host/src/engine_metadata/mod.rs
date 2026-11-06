@@ -6,7 +6,7 @@ mod control;
 mod native;
 mod process;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;
 pub use control::{CancellationToken, ReadonlyEngine};
 use reverie_core::ids::ContainerId;

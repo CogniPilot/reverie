@@ -74,7 +74,7 @@ fn malformed_truncated_or_multiple_rights_close_every_installed_descriptor() {
 #[test]
 fn pre_exec_failure_after_identity_transfer_never_runs_the_controlled_program() {
     let mut handshake = Handshake::new().ok().unwrap();
-    let mut command = Command::new(super::super::tests::program());
+    let mut command = Command::new(crate::engine_metadata::tests::program());
     handshake.configure(&mut command);
     // SAFETY: this fixed test-only pre_exec callback returns a raw errno without
     // allocation or host access, after the real private identity transfer.

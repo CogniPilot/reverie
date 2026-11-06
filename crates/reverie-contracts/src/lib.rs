@@ -21,6 +21,7 @@ pub mod rootless;
 pub mod storage_identity;
 pub mod subscription_profiles_v1;
 pub mod task_perf_v1;
+pub mod worker_child;
 pub mod worker_config;
 pub mod worker_launch;
 pub mod worker_schema;

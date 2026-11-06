@@ -62,7 +62,7 @@ impl Hooks {
 }
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static FIXTURE: OnceLock<PathBuf> = OnceLock::new();
-pub(super) fn program() -> &'static Path {
+pub(crate) fn program() -> &'static Path {
     FIXTURE.get_or_init(|| {
         let root = std::env::temp_dir().join(format!("engine-child-build-{}", std::process::id()));
         fs::create_dir(&root).unwrap();

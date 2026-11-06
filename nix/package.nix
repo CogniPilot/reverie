@@ -485,6 +485,9 @@ let
   # All client modes and the protected manifest move together; no Python branch.
   workerResourceClientManifest = workerNativeClientManifest;
   workerExec = workerNativeClient;
+  # Candidate only: source preparation/admission consumers still select the
+  # existing child entry point until the complete broker transition is reviewed.
+  workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -582,4 +585,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild laptopTools; }

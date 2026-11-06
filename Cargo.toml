@@ -9,6 +9,8 @@ members = [
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",
+    "crates/reverie-worker-child",
+    "crates/reverie-diagnostics",
     "crates/xtask",
 ]
 resolver = "3"
@@ -44,6 +46,7 @@ reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.
 # Every member must opt in with [lints] workspace = true.

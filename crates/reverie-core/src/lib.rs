@@ -17,6 +17,7 @@ pub mod resources;
 pub mod revision;
 pub mod rootless;
 pub mod task_perf;
+pub mod worker_child;
 pub mod worker_launch;
 pub mod worker_options;
 pub mod worker_schema;

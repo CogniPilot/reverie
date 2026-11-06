@@ -11,7 +11,16 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 mod control;
+mod child_record;
+pub(crate) mod child_signals;
 mod lease;
+pub(crate) mod ordered_exec;
+pub(crate) mod owned_process;
+pub(crate) use child_record::unlink as unlink_child_record;
+pub(crate) use child_record::{
+    create_private as create_child_receipt, publish as publish_child_receipt,
+};
+pub(crate) use lease::open_at;
 mod passwd;
 mod reservation;
 pub(crate) use control::{HeldAdmission, control_directory, open_admission};
@@ -29,7 +38,7 @@ pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};
 pub(crate) use worker_config::read_worker_config;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Stamp {
+pub(crate) struct Stamp {
     device: u64,
     inode: u64,
     uid: u32,
@@ -41,7 +50,17 @@ struct Stamp {
     ctime: (i64, i64),
 }
 impl Stamp {
-    fn of(metadata: &Metadata) -> Self {
+    pub(crate) fn matches_rename_metadata(&self, other: &Self) -> bool {
+        self.device == other.device
+            && self.inode == other.inode
+            && self.uid == other.uid
+            && self.gid == other.gid
+            && self.mode == other.mode
+            && self.links == other.links
+            && self.size == other.size
+            && self.mtime == other.mtime
+    }
+    pub(crate) fn of(metadata: &Metadata) -> Self {
         Self {
             device: metadata.dev(),
             inode: metadata.ino(),

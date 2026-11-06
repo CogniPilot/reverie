@@ -686,6 +686,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "reverie-host"
 version = "0.1.0"
 dependencies = [
@@ -699,6 +706,7 @@ dependencies = [
  "libc",
  "reverie-contracts",
  "reverie-core",
+ "reverie-diagnostics",
  "reverie-store",
  "rustls",
  "rustls-platform-verifier",
@@ -745,6 +753,15 @@ dependencies = [
  "reverie-core",
  "rusqlite",
  "serde_json",
+]
+
+[[package]]
+name = "reverie-worker-child"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-diagnostics",
+ "reverie-host",
 ]
 
 [[package]]

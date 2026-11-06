@@ -1,7 +1,6 @@
 use super::*;
 use crate::storage_identity::Metadata;
 use reverie_core::ids::ProfileEmployeeId;
-use sha2::{Digest, Sha256};
 
 /// Paths/UID from the same captured worker domain. No filesystem qualification.
 pub struct LaunchSettings {
@@ -71,28 +70,11 @@ pub fn employee_hostname(
 /// cwd_bytes must be the POSIX fsencode of the RAW request cwd. The host
 /// adapter owns that conversion; no pathname normalization belongs here.
 pub fn temporary_environment(cwd_bytes: Option<&[u8]>) -> Vec<(String, String)> {
-    let mut root = String::from("/tmp/reverie");
-    if let Some(bytes) = cwd_bytes {
-        let hash = crate::digest::hex(&Sha256::digest(bytes).into());
-        root.push_str("/projects/");
-        root.push_str(&hash[..24]);
+    match cwd_bytes {
+        None => reverie_core::worker_child::TemporaryEnvironmentRoot::global(),
+        Some(bytes) => crate::worker_child::project_temporary_root(bytes),
     }
-    [
-        ("TMPDIR", "/tmp".to_owned()),
-        ("TMP", "/tmp".to_owned()),
-        ("TEMP", "/tmp".to_owned()),
-        ("XDG_CACHE_HOME", format!("{root}/cache")),
-        ("PIP_CACHE_DIR", format!("{root}/cache/pip")),
-        ("UV_CACHE_DIR", format!("{root}/cache/uv")),
-        ("npm_config_cache", format!("{root}/cache/npm")),
-        ("CCACHE_DIR", format!("{root}/cache/ccache")),
-        ("GOCACHE", format!("{root}/cache/go-build")),
-        ("GOMODCACHE", format!("{root}/cache/go-mod")),
-        ("XDG_DOWNLOAD_DIR", format!("{root}/downloads")),
-    ]
-    .into_iter()
-    .map(|(key, value)| (key.to_owned(), value))
-    .collect()
+    .entries()
 }
 
 /// Fixed container tmux adapter DATA, not a host-command or admission endpoint.

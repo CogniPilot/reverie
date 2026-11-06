@@ -9,6 +9,43 @@ use reverie_core::{
 };
 
 pub const MAX_REQUEST_FRAME: usize = 256 * 1024;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RequestField {
+    Session,
+    Cwd,
+    Command,
+    Environment,
+    Columns,
+    Rows,
+    AttachOnly,
+}
+impl RequestField {
+    const REQUIRED: [Self; 6] = [
+        Self::Session,
+        Self::Cwd,
+        Self::Command,
+        Self::Environment,
+        Self::Columns,
+        Self::Rows,
+    ];
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Session => "sessionId",
+            Self::Cwd => "cwd",
+            Self::Command => "command",
+            Self::Environment => "env",
+            Self::Columns => "cols",
+            Self::Rows => "rows",
+            Self::AttachOnly => "attachOnly",
+        }
+    }
+    fn parse(key: &Text) -> Option<Self> {
+        Self::REQUIRED
+            .into_iter()
+            .chain([Self::AttachOnly])
+            .find(|field| key.equals_ascii(field.name()))
+    }
+}
 /// Complete request validation against captured declaration DATA. This does not
 /// prove that the peer/session is admitted or any filesystem grant still holds.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +56,7 @@ pub struct WorkerRequest {
     environment: WorkerEnvironment,
     terminal: TerminalSize,
     attach_only: Option<bool>,
+    field_order: Vec<RequestField>,
 }
 impl WorkerRequest {
     pub fn decode(raw: &[u8], configuration: &EffectiveWorkerConfig) -> Result<Self> {
@@ -28,14 +66,12 @@ impl WorkerRequest {
         let request =
             legacy_json::decode_worker_request_bytes(raw).map_err(|_| LaunchDataError::Json)?;
         let fields = object(&request.value).map_err(|_| LaunchDataError::Request)?;
-        const REQUIRED: [&str; 6] = ["sessionId", "cwd", "command", "env", "cols", "rows"];
-        if REQUIRED.iter().any(|name| field(fields, name).is_none())
-            || fields.keys().any(|name| {
-                !REQUIRED
-                    .iter()
-                    .chain(["attachOnly"].iter())
-                    .any(|expected| name.equals_ascii(expected))
-            })
+        if RequestField::REQUIRED
+            .iter()
+            .any(|name| field(fields, name.name()).is_none())
+            || fields
+                .keys()
+                .any(|name| RequestField::parse(name).is_none())
         {
             return Err(LaunchDataError::Request);
         }
@@ -64,6 +100,13 @@ impl WorkerRequest {
         let environment = environment(&request, fields)?;
         let terminal =
             TerminalSize::try_new(dimension(fields, "cols")?, dimension(fields, "rows")?)?;
+        let OrderNode::Object(order) = &request.graph.nodes[request.graph.root] else {
+            unreachable!("parsed request object");
+        };
+        let field_order = order
+            .iter()
+            .map(|(key, _)| RequestField::parse(key).expect("checked request keys"))
+            .collect();
         Ok(Self {
             session,
             directory,
@@ -71,6 +114,7 @@ impl WorkerRequest {
             environment,
             terminal,
             attach_only,
+            field_order,
         })
     }
     pub fn session(&self) -> &ProfileSessionId {
@@ -90,6 +134,9 @@ impl WorkerRequest {
     }
     pub fn attach_only(&self) -> Option<bool> {
         self.attach_only
+    }
+    pub(crate) fn field_order(&self) -> &[RequestField] {
+        &self.field_order
     }
 }
 fn writable(directory: &WorkerDirectory, config: &EffectiveWorkerConfig) -> Result<()> {
