@@ -7,6 +7,7 @@ mod legacy_json;
 pub mod profiles_v1;
 pub mod resource_config;
 pub mod route_frames_v1;
+pub mod route_frames_v2;
 pub mod storage_identity;
 pub mod subscription_profiles_v1;
 pub mod task_perf_v1;
