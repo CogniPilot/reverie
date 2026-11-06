@@ -66,6 +66,8 @@ export class ChatArchive {
   private lastAt: Map<string, number> | undefined;
   /** The zone date of the last gzip sweep. */
   private sweptOn: string | undefined;
+  /** The last sweep started: sweeps run one at a time, and `idle()` waits for the last. */
+  private sweeping: Promise<unknown> = Promise.resolve();
 
   constructor(
     readonly dir: string,
@@ -174,8 +176,19 @@ export class ChatArchive {
     }
   }
 
-  /** Gzip the plain files of weeks that have ended, at most once per zone day. */
-  async sweep(now: number, timeZone?: string): Promise<string[]> {
+  /** Gzip the plain files of weeks that have ended, at most once per zone day, after any sweep still running. */
+  sweep(now: number, timeZone?: string): Promise<string[]> {
+    const run = this.sweeping.catch(() => undefined).then(() => this.sweepNow(now, timeZone));
+    this.sweeping = run;
+    return run;
+  }
+
+  /** Resolves once no sweep is running, so the directory can be closed or removed. */
+  async idle(): Promise<void> {
+    await this.sweeping.catch(() => undefined);
+  }
+
+  private async sweepNow(now: number, timeZone?: string): Promise<string[]> {
     const today = zoneDate(now, timeZone);
     if (this.sweptOn === today) return [];
     const thisWeek = zoneWeek(now, timeZone);
