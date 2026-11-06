@@ -58,34 +58,63 @@ fn run(
     client: &CapturedClient,
     deadline: Instant,
 ) -> std::result::Result<CapturedOutput, CallFailure> {
+    run_with_cancellation(client, deadline, &CancellationToken::new())
+}
+fn run_with_cancellation(
+    client: &CapturedClient,
+    deadline: Instant,
+    cancellation: &CancellationToken,
+) -> std::result::Result<CapturedOutput, CallFailure> {
     client.run_scoped(
         vec!["fixed-owned-call".into()],
         deadline,
-        &CancellationToken::new(),
+        cancellation,
         policy(),
     )
 }
 struct Running {
     client: Arc<CapturedClient>,
     gate: Arc<Gate>,
+    cancellation: CancellationToken,
     thread: Option<std::thread::JoinHandle<std::result::Result<CapturedOutput, CallFailure>>>,
 }
 impl Running {
     fn new(client: Arc<CapturedClient>, gate: Arc<Gate>, deadline: Instant) -> Self {
         let worker = client.clone();
-        let thread = std::thread::spawn(move || run(&worker, deadline));
+        let cancellation = CancellationToken::new();
+        let token = cancellation.clone();
+        let thread = std::thread::spawn(move || run_with_cancellation(&worker, deadline, &token));
         Self {
             client,
             gate,
+            cancellation,
             thread: Some(thread),
         }
     }
-    fn entered(&self) {
+    fn entered(&mut self) {
         let until = end();
-        while !self.gate.entered.load(Ordering::Acquire) {
-            assert!(Instant::now() < until);
+        while !self.gate.entered.load(Ordering::Acquire) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(1));
         }
+        let entered = self.gate.entered.load(Ordering::Acquire);
+        let observed = if entered {
+            None
+        } else {
+            self.gate.released.store(true, Ordering::Release);
+            Some(
+                self.thread
+                    .take()
+                    .unwrap()
+                    .join()
+                    .unwrap()
+                    .err()
+                    .map(|failure| (failure.error.fault, failure.call.is_some())),
+            )
+        };
+        assert!(
+            entered,
+            "actual constructor hook not entered; joined worker result: {observed:?}"
+        );
     }
     fn finish(&mut self) -> std::result::Result<CapturedOutput, CallFailure> {
         self.gate.released.store(true, Ordering::Release);
@@ -172,9 +201,10 @@ fn exact_uncertain_constructor_handle_retains_and_settles_the_late_child_without
     let mut running = Running::new(
         client.clone(),
         gate.clone(),
-        Instant::now() + Duration::from_millis(60),
+        Instant::now() + Duration::from_secs(20),
     );
     running.entered();
+    running.cancellation.cancel();
     let failure = running
         .thread
         .take()
@@ -206,7 +236,7 @@ fn global_close_seals_admission_while_the_same_actual_constructor_remains_retain
     let mut running = Running::new(
         client.clone(),
         gate,
-        Instant::now() + Duration::from_millis(60),
+        Instant::now() + Duration::from_secs(20),
     );
     running.entered();
     assert!(client.close(Instant::now()).is_err());
@@ -218,4 +248,41 @@ fn global_close_seals_admission_while_the_same_actual_constructor_remains_retain
     client.close(end()).unwrap();
     assert_eq!(starts.load(Ordering::Acquire), 1);
     assert!(run(&client, end()).err().unwrap().call.is_none());
+}
+#[test]
+fn original_deadline_expires_while_actual_constructor_is_held_and_retains_the_exact_call() {
+    let tree = Tree::new();
+    let gate = Arc::new(Gate::default());
+    let hooks = Hooks {
+        gate: Some(gate.clone()),
+        ..Hooks::default()
+    };
+    let starts = hooks.starts.clone();
+    let client = tree.client(hooks);
+    let mut running = Running::new(
+        client.clone(),
+        gate.clone(),
+        Instant::now() + Duration::from_secs(20),
+    );
+    running.entered();
+    // No cancellation: the captured original deadline must expire while the
+    // actual constructor hook is still held. This is not fork/exec evidence.
+    let failure = running
+        .thread
+        .take()
+        .unwrap()
+        .join()
+        .unwrap()
+        .err()
+        .unwrap();
+    assert_eq!(failure.error.fault, Fault::Deadline);
+    assert!(failure.error.is_uncertain());
+    assert!(!running.cancellation.is_cancelled());
+    let owned = failure.call.unwrap();
+    assert!(client.settle_call(&owned, Instant::now()).is_err());
+    assert_eq!(run(&client, end()).err().unwrap().error.fault, Fault::Busy);
+    gate.released.store(true, Ordering::Release);
+    client.settle_call(&owned, end()).unwrap();
+    assert_eq!(starts.load(Ordering::Acquire), 1);
+    client.close(end()).unwrap();
 }
