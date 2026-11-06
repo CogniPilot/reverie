@@ -1,11 +1,17 @@
 //! Shared frozen Python text facts for scalar and lossless codepoint consumers.
 //! No host/HTTP dependencies, normalization, identity or authority is supplied.
+mod alphabetic;
 mod borrowed;
 mod decimal;
+mod identifier_continue;
+mod identifier_start;
 mod lower_table;
 mod points;
 mod printable;
+pub mod regex;
+mod regex_casefix;
 mod tables;
+mod upper_table;
 pub use borrowed::PythonTextRef;
 pub use points::{PythonText, PythonTextError};
 #[cfg(test)]

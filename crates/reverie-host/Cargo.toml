@@ -9,6 +9,7 @@ publish.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["term", "fs"] }
 reverie-core.workspace = true
+reverie-python-regex.workspace = true
 reverie-contracts.workspace = true
 reverie-store.workspace = true
 reverie-http.workspace = true

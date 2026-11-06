@@ -47,11 +47,13 @@ fenced and produces a negative standalone exit after remaining finalizers;
 polling an irreversible error cannot acknowledge cleanup. An unconfirmed API
 save remains unconfirmed in every shutdown state.
 
-Configured owner regex patterns remain a required compatibility dependency.
-This candidate refuses a nonempty rule set until a Python-compatible native
-adapter is independently qualified; it never silently omits rules or substitutes
-a different regex language. The fixed floor uses shared frozen Unicode facts and
-actual Python differential fixtures, not an arbitrary regular-expression VM.
+Configured owner regex patterns use the safe native Python 3.13 str compiler
+and pinned standalone matcher described in
+[reverie-python-regex](../reverie-python-regex/README.md). All rules compile before
+any search or protected-name read. No Python interpreter, fallback or pattern
+subset is used. The fixed privacy floor shares the same frozen Core Unicode
+owner. Runtime selection remains held for independent source/package review and
+the actual authenticated installation producer.
 
 Intentional corrections needing review before selection: request fields are
 closed (no path/model/private-store editor); read-only recall and journal saves
@@ -65,7 +67,7 @@ from the legacy employee/project memory tables and Handsroom data.
 The journal transport uses the common retained process owner. Its 60-second,
 8 MiB combined transport policy is separate from embedding HTTP semantics and
 the broker metadata capture policy. Launch/auth binding, configured endpoint-scheme
-inventory, owner-regex compatibility and coordinated single-writer cutover remain
+inventory, final regex qualification and coordinated single-writer cutover remain
 required. Host child fixtures qualify retained transport behavior; the console's
 `native-memory-journal-api.test.ts` qualifies actual clients, enforced middleware
 and policy, current company/source stores and durable journal behavior using
