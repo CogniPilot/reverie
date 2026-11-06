@@ -53,20 +53,25 @@ impl ContainerRow {
         unsigned(field(self.state()?, "Pid"))
     }
     pub fn running_header(&self) -> Result<()> {
+        // limits() indexes both top-level fields before checking Running.
+        // capacity's separate running() projection permits a missing State,
+        // so these required accesses must not be moved into that projection.
+        let state = required(field(self.root(), "State"))?;
+        let host = required(field(self.root(), "HostConfig"))?;
         if !matches!(
-            field(self.state()?, "Running"),
-            Some(Value(Node::Bool(true)))
+            required(field(structure_object(Some(state))?, "Running"))?,
+            Value(Node::Bool(true))
         ) {
             return Err(EngineDataError::NotRunning);
         }
-        let host = object(field(self.root(), "HostConfig").ok_or(EngineDataError::FiniteLimits)?)?;
+        let host = structure_object(Some(host))?;
         if !["Memory", "MemorySwap", "PidsLimit", "NanoCpus"]
             .iter()
             .all(|name| field(host, name).is_some())
         {
-            return Err(EngineDataError::FiniteLimits);
+            return Err(EngineDataError::Structure);
         }
-        self.labels()?;
+        self.labels().map_err(|_| EngineDataError::Structure)?;
         Ok(())
     }
     pub fn memory_matches(&self, expected: &UnsignedInteger) -> Result<bool> {
@@ -105,9 +110,7 @@ impl ContainerRow {
         Ok(ProfileSessionId::parse(&value).ok())
     }
     pub fn declarations(&self, swap_allowance: &UnsignedInteger) -> Result<DeclaredLimits> {
-        if !self.running()? {
-            return Err(EngineDataError::FiniteLimits);
-        }
+        self.running_header()?;
         let host = object(field(self.root(), "HostConfig").ok_or(EngineDataError::FiniteLimits)?)?;
         let memory = unsigned(field(host, "Memory"))?;
         let swap = unsigned(field(host, "MemorySwap"))?;
@@ -120,7 +123,8 @@ impl ContainerRow {
         {
             return Err(EngineDataError::FiniteLimits);
         }
-        let pid = self.pid().map_err(|_| EngineDataError::Pid)?;
+        let pid = unsigned(Some(required(field(self.state()?, "Pid"))?))
+            .map_err(|_| EngineDataError::Pid)?;
         if pid.is_zero() {
             return Err(EngineDataError::Pid);
         }
@@ -204,7 +208,8 @@ impl ContainerRow {
         object(&self.value).expect("captured row object")
     }
     pub(super) fn state(&self) -> Result<&Object> {
-        object(field(self.root(), "State").ok_or(EngineDataError::State)?)
+        let state = field(self.root(), "State").ok_or(EngineDataError::State)?;
+        structure_object(Some(state))
     }
     fn mounts(&self) -> Result<&[Value]> {
         match field(self.root(), "Mounts") {
@@ -216,7 +221,7 @@ impl ContainerRow {
         static EMPTY: std::sync::OnceLock<Object> = std::sync::OnceLock::new();
         let config = match field(self.root(), "Config") {
             None => EMPTY.get_or_init(Object::new),
-            Some(value) => object(value)?,
+            Some(value) => structure_object(Some(value))?,
         };
         match field(config, "Labels") {
             value if !legacy_json::truthy(value) => Ok(EMPTY.get_or_init(Object::new)),
@@ -224,6 +229,12 @@ impl ContainerRow {
             None => Ok(EMPTY.get_or_init(Object::new)),
         }
     }
+}
+fn required(value: Option<&Value>) -> Result<&Value> {
+    value.ok_or(EngineDataError::Structure)
+}
+fn structure_object(value: Option<&Value>) -> Result<&Object> {
+    object(required(value)?).map_err(|_| EngineDataError::Structure)
 }
 pub struct DeclaredLimits {
     memory: UnsignedInteger,

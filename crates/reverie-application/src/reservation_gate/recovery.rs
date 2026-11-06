@@ -59,7 +59,7 @@ impl Inner {
                     NativeObservationState::Matches
                 }
                 Ok(_) => NativeObservationState::Changed,
-                Err(error) if structural_company_error(&error) => return Err(error),
+                Err(error) if propagated_projection_error(&error) => return Err(error),
                 Err(_) => NativeObservationState::Unavailable,
             };
             // Unavailability is not a reason to skip mandatory custody/scope
@@ -86,15 +86,22 @@ impl Inner {
         })
     }
 }
-fn structural_company_error(error: &GateError) -> bool {
+fn propagated_projection_error(error: &GateError) -> bool {
     match error {
         GateError::ObservationData(
             reverie_contracts::reservation_observation::ObservationDataError::CompanyStructure,
         ) => true,
+        GateError::Configuration(EngineDataError::Structure)
+        | GateError::Observer(ObserverError::Data(EngineDataError::Structure))
+        | GateError::Observer(ObserverError::Kernel(
+            reverie_host::reservation_kernel::ReservationKernelError::EngineData(
+                EngineDataError::Structure,
+            ),
+        )) => true,
         GateError::Finalization { primary, secondary } => {
-            structural_company_error(primary) || structural_company_error(secondary)
+            propagated_projection_error(primary) || propagated_projection_error(secondary)
         }
-        GateError::ClaimUncertain { cause } => structural_company_error(cause),
+        GateError::ClaimUncertain { cause } => propagated_projection_error(cause),
         _ => false,
     }
 }

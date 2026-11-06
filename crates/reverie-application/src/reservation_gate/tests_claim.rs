@@ -1,5 +1,7 @@
 use super::*;
 use reverie_core::operations::{MemoryBytes, OperationRequest, OperationState};
+#[path = "tests_native_recovery.rs"]
+mod native_recovery_cases;
 fn request(setup: &Setup) -> OperationRequest {
     let observed = operations_v1::decode_observation(setup.expected().as_bytes()).unwrap();
     let data = observed.data();

@@ -32,6 +32,9 @@ pub enum EngineDataError {
     StoppedObservation,
     StoppedChanged,
     State,
+    /// Legacy native indexing/attribute failure outside recovery's ordinary
+    /// OSError/ValueError/RuntimeError refusal catch.
+    Structure,
     NotRunning,
     FiniteLimits,
     Image,
@@ -53,6 +56,7 @@ impl EngineDataError {
             Self::StoppedObservation => "RESERVATION_STOPPED_OBSERVATION",
             Self::StoppedChanged => "RESERVATION_STOPPED_IDENTITY_CHANGED",
             Self::State => "RESERVATION_NATIVE_STATE",
+            Self::Structure => "RESERVATION_NATIVE_STRUCTURE",
             Self::NotRunning => "RESERVATION_SOURCE_NOT_RUNNING",
             Self::FiniteLimits => "RESERVATION_NATIVE_FINITE_LIMITS",
             Self::Image => "RESERVATION_NATIVE_IMAGE",
