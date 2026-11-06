@@ -276,3 +276,11 @@ real successful Host workflow. Later rollback metadata cannot replace that data;
 image opt-out/negative results provide no path. `into_parts` remains compatible,
 so the actual laptop-mount consumer must retain the returned data alongside its
 same original resource owners before composing create arguments.
+
+`StorageClaim::prepare_create_plan` uses the existing effective-config resolver
+once while retaining actual custody, then delegates to the one Host observation
+owner. Unknown Nix/consumed owners refuse before another native lookup. The
+existing `worker_launch::prepare_create` data API remains compatible and delegates
+that same sequence. Same-runtime provenance and a plan are not an authorization,
+a protected start, a supervised Created/Started result or a lifecycle registry
+entry; those actual consuming producers remain required.

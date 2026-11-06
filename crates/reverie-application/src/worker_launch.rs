@@ -2,18 +2,12 @@
 //! data and store-selected paths, never admission or native effect permission.
 use crate::{resource_staging, worker_validation::ValidatedWorkerSnapshot};
 use reverie_contracts::{
-    device_policy::gpu,
-    resource_config::ResourceConfiguration,
-    rootless::RootlessConfig,
     storage_identity::MetadataText,
     worker_config::EffectiveWorkerConfig,
-    worker_launch::{
-        self, CreateArguments, CreateObservations, CreatePreparation, LaunchDataError,
-        WorkerRequest,
-    },
+    worker_launch::{self, CreateArguments, LaunchDataError, WorkerRequest},
 };
 use reverie_core::ids::ProfileSessionId;
-use reverie_host::{device_policy, rootless, worker_identity, worker_launch as host};
+use reverie_host::{device_policy, rootless, worker_launch as host};
 use reverie_store::storage_identity::{IdentityError, StoragePaths};
 #[cfg(test)]
 mod tests;
@@ -26,6 +20,7 @@ pub enum LaunchPreparationError {
     Host(host::LaunchHostError),
     Gpu(device_policy::DevicePolicyHostError),
     Identity(IdentityError),
+    Owner(reverie_host::worker_storage::StorageOwnerError),
     StorageSession,
 }
 impl std::fmt::Display for LaunchPreparationError {
@@ -37,11 +32,25 @@ impl std::fmt::Display for LaunchPreparationError {
             Self::Host(_) => "LAUNCH_HOST",
             Self::Gpu(_) => "LAUNCH_GPU",
             Self::Identity(_) => "LAUNCH_IDENTITY",
+            Self::Owner(_) => "LAUNCH_OWNER",
             Self::StorageSession => "LAUNCH_STORAGE_SESSION",
         })
     }
 }
-impl std::error::Error for LaunchPreparationError {}
+impl std::error::Error for LaunchPreparationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Data(e) => Some(e),
+            Self::Effective(e) => Some(e),
+            Self::Rootless(e) => Some(e),
+            Self::Host(e) => Some(e),
+            Self::Gpu(e) => Some(e),
+            Self::Identity(e) => Some(e),
+            Self::Owner(e) => Some(e),
+            Self::StorageSession => None,
+        }
+    }
+}
 impl From<LaunchDataError> for LaunchPreparationError {
     fn from(value: LaunchDataError) -> Self {
         Self::Data(value)
@@ -65,6 +74,19 @@ impl From<device_policy::DevicePolicyHostError> for LaunchPreparationError {
 impl From<IdentityError> for LaunchPreparationError {
     fn from(value: IdentityError) -> Self {
         Self::Identity(value)
+    }
+}
+impl From<host::CreateObservationError> for LaunchPreparationError {
+    fn from(error: host::CreateObservationError) -> Self {
+        match error {
+            host::CreateObservationError::Data(e) => Self::Data(e),
+            host::CreateObservationError::Rootless(e) => Self::Rootless(e),
+            host::CreateObservationError::Gpu(e) => Self::Gpu(e),
+            host::CreateObservationError::Host(e) => Self::Host(e),
+            host::CreateObservationError::Identity(e) => Self::Identity(e),
+            host::CreateObservationError::Owner(e) => Self::Owner(e),
+            host::CreateObservationError::StorageSession => Self::StorageSession,
+        }
     }
 }
 type Result<T> = std::result::Result<T, LaunchPreparationError>;
@@ -122,75 +144,13 @@ pub fn prepare_create(
     session: &ProfileSessionId,
     storage: &StoragePaths,
 ) -> Result<WorkerCreatePlan> {
-    prepare_observing(captured, session, storage, &Installed)
-}
-trait Source {
-    fn rootless(&self, config: &RootlessConfig) -> Result<rootless::RootlessObservation>;
-    fn gpu(
-        &self,
-        config: &EffectiveWorkerConfig,
-        session: &ProfileSessionId,
-    ) -> Result<Vec<String>>;
-    fn hostname(
-        &self,
-        config: &EffectiveWorkerConfig,
-        storage: &StoragePaths,
-    ) -> Result<Option<String>>;
-}
-struct Installed;
-impl Source for Installed {
-    fn rootless(&self, config: &RootlessConfig) -> Result<rootless::RootlessObservation> {
-        Ok(rootless::observe_rootless(config)?)
-    }
-    fn gpu(
-        &self,
-        config: &EffectiveWorkerConfig,
-        session: &ProfileSessionId,
-    ) -> Result<Vec<String>> {
-        gpu_arguments(config, session)
-    }
-    fn hostname(
-        &self,
-        config: &EffectiveWorkerConfig,
-        storage: &StoragePaths,
-    ) -> Result<Option<String>> {
-        Ok(host::employee_hostname(config, storage)?)
-    }
-}
-fn prepare_observing(
-    captured: &ValidatedWorkerSnapshot,
-    session: &ProfileSessionId,
-    storage: &StoragePaths,
-    observed: &impl Source,
-) -> Result<WorkerCreatePlan> {
     if storage.session() != session {
         return Err(LaunchPreparationError::StorageSession);
     }
     let source = captured.configuration().clone();
     let effective = resource_staging::effective_config(source.clone(), session)
         .map_err(LaunchPreparationError::Effective)?;
-    let prepared = CreatePreparation::capture(&effective, session)?;
-    let rootless =
-        RootlessConfig::capture(effective.clone()).map_err(rootless::RootlessHostError::from)?;
-    // Preserve TWO fresh profile observations, matching security_args then
-    // runtime_args. This snapshot is not durable profile/cgroup custody.
-    let security = observed.rootless(&rootless)?;
-    let runtime = observed.rootless(&rootless)?;
-    let gpu = observed.gpu(&effective, session)?;
-    // Human hostname metadata is read last, after GPU qualification.
-    let hostname = observed.hostname(&effective, storage)?;
-    let paths = host::storage_argument_paths(storage)?;
-    let employee = storage.employee().zip(hostname.as_deref());
-    let arguments = prepared.arguments(
-        &paths.0,
-        Some(&paths.1),
-        CreateObservations {
-            security: security.security_args(),
-            runtime: runtime.runtime_args(),
-            gpu: &gpu,
-            employee,
-        },
-    )?;
+    let arguments = host::observe_create_arguments(&effective, session, storage)?;
     Ok(WorkerCreatePlan {
         source,
         effective,
@@ -198,23 +158,4 @@ fn prepare_observing(
         storage: storage.clone(),
         arguments,
     })
-}
-fn gpu_arguments(
-    config: &EffectiveWorkerConfig,
-    session: &ProfileSessionId,
-) -> Result<Vec<String>> {
-    let policies =
-        gpu::validate_config(config).map_err(device_policy::DevicePolicyHostError::from)?;
-    if !policies.needs_current_employee(session) {
-        return Ok(gpu::gpu_create_args(&policies, session, None)
-            .map_err(device_policy::DevicePolicyHostError::from)?);
-    }
-    let captured = ResourceConfiguration::capture(config.clone())
-        .map_err(device_policy::DevicePolicyHostError::from)?;
-    let identity = worker_identity::storage_identity(
-        &captured
-            .identity_settings()
-            .map_err(device_policy::DevicePolicyHostError::from)?,
-    )?;
-    Ok(device_policy::gpu_create_args(config, &identity, session)?)
 }
