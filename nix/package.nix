@@ -150,7 +150,8 @@ let
       npm test -- test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
         test/rust-routes/settings-fixtures.test.ts
       npm test -- test/rust-front/adapter.test.ts test/rust-front/fd-inheritance.test.ts test/rust-front/server-front.test.ts \
-        test/rust-front/front-child.test.ts test/rust-front/receipts.test.ts test/rust-front/direct-child.test.ts
+        test/rust-front/front-child.test.ts test/rust-front/receipts.test.ts test/rust-front/direct-child.test.ts \
+        test/rust-front/http-body.test.ts
       npm test -- test/board-permissions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
