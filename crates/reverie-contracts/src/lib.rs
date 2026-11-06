@@ -1,6 +1,7 @@
 //! Named legacy wire codecs. Decoded values and digests confer no authority.
 pub mod broker_laptop;
 pub mod broker_resources;
+pub mod command_telemetry;
 pub mod creation_budget;
 pub mod device_policy;
 mod digest;

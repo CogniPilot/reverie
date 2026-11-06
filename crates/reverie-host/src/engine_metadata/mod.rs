@@ -44,11 +44,28 @@ pub enum EngineQuery<'a> {
     InspectBatch(&'a [ContainerId]),
     InspectStopped(&'a ContainerId),
     GpuInformation,
+    TelemetryInventory,
+    TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
 }
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
             Self::InventoryIds => return Ok(["ps", "-aq", "--no-trunc"].map(Into::into).to_vec()),
+            Self::TelemetryInventory => {
+                return Ok([
+                    "ps",
+                    "--all",
+                    "--filter",
+                    "label=reverie.worker",
+                    "--format",
+                    "{{.ID}}",
+                ]
+                .map(Into::into)
+                .to_vec());
+            }
+            Self::TelemetryInspect(id) => {
+                return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
+            }
             Self::GpuInformation => {
                 return Ok(["info", "--format", GPU_INFORMATION_FORMAT]
                     .map(Into::into)

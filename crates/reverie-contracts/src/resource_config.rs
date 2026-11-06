@@ -116,6 +116,10 @@ impl ResourceIdentitySettings {
                 .map_err(|_| ResourceConfigError::ResourceShape)?,
             _ => return Err(ResourceConfigError::ResourceShape),
         };
+        Self::capture_known_uid(source, uid)
+    }
+    pub(crate) fn capture_known_uid(source: &EffectiveWorkerConfig, uid: u32) -> Result<Self> {
+        let fields = root(source);
         Ok(Self {
             company: path(fields, "companyFile")?,
             state: path(fields, "stateRoot")?,
