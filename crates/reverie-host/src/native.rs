@@ -11,10 +11,12 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 mod lease;
+mod passwd;
 pub(crate) use lease::observe_with_ancestors;
 mod text;
 pub(crate) use text::{python_path, python_text};
 mod resolve;
+pub(crate) use passwd::username;
 pub(crate) use resolve::resolve_strict_text;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

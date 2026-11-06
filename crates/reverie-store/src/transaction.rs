@@ -5,13 +5,18 @@ use reverie_contracts::profiles_v1;
 use reverie_core::profiles::{ProfileDocument, ProfilePutIntent};
 use std::fs::File;
 
-struct Temporary {
-    name: String,
+pub(crate) struct Temporary {
+    pub(crate) name: String,
     stamp: Stamp,
     anchor: File,
 }
-fn prepare(directory: &Directory, bytes: &[u8]) -> Result<Temporary> {
-    let name = private_fs::random_temporary_name()?;
+pub(crate) fn prepare(
+    directory: &Directory,
+    bytes: &[u8],
+    maximum: usize,
+    prefix: &str,
+) -> Result<Temporary> {
+    let name = private_fs::random_name(prefix)?;
     let mut writer = directory.create_file(&name)?;
     let initial = match initial_stamp(&writer, directory) {
         Ok(stamp) => stamp,
@@ -34,7 +39,7 @@ fn prepare(directory: &Directory, bytes: &[u8]) -> Result<Temporary> {
         anchor,
     };
     let write = private_fs::write_all(&mut writer, bytes, directory.path());
-    let verified = write.and_then(|()| verify_prepared(&mut writer, bytes));
+    let verified = write.and_then(|()| verify_prepared(&mut writer, bytes, maximum));
     let closed = private_fs::close(writer, CloseRole::Temporary, directory.path());
     let result = finalized(verified, closed);
     match result {
@@ -84,10 +89,10 @@ fn failed_unanchored(
     let closed = private_fs::close(writer, CloseRole::Temporary, directory.path());
     finalized(finalized(Err(error), cleaned), closed)
 }
-fn verify_prepared(file: &mut File, bytes: &[u8]) -> Result<Stamp> {
+fn verify_prepared(file: &mut File, bytes: &[u8], maximum: usize) -> Result<Stamp> {
     let before = private_fs::private_stamp(file)?;
     private_fs::rewind(file)?;
-    let actual = private_fs::read_bounded(file, MAX_BYTES)?;
+    let actual = private_fs::read_bounded(file, maximum)?;
     need(
         actual == bytes && private_fs::private_stamp(file)? == before,
         StoreFault::Changed,
@@ -95,7 +100,10 @@ fn verify_prepared(file: &mut File, bytes: &[u8]) -> Result<Stamp> {
     Ok(before)
 }
 impl Temporary {
-    fn check(&self, directory: &Directory) -> Result<()> {
+    pub(crate) fn stamp(&self) -> Result<Stamp> {
+        private_fs::private_stamp(&self.anchor)
+    }
+    pub(crate) fn check(&self, directory: &Directory) -> Result<()> {
         need(
             private_fs::private_stamp(&self.anchor)? == self.stamp,
             StoreFault::TemporaryRebound,
@@ -105,7 +113,7 @@ impl Temporary {
             StoreFault::TemporaryRebound,
         )
     }
-    fn cleanup(self, directory: &Directory) -> Result<()> {
+    pub(crate) fn cleanup(self, directory: &Directory) -> Result<()> {
         let removed = directory.remove_temporary(&self.name, &self.stamp);
         let closed = private_fs::close(self.anchor, CloseRole::TemporaryAnchor, directory.path());
         finalized(removed, closed)
@@ -126,7 +134,7 @@ fn commit(
     attempted: &mut bool,
 ) -> Result<Stamp> {
     let bytes = profiles_v1::encode(document).map_err(StoreError::Codec)?;
-    let temporary = prepare(&store.directory, &bytes)?;
+    let temporary = prepare(&store.directory, &bytes, MAX_BYTES, ".profiles-")?;
     #[cfg(test)]
     let hook = crate::faults::hit(
         crate::faults::Point::AfterTemporaryPrepared,
