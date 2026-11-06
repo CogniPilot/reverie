@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 mod claim_cases;
 #[path = "tests_preparation.rs"]
 mod preparation_cases;
+#[path = "tests_profile_selection.rs"]
+mod profile_selection_cases;
 fn sha(raw: &[u8]) -> String {
     Sha256::digest(raw)
         .iter()

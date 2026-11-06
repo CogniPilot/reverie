@@ -13,6 +13,47 @@ pub struct ClaimEmployee {
     employee: ProfileEmployeeId,
 }
 impl ClaimEmployee {
+    /// Named pre-approval profile-selection fields. Missing/wrong SID uses
+    /// J's canonical role refusal, distinct from observe()'s indexed SID read.
+    pub fn selection_session(&self) -> reverie_core::operations::Result<ProfileSessionId> {
+        let invalid = || reverie_core::operations::OperationError::new("UUID");
+        let row = object(&self.value).map_err(|_| invalid())?;
+        let Some(Value(Node::String(value))) = row.get(&key("sessionId")) else {
+            return Err(invalid());
+        };
+        let text = value
+            .0
+            .iter()
+            .map(|&p| char::from_u32(p))
+            .collect::<Option<String>>()
+            .ok_or_else(invalid)?;
+        let value = reverie_core::operations::JournalId::parse(&text)?;
+        Ok(ProfileSessionId::parse(value.as_str()).expect("checked canonical role"))
+    }
+    pub fn selection_generation(&self) -> reverie_core::operations::Result<Generation> {
+        let invalid = || reverie_core::operations::OperationError::new("VERSION");
+        let row = object(&self.value).map_err(|_| invalid())?;
+        let Some(Value(Node::Number(Number::Integer(value)))) = row.get(&key("sessionGeneration"))
+        else {
+            return Err(invalid());
+        };
+        Generation::try_new(value.parse::<u64>().map_err(|_| invalid())?).map_err(|_| invalid())
+    }
+    pub fn selection_intent(
+        &self,
+        scope: &reverie_core::operations::OperationScope,
+    ) -> Result<bool> {
+        let row = object(&self.value)?;
+        if !matches!(
+            row.get(&key("desiredRunning")),
+            Some(Value(Node::Bool(true)))
+        ) || crate::legacy_json::truthy(row.get(&key("onVacation")))
+            || crate::legacy_json::truthy(row.get(&key("bindingMigration")))
+        {
+            return Ok(false);
+        }
+        Ok(owner_digest(&self.value, &scope.company_id)? == scope.owner_scope_digest)
+    }
     pub fn capture(metadata: &Metadata, employee: &ProfileEmployeeId) -> Result<Self> {
         let selected = eid_rows(metadata, employee)?;
         if selected.len() != 1 {
@@ -99,21 +140,7 @@ impl ReservationEmployee {
         &self,
         company: &reverie_core::operations::JournalId,
     ) -> Result<reverie_core::operations::JournalDigest> {
-        let row = object(&self.value)?;
-        let fields = [
-            (
-                key("company_id"),
-                Value(Node::String(key(company.as_str()))),
-            ),
-            (
-                key("owner"),
-                row.get(&key("owner"))
-                    .map_or_else(|| Value(Node::Null), Value::deep_clone),
-            ),
-        ]
-        .into_iter()
-        .collect();
-        super::digests::digest(&Value(Node::Object(fields)))
+        owner_digest(&self.value, company)
     }
     pub(super) fn data(&self) -> &Value {
         &self.value
@@ -139,6 +166,26 @@ impl ReservationEmployee {
     pub fn still_current(&self, metadata: &Metadata) -> Result<bool> {
         unchanged(metadata, &self.employee, &self.value)
     }
+}
+fn owner_digest(
+    value: &Value,
+    company: &reverie_core::operations::JournalId,
+) -> Result<reverie_core::operations::JournalDigest> {
+    let row = object(value)?;
+    let fields = [
+        (
+            key("company_id"),
+            Value(Node::String(key(company.as_str()))),
+        ),
+        (
+            key("owner"),
+            row.get(&key("owner"))
+                .map_or_else(|| Value(Node::Null), Value::deep_clone),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    super::digests::digest(&Value(Node::Object(fields)))
 }
 fn eid_rows<'a>(metadata: &'a Metadata, employee: &ProfileEmployeeId) -> Result<Vec<&'a Value>> {
     let mut selected = Vec::new();

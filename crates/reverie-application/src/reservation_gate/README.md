@@ -21,6 +21,7 @@ held admission, native completion proof or start permit.
 | `_finish_claim` | `terminal_claim`, consumed exact store reader | Fresh terminal reader/store/lock close before last native guards; metadata/preview close their original store too, while the retained producer keeps its actual original store; full epoch/source/metadata fences and named journal stamp |
 | `cold_inspect`, `check_recovery` | `recovery` | Fresh matching/changed/unavailable source facts and unchanged journal; no handle resurrection, retry or positive capacity credit |
 | preparation `draft` for an already selected profile | `draft`, fixed `DraftCapacity` and named draft codec | Actual journal flock around observe/retained headroom; only then allocates opaque IDs, checks all occupied roles, closes store, bounds every directory entry and exclusively persists/fsyncs the fixed draft |
+| preparation RAM `_select_profile` | `profile_selection`, existing canonical `ProfileStore::put` | Actual admission/history, strict current intent/scope, native census, effective resource fields, late target allocation and repeated whole-company/storage fences before revision/version/binding CAS; no executing claim may be rewritten |
 | preparation `reserve`, `_RetainedClaim` | `preparation`, shared `claim` owner | Reuses exact approved IDs, real process-local journal handle and owned store, original canonical profile/context and exact source paths; replays cannot manufacture a handle |
 | native `capture_original`, `_account_mounts` | `preparation`, fixed `reservation_kernel` and named baseline codec | Actual selected source limits/storage/capacity hashes, physical cgroup identity, ordered source resolves/identities then sorted account references and fixed proc-root identities; no credential contents read |
 | `begin_prepare`, `_finish_phase` before publication | `preparation_phase`, retained handle, fixed publication codec/reader/writer | Latches before admission, durably records PREPARING before intent publication, preserves fresh-thread recipe semantics and original source/epoch/storage; exact selected operation and named journal/phase stamps fence the terminal result |
@@ -35,7 +36,7 @@ and publicly inspectable secondary finalizer failures.
 
 The ordinary guard currently refuses every control transition marker. It does not claim
 the unported GPU/actor/image/perf/mount transition owners or their pending/row
-exceptions. RAM profile selection, configuration staging/commit/reload,
+exceptions. Configuration staging/commit/reload,
 creation/stop policies, start/completion boundaries and host-job begin/bind/finish remain
 required. These must be real producers before a full Gate or launch claim. Caller
 owner/session authorization and future selected HTTP/broker integration remain
@@ -111,3 +112,14 @@ that mismatch remains an uncertain PREPARING claim. Actual workflow regressions
 also cover lost transition ACK, retained exclusive names, premature publication,
 last-stamp drift, and fresh reader close ordering. These checks qualify source
 compatibility only, not a mutable broker reload, protected stop or launch.
+
+The RAM path now selects its canonical profile before preview, using only the
+requested memory; identity and every other resource come from current trusted
+metadata/effective configuration. It supports an absent canonical profile,
+invalidates old previews after a new choice and refuses an executing employee
+claim. A later failed preview retains a successful profile CAS, with no hidden
+rollback or positive capacity claim. Whole-company drift wins before put, and
+target-generation overflow is checked only at that original late phase.
+Current CPU numeric representation (including signed zero) is preserved. Six
+real workflow controls and five actual old preview/profile tests cover these
+paths. This changes neither the company binding nor the installed worker policy.

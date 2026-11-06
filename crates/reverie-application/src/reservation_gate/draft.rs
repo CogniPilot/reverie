@@ -135,15 +135,11 @@ impl ReservationGate {
         employee: &JournalId,
         key: &JournalId,
     ) -> Result<DraftPreview> {
-        let admission = self.inner.admit(AdmissionBounds::default())?;
-        match self.inner.draft_profile(employee, key) {
-            Ok((preview, terminal)) => finalized(Ok(preview), admission.finish_claim(&terminal)),
-            Err(error) => admission.conclude(Err(error)),
-        }
+        self.draft(employee, key, None)
     }
 }
 impl Inner {
-    fn draft_profile(
+    pub(super) fn draft_profile(
         self: &Arc<Self>,
         employee: &JournalId,
         key: &JournalId,

@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Value(reverie_core::ValueError),
     PublicationData(reverie_contracts::reservation_publication::PublicationDataError),
     PreparationIntentUncertain {
         cause: Box<Self>,
@@ -39,6 +40,7 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Value(error) => error.code(),
             Self::PublicationData(error) => error.code(),
             Self::PreparationIntentUncertain { .. } => {
                 "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM"
@@ -79,6 +81,7 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Value(error) => Some(error),
             Self::PublicationData(error) => Some(error),
             Self::PreparationIntentUncertain { cause }
             | Self::PreparationPublicationUncertain { cause } => Some(cause),
@@ -117,6 +120,7 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(reverie_core::ValueError, Value);
 from_error!(
     reverie_contracts::reservation_publication::PublicationDataError,
     PublicationData

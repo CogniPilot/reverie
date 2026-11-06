@@ -35,14 +35,7 @@ impl DraftRecord {
                 == 5,
             DraftDataError::Ids,
         )?;
-        for op in document.operations().values() {
-            let op = op.data();
-            let occupied = [
-                op.id.as_str(),
-                op.reservation_id.as_str(),
-                op.reserved_sid.as_str(),
-                op.observation.data().current_sid.as_str(),
-            ];
+        for occupied in document.role_ids() {
             need(
                 [
                     fields.operation.as_str(),
@@ -50,7 +43,7 @@ impl DraftRecord {
                     target.as_str(),
                 ]
                 .iter()
-                .all(|id| !occupied.contains(id)),
+                .all(|id| *id != occupied.as_str()),
                 DraftDataError::Ids,
             )?;
         }

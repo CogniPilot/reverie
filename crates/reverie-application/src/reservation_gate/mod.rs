@@ -11,6 +11,7 @@ mod host_jobs;
 mod observation;
 mod preparation;
 mod preparation_phase;
+mod profile_selection;
 mod recovery;
 mod terminal_claim;
 #[cfg(test)]

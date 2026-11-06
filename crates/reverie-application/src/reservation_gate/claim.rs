@@ -238,21 +238,33 @@ impl Inner {
         rows: &ObservedInventory,
         target: &ProfileSessionId,
     ) -> Result<()> {
-        for row in rows.rows() {
-            need(
-                !row.data().label_is("reverie.session", target.as_str())?,
-                "RESERVATION_TARGET_ALREADY_PUBLISHED",
-            )?;
-        }
-        Ok(())
-    }
-    pub(super) fn target_unpublished(&self, target: &ProfileSessionId) -> Result<()> {
-        let paths = storage_identity::storage_paths(&self.identity, target)?;
         need(
-            paths.kind() == StorageKind::Session
-                && paths.identity() == target.as_str()
-                && !reservation_control::session_directory_present(&self.config, target)?,
+            self.target_is_absent(rows, target)?,
             "RESERVATION_TARGET_ALREADY_PUBLISHED",
         )
+    }
+    pub(super) fn target_is_absent(
+        &self,
+        rows: &ObservedInventory,
+        target: &ProfileSessionId,
+    ) -> Result<bool> {
+        for row in rows.rows() {
+            if row.data().label_is("reverie.session", target.as_str())? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+    pub(super) fn target_unpublished(&self, target: &ProfileSessionId) -> Result<()> {
+        need(
+            self.target_is_unpublished(target)?,
+            "RESERVATION_TARGET_ALREADY_PUBLISHED",
+        )
+    }
+    pub(super) fn target_is_unpublished(&self, target: &ProfileSessionId) -> Result<bool> {
+        let paths = storage_identity::storage_paths(&self.identity, target)?;
+        Ok(paths.kind() == StorageKind::Session
+            && paths.identity() == target.as_str()
+            && !reservation_control::session_directory_present(&self.config, target)?)
     }
 }

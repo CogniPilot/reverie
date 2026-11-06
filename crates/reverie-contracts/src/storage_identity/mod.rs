@@ -127,6 +127,11 @@ pub fn decode_ordered_metadata(raw: &[u8]) -> Result<OrderedMetadata> {
 }
 
 impl Metadata {
+    /// Python equality of complete metadata DATA, retaining codepoints and
+    /// number semantics. This is not a current-file or identity permission.
+    pub fn equivalent(&self, other: &Self) -> bool {
+        self.0.python_eq(&other.0)
+    }
     pub(crate) fn as_value(&self) -> &Value {
         &self.0
     }
