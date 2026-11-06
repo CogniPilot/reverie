@@ -19,6 +19,9 @@ fn employee(setup: &Setup) -> JournalId {
 }
 #[test]
 fn approved_preview_persists_exact_data_without_claim_and_retains_real_original_baseline() {
+    crate::test_process::owning_case!(
+        approved_preview_persists_exact_data_without_claim_and_retains_real_original_baseline
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -104,6 +107,9 @@ fn approved_preview_persists_exact_data_without_claim_and_retains_real_original_
 }
 #[test]
 fn changed_preview_refuses_before_claim_and_native_baseline_loss_retains_the_real_claim() {
+    crate::test_process::owning_case!(
+        changed_preview_refuses_before_claim_and_native_baseline_loss_retains_the_real_claim
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -144,6 +150,9 @@ fn changed_preview_refuses_before_claim_and_native_baseline_loss_retains_the_rea
 }
 #[test]
 fn preview_closes_original_reader_before_publishing_and_terminal_native_checks() {
+    crate::test_process::owning_case!(
+        preview_closes_original_reader_before_publishing_and_terminal_native_checks
+    );
     use std::sync::atomic::{AtomicBool, Ordering};
     let setup = Setup::new();
     let fixture = Fixture::new();
@@ -178,6 +187,9 @@ fn preview_closes_original_reader_before_publishing_and_terminal_native_checks()
 }
 #[test]
 fn legacy_nil_source_session_is_preview_data_but_cannot_produce_a_retained_claim() {
+    crate::test_process::owning_case!(
+        legacy_nil_source_session_is_preview_data_but_cannot_produce_a_retained_claim
+    );
     let mut setup = Setup::new();
     let nil = "00000000-0000-0000-0000-000000000000";
     setup.oracle["employee"]["sessionId"] = json!(nil);
@@ -224,6 +236,9 @@ fn legacy_nil_source_session_is_preview_data_but_cannot_produce_a_retained_claim
 }
 #[test]
 fn python_equal_profile_numbers_preserve_request_validation_and_native_read_priority() {
+    crate::test_process::owning_case!(
+        python_equal_profile_numbers_preserve_request_validation_and_native_read_priority
+    );
     for (field, expected) in [
         ("version", "UINT64"),
         ("memoryMiB", "RESERVATION_REQUEST_PROFILE"),
@@ -278,6 +293,9 @@ fn python_equal_profile_numbers_preserve_request_validation_and_native_read_prio
 }
 #[test]
 fn stored_target_mismatch_refuses_before_any_live_profile_read_or_native_observation() {
+    crate::test_process::owning_case!(
+        stored_target_mismatch_refuses_before_any_live_profile_read_or_native_observation
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -307,6 +325,9 @@ fn stored_target_mismatch_refuses_before_any_live_profile_read_or_native_observa
 }
 #[test]
 fn draft_profile_comparison_keeps_legacy_python_numeric_equality_without_minting_a_profile() {
+    crate::test_process::owning_case!(
+        draft_profile_comparison_keeps_legacy_python_numeric_equality_without_minting_a_profile
+    );
     for cpus in [json!(false), json!(-0.0)] {
         let setup = Setup::new();
         let fixture = Fixture::new();

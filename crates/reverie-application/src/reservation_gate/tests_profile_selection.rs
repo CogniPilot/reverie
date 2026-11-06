@@ -17,6 +17,9 @@ fn profiles(setup: &Setup) -> reverie_core::profiles::ProfileDocument {
 }
 #[test]
 fn ram_choice_uses_real_canonical_cas_before_preview_without_company_or_policy_mutation() {
+    crate::test_process::owning_case!(
+        ram_choice_uses_real_canonical_cas_before_preview_without_company_or_policy_mutation
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup_gate(&setup, &fixture);
@@ -63,6 +66,9 @@ fn ram_choice_uses_real_canonical_cas_before_preview_without_company_or_policy_m
 }
 #[test]
 fn empty_canonical_store_is_initialized_and_bad_ram_or_stopped_intent_never_puts_a_profile() {
+    crate::test_process::owning_case!(
+        empty_canonical_store_is_initialized_and_bad_ram_or_stopped_intent_never_puts_a_profile
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup_gate(&setup, &fixture);
@@ -103,6 +109,9 @@ fn empty_canonical_store_is_initialized_and_bad_ram_or_stopped_intent_never_puts
 }
 #[test]
 fn new_ram_choice_invalidates_old_preview_but_cannot_rewrite_a_retained_employee_claim() {
+    crate::test_process::owning_case!(
+        new_ram_choice_invalidates_old_preview_but_cannot_rewrite_a_retained_employee_claim
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup_gate(&setup, &fixture);
@@ -140,6 +149,9 @@ fn new_ram_choice_invalidates_old_preview_but_cannot_rewrite_a_retained_employee
 }
 #[test]
 fn late_whole_company_drift_refuses_before_put_and_numeric_cpu_kind_comes_from_current_policy() {
+    crate::test_process::owning_case!(
+        late_whole_company_drift_refuses_before_put_and_numeric_cpu_kind_comes_from_current_policy
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup_gate(&setup, &fixture);
@@ -195,6 +207,9 @@ fn late_whole_company_drift_refuses_before_put_and_numeric_cpu_kind_comes_from_c
 }
 #[test]
 fn preview_loss_after_successful_profile_cas_retains_profile_without_a_capacity_claim() {
+    crate::test_process::owning_case!(
+        preview_loss_after_successful_profile_cas_retains_profile_without_a_capacity_claim
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup_gate(&setup, &fixture);
@@ -249,6 +264,9 @@ fn preview_loss_after_successful_profile_cas_retains_profile_without_a_capacity_
 }
 #[test]
 fn target_generation_overflow_is_checked_after_final_native_and_company_fences() {
+    crate::test_process::owning_case!(
+        target_generation_overflow_is_checked_after_final_native_and_company_fences
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup_gate(&setup, &fixture);

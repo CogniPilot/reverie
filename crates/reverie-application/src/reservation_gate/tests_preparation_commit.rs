@@ -46,6 +46,7 @@ fn preparing() -> (
 #[test]
 fn actual_policy_cas_installs_same_broker_state_and_acks_prepared_without_start_or_capacity_release()
  {
+    crate::test_process::owning_case!(actual_policy_cas_installs_same_broker_state_and_acks_prepared_without_start_or_capacity_release);
     let (setup, fixture, gate, mut claim, path) = preparing();
     let old = claim.profile().binding().current_session().clone();
     let nil = ProfileSessionId::parse("00000000-0000-0000-0000-000000000000").unwrap();
@@ -116,6 +117,9 @@ fn actual_policy_cas_installs_same_broker_state_and_acks_prepared_without_start_
 }
 #[test]
 fn same_bytes_original_rebind_retains_preparing_claim_temp_and_before_evidence_without_retry() {
+    crate::test_process::owning_case!(
+        same_bytes_original_rebind_retains_preparing_claim_temp_and_before_evidence_without_retry
+    );
     let (setup, fixture, gate, mut claim, path) = preparing();
     let policy = path.clone();
     let directory = path.parent().unwrap().to_owned();
@@ -185,6 +189,7 @@ fn same_bytes_original_rebind_retains_preparing_claim_temp_and_before_evidence_w
 #[test]
 fn failed_optional_laptop_inspect_wins_before_json_and_keeps_actual_published_file_without_reload()
 {
+    crate::test_process::owning_case!(failed_optional_laptop_inspect_wins_before_json_and_keeps_actual_published_file_without_reload);
     let (setup, fixture, gate, mut claim, path) = preparing();
     let old = claim.profile().binding().current_session().clone();
     let other = ProfileSessionId::parse("00000000-0000-0000-0000-000000000000").unwrap();
@@ -233,6 +238,9 @@ fn failed_optional_laptop_inspect_wins_before_json_and_keeps_actual_published_fi
 }
 #[test]
 fn ordinary_reload_reads_real_file_and_cannot_install_changed_projections_for_active_claim() {
+    crate::test_process::owning_case!(
+        ordinary_reload_reads_real_file_and_cannot_install_changed_projections_for_active_claim
+    );
     let (_setup, fixture, _gate, claim, path) = preparing();
     let broker =
         ReservationGate::new(load_owner_config(&path).unwrap(), fixture.observer()).unwrap();

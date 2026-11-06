@@ -23,6 +23,9 @@ fn record_source_binding(setup: &Setup) {
 mod commit_cases;
 #[test]
 fn actual_profile_stage_freezes_source_policy_after_publication_without_config_write_or_reload() {
+    crate::test_process::owning_case!(
+        actual_profile_stage_freezes_source_policy_after_publication_without_config_write_or_reload
+    );
     let setup = Setup::new();
     record_source_binding(&setup);
     let fixture = Fixture::new();
@@ -95,6 +98,9 @@ fn actual_profile_stage_freezes_source_policy_after_publication_without_config_w
 }
 #[test]
 fn old6_native_peer_reads_follow_original_order_even_when_hash_encoding_sorts_keys() {
+    crate::test_process::owning_case!(
+        old6_native_peer_reads_follow_original_order_even_when_hash_encoding_sorts_keys
+    );
     let mut setup = Setup::new();
     let first = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     let second = "11111111-1111-4111-8111-111111111111";
@@ -186,6 +192,9 @@ fn old6_native_peer_reads_follow_original_order_even_when_hash_encoding_sorts_ke
 }
 #[test]
 fn actual_preparing_is_durable_once_before_normal_rebind_and_readonly_publication_ack() {
+    crate::test_process::owning_case!(
+        actual_preparing_is_durable_once_before_normal_rebind_and_readonly_publication_ack
+    );
     let setup = Setup::new();
     record_source_binding(&setup);
     let mut before = setup.oracle["employee"].clone();
@@ -258,6 +267,7 @@ fn actual_preparing_is_durable_once_before_normal_rebind_and_readonly_publicatio
 }
 #[test]
 fn premature_publication_and_post_preparing_native_loss_close_owner_keep_claim_and_forbid_retry() {
+    crate::test_process::owning_case!(premature_publication_and_post_preparing_native_loss_close_owner_keep_claim_and_forbid_retry);
     let setup = Setup::new();
     let fixture = Fixture::new();
     let (_gate, mut claim) = retained(&setup, &fixture);
@@ -314,6 +324,9 @@ fn premature_publication_and_post_preparing_native_loss_close_owner_keep_claim_a
 }
 #[test]
 fn fresh_terminal_reader_closes_before_last_native_and_late_journal_stamp_cannot_ack_intent() {
+    crate::test_process::owning_case!(
+        fresh_terminal_reader_closes_before_last_native_and_late_journal_stamp_cannot_ack_intent
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let (_gate, mut claim) = retained(&setup, &fixture);
@@ -357,6 +370,9 @@ fn fresh_terminal_reader_closes_before_last_native_and_late_journal_stamp_cannot
 }
 #[test]
 fn adjacent_raw_surrogate_codepoints_are_not_normalized_by_copying_the_publication_receipt() {
+    crate::test_process::owning_case!(
+        adjacent_raw_surrogate_codepoints_are_not_normalized_by_copying_the_publication_receipt
+    );
     let setup = Setup::new();
     let mut row = setup.oracle["employee"].clone();
     row["runtimeRecipe"] = json!({"mode":"claude","unknown":"RAWPAIR"});
@@ -389,6 +405,9 @@ fn adjacent_raw_surrogate_codepoints_are_not_normalized_by_copying_the_publicati
 }
 #[test]
 fn exclusive_publication_refuses_a_retained_name_without_rollback_or_handle_retry() {
+    crate::test_process::owning_case!(
+        exclusive_publication_refuses_a_retained_name_without_rollback_or_handle_retry
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let (_gate, mut claim) = retained(&setup, &fixture);
@@ -425,6 +444,9 @@ fn exclusive_publication_refuses_a_retained_name_without_rollback_or_handle_retr
 }
 #[test]
 fn twenty_two_actual_legacy_recipe_cases_keep_normal_selector_and_unknown_data_semantics() {
+    crate::test_process::owning_case!(
+        twenty_two_actual_legacy_recipe_cases_keep_normal_selector_and_unknown_data_semantics
+    );
     let cases: Value = serde_json::from_str(include_str!(
         "../../../reverie-contracts/tests/fixtures/reservation-publication-recipes-python.json"
     ))

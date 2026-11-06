@@ -58,27 +58,7 @@ fn program() -> &'static Path {
         binary
     })
 }
-fn isolate(name: &str) -> bool {
-    const KEY: &str = "REVERIE_STORAGE_REGISTRY_OWNING_CASE";
-    if std::env::var(KEY).as_deref() == Ok(name) {
-        return false;
-    }
-    let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", name, "--nocapture", "--test-threads=1"])
-        .env(KEY, name)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success()
-            && String::from_utf8_lossy(&output.stdout)
-                .contains("test result: ok. 1 passed; 0 failed;"),
-        "owning selector {name} must execute exactly one test; status={:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    true
-}
+use crate::test_process::isolate_case as isolate;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {

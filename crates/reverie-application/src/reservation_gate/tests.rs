@@ -114,6 +114,9 @@ fn key() -> JournalId {
 
 #[test]
 fn readonly_lookup_uses_actual_admission_canonical_store_and_final_guard() {
+    crate::test_process::owning_case!(
+        readonly_lookup_uses_actual_admission_canonical_store_and_final_guard
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     prepare(&fixture, 8);
@@ -131,6 +134,9 @@ fn readonly_lookup_uses_actual_admission_canonical_store_and_final_guard() {
 }
 #[test]
 fn reentrant_and_expired_admission_refuse_before_new_native_queries() {
+    crate::test_process::owning_case!(
+        reentrant_and_expired_admission_refuse_before_new_native_queries
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     prepare(&fixture, 4);
@@ -158,6 +164,7 @@ fn reentrant_and_expired_admission_refuse_before_new_native_queries() {
 }
 #[test]
 fn entry_bound_does_not_become_a_new_body_or_finalizer_deadline() {
+    crate::test_process::owning_case!(entry_bound_does_not_become_a_new_body_or_finalizer_deadline);
     let tree = Tree::new();
     let fixture = Fixture::new();
     prepare(&fixture, 4);
@@ -187,6 +194,9 @@ fn entry_bound_does_not_become_a_new_body_or_finalizer_deadline() {
 }
 #[test]
 fn changed_image_and_pending_refuse_and_release_the_actual_flock() {
+    crate::test_process::owning_case!(
+        changed_image_and_pending_refuse_and_release_the_actual_flock
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     let gate = tree.gate(&fixture, true);
@@ -209,6 +219,9 @@ fn changed_image_and_pending_refuse_and_release_the_actual_flock() {
 }
 #[test]
 fn failed_body_closes_store_and_admission_without_success_native_finalizer_queries() {
+    crate::test_process::owning_case!(
+        failed_body_closes_store_and_admission_without_success_native_finalizer_queries
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     prepare(&fixture, 4);
@@ -226,6 +239,9 @@ fn failed_body_closes_store_and_admission_without_success_native_finalizer_queri
 }
 #[test]
 fn another_thread_cannot_borrow_the_live_scope_and_waiting_is_bounded() {
+    crate::test_process::owning_case!(
+        another_thread_cannot_borrow_the_live_scope_and_waiting_is_bounded
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     prepare(&fixture, 4);
@@ -255,6 +271,9 @@ fn another_thread_cannot_borrow_the_live_scope_and_waiting_is_bounded() {
 }
 #[test]
 fn waiting_remains_bounded_before_native_flock_open_and_entry_is_not_admission() {
+    crate::test_process::owning_case!(
+        waiting_remains_bounded_before_native_flock_open_and_entry_is_not_admission
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     let gate = tree.gate(&fixture, false);
@@ -286,6 +305,9 @@ fn waiting_remains_bounded_before_native_flock_open_and_entry_is_not_admission()
 }
 #[test]
 fn failed_actual_lock_open_releases_only_its_owned_entry_registration() {
+    crate::test_process::owning_case!(
+        failed_actual_lock_open_releases_only_its_owned_entry_registration
+    );
     let tree = Tree::new();
     let fixture = Fixture::new();
     let gate = tree.gate(&fixture, false);

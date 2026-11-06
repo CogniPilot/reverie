@@ -112,6 +112,9 @@ impl Setup {
 }
 #[test]
 fn full_readside_observe_matches_actual_python_journal_bytes_and_hashes() {
+    crate::test_process::owning_case!(
+        full_readside_observe_matches_actual_python_journal_bytes_and_hashes
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -132,6 +135,9 @@ fn full_readside_observe_matches_actual_python_journal_bytes_and_hashes() {
 
 #[test]
 fn install_headroom_uses_real_admission_journal_and_same_native_origin() {
+    crate::test_process::owning_case!(
+        install_headroom_uses_real_admission_journal_and_same_native_origin
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -149,6 +155,9 @@ fn install_headroom_uses_real_admission_journal_and_same_native_origin() {
 
 #[test]
 fn retained_delta_requires_current_old_source_instead_of_treating_a_hold_as_credit() {
+    crate::test_process::owning_case!(
+        retained_delta_requires_current_old_source_instead_of_treating_a_hold_as_credit
+    );
     use reverie_core::{operations::*, revision::ProfileVersion};
     let setup = Setup::new();
     let fixture = Fixture::new();
@@ -209,6 +218,9 @@ fn retained_delta_requires_current_old_source_instead_of_treating_a_hold_as_cred
 
 #[test]
 fn pending_count_includes_every_native_name_and_refuses_first_out_of_bound_position() {
+    crate::test_process::owning_case!(
+        pending_count_includes_every_native_name_and_refuses_first_out_of_bound_position
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -235,6 +247,9 @@ fn pending_count_includes_every_native_name_and_refuses_first_out_of_bound_posit
 
 #[test]
 fn headroom_host_job_and_orphan_pending_refuse_without_credit_or_success_guard() {
+    crate::test_process::owning_case!(
+        headroom_host_job_and_orphan_pending_refuse_without_credit_or_success_guard
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -270,6 +285,9 @@ fn headroom_host_job_and_orphan_pending_refuse_without_credit_or_success_guard()
 }
 #[test]
 fn profile_cpu_spelling_change_is_python_equal_without_rewriting_original_digest() {
+    crate::test_process::owning_case!(
+        profile_cpu_spelling_change_is_python_equal_without_rewriting_original_digest
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -285,6 +303,9 @@ fn profile_cpu_spelling_change_is_python_equal_without_rewriting_original_digest
 }
 #[test]
 fn profile_and_employee_drift_after_actual_storage_phase_refuse_before_success_finalizer() {
+    crate::test_process::owning_case!(
+        profile_and_employee_drift_after_actual_storage_phase_refuse_before_success_finalizer
+    );
     for employee_change in [false, true] {
         let setup = Setup::new();
         let fixture = Fixture::new();

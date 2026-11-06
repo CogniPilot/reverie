@@ -1,6 +1,9 @@
 use super::*;
 #[test]
 fn cold_recovery_matches_actual_legacy_native_exception_boundaries_without_releasing_claims() {
+    crate::test_process::owning_case!(
+        cold_recovery_matches_actual_legacy_native_exception_boundaries_without_releasing_claims
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);

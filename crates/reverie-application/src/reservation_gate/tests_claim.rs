@@ -17,6 +17,9 @@ fn request(setup: &Setup) -> OperationRequest {
 }
 #[test]
 fn metadata_reserve_and_replay_use_actual_flock_journal_claim_and_terminal_native_fences() {
+    crate::test_process::owning_case!(
+        metadata_reserve_and_replay_use_actual_flock_journal_claim_and_terminal_native_fences
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -91,6 +94,9 @@ fn metadata_reserve_and_replay_use_actual_flock_journal_claim_and_terminal_nativ
 }
 #[test]
 fn published_target_and_stale_preview_refuse_before_any_durable_claim() {
+    crate::test_process::owning_case!(
+        published_target_and_stale_preview_refuse_before_any_durable_claim
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -120,6 +126,9 @@ fn published_target_and_stale_preview_refuse_before_any_durable_claim() {
 
 #[test]
 fn native_ack_loss_after_publication_keeps_the_positive_claim_and_cold_fence() {
+    crate::test_process::owning_case!(
+        native_ack_loss_after_publication_keeps_the_positive_claim_and_cold_fence
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
@@ -155,6 +164,9 @@ fn native_ack_loss_after_publication_keeps_the_positive_claim_and_cold_fence() {
 
 #[test]
 fn terminal_reader_and_original_store_close_before_native_and_last_named_stamp() {
+    crate::test_process::owning_case!(
+        terminal_reader_and_original_store_close_before_native_and_last_named_stamp
+    );
     use std::sync::atomic::{AtomicBool, Ordering};
     let setup = Setup::new();
     let fixture = Fixture::new();
@@ -192,6 +204,9 @@ fn terminal_reader_and_original_store_close_before_native_and_last_named_stamp()
 }
 #[test]
 fn cold_recovery_preserves_actual_legacy_structural_vs_unavailable_observation_failures() {
+    crate::test_process::owning_case!(
+        cold_recovery_preserves_actual_legacy_structural_vs_unavailable_observation_failures
+    );
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
