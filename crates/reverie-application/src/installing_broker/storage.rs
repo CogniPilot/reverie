@@ -36,6 +36,8 @@ impl StorageRegistry {
         deadline: Option<Instant>,
     ) -> Result<MutexGuard<'_, Vec<Entry>>, StorageWorkflowError> {
         let Some(deadline) = deadline else {
+            #[cfg(test)]
+            tests::before_blocking_lock();
             return self
                 .entries
                 .lock()

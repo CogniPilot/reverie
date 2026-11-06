@@ -25,6 +25,15 @@ const NEXT_SID: &str = "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const EID: &str = "11111111-2222-4333-8444-555555555555";
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
+type BeforeLock = Box<dyn FnOnce()>;
+thread_local! {static BEFORE_BLOCKING_LOCK:std::cell::RefCell<Option<BeforeLock>>=std::cell::RefCell::new(None);}
+pub(super) fn before_blocking_lock() {
+    BEFORE_BLOCKING_LOCK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
 fn sid(value: &str) -> ProfileSessionId {
     ProfileSessionId::parse(value).unwrap()
 }
@@ -233,6 +242,44 @@ fn bounded_lock_wait_preserves_real_registered_owner_on_expired_release_budget()
     assert_eq!(held.len(), 1);
     drop(held);
     claim.release(end()).unwrap();
+    registry.runtime.close(end()).unwrap();
+}
+
+#[test]
+fn stop_arriving_after_unbounded_release_capture_keeps_the_real_owner_and_waiting_task() {
+    if isolate(
+        "installing_broker::storage::tests::stop_arriving_after_unbounded_release_capture_keeps_the_real_owner_and_waiting_task",
+    ) {
+        return;
+    }
+    let tree = Tree::new();
+    let registry = tree.registry();
+    let source = tree.source();
+    let claim = registry.claim(&source, &sid(SID)).unwrap();
+    let held = registry.entries.lock().unwrap();
+    let (captured, receive) = std::sync::mpsc::channel();
+    let release = std::thread::spawn(move || {
+        BEFORE_BLOCKING_LOCK
+            .with(|slot| *slot.borrow_mut() = Some(Box::new(move || captured.send(()).unwrap())));
+        claim.release(end())
+    });
+    receive.recv_timeout(Duration::from_secs(2)).unwrap();
+    // The real release has selected the source's None-deadline Mutex::lock
+    // branch. This thread still holds that exact mutex; no new stop/deadline
+    // selection is permitted to turn this in-flight owner into completion.
+    std::thread::sleep(Duration::from_millis(20));
+    assert!(!release.is_finished());
+    let stop = registry.runtime.request_stop();
+    assert_eq!(registry.runtime.stop_deadline(), Some(stop));
+    assert_eq!(registry.runtime.request_stop(), stop);
+    assert!(!release.is_finished());
+    assert_eq!(held.len(), 1);
+    assert!(StorageLease::acquire_launch(&source, &sid(SID)).is_err());
+    std::thread::sleep(Duration::from_millis(20));
+    assert!(!release.is_finished());
+    drop(held);
+    release.join().unwrap().unwrap();
+    assert!(registry.entries.lock().unwrap().is_empty());
     registry.runtime.close(end()).unwrap();
 }
 #[test]

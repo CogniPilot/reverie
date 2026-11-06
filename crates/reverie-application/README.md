@@ -180,3 +180,11 @@ constructor contexts and confirm native laptop disposition before a global
 acknowledgement. Actual Nix ownership transfer, laptop registration, mutable
 launch/recovery, and this terminal release caller remain required integration;
 no plan, path, label or returned claim grants API or engine authority.
+
+A release that already selected the source's unbounded mutex path remains in
+flight when the first stop arrives later. The real stop producer must retain
+that exact task and the registry's resources; it cannot infer completion or
+restart a fresh cleanup budget. An owning control establishes that late stop
+does not release the lease or finish the waiting task until the original mutex
+is actually released. This is preserved source behavior and a required final
+shutdown integration boundary, not a claimed whole-service 34-second bound.
