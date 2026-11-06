@@ -55,7 +55,9 @@ initial cancellation; a missing close remains pending. Ordinary timeout and
 per-stream output overflow arm cleanup independently of the completion callback,
 so a child ignoring SIGTERM cannot prevent the escalation attempt. A later abort
 does not renew the first cleanup budget. A timed-out result is refused even if
-the cooperative child exits zero. No result from a cancelled call is emitted.
+the cooperative child exits zero. Final acceptance rechecks the original monotonic
+deadline even when event-loop delay postpones its timer callback. No result from
+a cancelled call is emitted.
 The MCP process awaits settlement before exit.
 The fixed installed entry intentionally omits diagnostic logging so a full
 stderr stream cannot retain an idle Node process. Protocol and error responses

@@ -17,6 +17,11 @@ export const runMemoryBridge: BridgeRunner = (program, args, { env, input, timeo
     let cleanup: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (!closed || !outcome) return;
+      // Event-loop delay can deliver close before the overdue monitor callback.
+      // Acceptance uses the original monotonic deadline, not callback order.
+      if (outcome.code === 0 && (interrupted || (timeoutMs > 0 && performance.now() - began >= timeoutMs))) {
+        outcome.code = 1;
+      }
       if (cleanup) clearTimeout(cleanup);
       if (deadline) clearTimeout(deadline);
       signal?.removeEventListener('abort', aborted);

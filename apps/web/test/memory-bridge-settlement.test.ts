@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,33 @@ async function waitFile(path: string): Promise<void> {
 }
 
 describe('memory child settlement', () => {
+  it('refuses late zero exit when the bridge deadline callback is delayed until after actual close', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'reverie-memory-delayed-timer-'));
+    const started = join(root, 'started');
+    const finished = join(root, 'finished');
+    // Only the bridge's global timer is held. Node execFile retains its own
+    // internal timer, and the child and monotonic clock remain real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const began = performance.now();
+    const work = runMemoryBridge(process.execPath, ['--input-type=module', '-e', delayedChild], {
+      env: { STARTED: started, FINISHED: finished },
+      input: '{}',
+      timeoutMs: 1_500,
+    });
+    try {
+      expect(vi.getTimerCount()).toBe(1);
+      await waitFile(started);
+      const result = await work;
+      expect(performance.now() - began).toBeGreaterThanOrEqual(1_500);
+      expect(await readFile(finished, 'utf8')).toBe('closed');
+      expect(result.code, 'acceptance must recheck the original clock without a timer callback').not.toBe(0);
+    } finally {
+      vi.useRealTimers();
+      await work;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the first timeout cleanup budget when an external abort arrives later', async () => {
     const root = await mkdtemp(join(tmpdir(), 'reverie-memory-first-stop-'));
     const started = join(root, 'started');
