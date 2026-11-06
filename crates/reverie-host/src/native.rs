@@ -40,8 +40,8 @@ mod policy;
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{
-    PolicyEntryStamp, create_policy_temporary, named_policy_entry, open_policy_child_directory,
-    open_policy_original, policy_effective_uid, replace_policy,
+    EntryStat, PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
+    open_policy_child_directory, open_policy_original, policy_effective_uid, replace_policy,
 };
 pub(crate) use reservation::{
     read_reservation, reservation_identity, reservation_identity_text, reservation_location,
@@ -102,11 +102,7 @@ pub(crate) fn uid() -> u32 {
     unsafe { libc::getuid() }
 }
 pub(crate) fn system() -> Result<(String, String)> {
-    // SAFETY: initialized utsname provides valid writable ABI output storage.
-    let mut value: libc::utsname = unsafe { std::mem::zeroed() };
-    if unsafe { libc::uname(&mut value) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    let value = uname()?;
     // SAFETY: successful uname terminates these fixed-size character arrays.
     let system = unsafe { CStr::from_ptr(value.sysname.as_ptr()) }
         .to_str()
@@ -117,6 +113,23 @@ pub(crate) fn system() -> Result<(String, String)> {
         .map_err(|_| ObservationError::Refused(ObservationFault::System))?
         .to_owned();
     Ok((system, machine))
+}
+pub(crate) fn kernel_release() -> Result<String> {
+    let value = uname()?;
+    // SAFETY: successful uname terminates this fixed-size ABI character array;
+    // the owned utsname stays live for the whole CStr/UTF8 conversion.
+    unsafe { CStr::from_ptr(value.release.as_ptr()) }
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|_| ObservationError::Refused(ObservationFault::System))
+}
+fn uname() -> Result<libc::utsname> {
+    // SAFETY: initialized utsname provides valid writable ABI output storage.
+    let mut value: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut value) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(value)
 }
 pub(crate) fn canonical_in(path: &Path, root: &Path) -> Result<PathBuf> {
     let bytes = path.as_os_str().as_bytes();

@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod bootstrap_tests;
 mod creation;
+mod gpu_access;
 mod image_refresh;
 mod storage;
 use crate::{
@@ -66,6 +67,28 @@ pub(crate) struct InstalledWorker {
         Mutex<Option<crate::test_process::PausePoint<Arc<ValidatedWorkerSnapshot>>>>,
 }
 impl InstalledWorker {
+    /// Read the current configuration and its same-installation binding under
+    /// the publication lock order. The caller retains Gate state/context when
+    /// it needs the full guard tuple; no I/O or transition authority is created.
+    pub(crate) fn bound_resources(
+        &self,
+        binding: &RwLock<reverie_contracts::reservation_control::ControlBinding>,
+    ) -> Result<
+        (
+            Arc<ReservationConfiguration>,
+            reverie_contracts::reservation_control::ControlBinding,
+        ),
+        GateError,
+    > {
+        let current = self
+            .current
+            .read()
+            .map_err(|_| GateError::Refused("WORKER_BROKER_CURRENT_UNAVAILABLE"))?;
+        let binding = binding
+            .read()
+            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+        Ok((current.resources.clone(), binding.clone()))
+    }
     #[cfg(test)]
     pub(crate) fn model_laptop(&self, session: ProfileSessionId) {
         let snapshot = self.snapshot().unwrap();

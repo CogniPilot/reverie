@@ -582,6 +582,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libyaml-safer"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d325b93a27b93b93b7cf4a57d681c5b6a4d8f910e695db989c055eb1e4f657df"
+
+[[package]]
 name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -680,6 +686,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "reverie-application"
 version = "0.1.0"
 dependencies = [
@@ -696,6 +708,8 @@ dependencies = [
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
+ "libyaml-safer",
+ "regex-lite",
  "reverie-core",
  "serde",
  "serde_json",

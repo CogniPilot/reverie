@@ -4,6 +4,7 @@ pub mod broker_resources;
 pub mod creation_budget;
 pub mod device_policy;
 mod digest;
+pub mod gpu_access;
 pub mod host_jobs;
 pub mod kernel_accounting;
 pub mod kernel_mounts;

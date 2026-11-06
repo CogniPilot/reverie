@@ -15,6 +15,7 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "gpu-info"=>gpu_info(&args),
         "storage-writer" | "image-refresh" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
@@ -100,4 +101,16 @@ fn main() {
             print!("{}", args.join("\0"));
         }
     }
+}
+fn gpu_info(args:&[String]){
+    use std::fs;
+    assert!(args.len()==3&&args[0]=="info"&&args[1]=="--format","fixed GPU information purpose only");
+    let count=fs::read_to_string("info-count").map_or(0,|value|value.parse::<u32>().unwrap())+1;
+    fs::write("info-count",count.to_string()).unwrap();
+    let mut trace=fs::OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
+    writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+    if count==2&&fs::exists("replace-on-second-info").unwrap(){
+        fs::copy("replacement-spec.json","cdi/device.json").unwrap();
+    }
+    io::stdout().write_all(&fs::read("info.json").unwrap()).unwrap();
 }

@@ -81,7 +81,7 @@ impl Tree {
         let info = fs::symlink_metadata(self.root.join(name)).unwrap();
         serde_json::json!([info.dev(), info.ino()])
     }
-    fn marker(&self, config: &serde_json::Value) {
+    pub(crate) fn marker(&self, config: &serde_json::Value) {
         let checked = worker_config::decode(&self.raw).unwrap();
         let marker = serde_json::json!({"schema":"reverie-resource-control-v1","state":"READY","option":config["resourceReservations"],"directories":{".":self.identity("control"),"profiles":self.identity("control/profiles"),"operations":self.identity("control/operations")},"admissionLock":self.identity("control/admission.lock"),"stateDirectory":self.identity("state"),"locks":{"profiles":self.identity("control/profiles/profiles.lock"),"operations":self.identity("control/operations/operations.lock")},"configurationDigest":domain_digest(&checked).unwrap().to_hex()});
         self.write(
@@ -89,7 +89,7 @@ impl Tree {
             &serde_json::to_vec(&marker).unwrap(),
         );
     }
-    fn gate(&self, fixture: &Arc<Fixture>, loaded: bool) -> ReservationGate {
+    pub(crate) fn gate(&self, fixture: &Arc<Fixture>, loaded: bool) -> ReservationGate {
         let snapshot = if loaded {
             load_owner_config(&self.root.join("worker.json")).unwrap()
         } else {

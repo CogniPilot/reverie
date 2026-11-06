@@ -61,6 +61,34 @@ impl Clone for EffectiveWorkerConfig {
     }
 }
 impl EffectiveWorkerConfig {
+    pub(crate) fn patch_employee_gpu_grant(
+        &mut self,
+        employee: &reverie_core::operations::JournalId,
+        device: Option<&reverie_core::gpu_access::GpuDeviceUuid>,
+    ) -> Option<()> {
+        let Node::Object(root) = &mut self.0.0 else {
+            unreachable!("worker object invariant");
+        };
+        let name = Text("employeeGpuGrants".chars().map(u32::from).collect());
+        let grants = root
+            .entry(name)
+            .or_insert_with(|| Value(Node::Object(BTreeMap::new())));
+        let Node::Object(grants) = &mut grants.0 else {
+            return None;
+        };
+        let employee = Text(employee.as_str().chars().map(u32::from).collect());
+        if let Some(device) = device {
+            grants.insert(
+                employee,
+                Value(Node::String(Text(
+                    device.device().as_str().chars().map(u32::from).collect(),
+                ))),
+            );
+        } else {
+            grants.remove(&employee);
+        }
+        Some(())
+    }
     fn from_ordered(value: legacy_json::ordered::OrderedValue) -> Result<Self, WorkerConfigError> {
         if !matches!(value.value.0, Node::Object(_)) {
             return Err(WorkerConfigError::ExpectedObject);

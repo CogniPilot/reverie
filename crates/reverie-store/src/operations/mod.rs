@@ -37,6 +37,11 @@ pub fn settlement_directory_names(directory: &Path) -> Result<Vec<Vec<u8>>> {
 pub fn allocate_policy_temporary_name() -> Result<String> {
     Ok(private_fs::random_name(".resource-preparing-")?)
 }
+/// Adjacent owner-GPU publication uses the same sole CSPRNG owner; the name is
+/// not file custody, an atomic CAS or permission to replace any existing file.
+pub fn allocate_gpu_temporary_name() -> Result<String> {
+    Ok(private_fs::random_name(".gpu-")?)
+}
 
 /// Must be fixed by trusted service installation and retain its live owner scope
 /// and outer native-admission guard. Directory custody is never authorization.

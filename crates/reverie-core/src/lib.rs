@@ -2,6 +2,7 @@
 pub mod capacity;
 pub mod decimal;
 pub mod device_policy;
+pub mod gpu_access;
 pub mod host_scope;
 pub mod ids;
 pub mod lease_policy;
@@ -17,6 +18,7 @@ pub mod posix_text;
 pub mod privacy_floor;
 pub mod profiles;
 pub(crate) mod python_text;
+pub use python_text::trim_text as python_trim_text;
 pub use python_text::{python_lowercase_character, python_lowercase_string, python_numeric_text};
 pub mod resource_projection;
 pub mod resources;
