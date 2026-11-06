@@ -1,0 +1,219 @@
+{
+  "oracle": "Actual existing worker_resources.resource_config/effective_config; synthetic data; employee fallback uses explicitly stubbed storage identity only",
+  "cases": [
+    {
+      "name": "unchanged-defaults",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "83583be87e8fcb772d0cac18872bbb2128124af4ad938716e10d549dc3230d52"
+    },
+    {
+      "name": "sid-priority",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 2048, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}",
+      "policy_sha256": "458a615cb00e280b531796fc53c3cf6183099214e03ae6790aa8e05be8e06685"
+    },
+    {
+      "name": "employee-fallback",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}",
+      "policy_sha256": "458a615cb00e280b531796fc53c3cf6183099214e03ae6790aa8e05be8e06685"
+    },
+    {
+      "name": "employee-unselected",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "83583be87e8fcb772d0cac18872bbb2128124af4ad938716e10d549dc3230d52"
+    },
+    {
+      "name": "other-session",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "83583be87e8fcb772d0cac18872bbb2128124af4ad938716e10d549dc3230d52"
+    },
+    {
+      "name": "global-pool-presence-None",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096, \"resourceReservations\": null, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096}",
+      "policy_sha256": "c590fbd0a2ab0c906d035aaffcee84412a0063a7c986b9b42233b539ef2ecd27"
+    },
+    {
+      "name": "global-pool-presence-False",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096, \"resourceReservations\": false, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096}",
+      "policy_sha256": "c590fbd0a2ab0c906d035aaffcee84412a0063a7c986b9b42233b539ef2ecd27"
+    },
+    {
+      "name": "global-pool-presence-{}",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096, \"resourceReservations\": {}, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096}",
+      "policy_sha256": "c590fbd0a2ab0c906d035aaffcee84412a0063a7c986b9b42233b539ef2ecd27"
+    },
+    {
+      "name": "global-pool-presence-0",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096, \"resourceReservations\": 0, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 4096}",
+      "policy_sha256": "c590fbd0a2ab0c906d035aaffcee84412a0063a7c986b9b42233b539ef2ecd27"
+    },
+    {
+      "name": "cpu-integer",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 1, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 1, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}",
+      "policy_sha256": "dc34e8d162da0ee5e1c7e1ce9faa3110d0d4297df948642d5afa1a649e3c23db"
+    },
+    {
+      "name": "cpu-negative-zero",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": -0.0, \"image\": \"synthetic-image\", \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}",
+      "policy_sha256": "4c702bd7fb6579974631ff57701da272146abda99cb264f5b7d23a72c4fadebf"
+    },
+    {
+      "name": "all-control-fields-stripped",
+      "input": "{\"browserJobPolicy\": {\"opaque\": 1}, \"budgetMode\": \"admission\", \"cpus\": 0, \"employeeGpuGrants\": {}, \"employeeMemoryPolicies\": [], \"employeePerfPolicies\": {}, \"employeeResources\": {}, \"image\": \"synthetic-image\", \"laptopSwapPoolMiB\": \"inactive\", \"leaseAcceptance\": null, \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"resourceActorConfig\": \"not-grant\", \"resourceReservations\": null, \"sessionResources\": {}, \"softLimitHelperSocket\": \"/opaque/control\"}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"leaseAcceptance\": null, \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "aa6f495f328ad623cf4c7bf1c72e0fdfef5913d886e3100b919116c4d6d95f2a"
+    },
+    {
+      "name": "nonfinite-unrelated",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"inf\": Infinity, \"nan\": NaN}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"inf\": Infinity, \"nan\": NaN}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "cb18dfd52c7112c4448a7d9cde006bbaf5c5ccc76e46f9d9a53c584bb217eb3c"
+    },
+    {
+      "name": "invalid-unselected-policy",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 999999, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "invalid-container",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": []}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "invalid-employee-container",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": null, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "invalid-inactive-perf-container",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeePerfPolicies\": [], \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "invalid-inactive-gpu-container",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeGpuGrants\": null, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "inactive-malformed-legacy-gpu-retained",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeGpuGrants\": {}, \"gpuGrants\": \"legacy-opaque\", \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"gpuGrants\": \"legacy-opaque\", \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "80a035a27cee16c19018e531f01de2f732b8f1188f903d9fdf1958e72de2e9ac"
+    },
+    {
+      "name": "inactive-false-memory-retained-pool-stripped",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeMemoryPolicies\": false, \"image\": \"synthetic-image\", \"laptopSwapPoolMiB\": true, \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "policy_sha256": "83583be87e8fcb772d0cac18872bbb2128124af4ad938716e10d549dc3230d52"
+    },
+    {
+      "name": "invalid-cpu-bool",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": true, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "invalid-extra-resource-key",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"extra\": 1, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": null,
+      "refused": true
+    },
+    {
+      "name": "invalid-infinite-resource",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": Infinity, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 2048}}, \"image\": \"synthetic-image\", \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"large\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"nested\": {\"image\": \"retained\"}, \"text\": \"\\ud800\\ue000\\ud83d\\ude00\"}, \"opsConfig\": {\"onlyHashOmission\": true}, \"pidsLimit\": 128, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "session": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "refused": true
+    }
+  ],
+  "staged": [
+    {
+      "index": 0,
+      "effective": "{\"budgetMode\": \"admission\", \"cpus\": 1.0, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "config_sha256": "2e34eab5d22eaf134c46fe9cfcb2dad7b397f1669d3aad4da2f55c7d3889dce6",
+      "policy_sha256": "1058be2f3b288c04dbb70c57ef02ebb97e71cfb4a20796487f97a9c02b1f26a1"
+    },
+    {
+      "index": 1,
+      "effective": "{\"budgetMode\": \"admission\", \"cpus\": 1, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "config_sha256": "6f9dc920f00ebb30100bf79d168eb2d943934b71c368d11e62d232d80ce09327",
+      "policy_sha256": "409e24adcc002a7ef5e3bb9b29ff392ffbb95b6ddbc9982976f6b28717e7f267"
+    },
+    {
+      "index": 2,
+      "effective": "{\"budgetMode\": \"admission\", \"cpus\": -0.0, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "config_sha256": "33843765947ed6d6999f7b5937c151e0b7f700a5709168ed7f5468cfe5ef912e",
+      "policy_sha256": "d9ed8f2582d2f9d124b95d4b30d3032a9e628745d5ee37890ae97363b02124f1"
+    },
+    {
+      "index": 3,
+      "effective": "{\"budgetMode\": \"admission\", \"cpus\": 0.25, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}",
+      "config_sha256": "20bdccff5bdad3b5dae2e80397765ce9207970f60313f3823539d56588ced1ce",
+      "policy_sha256": "bf569e105404efb7115404f6f37bf482d39ad8a5889990e2cad68b483994a243"
+    },
+    {
+      "index": 4,
+      "effective": "{\"budgetMode\": \"admission\", \"cpus\": 0.5, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}",
+      "config_sha256": "294e8ca15eb22a0c2ac289f001cbc9b0ab1c834babec02123f2575a6de1ffcf8",
+      "policy_sha256": "98afb2f7df3a08033e3004ed1a8cc79b4716efe39868dbd95291895756ac2fd7"
+    },
+    {
+      "index": 5,
+      "effective": "{\"budgetMode\": \"admission\", \"cpus\": 3.125, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 4096, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}",
+      "config_sha256": "caab4f1af6271549d916c2ca5ffe1a53707ce1159f2339d3236399108299db4a",
+      "policy_sha256": "ee72fcdf55b414c941e748fb6b7009a8334c534fed570ff12e8c44c5cdda3107"
+    }
+  ]
+}

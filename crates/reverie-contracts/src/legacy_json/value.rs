@@ -24,6 +24,17 @@ pub(crate) enum Node {
     Object(BTreeMap<Text, Value>),
 }
 pub(crate) struct Value(pub(crate) Node);
+pub(crate) fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value(Node::Null | Node::Bool(false))) => false,
+        Some(Value(Node::Number(Number::Integer(value)))) => value != "0",
+        Some(Value(Node::Number(Number::Float(value)))) => *value != 0.0,
+        Some(Value(Node::String(value))) => !value.0.is_empty(),
+        Some(Value(Node::Array(value))) => !value.is_empty(),
+        Some(Value(Node::Object(value))) => !value.is_empty(),
+        _ => true,
+    }
+}
 
 // Disabled rootlessDocker admits otherwise unconstrained JSON slots. Iterative
 // parsing, encoding and destruction avoid adding a shallow compatibility limit.
