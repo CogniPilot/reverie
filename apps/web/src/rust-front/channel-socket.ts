@@ -9,7 +9,7 @@
  * backpressure, `'drain'` follows real completion, and a response's `finish` means what it does on TCP.
  * Writable calls `_final` only after the last write's callback, so `end` follows the receipt that covers
  * every byte, as a TCP socket's shutdown follows its last write's completion; `_destroy` sends
- * `abort` unless the front closed the connection first, and fails a write still waiting with `ECANCELED`,
+ * `abort` unless the front closed the connection first, and fails the write in flight with `ECANCELED`,
  * as a TCP socket's destroy does.
  */
 import { Duplex } from 'node:stream';
@@ -35,7 +35,7 @@ export interface ConnLink {
 
 type Callback = (error?: Error | null) => void;
 
-/** The error a write still waiting for its receipt gets when the socket is destroyed, as on TCP. */
+/** The error the write in flight gets when the socket is destroyed, as on TCP. */
 function cancelled(): NodeJS.ErrnoException {
   return Object.assign(new Error('write cancelled: the connection was destroyed'), { code: 'ECANCELED' });
 }
@@ -170,12 +170,14 @@ export class ChannelSocket extends Duplex {
 
   override _destroy(error: Error | null, callback: Callback): void {
     clearTimeout(this.timer);
+    // Node leaves the write in flight to `_destroy`: it is held for credit or waiting for its receipt, never
+    // both, and is failed once here. The writes buffered behind it are Node's to fail.
+    const active = (this.held ?? this.waiting)?.callback;
     this.held = undefined;
-    const waiting = this.waiting?.callback;
     this.waiting = undefined;
     if (!this.closedByFront) this.link.abort(this.id);
     callback(error);
-    waiting?.(cancelled());
+    active?.(cancelled());
   }
 
   /** A real inactivity timer, as on a TCP socket: Node's keep-alive and request timeouts rely on it. */

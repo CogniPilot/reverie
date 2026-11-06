@@ -46,13 +46,15 @@ function recording(): ConnLink & { sent: number; frames: number; ended: boolean;
   return link;
 }
 
-function socket(maxStream?: number) {
+function socket(maxStream?: number, credit = 1 << 20) {
   const link = recording();
   const s = new ChannelSocket(1n, facts, link, maxStream);
   s.on('error', () => undefined);
-  s.grant(1 << 20);
+  if (credit > 0) s.grant(credit);
   return { s, link };
 }
+
+const code = (error: Error | null | undefined) => (error as NodeJS.ErrnoException | null | undefined)?.code;
 
 describe('a ChannelSocket write completes on its receipt', () => {
   it('does not call back a framed write until the receipt covers it, and a partial receipt is not enough', async () => {
@@ -136,6 +138,35 @@ describe('a ChannelSocket write completes on its receipt', () => {
     expect(link.aborted).toBe(true);
     expect(result).toEqual(['ECANCELED']);
   });
+
+  for (const [held, credit] of [
+    ['with no credit', 0],
+    ['part framed', 40],
+  ] as const) {
+    it(`on destroy fails a write still held ${held} with ECANCELED, once, and nothing completes later`, async () => {
+      const { s, link } = socket(undefined, credit);
+      const active: Array<string | undefined> = [];
+      const queued: Array<string | undefined> = [];
+      s.write(Buffer.alloc(100), (error) => active.push(code(error)));
+      s.write(Buffer.alloc(10), (error) => queued.push(code(error)));
+      await tick();
+      expect(link.sent).toBe(credit);
+      s.destroy();
+      await tick();
+      expect(link.aborted).toBe(true);
+      expect(active).toEqual(['ECANCELED']);
+      // The write buffered behind it is Node's to fail, as on TCP.
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toBeDefined();
+      // A grant or receipt crossing the destroy neither frames nor completes anything.
+      s.grant(1000);
+      s.receipt(credit || 1);
+      await tick();
+      expect(link.sent).toBe(credit);
+      expect(active).toEqual(['ECANCELED']);
+      expect(queued).toHaveLength(1);
+    });
+  }
 
   it('resets the inactivity timer on a receipt, as write completion does on TCP', async () => {
     const { s } = socket();
@@ -245,6 +276,31 @@ describe('receipts through the front channel', () => {
     expect(faults).toEqual([]);
     expect(front.openConnections).toBe(0);
   });
+
+  for (const [held, credit] of [
+    ['with no credit', 0],
+    ['part framed', 40],
+  ] as const) {
+    it(`on generation loss fails a response write still held ${held} with ECANCELED, once`, async () => {
+      const codes: Array<string | undefined> = [];
+      let served = false;
+      const { fake } = await fronted((_req, res) => {
+        served = true;
+        res.write('x'.repeat(100), (error) => codes.push(code(error)));
+      });
+      // The front grants the response `credit` bytes, or none, so the write stays held.
+      const connection = fake.open({ receipts: false, credit });
+      await fake.write(connection, 'GET / HTTP/1.1\r\nHost: x\r\n\r\n');
+      await eventually(() => served, 'the handler');
+      await sleep(20);
+      expect(Buffer.concat(connection.received).length).toBe(credit);
+      expect(codes).toEqual([]);
+      fake.peer.end();
+      await eventually(() => codes.length > 0, 'the held write to fail');
+      await sleep(20);
+      expect(codes).toEqual(['ECANCELED']);
+    });
+  }
 
   it('on generation loss fails every write still waiting for its receipt', async () => {
     const codes: Array<string | undefined> = [];
