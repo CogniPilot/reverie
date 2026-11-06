@@ -10,6 +10,8 @@ use std::{
     },
     time::{Duration, Instant},
 };
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
@@ -271,11 +273,32 @@ impl CapturedClient {
             job,
         })
     }
-    fn release(&self, job: &Arc<Job>) -> Result<()> {
-        let mut active = self
-            .active
-            .try_lock()
-            .map_err(|_| EngineError::pending(EngineFault::Supervisor, CleanupFault::Supervisor))?;
+    fn release(&self, job: &Arc<Job>, deadline: Instant) -> Result<()> {
+        // Only the exact completed job is handed off. Waiting for this RAM
+        // mutex is not another admission or native query. Preserve the caller's
+        // original deadline and retain its result until the handoff succeeds.
+        let mut active = loop {
+            match self.active.try_lock() {
+                Ok(active) => break active,
+                Err(TryLockError::Poisoned(_)) => {
+                    return Err(EngineError::pending(
+                        EngineFault::Supervisor,
+                        CleanupFault::Supervisor,
+                    ));
+                }
+                Err(TryLockError::WouldBlock) => {
+                    #[cfg(test)]
+                    job.hooks.handoff_contended.store(true, Ordering::Release);
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(EngineError::pending(
+                    EngineFault::Deadline,
+                    CleanupFault::Supervisor,
+                ));
+            }
+            tick(deadline);
+        };
         if active
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(current, job))
@@ -285,17 +308,20 @@ impl CapturedClient {
         Ok(())
     }
     fn result(&self, job: &Arc<Job>, deadline: Instant) -> Result<CapturedOutput> {
+        #[cfg(test)]
+        job.hooks.before_result();
         let mut data = job
             .data
             .try_lock()
             .map_err(|_| EngineError::pending(EngineFault::Supervisor, CleanupFault::Supervisor))?;
-        let result = data.result.take().ok_or_else(|| {
+        let result = data.result.as_ref().ok_or_else(|| {
             EngineError::pending(EngineFault::Supervisor, CleanupFault::Supervisor)
         })?;
         let retained = result.as_ref().err().is_some_and(EngineError::is_uncertain);
         if !retained {
-            self.release(job)?;
+            self.release(job, deadline)?;
         }
+        let result = data.result.take().expect("same locked completed result");
         if job.cancelled() || Instant::now() >= deadline {
             let fault = cancellation_fault(job.cancelled());
             return Err(data.process.report(EngineError::new(fault)));
@@ -364,7 +390,7 @@ impl CapturedClient {
                 .report(EngineError::new(EngineFault::Finalization)));
         }
         drop(data);
-        self.release(job)
+        self.release(job, deadline)
     }
 }
 impl Drop for CapturedClient {
