@@ -1,6 +1,6 @@
 //! `JSON.stringify` of the route's reply objects, in their construction order: schema keys, then `modes`.
 use super::{MAX_RESPONSE_BYTES, Modes, Profile, Refusal, Response};
-use std::fmt::Write;
+use crate::js_json::quote;
 
 const INVALID_FILE: &str = r#"{"success":false,"error":"Subscription profile file is invalid; it has not been changed","errorCode":"OPERATION_FAILED"}"#;
 
@@ -51,28 +51,4 @@ pub fn profiles_response(profiles: &[Profile], modes: &Modes) -> Result<Response
         status: 200,
         body: body.into_bytes(),
     })
-}
-
-/// ECMAScript QuoteJSONString: short escapes, other C0 and lone surrogates as lowercase `\uXXXX`.
-fn quote(output: &mut String, units: &[u16]) {
-    output.push('"');
-    for decoded in char::decode_utf16(units.iter().copied()) {
-        match decoded {
-            Ok('"') => output.push_str("\\\""),
-            Ok('\\') => output.push_str("\\\\"),
-            Ok('\u{8}') => output.push_str("\\b"),
-            Ok('\u{c}') => output.push_str("\\f"),
-            Ok('\n') => output.push_str("\\n"),
-            Ok('\r') => output.push_str("\\r"),
-            Ok('\t') => output.push_str("\\t"),
-            Ok(control) if control < ' ' => push_escape(output, control as u16),
-            Ok(character) => output.push(character),
-            Err(lone) => push_escape(output, lone.unpaired_surrogate()),
-        }
-    }
-    output.push('"');
-}
-fn push_escape(output: &mut String, unit: u16) {
-    // Writing to a String cannot fail.
-    let _ = write!(output, "\\u{unit:04x}");
 }

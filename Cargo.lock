@@ -276,11 +276,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-policy-artifacts"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "reverie-contracts",
+]
+
+[[package]]
 name = "reverie-routes"
 version = "0.1.0"
 dependencies = [
  "reverie-contracts",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

@@ -11,12 +11,16 @@ pub struct LeaseConfig {
 }
 impl LeaseConfig {
     pub fn capture(config: EffectiveWorkerConfig) -> Result<Self> {
-        let root = object(config.as_value())?;
-        let option = match field(root, "leaseAcceptance") {
-            None | Some(Value(Node::Null)) => None,
-            Some(value) => Some(option(root, value)?),
-        };
+        let option = Self::validate_option(&config)?;
         Ok(Self { config, option })
+    }
+    /// Borrowed pure option validation; no company or artifact observation.
+    pub fn validate_option(config: &EffectiveWorkerConfig) -> Result<Option<LeaseAcceptance>> {
+        let root = object(config.as_value())?;
+        match field(root, "leaseAcceptance") {
+            None | Some(Value(Node::Null)) => Ok(None),
+            Some(value) => Ok(Some(option(root, value)?)),
+        }
     }
     pub fn decode(raw: &[u8]) -> Result<Self> {
         Self::capture(worker_config::decode(raw).map_err(|error| match error {

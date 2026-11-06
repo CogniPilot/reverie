@@ -5,5 +5,6 @@ mod native;
 mod observation;
 pub mod task_perf;
 pub mod worker_identity;
+pub mod worker_mounts;
 
 pub use observation::{ObservationError, ObservationFault};

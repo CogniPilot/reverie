@@ -4,6 +4,11 @@ This crate provides the checked identities, counters, resource policies and pure
 profile CAS projection used by the Rust profile-store migration. Fields carrying
 invariants are private; public constructors return checked values.
 
+`worker_schema` owns checked worker base identity/count/UID data and pure POSIX
+mount target, immutable-rootless and account-target rules. It reuses resource
+bounds and retains codepoints, without filesystem/seccomp/start qualification.
+See the contracts [validation audit](../reverie-contracts/src/worker_schema/README.md).
+
 - `ProfileEmployeeId` and `ProfileSessionId` preserve lexical UUID compatibility,
   including nil. `NativeOperationId` rejects nil. These purpose-specific values
   do not redefine general legacy company/session identifiers.
@@ -58,3 +63,11 @@ effective `ResourcePolicy` RAM ceiling and must be strictly smaller. Unselected
 and swap-only projections do not inspect a RAM ceiling. Checked swap byte counts
 are commitment data; they provide no disk reservation, swap admission, cgroup
 write or start permission. These types do not resolve employee identity.
+## POSIX lexical data
+
+`posix_path::PosixPath` owns Python-compatible lexical path normalization,
+parent/join and descendant/overlap comparisons independently of the build OS.
+It preserves the double-slash anchor, '..' and Python codepoints. These values
+establish no filesystem resolution, custody or mount authority. The existing
+lease broker-parent comparison reuses this owner; source/control path policies
+remain the responsibility of their respective consumers.

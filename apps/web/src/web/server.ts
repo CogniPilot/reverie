@@ -5,7 +5,6 @@ import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
 import { OWNER_COOKIE } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
-import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
 import { ownPlanRecovery } from '../agent-plan-recovery.js';
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
@@ -206,7 +205,6 @@ function rewriteApiV1Url(url: string): string {
 }
 import {
   getErrorMessage,
-  httpStatusForErrorCode,
   createErrorResponse,
   ApiErrorCode,
   type PersistedRespawnConfig,
@@ -234,8 +232,9 @@ import { readSubscriptionProfiles } from '../subscription-profiles.js';
 import { scanCodexSessionsHistory, codexThreadBySessionId } from '../codex-transcript.js';
 import { registerSubscriptionProfileRoutes } from './routes/subscription-profile-routes.js';
 import { RouteChannel } from '../rust-routes/channel.js';
-import { ROUTE_STATUSES, rustRoutes } from '../rust-routes/config.js';
-import { SUBSCRIPTION_PROFILES } from '../rust-routes/frames.js';
+import { ROUTE_MEDIA, ROUTE_STATUSES, rustRoutes } from '../rust-routes/config.js';
+import { installResponseEnvelope } from './response-envelope.js';
+import { SETTINGS, SUBSCRIPTION_PROFILES } from '../rust-routes/frames.js';
 import { telemetrySignature } from '../usage-telemetry.js';
 import { readCodexPlanUsage, resolveCodexBinaryPath } from '../utils/codex-cli-resolver.js';
 import type { CronPort, ScheduledRun } from './ports/index.js';
@@ -769,6 +768,7 @@ export class WebServer extends EventEmitter {
     const channel = new RouteChannel({
       handlerPath: config.handlerPath,
       statuses: ROUTE_STATUSES,
+      media: ROUTE_MEDIA,
       log: (message) => this.app.log.warn(message),
     });
     this.app.addHook('onClose', async () => {
@@ -1061,32 +1061,7 @@ export class WebServer extends EventEmitter {
       });
     }
 
-    // Uniform response envelope (stable HTTP contract — docs/api-reference.md):
-    // wrap bare JSON payloads as { success:true, data } and map { success:false }
-    // error envelopes to a conventional HTTP status (instead of 200). Skips
-    // non-JSON responses (buffers/streams) and non-/api routes.
-    this.app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
-      // Federation speaks its own bare wire contract, including non-2xx errors.
-      // Exempt exact registered protocol routes only; owner APIs retain the console envelope.
-      const route = req.routeOptions?.url;
-      const canonicalRoute =
-        this.basePath && route?.startsWith(this.basePath + '/') ? route.slice(this.basePath.length) : route;
-      if (isEmbassyProtocolRoute(req.method, canonicalRoute)) return done(null, payload);
-      if (!req.url.startsWith('/api')) return done(null, payload);
-      if (payload === null || typeof payload !== 'object') return done(null, payload);
-      if (Buffer.isBuffer(payload) || typeof (payload as { pipe?: unknown }).pipe === 'function') {
-        return done(null, payload);
-      }
-      const p = payload as { success?: unknown; errorCode?: unknown };
-      if (p.success === false) {
-        if (reply.statusCode === 200 && typeof p.errorCode === 'string') {
-          reply.code(httpStatusForErrorCode(p.errorCode as ApiErrorCode));
-        }
-        return done(null, payload);
-      }
-      if (p.success === true) return done(null, payload);
-      return done(null, { success: true, data: payload });
-    });
+    installResponseEnvelope(this.app, this.basePath);
 
     // Anti-DNS-rebinding Host allowlist + cross-site (CSRF) Origin guard. Registered
     // before auth so forged cross-site / rebound requests are rejected up front, even
@@ -1437,7 +1412,7 @@ export class WebServer extends EventEmitter {
         ['plan-usage', 'routines'].some((name) => serviceVerifier({ service: ownerAuth, ctx }, name)(req)),
       this.rustRouteChannel(SUBSCRIPTION_PROFILES)
     );
-    registerSystemRoutes(this.app, ctx, verifiedOwner);
+    registerSystemRoutes(this.app, ctx, verifiedOwner, this.rustRouteChannel(SETTINGS));
     registerLaptopPowerRoutes(this.app, {
       verifiedOwner,
       stopIntent: async () => {

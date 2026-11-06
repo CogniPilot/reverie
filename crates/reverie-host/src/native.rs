@@ -3,32 +3,19 @@
 #![allow(unsafe_code)]
 
 use crate::observation::{ObservationError, ObservationFault, Result, finalized, need};
-use std::ffi::{CStr, OsString};
+use std::ffi::CStr;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::Read;
 use std::os::fd::IntoRawFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 mod lease;
 pub(crate) use lease::observe_with_ancestors;
-
-/// Python os.fsencode's POSIX surrogateescape conversion, without replacement
-/// characters or normalization. Path policy/opening independently rejects NUL.
-pub(crate) fn python_path(points: &[u32]) -> std::io::Result<PathBuf> {
-    let mut bytes = Vec::new();
-    for &point in points {
-        if (0xdc80..=0xdcff).contains(&point) {
-            bytes.push((point - 0xdc00) as u8);
-            continue;
-        }
-        let character = char::from_u32(point).ok_or(std::io::ErrorKind::InvalidInput)?;
-        let mut encoded = [0; 4];
-        bytes.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
-    }
-    Ok(OsString::from_vec(bytes).into())
-}
+mod text;
+pub(crate) use text::{python_path, python_text};
+mod resolve;
+pub(crate) use resolve::resolve_strict_text;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Stamp {
