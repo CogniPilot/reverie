@@ -365,3 +365,15 @@ The worker constructor checks the mandatory telemetry object's Runtime origin;
 the enabled telemetry Office hook and its InstallingBroker bootstrap consumer
 remain a separate composition. This increment does not recover/register laptops,
 stop a source, create/start a container, mint API grants, or select a backend.
+# Retained Office construction failures
+
+`bind_retained` returns a genuine failed-construction owner only after its actual
+registry insertion. That type cannot become a completed `OfficePhone` or a start
+grant. Known failures before ownership, or after confirmed constructor cleanup,
+return no owner. `close_construction` checks the exact Company and retained entry;
+even another Company on the same Runtime cannot close it. Consumed-close and
+unidentified-leaf failures remain negative across repeats. The compatibility
+`bind` retains its original constructor/error order and delegates the same owner.
+Recovery must keep its real storage resources while construction cleanup is
+unconfirmed; neither a failed-construction token nor successful local close
+acknowledges global release, durable reconciliation or authorization.

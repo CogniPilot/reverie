@@ -1,5 +1,7 @@
 //! Owned synthetic sockets/files only. No engine, provider, installed company,
 //! grant or container is touched by these actual transport controls.
+#[path = "construction_tests.rs"]
+mod construction;
 #[path = "native_tests.rs"]
 mod native;
 use super::*;

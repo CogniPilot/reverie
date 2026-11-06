@@ -7,10 +7,20 @@ pub(super) enum Failure {
     BeforeAnchor,
     AfterAnchor,
     Spawn,
+    StopAfterSpawn,
 }
 thread_local! { static NEXT: Cell<Option<Failure>> = const { Cell::new(None) }; }
 pub(super) fn set(failure: Failure) {
     NEXT.with(|state| state.set(Some(failure)));
+}
+pub(super) fn stop_after_spawn() -> bool {
+    NEXT.with(|state| {
+        let selected = state.get() == Some(Failure::StopAfterSpawn);
+        if selected {
+            state.set(None);
+        }
+        selected
+    })
 }
 pub(super) fn fail(failure: Failure) -> io::Result<()> {
     NEXT.with(|state| {
