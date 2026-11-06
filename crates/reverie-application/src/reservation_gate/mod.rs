@@ -3,11 +3,13 @@
 //! separate from the read-side admission dependencies.
 mod admission;
 mod claim;
+mod draft;
 mod error;
 mod guard;
 mod history;
 mod host_jobs;
 mod observation;
+mod preparation;
 mod recovery;
 mod terminal_claim;
 #[cfg(test)]
@@ -17,9 +19,11 @@ use crate::{
     worker_validation::ValidatedWorkerSnapshot,
 };
 pub use admission::AdmissionBounds;
+pub use draft::DraftPreview;
 pub use error::GateError;
 use error::{Result, finalized, need};
 pub use history::HeadroomFacts;
+pub use preparation::RetainedPreparation;
 pub use recovery::{NativeObservationState, RecoveryFacts, RecoveryObservation};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDataError, domain_digest},

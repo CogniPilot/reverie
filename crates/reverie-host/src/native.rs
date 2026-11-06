@@ -17,7 +17,9 @@ mod reservation;
 pub(crate) use control::{HeldAdmission, control_directory, open_admission};
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
-pub(crate) use reservation::{read_reservation, reservation_identity, reservation_location};
+pub(crate) use reservation::{
+    read_reservation, reservation_identity, reservation_identity_text, reservation_location,
+};
 mod text;
 pub(crate) use text::{python_path, python_text};
 mod resolve;

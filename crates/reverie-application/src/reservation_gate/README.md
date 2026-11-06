@@ -20,6 +20,9 @@ held admission, native completion proof or start permit.
 | `reserve`, `_observe_claim` | `claim`, fixed private `ClaimCapacity`, canonical `confirm_claim` | Actual durable metadata claim and selected profile/target checks; installed observer runs under journal flock; public reserve discards effect handles |
 | `_finish_claim` | `terminal_claim`, consumed exact store reader | Both stores/reader lock close before last native guards; full epoch/source/metadata fences and named journal stamp; uncertainty retains durable claims |
 | `cold_inspect`, `check_recovery` | `recovery` | Fresh matching/changed/unavailable source facts and unchanged journal; no handle resurrection, retry or positive capacity credit |
+| preparation `draft` for an already selected profile | `draft`, fixed `DraftCapacity` and named draft codec | Actual journal flock around observe/retained headroom; only then allocates opaque IDs, checks all occupied roles, closes store, bounds every directory entry and exclusively persists/fsyncs the fixed draft |
+| preparation `reserve`, `_RetainedClaim` | `preparation`, shared `claim` owner | Reuses exact approved IDs, real process-local journal handle and owned store, original canonical profile/context and exact source paths; replays cannot manufacture a handle |
+| native `capture_original`, `_account_mounts` | `preparation`, fixed `reservation_kernel` and named baseline codec | Actual selected source limits/storage/capacity hashes, physical cgroup identity, ordered source resolves/identities then sorted account references and fixed proc-root identities; no credential contents read |
 
 The waiting-state mutex is never held through filesystem I/O. A private entering
 registration keeps other threads' waits bounded before the flock open returns;
@@ -30,8 +33,8 @@ and publicly inspectable secondary finalizer failures.
 
 The ordinary guard currently refuses every control transition marker. It does not claim
 the unported GPU/actor/image/perf/mount transition owners or their pending/row
-exceptions. Retained preparation ownership, creation/stop/reload policies,
-preparation/start/completion boundaries and host-job begin/bind/finish remain
+exceptions. RAM profile selection, preparation phase/publication latches,
+creation/stop/reload policies, preparation/start/completion boundaries and host-job begin/bind/finish remain
 required. These must be real producers before a full Gate or launch claim. Caller
 owner/session authorization and future selected HTTP/broker integration remain
 separate obligations; captured worker/path data never supplies those permissions.
@@ -67,3 +70,24 @@ states. A terminal native hook observes both actual journal descriptors closed,
 then changes the named journal generation; the response remains uncertain and
 retains the positive claim. No retained preparation handle or live effect is
 exposed by the public metadata entry.
+
+The separate `retain_draft` entry now produces an actual nonserializable retained
+preparation owner, after original native capture and terminal admission checks.
+Its data getters cannot grant native effects. It keeps its original journal
+store/handle until checked close; the fresh exact terminal reader and lock close
+before terminal native observations. Closing/dropping never clears the durable
+claim, credits capacity, grants retry or acknowledges completion. The immutable
+captured config cannot substitute for the still-required mutable broker reload
+owner. No start/stop/configuration-commit method is exposed by this cohort.
+
+Two frozen actual old Python draft records verify exact bytes/hashes, including
+a nil current SID that previews successfully but cannot enter a journal claim.
+Real journal/flock tests check locked observation and close ordering. Private
+draft profile comparison preserves Python numeric equality (including bool/zero
+and signed zero); it always retains the actual checked canonical profile.
+Malformed numeric request spellings are checked at the original later phase,
+after earlier admission/native reads, and mismatched stored target/profile
+bindings fail before live profile I/O. Native baseline loss after publication
+retains the positive claim and closes owned descriptors without a fresh handle.
+The native account tests use owned fake-kernel trees and actual directory
+identities, source-first failures, raw trailing-dot behavior and namespace drift.

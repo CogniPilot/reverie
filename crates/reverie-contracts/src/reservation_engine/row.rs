@@ -33,6 +33,9 @@ impl ContainerRow {
     pub fn id(&self) -> &ContainerId {
         &self.id
     }
+    pub(crate) fn data(&self) -> &Value {
+        &self.value
+    }
     pub fn name_is(&self, name: &str) -> bool {
         text(field(self.root(), "Name"))
             .is_some_and(|value| value.0.iter().copied().eq(name.chars().map(u32::from)))
@@ -211,7 +214,7 @@ impl ContainerRow {
         let state = field(self.root(), "State").ok_or(EngineDataError::State)?;
         structure_object(Some(state))
     }
-    fn mounts(&self) -> Result<&[Value]> {
+    pub(crate) fn mounts(&self) -> Result<&[Value]> {
         match field(self.root(), "Mounts") {
             Some(Value(Node::Array(values))) => Ok(values),
             _ => Err(EngineDataError::Mounts),

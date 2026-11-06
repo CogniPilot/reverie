@@ -42,7 +42,7 @@ pub fn settlement_pending_present(
         &format!("settlement-{}.pending.json", id.as_str()),
     )?)
 }
-fn read_receipt(config: &ReservationConfiguration, name: &str) -> Result<Metadata> {
+pub(super) fn read_receipt(config: &ReservationConfiguration, name: &str) -> Result<Metadata> {
     let path = native::python_path(&operation_leaf(config, name)?.codepoints())?;
     let value = storage_identity::read_metadata(
         &path,

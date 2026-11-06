@@ -9,7 +9,7 @@ use reverie_core::{
     profiles::ResourceProfile,
 };
 use reverie_store::{
-    operations::{CapacityObserver, ClaimSelection},
+    operations::{CapacityObserver, ClaimSelection, OperationHandle},
     storage_identity::{self, StorageKind},
 };
 
@@ -26,6 +26,12 @@ pub(super) struct TerminalClaim {
     pub(super) document: OperationDocument,
     pub(super) native: ObservedInventory,
     pub(super) observed: ReservationObservation,
+}
+pub(super) struct ClaimedContext {
+    pub(super) view: OperationView,
+    pub(super) handle: Option<OperationHandle>,
+    pub(super) terminal: TerminalClaim,
+    pub(super) store: OperationStore,
 }
 impl CapacityObserver for ClaimCapacity {
     fn observe(
@@ -60,7 +66,7 @@ impl ReservationGate {
         let mut claimed = false;
         let body = self.inner.reserve_metadata(key, request, &mut claimed);
         let result = match body {
-            Ok((view, terminal)) => finalized(Ok(view), admission.finish_claim(terminal)),
+            Ok((view, terminal)) => finalized(Ok(view), admission.finish_claim(&terminal)),
             Err(error) => admission.conclude(Err(error)),
         };
         if claimed {
@@ -82,6 +88,21 @@ impl Inner {
         request: &OperationRequest,
         claimed: &mut bool,
     ) -> Result<(OperationView, TerminalClaim)> {
+        let claimed =
+            self.claim_reservation(key, request, ClaimSelection::default(), None, claimed)?;
+        finalized(
+            Ok((claimed.view, claimed.terminal)),
+            claimed.store.close().map_err(Into::into),
+        )
+    }
+    pub(super) fn claim_reservation(
+        self: &Arc<Self>,
+        key: &JournalId,
+        request: &OperationRequest,
+        mut selected: ClaimSelection,
+        draft: Option<&reverie_contracts::reservation_draft::DraftRecord>,
+        claimed: &mut bool,
+    ) -> Result<ClaimedContext> {
         self.require_host_job_idle()?;
         let history = self.document()?;
         need(
@@ -97,11 +118,12 @@ impl Inner {
         let profile = self
             .profile(&eid)?
             .ok_or(GateError::Refused("RESERVATION_REQUEST_PROFILE"))?;
-        need(
-            request.requested_memory_bytes.get()
-                == u64::from(profile.resources().memory_mib()) * reverie_core::operations::MIB,
-            "RESERVATION_REQUEST_PROFILE",
-        )?;
+        let memory = u64::from(profile.resources().memory_mib()) * reverie_core::operations::MIB;
+        let matches = match draft {
+            Some(record) => record.requested_memory_matches(memory)?,
+            None => request.requested_memory_bytes.get() == memory,
+        };
+        need(matches, "RESERVATION_REQUEST_PROFILE")?;
         need(
             request.observation_digest == observed.digest(),
             "STALE_CAPACITY_SNAPSHOT",
@@ -117,13 +139,14 @@ impl Inner {
         });
         let store = self.claim_store(capacity.clone())?;
         let result = (|| {
-            let selected = ClaimSelection {
-                reserved_sid: Some(JournalId::parse(
-                    profile.binding().target_session().as_str(),
-                )?),
-                ..ClaimSelection::default()
+            let request = match draft {
+                Some(record) => record.request()?,
+                None => request.clone(),
             };
-            let (view, _discarded_handle) = store.claim(&self.scope, key, request, &selected)?;
+            selected.reserved_sid = Some(JournalId::parse(
+                profile.binding().target_session().as_str(),
+            )?);
+            let (view, handle) = store.claim(&self.scope, key, &request, &selected)?;
             *claimed = true;
             let document = store.confirm_claim(&self.scope, &view)?;
             let native = capacity
@@ -136,6 +159,7 @@ impl Inner {
                 ))?;
             Ok((
                 view,
+                handle,
                 TerminalClaim {
                     profile,
                     employee,
@@ -145,7 +169,15 @@ impl Inner {
                 },
             ))
         })();
-        finalized(result, store.close().map_err(Into::into))
+        match result {
+            Ok((view, handle, terminal)) => Ok(ClaimedContext {
+                view,
+                handle,
+                terminal,
+                store,
+            }),
+            Err(error) => finalized(Err(error), store.close().map_err(Into::into)),
+        }
     }
     fn claim_store(self: &Arc<Self>, observer: Arc<ClaimCapacity>) -> Result<OperationStore> {
         Ok(OperationStore::open(
@@ -154,7 +186,7 @@ impl Inner {
             Some(observer),
         )?)
     }
-    fn observe_claim(
+    pub(super) fn observe_claim(
         &self,
         scope: &OperationScope,
         pool: &JournalId,

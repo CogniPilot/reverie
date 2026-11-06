@@ -55,7 +55,7 @@ impl Inner {
             id,
         )?)
     }
-    fn retained_delta(&self, document: &OperationDocument) -> Result<UnsignedInteger> {
+    pub(super) fn retained_delta(&self, document: &OperationDocument) -> Result<UnsignedInteger> {
         let active = self.active_operations(document)?;
         for operation in &active {
             let op = operation.data();

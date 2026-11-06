@@ -34,6 +34,12 @@ pub(super) trait Source: Send + Sync {
         end: Instant,
     ) -> Result<NativeStorageBinding>;
     fn swap_total(&self, end: Instant) -> Result<UnsignedInteger>;
+    fn original_runtime_tail(
+        &self,
+        row: &ContainerRow,
+        limits: &NativeLimitBinding,
+        end: Instant,
+    ) -> Result<reverie_contracts::reservation_baseline::OriginalRuntimeTail>;
     fn effective_config(
         &self,
         config: EffectiveWorkerConfig,
@@ -99,6 +105,14 @@ impl Source for Installed {
     }
     fn swap_total(&self, end: Instant) -> Result<UnsignedInteger> {
         Ok(self.kernel.swap_total(end)?)
+    }
+    fn original_runtime_tail(
+        &self,
+        row: &ContainerRow,
+        limits: &NativeLimitBinding,
+        end: Instant,
+    ) -> Result<reverie_contracts::reservation_baseline::OriginalRuntimeTail> {
+        Ok(self.kernel.original_runtime_tail(row, limits, end)?)
     }
     fn effective_config(
         &self,

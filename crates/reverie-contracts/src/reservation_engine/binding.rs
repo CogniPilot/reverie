@@ -53,6 +53,20 @@ impl NativeLimitBinding {
     pub fn container_id(&self) -> &ContainerId {
         &self.container
     }
+    /// Captured relative membership DATA. A native observer still selects its
+    /// fixed cgroup root and observes the actual directory; this is no lease.
+    pub fn cgroup(&self) -> Result<PosixPath> {
+        let fields = object(&self.value)?;
+        let value = text(field(fields, "cgroup")).ok_or(EngineDataError::State)?;
+        let path = PosixPath::try_new(&value.0).map_err(|_| EngineDataError::State)?;
+        if path.is_absolute() || path.has_parent_component() {
+            return Err(EngineDataError::State);
+        }
+        Ok(path)
+    }
+    pub fn pid(&self) -> Result<UnsignedInteger> {
+        unsigned(field(object(&self.value)?, "pid"))
+    }
     pub(crate) fn data(&self) -> &Value {
         &self.value
     }

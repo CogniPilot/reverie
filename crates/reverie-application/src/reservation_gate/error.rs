@@ -1,6 +1,8 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Draft(reverie_contracts::reservation_draft::DraftDataError),
+    Baseline(reverie_contracts::reservation_baseline::BaselineDataError),
     HostJob(reverie_contracts::host_jobs::HostJobDataError),
     HostJobPath(reverie_host::host_jobs::HostJobPathError),
     History(reverie_contracts::reservation_history::HistoryError),
@@ -30,6 +32,8 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Draft(error) => error.code(),
+            Self::Baseline(error) => error.code(),
             Self::HostJob(error) => error.code(),
             Self::HostJobPath(error) => error.code(),
             Self::History(error) => error.code(),
@@ -61,6 +65,8 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Draft(error) => Some(error),
+            Self::Baseline(error) => Some(error),
             Self::HostJob(error) => Some(error),
             Self::HostJobPath(error) => Some(error),
             Self::History(error) => Some(error),
@@ -94,6 +100,11 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(reverie_contracts::reservation_draft::DraftDataError, Draft);
+from_error!(
+    reverie_contracts::reservation_baseline::BaselineDataError,
+    Baseline
+);
 from_error!(reverie_contracts::host_jobs::HostJobDataError, HostJob);
 from_error!(reverie_host::host_jobs::HostJobPathError, HostJobPath);
 from_error!(

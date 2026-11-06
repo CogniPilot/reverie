@@ -25,7 +25,12 @@ pub(crate) fn read_reservation(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     finalized(value, close(file))
 }
 pub(crate) fn reservation_identity(path: &PosixPath) -> Result<[u64; 4]> {
-    let file = path_file(path)?;
+    reservation_identity_text(&path.codepoints())
+}
+/// _identity(str) keeps its raw spelling; pathlib normalization belongs to the
+/// separate canonical comparison, not to this final no-follow open.
+pub(crate) fn reservation_identity_text(points: &[u32]) -> Result<[u64; 4]> {
+    let file = path_file_text(points)?;
     let result = (|| {
         let info = file.metadata()?;
         need(info.is_dir(), ObservationFault::ReservationStorageDirectory)?;
@@ -62,8 +67,11 @@ pub(crate) fn reservation_location(path: &PosixPath) -> Result<(UnsignedInteger,
     finalized(result, close(file))
 }
 fn path_file(path: &PosixPath) -> Result<File> {
+    path_file_text(&path.codepoints())
+}
+fn path_file_text(points: &[u32]) -> Result<File> {
     Ok(OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(python_path(&path.codepoints())?)?)
+        .open(python_path(points)?)?)
 }

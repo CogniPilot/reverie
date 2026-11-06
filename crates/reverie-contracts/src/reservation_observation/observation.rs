@@ -48,7 +48,7 @@ impl ReservationObservation {
         self.value()
             .python_eq(&crate::operations_v1::observation(stored))
     }
-    fn value(&self) -> Value {
+    pub(crate) fn value(&self) -> Value {
         let fields = &self.0;
         let entries = [
             ("pool_id", fields.pool.as_str().to_owned()),

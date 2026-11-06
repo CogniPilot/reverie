@@ -226,6 +226,24 @@ impl ObservationContext {
         self.check(end)?;
         Ok(result)
     }
+    pub(crate) fn original_runtime_tail(
+        &self,
+        row: &ObservedRow<'_>,
+        limits: &NativeLimitBinding,
+    ) -> Result<reverie_contracts::reservation_baseline::OriginalRuntimeTail> {
+        let end = self.deadline(None)?;
+        let row = self.checked_row(row)?;
+        need(
+            row.id() == limits.container_id() && row.pid()? == limits.pid()?,
+            "RESOURCE_NATIVE_SOURCE_CHANGED",
+        )?;
+        let result = self
+            .observer
+            .source
+            .original_runtime_tail(row, limits, end)?;
+        self.check(end)?;
+        Ok(result)
+    }
     pub fn capacity(&self, inventory: &ObservedInventory) -> Result<CapacityFacts> {
         self.capacity_at(inventory, None)
     }

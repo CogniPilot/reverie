@@ -1,5 +1,6 @@
 //! Fixed Linux reservation kernel/filesystem observations. These are snapshots,
 //! not retained native grants, leases, process effects or admission authority.
+mod baseline;
 mod custody;
 mod limits;
 mod storage;
@@ -29,6 +30,7 @@ pub enum ReservationKernelError {
     Data(KernelDataError),
     Mounts(MountTableError),
     EngineData(EngineDataError),
+    Baseline(reverie_contracts::reservation_baseline::BaselineDataError),
     Refused(&'static str),
 }
 impl ReservationKernelError {
@@ -41,6 +43,7 @@ impl ReservationKernelError {
                 "RESERVATION_MOUNT_INVENTORY"
             }
             Self::EngineData(value) => value.code(),
+            Self::Baseline(value) => value.code(),
             Self::Refused(value) => value,
         }
     }
@@ -57,6 +60,7 @@ impl std::error::Error for ReservationKernelError {
             Self::Data(error) => Some(error),
             Self::Mounts(error) => Some(error),
             Self::EngineData(error) => Some(error),
+            Self::Baseline(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
@@ -86,6 +90,11 @@ impl From<EngineDataError> for ReservationKernelError {
         Self::EngineData(value)
     }
 }
+impl From<reverie_contracts::reservation_baseline::BaselineDataError> for ReservationKernelError {
+    fn from(value: reverie_contracts::reservation_baseline::BaselineDataError) -> Self {
+        Self::Baseline(value)
+    }
+}
 type Result<T> = std::result::Result<T, ReservationKernelError>;
 fn need(value: bool, code: &'static str) -> Result<()> {
     if value {
@@ -108,6 +117,8 @@ trait Source {
     fn exists(&self, path: &PosixPath) -> Result<bool>;
     fn resolve(&self, path: &PosixPath) -> Result<PosixPath>;
     fn identity(&self, path: &PosixPath) -> Result<[u64; 4]>;
+    fn identity_text(&self, points: &[u32]) -> Result<[u64; 4]>;
+    fn resolve_optional(&self, path: &PosixPath) -> Result<PosixPath>;
     fn location(&self, path: &PosixPath) -> Result<(UnsignedInteger, MountDevice)>;
 }
 struct Installed;
@@ -135,6 +146,12 @@ impl Source for Installed {
     }
     fn identity(&self, path: &PosixPath) -> Result<[u64; 4]> {
         Ok(native::reservation_identity(path)?)
+    }
+    fn identity_text(&self, points: &[u32]) -> Result<[u64; 4]> {
+        Ok(native::reservation_identity_text(points)?)
+    }
+    fn resolve_optional(&self, path: &PosixPath) -> Result<PosixPath> {
+        Ok(native::resolve_optional_text(&path.codepoints())?)
     }
     fn location(&self, path: &PosixPath) -> Result<(UnsignedInteger, MountDevice)> {
         Ok(native::reservation_location(path)?)
@@ -241,6 +258,16 @@ impl ReservationKernel {
             false,
             end,
         )?)?)
+    }
+    /// Real read-side tail of capture_original. Fixed kernel roots are selected
+    /// here; returned account/cgroup identities are DATA, never retained proof.
+    pub fn original_runtime_tail(
+        &self,
+        row: &ContainerRow,
+        limits: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        end: Instant,
+    ) -> Result<reverie_contracts::reservation_baseline::OriginalRuntimeTail> {
+        baseline::observe(&Installed, row, limits, end)
     }
 }
 fn host_root(source: &impl Source, end: Instant) -> Result<HostAccounting> {

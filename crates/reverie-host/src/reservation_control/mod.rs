@@ -1,11 +1,13 @@
 //! Actual private control metadata, directory and held-admission observations.
 //! Installing services supply captured configuration; no request path or Source
 //! constructor is exposed, and READY contents alone convey no authority.
+mod draft;
 mod history;
 mod image;
 #[cfg(test)]
 mod tests;
 use crate::{ObservationError, native};
+pub use draft::{publish_draft, read_draft};
 pub use history::{
     read_completion_receipt, read_settlement_pending, read_verification_receipt, settlement_names,
     settlement_pending_present,
@@ -21,6 +23,11 @@ use reverie_store::storage_identity::{self, IdentityError};
 use std::os::unix::fs::MetadataExt;
 use std::{fmt, fs, io};
 pub enum ControlHostError {
+    Draft(reverie_contracts::reservation_draft::DraftDataError),
+    Finalization {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
     Native(ObservationError),
     /// Preserve ledger/finalizer variants for typed inspection; no erased
     /// io::Error wrapper is needed to reach a secondary checked-close error.
@@ -32,6 +39,8 @@ pub enum ControlHostError {
 impl ControlHostError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Draft(e) => e.code(),
+            Self::Finalization { primary, .. } => primary.code(),
             Self::Native(e) => e.code(),
             Self::Journal(e) => e.code(),
             Self::Metadata(e) => e.code(),
@@ -55,6 +64,8 @@ impl fmt::Display for ControlHostError {
 impl std::error::Error for ControlHostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Draft(error) => Some(error),
+            Self::Finalization { primary, .. } => Some(primary),
             Self::Native(error) => Some(error),
             Self::Journal(error) => Some(error),
             Self::Metadata(error) => Some(error),

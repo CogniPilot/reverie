@@ -3,12 +3,17 @@
 mod claim;
 mod completion;
 mod confirmation;
+mod draft;
 mod error;
 mod io;
 mod terminal;
 mod transition;
 use crate::private_fs::{self, CloseRole, Directory, Stamp};
 pub use completion::NativeCompletionProof;
+pub use draft::{
+    DraftObservation, DraftObserver, DraftReferences, DraftSnapshot, allocate_draft_references,
+    allocate_profile_target,
+};
 pub use error::{JournalError, Result};
 use error::{finalized, need};
 use reverie_core::operations::*;
@@ -107,6 +112,7 @@ pub struct OperationStore {
     inner: Mutex<Inner>,
     guard: Arc<dyn ScopeGuard>,
     observer: Option<Arc<dyn CapacityObserver>>,
+    draft_observer: Option<Arc<dyn DraftObserver>>,
     #[cfg(test)]
     identity: Arc<()>,
 }
@@ -171,6 +177,7 @@ impl OperationStore {
             }),
             guard,
             observer,
+            draft_observer: None,
             #[cfg(test)]
             identity: Arc::new(()),
         })

@@ -16,6 +16,7 @@ struct State {
     storage: Option<[[u64; 4]; 3]>,
     after_storage: Option<Box<dyn FnOnce() -> std::io::Result<()> + Send>>,
     on_query: Option<Box<dyn FnMut() -> Result<()> + Send>>,
+    original_runtime: Option<reverie_contracts::reservation_baseline::OriginalRuntimeTail>,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -32,6 +33,7 @@ impl Fixture {
             storage: None,
             after_storage: None,
             on_query: None,
+            original_runtime: None,
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -75,6 +77,12 @@ impl Fixture {
     }
     pub(crate) fn on_query(&self, hook: impl FnMut() -> Result<()> + Send + 'static) {
         self.0.lock().unwrap().on_query = Some(Box::new(hook));
+    }
+    pub(crate) fn original_runtime(
+        &self,
+        tail: reverie_contracts::reservation_baseline::OriginalRuntimeTail,
+    ) {
+        self.0.lock().unwrap().original_runtime = Some(tail);
     }
 }
 impl Source for Arc<Fixture> {
@@ -179,6 +187,18 @@ impl Source for Arc<Fixture> {
         let mut state = self.0.lock().unwrap();
         state.events.push("swap".to_owned());
         Ok(state.swap.clone())
+    }
+    fn original_runtime_tail(
+        &self,
+        _: &ContainerRow,
+        _: &NativeLimitBinding,
+        _: Instant,
+    ) -> Result<reverie_contracts::reservation_baseline::OriginalRuntimeTail> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("original-runtime".into());
+        state.original_runtime.clone().ok_or(ObserverError::Refused(
+            "FIXTURE_ORIGINAL_RUNTIME_UNAVAILABLE",
+        ))
     }
     fn effective_config(
         &self,

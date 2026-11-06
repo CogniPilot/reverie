@@ -9,6 +9,8 @@ use std::{
     time::Duration,
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[path = "tests_baseline.rs"]
+mod baseline_cases;
 #[path = "tests_custody.rs"]
 mod custody_cases;
 #[path = "tests_oracle.rs"]
@@ -85,8 +87,11 @@ impl Fixture {
         fs::write(p, raw).unwrap();
     }
     fn row(&self) -> InventoryRows {
+        self.row_with_mounts(json!([]))
+    }
+    fn row_with_mounts(&self, mounts: serde_json::Value) -> InventoryRows {
         let id = "1".repeat(64);
-        let row = json!({"Id":id,"Name":"/office-agent","Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":{"reverie.worker":"office"}},"State":{"Running":true,"Pid":123},"Mounts":[],"HostConfig":{"Memory":2147483648u64,"MemorySwap":2147483648u64,"PidsLimit":128,"NanoCpus":0}});
+        let row = json!({"Id":id,"Name":"/office-agent","Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":{"reverie.worker":"office"}},"State":{"Running":true,"Pid":123},"Mounts":mounts,"HostConfig":{"Memory":2147483648u64,"MemorySwap":2147483648u64,"PidsLimit":128,"NanoCpus":0}});
         InventoryRows::decode(&inventory_ids(&id).unwrap(), &[row.to_string()]).unwrap()
     }
 }
@@ -124,13 +129,27 @@ impl Source for Fixture {
             .borrow()
             .get(&p.codepoints())
             .cloned()
-            .unwrap_or_else(|| p.clone());
+            .unwrap_or_else(|| PosixPath::try_new(&native::python_text(&self.actual(p))).unwrap());
         let result = native::reservation_identity(&mapped)?;
         let hook = self.identity_hook.borrow_mut().take();
         if let Some(hook) = hook {
             hook(self, p);
         }
         Ok(result)
+    }
+    fn identity_text(&self, points: &[u32]) -> Result<[u64; 4]> {
+        let raw = native::python_path(points)?;
+        let selected = if raw.starts_with("/proc") || raw.starts_with(CGROUP) {
+            self.actual(&PosixPath::try_new(points).unwrap())
+        } else {
+            raw
+        };
+        Ok(native::reservation_identity_text(&native::python_text(
+            &selected,
+        ))?)
+    }
+    fn resolve_optional(&self, p: &PosixPath) -> Result<PosixPath> {
+        Ok(native::resolve_optional_text(&p.codepoints())?)
     }
     fn location(&self, p: &PosixPath) -> Result<(UnsignedInteger, MountDevice)> {
         if let Some((_, id, device)) = self
