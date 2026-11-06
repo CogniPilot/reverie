@@ -36,8 +36,12 @@ export class FakeFront {
   private nextId = 1n;
   private readonly waiters = new Set<() => void>();
 
-  constructor(readonly generation = 1n) {
-    [this.channel, this.peer] = duplexPair();
+  /** With `peer`, the fake front drives that stream (a real inherited fd in a child's tests), and `channel` is unused. */
+  constructor(
+    readonly generation = 1n,
+    peer?: Duplex
+  ) {
+    [this.channel, this.peer] = peer ? [peer, peer] : duplexPair();
     this.peer.on('data', (chunk: Buffer) => {
       for (const frame of this.reader.push(chunk)) this.record(frame);
     });
