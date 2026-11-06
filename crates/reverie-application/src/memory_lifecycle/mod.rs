@@ -40,8 +40,25 @@ impl InstalledMemory {
         Self::capture_instance(None)
     }
     pub fn capture_instance(instance: Option<&std::path::Path>) -> Result<Self> {
+        Self::capture_selection(instance, None)
+    }
+    /// Installed metadata selects data only. The actual API/launch caller
+    /// still owns current employee/grant checks and a retained context guard.
+    pub fn capture_context(
+        context: &reverie_core::memory_context::InstalledMemoryContext,
+    ) -> Result<Self> {
+        Self::capture_selection(None, Some(context))
+    }
+    fn capture_selection(
+        instance: Option<&std::path::Path>,
+        context: Option<&reverie_core::memory_context::InstalledMemoryContext>,
+    ) -> Result<Self> {
         let mut namespace = MemoryNamespace::capture_current()?;
-        let configured = MemoryConfiguration::capture_instance(instance)
+        let selected = match context {
+            Some(context) => MemoryConfiguration::capture_context(context),
+            None => MemoryConfiguration::capture_instance(instance),
+        };
+        let configured = selected
             .map_err(MemoryLifecycleError::Configuration)
             .and_then(|configuration| {
                 namespace.assert_current()?;

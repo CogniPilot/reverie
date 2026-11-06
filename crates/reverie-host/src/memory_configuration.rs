@@ -40,6 +40,27 @@ pub struct MemoryConfiguration {
     instance: Option<LoadedMemoryInstance>,
 }
 impl MemoryConfiguration {
+    /// Installed selection DATA in the real calling namespace, not a grant.
+    /// The API/launch owner authenticates callers independently. Capture once
+    /// and compare the actual decoded instance; do not validate one read and
+    /// then reopen another configuration for the operation.
+    pub fn capture_context(
+        context: &reverie_core::memory_context::InstalledMemoryContext,
+    ) -> Result<Self, InstanceLoadError> {
+        let path = native::python_path(context.configuration().codepoints())?;
+        let configured = Self::capture_instance(Some(&path))?;
+        let instance = configured
+            .instance()
+            .ok_or(InstanceLoadError::ContextBinding)?
+            .configuration();
+        // Legacy instance employee_id is metadata in a different identity
+        // domain. Only the actual API actor/grant owns permission; do not
+        // invent a Company identity restriction from that legacy field.
+        if instance.id() != context.instance() {
+            return Err(InstanceLoadError::ContextBinding);
+        }
+        Ok(configured)
+    }
     /// Same process filesystem/network namespace as the eventual consumer.
     /// Capture once at bootstrap instead of consulting mutable process env on
     /// individual API requests. Organizational instance labels grant no scope.

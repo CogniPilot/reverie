@@ -21,7 +21,7 @@ import type { GoalAuthentication } from './goal-access.js';
 import type { ResumeGrantLease } from './recovery-authority.js';
 
 export type ServicePurpose = string;
-const MAX_LIFETIME_MS = 10_000;
+export const SERVICE_ASSERTION_MAX_LIFETIME_MS = 10_000;
 const canonicalId = /^[A-Za-z0-9_.:-]{1,100}$/;
 const ownerIdPattern = /^(?:[A-Za-z0-9_.:-]{1,100})?$/;
 const session = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -188,7 +188,7 @@ export class ServiceGrantAuthentication {
         !integer(f[7]) ||
         !integer(f[8]) ||
         f[8] <= f[7] ||
-        f[8] - f[7] > MAX_LIFETIME_MS ||
+        f[8] - f[7] > SERVICE_ASSERTION_MAX_LIFETIME_MS ||
         !exact(nonce, f[9])
       )
         return null;
@@ -295,9 +295,13 @@ export interface CanonicalServiceGrantOptions {
 }
 /** grant/revoked/binding ports read from the same canonical CompanyStore, with custody checked around every fresh read.
  * It authenticates nobody: issuer keys and the durable nonce store remain host bootstrap ports. */
-export function canonicalServiceGrantSource(
-  options: CanonicalServiceGrantOptions
-): Pick<ServiceGrantPorts, 'grant' | 'revoked' | 'binding'> {
+export function canonicalServiceGrantSource(options: CanonicalServiceGrantOptions): Pick<
+  ServiceGrantPorts,
+  'grant' | 'revoked' | 'binding'
+> & {
+  /** Canonical data for a named publisher to select a record; never authority. */
+  grantsFor(purpose: ServicePurpose): readonly ServiceGrant[];
+} {
   const snapshot = (): CompanyState => {
     const settle = (value: unknown) => {
       if (value !== undefined) throw new Error('custody port must be synchronous');
@@ -309,6 +313,7 @@ export function canonicalServiceGrantSource(
   };
   const one = <T>(items: T[]): T | undefined => (items.length === 1 ? items[0] : undefined);
   return {
+    grantsFor: (purpose) => snapshot().serviceGrants.filter((grant) => grant.purpose === purpose),
     grant: (grantId) => one(snapshot().serviceGrants.filter((g) => g.id === grantId)),
     revoked: (grantId) => {
       const state = snapshot();
