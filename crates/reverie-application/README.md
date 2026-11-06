@@ -255,7 +255,10 @@ one-shot `reclaim` restores the exact direct storage and returns the actual Nix
 guard plus its result; a definitive retention failure returns the original
 claim/guard. Unknown helper/client/removal outcomes retain the workflow and
 refuse direct aliases, further preparation and release. Dropping a preparation
-handle does not acknowledge settlement or release its registry/Runtime owners.
+handle does not acknowledge settlement. Its resources remain held only while the
+actual Registry/Runtime remains retained; the last owner/process exit supplies
+no global-release guarantee. The complete installing service still needs actual
+process-lifetime retention of unknowns or confirmed structured shutdown.
 The application controller must retain these handles and settle them during
 real launch/recovery/stop; the public resource result is not API authorization,
 Gate admission, laptop ownership or global capacity-release proof. Ordinary
