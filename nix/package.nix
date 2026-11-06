@@ -492,6 +492,7 @@ let
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
   memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
+  mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -589,4 +590,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild memoryNativeCli laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild memoryNativeCli mcpNativeCli laptopTools; }

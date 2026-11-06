@@ -747,6 +747,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-mcp-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-core",
+ "reverie-diagnostics",
+ "reverie-host",
+]
+
+[[package]]
 name = "reverie-memory-cli"
 version = "0.1.0"
 dependencies = [

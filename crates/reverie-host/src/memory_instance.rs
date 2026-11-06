@@ -19,6 +19,7 @@ pub enum InstanceLoadError {
         secondary: Box<Self>,
     },
     SeparateStateRequired,
+    ContextBinding,
 }
 impl fmt::Display for InstanceLoadError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -32,6 +33,7 @@ impl fmt::Display for InstanceLoadError {
             Self::SeparateStateRequired => {
                 output.write_str("instance data_dir must be a separate state directory")
             }
+            Self::ContextBinding => output.write_str("installed memory instance binding changed"),
         }
     }
 }

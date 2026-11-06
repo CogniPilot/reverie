@@ -29,12 +29,15 @@ import { CompanyService, CompanyError } from '../company-service.js';
 import { createGoalServerAssembly, type GoalServerInput } from '../goal-server-assembly.js';
 import { registerGoalServiceRoutes } from './routes/goal-routes.js';
 import {
-  createServiceDecisions,
+  ServiceDecisions,
   registerServiceDecisionRoute,
   registerServiceGrantRoutes,
   registerServiceGrantSetupPage,
 } from '../service-decision.js';
 import { loadServiceAuthConfig } from '../service-auth-config.js';
+import { createServiceAuthorization } from '../service-authorization.js';
+import { MemoryScopePublisher } from '../memory-scope-publisher.js';
+import { registerMemoryScopeRoutes } from './routes/memory-scope-routes.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
@@ -1579,6 +1582,7 @@ export class WebServer extends EventEmitter {
     this.companyService = new CompanyService(companyStore, {
       goalAuthentication: goalBoundary.authentication,
       servicePurposes: serviceConfig?.purposes,
+      memoryScopes: serviceConfig?.memoryScopes,
       getSession: (id) => this.sessions.get(id),
       providerHealth: (employee) => this.workerProviderHealth?.read(employee),
       workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
@@ -1657,16 +1661,27 @@ export class WebServer extends EventEmitter {
       this.goalPorts && 'kind' in this.goalPorts && this.goalPorts.kind === 'canonical-goal-provisioning'
         ? this.goalPorts
         : undefined;
-    registerServiceDecisionRoute(
-      this.app,
+    const serviceAuthorization =
       serviceConfig && provisioning
-        ? createServiceDecisions(serviceConfig, {
+        ? createServiceAuthorization(serviceConfig, {
             company: this.companyService,
             custody: goalBoundary.authentication,
             nonce: provisioning.nonce,
           })
+        : undefined;
+    registerServiceDecisionRoute(
+      this.app,
+      serviceAuthorization
+        ? new ServiceDecisions({
+            loaded: serviceAuthorization.loaded,
+            auth: serviceAuthorization.auth,
+            binding: serviceAuthorization.source.binding,
+          })
         : undefined
     );
+    const memoryScopePublisher = serviceAuthorization?.loaded.memoryScopes
+      ? new MemoryScopePublisher(serviceAuthorization)
+      : undefined;
     registerServiceGrantRoutes(this.app, serviceConfig ? this.companyService.goals : undefined);
     registerServiceGrantSetupPage(
       this.app,
@@ -1786,6 +1801,10 @@ export class WebServer extends EventEmitter {
       journal: openJournal,
       visibleMessage: (sessionId, roomId, messageId) => this.chatroomService.agentVisibleMessage(sessionId, roomId, messageId),
     });
+    registerMemoryScopeRoutes(this.app, ctx, {
+      agentSession: currentAgentSession,
+      company: owner => this.companyService.view(owner),
+    }, memoryScopePublisher);
     registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
     registerCompanyRoutes(
       this.app,

@@ -91,4 +91,9 @@ export class InstalledMemoryBridge {
   environment(instance: string): NodeJS.ProcessEnv {
     return { ...this.settings, REVERIE_INSTANCE_CONFIG: instance };
   }
+  /** The native installed-context mode reads its fixed guest file itself.
+   * Preserve codepoint paths there; never roundtrip them through JS argv/env. */
+  installedEnvironment(): NodeJS.ProcessEnv {
+    return { ...this.settings };
+  }
 }

@@ -11,6 +11,7 @@ members = [
     "crates/reverie-worker-client",
     "crates/reverie-worker-child",
     "crates/reverie-memory-cli",
+    "crates/reverie-mcp-cli",
     "crates/reverie-diagnostics",
     "crates/xtask",
 ]

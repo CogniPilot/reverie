@@ -7,6 +7,7 @@ pub mod ids;
 pub mod lease_policy;
 pub mod memory;
 pub mod memory_configuration;
+pub mod memory_context;
 pub mod memory_documents;
 pub mod memory_instance;
 pub mod operations;
