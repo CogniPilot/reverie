@@ -10,6 +10,7 @@ members = [
     "crates/reverie-routes",
     "crates/reverie-worker-client",
     "crates/reverie-worker-child",
+    "crates/reverie-nix-store-prepare",
     "crates/reverie-memory-cli",
     "crates/reverie-http",
     "crates/reverie-ops-cli",

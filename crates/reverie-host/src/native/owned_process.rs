@@ -110,9 +110,6 @@ impl ProcessStatus {
         self == Self::Exited(0)
     }
 }
-pub(crate) fn reap(pidfd: &OwnedFd) -> io::Result<Option<bool>> {
-    reap_status(pidfd).map(|status| status.map(ProcessStatus::successful))
-}
 pub(crate) fn reap_status(pidfd: &OwnedFd) -> io::Result<Option<ProcessStatus>> {
     // SAFETY: zero is a valid siginfo_t initialization; waitid writes into live
     // output storage and targets only the owned pidfd's child, with WNOHANG.
@@ -184,6 +181,34 @@ fn reserve_descriptor(
         return Err(PreparationError { close_failed: true }.after_close(finalizer(duplicate)));
     }
     Ok(duplicate)
+}
+/// One fixed registration input, reserved above stdio before Command installs
+/// null stdin. Process retains the parent owner through spawn and closes once.
+pub(crate) struct RegistrationInput(OwnedFd);
+impl RegistrationInput {
+    pub(crate) fn prepare(fd: OwnedFd) -> std::result::Result<Self, PreparationError> {
+        reserve_descriptor(fd, 3, close).map(Self)
+    }
+    pub(crate) fn configure(&self, command: &mut Command) {
+        let fd = self.0.as_raw_fd();
+        // SAFETY: this type's private constructor reserves fd>=3. Process
+        // retains its parent owner until spawn returns. dup2/close are async-
+        // signal-safe and neither allocate nor lock. Close the child's original
+        // descriptor exactly once, checking failure before exec. Its fd0 copy
+        // survives successful exec; failed pre_exec exits/reaps the child.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(fd, libc::STDIN_FILENO) < 0 || libc::close(fd) != 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
+    }
+    pub(crate) fn finish(self) -> io::Result<()> {
+        close(self.0)
+    }
 }
 impl Handshake {
     pub(crate) fn new() -> std::result::Result<Self, PreparationError> {

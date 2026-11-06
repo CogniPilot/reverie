@@ -53,6 +53,14 @@ pub(crate) fn decode_python_str(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_last_wins(raw)
 }
+/// UTF-8 Path.read_text's universal newlines, shared by named file purposes.
+/// JSON syntax/purpose policy remains with each caller; no bytes BOM detector.
+pub(crate) fn utf8_file_text(raw: &[u8]) -> Result<String, Error> {
+    Ok(std::str::from_utf8(raw)
+        .map_err(|_| Error::InvalidJson)?
+        .replace("\r\n", "\n")
+        .replace('\r', "\n"))
+}
 pub(crate) fn decode_python_str_ordered(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_ordered(raw, decode::Purpose::Rootless)

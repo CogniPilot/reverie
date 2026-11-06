@@ -13,9 +13,14 @@ use std::{
 mod tests;
 
 pub(crate) fn read_worker_config(path: &Path) -> Result<Vec<u8>> {
+    read_owned_text_file(path, uid())
+}
+/// Shared private regular text-file snapshot owner. Callers choose the original
+/// fixed purpose UID; no raw path reader is exported outside Host.
+pub(crate) fn read_owned_text_file(path: &Path, owner: u32) -> Result<Vec<u8>> {
     let before = fs::symlink_metadata(path)?;
     need(
-        before.is_file() && before.uid() == uid() && before.mode() & 0o077 == 0,
+        before.is_file() && before.uid() == owner && before.mode() & 0o077 == 0,
         ObservationFault::ArtifactCustody,
     )?;
     let mut file = OpenOptions::new()

@@ -7,12 +7,14 @@ use std::{ffi::OsString, io, os::fd::OwnedFd, time::Instant};
 
 #[derive(Default)]
 pub(super) struct Process {
+    registration: Option<std::fs::File>,
+    prepared_registration: Option<native::RegistrationInput>,
     handshake: Option<native::Handshake>,
     identity: Option<OwnedFd>,
     streams: [Option<OwnedFd>; 2],
     nonblocking: [bool; 2],
     output: [Vec<u8>; 2],
-    status: Option<bool>,
+    status: Option<native::ProcessStatus>,
     attempted: bool,
     started: bool,
     kill_attempted: bool,
@@ -23,21 +25,41 @@ impl Process {
     /// Observation only: opaque consumed failures remain negative, but cannot
     /// be mistaken for a constructor, child or descriptor still owned here.
     pub(super) fn has_pending_native_work(&self) -> bool {
-        self.handshake.is_some()
+        self.registration.is_some()
+            || self.prepared_registration.is_some()
+            || self.handshake.is_some()
             || self.identity.is_some()
             || self.streams.iter().any(Option::is_some)
             || (self.attempted && self.status.is_none())
     }
-    pub(super) fn start(&mut self, bootstrap: &InstalledCommand, args: &[OsString]) -> Result<()> {
+    pub(super) fn with_registration(input: Option<std::fs::File>) -> Self {
+        Self {
+            registration: input,
+            ..Self::default()
+        }
+    }
+    pub(super) fn start(
+        &mut self,
+        bootstrap: &InstalledCommand,
+        args: &[OsString],
+        job: &Job,
+    ) -> Result<()> {
+        self.prepare_registration()?;
         let preparation = native::Handshake::new();
         #[cfg(test)]
         let preparation = bootstrap.hooks.prepared(preparation);
-        self.handshake = Some(preparation.map_err(|error| self.preparation_failed(error))?);
+        self.handshake = Some(
+            preparation
+                .map_err(|error| self.preparation_failed(error, CleanupFault::HandshakeClose))?,
+        );
         let mut command = bootstrap.command(args);
         self.handshake
             .as_ref()
             .expect("prepared handshake")
             .configure(&mut command);
+        if let Some(input) = &self.prepared_registration {
+            input.configure(&mut command);
+        }
         bootstrap
             .configure_exact(&mut command, args)
             .map_err(|_| EngineError::new(EngineFault::Spawn))?;
@@ -45,6 +67,7 @@ impl Process {
         #[cfg(test)]
         bootstrap.hooks.before_spawn();
         let result = command.spawn();
+        self.close_registration(job);
         match result {
             Err(_) => {
                 self.attempted = false;
@@ -69,6 +92,34 @@ impl Process {
             return Err(EngineError::new(EngineFault::Finalization));
         }
         Ok(())
+    }
+    fn prepare_registration(&mut self) -> Result<()> {
+        if let Some(input) = self.registration.take() {
+            self.prepared_registration = Some(
+                native::RegistrationInput::prepare(input.into()).map_err(|error| {
+                    self.preparation_failed(error, CleanupFault::RegistrationClose)
+                })?,
+            );
+        }
+        Ok(())
+    }
+    fn close_registration(&mut self, job: &Job) {
+        let closed = if let Some(input) = self.prepared_registration.take() {
+            Some(input.finish())
+        } else {
+            self.registration
+                .take()
+                .map(|input| native::close(input.into()))
+        };
+        if let Some(closed) = closed {
+            #[cfg(test)]
+            let closed = job.hooks.registration_closed(closed);
+            #[cfg(not(test))]
+            let _ = job;
+            if closed.is_err() {
+                self.failed(CleanupFault::RegistrationClose, true);
+            }
+        }
     }
     fn prepare_streams(&mut self) -> Result<()> {
         for index in 0..2 {
@@ -101,9 +152,13 @@ impl Process {
         }
         EngineError::new(EngineFault::Identity)
     }
-    fn preparation_failed(&mut self, error: native::PreparationError) -> EngineError {
+    fn preparation_failed(
+        &mut self,
+        error: native::PreparationError,
+        fault: CleanupFault,
+    ) -> EngineError {
         if error.close_failed {
-            self.failed(CleanupFault::HandshakeClose, true);
+            self.failed(fault, true);
         }
         EngineError::new(EngineFault::Spawn)
     }
@@ -134,7 +189,8 @@ impl Process {
             .identity
             .as_ref()
             .ok_or_else(|| EngineError::new(EngineFault::Identity))?;
-        self.status = native::reap(fd).map_err(|_| EngineError::new(EngineFault::Identity))?;
+        self.status =
+            native::reap_status(fd).map_err(|_| EngineError::new(EngineFault::Identity))?;
         Ok(())
     }
     fn stream(&mut self, index: usize, capture: bool, job: &Job) -> Result<()> {
@@ -157,12 +213,15 @@ impl Process {
                 job.hooks
                     .reads
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if self.output.iter().map(Vec::len).sum::<usize>() + count
+                if job.nix_tail {
+                    super::nix_tail::append(&mut self.output[index], &buffer[..count]);
+                } else if self.output.iter().map(Vec::len).sum::<usize>() + count
                     > job.policy.maximum_output
                 {
                     return Err(EngineError::new(EngineFault::OutputBound));
+                } else {
+                    self.output[index].extend_from_slice(&buffer[..count]);
                 }
-                self.output[index].extend_from_slice(&buffer[..count]);
             }
             Ok(_) => {}
             Err(error)
@@ -193,7 +252,10 @@ impl Process {
         Err(EngineError::new(EngineFault::Finalization))
     }
     fn complete(&self) -> bool {
-        (!self.attempted || self.status.is_some()) && self.streams.iter().all(Option::is_none)
+        self.registration.is_none()
+            && self.prepared_registration.is_none()
+            && (!self.attempted || self.status.is_some())
+            && self.streams.iter().all(Option::is_none)
     }
     fn poll(&self, deadline: Instant) {
         let mut fds = self.streams.iter().flatten().collect::<Vec<_>>();
@@ -227,21 +289,33 @@ impl Process {
             }
             self.poll(deadline);
         }
-        std::str::from_utf8(&self.output[0]).map_err(|_| EngineError::new(EngineFault::Utf8))?;
-        std::str::from_utf8(&self.output[1]).map_err(|_| EngineError::new(EngineFault::Utf8))?;
+        for output in &mut self.output {
+            if job.nix_tail {
+                super::nix_tail::finish(output);
+            } else {
+                std::str::from_utf8(output).map_err(|_| EngineError::new(EngineFault::Utf8))?;
+            }
+        }
         let status = self
             .status
             .expect("complete process has actual exit status");
-        if job.policy.successful_exit && !status {
+        if job.policy.successful_exit && !status.successful() {
             return Err(EngineError::new(EngineFault::Exit));
         }
         Ok(CapturedOutput {
             stdout: std::mem::take(&mut self.output[0]),
             stderr: std::mem::take(&mut self.output[1]),
-            succeeded: status,
+            succeeded: status.successful(),
+            shell_code: status.shell_code(),
         })
     }
     pub(super) fn cleanup(&mut self, deadline: Instant, job: &Job) -> bool {
+        let deadline = if job.nix_tail {
+            crate::native::child_signals::clamp(deadline)
+        } else {
+            deadline
+        };
+        self.close_registration(job);
         if self.prepare_streams().is_err() {
             self.failed(CleanupFault::Identity, false);
         }

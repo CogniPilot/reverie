@@ -35,12 +35,15 @@ pub(super) struct Job {
     finished: AtomicBool,
     data: Mutex<JobData>,
     pub(super) policy: Policy,
+    pub(super) nix_tail: bool,
     #[cfg(test)]
     pub(super) hooks: super::test_hooks::Hooks,
 }
 impl Job {
     pub(super) fn cancelled(&self) -> bool {
-        self.abort.load(Ordering::Acquire) || self.external.is_cancelled()
+        self.abort.load(Ordering::Acquire)
+            || self.external.is_cancelled()
+            || (self.nix_tail && crate::native::child_signals::signal().is_some())
     }
 }
 /// One persistent installing-service context, intentionally not Clone. Keep it
@@ -52,6 +55,21 @@ pub(crate) struct CapturedClient {
     bootstrap: Arc<InstalledCommand>,
     active: Mutex<Option<Arc<Job>>>,
     closing: AtomicBool,
+}
+/// Exact native job custody, minted only after actual locked admission. It is
+/// not an engine effect/owner permit and has no wire or PID/path constructor.
+pub(crate) struct CapturedCall {
+    origin: Arc<InstalledCommand>,
+    job: Arc<Job>,
+}
+pub(crate) struct CallFailure {
+    pub(crate) error: EngineError,
+    pub(crate) call: Option<CapturedCall>,
+}
+impl CallFailure {
+    fn before_admission(error: EngineError) -> Self {
+        Self { error, call: None }
+    }
 }
 impl CapturedClient {
     /// This does not clear a fence or turn a negative close into success. A
@@ -107,16 +125,84 @@ impl CapturedClient {
         cancellation: &CancellationToken,
         policy: Policy,
     ) -> Result<CapturedOutput> {
-        let deadline = deadline.min(Instant::now() + policy.maximum);
+        self.run_scoped(args, deadline, cancellation, policy)
+            .map_err(|failure| failure.error)
+    }
+    pub(crate) fn run_scoped(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        policy: Policy,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        self.run_owned(args, deadline, cancellation, policy, &mut None, false)
+    }
+    /// The closed guest bootstrap alone streams a one-shot installed
+    /// registration file and retains diagnostic tails. Failed admission leaves
+    /// input with its caller; admitted input belongs to Process before the
+    /// constructor thread can start, including delayed/failed constructors.
+    pub(crate) fn run_nix_bootstrap(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        registration: &mut Option<std::fs::File>,
+    ) -> Result<CapturedOutput> {
+        self.run_owned(
+            args,
+            deadline,
+            cancellation,
+            Policy {
+                maximum: deadline.saturating_duration_since(Instant::now()),
+                maximum_output: 0,
+                successful_exit: false,
+            },
+            registration,
+            true,
+        )
+        .map_err(|failure| failure.error)
+    }
+    fn run_owned(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        policy: Policy,
+        registration: &mut Option<std::fs::File>,
+        nix_tail: bool,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        let deadline = deadline.min(
+            Instant::now()
+                .checked_add(policy.maximum)
+                .unwrap_or(deadline),
+        );
         if cancellation.is_cancelled() {
-            return Err(EngineError::new(EngineFault::Cancelled));
+            return Err(CallFailure::before_admission(EngineError::new(
+                EngineFault::Cancelled,
+            )));
         }
         if Instant::now() >= deadline {
-            return Err(EngineError::new(EngineFault::Deadline));
+            return Err(CallFailure::before_admission(EngineError::new(
+                EngineFault::Deadline,
+            )));
         }
-        let job = self.admit(cancellation, policy)?;
+        let call = self
+            .admit(cancellation, policy, registration, nix_tail)
+            .map_err(CallFailure::before_admission)?;
+        self.run_admitted(args, deadline, &call.job)
+            .map_err(|error| CallFailure {
+                error,
+                call: Some(call),
+            })
+    }
+    fn run_admitted(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        job: &Arc<Job>,
+    ) -> Result<CapturedOutput> {
         let bootstrap = Arc::clone(&self.bootstrap);
-        let owned = Arc::clone(&job);
+        let owned = Arc::clone(job);
         if std::thread::Builder::new()
             .name("reverie-captured-client".into())
             .spawn(move || execute(bootstrap, args, deadline, owned))
@@ -126,15 +212,18 @@ impl CapturedClient {
                 .data
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            data.result = Some(Err(EngineError::new(EngineFault::Supervisor)));
+            data.result = Some(data.process.finish(
+                Err(EngineError::new(EngineFault::Supervisor)),
+                deadline,
+                job,
+            ));
             drop(data);
             job.finished.store(true, Ordering::Release);
-            self.release(&job)?;
-            return Err(EngineError::new(EngineFault::Supervisor));
+            return self.result(job, deadline);
         }
         loop {
             if job.finished.load(Ordering::Acquire) {
-                return self.result(&job, deadline);
+                return self.result(job, deadline);
             }
             if job.cancelled() || Instant::now() >= deadline {
                 let fault = cancellation_fault(job.cancelled());
@@ -144,7 +233,13 @@ impl CapturedClient {
             tick(deadline);
         }
     }
-    fn admit(&self, external: &CancellationToken, policy: Policy) -> Result<Arc<Job>> {
+    fn admit(
+        &self,
+        external: &CancellationToken,
+        policy: Policy,
+        registration: &mut Option<std::fs::File>,
+        nix_tail: bool,
+    ) -> Result<CapturedCall> {
         let mut active = self.active.try_lock().map_err(|_| {
             EngineError::before_start_pending(EngineFault::Busy, CleanupFault::Supervisor)
         })?;
@@ -161,13 +256,20 @@ impl CapturedClient {
             external: external.clone(),
             abort: AtomicBool::new(false),
             finished: AtomicBool::new(false),
-            data: Mutex::new(JobData::default()),
+            data: Mutex::new(JobData {
+                process: Process::with_registration(registration.take()),
+                result: None,
+            }),
             policy,
+            nix_tail,
             #[cfg(test)]
             hooks: self.bootstrap.hooks.clone(),
         });
         *active = Some(Arc::clone(&job));
-        Ok(job)
+        Ok(CapturedCall {
+            origin: Arc::clone(&self.bootstrap),
+            job,
+        })
     }
     fn release(&self, job: &Arc<Job>) -> Result<()> {
         let mut active = self
@@ -211,10 +313,19 @@ impl CapturedClient {
         let Some(job) = job else {
             return Ok(());
         };
+        self.settle_job(&job, deadline)
+    }
+    pub(crate) fn settle_call(&self, call: &CapturedCall, deadline: Instant) -> Result<()> {
+        if !Arc::ptr_eq(&self.bootstrap, &call.origin) {
+            return Err(EngineError::new(EngineFault::Identity));
+        }
+        self.settle_job(&call.job, deadline)
+    }
+    fn settle_job(&self, job: &Arc<Job>, deadline: Instant) -> Result<()> {
         job.abort.store(true, Ordering::Release);
         loop {
             if job.finished.load(Ordering::Acquire) {
-                return self.settle_finished(&job, deadline);
+                return self.settle_finished(job, deadline);
             }
             if Instant::now() >= deadline {
                 return Err(EngineError::pending(
@@ -287,7 +398,7 @@ fn execute(
             Err(EngineError::new(EngineFault::Deadline))
         } else {
             data.process
-                .start(&bootstrap, &args)
+                .start(&bootstrap, &args, &job)
                 .and_then(|()| data.process.observe(deadline, &job))
         };
         data.result = Some(data.process.finish(value, deadline, &job));

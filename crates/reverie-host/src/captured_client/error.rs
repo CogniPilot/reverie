@@ -23,6 +23,7 @@ pub enum CleanupFault {
     StderrClose,
     PidfdClose,
     HandshakeClose,
+    RegistrationClose,
     Supervisor,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]

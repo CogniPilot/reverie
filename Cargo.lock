@@ -780,6 +780,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-nix-store-prepare"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-core",
+ "reverie-diagnostics",
+ "reverie-host",
+]
+
+[[package]]
 name = "reverie-ops-cli"
 version = "0.1.0"
 dependencies = [

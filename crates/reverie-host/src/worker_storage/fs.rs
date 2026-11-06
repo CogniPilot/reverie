@@ -13,7 +13,7 @@ use std::{
 pub(super) fn close(file: File) -> Result<()> {
     native::close(file).map_err(Into::into)
 }
-pub(super) struct Directory {
+pub(crate) struct Directory {
     file: File,
     path: PathBuf,
     uid: u32,
@@ -46,7 +46,24 @@ fn walk(path: &Path) -> Result<File> {
     Ok(parent)
 }
 impl Directory {
-    pub(super) fn open(path: &Path, uid: u32) -> Result<Self> {
+    pub(crate) fn nix_log_writer(&self) -> Result<File> {
+        self.check()?;
+        Ok(native::open_at_mode(
+            self.file.as_raw_fd(),
+            OsStr::new(".reverie-nix-prepare.log"),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_NONBLOCK,
+            0o600,
+        )?)
+    }
+    pub(crate) fn nix_log_anchor(&self) -> Result<File> {
+        self.check()?;
+        Ok(native::open_at(
+            self.file.as_raw_fd(),
+            OsStr::new(".reverie-nix-prepare.log"),
+            libc::O_PATH,
+        )?)
+    }
+    pub(crate) fn open(path: &Path, uid: u32) -> Result<Self> {
         reverie_store::storage_identity::canonical(path)?;
         let file = walk(path)?;
         let checked = file
@@ -89,7 +106,7 @@ impl Directory {
         finalized(result, close(parent))?;
         Self::open(path, uid)
     }
-    pub(super) fn check(&self) -> Result<()> {
+    pub(crate) fn check(&self) -> Result<()> {
         let held = self.file.metadata()?;
         let named = fs::symlink_metadata(&self.path)?;
         need(
@@ -99,7 +116,7 @@ impl Directory {
         reverie_store::storage_identity::canonical(&self.path)?;
         Ok(())
     }
-    pub(super) fn lock_file(&self, name: &OsStr, effects: &mut bool) -> Result<File> {
+    pub(crate) fn lock_file(&self, name: &OsStr, effects: &mut bool) -> Result<File> {
         self.check()?;
         // O_NONBLOCK prevents a malicious FIFO leaf from blocking before fstat.
         // This has no effect on a valid regular flock file.
@@ -112,6 +129,14 @@ impl Directory {
         )?)
     }
     pub(super) fn file_current(&self, file: &File, name: &OsStr) -> Result<()> {
+        self.private_file_current(file, name, true)
+    }
+    /// Nix's original session lock permits hard links; it is not the stable
+    /// employee lock or an exclusive publication marker.
+    pub(crate) fn nix_lock_current(&self, file: &File, name: &OsStr) -> Result<()> {
+        self.private_file_current(file, name, false)
+    }
+    fn private_file_current(&self, file: &File, name: &OsStr, single_link: bool) -> Result<()> {
         self.check()?;
         let held = file.metadata()?;
         let named = fs::symlink_metadata(self.path.join(name))?;
@@ -120,7 +145,7 @@ impl Directory {
                 && held.is_file()
                 && named.is_file()
                 && held.uid() == self.uid
-                && held.nlink() == 1
+                && (!single_link || held.nlink() == 1)
                 && held.mode() & 0o077 == 0,
             StorageFault::LockCustody,
         )
@@ -146,9 +171,48 @@ impl Directory {
         sync(&self.file)?;
         self.check()
     }
-    pub(super) fn close(self) -> Result<()> {
+    pub(crate) fn close(self) -> Result<()> {
         close(self.file)
     }
+    /// Python Nix session/store mkdir policy. It deliberately does not inherit
+    /// the durable employee-publication fsync phase or create all parents0700.
+    pub(crate) fn nix_directory(
+        path: &Path,
+        uid: u32,
+        parents: bool,
+        effects: &mut bool,
+    ) -> Result<Self> {
+        reverie_store::storage_identity::canonical(path)?;
+        nix_mkdir(path, Mode::S_IRWXU, parents, effects)?;
+        Self::open(path, uid)
+    }
+}
+fn nix_mkdir(path: &Path, mode: Mode, parents: bool, effects: &mut bool) -> Result<()> {
+    let parent_path = path.parent().unwrap_or(Path::new("/"));
+    let parent = match walk(parent_path) {
+        Ok(parent) => parent,
+        Err(super::StorageError::Io(error))
+            if parents && error.kind() == io::ErrorKind::NotFound =>
+        {
+            // pathlib parent.mkdir(parents=True, exist_ok=True) uses its own
+            // default0777 mode, not the child's explicitly requested0700.
+            nix_mkdir(parent_path, Mode::from_bits_truncate(0o777), true, effects)?;
+            walk(parent_path)?
+        }
+        Err(error) => return Err(error),
+    };
+    let result = match mkdirat(&parent, path.file_name().unwrap_or(OsStr::new(".")), mode) {
+        Ok(()) => {
+            *effects = true;
+            Ok(())
+        }
+        Err(nix::errno::Errno::EEXIST) => Ok(()),
+        Err(error) => {
+            *effects = true;
+            Err(io::Error::from(error).into())
+        }
+    };
+    finalized(result, close(parent))
 }
 fn sync(parent: &File) -> Result<()> {
     let readable = native::open_at(

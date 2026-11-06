@@ -1,6 +1,7 @@
 //! One service-captured worker lifetime and its immutable configuration identity.
 //! Neither checked base data nor this wrapper is owner authorization or a
 //! laptop start grant. Named effects require their real resource/phase owners.
+use crate::worker_nix::{NixError, Workflows};
 use crate::{
     engine_metadata::{CancellationToken, EngineError, ReadonlyEngine},
     installed_worker_engine::InstalledWorkerEngine,
@@ -15,12 +16,35 @@ mod tests;
 pub struct WorkerRuntime {
     engine: Arc<InstalledWorkerEngine>,
     identity: WorkerServiceIdentity,
+    nix: Workflows,
+}
+#[derive(Debug)]
+pub enum RuntimeError {
+    Engine(EngineError),
+    Nix(NixError),
+}
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Engine(error) => error.fmt(output),
+            Self::Nix(error) => error.fmt(output),
+        }
+    }
+}
+impl std::error::Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Engine(error) => Some(error),
+            Self::Nix(error) => Some(error),
+        }
+    }
 }
 impl WorkerRuntime {
     pub fn new(engine: InstalledWorkerEngine, base: &WorkerBase) -> Self {
         Self {
             engine: Arc::new(engine),
             identity: WorkerServiceIdentity::capture(base),
+            nix: Workflows::new(base.connection_limit()),
         }
     }
     pub fn readonly(&self) -> ReadonlyEngine {
@@ -38,19 +62,29 @@ impl WorkerRuntime {
     pub fn connection_limit(&self) -> usize {
         self.worker_identity().connection_limit()
     }
-    pub fn settle_owned(&self, deadline: Instant) -> Result<(), EngineError> {
-        self.installed_engine().settle_owned(deadline)
+    pub fn settle_owned(&self, deadline: Instant) -> Result<(), RuntimeError> {
+        self.nix.settle(self, deadline).map_err(RuntimeError::Nix)?;
+        self.installed_engine()
+            .settle_owned(deadline)
+            .map_err(RuntimeError::Engine)
     }
-    /// Only the current readonly client lifetime is settled here. Before any
-    /// effect is exposed its actual retained workflow must join this boundary;
-    /// this method is not a laptop/container/writer-release acknowledgement.
-    pub fn close(&self, deadline: Instant) -> Result<(), EngineError> {
-        self.installed_engine().close(deadline)
+    /// Request the first stop, drain actual helper records, then seal the SAME
+    /// client. Unconfirmed records retain all resources and prevent sealing.
+    /// Returned storage owners remain App's duty; this is no writer-release ACK.
+    pub fn close(&self, deadline: Instant) -> Result<(), RuntimeError> {
+        let deadline = deadline.min(self.request_stop());
+        self.nix.settle(self, deadline).map_err(RuntimeError::Nix)?;
+        self.installed_engine()
+            .close(deadline)
+            .map_err(RuntimeError::Engine)
     }
     pub(crate) fn installed_engine(&self) -> &Arc<InstalledWorkerEngine> {
         &self.engine
     }
     pub(crate) fn worker_identity(&self) -> &WorkerServiceIdentity {
         &self.identity
+    }
+    pub(crate) fn nix_workflows(&self) -> &Workflows {
+        &self.nix
     }
 }

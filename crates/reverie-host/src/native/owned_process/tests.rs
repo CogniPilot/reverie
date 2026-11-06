@@ -86,7 +86,7 @@ fn pre_exec_failure_after_identity_transfer_never_runs_the_controlled_program() 
     // Failed spawn already reaped its child; this handle still cannot refer to
     // an unrelated/reused PID, and no numeric signal fallback is attempted.
     assert_eq!(
-        reap(&identity).unwrap_err().raw_os_error(),
+        reap_status(&identity).unwrap_err().raw_os_error(),
         Some(libc::ECHILD)
     );
     close(identity).unwrap();

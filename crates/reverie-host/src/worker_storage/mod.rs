@@ -4,7 +4,7 @@
 //! See the module README for compatible inputs, failure custody and remaining
 //! actual broker integration obligations.
 mod error;
-mod fs;
+pub(crate) mod fs;
 mod owner;
 mod wait_binding;
 mod writers;

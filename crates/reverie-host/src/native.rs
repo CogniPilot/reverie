@@ -57,6 +57,7 @@ pub(crate) use office::office_plan_capability;
 pub(crate) use passwd::home_directory;
 pub(crate) use passwd::username;
 pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};
+pub(crate) use worker_config::read_owned_text_file as read_nix_rollback;
 pub(crate) use worker_config::read_worker_config;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

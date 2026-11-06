@@ -28,10 +28,7 @@ impl PrivateChildRecord {
     /// Path.read_text universal newlines followed by default json.loads(str).
     /// No bytes BOM detector or arbitrary global file/depth cap is inserted.
     pub fn decode(raw: &[u8]) -> Result<Self, ChildDataError> {
-        let raw = std::str::from_utf8(raw)
-            .map_err(|_| ChildDataError::Json)?
-            .replace("\r\n", "\n")
-            .replace('\r', "\n");
+        let raw = legacy_json::utf8_file_text(raw).map_err(|_| ChildDataError::Json)?;
         legacy_json::decode_private_child_text(raw.as_bytes())
             .map(Self)
             .map_err(|_| ChildDataError::Json)

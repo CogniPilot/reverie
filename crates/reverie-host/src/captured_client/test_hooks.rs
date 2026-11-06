@@ -14,6 +14,7 @@ pub(crate) struct Hooks {
     pub close_failed: Arc<AtomicBool>,
     pub reads: Arc<AtomicUsize>,
     pub preparation_failed: Arc<AtomicBool>,
+    pub registration_close_failed: Arc<AtomicBool>,
 }
 #[derive(Default)]
 pub(crate) struct Gate {
@@ -47,6 +48,13 @@ impl Hooks {
     }
     pub(crate) fn closed(&self, index: usize, value: std::io::Result<()>) -> std::io::Result<()> {
         if index == 0 && self.close_failed.swap(false, Ordering::SeqCst) {
+            Err(std::io::Error::from_raw_os_error(libc::EIO))
+        } else {
+            value
+        }
+    }
+    pub(crate) fn registration_closed(&self, value: std::io::Result<()>) -> std::io::Result<()> {
+        if self.registration_close_failed.swap(false, Ordering::SeqCst) {
             Err(std::io::Error::from_raw_os_error(libc::EIO))
         } else {
             value
