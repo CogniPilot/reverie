@@ -322,7 +322,10 @@ impl Directory {
         let flags = if absent { libc::RENAME_NOREPLACE } else { 0 };
         // SAFETY: both names are terminated leaves in this held private directory.
         if unsafe {
-            libc::renameat2(
+            // Keep the same atomic syscall under glibc and static musl,
+            // whose libc does not export a renameat2 wrapper.
+            libc::syscall(
+                libc::SYS_renameat2,
                 self.file.as_raw_fd(),
                 source.as_ptr(),
                 self.file.as_raw_fd(),

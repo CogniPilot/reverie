@@ -299,12 +299,14 @@ fn send_identity(socket: RawFd) -> io::Result<()> {
     message.msg_iov = &mut iov;
     message.msg_iovlen = 1;
     message.msg_control = control.as_mut_ptr().cast();
-    message.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<RawFd>() as u32) } as usize;
+    // libc exposes these ABI lengths as u32 on musl and usize on glibc. The
+    // fixed one-fd/control-array lengths fit both without changing the protocol.
+    message.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<RawFd>() as u32) } as _;
     unsafe {
         let header = libc::CMSG_FIRSTHDR(&message);
         (*header).cmsg_level = libc::SOL_SOCKET;
         (*header).cmsg_type = libc::SCM_RIGHTS;
-        (*header).cmsg_len = libc::CMSG_LEN(mem::size_of::<RawFd>() as u32) as usize;
+        (*header).cmsg_len = libc::CMSG_LEN(mem::size_of::<RawFd>() as u32) as _;
         std::ptr::write_unaligned(libc::CMSG_DATA(header).cast::<RawFd>(), pidfd as RawFd);
     }
     // SAFETY: all message pointers above refer to initialized stack storage;
@@ -338,7 +340,7 @@ fn receive_identity(socket: RawFd) -> std::result::Result<OwnedFd, ReceiveError>
     message.msg_iov = &mut iov;
     message.msg_iovlen = 1;
     message.msg_control = control.as_mut_ptr().cast();
-    message.msg_controllen = mem::size_of_val(&control);
+    message.msg_controllen = mem::size_of_val(&control) as _;
     let received = unsafe {
         libc::recvmsg(
             socket,
@@ -360,7 +362,8 @@ fn receive_identity(socket: RawFd) -> std::result::Result<OwnedFd, ReceiveError>
         let mut header = libc::CMSG_FIRSTHDR(&message);
         while !header.is_null() {
             let base = libc::CMSG_LEN(0) as usize;
-            let size = (*header).cmsg_len.saturating_sub(base);
+            let length: usize = (*header).cmsg_len as _;
+            let size = length.saturating_sub(base);
             if (*header).cmsg_level == libc::SOL_SOCKET && (*header).cmsg_type == libc::SCM_RIGHTS {
                 valid &= size == mem::size_of::<RawFd>();
                 for index in 0..size / mem::size_of::<RawFd>() {
