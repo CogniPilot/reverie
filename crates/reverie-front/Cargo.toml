@@ -10,11 +10,16 @@ clap.workspace = true
 reverie-contracts.workspace = true
 reverie-diagnostics.workspace = true
 tokio.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+libc.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 command-fds.workspace = true
+nix.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

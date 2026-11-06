@@ -12,6 +12,8 @@ pub mod process;
 pub mod session;
 #[cfg(unix)]
 pub mod supervisor;
+#[cfg(unix)]
+pub mod tls;
 
 pub const MAX_CONNECTIONS: usize = 4096;
 pub const DIRECTION_BYTES: usize = 32 << 20;

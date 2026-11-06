@@ -50,12 +50,26 @@ impl Drop for Signals {
     }
 }
 pub async fn run(spec: InstalledChild) -> io::Result<i32> {
-    let signals = Signals::start()?;
-    run_with_signals(spec, signals.received.clone()).await
+    run_with_tls(spec, None).await
 }
+pub async fn run_with_tls(
+    spec: InstalledChild,
+    tls: Option<crate::tls::TlsFiles>,
+) -> io::Result<i32> {
+    let signals = Signals::start()?;
+    run_configured(spec, signals.received.clone(), tls).await
+}
+#[cfg(test)]
 async fn run_with_signals(
     spec: InstalledChild,
     received: watch::Receiver<Option<ShutdownRequest>>,
+) -> io::Result<i32> {
+    run_configured(spec, received, None).await
+}
+async fn run_configured(
+    spec: InstalledChild,
+    received: watch::Receiver<Option<ShutdownRequest>>,
+    tls: Option<crate::tls::TlsFiles>,
 ) -> io::Result<i32> {
     let mut child = FrontChild::spawn(spec)?;
     let channel = match child.channel().and_then(Channel::start) {
@@ -71,6 +85,7 @@ async fn run_with_signals(
         NonZeroU64::new(1).expect("nonzero"),
         received.clone(),
         lost,
+        tls,
     )));
     tokio::select! {
         status = child.wait() => {

@@ -7,6 +7,7 @@ mod listener_release;
 mod receipts;
 #[cfg(target_os = "linux")]
 mod stderr;
+mod tls;
 
 struct Peer(UnixStream);
 impl Peer {
@@ -90,12 +91,16 @@ struct Harness {
 }
 impl Harness {
     fn start(maximum: usize, bytes: usize) -> Self {
+        Self::configured(maximum, bytes, None)
+    }
+    fn configured(maximum: usize, bytes: usize, files: Option<TlsFiles>) -> Self {
         let (socket, peer) = UnixStream::pair().unwrap();
         peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         peer.set_write_timeout(Some(Duration::from_secs(3)))
             .unwrap();
         let channel = Channel::start(socket).unwrap();
-        let state = State::new(NonZeroU64::new(1).unwrap(), maximum, bytes).unwrap();
+        let mut state = State::new(NonZeroU64::new(1).unwrap(), maximum, bytes).unwrap();
+        state.tls_files = files;
         let (signals, rx) = watch::channel(None);
         let task = tokio::spawn(run_bounded(channel, state, rx));
         Self {
@@ -327,6 +332,12 @@ async fn qualify_queued_end_abort() {
         .await
         .unwrap();
     let (socket, _) = listener.accept().await.unwrap();
+    state.listeners[0] = Some(Bound {
+        socket: listener,
+        accepting: true,
+        tls: None,
+        epoch: 1,
+    });
     let (events, _network) = mpsc::channel(4);
     state
         .accepted(Listener::Main, socket, &events)
@@ -387,9 +398,7 @@ async fn qualify_pending_bind() {
         let mut state = State::new(NonZeroU64::new(1).unwrap(), 1, 64).unwrap();
         // The same owned job slot as hostname resolution, controlled without DNS.
         state.binding[0] = true;
-        state
-            .binds
-            .spawn(pending::<(Listener, io::Result<TcpListener>)>());
+        state.binds.spawn(pending::<BindResult>());
         let (tx, rx) = watch::channel(None);
         let task = tokio::spawn(run_bounded(channel, state, rx));
         let peer = Peer(peer);

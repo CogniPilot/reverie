@@ -7,7 +7,7 @@ use std::{ffi::OsString, path::PathBuf};
 #[command(
     version,
     about = "Own Reverie's network listeners and supervise its TypeScript service",
-    long_about = "Own Reverie's network listeners and supervise one installed TypeScript service.\n\nThe child receives the private framing channel on fd 3. Its original arguments pass unchanged after --. The front does not authenticate HTTP, replay requests or restart the child. The outer service manager owns restart and deployment.\n\nThis binary currently requires Unix. TLS and packaged service selection are separate migration gates.",
+    long_about = "Own Reverie's network listeners and supervise one installed TypeScript service.\n\nThe child receives the private framing channel on fd 3. Its original arguments pass unchanged after --. The front does not authenticate HTTP, replay requests or restart the child. The outer service manager owns restart and deployment.\n\nTLS binds require paired service-selected --tls-cert/--tls-key paths, read after the child requests TLS. Missing or invalid material fails the bind. This binary currently requires Unix; packaged service selection is a separate migration gate.",
     after_help = "Service invocation:\n  reverie-front --node /installed/bin/node --entrypoint /installed/reverie/cli.js -- web --port 3000\n\nExit status follows the child (128 + signal when signalled); 70 reports a front failure. Diagnostics go to stderr. This is an installed service entrypoint, not an owner configuration or deployment command."
 )]
 struct Arguments {
@@ -17,6 +17,12 @@ struct Arguments {
     /// Installed JavaScript entrypoint for the TypeScript service
     #[arg(long, value_name = "PATH")]
     entrypoint: PathBuf,
+    /// Certificate PEM selected by the installing service; loaded per TLS bind
+    #[arg(long, value_name = "PATH", requires = "tls_key")]
+    tls_cert: Option<PathBuf>,
+    /// Unencrypted private-key PEM selected by the installing service
+    #[arg(long, value_name = "PATH", requires = "tls_cert")]
+    tls_key: Option<PathBuf>,
     /// Original child arguments, preserved as operating-system strings
     #[arg(last = true, allow_hyphen_values = true, value_name = "TS_ARGUMENT")]
     arguments: Vec<OsString>,
@@ -34,12 +40,23 @@ fn main() {
             std::process::exit(70);
         }
     };
-    let result = runtime.block_on(reverie_front::supervisor::run(
+    let tls = match (arguments.tls_cert, arguments.tls_key) {
+        (Some(cert), Some(key)) => match reverie_front::tls::TlsFiles::new(cert, key) {
+            Ok(files) => Some(files),
+            Err(error) => {
+                let _ = reverie_diagnostics::stderr(format!("reverie-front: {error}\n").as_bytes());
+                finish_runtime(runtime, 70);
+            }
+        },
+        _ => None,
+    };
+    let result = runtime.block_on(reverie_front::supervisor::run_with_tls(
         reverie_front::process::InstalledChild {
             node: arguments.node,
             entrypoint: arguments.entrypoint,
             arguments: arguments.arguments,
         },
+        tls,
     ));
     let code = match result {
         Ok(code) => code,
@@ -75,6 +92,37 @@ mod tests {
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
+    #[test]
+    fn tls_bootstrap_requires_a_pair_and_preserves_child_arguments() {
+        let base = ["reverie-front", "--node", "/node", "--entrypoint", "/entry"];
+        assert!(
+            Arguments::try_parse_from(base.iter().copied().chain(["--tls-cert", "/cert"])).is_err()
+        );
+        assert!(
+            Arguments::try_parse_from(base.iter().copied().chain(["--tls-key", "/key"])).is_err()
+        );
+        let parsed = Arguments::try_parse_from(base.iter().copied().chain([
+            "--tls-cert",
+            "/cert",
+            "--tls-key",
+            "/key",
+            "--",
+            "web",
+            "--port",
+            "3000",
+        ]))
+        .unwrap();
+        assert_eq!(parsed.tls_cert, Some(PathBuf::from("/cert")));
+        assert_eq!(parsed.tls_key, Some(PathBuf::from("/key")));
+        assert_eq!(
+            parsed.arguments,
+            vec![
+                OsString::from("web"),
+                OsString::from("--port"),
+                OsString::from("3000")
+            ]
+        );
+    }
     #[test]
     fn process_exit_does_not_wait_for_a_blocked_resolver_worker() {
         if std::env::var_os("REVERIE_TEST_BLOCKED_RESOLVER_WORKER").is_some() {

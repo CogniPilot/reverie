@@ -56,3 +56,15 @@ https://github.com/openai/codex under Apache-2.0. The exact observer patch,
 source checksum and locked dependency provenance are retained under
 `nix/codex-observer/`; its package retains the upstream LICENSE and any NOTICE.
 This optional candidate is separate from the default provider CLI installer.
+
+## Rust front TLS dependencies
+
+The Rust TLS adapter uses rustls (Apache-2.0 OR ISC OR MIT), tokio-rustls
+(MIT OR Apache-2.0), rustls-pki-types (MIT OR Apache-2.0), rustls-webpki
+(ISC), and ring (ISC with its upstream third-party notices). Their sources and
+license texts are retained through Cargo/Nix source dependencies. ring's
+code sourced from BoringSSL uses Apache-2.0 or ISC as stated in each file;
+its once_cell-derived code uses Apache-2.0/MIT notices. See ring's LICENSE,
+LICENSE-BoringSSL, LICENSE-other-bits and src/polyfill/once_cell license files;
+these upstream notices remain applicable. The front
+selects ring explicitly and does not include a second TLS implementation.

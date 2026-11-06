@@ -4,8 +4,12 @@ use crate::{
     CONTROL_BYTES, DIRECTION_BYTES, MAX_CONNECTIONS,
     budget::BytePool,
     channel::{Channel, Incoming},
-    network::{Client, NetworkEvent},
+    network::{Client, NetworkEvent, Transport},
     outbox::{ChargedData, Outbox, StreamPacket},
+    tls::{
+        TlsBudget, TlsFiles,
+        pending::{Accepted, Pending},
+    },
 };
 use reverie_contracts::route_frames_v2::{
     AbortReason, Body, Frame, Listener, MAX_DATA_BYTES, Signal, SocketFacts,
@@ -50,6 +54,8 @@ impl ShutdownRequest {
 struct Bound {
     socket: TcpListener,
     accepting: bool,
+    tls: Option<std::sync::Arc<rustls::ServerConfig>>,
+    epoch: u64,
 }
 struct ChannelWrite {
     id: u64,
@@ -62,7 +68,11 @@ struct State {
     clients: BTreeMap<u64, Client>,
     listeners: [Option<Bound>; 2],
     binding: [bool; 2],
-    binds: JoinSet<(Listener, io::Result<TcpListener>)>,
+    binds: JoinSet<BindResult>,
+    tls_files: Option<TlsFiles>,
+    tls_scratch: Option<std::sync::Arc<crate::tls::scratch::SharedScratch>>,
+    handshakes: Pending,
+    epoch: u64,
     incoming: BytePool,
     outgoing: BytePool,
     outbox: Outbox,
@@ -81,6 +91,10 @@ impl State {
             listeners: [None, None],
             binding: [false, false],
             binds: JoinSet::new(),
+            tls_files: None,
+            tls_scratch: None,
+            handshakes: Pending::default(),
+            epoch: 0,
             incoming: BytePool::new(bytes).map_err(io::Error::other)?,
             outgoing: BytePool::new(bytes).map_err(io::Error::other)?,
             outbox: Outbox::new(generation, CONTROL_BYTES),
@@ -201,6 +215,7 @@ impl State {
                 self.listeners[index(listener)]
                     .take()
                     .ok_or_else(|| fault("unbind before bound"))?;
+                self.handshakes.cancel(listener);
                 Ok(())
             }
             Body::ServiceReady => {
@@ -217,25 +232,37 @@ impl State {
         if self.binding[index(listener)] || self.listeners[index(listener)].is_some() {
             return Err(fault("duplicate bind"));
         }
-        // TLS is implemented in S4. Never turn a requested secure bind into plain TCP.
-        if tls {
-            return self.bind_failed(listener, "ENOTSUP", "TLS front is not installed");
-        }
+        let files = self.tls_files.clone();
         self.binding[index(listener)] = true;
-        self.binds
-            .spawn(async move { (listener, TcpListener::bind((host.as_str(), port)).await) });
+        self.binds.spawn(async move {
+            let result = bind_socket(host, port, tls, files).await;
+            (listener, result)
+        });
         Ok(())
     }
-    fn bound(&mut self, listener: Listener, result: io::Result<TcpListener>) -> io::Result<()> {
+    fn bound(&mut self, listener: Listener, result: io::Result<BoundSocket>) -> io::Result<()> {
         if !std::mem::replace(&mut self.binding[index(listener)], false) {
             return Err(fault("unexpected bind completion"));
         }
         match result {
-            Ok(socket) => {
+            Ok((socket, tls)) => {
+                if tls.is_some() && !self.prepare_tls_workspace() {
+                    return self.bind_failed(
+                        listener,
+                        "ENOMEM",
+                        "TLS parser workspace unavailable",
+                    );
+                }
                 let port = socket.local_addr()?.port();
+                self.epoch = self
+                    .epoch
+                    .checked_add(1)
+                    .ok_or_else(|| fault("bind epoch overflow"))?;
                 self.listeners[index(listener)] = Some(Bound {
                     socket,
                     accepting: false,
+                    tls,
+                    epoch: self.epoch,
                 });
                 self.outbox
                     .control(0, Body::Bound { listener, port })
@@ -260,13 +287,19 @@ impl State {
             )
             .map_err(io::Error::other)
     }
+    fn prepare_tls_workspace(&mut self) -> bool {
+        if self.tls_scratch.is_none() {
+            self.tls_scratch = crate::tls::scratch::SharedScratch::reserve(&self.incoming);
+        }
+        self.tls_scratch.is_some()
+    }
     async fn accepted(
         &mut self,
         listener: Listener,
         socket: TcpStream,
         events: &mpsc::Sender<NetworkEvent>,
     ) -> io::Result<()> {
-        if self.clients.len() >= self.maximum {
+        if self.clients.len() + self.handshakes.len() >= self.maximum {
             // Includes graceful transports whose final bytes are still draining.
             drop(socket);
             let _ = reverie_diagnostics::stderr(b"reverie-front: connection limit reached\n");
@@ -274,6 +307,36 @@ impl State {
         }
         let peer = socket.peer_addr()?;
         let local = socket.local_addr()?;
+        let bound = self.listeners[index(listener)]
+            .as_ref()
+            .expect("accepted bound listener");
+        if let Some(config) = &bound.tls {
+            if let Some(budget) = TlsBudget::reserve(&self.incoming, &self.outgoing) {
+                self.handshakes.start(
+                    listener,
+                    bound.epoch,
+                    socket,
+                    config.clone(),
+                    budget,
+                    self.tls_scratch
+                        .as_ref()
+                        .expect("TLS bound parser workspace")
+                        .clone(),
+                )?;
+            }
+            return Ok(());
+        }
+        self.open_transport(listener, peer, local, Box::new(socket), false, events)
+    }
+    fn open_transport(
+        &mut self,
+        listener: Listener,
+        peer: std::net::SocketAddr,
+        local: std::net::SocketAddr,
+        socket: Transport,
+        encrypted: bool,
+        events: &mpsc::Sender<NetworkEvent>,
+    ) -> io::Result<()> {
         let id = self.table.open_next().map_err(|e| fault(e.code()))?;
         self.outbox
             .control(
@@ -288,7 +351,7 @@ impl State {
                         address: local.ip(),
                         port: local.port(),
                     },
-                    encrypted: false,
+                    encrypted,
                 },
             )
             .map_err(io::Error::other)?;
@@ -538,6 +601,7 @@ impl State {
         Ok(())
     }
     async fn close(mut self) {
+        self.handshakes.close().await;
         self.listeners = [None, None];
         self.binds.abort_all();
         while self.binds.join_next().await.is_some() {}
@@ -551,6 +615,27 @@ fn index(listener: Listener) -> usize {
 }
 fn fault(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+async fn bind_socket(
+    host: String,
+    port: u16,
+    tls: bool,
+    files: Option<TlsFiles>,
+) -> io::Result<BoundSocket> {
+    let config = if tls {
+        Some(
+            files
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "TLS material is not configured")
+                })?
+                .load()
+                .await?,
+        )
+    } else {
+        None
+    };
+    let socket = TcpListener::bind((host.as_str(), port)).await?;
+    Ok((socket, config))
 }
 fn errno(error: &io::Error) -> &'static str {
     match error.kind() {
@@ -599,14 +684,11 @@ pub(crate) async fn run_supervised(
     generation: NonZeroU64,
     signals: watch::Receiver<Option<ShutdownRequest>>,
     loss: watch::Receiver<bool>,
+    tls_files: Option<TlsFiles>,
 ) -> io::Result<SessionEnd> {
-    run_owned(
-        channel,
-        State::new(generation, MAX_CONNECTIONS, DIRECTION_BYTES)?,
-        signals,
-        Some(loss),
-    )
-    .await
+    let mut state = State::new(generation, MAX_CONNECTIONS, DIRECTION_BYTES)?;
+    state.tls_files = tls_files;
+    run_owned(channel, state, signals, Some(loss)).await
 }
 async fn run_owned(
     mut channel: Channel,
@@ -673,12 +755,14 @@ struct Control {
     shutdown: Option<Instant>,
     signals_open: bool,
 }
-type BindResult = (Listener, io::Result<TcpListener>);
+type BoundSocket = (TcpListener, Option<std::sync::Arc<rustls::ServerConfig>>);
+type BindResult = (Listener, io::Result<BoundSocket>);
 enum Event {
     Input(Option<Incoming>),
     Output(Option<crate::channel::WriteFinished>),
     Accepted(Listener, io::Result<TcpStream>),
     Bound(Option<Result<BindResult, tokio::task::JoinError>>),
+    Handshake(Option<Accepted>),
     Network(Option<NetworkEvent>),
     Wake,
     Signal(bool),
@@ -697,6 +781,7 @@ async fn next_event(
         socket = accept(&state.listeners[0]) => Event::Accepted(Listener::Main, socket),
         socket = accept(&state.listeners[1]) => Event::Accepted(Listener::Bridge, socket),
         bound = state.binds.join_next(), if !state.binds.is_empty() => Event::Bound(bound),
+        accepted = state.handshakes.next(), if state.handshakes.len() > 0 => Event::Handshake(accepted),
         event = network.recv() => Event::Network(event),
         () = state.incoming.changed() => Event::Wake,
         () = state.outgoing.changed() => Event::Wake,
@@ -726,6 +811,22 @@ async fn handle_event(
             state.channel_finished(finished)?;
         }
         Event::Accepted(listener, socket) => state.accepted(listener, socket?, events).await?,
+        Event::Handshake(Some(accepted)) => {
+            if state.listeners[index(accepted.listener)]
+                .as_ref()
+                .is_some_and(|b| b.epoch == accepted.epoch)
+            {
+                state.open_transport(
+                    accepted.listener,
+                    accepted.peer,
+                    accepted.local,
+                    accepted.transport,
+                    true,
+                    events,
+                )?;
+            }
+        }
+        Event::Handshake(None) => {}
         Event::Bound(bound) => {
             let (listener, result) = bound
                 .ok_or_else(|| fault("bind owner stopped"))?

@@ -8,6 +8,12 @@ async fn draining_response() -> (State, TcpStream) {
         .await
         .unwrap();
     let (socket, _) = listener.accept().await.unwrap();
+    state.listeners[0] = Some(Bound {
+        socket: listener,
+        accepting: true,
+        tls: None,
+        epoch: 1,
+    });
     let (events, mut network) = mpsc::channel(8);
     state
         .accepted(Listener::Main, socket, &events)

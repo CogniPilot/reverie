@@ -56,10 +56,12 @@ two seconds. Repeated signals cannot extend it. KILL begins at that deadline if
 needed; kernel reap latency has no promised wall-clock bound, and a failed wait
 never counts as confirmed cleanup. Exit follows the child, or 70 for front faults.
 
-This source is under implementation and review. Plain TCP and bridge tags are
-implemented. TLS binds currently return ENOTSUP rather than accepting plaintext.
-TLS, actual S2 child integration, Nix packaging and service selection remain
-separate acceptance gates. Nothing selects or deploys this binary yet.
+Plain TCP, bridge tags and service-configured TLS are implemented. TLS uses the
+same Node-generated certificate/key files and fails a secure bind when they are
+unavailable. See the [TLS boundary](src/tls/README.md) for buffer/admission bounds,
+modern-cipher compatibility restrictions and the remaining cutover qualification.
+Actual S2 integration, Nix packaging and service selection have separate receipts;
+this source change does not select or deploy the binary.
 
 Run `cargo xtask verify` in the development environment for the ordinary gate.
 For the explicit Linux child qualifications, set `REVERIE_TEST_NODE` to the

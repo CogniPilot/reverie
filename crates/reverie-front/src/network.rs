@@ -6,11 +6,13 @@ use crate::{
 };
 use std::io;
 use tokio::{
-    io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::{TcpStream, tcp::OwnedReadHalf},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf},
     sync::mpsc,
     task::JoinHandle,
 };
+pub(crate) trait NetworkStream: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> NetworkStream for T {}
+pub(crate) type Transport = Box<dyn NetworkStream>;
 
 pub(crate) enum NetworkEvent {
     Read {
@@ -57,8 +59,8 @@ impl Drop for ClientTasks {
     }
 }
 impl Client {
-    pub(crate) fn start(id: u64, socket: TcpStream, events: mpsc::Sender<NetworkEvent>) -> Self {
-        let (read_half, write_half) = socket.into_split();
+    pub(crate) fn start(id: u64, socket: Transport, events: mpsc::Sender<NetworkEvent>) -> Self {
+        let (read_half, write_half) = tokio::io::split(socket);
         let (read, read_rx) = mpsc::channel(1);
         let (write, write_rx) = mpsc::channel(1);
         let reader = tokio::spawn(read_loop(id, read_half, read_rx, events.clone()));
@@ -107,7 +109,7 @@ impl Client {
 }
 async fn read_loop(
     id: u64,
-    mut socket: OwnedReadHalf,
+    mut socket: ReadHalf<Transport>,
     mut input: mpsc::Receiver<ByteLease>,
     events: mpsc::Sender<NetworkEvent>,
 ) {

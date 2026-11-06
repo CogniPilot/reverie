@@ -21,6 +21,8 @@ fn install(listener: std::net::TcpListener) -> State {
     state.listeners[index(Listener::Bridge)] = Some(Bound {
         socket: TcpListener::from_std(listener).unwrap(),
         accepting: true,
+        tls: None,
+        epoch: 0,
     });
     state
 }
