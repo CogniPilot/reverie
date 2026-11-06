@@ -1,4 +1,4 @@
-use super::value::{Node, Number, Text, Value};
+use crate::legacy_json::{Node, Number, Text, Value};
 use std::collections::BTreeMap;
 use std::fmt::Write;
 

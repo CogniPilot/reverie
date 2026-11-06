@@ -1,5 +1,5 @@
+use super::Error;
 use super::value::{Node, Number, Text, Value};
-use super::{EffectiveWorkerConfig, WorkerConfigError as Error};
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 
@@ -27,25 +27,18 @@ enum Action {
     Continue,
 }
 struct Cursor<'a> {
-    source: &'a str,
+    source: &'a [u8],
     offset: usize,
 }
 
-/// Decode Python JSON data for the legacy effective-worker hash format. JSON
-/// duplicates are refused at every depth, including equivalent escaped keys.
-/// This does not run worker validation or any filesystem/host projection.
-pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, Error> {
-    let source = std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
     let mut cursor = Cursor { source, offset: 0 };
     let root = parse(&mut cursor)?;
     cursor.whitespace();
     if cursor.offset != source.len() {
         return Err(Error::InvalidJson);
     }
-    if !matches!(root.0, Node::Object(_)) {
-        return Err(Error::ExpectedObject);
-    }
-    Ok(EffectiveWorkerConfig(root))
+    Ok(root)
 }
 fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     let mut frames: Vec<Frame> = Vec::new();
@@ -128,7 +121,6 @@ impl Cursor<'_> {
     fn whitespace(&mut self) {
         while self
             .source
-            .as_bytes()
             .get(self.offset)
             .is_some_and(|b| b" \n\t\r".contains(b))
         {
@@ -136,7 +128,7 @@ impl Cursor<'_> {
         }
     }
     fn take(&mut self, byte: u8) -> bool {
-        if self.source.as_bytes().get(self.offset) == Some(&byte) {
+        if self.source.get(self.offset) == Some(&byte) {
             self.offset += 1;
             true
         } else {
@@ -145,7 +137,7 @@ impl Cursor<'_> {
     }
     fn start(&mut self) -> Result<Action, Error> {
         self.whitespace();
-        let action = match self.source.as_bytes().get(self.offset) {
+        let action = match self.source.get(self.offset) {
             Some(b'{') => {
                 self.offset += 1;
                 Action::Push(Frame::Object {
@@ -173,7 +165,7 @@ impl Cursor<'_> {
         Ok(action)
     }
     fn literal(&mut self, literal: &str, node: Node) -> Result<Action, Error> {
-        if !self.source[self.offset..].starts_with(literal) {
+        if !self.source[self.offset..].starts_with(literal.as_bytes()) {
             return Err(Error::InvalidJson);
         }
         self.offset += literal.len();
@@ -181,19 +173,19 @@ impl Cursor<'_> {
     }
     fn number(&mut self) -> Result<Number, Error> {
         let begin = self.offset;
-        if self.source[begin..].starts_with("-Infinity") {
+        if self.source[begin..].starts_with(b"-Infinity") {
             self.offset += "-Infinity".len();
             return Ok(Number::NegativeInfinity);
         }
         while self
             .source
-            .as_bytes()
             .get(self.offset)
             .is_some_and(|b| b"0123456789-+.eE".contains(b))
         {
             self.offset += 1;
         }
-        let text = &self.source[begin..self.offset];
+        let text = std::str::from_utf8(&self.source[begin..self.offset])
+            .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
             return Ok(Number::Integer(
@@ -215,25 +207,18 @@ impl Cursor<'_> {
         }
         let mut result = Vec::new();
         loop {
-            let character = self.source[self.offset..]
-                .chars()
-                .next()
-                .ok_or(Error::InvalidJson)?;
-            self.offset += character.len_utf8();
+            let (character, width) = super::text::codepoint(&self.source[self.offset..])?;
+            self.offset += width;
             match character {
-                '"' => return Ok(Text(result)),
-                '\\' => result.push(self.escape()?),
-                '\0'..='\u{1f}' => return Err(Error::InvalidJson),
-                _ => result.push(u32::from(character)),
+                34 => return Ok(Text(result)),
+                92 => result.push(self.escape()?),
+                0..=31 => return Err(Error::InvalidJson),
+                _ => result.push(character),
             }
         }
     }
     fn escape(&mut self) -> Result<u32, Error> {
-        let byte = *self
-            .source
-            .as_bytes()
-            .get(self.offset)
-            .ok_or(Error::InvalidJson)?;
+        let byte = *self.source.get(self.offset).ok_or(Error::InvalidJson)?;
         self.offset += 1;
         match byte {
             b'"' | b'\\' | b'/' => Ok(u32::from(byte)),
@@ -248,7 +233,7 @@ impl Cursor<'_> {
     }
     fn unicode_escape(&mut self) -> Result<u32, Error> {
         let high = self.hex_unit()?;
-        if !(0xd800..=0xdbff).contains(&high) || !self.source[self.offset..].starts_with("\\u") {
+        if !(0xd800..=0xdbff).contains(&high) || !self.source[self.offset..].starts_with(b"\\u") {
             return Ok(high);
         }
         let previous = self.offset;
@@ -263,7 +248,6 @@ impl Cursor<'_> {
     fn hex_unit(&mut self) -> Result<u32, Error> {
         let bytes = self
             .source
-            .as_bytes()
             .get(self.offset..self.offset + 4)
             .ok_or(Error::InvalidJson)?;
         let mut value = 0;

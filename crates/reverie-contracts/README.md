@@ -44,8 +44,24 @@ Parsing, writing and cleanup use iterative traversal instead of imposing a new
 shallow nesting bound. Duplicate keys are explicitly refused; the existing
 legacy reader may accept them, so this codec is not its replacement without the
 owning migration's validation. Input text is UTF-8, matching the
-worker config's `Path.read_text()` followed by `json.loads`; profile byte-encoding
-detection is intentionally confined to `profiles_v1`.
+worker config's `Path.read_text()` followed by `json.loads`; it does not use the
+separate metadata byte-encoding detector.
+
+`storage_identity` provides named read-side views for company current/retired
+records, `storage-owner.json`, historical plan-move edges and current employee
+selection. It uses shared private lossless JSON primitives, not the effective
+worker hash wrapper or a generic JSON editing API. The metadata reader preserves
+Python `json.loads(bytes)` UTF-8/BOM, UTF-16/32 and surrogatepass behavior, rejects
+duplicate keys and retains opaque unrelated identities. UUID validation applies
+when selecting a storage identity. Owners retain Python's 200-codepoint bound;
+current GPU generations are positive Python integers without a JS-safe ceiling.
+Numeric duplicate-session comparison preserves Python bool/int/float equality
+without casting arbitrary integers to floats. Desired-running/vacation checks
+retain the existing exact-false and truthiness semantics.
+
+These are data readers. The owning native store checks file custody and read
+stability; the application still owns authorization, leases, outer admission and
+operation completion. No reader grants storage publication or execution rights.
 
 # Subscription profiles v1 JS codec
 

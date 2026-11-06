@@ -1,21 +1,21 @@
 use std::collections::BTreeMap;
 
 /// Python sorts strings by Unicode codepoint, including escaped lone surrogates.
-#[derive(Eq, PartialEq, Ord, PartialOrd)]
-pub(super) struct Text(pub(super) Vec<u32>);
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct Text(pub(crate) Vec<u32>);
 impl Text {
-    pub(super) fn equals_ascii(&self, value: &str) -> bool {
+    pub(crate) fn equals_ascii(&self, value: &str) -> bool {
         self.0.iter().copied().eq(value.bytes().map(u32::from))
     }
 }
-pub(super) enum Number {
+pub(crate) enum Number {
     Integer(String),
     Float(f64),
     Nan,
     PositiveInfinity,
     NegativeInfinity,
 }
-pub(super) enum Node {
+pub(crate) enum Node {
     Null,
     Bool(bool),
     String(Text),
@@ -23,7 +23,7 @@ pub(super) enum Node {
     Array(Vec<Value>),
     Object(BTreeMap<Text, Value>),
 }
-pub(super) struct Value(pub(super) Node);
+pub(crate) struct Value(pub(crate) Node);
 
 // Disabled rootlessDocker admits otherwise unconstrained JSON slots. Iterative
 // parsing, encoding and destruction avoid adding a shallow compatibility limit.
