@@ -51,8 +51,12 @@ initialize, import, reembed, rewrite profiles or seed an existing database.
 Cancellation reaches journal/API requests and the actual bridge child. Shutdown
 waits for real request completion and child `close`, including after an early
 `execFile` abort callback. A retained child gets one SIGKILL escalation after its
-initial cancellation; a missing close remains pending. No result from a cancelled
-call is emitted. The MCP process awaits settlement before exit.
+initial cancellation; a missing close remains pending. Ordinary timeout and
+per-stream output overflow arm cleanup independently of the completion callback,
+so a child ignoring SIGTERM cannot prevent the escalation attempt. A later abort
+does not renew the first cleanup budget. A timed-out result is refused even if
+the cooperative child exits zero. No result from a cancelled call is emitted.
+The MCP process awaits settlement before exit.
 The fixed installed entry intentionally omits diagnostic logging so a full
 stderr stream cannot retain an idle Node process. Protocol and error responses
 still use stdout; ordinary standalone MCP logging is unchanged. Rust launcher

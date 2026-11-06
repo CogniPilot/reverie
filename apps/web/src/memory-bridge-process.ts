@@ -4,34 +4,47 @@
 import { execFile } from 'node:child_process';
 import type { BridgeRunner } from './mcp-memory-tools.js';
 
+const MAX_BUFFER = 1024 * 1024;
+const CLEANUP_MS = 2_000;
+
 export const runMemoryBridge: BridgeRunner = (program, args, { env, input, timeoutMs, signal }) =>
   new Promise((resolve) => {
+    const began = performance.now();
     let outcome: { stdout: string; stderr: string; code: number } | undefined;
     let closed = false;
+    let interrupted = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     let cleanup: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (!closed || !outcome) return;
       if (cleanup) clearTimeout(cleanup);
-      signal?.removeEventListener('abort', stop);
+      if (deadline) clearTimeout(deadline);
+      signal?.removeEventListener('abort', aborted);
       resolve(outcome);
     };
-    const stop = () => {
+    const stop = (end = performance.now() + CLEANUP_MS) => {
       if (closed || cleanup) return;
-      // execFile owns the first timeout/abort signal. Retain the actual child
-      // through a single escalation; a failed kill still requires close.
-      cleanup = setTimeout(() => {
-        if (!closed) child.kill('SIGKILL');
-      }, 2_000);
+      interrupted = true;
+      // execFile owns the first SIGTERM. Its timeout/overflow callback can wait
+      // for close, so independently arm one escalation at the first stop end.
+      // A failed kill still cannot stand in for the actual close event.
+      cleanup = setTimeout(
+        () => {
+          if (!closed) child.kill('SIGKILL');
+        },
+        Math.max(0, end - performance.now())
+      );
     };
+    const aborted = () => stop();
     const child = execFile(
       program,
       args,
-      { env, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal },
+      { env, timeout: timeoutMs, maxBuffer: MAX_BUFFER, signal },
       (error, stdout, stderr) => {
         outcome = {
           stdout: String(stdout),
           stderr: String(stderr),
-          code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+          code: error ? (typeof error.code === 'number' ? error.code : 1) : interrupted ? 1 : 0,
         };
         if (error) stop();
         finish();
@@ -41,7 +54,20 @@ export const runMemoryBridge: BridgeRunner = (program, args, { env, input, timeo
       closed = true;
       finish();
     });
-    signal?.addEventListener('abort', stop, { once: true });
+    if (timeoutMs > 0) {
+      const end = began + timeoutMs;
+      deadline = setTimeout(() => stop(end + CLEANUP_MS), Math.max(0, end - performance.now()));
+    }
+    // Observe the same per-stream UTF-8 byte count used by execFile. It remains
+    // the sole output collector and error producer; this watcher owns cleanup.
+    for (const stream of [child.stdout, child.stderr]) {
+      let bytes = 0;
+      stream?.on('data', (chunk: string | Buffer) => {
+        bytes += Buffer.byteLength(chunk);
+        if (bytes > MAX_BUFFER) stop();
+      });
+    }
+    signal?.addEventListener('abort', aborted, { once: true });
     if (signal?.aborted) stop();
     child.stdin?.on('error', () => {});
     child.stdin?.end(input);

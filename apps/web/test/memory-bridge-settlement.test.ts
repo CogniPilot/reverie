@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,6 +12,14 @@ const delayedChild = `import {writeFileSync} from 'node:fs';
   const held=setInterval(()=>{},1000);
   process.on('SIGTERM',()=>{clearInterval(held);setTimeout(()=>{writeFileSync(process.env.FINISHED,'closed');process.exit(0)},150)});
   writeFileSync(process.env.STARTED,'started');`;
+
+const stubbornChild = `import {writeFileSync,existsSync} from 'node:fs';
+  process.stdin.resume();
+  process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});
+  process.on('SIGTERM',()=>writeFileSync(process.env.TERMINATED,'term'));
+  setInterval(()=>{if(existsSync(process.env.RELEASE))process.exit(0)},10);
+  writeFileSync(process.env.STARTED,'started');
+  if(process.env.OVERFLOW)process[process.env.OVERFLOW].write('x'.repeat(1024*1024+4096));`;
 
 async function waitFile(path: string): Promise<void> {
   const deadline = Date.now() + 5_000;
@@ -27,6 +35,87 @@ async function waitFile(path: string): Promise<void> {
 }
 
 describe('memory child settlement', () => {
+  it('keeps the first timeout cleanup budget when an external abort arrives later', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'reverie-memory-first-stop-'));
+    const started = join(root, 'started');
+    const terminated = join(root, 'terminated');
+    const release = join(root, 'release');
+    const controller = new AbortController();
+    const work = runMemoryBridge(process.execPath, ['--input-type=module', '-e', stubbornChild], {
+      env: { STARTED: started, TERMINATED: terminated, RELEASE: release },
+      input: '{}',
+      timeoutMs: 1_500,
+      signal: controller.signal,
+    });
+    try {
+      await waitFile(started);
+      await waitFile(terminated);
+      await delay(1_500);
+      controller.abort();
+      const result = await Promise.race([work, delay(1_200).then(() => undefined)]);
+      expect(result, 'a later abort cannot restart the original two-second cleanup budget').toBeDefined();
+      expect(result!.code).not.toBe(0);
+    } finally {
+      await writeFile(release, 'fixture cleanup');
+      await work;
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 12_000);
+
+  it('refuses a timed-out result even when the cooperative child eventually exits zero', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'reverie-memory-timeout-result-'));
+    const started = join(root, 'started');
+    const finished = join(root, 'finished');
+    const work = runMemoryBridge(process.execPath, ['--input-type=module', '-e', delayedChild], {
+      env: { STARTED: started, FINISHED: finished },
+      input: '{}',
+      timeoutMs: 1_500,
+    });
+    try {
+      await waitFile(started);
+      const result = await work;
+      expect(result.code).not.toBe(0);
+      expect(await readFile(finished, 'utf8')).toBe('closed');
+    } finally {
+      await work;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['timeout', 'stdout', 'stderr'])(
+    'settles an ordinary %s without external abort when the real child ignores SIGTERM',
+    async (reason) => {
+      const root = await mkdtemp(join(tmpdir(), 'reverie-memory-stubborn-'));
+      const started = join(root, 'started');
+      const terminated = join(root, 'terminated');
+      const release = join(root, 'release');
+      const work = runMemoryBridge(process.execPath, ['--input-type=module', '-e', stubbornChild], {
+        env: {
+          STARTED: started,
+          TERMINATED: terminated,
+          RELEASE: release,
+          ...(reason === 'timeout' ? {} : { OVERFLOW: reason }),
+        },
+        input: '{}',
+        timeoutMs: reason === 'timeout' ? 1_500 : 20_000,
+      });
+      try {
+        await waitFile(started);
+        const result = await Promise.race([work, delay(6_000).then(() => undefined)]);
+        expect(result, 'cleanup must escalate without waiting for the execFile completion callback').toBeDefined();
+        expect(result!.code).not.toBe(0);
+        expect(await readFile(terminated, 'utf8')).toBe('term');
+      } finally {
+        // The original broken path also joins its actual child on failure.
+        // An owned release file avoids signalling a potentially reused PID.
+        await writeFile(release, 'fixture cleanup');
+        await work;
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    12_000
+  );
+
   it('waits for the actual aborting child close rather than the earlier execFile callback', async () => {
     const root = await mkdtemp(join(tmpdir(), 'reverie-memory-child-'));
     const controller = new AbortController();
