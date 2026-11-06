@@ -19,6 +19,9 @@ pub const MAX_DATA_BYTES: usize = 64 << 10;
 pub const MAX_HOST_BYTES: usize = 255;
 pub const MAX_ERRNO_BYTES: usize = 32;
 pub const MAX_MESSAGE_BYTES: usize = 512;
+/// The most TS→front stream bytes one connection may carry, and so the largest `written`: the
+/// largest integer a JS number holds exactly, so TS can count with an exact `number`.
+pub const MAX_STREAM_BYTES: u64 = (1 << 53) - 1;
 /// `listener`, `family`, two 16-byte addresses with their ports, and `encrypted`.
 const CONN_OPEN_BYTES: usize = 1 + 1 + (16 + 2) * 2 + 1;
 
@@ -45,9 +48,10 @@ pub enum Kind {
     End,
     Abort,
     Credit,
+    Written,
 }
 
-const KINDS: [Kind; 12] = [
+const KINDS: [Kind; 13] = [
     Kind::BindRequest,
     Kind::Bound,
     Kind::BindFailed,
@@ -60,6 +64,7 @@ const KINDS: [Kind; 12] = [
     Kind::End,
     Kind::Abort,
     Kind::Credit,
+    Kind::Written,
 ];
 
 impl Kind {
@@ -77,6 +82,7 @@ impl Kind {
             Self::End => 18,
             Self::Abort => 19,
             Self::Credit => 20,
+            Self::Written => 27,
         }
     }
     fn from_byte(byte: u8) -> Option<Self> {
@@ -88,7 +94,7 @@ impl Kind {
             Self::BindRequest | Self::Accepting | Self::ServiceReady | Self::Unbind => {
                 direction == Direction::ToFront
             }
-            Self::Bound | Self::BindFailed | Self::Shutdown | Self::ConnOpen => {
+            Self::Bound | Self::BindFailed | Self::Shutdown | Self::ConnOpen | Self::Written => {
                 direction == Direction::ToTs
             }
             Self::Data | Self::End | Self::Abort | Self::Credit => true,
@@ -98,7 +104,7 @@ impl Kind {
     pub fn is_connection(self) -> bool {
         matches!(
             self,
-            Self::ConnOpen | Self::Data | Self::End | Self::Abort | Self::Credit
+            Self::ConnOpen | Self::Data | Self::End | Self::Abort | Self::Credit | Self::Written
         )
     }
     /// The inclusive `length` range of this kind.
@@ -112,6 +118,7 @@ impl Kind {
             Self::ConnOpen => (CONN_OPEN_BYTES, CONN_OPEN_BYTES),
             Self::Data => (1, MAX_DATA_BYTES),
             Self::Credit => (4, 4),
+            Self::Written => (8, 8),
         };
         (HEADER_BYTES + payload.0, HEADER_BYTES + payload.1)
     }
@@ -197,6 +204,9 @@ pub enum Body {
     End,
     Abort(AbortReason),
     Credit(u32),
+    /// The TS→front stream bytes of this connection the OS has accepted for the client, in total:
+    /// 1 ..= [`MAX_STREAM_BYTES`]. Not client delivery.
+    Written(u64),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -262,6 +272,7 @@ impl Body {
             Self::End => Kind::End,
             Self::Abort(_) => Kind::Abort,
             Self::Credit(_) => Kind::Credit,
+            Self::Written(_) => Kind::Written,
         }
     }
     fn payload(&self) -> Vec<u8> {
@@ -312,6 +323,7 @@ impl Body {
             Self::Data(bytes) => bytes.clone(),
             Self::Abort(reason) => vec![reason.byte()],
             Self::Credit(bytes) => bytes.to_be_bytes().to_vec(),
+            Self::Written(bytes) => bytes.to_be_bytes().to_vec(),
         }
     }
 }
@@ -496,6 +508,13 @@ fn body(kind: Kind, payload: &[u8]) -> Option<Body> {
                 return None;
             }
             Body::Credit(bytes)
+        }
+        Kind::Written => {
+            let bytes = u64::from_be_bytes(payload.try_into().ok()?);
+            if bytes == 0 || bytes > MAX_STREAM_BYTES {
+                return None;
+            }
+            Body::Written(bytes)
         }
     })
 }

@@ -15,7 +15,7 @@ import {
   type Direction,
   type Frame,
 } from '../../src/rust-front/frames.js';
-import { ConnFault, ConnTable, type ConnFrame, type Received } from '../../src/rust-front/conn-table.js';
+import { ConnFault, ConnTable, type ConnFrame, type Received, type Side } from '../../src/rust-front/conn-table.js';
 
 // The Nix web derivation is flattened to apps/web, so package.nix copies the cases into test/fixtures.
 const copied = resolve(import.meta.dirname, '../fixtures/route-frames-v2');
@@ -41,7 +41,7 @@ type Step = {
   expect?: number | boolean | Received;
   error?: string;
 };
-type Sequence = { name: string; max_open: number; steps: Step[]; open_count: number };
+type Sequence = { name: string; side: Side; max_open: number; steps: Step[]; open_count: number };
 const { cases, boundaries, conn, max_lengths } = JSON.parse(readFileSync(join(fixtures, 'cases.json'), 'utf8')) as {
   cases: Case[];
   boundaries: Record<string, Boundary>;
@@ -203,7 +203,7 @@ describe('route-frames-v2 TS connection rules', () => {
   it('run every shared sequence', () => {
     expect(conn.length).toBeGreaterThan(5);
     for (const sequence of conn) {
-      const table = new ConnTable(sequence.max_open);
+      const table = new ConnTable(sequence.side, sequence.max_open);
       sequence.steps.forEach((step, at) => {
         const label = `${sequence.name} step ${at}`;
         let outcome: unknown;
