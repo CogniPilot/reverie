@@ -537,6 +537,61 @@ describe('connection rules, the receive pool and the writer', () => {
     expect(await flushed).toBe(true);
   });
 
+  /** One connection with a large response queued behind a paused peer, its socket, and a pending flush. */
+  async function pendingFlush(): Promise<{
+    fake: FakeFront;
+    front: FrontChannel;
+    connection: FakeConnection;
+    socket: ChannelSocket;
+    flushed: Promise<boolean>;
+  }> {
+    const fake = new FakeFront();
+    const front = new FrontChannel(fake.channel);
+    const server = createServer();
+    server.removeAllListeners('connection');
+    const accepted = new Promise<ChannelSocket>((resolve) => server.once('connection', resolve));
+    const bound = front.bind('main', { host: '127.0.0.1', port: 0, tls: false });
+    fake.send(0n, { kind: 'bound', listener: 'main', port: 1 });
+    await bound;
+    front.accepting('main', server);
+    const connection = fake.open({ credit: 1024 * 1024 });
+    const socket = await accepted;
+    fake.peer.pause();
+    socket.write(Buffer.alloc(512 * 1024, 0x63));
+    await sleep(50);
+    const flushed = front.flushStreams(5000);
+    return { fake, front, connection, socket, flushed };
+  }
+  const waiters = (front: FrontChannel) => (front as unknown as { streamWaiters: Set<unknown> }).streamWaiters.size;
+
+  it('flushStreams() reports false, not success, when a received abort discards the queued stream', async () => {
+    const { fake, front, connection, flushed } = await pendingFlush();
+    const faultListeners = front.listenerCount('fault');
+    expect(waiters(front)).toBe(1);
+    fake.send(connection.id, { kind: 'abort', reason: 'peer_reset' });
+    expect(await flushed).toBe(false);
+    expect(waiters(front)).toBe(0);
+    expect(front.listenerCount('fault')).toBe(faultListeners - 1);
+    fake.peer.resume();
+  });
+
+  it('flushStreams() reports false when a local destroy discards the queued stream', async () => {
+    const { fake, front, socket, flushed } = await pendingFlush();
+    const faultListeners = front.listenerCount('fault');
+    socket.destroy();
+    expect(await flushed).toBe(false);
+    expect(waiters(front)).toBe(0);
+    expect(front.listenerCount('fault')).toBe(faultListeners - 1);
+    fake.peer.resume();
+  });
+
+  it('flushStreams() still reports true when the writer hands the same queued stream off', async () => {
+    const { fake, front, flushed } = await pendingFlush();
+    fake.peer.resume();
+    expect(await flushed).toBe(true);
+    expect(waiters(front)).toBe(0);
+  });
+
   it('finish() rejects when the channel does not flush in time', async () => {
     const { fake, front } = await app();
     const big = fake.open();

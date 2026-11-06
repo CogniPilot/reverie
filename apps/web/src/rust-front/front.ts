@@ -122,6 +122,8 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   private finishing: Promise<void> | undefined;
   /** Callers waiting for every stream queue to be handed to the channel. */
   private readonly streamWaiters = new Set<() => void>();
+  /** Stream queues an abort has discarded, so a flush can tell discard from handoff. */
+  private discardedStreams = 0;
   private readonly link: ConnLink;
 
   constructor(
@@ -219,9 +221,10 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   }
 
   /**
-   * Resolves true once every connection's queued `data` and `end` have been handed to the channel, or false if that
-   * has not happened within `timeoutMs` or the generation ended. Shutdown waits on it before Node's idle close
-   * destroys sockets, because an abort discards what a connection still has queued.
+   * Resolves true once every connection's queued `data` and `end` have been handed to the channel. It resolves false
+   * if an abort discarded a queued stream while it waited, if that has not happened within `timeoutMs`, or if the
+   * generation ended. Shutdown waits on it before Node's idle close destroys sockets, because an abort discards what a
+   * connection still has queued.
    */
   flushStreams(timeoutMs: number): Promise<boolean> {
     if (this.ended) return Promise.resolve(false);
@@ -233,7 +236,8 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
         this.off('fault', onFault);
         resolve(flushed);
       };
-      const waiter = () => done(true);
+      const discardedBefore = this.discardedStreams;
+      const waiter = () => done(this.discardedStreams === discardedBefore);
       const onFault = () => done(false);
       const timer = setTimeout(() => done(false), timeoutMs);
       this.streamWaiters.add(waiter);
@@ -465,6 +469,7 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
 
   private dropStream(id: bigint): void {
     if (!this.streams.delete(id)) return;
+    this.discardedStreams += 1;
     this.rotation.splice(this.rotation.indexOf(id), 1);
     this.streamsFlushed();
   }
