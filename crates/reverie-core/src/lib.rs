@@ -16,6 +16,7 @@ use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueError {
+    ContainerId,
     CanonicalUuid,
     NativeUuid,
     NilOperationId,
@@ -29,6 +30,7 @@ pub enum ValueError {
 impl ValueError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::ContainerId => "CONTAINER_ID",
             Self::CanonicalUuid => "CANONICAL_UUID",
             Self::NativeUuid | Self::NilOperationId => "UUID",
             Self::CounterRange => "VERSION_TYPE",
