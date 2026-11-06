@@ -2,7 +2,9 @@
 //! resources; labels, returned paths and this handle do not authorize launch.
 mod error;
 mod nix;
+mod observed;
 mod preparation;
+pub use observed::OwnedCreatePreparationError;
 #[cfg(test)]
 mod tests;
 use super::*;

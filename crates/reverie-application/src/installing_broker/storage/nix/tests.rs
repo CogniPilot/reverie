@@ -279,3 +279,46 @@ fn actual_app_handoff_preserves_prepared_path_data_across_later_owner_marker_dri
     assert_ne!(prepared, later);
     assert_eq!(trace(&tree, "create"), 1);
 }
+
+#[test]
+fn retained_nix_refuses_observed_plan_before_late_company_metadata() {
+    crate::test_process::owning_case!(
+        retained_nix_refuses_observed_plan_before_late_company_metadata
+    );
+    let tree = Tree::new();
+    let registry = registry(&tree, "");
+    let source = source(&tree, 'b');
+    fs::create_dir(tree.0.join("work")).unwrap();
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&worker_config::encode_config(&source)).unwrap();
+    raw["mounts"] =
+        json!([{"source":tree.0.join("work"),"destination":"/workspace","readOnly":false}]);
+    for (key, value) in [
+        ("version", json!(1)),
+        ("socket", json!("/run/nix-observed-plan.sock")),
+        ("companyRoot", json!(tree.0.join("company"))),
+        ("apiSocketRoot", json!(tree.0.join("api"))),
+        ("cgroupParent", json!("reverie-workers.slice")),
+        ("maintenanceSessions", json!([])),
+    ] {
+        raw[key] = value;
+    }
+    let captured = crate::worker_validation::validate_captured(
+        worker_config::decode(&serde_json::to_vec(&raw).unwrap()).unwrap(),
+    )
+    .unwrap();
+    let claim = claim(&tree, &registry, 'b');
+    let alias = registry.claim(&source, &sid(SID)).unwrap();
+    let preparation = retain(&tree, claim, 'b');
+    fs::remove_file(tree.0.join("company.json")).unwrap();
+    let error = alias.prepare_create_plan(&captured).err().unwrap();
+    tree.company(SID, EID);
+    let progress = preparation.run().unwrap();
+    finish(preparation);
+    alias.release(end()).unwrap();
+    registry.runtime.close(end()).unwrap();
+    assert!(
+        matches!(error,super::super::observed::OwnedCreatePreparationError::Storage(ref cause) if cause.code()=="WORKER_NIX_STORAGE_RETAINED")
+    );
+    assert_eq!(progress, NixProgress::NoHelper);
+}

@@ -297,3 +297,12 @@ and do not promise that kernel I/O always completes within a wall-clock bound.
 The separate activation and creation-pool readers retain their different
 integer/positivity and read-order rules. These snapshots provide neither
 process/cgroup ownership nor authorization, a start permit or global release.
+
+`worker_launch` owns the actual create-argument observation sequence: hashes,
+separate fresh security/runtime rootless reads, GPU qualification, then hostname
+metadata. `WorkerRuntime::prepare_laptop_plan` binds that actual observation to
+its same captured engine and real `LaunchStorage` namespace/SID; its opaque plan
+has no argv/reply-data constructor. Mutable image/resources are not frozen into
+the bootstrap identity. This observation still grants no API/admission/start
+permission; real moved resource owners and supervised lifecycle results remain
+necessary. The compatibility argument API delegates the same observation owner.

@@ -120,3 +120,31 @@ fn late_durable_fence_refuses_unreserved_feature_selection_without_installing_a_
         .close(Instant::now() + Duration::from_secs(2))
         .unwrap();
 }
+
+#[test]
+fn actual_claim_prepares_same_runtime_observed_plan_without_a_second_resolver_or_engine_query() {
+    let tree = Tree::new();
+    unreserved(&tree);
+    fs::remove_file(tree.root.join("state/resource-reservation-control.json")).unwrap();
+    let broker = broker(&tree).unwrap();
+    let sid = ProfileSessionId::parse("00000000-0000-0000-0000-000000000000").unwrap();
+    let claim = broker.claim_storage(&sid).unwrap();
+    let source = broker.configuration().unwrap();
+    let plan = claim.prepare_create_plan(&source).unwrap();
+    let same = plan.same_runtime(&broker.storage.runtime);
+    let paths_same = plan.storage() == claim.paths();
+    claim
+        .release(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    broker
+        .storage
+        .runtime
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    assert!(same && paths_same);
+    assert_eq!(plan.session(), &sid);
+    assert!(reverie_contracts::worker_config::equivalent(
+        plan.source(),
+        source.configuration()
+    ));
+}

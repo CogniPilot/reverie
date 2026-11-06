@@ -1,6 +1,8 @@
-//! Readonly account-path and employee-hostname preparation. No credentials are
-//! read, files changed or directory/mount/engine authority retained.
+//! Readonly account/hostname and actual create-argument observations. Captured
+//! runtime provenance is retained without granting API or start permission.
+mod observed;
 use crate::{native, rootless};
+pub use observed::{CreateObservationError, ObservedCreatePlan, observe_create_arguments};
 use reverie_contracts::{
     rootless::RootlessConfig,
     storage_identity::MetadataText,
