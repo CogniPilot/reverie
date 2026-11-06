@@ -314,3 +314,11 @@ available registry mutex during actual child I/O and retained resources at stop.
 The full canonical launch sequence and its telemetry/cold-temporary fences,
 private record/create/start, recovery, viewer and whole-service shutdown remain
 required before selecting the Rust worker service.
+# Recovery memory observations
+
+`worker_recovery::verify_recovered_memory` applies the original effective-config,
+namespace, repeated policy-digest, host-root and native-limit sequence to genuine
+same-Runtime recovery inspection data. It shares the existing resolver and kernel
+rule owners; no CID is invented to adapt the weaker legacy recovery data. The
+complete recovery transaction, phone/storage registration, source-stop and later
+create/start lifecycle still require their real InstallingBroker producers.

@@ -1,7 +1,7 @@
 use super::*;
 use reverie_contracts::{
     kernel_accounting::{CgroupMembership, ControllerLimit, strip},
-    reservation_engine::NativeLimitBinding,
+    reservation_engine::{DeclaredLimits, NativeLimitBinding, NativeLimitFields},
 };
 pub struct LimitsObservation {
     binding: NativeLimitBinding,
@@ -20,11 +20,41 @@ pub(super) fn observe(
     policy: Option<&ObservedMemoryPolicy>,
     end: Instant,
 ) -> Result<LimitsObservation> {
+    let readback = observe_fields(source, &row.fields_for_limits(), policy, end)?;
+    Ok(LimitsObservation {
+        binding: NativeLimitBinding::from_observed_data(
+            row,
+            &readback.declared,
+            &readback.start,
+            &readback.group,
+            policy,
+        )?,
+    })
+}
+struct LimitsReadback {
+    declared: DeclaredLimits,
+    start: String,
+    group: PosixPath,
+}
+pub(super) fn verify_fields(
+    source: &impl Source,
+    fields: &NativeLimitFields<'_>,
+    policy: Option<&ObservedMemoryPolicy>,
+    end: Instant,
+) -> Result<()> {
+    observe_fields(source, fields, policy, end).map(|_| ())
+}
+fn observe_fields(
+    source: &impl Source,
+    fields: &NativeLimitFields<'_>,
+    policy: Option<&ObservedMemoryPolicy>,
+    end: Instant,
+) -> Result<LimitsReadback> {
     let zero = UnsignedInteger::from_u64(0);
     let swap = policy.map_or(&zero, ObservedMemoryPolicy::swap);
-    let declared = row.declarations(swap)?;
+    let declared = fields.declarations(swap)?;
     let start = pid_start(source, declared.pid(), end)?;
-    row.image()?; // Preserve source's image check after the first PID read.
+    fields.image()?; // Preserve source's image check after the first PID read.
     let group_path = path(&format!("{PROC}/{}/cgroup", declared.pid().as_str()));
     let group = CgroupMembership::container(&text(source, &group_path, 65536, true, end)?)?;
     let leaf = path(CGROUP).join(group.relative());
@@ -52,14 +82,10 @@ pub(super) fn observe(
             && group.matches(&text(source, &group_path, 65536, true, end)?),
         "RESERVATION_NATIVE_PID_CHANGED",
     )?;
-    Ok(LimitsObservation {
-        binding: NativeLimitBinding::from_observed_data(
-            row,
-            &declared,
-            &start,
-            group.relative(),
-            policy,
-        )?,
+    Ok(LimitsReadback {
+        declared,
+        start,
+        group: group.relative().clone(),
     })
 }
 fn ancestors(

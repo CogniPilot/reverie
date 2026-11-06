@@ -1,5 +1,9 @@
 //! Owned synthetic sockets/files only. No engine, provider, installed company,
 //! grant or container is touched by these actual transport controls.
+#[path = "construction_tests.rs"]
+mod construction;
+#[path = "native_tests.rs"]
+mod native;
 use super::*;
 use crate::engine_metadata::EngineBootstrap;
 use reverie_core::{
@@ -63,7 +67,7 @@ impl Fixture {
         .unwrap();
         let runtime = WorkerRuntime::new(InstalledWorkerEngine::new(bootstrap), &base);
         let service = OfficeService::from_runtime(&runtime, root.clone(), address.ip()).unwrap();
-        *service.company.address.write().unwrap() = address;
+        service.company.address.update_fixed(address).unwrap();
         Self {
             root,
             service,

@@ -2,7 +2,7 @@
 //! The lexical backend remains the original algorithm; response data grants no
 //! model, owner, execution or persistence authority.
 mod http;
-mod idna;
+pub(crate) mod idna;
 mod policy;
 mod redirect;
 #[cfg(test)]

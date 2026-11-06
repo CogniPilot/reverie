@@ -38,6 +38,7 @@ pub mod worker_laptop;
 pub mod worker_launch;
 pub mod worker_mounts;
 pub mod worker_nix;
+pub mod worker_recovery;
 pub mod worker_runtime;
 pub mod worker_storage;
 pub mod worker_validation;

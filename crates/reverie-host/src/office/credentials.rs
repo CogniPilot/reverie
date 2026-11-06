@@ -21,7 +21,7 @@ pub(super) fn headers(
         }
     }
     let raw = crate::native::observe_with_ancestors(
-        &company.root.join("console/.env"),
+        &company.root()?.join("console/.env"),
         1024 * 1024,
         |_| true,
     )
@@ -59,7 +59,7 @@ pub(super) fn headers(
     );
     if hooks {
         let raw = crate::native::observe_with_ancestors(
-            &company.root.join("console/hook-secret"),
+            &company.root()?.join("console/hook-secret"),
             64 * 1024,
             |_| true,
         )
