@@ -617,11 +617,26 @@ fn slow_request_upload_does_not_spend_later_response_read_budget() {
 fn request_sendall_budget_is_not_renewed_by_partial_write_progress() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let stop = Arc::new(AtomicBool::new(false));
     let server_stop = Arc::clone(&stop);
+    let (accepted, connection_started) = std::sync::mpsc::channel();
     let server = thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        // A preconnect refusal must fail this fixture, not leave an unbounded
+        // accept/join. This is setup allowance, not a socket-operation budget.
+        let setup = std::time::Instant::now() + Duration::from_secs(15);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(std::time::Instant::now() < setup, "no actual connection");
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("owned listener: {error}"),
+            }
+        };
+        accepted.send(std::time::Instant::now()).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -643,12 +658,20 @@ fn request_sendall_budget_is_not_renewed_by_partial_write_progress() {
     let mut embedder = embedder(url);
     embedder.config.timeout = Duration::from_millis(300);
     let text = "x".repeat(16 * 1024 * 1024);
-    let started = std::time::Instant::now();
     let result = embedder.request_embedding(&text, EmbeddingKind::Document);
+    let finished = std::time::Instant::now();
     stop.store(true, Ordering::Release);
-    assert!(result.is_err());
-    assert!(started.elapsed() < Duration::from_secs(3));
     let sent = server.join().unwrap();
+    let accepted = connection_started
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    assert!(result.is_err());
+    // Encoding the 16MiB JSON body precedes the socket timeout in both source
+    // and native transports. Measure the actual accepted network phase.
+    let elapsed = finished
+        .checked_duration_since(accepted)
+        .expect("actual connection must precede the observed client finish");
+    assert!(elapsed < Duration::from_secs(3));
     assert!(sent > 0 && sent < text.len());
 }
 #[test]
