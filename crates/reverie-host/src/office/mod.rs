@@ -2,6 +2,11 @@
 //! installing worker's actual stop lifetime. Addresses/paths are installation
 //! data; neither a phone handle nor Basic transport authentication is a grant.
 use crate::{installed_worker_engine::InstalledWorkerEngine, worker_runtime::WorkerRuntime};
+use reverie_contracts::{
+    storage_identity::MetadataText,
+    worker_config::EffectiveWorkerConfig,
+    worker_schema::{WorkerEnvelope, WorkerPath},
+};
 use reverie_core::ids::ProfileSessionId;
 use std::{
     collections::BTreeMap,
@@ -9,18 +14,21 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{
-        Arc, Mutex, MutexGuard, OnceLock, RwLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, MutexGuard, OnceLock,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 use tokio::sync::Semaphore;
+mod address;
 mod body;
 mod credentials;
 mod io_timeout;
+mod native_jobs;
 mod policy;
 mod proxy;
+mod request;
 mod server;
 mod socket;
 #[cfg(test)]
@@ -34,6 +42,9 @@ pub enum OfficeError {
     Refused,
     Closed,
     Unconfirmed,
+    Server(Arc<Self>),
+    Task(Arc<Self>),
+    Backend(Arc<crate::worker_recovery::WorkerRecoveryError>),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -46,11 +57,24 @@ impl fmt::Display for OfficeError {
             Self::Refused => "Office request refused",
             Self::Closed => "Office is closing",
             Self::Unconfirmed => "Office close unconfirmed; retain its owner",
+            Self::Server(_) => "Office server failed; retain its owner",
+            Self::Task(_) => "Office native work failed",
+            Self::Backend(_) => "Office backend unavailable",
             Self::Finalization { .. } => "Office operation and cleanup failed; retain its owner",
         })
     }
 }
-impl std::error::Error for OfficeError {}
+impl std::error::Error for OfficeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Server(error) | Self::Task(error) => Some(error.as_ref()),
+            Self::Backend(error) => Some(error.as_ref()),
+            Self::Finalization { primary, .. } => Some(primary.as_ref()),
+            Self::Refused | Self::Closed | Self::Unconfirmed => None,
+        }
+    }
+}
 impl From<io::Error> for OfficeError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
@@ -68,15 +92,23 @@ fn finalized<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
     }
 }
 struct Company {
-    root: PathBuf,
-    address: RwLock<SocketAddr>,
+    root: MetadataText,
+    address: address::AddressSource,
+    native_jobs: native_jobs::NativeJobs,
     engine: Arc<InstalledWorkerEngine>,
     closing: AtomicBool,
+}
+impl Company {
+    fn root(&self) -> Result<PathBuf> {
+        Ok(crate::native::python_path(self.root.codepoints())?)
+    }
 }
 struct OwnedOffice {
     closing: Arc<AtomicBool>,
     first_close: OnceLock<Instant>,
     thread: Mutex<Option<JoinHandle<Result<()>>>>,
+    joined: Mutex<Option<std::result::Result<(), Arc<OfficeError>>>>,
+    live_requests: Arc<AtomicUsize>,
     _preparation: Option<server::SpawnPayload>,
 }
 /// Own one registry for the installing broker. Dropping an individual phone
@@ -108,9 +140,41 @@ impl OfficeService {
         }
         Ok(Self {
             company: Arc::new(Company {
-                root: company_root,
-                address: RwLock::new(SocketAddr::new(address, 3000)),
+                root: MetadataText::from_python_text(
+                    reverie_core::PythonText::try_new(crate::native::python_text(&company_root))
+                        .expect("filesystem text"),
+                ),
+                address: address::AddressSource::fixed(SocketAddr::new(address, 3000)),
+                native_jobs: native_jobs::NativeJobs::new(),
                 engine: Arc::clone(runtime.installed_engine()),
+                closing: AtomicBool::new(false),
+            }),
+            offices: Mutex::new(BTreeMap::new()),
+            next: AtomicU64::new(0),
+        })
+    }
+    /// Actual worker origin, captured configuration and lazy fixed server.
+    /// Construct only at the original phone phase, after storage recovery.
+    pub fn from_worker(
+        runtime: &WorkerRuntime,
+        config: &EffectiveWorkerConfig,
+        telemetry: Arc<crate::command_telemetry::CommandTelemetry>,
+    ) -> Result<Self> {
+        telemetry
+            .assert_runtime(runtime)
+            .map_err(|_| OfficeError::Refused)?;
+        let envelope = WorkerEnvelope::capture(config.clone()).map_err(|_| OfficeError::Refused)?;
+        if reverie_core::worker_schema::WorkerServiceIdentity::capture(envelope.base())
+            != *runtime.worker_identity()
+        {
+            return Err(OfficeError::Refused);
+        }
+        Ok(Self {
+            company: Arc::new(Company {
+                root: envelope.path(WorkerPath::CompanyRoot).clone(),
+                address: address::AddressSource::worker(envelope.base().container().to_owned()),
+                native_jobs: native_jobs::NativeJobs::new(),
+                engine: runtime.installed_engine().clone(),
                 closing: AtomicBool::new(false),
             }),
             offices: Mutex::new(BTreeMap::new()),
@@ -121,12 +185,9 @@ impl OfficeService {
     /// choose this address, its port, the host credentials, or another session.
     pub fn update_address(&self, address: IpAddr) -> Result<()> {
         self.require_running()?;
-        *self
-            .company
+        self.company
             .address
-            .write()
-            .map_err(|_| OfficeError::Unconfirmed)? = SocketAddr::new(address, 3000);
-        Ok(())
+            .update_fixed(SocketAddr::new(address, 3000))
     }
     pub fn bind(&self, directory: PathBuf, session: ProfileSessionId) -> Result<OfficePhone> {
         self.require_running()?;
@@ -148,6 +209,8 @@ impl OfficeService {
                             closing,
                             first_close: OnceLock::new(),
                             thread: Mutex::new(None),
+                            joined: Mutex::new(None),
+                            live_requests: Arc::new(AtomicUsize::new(0)),
                             _preparation: None,
                         }),
                     );
@@ -155,10 +218,12 @@ impl OfficeService {
                 return Err(error);
             }
         };
+        let live_requests = Arc::new(AtomicUsize::new(0));
         let context = server::Context::new(
             Arc::clone(&self.company),
             session.clone(),
             Arc::clone(&closing),
+            live_requests.clone(),
         );
         let payload = Arc::new(Mutex::new(Some(server::PreparedOffice::new(
             runtime, listener, socket, context,
@@ -167,6 +232,8 @@ impl OfficeService {
             closing,
             first_close: OnceLock::new(),
             thread: Mutex::new(None),
+            joined: Mutex::new(None),
+            live_requests,
             _preparation: Some(Arc::clone(&payload)),
         });
         offices.insert(id, Arc::clone(&owned));
@@ -222,18 +289,22 @@ impl OfficeService {
     /// entries; closing one phone cannot stand in for closing the entire broker.
     pub fn close(&self, deadline: Instant) -> Result<()> {
         self.request_close();
-        let mut offices = lock_until(&self.offices, self.deadline(deadline))?;
-        let mut failed = false;
-        offices.retain(|_, office| {
-            let retain = close(office, self.deadline(deadline)).is_err();
-            failed |= retain;
-            retain
+        // Abort servers first, then settle all native jobs even when a phone
+        // has failed. Jobs own the same real request seats after cancellation.
+        let jobs = self.company.native_jobs.close(self.deadline(deadline));
+        let mut offices = match lock_until(&self.offices, self.deadline(deadline)) {
+            Ok(offices) => offices,
+            Err(error) => return finalized(jobs, Err(error)),
+        };
+        let mut result = jobs;
+        offices.retain(|_, office| match close(office, self.deadline(deadline)) {
+            Ok(()) => false,
+            Err(error) => {
+                result = finalized(std::mem::replace(&mut result, Ok(())), Err(error));
+                true
+            }
         });
-        if failed {
-            Err(OfficeError::Unconfirmed)
-        } else {
-            Ok(())
-        }
+        result
     }
     fn deadline(&self, deadline: Instant) -> Instant {
         self.company
@@ -265,20 +336,29 @@ fn close(owned: &OwnedOffice, deadline: Instant) -> Result<()> {
     let deadline =
         deadline.min(*owned.first_close.get_or_init(Instant::now) + Duration::from_secs(2));
     let mut slot = lock_until(&owned.thread, deadline)?;
-    let Some(thread) = slot.as_ref() else {
-        return Err(OfficeError::Unconfirmed);
-    };
-    while !thread.is_finished() {
+    while slot.as_ref().is_some_and(|thread| !thread.is_finished()) {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(OfficeError::Unconfirmed);
         }
         std::thread::sleep(remaining.min(Duration::from_millis(5)));
     }
-    slot.take()
-        .ok_or(OfficeError::Unconfirmed)?
-        .join()
-        .map_err(|_| OfficeError::Unconfirmed)?
+    let mut joined = lock_until(&owned.joined, deadline)?;
+    if let Some(thread) = slot.take() {
+        let result = thread
+            .join()
+            .unwrap_or(Err(OfficeError::Unconfirmed))
+            .map_err(Arc::new);
+        *joined = Some(result);
+    }
+    let result = joined.as_ref().ok_or(OfficeError::Unconfirmed)?;
+    if let Err(error) = result {
+        return Err(OfficeError::Server(error.clone()));
+    }
+    if owned.live_requests.load(Ordering::Acquire) != 0 {
+        return Err(OfficeError::Unconfirmed);
+    }
+    Ok(())
 }
 fn global_slots() -> Arc<Semaphore> {
     static SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -301,16 +381,28 @@ fn lock_until<T>(lock: &Mutex<T>, deadline: Instant) -> Result<MutexGuard<'_, T>
 impl Drop for OfficeService {
     fn drop(&mut self) {
         self.request_close();
+        if self
+            .offices
+            .get_mut()
+            .is_ok_and(|offices| offices.is_empty())
+            && self.company.native_jobs.known_settled()
+        {
+            return;
+        }
         // An accidental coordinator drop must not detach an outstanding native
         // server thread or erase its failed close. These owners remain retained
         // for process lifetime; Drop is deliberately never a capacity ACK.
-        static ABANDONED: OnceLock<Mutex<Vec<Arc<OwnedOffice>>>> = OnceLock::new();
+        type AbandonedCompany = (Arc<Company>, Vec<Arc<OwnedOffice>>);
+        static ABANDONED: OnceLock<Mutex<Vec<AbandonedCompany>>> = OnceLock::new();
         let abandoned = ABANDONED.get_or_init(|| Mutex::new(Vec::new()));
         let mut abandoned = abandoned.lock().unwrap_or_else(|error| error.into_inner());
         let offices = self
             .offices
             .get_mut()
             .unwrap_or_else(|error| error.into_inner());
-        abandoned.extend(std::mem::take(offices).into_values());
+        abandoned.push((
+            self.company.clone(),
+            std::mem::take(offices).into_values().collect(),
+        ));
     }
 }

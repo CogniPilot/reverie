@@ -342,3 +342,26 @@ UID-1000 differential witness establishes that Python `lexists` silently accepts
 an inaccessible ancestor over a populated cgroup. The Rust shared fixed-kernel
 reader deliberately preserves its PermissionDenied refusal instead of granting
 false absence credit. These are observations, not a held writer-release proof.
+# Worker recovery and lazy Office observations
+
+`worker_recovery` retains the actual Runtime origin for the original running-name
+census and optional single-container inspection. Raw recovered names, including
+bare/nil UUID spellings and last-name selection for one SID, remain membership
+data. They do not establish exact container/process custody. Recovery memory
+verification shares the existing native limits reader without imposing the
+inventory's stricter CID schema on the original ignored `Id` result.
+
+`OfficeService::from_worker` captures the same Runtime and defers the fixed server
+inspection until an actual forwarded request, after host credential processing.
+Its Company-local two-second cache preserves the original IP/scope codepoints;
+socket conversion reuses the existing Python IDNA2003 owner. Request futures and
+their native query/DNS threads share actual local/global request seats. Cancelling
+HTTP cannot free those seats or acknowledge close while owned native work remains.
+Checked Company close attempts every job and phone; unresolved owners survive an
+accidental service drop in process-lifetime quarantine. Neither this quarantine
+nor a closed phone establishes durable recovery or global shutdown.
+
+The worker constructor checks the mandatory telemetry object's Runtime origin;
+the enabled telemetry Office hook and its InstallingBroker bootstrap consumer
+remain a separate composition. This increment does not recover/register laptops,
+stop a source, create/start a container, mint API grants, or select a backend.

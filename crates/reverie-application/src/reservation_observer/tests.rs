@@ -112,6 +112,16 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn verify_recovery_limits(
+        &self,
+        _: &reverie_contracts::worker_recovery::RecoveryInspection,
+        _: Option<&ObservedMemoryPolicy>,
+        _: Instant,
+    ) -> Result<()> {
+        Err(ObserverError::Refused(
+            "FIXTURE_RECOVERY_LIMITS_NOT_SELECTED",
+        ))
+    }
     fn original_target_storage(
         &self,
         _: &StoragePaths,

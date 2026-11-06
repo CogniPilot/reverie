@@ -21,6 +21,7 @@ use tokio::net::TcpStream;
 pub(super) async fn handle(
     mut request: Request<Incoming>,
     context: Arc<Context>,
+    lifetime: Arc<super::request::RequestLifetime>,
 ) -> Response<OfficeBody> {
     let policy = match policy::classify(&request) {
         Ok(policy) => policy,
@@ -60,7 +61,7 @@ pub(super) async fn handle(
     let (mut parts, _) = request.into_parts();
     parts.headers = headers;
     let request = Request::from_parts(parts, Full::new(Bytes::from(body)));
-    match forward(&context.company, request).await {
+    match forward(&context.company, request, lifetime).await {
         Ok(response) => response,
         Err(_) => refusal(StatusCode::BAD_GATEWAY),
     }
@@ -73,9 +74,12 @@ fn plan_decision(context: &Context, request: &Request<Incoming>, body: &[u8]) ->
         body,
     )
     .map_err(|_| OfficeError::Refused)?;
-    let capability =
-        crate::native::office_plan_capability(&context.company.root, &context.session, &decision)
-            .map_err(|_| OfficeError::Refused)?;
+    let capability = crate::native::office_plan_capability(
+        &context.company.root()?,
+        &context.session,
+        &decision,
+    )
+    .map_err(|_| OfficeError::Refused)?;
     decision
         .attach_capability(&context.session, &capability)
         .map_err(|_| OfficeError::Refused)
@@ -95,14 +99,13 @@ async fn read_body(body: &mut Incoming, length: usize) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
-async fn forward(company: &Company, request: Request<Full<Bytes>>) -> Result<Response<OfficeBody>> {
-    let address = *company
-        .address
-        .read()
-        .map_err(|_| OfficeError::Unconfirmed)?;
-    let socket = tokio::time::timeout(Duration::from_secs(310), TcpStream::connect(address))
-        .await
-        .map_err(|_| OfficeError::Refused)??;
+async fn forward(
+    company: &Company,
+    request: Request<Full<Bytes>>,
+    lifetime: Arc<super::request::RequestLifetime>,
+) -> Result<Response<OfficeBody>> {
+    let addresses = company.address.targets(company, lifetime).await?;
+    let socket = connect(addresses).await?;
     let (mut sender, connection) = reverie_http::http1_builder()
         .handshake(TokioIo::new(IdleIo::new(socket, Duration::from_secs(310))))
         .await
@@ -132,6 +135,17 @@ async fn forward(company: &Company, request: Request<Full<Bytes>>) -> Result<Res
         parts,
         OfficeBody::stream(body, driver),
     ))
+}
+async fn connect(addresses: Vec<std::net::SocketAddr>) -> Result<TcpStream> {
+    let mut last = None;
+    for address in addresses {
+        match tokio::time::timeout(Duration::from_secs(310), TcpStream::connect(address)).await {
+            Ok(Ok(socket)) => return Ok(socket),
+            Ok(Err(error)) => last = Some(OfficeError::Io(error)),
+            Err(_) => last = Some(OfficeError::Refused),
+        }
+    }
+    Err(last.unwrap_or(OfficeError::Refused))
 }
 pub(super) fn refusal(status: StatusCode) -> Response<OfficeBody> {
     let mut response = Response::new(OfficeBody::fixed(

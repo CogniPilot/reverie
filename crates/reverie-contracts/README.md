@@ -306,3 +306,14 @@ apply their strict rules. The named intent codec hashes finite baseline data onl
 at the original late receipt phase; five original-Python fingerprint/byte vectors
 cover numeric provenance, lone-surrogate text and nonfinite refusal. It cannot
 manufacture a live claim, process birth, effect result or launch permit.
+# Recovery observation data
+
+`worker_recovery` names the original Broker running-name selection, optional
+inspect/confirmed-absence shapes and lazy Office IP literal projection. It keeps
+Python last-key-wins/4300-digit/string JSON semantics and arbitrary ignored
+inspection fields. The shared `NativeLimitFields` view is the existing limits
+rule owner; complete inventory rows still require their canonical CID. A recovery
+inspection's late `Id` presence check does not turn that value into CID custody.
+The checked-in corpus comes from actual unchanged Python methods with synthetic
+engine replies and owned local Office sockets, including eight complete recovery
+selection cases. No codec creates registration, start or authorization authority.

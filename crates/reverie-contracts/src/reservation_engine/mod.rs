@@ -2,6 +2,7 @@
 //! admission authority are separate; all unknown row/mount fields are retained.
 mod binding;
 mod config;
+mod fields;
 mod row;
 mod stopped;
 use crate::legacy_json::{self, Node, Number, Text, Value};
@@ -11,8 +12,9 @@ pub use config::{
     ControlBindingPaths, ControlPaths, ObservedMemoryPolicy, ReservationConfiguration,
     StorageIdentityRef, StoragePathText,
 };
+pub use fields::{DeclaredLimits, NativeLimitFields};
 use reverie_core::{decimal::UnsignedInteger, ids::ContainerId};
-pub use row::{ContainerRow, DeclaredLimits, StoppedWebsite};
+pub use row::{ContainerRow, StoppedWebsite};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt};
 pub use stopped::{StoppedFlag, StoppedState};
