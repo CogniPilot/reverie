@@ -7,6 +7,7 @@ use crate::storage_identity::MetadataText;
 use crate::worker_config::EffectiveWorkerConfig;
 pub use image::{ImageMappings, RootlessImage, RootlessImageIdentity, parse_host_grants};
 pub use integers::ImageInteger;
+pub(crate) use integers::parse_python_digits;
 pub use profile::PreparedRootlessProfile;
 use reverie_core::posix_path::PosixPath;
 use reverie_core::worker_schema::{MountTarget, WorkerIds, require_account_mounts};

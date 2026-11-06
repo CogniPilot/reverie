@@ -2,10 +2,13 @@
 pub mod broker_resources;
 pub mod device_policy;
 mod digest;
+pub mod kernel_accounting;
+pub mod kernel_mounts;
 pub mod lease_policy;
 mod legacy_json;
 pub mod operations_v1;
 pub mod profiles_v1;
+pub mod reservation_engine;
 pub mod resource_config;
 pub mod rootless;
 pub mod storage_identity;

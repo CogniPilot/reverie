@@ -19,6 +19,11 @@ See the contracts [validation audit](../reverie-contracts/src/worker_schema/READ
 `rootless` owns arbitrary-precision subordinate-ID containment. Checked decimal
 data and containment results are neither host observations nor access grants.
 
+`decimal` supplies shared exact unsigned arithmetic without schema bounds;
+`capacity` applies the existing signed63-bit explicit policy bounds, exact host/
+pool sums and the separate legacy floating90%+8GiB rule. Rootless and journal
+domains retain their own bounds. Arithmetic data never qualifies a native fact.
+
 - `ProfileEmployeeId` and `ProfileSessionId` preserve lexical UUID compatibility,
   including nil. `NativeOperationId` rejects nil. These purpose-specific values
   do not redefine general legacy company/session identifiers.
