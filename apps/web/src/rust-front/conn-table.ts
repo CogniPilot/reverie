@@ -85,6 +85,11 @@ export class ConnTable {
     return this.open.size;
   }
 
+  /** Whether `id` is open, draining included. */
+  isOpen(id: bigint): boolean {
+    return this.open.has(id);
+  }
+
   /** The front opens its next connection; the caller then sends `conn_open` with this id. */
   openNext(): bigint {
     if (this.open.size >= this.maxOpen) throw new ConnFault('CONN_FULL');
