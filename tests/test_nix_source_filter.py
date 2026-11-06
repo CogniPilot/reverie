@@ -1,9 +1,11 @@
 """Bounded source-filter evaluations; no derivation builds or host operations."""
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,19 +102,29 @@ class SourceFilterTests(unittest.TestCase):
         """Unrelated edits reuse the checked console; consumed fixtures invalidate it."""
         with tempfile.TemporaryDirectory(prefix="reverie-console-cache-") as tmp:
             root = Path(tmp)
-            fixture_paths = (
-                "python/reverie/__init__.py", "python/reverie/resume_ledger.py",
-                "python/reverie/resume_ledger_rpc.py", "tests/__init__.py",
-                "tests/goal_private_fixture.py", "tests/goal_broker_fixture.py",
+            # The package owns its explicit fixture references. Derive this
+            # miniature source from those calls as routes add new fixtures.
+            package_text = (ROOT / "nix/package.nix").read_text()
+            fixture_paths = tuple(dict.fromkeys((
+                *re.findall(r'\bconsoleFixture\s+"([^"]+)"', package_text),
                 "skills/reverie/SKILL.md", "apps/web/src/example.ts",
-            )
+            )))
             for relative in fixture_paths:
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text("fixture\n")
             (root / "apps/web/package.json").write_text('{"version":"1.0.0"}\n')
-            (root / "nix").mkdir()
+            (root / "nix").mkdir(exist_ok=True)
             shutil.copyfile(ROOT / "nix/package.nix", root / "nix/package.nix")
+            # Native wrapper bindings derive from the selected Rust workspace,
+            # not unrelated repository files. Keep real Cargo metadata here so
+            # their dependency projection is evaluated, not stubbed.
+            for name in ("Cargo.toml", "Cargo.lock"):
+                shutil.copyfile(ROOT / name, root / name)
+            members = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["members"]
+            for member in members:
+                shutil.copytree(ROOT / member, root / member, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("target"))
             expression = f'''let pkgs = import {self.library.parent} {{}};
               src = import {ROOT}/nix/source-filter.nix {{ inherit (pkgs) lib; src = {root}; }};
               in (import {ROOT}/nix/package.nix {{ inherit pkgs src; }}).console.drvPath'''
@@ -121,7 +133,21 @@ class SourceFilterTests(unittest.TestCase):
             unrelated.write_text("documentation edit\n")
             self.assertEqual(self.evaluate(expression), baseline)
             unrelated.unlink()
-            for relative in fixture_paths + ("nix/package.nix", "apps/web/package.json"):
+            cargo = root / "Cargo.toml"
+            cargo_before = cargo.read_text()
+            unused = cargo_before.replace('members = [', 'members = [\n"crates/unrelated",', 1)
+            unused = unused.replace('[workspace.dependencies]',
+                                    '[workspace.dependencies]\nunrelated = "1"', 1)
+            self.assertNotEqual(unused, cargo_before)
+            cargo.write_text(unused)
+            lock = root / "Cargo.lock"
+            lock_before = lock.read_text()
+            lock.write_text(lock_before + '\n[[package]]\nname = "unrelated"\nversion = "1.0.0"\n')
+            self.assertEqual(self.evaluate(expression), baseline)
+            cargo.write_text(cargo_before)
+            lock.write_text(lock_before)
+            for relative in tuple(dict.fromkeys((*fixture_paths, "apps/web/package.json",
+                                                "crates/reverie-routes/src/lib.rs"))):
                 with self.subTest(relative=relative):
                     target = root / relative
                     original = target.read_text()

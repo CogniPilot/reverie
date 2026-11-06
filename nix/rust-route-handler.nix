@@ -1,10 +1,16 @@
 # The console's fixed stdio handler. Building it does not enable any route.
 { pkgs, src }:
+let
+  workspace = import ./rust-workspace-source.nix {
+    inherit pkgs src;
+    members = [ "reverie-core" "reverie-contracts" "reverie-routes" ];
+  };
+in
 pkgs.rustPlatform.buildRustPackage {
   pname = "reverie-route-handler";
   version = "0.1.0";
-  inherit src;
-  cargoLock.lockFile = src + "/Cargo.lock";
+  src = workspace.source;
+  cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-routes" "--bin" "reverie-route-handler" ];
   cargoTestFlags = [ "-p" "reverie-routes" ];
   doCheck = true;
