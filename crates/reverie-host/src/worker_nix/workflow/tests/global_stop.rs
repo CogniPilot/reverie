@@ -25,19 +25,36 @@ fn pending_metadata<'a>(
     gate.entered.store(false, Ordering::Release);
     gate.released.store(false, Ordering::Release);
     let client = &runtime.installed_engine().engine.client;
-    let failure = client
-        .run_scoped(
-            ["ps", "-aq", "--no-trunc"].map(Into::into).to_vec(),
-            Instant::now() + Duration::from_millis(50),
-            &CancellationToken::new(),
-            Policy {
-                maximum: Duration::from_secs(20),
-                maximum_output: 4 * 1024 * 1024,
-                successful_exit: true,
-            },
-        )
-        .err()
-        .unwrap();
+    let cancellation = CancellationToken::new();
+    let failure = std::thread::scope(|scope| {
+        let query = scope.spawn(|| {
+            client.run_scoped(
+                ["ps", "-aq", "--no-trunc"].map(Into::into).to_vec(),
+                Instant::now() + Duration::from_secs(20),
+                &cancellation,
+                Policy {
+                    maximum: Duration::from_secs(20),
+                    maximum_output: 4 * 1024 * 1024,
+                    successful_exit: true,
+                },
+            )
+        });
+        let ceiling = end();
+        while !gate.entered.load(Ordering::Acquire) && Instant::now() < ceiling {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let entered = gate.entered.load(Ordering::Acquire);
+        cancellation.cancel();
+        if !entered {
+            gate.released.store(true, Ordering::Release);
+        }
+        let failed = query.join().unwrap().err().unwrap();
+        assert!(
+            entered,
+            "owned metadata constructor actually reached its gate"
+        );
+        failed
+    });
     let pending = Pending {
         client,
         gate,
