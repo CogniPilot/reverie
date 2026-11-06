@@ -22,6 +22,12 @@ short buffers shed the original allocation. Adjacent fragments coalesce into
 and 1 MiB of pending priority controls. The codec and active writer have bounded
 single-frame encoding/decoding scratch space in addition to these payload pools.
 
+Operational diagnostics use the shared `reverie-diagnostics` owner. Rejected
+connections are dropped before reporting the cap. The Linux adapter offers one
+bounded nonblocking diagnostic attempt; full stderr cannot stall the actor or
+cleanup. Diagnostic delivery never changes the outcome. Other platforms report
+an unsupported diagnostic transport; kernel/device latency has no hard bound.
+
 Controls precede round-robin stream queues. Credit is coalesced per connection;
 end remains behind that connection's queued data. Abort discards pending stream
 packets and settles their leases. Closed ids follow the contract's monotone-id

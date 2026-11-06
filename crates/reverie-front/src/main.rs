@@ -30,7 +30,7 @@ fn main() {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("reverie-front: {error}");
+            let _ = reverie_diagnostics::stderr(format!("reverie-front: {error}\n").as_bytes());
             std::process::exit(70);
         }
     };
@@ -44,7 +44,7 @@ fn main() {
     let code = match result {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("reverie-front: {error}");
+            let _ = reverie_diagnostics::stderr(format!("reverie-front: {error}\n").as_bytes());
             70
         }
     };
@@ -62,7 +62,9 @@ fn finish_runtime(runtime: tokio::runtime::Runtime, code: i32) -> ! {
 #[cfg(not(unix))]
 fn main() {
     let _ = Arguments::parse();
-    eprintln!("reverie-front: this build requires the Unix channel/process adapter");
+    let _ = reverie_diagnostics::stderr(
+        b"reverie-front: this build requires the Unix channel/process adapter\n",
+    );
     std::process::exit(78);
 }
 

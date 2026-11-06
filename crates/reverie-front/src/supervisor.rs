@@ -139,7 +139,9 @@ fn exited_code(status: ExitStatus, outcome: io::Result<SessionEnd>) -> i32 {
         let transport_loss = error.kind() == io::ErrorKind::BrokenPipe
             || (!status.success() && error.kind() == io::ErrorKind::UnexpectedEof);
         if !transport_loss {
-            eprintln!("reverie-front: generation fault: {error}");
+            let _ = reverie_diagnostics::stderr(
+                format!("reverie-front: generation fault: {error}\n").as_bytes(),
+            );
             return 70;
         }
     }

@@ -255,8 +255,8 @@ impl State {
     ) -> io::Result<()> {
         if self.clients.len() >= self.maximum {
             // Includes graceful transports whose final bytes are still draining.
-            eprintln!("reverie-front: connection limit reached");
             drop(socket);
+            let _ = reverie_diagnostics::stderr(b"reverie-front: connection limit reached\n");
             return Ok(());
         }
         let peer = socket.peer_addr()?;

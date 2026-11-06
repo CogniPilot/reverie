@@ -2,6 +2,8 @@ use super::*;
 use reverie_contracts::route_frames_v2::{Direction, read_frame};
 use std::{io::Write, net::Shutdown, os::unix::net::UnixStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(target_os = "linux")]
+mod stderr;
 
 struct Peer(UnixStream);
 impl Peer {

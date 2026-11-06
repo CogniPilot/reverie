@@ -323,12 +323,20 @@ name = "reverie-core"
 version = "0.1.0"
 
 [[package]]
+name = "reverie-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "reverie-front"
 version = "0.1.0"
 dependencies = [
  "clap",
  "command-fds",
  "reverie-contracts",
+ "reverie-diagnostics",
  "tokio",
 ]
 
