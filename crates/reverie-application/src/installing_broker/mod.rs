@@ -1,6 +1,7 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+mod storage;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
     reservation_observer::NativeObserver,
@@ -9,6 +10,7 @@ use crate::{
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+pub use storage::{StorageClaim, StorageReleaseFailure, StorageWorkflowError};
 struct CurrentInstalled {
     snapshot: Arc<ValidatedWorkerSnapshot>,
     resources: Arc<ReservationConfiguration>,
@@ -104,15 +106,18 @@ impl InstalledWorker {
 }
 pub struct InstallingBroker {
     gate: ReservationGate,
+    storage: Arc<storage::StorageRegistry>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.
     pub fn new(
         snapshot: ValidatedWorkerSnapshot,
-        observer: NativeObserver,
+        runtime: reverie_host::worker_runtime::WorkerRuntime,
     ) -> Result<Self, GateError> {
+        let observer = NativeObserver::new(runtime.readonly());
         Ok(Self {
             gate: ReservationGate::new(snapshot, observer)?,
+            storage: Arc::new(storage::StorageRegistry::new(runtime)),
         })
     }
     pub fn configuration(&self) -> Result<Arc<ValidatedWorkerSnapshot>, GateError> {
@@ -131,5 +136,28 @@ impl InstallingBroker {
             self.configuration()?.configuration(),
             session,
         )?)
+    }
+
+    /// Actual fixed-purpose storage acquisition. This retains resources only;
+    /// it neither registers a laptop nor authorizes engine/start effects.
+    pub fn claim_storage(
+        &self,
+        session: &ProfileSessionId,
+    ) -> Result<StorageClaim, StorageWorkflowError> {
+        self.storage
+            .claim(self.configuration()?.configuration(), session)
+    }
+    pub fn launch_wait_binding(
+        &self,
+        session: &ProfileSessionId,
+    ) -> Result<Option<reverie_contracts::storage_writers::LaunchWaitBinding>, StorageWorkflowError>
+    {
+        Ok(reverie_host::worker_storage::read_launch_wait_binding(
+            self.configuration()?.configuration(),
+            session,
+        )?)
+    }
+    pub fn request_stop(&self) -> std::time::Instant {
+        self.storage.runtime.request_stop()
     }
 }

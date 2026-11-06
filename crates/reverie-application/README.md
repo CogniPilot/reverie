@@ -152,3 +152,31 @@ through a path-free API. A host must not reinterpret a guest's filesystem or
 loopback endpoint. Current Python/CLI consumers remain selected. Hands room
 memory and the Office employee journal are separate stores and are not routed
 through this legacy-memory service.
+
+# Installing storage ownership
+
+`InstallingBroker::new` consumes the actual service `WorkerRuntime` and creates
+its reservation observer from that exact runtime's read-only handle. There is
+no independent engine recapture, optional fake runtime or public registry setter.
+The existing bootstrap currently requires the real reservation-control setup;
+it is not yet the complete optional-reservations worker service.
+
+`claim_storage` performs fresh service-selected resolution before the private
+registry lock. Genuine legacy paths bypass the employee lock, census and
+registry; employee claims retain actual move-only owners, recheck exact prior
+bindings and census writers on the original same client. Fresh acquired guard
+paths are retained even when the source permits an identity/kind change. Claim
+handle Drop does not release a laptop-lifetime owner. Failed writer cleanup
+retains the real unconfirmed owner and both primary/secondary errors; it cannot
+be reused as a positive registration. Launch-wait bytes use strict metadata and
+the original nine-field projection, separately from permissive allowed() data.
+
+Exact claim-handle consumption settles the same native client before and after
+local resource close; unknown close/settlement keeps a fenced registry entry
+and returns the exact handle. It neither stops a container nor proves global
+unlock, storage exclusivity, admission completion or capacity release. The real
+launch/stop producer must also inventory and settle viewer/Office/other owned
+constructor contexts and confirm native laptop disposition before a global
+acknowledgement. Actual Nix ownership transfer, laptop registration, mutable
+launch/recovery, and this terminal release caller remain required integration;
+no plan, path, label or returned claim grants API or engine authority.

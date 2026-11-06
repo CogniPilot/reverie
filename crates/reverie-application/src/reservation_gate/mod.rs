@@ -19,7 +19,7 @@ mod recovery;
 mod reload;
 mod terminal_claim;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 use crate::{
     reservation_observer::{NativeObserver, ObservationContext, ObservedInventory, ObserverError},
     worker_validation::ValidatedWorkerSnapshot,

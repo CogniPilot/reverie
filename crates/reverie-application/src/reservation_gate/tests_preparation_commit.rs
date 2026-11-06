@@ -234,24 +234,21 @@ fn failed_optional_laptop_inspect_wins_before_json_and_keeps_actual_published_fi
 #[test]
 fn ordinary_reload_reads_real_file_and_cannot_install_changed_projections_for_active_claim() {
     let (_setup, fixture, _gate, claim, path) = preparing();
-    let broker = crate::installing_broker::InstallingBroker::new(
-        load_owner_config(&path).unwrap(),
-        fixture.observer(),
-    )
-    .unwrap();
-    broker.reload_resources().unwrap();
-    let before = broker.configuration().unwrap();
+    let broker =
+        ReservationGate::new(load_owner_config(&path).unwrap(), fixture.observer()).unwrap();
+    broker.reload_owner_configuration().unwrap();
+    let before = broker.installed_snapshot().unwrap();
     let staged = claim.stage_configuration().unwrap();
     let bytes =
         reverie_contracts::reservation_policy::PolicyCandidateData::capture(staged.configuration())
             .unwrap();
     fs::write(&path, bytes.bytes()).unwrap();
     assert_eq!(
-        broker.reload_resources().unwrap_err().code(),
+        broker.reload_owner_configuration().unwrap_err().code(),
         "RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION"
     );
     assert!(
-        Arc::ptr_eq(&before, &broker.configuration().unwrap()),
+        Arc::ptr_eq(&before, &broker.installed_snapshot().unwrap()),
         "failed file reload never swaps the installed snapshot"
     );
     assert_eq!(claim.operation().state(), OperationState::Preparing);

@@ -14,12 +14,12 @@ use std::{
 static NEXT: AtomicU64 = AtomicU64::new(0);
 #[path = "tests_observation.rs"]
 mod observation_cases;
-struct Tree {
-    root: PathBuf,
-    raw: Vec<u8>,
+pub(crate) struct Tree {
+    pub(crate) root: PathBuf,
+    pub(crate) raw: Vec<u8>,
 }
 impl Tree {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "reverie-gate-{}-{}",
             std::process::id(),
@@ -72,7 +72,7 @@ impl Tree {
         tree.marker(&config);
         tree
     }
-    fn write(&self, name: &str, raw: &[u8]) {
+    pub(crate) fn write(&self, name: &str, raw: &[u8]) {
         let path = self.root.join(name);
         fs::write(&path, raw).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
