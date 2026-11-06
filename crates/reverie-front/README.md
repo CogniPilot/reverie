@@ -70,3 +70,11 @@ pinned installed Node path and run
 twelve-second unresponsive-child deadline check. These checks use only isolated
 fixtures and loopback sockets; they do not open an instance database or deploy a
 service.
+
+Build the unselected native package with `nix build .#rustFront`. It uses the
+shared Rust workspace projection, retaining only the core, contracts, diagnostics
+and front crates plus their locked dependencies. The derivation runs ordinary
+front tests; real Node/adapter qualifications remain explicit separate gates.
+It does not modify the console launcher or select the front in any service.
+The paired adapter harness accepts `REVERIE_TEST_FRONT` as an explicit absolute
+executable path to qualify this installed artifact instead of Cargo's binary.

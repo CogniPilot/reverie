@@ -35,7 +35,11 @@ impl Running {
         assert!(fixture.is_absolute() && fixture.is_file());
         let mut command = match mode {
             Mode::Front => {
-                let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-front"));
+                let executable = std::env::var_os("REVERIE_TEST_FRONT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_reverie-front")));
+                assert!(executable.is_absolute() && executable.is_file());
+                let mut command = Command::new(executable);
                 command
                     .arg("--node")
                     .arg(&node)
