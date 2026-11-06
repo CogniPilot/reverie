@@ -7,6 +7,7 @@ pub mod lease_policy;
 mod legacy_json;
 pub mod profiles_v1;
 pub mod resource_config;
+pub mod rootless;
 pub mod route_frames_v1;
 pub mod route_frames_v2;
 pub mod settings_v1;

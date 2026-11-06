@@ -4,9 +4,12 @@ mod manifest;
 mod producer;
 mod profile;
 
-pub use config::{TaskPerfConfiguration, TaskPerfProjection};
+pub use config::{
+    TaskPerfConfiguration, TaskPerfProjection, recognize_configuration, validate_selection_marker,
+};
 pub use manifest::{PerfSystem, TaskPerfManifest};
 pub use producer::{TaskPerfProducedBytes, produce_task_perf};
+pub(crate) use profile::is_task_perf_rule;
 pub use profile::{TaskPerfArtifactData, TaskPerfProfile};
 
 use crate::legacy_json::{self, Node, Text, Value};

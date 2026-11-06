@@ -65,6 +65,9 @@ impl InstalledTaskPerfArtifact {
     pub fn data(&self) -> &TaskPerfArtifactData {
         &self.data
     }
+    pub fn into_data(self) -> TaskPerfArtifactData {
+        self.data
+    }
 }
 
 trait ArtifactSource {

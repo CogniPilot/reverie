@@ -7,6 +7,7 @@ pub mod profiles;
 pub mod resource_projection;
 pub mod resources;
 pub mod revision;
+pub mod rootless;
 pub mod task_perf;
 pub mod worker_schema;
 

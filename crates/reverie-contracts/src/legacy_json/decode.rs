@@ -37,6 +37,7 @@ enum Purpose {
     Default,
     NoConstants,
     Metadata,
+    Rootless,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
@@ -44,6 +45,9 @@ pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
 }
 pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
     decode_with(source, Purpose::Metadata)
+}
+pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
+    decode_with(source, Purpose::Rootless)
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
     decode_with(source, Purpose::NoConstants)
@@ -105,10 +109,10 @@ impl Frame {
             } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
                 let replaced = values.insert(key, value).is_some();
-                if replaced && purpose != Purpose::Metadata {
+                if replaced && !matches!(purpose, Purpose::Metadata | Purpose::Rootless) {
                     return Err(Error::DuplicateKey);
                 }
-                *duplicate |= replaced;
+                *duplicate |= replaced && purpose == Purpose::Metadata;
                 *phase = Phase::Next;
             }
         }
@@ -229,7 +233,7 @@ impl Cursor<'_> {
             .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
-            if self.purpose == Purpose::Metadata
+            if matches!(self.purpose, Purpose::Metadata | Purpose::Rootless)
                 && text.trim_start_matches('-').len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);
