@@ -300,6 +300,26 @@ describe('the three Node behaviours a never-listening server loses', () => {
     expect(open.unbound).toBe(true);
   });
 
+  it('on app.close(), a keep-alive response still queued behind backpressure arrives whole before unbind', async () => {
+    const server = Fastify();
+    server.get('/big', (_req, reply) => reply.send(Buffer.alloc(300 * 1024, 0x62)));
+    const { fake } = await fronted(server, {}, (app, front) => closeThroughFront(app, front));
+    const connection = fake.open();
+    await fake.write(connection, get('/big'));
+    fake.peer.pause();
+    await sleep(100);
+    // The response is complete to Node, so idle close will destroy its socket; the bytes are still queued.
+    const closed = server.close();
+    await sleep(100);
+    fake.peer.resume();
+    await closed;
+    await fake.until(() => fake.frames.some((frame) => frame.body.kind === 'unbind'), 2000, 'unbind');
+    const response = Buffer.concat(connection.received);
+    expect(response.subarray(response.indexOf('\r\n\r\n') + 4)).toEqual(Buffer.alloc(300 * 1024, 0x62));
+    const order = fake.frames.map((frame) => `${frame.id}:${frame.body.kind}`);
+    expect(order.indexOf('0:unbind')).toBeGreaterThan(order.lastIndexOf(`${connection.id}:data`));
+  });
+
   it("pins the 'listening' contract to the Node and Fastify versions it was checked on", async () => {
     // Only Node's own connection tracking may listen for 'listening' on a server that never listens, and
     // emitting it must not mark the server as listening. Recheck both before moving either version.
@@ -502,6 +522,19 @@ describe('connection rules, the receive pool and the writer', () => {
     fake.peer.resume();
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
     expect(front.finish(10)).toBe(first);
+  });
+
+  it('flushStreams() resolves true once stream queues are handed off, and false at its deadline', async () => {
+    const { fake, front } = await app();
+    expect(await front.flushStreams(10)).toBe(true);
+    const big = fake.open();
+    await fake.write(big, get('/big'));
+    fake.peer.pause();
+    await sleep(100);
+    expect(await front.flushStreams(100)).toBe(false);
+    const flushed = front.flushStreams(2000);
+    fake.peer.resume();
+    expect(await flushed).toBe(true);
   });
 
   it('finish() rejects when the channel does not flush in time', async () => {

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
-import { FakeFront } from './fake-front.js';
+import { FakeFront, type FakeConnection } from './fake-front.js';
 
 const web = resolve(import.meta.dirname, '../..');
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -135,18 +135,19 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
   }, 20_000);
 
   /** A response far larger than the socket buffers, read by nobody: the child's writes back up behind it. */
-  async function congest(running: Running): Promise<void> {
+  async function congest(running: Running): Promise<FakeConnection> {
     const big = running.fake.open({ credit: 16 * 1024 * 1024 });
     await running.fake.write(big, 'GET /bytes?n=8388608 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
     // Stop reading only once the request (which needs TS's request credit) is out.
     running.fake.peer.pause();
     await sleep(300);
+    return big;
   }
 
   it('on shutdown behind a congested channel, exits 0 only after unbind has been delivered', async () => {
     const running = start();
     await ready(running);
-    await congest(running);
+    const big = await congest(running);
     running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
     await sleep(500);
     // Fastify has closed, but unbind is still queued behind the unread bytes: the child must still be waiting.
@@ -154,6 +155,9 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     running.fake.peer.resume();
     await running.channelEnded;
     expect(running.fake.frames.some((frame) => frame.body.kind === 'unbind')).toBe(true);
+    // The queued response is flushed before Node's idle close, so it arrives whole.
+    const response = Buffer.concat(big.received);
+    expect(response.length - (response.indexOf('\r\n\r\n') + 4)).toBe(8 * 1024 * 1024);
     expect(await running.exited).toBe(0);
     expect(running.events.at(-1)).toEqual({ event: 'closed' });
   }, 20_000);

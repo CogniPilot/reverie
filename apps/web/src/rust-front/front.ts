@@ -120,6 +120,8 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   private onIdle: (() => void) | undefined;
   /** The one finish in flight, shared by every caller so none is left waiting on a replaced hook. */
   private finishing: Promise<void> | undefined;
+  /** Callers waiting for every stream queue to be handed to the channel. */
+  private readonly streamWaiters = new Set<() => void>();
   private readonly link: ConnLink;
 
   constructor(
@@ -214,6 +216,29 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
       this.pump();
     });
     return this.finishing;
+  }
+
+  /**
+   * Resolves true once every connection's queued `data` and `end` have been handed to the channel, or false if that
+   * has not happened within `timeoutMs` or the generation ended. Shutdown waits on it before Node's idle close
+   * destroys sockets, because an abort discards what a connection still has queued.
+   */
+  flushStreams(timeoutMs: number): Promise<boolean> {
+    if (this.ended) return Promise.resolve(false);
+    if (this.streams.size === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = (flushed: boolean) => {
+        clearTimeout(timer);
+        this.streamWaiters.delete(waiter);
+        this.off('fault', onFault);
+        resolve(flushed);
+      };
+      const waiter = () => done(true);
+      const onFault = () => done(false);
+      const timer = setTimeout(() => done(false), timeoutMs);
+      this.streamWaiters.add(waiter);
+      this.once('fault', onFault);
+    });
   }
 
   /** Asks the front to close `listener`. Connections it accepted before this keep running. */
@@ -441,6 +466,12 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   private dropStream(id: bigint): void {
     if (!this.streams.delete(id)) return;
     this.rotation.splice(this.rotation.indexOf(id), 1);
+    this.streamsFlushed();
+  }
+
+  private streamsFlushed(): void {
+    if (this.streams.size > 0) return;
+    for (const waiter of [...this.streamWaiters]) waiter();
   }
 
   /** Writes while the channel accepts: all priority control first, then one stream frame per turn. */
@@ -463,7 +494,10 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
         const queue = this.streams.get(id) as Buffer[];
         wire = queue.shift() as Buffer;
         if (queue.length > 0) this.rotation.push(id);
-        else this.streams.delete(id);
+        else {
+          this.streams.delete(id);
+          this.streamsFlushed();
+        }
       }
       this.writable = this.channel.write(wire);
     }
@@ -500,14 +534,19 @@ export function restoreListeningBehaviour(server: Server): void {
 }
 
 /**
- * Asks the front to stop accepting on `listener` when Fastify starts closing. Idle keep-alive
- * connections close as they do on a listening server: Fastify calls `server.close()` even when not
- * listening, and Node's `close()` runs `closeIdleConnections()`, which works once the `'listening'` emit
- * above has installed connection tracking.
+ * When Fastify starts closing: waits (at most `flushMs`) until every connection's queued response bytes have been
+ * handed to the front, then asks it to stop accepting on `listener`. Fastify then calls `server.close()` even though
+ * it never listened, and Node's `close()` runs `closeIdleConnections()` (working once the `'listening'` emit above
+ * has installed tracking). Its destroy becomes an abort, which would discard bytes still queued, hence the flush.
  */
-export function closeThroughFront(app: FastifyInstance, front: FrontChannel, listener: Listener = 'main'): void {
-  app.addHook('preClose', (done) => {
+export function closeThroughFront(
+  app: FastifyInstance,
+  front: FrontChannel,
+  listener: Listener = 'main',
+  flushMs = 5000
+): void {
+  app.addHook('preClose', async () => {
+    await front.flushStreams(flushMs);
     front.unbind(listener);
-    done();
   });
 }
