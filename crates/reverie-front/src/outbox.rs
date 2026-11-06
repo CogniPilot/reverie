@@ -11,6 +11,7 @@ pub enum QueueError {
     Charge,
     ControlFull,
     CreditOverflow,
+    ReceiptOrder,
     AfterEnd,
 }
 impl std::fmt::Display for QueueError {
@@ -151,11 +152,16 @@ impl Outbox {
         {
             return Ok(());
         }
+        if let Body::Written(total) = frame.body
+            && self.coalesce_written(id, total)?
+        {
+            return Ok(());
+        }
         if bytes > self.control_limit.saturating_sub(self.control_bytes) {
             return Err(QueueError::ControlFull);
         }
         if matches!(frame.body, Body::Abort(_)) {
-            self.discard_stream(id);
+            self.discard_connection(id);
         }
         self.control_bytes += bytes;
         self.controls.push_back(frame);
@@ -177,6 +183,23 @@ impl Outbox {
             .ok_or(QueueError::CreditOverflow)?;
         Ok(true)
     }
+    fn coalesce_written(&mut self, id: u64, total: u64) -> Result<bool, QueueError> {
+        let pending = self
+            .controls
+            .iter_mut()
+            .find_map(|frame| match &mut frame.body {
+                Body::Written(value) if frame.id == id => Some(value),
+                _ => None,
+            });
+        let Some(pending) = pending else {
+            return Ok(false);
+        };
+        if total <= *pending {
+            return Err(QueueError::ReceiptOrder);
+        }
+        *pending = total;
+        Ok(true)
+    }
     pub fn stream(&mut self, id: u64, packet: StreamPacket) -> Result<(), QueueError> {
         let queue = self.streams.entry(id).or_default();
         let was_empty = queue.is_empty();
@@ -189,6 +212,22 @@ impl Outbox {
     pub fn discard_stream(&mut self, id: u64) {
         self.streams.remove(&id);
         self.ready.retain(|queued| *queued != id);
+    }
+    /// Abort can discard a queued receipt, never a frame already owned by the
+    /// channel writer. Normal retirement waits for that writer's completion.
+    pub fn discard_connection(&mut self, id: u64) {
+        self.discard_stream(id);
+        self.controls.retain(|frame| {
+            if frame.id == id && matches!(frame.body, Body::Written(_)) {
+                self.control_bytes -= frame
+                    .encode(Direction::ToTs)
+                    .expect("validated receipt")
+                    .len();
+                false
+            } else {
+                true
+            }
+        });
     }
     pub fn has_stream(&self, id: u64) -> bool {
         self.streams.contains_key(&id)

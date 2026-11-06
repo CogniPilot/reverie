@@ -13,6 +13,29 @@ fn outbox(limit: usize) -> Outbox {
     Outbox::new(NonZeroU64::new(1).unwrap(), limit)
 }
 #[test]
+fn receipts_coalesce_in_priority_controls_and_abort_preserves_only_the_committed_frame() {
+    let pool = BytePool::new(64).unwrap();
+    let mut out = outbox(64);
+    out.stream(2, packet(&pool, vec![9; 64])).unwrap();
+    for total in 1..=1000 {
+        out.control(1, Body::Written(total)).unwrap();
+    }
+    assert_eq!(out.control_bytes(), 30);
+    assert!(matches!(
+        out.control(1, Body::Written(1000)),
+        Err(QueueError::ReceiptOrder)
+    ));
+    let committed = out.pop().unwrap();
+    assert_eq!(committed.frame.body, Body::Written(1000));
+    out.control(1, Body::Written(1001)).unwrap();
+    out.control(1, Body::Abort(AbortReason::Destroy)).unwrap();
+    assert!(matches!(out.pop().unwrap().frame.body, Body::Abort(_)));
+    assert_eq!(committed.frame.body, Body::Written(1000));
+    assert!(matches!(out.pop().unwrap().frame.body, Body::Data(_)));
+    assert!(out.pop().is_none());
+    assert_eq!(out.control_bytes(), 0);
+}
+#[test]
 fn saturated_streams_preserve_end_order_and_control_progress() {
     let pool = BytePool::new(2 * MAX_DATA_BYTES).unwrap();
     let mut out = outbox(1024);

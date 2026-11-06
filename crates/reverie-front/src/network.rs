@@ -6,11 +6,8 @@ use crate::{
 };
 use std::io;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        TcpStream,
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
+    io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpStream, tcp::OwnedReadHalf},
     sync::mpsc,
     task::JoinHandle,
 };
@@ -24,6 +21,7 @@ pub(crate) enum NetworkEvent {
     },
     Written {
         id: u64,
+        bytes: usize,
         ended: bool,
         result: io::Result<()>,
     },
@@ -40,6 +38,8 @@ pub(crate) struct Client {
     pub write_ended: bool,
     pub grant_queued: bool,
     pub read_queued: bool,
+    pub written: u64,
+    pub acknowledged: u64,
     tasks: ClientTasks,
 }
 struct ClientTasks {
@@ -75,6 +75,8 @@ impl Client {
             write_ended: false,
             grant_queued: false,
             read_queued: false,
+            written: 0,
+            acknowledged: 0,
             tasks: ClientTasks {
                 reader: Some(reader),
                 writer: Some(writer),
@@ -131,22 +133,31 @@ async fn read_loop(
         }
     }
 }
-async fn write_loop(
+async fn write_loop<W: AsyncWrite + Unpin>(
     id: u64,
-    mut socket: OwnedWriteHalf,
+    mut socket: W,
     mut input: mpsc::Receiver<StreamPacket>,
     events: mpsc::Sender<NetworkEvent>,
 ) {
     while let Some(packet) = input.recv().await {
         let ended = matches!(packet, StreamPacket::End);
+        let bytes = match &packet {
+            StreamPacket::Data(data) => data.bytes().len(),
+            StreamPacket::End => 0,
+        };
         let result = match &packet {
-            StreamPacket::Data(data) => socket.write_all(data.bytes()).await,
+            StreamPacket::Data(data) => write_data(&mut socket, data.bytes()).await,
             StreamPacket::End => socket.shutdown().await,
         };
         drop(packet);
         let failed = result.is_err();
         if events
-            .send(NetworkEvent::Written { id, ended, result })
+            .send(NetworkEvent::Written {
+                id,
+                bytes,
+                ended,
+                result,
+            })
             .await
             .is_err()
             || ended
@@ -156,3 +167,13 @@ async fn write_loop(
         }
     }
 }
+
+async fn write_data<W: AsyncWrite + Unpin>(socket: &mut W, bytes: &[u8]) -> io::Result<()> {
+    socket.write_all(bytes).await?;
+    // Plain TCP flushes immediately. Buffered transports must accept their
+    // records at the socket before any receipt or packet charge is released.
+    socket.flush().await
+}
+
+#[cfg(test)]
+mod tests;

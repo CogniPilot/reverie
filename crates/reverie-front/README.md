@@ -37,6 +37,17 @@ No unbounded closed-id table is kept. Waiters receive freed capacity before the
 just-consumed connection can replenish its grant. Idle outstanding grants remain
 reserved until used or closed, as required by the reviewed protocol.
 
+The front reports cumulative native-write completion with `written`, separate
+from permission to send more bytes (`credit`). Receipts deliberately lag partial
+writes: a bounded packet must finish its socket write and transport flush before
+its receipt advances or its payload lease is released. This observes socket
+acceptance, not client delivery. At most one pending receipt per connection is
+coalesced in the priority controls. A normally draining connection remains owned
+until its final receipt has actually been written to the channel; enqueueing or
+submitting it is insufficient. Abort discards pending receipts and cancels both
+socket tasks. A receipt already committed to the channel writer may finish and
+is settled by the peer after its abort. Generation loss discards pending output.
+
 A generation fault closes all clients and listeners. There is no response
 substitution, request replay or child respawn. Normal cleanup explicitly joins
 socket tasks and channel threads, then reaps the child. The first process signal

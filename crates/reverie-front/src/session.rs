@@ -9,7 +9,7 @@ use crate::{
 };
 use reverie_contracts::route_frames_v2::{
     AbortReason, Body, Frame, Listener, MAX_DATA_BYTES, Signal, SocketFacts,
-    conn::{ConnFrame, ConnTable, Received},
+    conn::{ConnFrame, ConnTable, Received, Side},
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -51,6 +51,10 @@ struct Bound {
     socket: TcpListener,
     accepting: bool,
 }
+struct ChannelWrite {
+    id: u64,
+    written: Option<u64>,
+}
 struct State {
     generation: u64,
     maximum: usize,
@@ -64,7 +68,7 @@ struct State {
     outbox: Outbox,
     grants: VecDeque<u64>,
     readers: VecDeque<u64>,
-    channel_write: Option<u64>,
+    channel_write: Option<ChannelWrite>,
     service_ready: bool,
 }
 impl State {
@@ -72,7 +76,7 @@ impl State {
         Ok(Self {
             generation: generation.get(),
             maximum,
-            table: ConnTable::new(maximum),
+            table: ConnTable::new(Side::Front, maximum),
             clients: BTreeMap::new(),
             listeners: [None, None],
             binding: [false, false],
@@ -105,7 +109,14 @@ impl State {
             .receive(frame.id, connection)
             .map_err(|e| fault(e.code()))?;
         match received {
-            Received::Late { .. } => Ok(()),
+            Received::Late { .. } => {
+                if matches!(frame.body, Body::Abort(_)) {
+                    // The table can close before the retained transport's
+                    // shutdown finishes. A late destroy still cancels it.
+                    self.remove(frame.id).await;
+                }
+                Ok(())
+            }
             Received::Aborted => {
                 self.remove(frame.id).await;
                 Ok(())
@@ -139,7 +150,9 @@ impl State {
                     .push(StreamPacket::End)
                     .map_err(io::Error::other)
             }
-            Received::Opened => Err(fault("child cannot open connections")),
+            Received::Opened | Received::Written { .. } => {
+                Err(fault("unexpected child connection frame"))
+            }
         }
     }
     fn receive_data(&mut self, id: u64, bytes: Vec<u8>) -> io::Result<()> {
@@ -312,7 +325,13 @@ impl State {
         if self.channel_write.is_none()
             && let Some(frame) = self.outbox.pop()
         {
-            self.channel_write = Some(frame.frame().id);
+            self.channel_write = Some(ChannelWrite {
+                id: frame.frame().id,
+                written: match frame.frame().body {
+                    Body::Written(total) => Some(total),
+                    _ => None,
+                },
+            });
             channel.submit(frame)?;
         }
         Ok(())
@@ -376,7 +395,12 @@ impl State {
                 lease,
                 result,
             } => self.read(id, bytes, lease, result).await,
-            NetworkEvent::Written { id, ended, result } => {
+            NetworkEvent::Written {
+                id,
+                bytes,
+                ended,
+                result,
+            } => {
                 if !self.clients.contains_key(&id) {
                     return Ok(());
                 }
@@ -386,6 +410,15 @@ impl State {
                 let client = self.clients.get_mut(&id).expect("retained client");
                 client.writing = false;
                 client.write_ended |= ended;
+                if bytes > 0 {
+                    client.written = client
+                        .written
+                        .checked_add(bytes as u64)
+                        .ok_or_else(|| fault("written overflow"))?;
+                    self.outbox
+                        .control(id, Body::Written(client.written))
+                        .map_err(io::Error::other)?;
+                }
                 Ok(())
             }
         }
@@ -454,7 +487,7 @@ impl State {
         Ok(())
     }
     async fn remove(&mut self, id: u64) {
-        self.outbox.discard_stream(id);
+        self.outbox.discard_connection(id);
         self.grants.retain(|queued| *queued != id);
         self.readers.retain(|queued| *queued != id);
         if let Some(client) = self.clients.remove(&id) {
@@ -468,14 +501,41 @@ impl State {
             .filter_map(|(id, client)| {
                 (client.read_ended
                     && client.write_ended
+                    && client.written == client.acknowledged
                     && !self.outbox.has_stream(*id)
-                    && self.channel_write != Some(*id))
+                    && self
+                        .channel_write
+                        .as_ref()
+                        .is_none_or(|write| write.id != *id))
                 .then_some(*id)
             })
             .collect();
         for id in done {
             self.remove(id).await;
         }
+    }
+    fn channel_finished(&mut self, finished: crate::channel::WriteFinished) -> io::Result<()> {
+        finished.result?;
+        let write = self
+            .channel_write
+            .take()
+            .ok_or_else(|| fault("unexpected write receipt"))?;
+        if write.id != finished.id {
+            return Err(fault("write receipt mismatch"));
+        }
+        if let Some(total) = write.written {
+            // The final receipt must reach the channel before it closes the
+            // table. A crossing abort may already have retired this client.
+            if self
+                .table
+                .send(write.id, ConnFrame::Written(total))
+                .map_err(|error| fault(error.code()))?
+                && let Some(client) = self.clients.get_mut(&write.id)
+            {
+                client.acknowledged = total;
+            }
+        }
+        Ok(())
     }
     async fn close(mut self) {
         self.listeners = [None, None];
@@ -663,11 +723,7 @@ async fn handle_event(
         }
         Event::Output(output) => {
             let finished = output.ok_or_else(|| fault("channel writer stopped"))?;
-            finished.result?;
-            if state.channel_write != Some(finished.id) {
-                return Err(fault("write receipt mismatch"));
-            }
-            state.channel_write = None;
+            state.channel_finished(finished)?;
         }
         Event::Accepted(listener, socket) => state.accepted(listener, socket?, events).await?,
         Event::Bound(bound) => {
