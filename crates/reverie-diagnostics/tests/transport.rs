@@ -20,6 +20,10 @@ fn entry() {
     let Ok(mode) = std::env::var("OWNED_DIAGNOSTIC") else {
         return;
     };
+    if std::env::var_os("OWNED_DIAGNOSTIC_STDOUT").is_some() {
+        stdout_entry(&mode);
+        return;
+    }
     if mode == "blocking-control" {
         std::io::stderr().write_all(b"owned-diagnostic\n").unwrap();
         return;
@@ -64,6 +68,42 @@ fn entry() {
         result.unwrap();
     }
 }
+fn stdout_entry(mode: &str) {
+    let null = OpenOptions::new().write(true).open("/dev/null").unwrap();
+    // SAFETY: this is a separately owned test process. Its harness output goes
+    // to /dev/null; only this synchronous call borrows the controlled fd2 OFD
+    // as fd1. Restore before the harness prints any completion text.
+    assert_eq!(unsafe { libc::dup2(2, 1) }, 1);
+    // Make stderr a different destination: a stdout implementation accidentally
+    // targeting fd2 cannot satisfy the regular-file/closed-fd controls.
+    assert_eq!(unsafe { libc::dup2(null.as_raw_fd(), 2) }, 2);
+    if mode == "closed" {
+        assert_eq!(unsafe { libc::close(1) }, 0);
+    }
+    let data = if mode == "bound" {
+        vec![b'x'; reverie_diagnostics::MAX_BYTES * 2]
+    } else {
+        b"owned-diagnostic\n".to_vec()
+    };
+    let result = reverie_diagnostics::stdout(&data);
+    assert_eq!(unsafe { libc::dup2(null.as_raw_fd(), 1) }, 1);
+    match mode {
+        "closed" => assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EBADF)),
+        "readonly" => assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied),
+        "regular" | "bound" => result.unwrap(),
+        _ => assert!(result.is_err()),
+    }
+}
+fn spawn_stdout(mode: &str, output: OwnedFd) -> Child {
+    Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", ENTRY, "--nocapture"])
+        .env("OWNED_DIAGNOSTIC", mode)
+        .env("OWNED_DIAGNOSTIC_STDOUT", "1")
+        .stderr(Stdio::from(output))
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap()
+}
 fn spawn(mode: &str, stderr: OwnedFd) -> Child {
     Command::new(std::env::current_exe().unwrap())
         .args(["--exact", ENTRY, "--nocapture"])
@@ -83,6 +123,14 @@ fn completes(child: &mut Child, duration: Duration) -> bool {
         std::thread::sleep(Duration::from_millis(5));
     }
     false
+}
+fn finish_owned(child: &mut Child) {
+    let done = completes(child, Duration::from_secs(2));
+    if !done {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    assert!(done);
 }
 fn flags(fd: i32) -> i32 {
     // SAFETY: tests borrow live owned descriptors; F_GETFL changes nothing.
@@ -237,6 +285,77 @@ fn regular_file_offset_append_and_byte_bound_remain_exact() {
         .unwrap();
     let mut child = spawn("bound", file.into());
     assert!(completes(&mut child, Duration::from_secs(2)));
+    assert_eq!(
+        fs::read(path).unwrap().len(),
+        reverie_diagnostics::MAX_BYTES
+    );
+}
+
+#[test]
+fn stdout_closed_and_readonly_descriptors_refuse_without_replacement() {
+    let tree = Tree::new();
+    let path = tree.0.join("readonly");
+    fs::write(&path, b"unchanged").unwrap();
+    for mode in ["closed", "readonly"] {
+        let reader = File::open(&path).unwrap();
+        let before = flags(reader.as_raw_fd());
+        let mut child = spawn_stdout(mode, reader.try_clone().unwrap().into());
+        finish_owned(&mut child);
+        assert_eq!(flags(reader.as_raw_fd()), before);
+        assert_eq!(fs::read(&path).unwrap(), b"unchanged");
+    }
+}
+
+#[test]
+fn stdout_full_fifo_and_socket_return_without_changing_the_inherited_ofd_flags() {
+    let (_reader, writer) = full_pipe();
+    let before = flags(writer.as_raw_fd());
+    let mut child = spawn_stdout("full", writer.try_clone().unwrap().into());
+    finish_owned(&mut child);
+    assert_eq!(flags(writer.as_raw_fd()), before);
+    let (_reader, mut writer) = UnixStream::pair().unwrap();
+    writer.set_nonblocking(true).unwrap();
+    fill(&mut writer);
+    writer.set_nonblocking(false).unwrap();
+    let before = flags(writer.as_raw_fd());
+    let mut child = spawn_stdout("full", writer.try_clone().unwrap().into());
+    finish_owned(&mut child);
+    assert_eq!(flags(writer.as_raw_fd()), before);
+}
+
+#[test]
+fn stdout_regular_file_shares_offset_append_and_the_same_byte_bound() {
+    let tree = Tree::new();
+    for append in [false, true] {
+        let path = tree.0.join(format!("stdout-{append}"));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create_new(true)
+            .mode(0o600)
+            .append(append)
+            .open(&path)
+            .unwrap();
+        file.write_all(b"prefix").unwrap();
+        if append {
+            file.rewind().unwrap();
+        }
+        let before = flags(file.as_raw_fd());
+        let mut child = spawn_stdout("regular", file.try_clone().unwrap().into());
+        finish_owned(&mut child);
+        assert_eq!(file.stream_position().unwrap(), 23);
+        assert_eq!(fs::read(&path).unwrap(), b"prefixowned-diagnostic\n");
+        assert_eq!(flags(file.as_raw_fd()), before);
+    }
+    let path = tree.0.join("stdout-bound");
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .unwrap();
+    let mut child = spawn_stdout("bound", file.into());
+    finish_owned(&mut child);
     assert_eq!(
         fs::read(path).unwrap().len(),
         reverie_diagnostics::MAX_BYTES
