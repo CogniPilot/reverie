@@ -6,6 +6,7 @@ pub mod kernel_accounting;
 pub mod kernel_mounts;
 pub mod lease_policy;
 mod legacy_json;
+pub mod memory;
 pub mod operations_v1;
 pub mod profiles_v1;
 pub mod reservation_engine;

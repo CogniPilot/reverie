@@ -1,5 +1,23 @@
 # Named compatibility codecs
 
+`memory` preserves the existing SQLite memory metadata/source fields and the
+embedding request/response data contract. The one shared private JSON parser can
+retain a flat insertion-order companion graph: last-value duplicate replacement
+keeps the first key position, including nested replaced objects and lone-surrogate
+keys. Named memory fields use Python `str` JSON; HTTP response bytes retain the
+separate BOM/UTF16/32 detector. Both preserve the existing default Python constants
+and 4300-digit integer behavior. Other named parse policies remain unchanged.
+
+The graph, traversal and builder stay private. Public memory data exposes whole
+named fields and the specific dream-release change, with the original default
+spacing, truthiness, recall coercion and `as_dict` behavior. The latter omits the
+embedding. HTTP response dimensions are available before numerical coercion;
+response vectors retain the source's sequence and float conversion rules.
+
+This checkpoint contains no HTTP transport, provider probing, SQLite connection
+or selected service consumer. Runtime proxy/redirect/fallback behavior and complete
+database interoperability require their own composed service qualification.
+
 `operations_v1` preserves the closed resource-operation journal, compact sorted
 ASCII bytes and named request/observation/operation/scope fingerprints. It uses
 the existing private JSON/encoding owners, rejects duplicate fields, JSON floats,
