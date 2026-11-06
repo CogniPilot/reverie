@@ -1,5 +1,20 @@
 # Linux native adapters
 
+`captured_client` privately owns the pipe capture and retained child settlement
+used by `engine_metadata`. Its command snapshot, argv and per-call output/deadline
+policy come from fixed purpose wrappers. It exposes no public arbitrary-command
+endpoint and supplies no engine, session or owner permission. Installing-service
+variants must borrow the same actual context so a different policy cannot bypass
+a pending constructor or pipe writer. The metadata wrapper retains its closed
+CID/query allowlist, 20-second clamp, 8 MiB combined bound and UTF-8/exit checks.
+
+`ReadonlyEngine::settle_owned` settles retained clients while allowing later
+queries after verified cleanup. `close` first permanently seals admission under
+the same mutex used for a new job, then settles only its exact retained client.
+Neither method retries a query or confirms an engine/API effect. The existing
+pidfd handoff, ordered exec, child signals and diagnostic syscall owners remain
+unchanged; process groups and PTY relay are separate purpose policies.
+
 `memory_configuration::MemoryConfiguration` captures named settings once in
 the actual calling namespace. Explicit instance paths use the shared Python
 path resolver and fixed NSS home lookup; relative data is placed beside the

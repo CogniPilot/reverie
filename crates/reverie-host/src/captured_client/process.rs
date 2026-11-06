@@ -1,6 +1,7 @@
 use super::control::Job;
 use super::{
-    CleanupFault, EngineBootstrap, EngineError, EngineFault, MAX_OUTPUT_BYTES, Result, native,
+    CapturedOutput, CleanupFault, Error as EngineError, Fault as EngineFault, InstalledCommand,
+    Result, native,
 };
 use std::{ffi::OsString, io, os::fd::OwnedFd, time::Instant};
 
@@ -19,7 +20,7 @@ pub(super) struct Process {
     opaque: bool,
 }
 impl Process {
-    pub(super) fn start(&mut self, bootstrap: &EngineBootstrap, args: &[OsString]) -> Result<()> {
+    pub(super) fn start(&mut self, bootstrap: &InstalledCommand, args: &[OsString]) -> Result<()> {
         let preparation = native::Handshake::new();
         #[cfg(test)]
         let preparation = bootstrap.hooks.prepared(preparation);
@@ -29,6 +30,9 @@ impl Process {
             .as_ref()
             .expect("prepared handshake")
             .configure(&mut command);
+        bootstrap
+            .configure_exact(&mut command, args)
+            .map_err(|_| EngineError::new(EngineFault::Spawn))?;
         self.attempted = true;
         #[cfg(test)]
         bootstrap.hooks.before_spawn();
@@ -145,7 +149,9 @@ impl Process {
                 job.hooks
                     .reads
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if self.output.iter().map(Vec::len).sum::<usize>() + count > MAX_OUTPUT_BYTES {
+                if self.output.iter().map(Vec::len).sum::<usize>() + count
+                    > job.policy.maximum_output
+                {
                     return Err(EngineError::new(EngineFault::OutputBound));
                 }
                 self.output[index].extend_from_slice(&buffer[..count]);
@@ -196,7 +202,7 @@ impl Process {
             std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));
         }
     }
-    pub(super) fn observe(&mut self, deadline: Instant, job: &Job) -> Result<String> {
+    pub(super) fn observe(&mut self, deadline: Instant, job: &Job) -> Result<CapturedOutput> {
         loop {
             if job.cancelled() {
                 return Err(EngineError::new(EngineFault::Cancelled));
@@ -213,14 +219,19 @@ impl Process {
             }
             self.poll(deadline);
         }
-        let stdout = String::from_utf8(std::mem::take(&mut self.output[0]))
-            .map_err(|_| EngineError::new(EngineFault::Utf8))?;
+        std::str::from_utf8(&self.output[0]).map_err(|_| EngineError::new(EngineFault::Utf8))?;
         std::str::from_utf8(&self.output[1]).map_err(|_| EngineError::new(EngineFault::Utf8))?;
-        self.output[1].clear();
-        if self.status != Some(true) {
+        let status = self
+            .status
+            .expect("complete process has actual exit status");
+        if job.policy.successful_exit && !status {
             return Err(EngineError::new(EngineFault::Exit));
         }
-        Ok(stdout)
+        Ok(CapturedOutput {
+            stdout: std::mem::take(&mut self.output[0]),
+            stderr: std::mem::take(&mut self.output[1]),
+            succeeded: status,
+        })
     }
     pub(super) fn cleanup(&mut self, deadline: Instant, job: &Job) -> bool {
         if self.prepare_streams().is_err() {
@@ -275,6 +286,7 @@ impl Process {
         }
     }
     pub(super) fn report(&self, mut error: EngineError) -> EngineError {
+        error.may_have_started |= self.started;
         error.cleanup.extend(
             self.faults
                 .iter()
@@ -296,10 +308,10 @@ impl Process {
     }
     pub(super) fn finish(
         &mut self,
-        result: Result<String>,
+        result: Result<CapturedOutput>,
         deadline: Instant,
         job: &Job,
-    ) -> Result<String> {
+    ) -> Result<CapturedOutput> {
         match result {
             Ok(value) => {
                 self.close_identity();

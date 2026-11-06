@@ -1,4 +1,5 @@
 //! Linux host observations. Returned data never grants owner or effect authority.
+mod captured_client;
 pub mod device_policy;
 pub mod embeddings;
 pub mod engine_metadata;

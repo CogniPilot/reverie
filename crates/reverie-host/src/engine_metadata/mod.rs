@@ -3,8 +3,6 @@
 //! commands, owner authorization, engine identity or mutation permission.
 mod bootstrap;
 mod control;
-mod native;
-mod process;
 #[cfg(test)]
 pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;
@@ -67,19 +65,7 @@ pub enum EngineFault {
     Finalization,
     Supervisor,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CleanupFault {
-    PendingStart,
-    Unreaped,
-    OpenPipes,
-    Signal,
-    Identity,
-    StdoutClose,
-    StderrClose,
-    PidfdClose,
-    HandshakeClose,
-    Supervisor,
-}
+pub use crate::captured_client::CleanupFault;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EngineError {
     fault: EngineFault,
@@ -92,13 +78,6 @@ impl EngineError {
             fault,
             cleanup: Vec::new(),
             uncertain: false,
-        }
-    }
-    fn pending(fault: EngineFault, cleanup: CleanupFault) -> Self {
-        Self {
-            fault,
-            cleanup: vec![cleanup],
-            uncertain: true,
         }
     }
     pub fn fault(&self) -> EngineFault {
@@ -125,3 +104,27 @@ impl fmt::Display for EngineError {
 }
 impl std::error::Error for EngineError {}
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+impl From<crate::captured_client::Error> for EngineError {
+    fn from(error: crate::captured_client::Error) -> Self {
+        use crate::captured_client::Fault;
+        let fault = match error.fault {
+            Fault::Busy => EngineFault::Busy,
+            Fault::Cancelled => EngineFault::Cancelled,
+            Fault::Deadline => EngineFault::Deadline,
+            Fault::Spawn => EngineFault::Spawn,
+            Fault::Identity => EngineFault::Identity,
+            Fault::Read => EngineFault::Read,
+            Fault::OutputBound => EngineFault::OutputBound,
+            Fault::Utf8 => EngineFault::Utf8,
+            Fault::Exit => EngineFault::Exit,
+            Fault::Finalization => EngineFault::Finalization,
+            Fault::Supervisor => EngineFault::Supervisor,
+        };
+        Self {
+            fault,
+            cleanup: error.cleanup,
+            uncertain: error.uncertain,
+        }
+    }
+}

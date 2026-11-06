@@ -8,58 +8,12 @@ use std::{
     process::Command,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Default)]
-pub(super) struct Hooks {
-    pub gate: Option<Arc<Gate>>,
-    pub starts: Arc<AtomicUsize>,
-    pub reap_blocked: Arc<AtomicBool>,
-    pub close_failed: Arc<AtomicBool>,
-    pub reads: Arc<AtomicUsize>,
-    pub preparation_failed: Arc<AtomicBool>,
-}
-#[derive(Default)]
-pub(super) struct Gate {
-    entered: AtomicBool,
-    released: AtomicBool,
-}
-impl Hooks {
-    pub(super) fn prepared(
-        &self,
-        result: std::result::Result<native::Handshake, native::PreparationError>,
-    ) -> std::result::Result<native::Handshake, native::PreparationError> {
-        if !self.preparation_failed.swap(false, Ordering::SeqCst) {
-            return result;
-        }
-        if let Ok(mut handshake) = result {
-            let _ = handshake.finish();
-        }
-        Err(native::PreparationError { close_failed: true })
-    }
-    pub(super) fn before_spawn(&self) {
-        self.starts.fetch_add(1, Ordering::SeqCst);
-        if let Some(gate) = &self.gate {
-            gate.entered.store(true, Ordering::SeqCst);
-            while !gate.released.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-    }
-    pub(super) fn defer_reap(&self) -> bool {
-        self.reap_blocked.load(Ordering::SeqCst)
-    }
-    pub(super) fn closed(&self, index: usize, value: std::io::Result<()>) -> std::io::Result<()> {
-        if index == 0 && self.close_failed.swap(false, Ordering::SeqCst) {
-            Err(std::io::Error::from_raw_os_error(libc::EIO))
-        } else {
-            value
-        }
-    }
-}
+pub(super) use crate::captured_client::test_hooks::{Gate, Hooks};
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static FIXTURE: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) fn program() -> &'static Path {
@@ -121,6 +75,74 @@ fn deadline() -> Instant {
 }
 fn settle(engine: &ReadonlyEngine) {
     engine.settle_owned(deadline()).unwrap();
+}
+#[test]
+fn different_private_policies_share_the_same_pending_context_and_closed_admission() {
+    use crate::captured_client::Policy;
+    let tree = Tree::new();
+    let mut bootstrap = tree.bootstrap("stall");
+    let gate = Arc::new(Gate::default());
+    bootstrap.hooks.gate = Some(Arc::clone(&gate));
+    let starts = Arc::clone(&bootstrap.hooks.starts);
+    let engine = Arc::new(ReadonlyEngine::new(bootstrap));
+    let other = Arc::clone(&engine);
+    let worker = std::thread::spawn(move || {
+        other.client.run(
+            vec![OsString::from("fixed-owned-test")],
+            Instant::now() + Duration::from_millis(80),
+            &CancellationToken::new(),
+            Policy {
+                maximum: Duration::from_secs(20),
+                maximum_output: 4 * 1024 * 1024,
+                successful_exit: false,
+            },
+        )
+    });
+    let until = deadline();
+    while !gate.entered.load(Ordering::Acquire) {
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let error = worker.join().unwrap().err().unwrap();
+    assert!(error.is_uncertain());
+    assert_eq!(
+        engine
+            .query(
+                EngineQuery::InventoryIds,
+                deadline(),
+                &CancellationToken::new()
+            )
+            .unwrap_err()
+            .fault(),
+        EngineFault::Busy
+    );
+    assert!(engine.close(Instant::now()).is_err());
+    let still_pending = engine
+        .query(
+            EngineQuery::InventoryIds,
+            deadline(),
+            &CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(still_pending.fault(), EngineFault::Busy);
+    assert!(
+        still_pending.is_uncertain(),
+        "sealing admission cannot hide retained cleanup uncertainty"
+    );
+    gate.released.store(true, Ordering::Release);
+    engine.close(deadline()).unwrap();
+    assert_eq!(
+        engine
+            .query(
+                EngineQuery::InventoryIds,
+                deadline(),
+                &CancellationToken::new()
+            )
+            .unwrap_err()
+            .fault(),
+        EngineFault::Busy
+    );
+    assert_eq!(starts.load(Ordering::Acquire), 1);
 }
 fn expected_argv(value: &serde_json::Value, name: &str) -> Vec<String> {
     value[name]
