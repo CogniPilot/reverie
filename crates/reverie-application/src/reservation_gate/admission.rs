@@ -186,6 +186,34 @@ impl Admission {
         self.finished = true;
         self.cleanup()
     }
+    pub(super) fn finish_native_start(
+        self,
+        claim: &super::preparation::RetainedPreparation,
+        intent: &super::preparation_start::ProtectedStartIntent,
+    ) -> Result<()> {
+        self.native_start_boundary(claim, intent, true).map(|_| ())
+    }
+    pub(super) fn inspect_native_start(
+        self,
+        claim: &super::preparation::RetainedPreparation,
+        intent: &super::preparation_start::ProtectedStartIntent,
+    ) -> Result<super::preparation_start::StartQualificationFacts> {
+        self.native_start_boundary(claim, intent, false)
+    }
+    fn native_start_boundary(
+        mut self,
+        claim: &super::preparation::RetainedPreparation,
+        intent: &super::preparation_start::ProtectedStartIntent,
+        allow_running: bool,
+    ) -> Result<super::preparation_start::StartQualificationFacts> {
+        let result = if Arc::ptr_eq(&self.gate, &claim.gate) {
+            claim.qualify_intent(intent, allow_running)
+        } else {
+            Err(GateError::Refused("RESOURCE_NATIVE_PERMIT_REQUIRED"))
+        };
+        self.finished = true;
+        finalized(result, self.cleanup())
+    }
     fn cleanup(&self) -> Result<()> {
         let closed = close_active(&self.active);
         let released = match self.gate.state.lock() {

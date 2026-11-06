@@ -1,5 +1,16 @@
 # Reverie application services
 
+`RetainedPreparation::begin_native_start` reuses the live protected claim,
+original source baseline and fresh complete qualification before the real
+journal STARTING/version-4 transition. Its exclusive start-intent receipt and
+second terminal qualification must both finish before returning the opaque
+same-owner join. A failure closes the retained store and keeps the durable
+claim; neither a receipt nor a cold journal read can reconstruct that join.
+`inspect_native_start` returns readonly release facts through that same live
+owner. It does not stop a source, bind a launch request, create/start a laptop,
+acknowledge completion or authorize an API caller. Those actual producers and
+the ordinary/no-reservations durable reconciliation flow remain required.
+
 `worker_validation::{validate_captured,load_owner_config}` composes the complete
 ordered worker validator and its compatible owner-file loader. The returned
 snapshot retains original data and readonly observations; no native mount,

@@ -332,3 +332,13 @@ The application supplies the atomic registry transition. Its complete canonical
 launch caller, create/private-record/start, stop/recovery, viewer and whole-service
 shutdown consumers remain required.
 No laptop-created/started object or selected backend is claimed by network success.
+
+Protected-start qualification observes the captured old PID incarnation both
+before and after its fixed cgroup/events check, preserves all captured storage
+identity tuple fields and visits original account sources in capture order.
+Missing old processes/cgroups remain source-compatible; populated, rebound,
+malformed or inaccessible cgroups cannot prove release. In particular, an owned
+UID-1000 differential witness establishes that Python `lexists` silently accepts
+an inaccessible ancestor over a populated cgroup. The Rust shared fixed-kernel
+reader deliberately preserves its PermissionDenied refusal instead of granting
+false absence credit. These are observations, not a held writer-release proof.

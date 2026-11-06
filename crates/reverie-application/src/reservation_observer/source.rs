@@ -3,6 +3,23 @@ use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
+    fn original_target_storage(
+        &self,
+        paths: &StoragePaths,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        end: Instant,
+    ) -> Result<()>;
+    fn old_source_released(
+        &self,
+        row: &ContainerRow,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        end: Instant,
+    ) -> Result<()>;
+    fn original_accounts_current(
+        &self,
+        runtime: &reverie_contracts::reservation_baseline::OriginalRuntimeTail,
+        end: Instant,
+    ) -> Result<()>;
     fn inspect_laptop(
         &self,
         name: &reverie_core::worker_laptop::WorkerContainerName,
@@ -65,6 +82,29 @@ impl Installed {
     }
 }
 impl Source for Installed {
+    fn original_target_storage(
+        &self,
+        paths: &StoragePaths,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        end: Instant,
+    ) -> Result<()> {
+        Ok(self.kernel.original_target_storage(paths, baseline, end)?)
+    }
+    fn old_source_released(
+        &self,
+        row: &ContainerRow,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        end: Instant,
+    ) -> Result<()> {
+        Ok(self.kernel.old_source_released(row, baseline, end)?)
+    }
+    fn original_accounts_current(
+        &self,
+        runtime: &reverie_contracts::reservation_baseline::OriginalRuntimeTail,
+        end: Instant,
+    ) -> Result<()> {
+        Ok(self.kernel.original_accounts_current(runtime, end)?)
+    }
     fn inspect_laptop(
         &self,
         name: &reverie_core::worker_laptop::WorkerContainerName,

@@ -1,6 +1,8 @@
 //! Original source-runtime baseline DATA. This cannot mint a retained claim,
 //! process birth, source-stop permission, preparation owner or launch permit.
 mod accounts;
+mod start;
+mod start_records;
 use crate::{
     legacy_json::{Node, Text, Value},
     reservation_engine::{ContainerRow, NativeLimitBinding, NativeStorageBinding},
@@ -8,6 +10,8 @@ use crate::{
 };
 pub use accounts::{AccountDeclaration, AccountDeclarations, ObservedAccount};
 use reverie_core::{decimal::UnsignedInteger, posix_path::PosixPath};
+pub use start::StartDataError;
+pub use start_records::{StartIntentRecord, assert_prepared_for_start};
 use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,10 +99,18 @@ pub struct OriginalBaselineFields<'a> {
 pub struct OriginalSourceBaseline {
     value: Value,
     source: reverie_core::ids::ContainerId,
+    native: NativeLimitBinding,
+    runtime: OriginalRuntimeTail,
 }
 impl OriginalSourceBaseline {
     pub fn source_container(&self) -> &reverie_core::ids::ContainerId {
         &self.source
+    }
+    pub fn native(&self) -> &NativeLimitBinding {
+        &self.native
+    }
+    pub fn runtime(&self) -> &OriginalRuntimeTail {
+        &self.runtime
     }
     pub(crate) fn data(&self) -> &Value {
         &self.value
@@ -166,6 +178,8 @@ impl OriginalSourceBaseline {
         Self {
             value,
             source: fields.source.id().clone(),
+            native: fields.native.clone(),
+            runtime: fields.runtime.clone(),
         }
     }
     pub fn canonical_bytes(&self) -> Result<Vec<u8>> {

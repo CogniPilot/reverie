@@ -6,6 +6,15 @@ pub struct NativeLimitBinding {
     memory: UnsignedInteger,
     container: ContainerId,
 }
+impl Clone for NativeLimitBinding {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.deep_clone(),
+            memory: self.memory.clone(),
+            container: self.container.clone(),
+        }
+    }
+}
 impl NativeLimitBinding {
     pub fn from_observed_data(
         row: &ContainerRow,
@@ -66,6 +75,14 @@ impl NativeLimitBinding {
     }
     pub fn pid(&self) -> Result<UnsignedInteger> {
         unsigned(field(object(&self.value)?, "pid"))
+    }
+    pub fn start_matches(&self, expected: &str) -> Result<bool> {
+        Ok(text(field(object(&self.value)?, "start"))
+            .ok_or(EngineDataError::State)?
+            .0
+            .iter()
+            .copied()
+            .eq(expected.chars().map(u32::from)))
     }
     pub(crate) fn data(&self) -> &Value {
         &self.value

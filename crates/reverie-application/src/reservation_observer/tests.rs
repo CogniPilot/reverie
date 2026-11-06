@@ -18,6 +18,8 @@ struct State {
     on_query: Option<Box<dyn FnMut() -> Result<()> + Send>>,
     original_runtime: Option<reverie_contracts::reservation_baseline::OriginalRuntimeTail>,
     laptop_outputs: VecDeque<reverie_host::broker_engine::LaptopInspectOutput>,
+    start_checks: bool,
+    old_release: Option<&'static str>,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -44,6 +46,8 @@ impl Fixture {
             on_query: None,
             original_runtime: None,
             laptop_outputs: VecDeque::new(),
+            start_checks: false,
+            old_release: None,
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -70,6 +74,12 @@ impl Fixture {
             );
         }
     }
+    pub(crate) fn replace_inventory(&self, rows: &[Value]) {
+        self.0.lock().unwrap().outputs.clear();
+        for _ in 0..500 {
+            self.inventory(rows);
+        }
+    }
     pub(crate) fn events(&self) -> Vec<String> {
         self.0.lock().unwrap().events.clone()
     }
@@ -94,8 +104,72 @@ impl Fixture {
     ) {
         self.0.lock().unwrap().original_runtime = Some(tail);
     }
+    pub(crate) fn native_start_facts(&self) {
+        self.0.lock().unwrap().start_checks = true;
+    }
+    pub(crate) fn old_release(&self, result: &'static str) {
+        self.0.lock().unwrap().old_release = Some(result);
+    }
 }
 impl Source for Arc<Fixture> {
+    fn original_target_storage(
+        &self,
+        _: &StoragePaths,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        _: Instant,
+    ) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("start-storage".into());
+        if !state.start_checks {
+            return Err(ObserverError::Refused("FIXTURE_START_FACTS_NOT_SELECTED"));
+        }
+        let facts = state
+            .storage
+            .ok_or(ObserverError::Refused("FIXTURE_STORAGE_NOT_SELECTED"))?;
+        for (destination, identity) in ["/home/agent", "/nix", "/scratch"].into_iter().zip(facts) {
+            baseline
+                .assert_original_storage_identity(destination, identity)
+                .map_err(|error| {
+                    ObserverError::Kernel(
+                        reverie_host::reservation_kernel::ReservationKernelError::StartData(error),
+                    )
+                })?;
+        }
+        Ok(())
+    }
+    fn old_source_released(
+        &self,
+        row: &ContainerRow,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        _: Instant,
+    ) -> Result<()> {
+        baseline.assert_old_stopped_state(row).map_err(|error| {
+            ObserverError::Kernel(
+                reverie_host::reservation_kernel::ReservationKernelError::StartData(error),
+            )
+        })?;
+        let mut state = self.0.lock().unwrap();
+        state.events.push("old-release".into());
+        match state.old_release {
+            Some("released") => Ok(()),
+            Some(code) => Err(ObserverError::Refused(code)),
+            None => Err(ObserverError::Refused("FIXTURE_OLD_RELEASE_NOT_SELECTED")),
+        }
+    }
+    fn original_accounts_current(
+        &self,
+        runtime: &reverie_contracts::reservation_baseline::OriginalRuntimeTail,
+        _: Instant,
+    ) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("start-accounts".into());
+        if !state.start_checks || !runtime.accounts().is_empty() {
+            return Err(ObserverError::Refused(
+                "FIXTURE_START_ACCOUNTS_NOT_SELECTED",
+            ));
+        }
+        Ok(())
+    }
     fn inspect_laptop(
         &self,
         name: &reverie_core::worker_laptop::WorkerContainerName,

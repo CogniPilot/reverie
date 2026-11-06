@@ -122,3 +122,72 @@ fn terminal_named_stamp_accepts_unchanged_data_and_refuses_in_place_mutation() {
         "RESERVATION_CLAIM_CHANGED"
     );
 }
+fn prepared(tree: &Tree) -> (OperationStore, OperationHandle, OperationView) {
+    let store = tree.initialized();
+    let (_, handle) = tree.claim(&store);
+    store
+        .begin_effect(&scope(), &handle, Effect::Prepare, version(1))
+        .unwrap();
+    let view = store
+        .record_ack(&scope(), &handle, Effect::Prepare, digest(9), version(2))
+        .unwrap();
+    (store, handle, view)
+}
+#[test]
+fn native_start_snapshot_is_exact_prepared_or_starting_data_after_all_reader_closes() {
+    for starting in [false, true] {
+        let tree = Tree::new();
+        let (store, handle, prepared) = prepared(&tree);
+        let view = if starting {
+            store
+                .begin_effect(&scope(), &handle, Effect::Start, version(3))
+                .unwrap()
+        } else {
+            prepared
+        };
+        store.close().unwrap();
+        let guard = Arc::new(TerminalGuard::default());
+        let reader = OperationStore::open(&tree.root, guard.clone(), None).unwrap();
+        let (document, stamp) = reader.into_native_start_snapshot(&scope(), &view).unwrap();
+        assert_eq!(tree.descriptor_count(), 0);
+        assert_eq!(
+            &document.operations()[&view.record().data().id],
+            view.record()
+        );
+        assert_eq!(guard.ordinary.load(Ordering::SeqCst), 0);
+        stamp.assert_native_start_named_current().unwrap();
+        let saved = tree.root.join("preserved-native-document");
+        fs::rename(tree.root.join("operations.json"), &saved).unwrap();
+        fs::write(tree.root.join("operations.json"), fs::read(saved).unwrap()).unwrap();
+        assert_eq!(
+            stamp
+                .assert_native_start_named_current()
+                .unwrap_err()
+                .code(),
+            "RESOURCE_NATIVE_CLAIM_CHANGED"
+        );
+    }
+}
+#[test]
+fn stale_native_start_view_and_checked_store_close_both_survive_finalization() {
+    let tree = Tree::new();
+    let (store, handle, prepared) = prepared(&tree);
+    store
+        .begin_effect(&scope(), &handle, Effect::Start, version(3))
+        .unwrap();
+    store.close().unwrap();
+    faults::STATE.with(|value| value.borrow_mut().close = Some(CloseRole::Store));
+    let error = tree
+        .open()
+        .into_native_start_snapshot(&scope(), &prepared)
+        .err()
+        .unwrap();
+    match error {
+        JournalError::Finalization { primary, secondary } => {
+            assert_eq!(primary.code(), "RESOURCE_NATIVE_CLAIM_CHANGED");
+            assert_eq!(secondary.code(), "LEDGER_UNAVAILABLE");
+        }
+        other => panic!("expected both native snapshot errors, got {other:?}"),
+    }
+    assert_eq!(tree.descriptor_count(), 0);
+}

@@ -15,6 +15,8 @@ mod baseline_cases;
 mod custody_cases;
 #[path = "tests_oracle.rs"]
 mod oracle_cases;
+#[path = "tests_source_release.rs"]
+mod source_release_cases;
 #[path = "tests_storage.rs"]
 mod storage_cases;
 type Hook = Box<dyn FnOnce(&Fixture, &PosixPath)>;
@@ -118,7 +120,7 @@ impl Source for Fixture {
         Ok(raw)
     }
     fn exists(&self, p: &PosixPath) -> Result<bool> {
-        Ok(fs::symlink_metadata(self.actual(p)).is_ok())
+        Installed.exists(&PosixPath::try_new(&native::python_text(&self.actual(p))).unwrap())
     }
     fn resolve(&self, p: &PosixPath) -> Result<PosixPath> {
         Ok(native::resolve_strict_text(&p.codepoints())?)

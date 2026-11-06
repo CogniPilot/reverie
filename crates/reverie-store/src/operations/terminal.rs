@@ -10,6 +10,7 @@ pub struct TerminalJournalStamp {
 enum TerminalSelection<'a> {
     Exact(&'a OperationDocument),
     Preparation(&'a OperationView),
+    NativeStart(&'a OperationView),
 }
 impl TerminalSelection<'_> {
     fn assert_document(&self, document: &OperationDocument) -> Result<()> {
@@ -31,6 +32,22 @@ impl TerminalSelection<'_> {
                     "RESOURCE_PREPARATION_CLAIM_CHANGED",
                 )
             }
+            Self::NativeStart(view) => {
+                let expected = view.record();
+                need(
+                    document
+                        .operations()
+                        .get(&expected.data().id)
+                        .is_some_and(|operation| {
+                            operation == expected
+                                && matches!(
+                                    (operation.data().state, operation.data().version.get()),
+                                    (OperationState::Prepared, 3) | (OperationState::Starting, 4)
+                                )
+                        }),
+                    "RESOURCE_NATIVE_CLAIM_CHANGED",
+                )
+            }
         }
     }
 }
@@ -42,6 +59,9 @@ impl TerminalJournalStamp {
     }
     pub fn assert_preparation_named_current(&self) -> Result<()> {
         self.assert_current("RESOURCE_PREPARATION_CLAIM_CHANGED")
+    }
+    pub fn assert_native_start_named_current(&self) -> Result<()> {
+        self.assert_current("RESOURCE_NATIVE_CLAIM_CHANGED")
     }
     fn assert_current(&self, code: &'static str) -> Result<()> {
         let current = std::fs::symlink_metadata(&self.path).map_err(StoreError::io)?;
@@ -63,7 +83,7 @@ impl OperationStore {
     ) -> Result<TerminalJournalStamp> {
         let read = self.read_terminal(scope, TerminalSelection::Exact(expected));
         let closed = self.close();
-        finalized(read, closed)
+        finalized(read.map(|(_, stamp)| stamp), closed)
     }
     /// Consuming fixed preparation reader. Checks only the exact selected
     /// operation/allowed phase, then closes its actual flock and owned store.
@@ -74,13 +94,24 @@ impl OperationStore {
         expected: &OperationView,
     ) -> Result<TerminalJournalStamp> {
         let read = self.read_terminal(scope, TerminalSelection::Preparation(expected));
+        finalized(read.map(|(_, stamp)| stamp), self.close())
+    }
+    /// Original native _document read: one selected operation and full current
+    /// document, with both fresh lock/store closed BEFORE native observations.
+    /// The returned stamp/data cannot mint a handle, grant, retry or completion.
+    pub fn into_native_start_snapshot(
+        self,
+        scope: &OperationScope,
+        expected: &OperationView,
+    ) -> Result<(OperationDocument, TerminalJournalStamp)> {
+        let read = self.read_terminal(scope, TerminalSelection::NativeStart(expected));
         finalized(read, self.close())
     }
     fn read_terminal(
         &self,
         scope: &OperationScope,
         expected: TerminalSelection<'_>,
-    ) -> Result<TerminalJournalStamp> {
+    ) -> Result<(OperationDocument, TerminalJournalStamp)> {
         let inner = self
             .inner
             .lock()
@@ -96,10 +127,13 @@ impl OperationStore {
             expected.assert_document(&loaded.document)?;
             directory.check()?;
             directory.check_lock_named(&lock, "operations.lock")?;
-            Ok(TerminalJournalStamp {
-                path: directory.path().join("operations.json"),
-                stamp: loaded.stamp,
-            })
+            Ok((
+                loaded.document,
+                TerminalJournalStamp {
+                    path: directory.path().join("operations.json"),
+                    stamp: loaded.stamp,
+                },
+            ))
         })();
         let closed = private_fs::close(lock, CloseRole::Lock, directory.path()).map_err(Into::into);
         finalized(primary, closed)

@@ -3,6 +3,7 @@
 mod baseline;
 mod custody;
 mod limits;
+mod source_release;
 mod storage;
 mod targets;
 pub use targets::CustodyPaths;
@@ -31,6 +32,7 @@ pub enum ReservationKernelError {
     Mounts(MountTableError),
     EngineData(EngineDataError),
     Baseline(reverie_contracts::reservation_baseline::BaselineDataError),
+    StartData(reverie_contracts::reservation_baseline::StartDataError),
     Refused(&'static str),
 }
 impl ReservationKernelError {
@@ -44,6 +46,7 @@ impl ReservationKernelError {
             }
             Self::EngineData(value) => value.code(),
             Self::Baseline(value) => value.code(),
+            Self::StartData(value) => value.code(),
             Self::Refused(value) => value,
         }
     }
@@ -61,6 +64,7 @@ impl std::error::Error for ReservationKernelError {
             Self::Mounts(error) => Some(error),
             Self::EngineData(error) => Some(error),
             Self::Baseline(error) => Some(error),
+            Self::StartData(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
@@ -93,6 +97,11 @@ impl From<EngineDataError> for ReservationKernelError {
 impl From<reverie_contracts::reservation_baseline::BaselineDataError> for ReservationKernelError {
     fn from(value: reverie_contracts::reservation_baseline::BaselineDataError) -> Self {
         Self::Baseline(value)
+    }
+}
+impl From<reverie_contracts::reservation_baseline::StartDataError> for ReservationKernelError {
+    fn from(value: reverie_contracts::reservation_baseline::StartDataError) -> Self {
+        Self::StartData(value)
     }
 }
 type Result<T> = std::result::Result<T, ReservationKernelError>;
@@ -203,6 +212,29 @@ impl Default for ReservationKernel {
     }
 }
 impl ReservationKernel {
+    pub fn original_target_storage(
+        &self,
+        paths: &reverie_store::storage_identity::StoragePaths,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        end: Instant,
+    ) -> Result<()> {
+        source_release::target_storage(&Installed, paths, baseline, end)
+    }
+    pub fn original_accounts_current(
+        &self,
+        runtime: &reverie_contracts::reservation_baseline::OriginalRuntimeTail,
+        end: Instant,
+    ) -> Result<()> {
+        source_release::accounts(&Installed, runtime, end)
+    }
+    pub fn old_source_released(
+        &self,
+        row: &ContainerRow,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+        end: Instant,
+    ) -> Result<()> {
+        source_release::observe(&Installed, row, baseline, end)
+    }
     pub fn new() -> Self {
         Self
     }

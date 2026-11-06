@@ -11,6 +11,7 @@ pub enum KernelDataError {
     SwapUnavailable,
     SwapCapacity,
     IntegerConversion,
+    OldCgroupEvents,
 }
 impl KernelDataError {
     pub fn code(self) -> &'static str {
@@ -22,6 +23,7 @@ impl KernelDataError {
             Self::SwapUnavailable => "Host swap capacity is unavailable",
             Self::SwapCapacity => "Laptop swap pool exceeds actual host swap capacity",
             Self::IntegerConversion => "PYTHON_INTEGER_CONVERSION",
+            Self::OldCgroupEvents => "RESOURCE_NATIVE_OLD_CGROUP_UNKNOWN",
         }
     }
 }
@@ -31,6 +33,20 @@ impl fmt::Display for KernelDataError {
     }
 }
 impl std::error::Error for KernelDataError {}
+/// Exact facts parsing after the native owner's bounded ASCII read. Empty
+/// facts/missing populated is a negative observation, not malformed syntax.
+pub fn old_cgroup_unpopulated(raw: &str) -> Result<bool, KernelDataError> {
+    let mut facts = std::collections::BTreeMap::new();
+    for line in lines(raw) {
+        let fields = words(line);
+        if fields.len() != 2 || facts.contains_key(fields[0]) {
+            return Err(KernelDataError::OldCgroupEvents);
+        }
+        let value = UnsignedInteger::parse(fields[1]).ok_or(KernelDataError::OldCgroupEvents)?;
+        facts.insert(fields[0], value);
+    }
+    Ok(facts.get("populated").is_some_and(UnsignedInteger::is_zero))
+}
 pub fn process_start(stat: &str) -> Result<String, KernelDataError> {
     let (_, tail) = stat.rsplit_once(')').ok_or(KernelDataError::Pid)?;
     words(tail)

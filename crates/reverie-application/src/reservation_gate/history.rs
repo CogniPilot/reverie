@@ -57,7 +57,29 @@ impl Inner {
         )?)
     }
     pub(super) fn retained_delta(&self, document: &OperationDocument) -> Result<UnsignedInteger> {
+        self.retained_delta_selected(document, None)
+    }
+    pub(super) fn retained_for_native_start(
+        &self,
+        document: &OperationDocument,
+        claim: &super::preparation::RetainedPreparation,
+    ) -> Result<UnsignedInteger> {
+        need(
+            std::ptr::eq(self, Arc::as_ptr(&claim.gate)),
+            "RESOURCE_NATIVE_PERMIT_REQUIRED",
+        )?;
+        self.retained_delta_selected(document, Some(claim.operation_id()))
+    }
+    fn retained_delta_selected(
+        &self,
+        document: &OperationDocument,
+        exclude: Option<&JournalId>,
+    ) -> Result<UnsignedInteger> {
         let active = self.active_operations(document)?;
+        let active = active
+            .into_iter()
+            .filter(|operation| exclude != Some(&operation.data().id))
+            .collect::<Vec<_>>();
         for operation in &active {
             let op = operation.data();
             let eid = ProfileEmployeeId::parse(op.request.employee_id.as_str())

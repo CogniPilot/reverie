@@ -299,3 +299,10 @@ not route a generic `write("self", ...)` around the self-model checks.
 It preserves named transaction methods and exposes no SQL callback. Explicit
 checked connection closure remains required; dropping a handle is not a
 namespace shutdown acknowledgement.
+
+`OperationStore::into_native_start_snapshot` is a consuming fixed-purpose
+reader of the exact selected PREPARED/3 or STARTING/4 operation and full current
+document. Both its fresh journal lock and store close before it returns the
+opaque original named stamp, retaining primary and secondary finalizer errors.
+The stamp supplies data for the application's final metadata fence; it grants
+no operation handle, effect permission, retry, completion or reservation credit.

@@ -16,6 +16,8 @@ mod preparation_commit;
 mod preparation_phase;
 mod preparation_policy;
 mod preparation_stage;
+mod preparation_start;
+pub use preparation_start::{ProtectedStartIntent, StartQualificationFacts};
 mod profile_selection;
 mod recovery;
 mod reload;

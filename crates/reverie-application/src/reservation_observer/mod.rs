@@ -96,6 +96,39 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    pub(crate) fn original_target_storage(
+        &self,
+        paths: &StoragePaths,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+    ) -> Result<()> {
+        let end = self.deadline(None)?;
+        self.observer
+            .source
+            .original_target_storage(paths, baseline, end)?;
+        self.check(end)
+    }
+    pub(crate) fn old_source_released(
+        &self,
+        row: &ObservedRow<'_>,
+        baseline: &reverie_contracts::reservation_baseline::OriginalSourceBaseline,
+    ) -> Result<()> {
+        let end = self.deadline(None)?;
+        let row = self.checked_row(row)?;
+        self.observer
+            .source
+            .old_source_released(row, baseline, end)?;
+        self.check(end)
+    }
+    pub(crate) fn original_accounts_current(
+        &self,
+        runtime: &reverie_contracts::reservation_baseline::OriginalRuntimeTail,
+    ) -> Result<()> {
+        let end = self.deadline(None)?;
+        self.observer
+            .source
+            .original_accounts_current(runtime, end)?;
+        self.check(end)
+    }
     #[cfg(test)]
     pub(crate) fn same_source_for_test(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.origin, &other.origin)

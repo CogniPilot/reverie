@@ -1,4 +1,4 @@
-//! Shared exclusive publication/finalizer owner for the two actual named
+//! Shared exclusive publication/finalizer owner for the actual named
 //! private record purposes. No public path/bytes writer or policy callback.
 use super::*;
 use reverie_contracts::{
@@ -15,10 +15,14 @@ pub(super) enum PrivateRecord<'a> {
     PolicyAttempt(&'a reverie_contracts::reservation_policy::PolicyAttemptRecord),
     PolicyBefore(&'a reverie_core::operations::JournalId, &'a [u8]),
     PreparedPolicy(&'a reverie_contracts::reservation_policy::PreparedPolicyRecord),
+    StartIntent(&'a reverie_contracts::reservation_baseline::StartIntentRecord),
 }
 impl PrivateRecord<'_> {
     fn name(&self) -> String {
         match self {
+            Self::StartIntent(value) => {
+                format!("start-attempt-{}.json", value.operation_id().as_str())
+            }
             Self::Draft(value) => format!("draft-{}.json", value.id().as_str()),
             Self::Publication(value) => {
                 format!("publication-{}.json", value.operation_id().as_str())
@@ -36,6 +40,7 @@ impl PrivateRecord<'_> {
     }
     fn bytes(&self) -> Result<Vec<u8>> {
         match self {
+            Self::StartIntent(value) => Ok(value.canonical_bytes().to_vec()),
             Self::Draft(value) => value.canonical_bytes().map_err(ControlHostError::Draft),
             Self::Publication(value) => Ok(value.canonical_bytes()),
             Self::PolicyAttempt(value) => Ok(value.canonical_bytes().to_vec()),
