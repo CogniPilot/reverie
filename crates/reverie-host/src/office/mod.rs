@@ -23,6 +23,8 @@ use std::{
 use tokio::sync::Semaphore;
 mod address;
 mod body;
+mod construction;
+pub use construction::{OfficeBindFailure, OfficeConstruction};
 mod credentials;
 mod io_timeout;
 mod native_jobs;
@@ -190,6 +192,15 @@ impl OfficeService {
             .update_fixed(SocketAddr::new(address, 3000))
     }
     pub fn bind(&self, directory: PathBuf, session: ProfileSessionId) -> Result<OfficePhone> {
+        self.bind_retained(directory, session)
+            .map_err(|failure| failure.into_parts().0)
+    }
+    fn bind_attempt(
+        &self,
+        directory: PathBuf,
+        session: ProfileSessionId,
+        construction: &mut Option<OfficeConstruction>,
+    ) -> Result<OfficePhone> {
         self.require_running()?;
         let runtime = server::runtime()?;
         let mut offices = self.offices.lock().map_err(|_| OfficeError::Unconfirmed)?;
@@ -203,17 +214,17 @@ impl OfficeService {
                     error,
                     OfficeError::Finalization { .. } | OfficeError::Unconfirmed
                 ) {
-                    offices.insert(
-                        id,
-                        Arc::new(OwnedOffice {
-                            closing,
-                            first_close: OnceLock::new(),
-                            thread: Mutex::new(None),
-                            joined: Mutex::new(None),
-                            live_requests: Arc::new(AtomicUsize::new(0)),
-                            _preparation: None,
-                        }),
-                    );
+                    let owned = Arc::new(OwnedOffice {
+                        closing,
+                        first_close: OnceLock::new(),
+                        thread: Mutex::new(None),
+                        joined: Mutex::new(None),
+                        live_requests: Arc::new(AtomicUsize::new(0)),
+                        _preparation: None,
+                    });
+                    owned.closing.store(true, Ordering::Release);
+                    offices.insert(id, owned.clone());
+                    *construction = Some(OfficeConstruction::captured(self, id, &owned));
                 }
                 return Err(error);
             }
@@ -237,6 +248,7 @@ impl OfficeService {
             _preparation: Some(Arc::clone(&payload)),
         });
         offices.insert(id, Arc::clone(&owned));
+        *construction = Some(OfficeConstruction::captured(self, id, &owned));
         // Acquire the fresh slot before starting a thread; no failed lock can
         // cause an already-created JoinHandle to be dropped and detached.
         let mut slot = owned.thread.lock().map_err(|_| OfficeError::Unconfirmed)?;
@@ -246,11 +258,16 @@ impl OfficeService {
                 let cleanup = server::cleanup_payload(&payload);
                 if cleanup.is_ok() {
                     offices.remove(&id);
+                    *construction = None;
                 }
                 return finalized(Err(error.into()), cleanup);
             }
         }
         drop(slot);
+        #[cfg(test)]
+        if test_hooks::stop_after_spawn() {
+            self.request_close();
+        }
         let phone = OfficePhone {
             id,
             owned,
@@ -261,6 +278,7 @@ impl OfficeService {
             phone.request_close();
             return Err(error);
         }
+        *construction = None;
         Ok(phone)
     }
     fn require_running(&self) -> Result<()> {
