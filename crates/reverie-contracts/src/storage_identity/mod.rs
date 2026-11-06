@@ -90,7 +90,7 @@ impl EmployeeGeneration {
 /// successful decoding alone is neither a registry nor a host-effect capability.
 pub struct Metadata(Value);
 pub fn decode_metadata(raw: &[u8]) -> Result<Metadata> {
-    legacy_json::decode_bytes(raw)
+    legacy_json::decode_metadata_bytes(raw)
         .map(Metadata)
         .map_err(|error| match error {
             legacy_json::Error::InvalidJson => IdentityDataError::InvalidJson,
