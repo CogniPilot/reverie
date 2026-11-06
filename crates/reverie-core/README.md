@@ -14,6 +14,11 @@ The Unicode data license is retained beside the tables. The port has no Python
 build or runtime dependency. Fixtures cover actual Python tokens, f64 values,
 stored f32 bytes, scores, HTTP float coercion and metadata string representation.
 
+The private `python_text` owner shares those unchanged frozen tables across
+scalar memory operations and lossless codepoint consumers such as hostnames and
+nonpersisted model/query text. Lone surrogates retain Python's lower-case
+context behavior; the existing public memory helpers remain available.
+
 Scores use the existing real-valued f64/JSON contract. Negative decay and unusual
 weights remain accepted when their powers produce real results, including IEEE
 infinite/NaN cases. A power for which Python returns a complex value produces an
