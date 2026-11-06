@@ -54,6 +54,7 @@ struct Record {
     id: u64,
     resources: Option<Resources>,
     prepared: EffectiveWorkerConfig,
+    prepared_store: Option<PathBuf>,
     phase: Phase,
     outcome: Option<Result<NixDisposition>>,
     turn: bool,
@@ -141,8 +142,19 @@ impl NixReclaimFailure {
 pub struct NixReturned {
     resources: Resources,
     outcome: Result<NixDisposition>,
+    prepared_store: Option<PathBuf>,
 }
 impl NixReturned {
+    /// Exact private_store result used by the actual helper, exposed only for
+    /// confirmed Prepared. This path is DATA, not a guard or effect capability.
+    /// It is never reconstructed from a status or later rollback metadata.
+    pub fn prepared_path(&self) -> Option<&std::path::Path> {
+        if matches!(&self.outcome, Ok(NixDisposition::Prepared)) {
+            self.prepared_store.as_deref()
+        } else {
+            None
+        }
+    }
     pub fn into_parts(self) -> (NixStoreGuard, LaunchStorage, Result<NixDisposition>) {
         (self.resources.guard, self.resources.storage, self.outcome)
     }
@@ -179,6 +191,7 @@ impl Workflows {
             id,
             resources: Some(resources),
             prepared,
+            prepared_store: None,
             phase: Phase::Held,
             outcome: None,
             turn: false,
@@ -275,9 +288,14 @@ impl Workflows {
         )?;
         let resources = record.resources.take().expect("known unreclaimed owners");
         let outcome = record.outcome.take().expect("known actual outcome");
+        let prepared_store = record.prepared_store.take();
         record.phase = Phase::Consumed;
         records.retain(|entry| !Arc::ptr_eq(entry, &workflow.record));
-        Ok(NixReturned { resources, outcome })
+        Ok(NixReturned {
+            resources,
+            outcome,
+            prepared_store,
+        })
     }
     pub(crate) fn settle(&self, runtime: &WorkerRuntime, deadline: Instant) -> Result<()> {
         let records = self

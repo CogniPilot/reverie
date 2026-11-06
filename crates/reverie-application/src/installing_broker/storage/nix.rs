@@ -60,6 +60,7 @@ impl NixStoragePreparation {
                 .runtime
                 .reclaim_nix_store(self.workflow.clone())
                 .map(|returned| {
+                    let prepared_store = returned.prepared_path().map(std::path::Path::to_owned);
                     let (guard, storage, outcome) = returned.into_parts();
                     NixStorageReturned {
                         claim: StorageClaim {
@@ -70,6 +71,7 @@ impl NixStoragePreparation {
                         },
                         guard,
                         outcome,
+                        prepared_store,
                     }
                 })
                 .map_err(|failure| NixStorageError::from(failure.into_parts().1)),
@@ -93,8 +95,13 @@ pub struct NixStorageReturned {
     claim: StorageClaim,
     guard: NixStoreGuard,
     outcome: Result<NixDisposition, NixError>,
+    prepared_store: Option<std::path::PathBuf>,
 }
 impl NixStorageReturned {
+    /// Exact successful helper output, not a later path lookup or permission.
+    pub fn prepared_path(&self) -> Option<&std::path::Path> {
+        self.prepared_store.as_deref()
+    }
     pub fn into_parts(
         self,
     ) -> (
@@ -233,12 +240,14 @@ impl StorageRegistry {
             .runtime
             .reclaim_nix_store(workflow.clone())
             .map_err(|failure| NixStorageError::from(failure.into_parts().1))?;
+        let prepared_store = returned.prepared_path().map(std::path::Path::to_owned);
         let (guard, owner, outcome) = returned.into_parts();
         entries[index].owner = EntryOwner::Direct(Box::new(owner));
         Ok(NixStorageReturned {
             claim: self.handle(&entries[index], newly_claimed),
             guard,
             outcome,
+            prepared_store,
         })
     }
 }

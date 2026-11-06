@@ -86,3 +86,13 @@ before/after filesystem/argv oracle remain in `fixtures/legacy-seed.json` (the
 unchanged original recipe is present at commit `6083f7d6`). There is no Python
 or shell fallback within the native helper. Source selection is separate from
 installed service activation and the pending real broker workflow consumer.
+
+A known-successful `NixReturned::prepared_path` retains the exact native path
+returned by the actual private-store preparation used for that helper. It is
+absent for image opt-out and known-negative results, and unknown records cannot
+be reclaimed. Existing `into_parts` callers remain compatible; a laptop mount
+consumer must retain this returned path DATA before consuming the parts. It must
+not reconstruct it from `Prepared` or rerun current rollback selection. The
+synthetic original-Python fixture and owned Rust rollback-drift case demonstrate
+that the later metadata lookup can select a different store. This result grants
+no mount/start permission and does not replace either real resource guard.
