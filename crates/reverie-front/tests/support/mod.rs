@@ -3,7 +3,12 @@ use nix::{
     unistd::Pid,
 };
 use serde_json::Value;
-use std::{io, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -25,6 +30,14 @@ pub(crate) struct Running {
 }
 impl Running {
     pub(crate) async fn start(mode: Mode) -> Self {
+        Self::start_with_tls(mode, None).await
+    }
+    pub(crate) async fn start_tls(mode: Mode, cert: &Path, key: &Path) -> Self {
+        assert!(cert.is_absolute() && cert.is_file());
+        assert!(key.is_absolute() && key.is_file());
+        Self::start_with_tls(mode, Some((cert, key))).await
+    }
+    async fn start_with_tls(mode: Mode, tls: Option<(&Path, &Path)>) -> Self {
         let node = std::env::var_os("REVERIE_TEST_NODE").expect("explicit pinned Node");
         let setting = match mode {
             Mode::Front => "REVERIE_FRONT_CHILD_FIXTURE",
@@ -45,6 +58,13 @@ impl Running {
                     .arg(&node)
                     .arg("--entrypoint")
                     .arg(&fixture);
+                if let Some((cert, key)) = tls {
+                    command
+                        .arg("--tls-cert")
+                        .arg(cert)
+                        .arg("--tls-key")
+                        .arg(key);
+                }
                 command
             }
             Mode::Direct => {
@@ -59,7 +79,15 @@ impl Running {
             .env("FRONT_CHILD_PORT", "0");
         command
             .env_remove("FRONT_CHILD_BRIDGE_HOST")
-            .env_remove("FRONT_CHILD_TLS");
+            .env_remove("FRONT_CHILD_TLS")
+            .env_remove("FRONT_CHILD_TLS_CERT")
+            .env_remove("FRONT_CHILD_TLS_KEY");
+        if let Some((cert, key)) = tls {
+            command
+                .env("FRONT_CHILD_TLS", "1")
+                .env("FRONT_CHILD_TLS_CERT", cert)
+                .env("FRONT_CHILD_TLS_KEY", key);
+        }
         command.env("FRONT_CHILD_FINISH_MS", "5000");
         command
             .stdin(Stdio::null())

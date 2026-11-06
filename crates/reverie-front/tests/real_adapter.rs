@@ -1,7 +1,13 @@
 //! Actual Rust front + sealed TypeScript FrontChannel qualification.
 #![cfg(target_os = "linux")]
+#[path = "support/http_client.rs"]
+mod http_client;
+#[path = "support/secure_stream.rs"]
+mod secure_stream;
 #[path = "support/shutdown.rs"]
 mod shutdown;
+#[path = "support/sse.rs"]
+mod sse;
 #[path = "support/streams.rs"]
 mod streams;
 mod support;

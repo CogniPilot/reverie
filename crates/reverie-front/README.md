@@ -64,12 +64,11 @@ Actual S2 integration, Nix packaging and service selection have separate receipt
 this source change does not select or deploy the binary.
 
 Run `cargo xtask verify` in the development environment for the ordinary gate.
-For the explicit Linux child qualifications, set `REVERIE_TEST_NODE` to the
-pinned installed Node path and run
-`cargo test --locked -p reverie-front -- --ignored`. That run includes a real
-twelve-second unresponsive-child deadline check. These checks use only isolated
-fixtures and loopback sockets; they do not open an instance database or deploy a
-service.
+For the explicit Linux library child/TLS qualifications, set
+`REVERIE_TEST_NODE` and `REVERIE_TEST_OPENSSL` to pinned installed executables,
+then run `cargo test --locked -p reverie-front --lib -- --ignored`.
+These checks use only isolated fixtures and loopback sockets; they do not open
+an instance database or deploy a service.
 
 Build the unselected native package with `nix build .#rustFront`. It uses the
 shared Rust workspace projection, retaining only the core, contracts, diagnostics
@@ -78,3 +77,21 @@ front tests; real Node/adapter qualifications remain explicit separate gates.
 It does not modify the console launcher or select the front in any service.
 The paired adapter harness accepts `REVERIE_TEST_FRONT` as an explicit absolute
 executable path to qualify this installed artifact instead of Cargo's binary.
+
+The separate `real_adapter` integration target needs both compiled TypeScript
+paired fixtures. Build `apps/web/test/rust-front/front-child.ts` and
+`direct-child.ts` together with esbuild's `--bundle --packages=external
+--platform=node --format=esm` options, placing their `.mjs` outputs under
+`apps/web/out/` so the existing application dependencies remain resolvable.
+Set `REVERIE_FRONT_CHILD_FIXTURE` and `REVERIE_DIRECT_CHILD_FIXTURE` to those
+absolute output paths, `REVERIE_TEST_NODE` to pinned Node, and optionally
+`REVERIE_TEST_FRONT` to the installed native executable. Run
+`cargo test --locked -p reverie-front --test real_adapter -- --ignored
+--test-threads=1`.
+
+The paired cases cover large-response shutdown before and after genuine finish,
+verified TLS and encrypted peer facts, a second request on the same connection,
+SSE backpressure with byte-exact HTTP-decoded bodies and ordered drains, and
+client write half-close. TLS uses the same existing leaf certificate/key fixtures
+in both modes with normal certificate and hostname verification. Hyper is a
+test-only HTTP decoder; the production front still relays opaque bytes.
