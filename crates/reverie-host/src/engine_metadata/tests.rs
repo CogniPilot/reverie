@@ -93,7 +93,7 @@ fn different_private_policies_share_the_same_pending_context_and_closed_admissio
             &CancellationToken::new(),
             Policy {
                 maximum: Duration::from_secs(20),
-                maximum_output: 4 * 1024 * 1024,
+                maximum_output: 8 * 1024 * 1024,
                 successful_exit: false,
             },
         )
@@ -210,15 +210,17 @@ fn independent_stdout_and_stderr_backpressure_respects_exact_combined_bound() {
         MAX_OUTPUT_BYTES / 2
     );
     settle(&engine);
-    let engine = tree.engine("overflow");
-    assert_eq!(
-        engine
-            .query(EngineQuery::InventoryIds, deadline(), &token)
-            .unwrap_err()
-            .fault(),
-        EngineFault::OutputBound
-    );
-    settle(&engine);
+    for mode in ["dual-over", "overflow", "dual8"] {
+        let engine = tree.engine(mode);
+        assert_eq!(
+            engine
+                .query(EngineQuery::InventoryIds, deadline(), &token)
+                .unwrap_err()
+                .fault(),
+            EngineFault::OutputBound
+        );
+        settle(&engine);
+    }
 }
 #[test]
 fn invalid_utf8_and_failed_status_never_return_rows_or_diagnostics() {

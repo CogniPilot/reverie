@@ -15,20 +15,26 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
-        "dual" => {
-            let stdout = std::thread::spawn(|| {
-                let data = vec![b'o'; 4 * 1024 * 1024];
+        "dual" | "dual-over" | "dual8" => {
+            let each = if mode == "dual8" {
+                4 * 1024 * 1024
+            } else {
+                2 * 1024 * 1024
+            };
+            let stdout = std::thread::spawn(move || {
+                let data = vec![b'o'; each];
                 io::stdout().write_all(&data).unwrap();
             });
-            let stderr = std::thread::spawn(|| {
-                let data = vec![b'e'; 4 * 1024 * 1024];
+            let extra = usize::from(mode == "dual-over");
+            let stderr = std::thread::spawn(move || {
+                let data = vec![b'e'; each + extra];
                 io::stderr().write_all(&data).unwrap();
             });
             stdout.join().unwrap();
             stderr.join().unwrap();
         }
         "overflow" => {
-            let data = vec![b'e'; 8 * 1024 * 1024 + 1];
+            let data = vec![b'e'; 4 * 1024 * 1024 + 1];
             let _ = io::stderr().write_all(&data);
         }
         "badout" => {

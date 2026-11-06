@@ -6,7 +6,10 @@ policy come from fixed purpose wrappers. It exposes no public arbitrary-command
 endpoint and supplies no engine, session or owner permission. Installing-service
 variants must borrow the same actual context so a different policy cannot bypass
 a pending constructor or pipe writer. The metadata wrapper retains its closed
-CID/query allowlist, 20-second clamp, 8 MiB combined bound and UTF-8/exit checks.
+CID/query allowlist, 20-second clamp, 4 MiB combined stdout/stderr capture bound
+and UTF-8/exit checks. This matches `Broker.run_engine` through
+`worker_cleanup.run_client`; the separate reservation JSON/schema decoder keeps
+its existing 8 MiB bound. A decoder allowance does not widen subprocess capture.
 
 `ReadonlyEngine::settle_owned` settles retained clients while allowing later
 queries after verified cleanup. `close` first permanently seals admission under
