@@ -7,6 +7,7 @@ pub(crate) use journal::{JournalParseError, JournalParsed};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Purpose {
+    Ops,
     Default,
     NoConstants,
     Metadata,
@@ -55,6 +56,9 @@ pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
     decode_mode(source, Purpose::NoConstants)
+}
+pub(super) fn decode_ops(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, Purpose::Ops)
 }
 pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
     decode_mode(source, Purpose::Rootless)
@@ -191,7 +195,7 @@ impl Frame {
 fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
     match purpose {
         Purpose::Rootless => Ok(false),
-        Purpose::Journal | Purpose::Metadata => Ok(true),
+        Purpose::Journal | Purpose::Metadata | Purpose::Ops => Ok(true),
         _ => Err(Error::DuplicateKey),
     }
 }
@@ -247,7 +251,7 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
-            Some(b'N' | b'I') if self.purpose == Purpose::NoConstants => {
+            Some(b'N' | b'I') if matches!(self.purpose, Purpose::NoConstants | Purpose::Ops) => {
                 return Err(Error::InvalidJson);
             }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
@@ -273,7 +277,7 @@ impl Cursor<'_> {
         }
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
-            if self.purpose == Purpose::NoConstants {
+            if matches!(self.purpose, Purpose::NoConstants | Purpose::Ops) {
                 return Err(Error::InvalidJson);
             }
             self.offset += "-Infinity".len();
@@ -293,8 +297,10 @@ impl Cursor<'_> {
             // Named default Python decoders use the runtime's decimal
             // conversion cap even for ignored/overwritten fields.
             // Other named readers keep their separately frozen number policy.
-            if matches!(self.purpose, Purpose::Metadata | Purpose::Rootless)
-                && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
+            if matches!(
+                self.purpose,
+                Purpose::Metadata | Purpose::Rootless | Purpose::Ops
+            ) && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);
             }

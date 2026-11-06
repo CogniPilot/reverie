@@ -1,0 +1,12 @@
+{
+  "source": "Actual CPython urllib.parse.urlsplit.port; independently captured before the Rust correction",
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "defaultIntegerDigits": 4300,
+  "construction": "http://localhost: followed by zeroCount ASCII zeroes and one ASCII digit 1",
+  "cases": [
+    { "zeroCount": 4299, "accepted": true, "port": 1 },
+    { "zeroCount": 4300, "accepted": false, "errorType": "ValueError" },
+    { "zeroCount": 4301, "accepted": false, "errorType": "ValueError" },
+    { "zeroCount": 5000, "accepted": false, "errorType": "ValueError" }
+  ]
+}
