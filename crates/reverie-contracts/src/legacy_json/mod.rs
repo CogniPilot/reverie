@@ -2,6 +2,7 @@
 mod copy;
 mod decode;
 mod equality;
+pub(crate) mod ordered;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -42,6 +43,13 @@ pub(crate) fn decode_engine_inventory(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_python_str(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_last_wins(raw)
+}
+pub(crate) fn decode_memory_str(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+    decode::decode_ordered(raw, decode::Purpose::Rootless)
+}
+pub(crate) fn decode_embedding_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Rootless)
 }
 pub(crate) fn decode_engine_stopped(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;

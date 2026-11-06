@@ -1,4 +1,27 @@
-# Checked profile domain
+# Reverie core data and algorithms
+
+`memory` owns the existing `hashed-v1-N` lexical embedding algorithm, signed
+eight-byte BLAKE2b buckets, first-feature accumulation order, Python 3.13
+compensated summation, native float32 vector packing and retrieval scoring.
+The hashed backend remains the existing lexical fallback; it makes no claim of
+model inference or semantic retrieval quality. An explicit backend identity
+continues to distinguish stored vectors.
+
+Unicode 15.1 lowercase, final-sigma context, alphanumeric, decimal, printable and
+whitespace facts are frozen to the accepted Python runtime rather than Rust's
+changing Unicode tables. They preserve voice claims and numerical/text coercion.
+The Unicode data license is retained beside the tables. The port has no Python
+build or runtime dependency. Fixtures cover actual Python tokens, f64 values,
+stored f32 bytes, scores, HTTP float coercion and metadata string representation.
+
+Scores use the existing real-valued f64/JSON contract. Negative decay and unusual
+weights remain accepted when their powers produce real results, including IEEE
+infinite/NaN cases. A power for which Python returns a complex value produces an
+explicit `Domain` refusal here; this is not a general Python complex arithmetic
+port. No positive-only decay or finite-only weight restriction is introduced.
+
+This component performs no SQLite, HTTP, provider selection, re-embedding or
+deployment. Persistence and service workflows remain separate owners.
 
 `operations` owns the existing resource journal's checked nonnil identifiers,
 unsigned memory references, phase/receipt rules, conservative positive deltas,
