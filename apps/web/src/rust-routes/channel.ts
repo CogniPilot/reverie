@@ -9,7 +9,7 @@
  * and no ticket moves to a later generation.
  */
 import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { FrameError, FrameReader, encode, type Body, type Frame, type Provider } from './frames.js';
+import { FrameError, FrameReader, MEDIA, encode, type Body, type Frame, type Media, type Provider } from './frames.js';
 
 export const QUEUE_LIMIT = 8;
 export const TIMEOUT_MS = 10_000;
@@ -20,7 +20,8 @@ export const STDERR_LINE_BYTES = 1024;
 export const STDERR_LINES = 200;
 
 export type Outcome =
-  | { kind: 'response'; generation: number; id: number; status: number; body: Buffer }
+  /** `contentType` is set for a typed route's response; a plain route's is fixed by its forwarder. */
+  | { kind: 'response'; generation: number; id: number; status: number; body: Buffer; contentType?: string }
   | { kind: 'unavailable'; generation: number; id: number; reason: string };
 export type Step = { kind: 'observe'; providers: Provider[] } | { kind: 'done'; outcome: Outcome };
 
@@ -31,6 +32,9 @@ export interface ChannelOptions {
   handlerPath: string;
   /** Allowed statuses per route key, from the route table. */
   statuses: Record<string, readonly number[]>;
+  /** The routes answered with typed responses, and the media each may name. Every other route
+   * answers with plain responses only. */
+  media?: Record<string, readonly Media[]>;
   log: (message: string) => void;
   spawn?: (path: string, args: string[]) => ChildProcessWithoutNullStreams;
   now?: () => number;
@@ -242,22 +246,28 @@ export class RouteChannel {
       head.head = 'observing';
       return head.deliver({ kind: 'observe', providers: body.providers });
     }
-    if (body.kind !== 'response' && body.kind !== 'refusal') return this.invalidate('direction-invalid frame');
-    if (body.kind === 'response' && !(this.options.statuses[head.route] ?? []).includes(body.status))
+    if (body.kind !== 'response' && body.kind !== 'typed_response' && body.kind !== 'refusal')
+      return this.invalidate('direction-invalid frame');
+    const media = this.options.media?.[head.route];
+    if (body.kind === 'response' && media) return this.invalidate('untyped response for a typed route');
+    if (body.kind === 'typed_response' && !media?.includes(body.media))
+      return this.invalidate('media outside the route table');
+    if (body.kind !== 'refusal' && !(this.options.statuses[head.route] ?? []).includes(body.status))
       return this.invalidate('status outside the route table');
     this.head = undefined;
     this.queue.shift();
     clearTimeout(head.timer);
     if (head.head !== 'canceled') {
-      if (body.kind === 'response')
+      if (body.kind === 'refusal') this.settle(head, `refused ${body.code}`);
+      else
         this.settle(head, {
           kind: 'response',
           generation: head.generation,
           id: head.id,
           status: body.status,
           body: body.body,
+          ...(body.kind === 'typed_response' ? { contentType: MEDIA[body.media] } : {}),
         });
-      else this.settle(head, `refused ${body.code}`);
     }
     this.dispatch();
   }

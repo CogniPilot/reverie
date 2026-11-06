@@ -11,6 +11,14 @@
 export const VERSION = 1;
 export const HEADER_BYTES = 18;
 export const SUBSCRIPTION_PROFILES = 'GET /api/subscription-profiles';
+export const SETTINGS = 'GET /api/settings';
+
+/** The finite media a typed response may name; mirrors `route_frames_v1::Media`. */
+export const MEDIA = {
+  1: 'application/json; charset=utf-8',
+  2: 'text/plain; charset=utf-8',
+} as const;
+export type Media = keyof typeof MEDIA;
 
 export type Direction = 'to_handler' | 'to_front';
 export type Provider = 'anthropic' | 'openai';
@@ -22,7 +30,8 @@ export type Body =
   | { kind: 'refusal'; code: string }
   | { kind: 'cancel' }
   | { kind: 'observe'; observation: Observation; providers: Provider[] }
-  | { kind: 'observed'; observation: Observation; json: Buffer };
+  | { kind: 'observed'; observation: Observation; json: Buffer }
+  | { kind: 'typed_response'; media: Media; status: number; body: Buffer };
 
 export interface Frame {
   generation: bigint;
@@ -46,6 +55,7 @@ const KINDS: Record<Kind, { byte: number; direction: Direction; lengths: [number
   cancel: { byte: 4, direction: 'to_handler', lengths: [HEADER_BYTES, HEADER_BYTES] },
   observe: { byte: 5, direction: 'to_front', lengths: [HEADER_BYTES + 3, HEADER_BYTES + 4] },
   observed: { byte: 6, direction: 'to_handler', lengths: [HEADER_BYTES + 2, HEADER_BYTES + 1 + 65536] },
+  typed_response: { byte: 7, direction: 'to_front', lengths: [HEADER_BYTES + 3, HEADER_BYTES + 3 + 8 * 1024 * 1024] },
 };
 
 /** The largest length any frame read in `direction` may declare. */
@@ -105,6 +115,11 @@ function body(kind: Kind, payload: Buffer): Body {
     case 'observed':
       if (payload[0] !== OBSERVATION_BYTE) refuse();
       return { kind, observation: 'subscription_modes', json: Buffer.from(payload.subarray(1)) };
+    case 'typed_response': {
+      const media = payload[0];
+      if (!Object.hasOwn(MEDIA, media)) refuse();
+      return { kind, media: media as Media, status: payload.readUInt16BE(1), body: Buffer.from(payload.subarray(3)) };
+    }
   }
 }
 
@@ -193,6 +208,12 @@ function payload(frame: Body): Buffer {
       ]);
     case 'observed':
       return Buffer.concat([Buffer.from([OBSERVATION_BYTE]), frame.json]);
+    case 'typed_response': {
+      const head = Buffer.alloc(3);
+      head[0] = frame.media;
+      head.writeUInt16BE(frame.status, 1);
+      return Buffer.concat([head, frame.body]);
+    }
   }
 }
 
