@@ -188,15 +188,17 @@ fn independent_stdout_and_stderr_backpressure_respects_exact_combined_bound() {
         MAX_OUTPUT_BYTES / 2
     );
     settle(&engine);
-    let engine = tree.engine("overflow");
-    assert_eq!(
-        engine
-            .query(EngineQuery::InventoryIds, deadline(), &token)
-            .unwrap_err()
-            .fault(),
-        EngineFault::OutputBound
-    );
-    settle(&engine);
+    for mode in ["dual-over", "overflow", "dual8"] {
+        let engine = tree.engine(mode);
+        assert_eq!(
+            engine
+                .query(EngineQuery::InventoryIds, deadline(), &token)
+                .unwrap_err()
+                .fault(),
+            EngineFault::OutputBound
+        );
+        settle(&engine);
+    }
 }
 #[test]
 fn invalid_utf8_and_failed_status_never_return_rows_or_diagnostics() {
