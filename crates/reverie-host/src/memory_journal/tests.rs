@@ -151,30 +151,77 @@ fn malformed_and_nonzero_save_results_never_confirm_or_automatically_retry() {
     }
 }
 #[test]
-fn combined_pipe_bound_and_deadline_keep_real_owned_cleanup() {
-    for mode in ["dual", "hold"] {
-        let tree = Tree::new();
-        let client = tree.client(mode, Hooks::default());
-        let limit = if mode == "hold" {
-            Instant::now() + Duration::from_millis(60)
-        } else {
-            deadline()
-        };
-        let error = client
-            .save(&request(), limit, &CancellationToken::new())
-            .err()
-            .unwrap();
-        assert_eq!(
-            error.fault(),
-            if mode == "dual" {
-                JournalClientFault::OutputBound
-            } else {
-                JournalClientFault::Deadline
-            }
-        );
-        assert!(error.save_is_unconfirmed());
-        client.close(deadline()).unwrap();
+fn combined_pipe_bound_keeps_real_owned_cleanup() {
+    let tree = Tree::new();
+    let client = tree.client("dual", Hooks::default());
+    let error = client
+        .save(&request(), deadline(), &CancellationToken::new())
+        .err()
+        .unwrap();
+    assert_eq!(error.fault(), JournalClientFault::OutputBound);
+    assert!(error.save_is_unconfirmed());
+    client.close(deadline()).unwrap();
+}
+#[test]
+fn an_expired_call_refuses_before_any_real_constructor_or_effect() {
+    let tree = Tree::new();
+    let hooks = Hooks::default();
+    let starts = std::sync::Arc::clone(&hooks.starts);
+    let client = tree.client("hold", hooks);
+    let error = client
+        .save(
+            &request(),
+            Instant::now() - Duration::from_millis(60),
+            &CancellationToken::new(),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.fault(), JournalClientFault::Deadline);
+    assert!(!error.save_is_unconfirmed());
+    assert!(!client.has_unconfirmed_save());
+    client.close(deadline()).unwrap();
+    assert_eq!(starts.load(Ordering::SeqCst), 0);
+    assert!(!tree.root.join("trace").exists());
+    assert!(!tree.root.join("effect").exists());
+}
+#[test]
+fn cancellation_after_a_real_child_effect_keeps_unknown_save_and_owned_cleanup() {
+    use std::sync::Arc;
+    let tree = Tree::new();
+    let hooks = Hooks::default();
+    let starts = Arc::clone(&hooks.starts);
+    let client = Arc::new(tree.client("hold", hooks));
+    let cancellation = CancellationToken::new();
+    let other = Arc::clone(&client);
+    let stop = cancellation.clone();
+    let worker = std::thread::spawn(move || other.save(&request(), deadline(), &stop));
+    // The immutable call deadline includes construction. It cannot establish
+    // that a child started in 60ms under arbitrary scheduling. Observe this
+    // fixture's actual child effect before testing post-effect cancellation.
+    let effect = b"synthetic-effect-may-complete-before-reply";
+    let limit = deadline();
+    while !fs::read(tree.root.join("effect")).is_ok_and(|bytes| bytes == effect) {
+        assert!(Instant::now() < limit);
+        std::thread::sleep(Duration::from_millis(1));
     }
+    assert_eq!(fs::read(tree.root.join("trace")).unwrap(), b"started\n");
+    std::thread::sleep(Duration::from_millis(60));
+    cancellation.cancel();
+    let error = worker.join().unwrap().err().unwrap();
+    assert_eq!(error.fault(), JournalClientFault::Cancelled);
+    assert!(error.save_is_unconfirmed());
+    client.close(deadline()).unwrap();
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    assert_eq!(fs::read(tree.root.join("effect")).unwrap(), effect);
+    assert_eq!(
+        client
+            .save(&request(), deadline(), &CancellationToken::new())
+            .err()
+            .unwrap()
+            .fault(),
+        JournalClientFault::UnknownSave,
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
 }
 #[test]
 fn actual_pipe_close_failure_remains_uncertain_and_fences_the_client() {

@@ -210,6 +210,11 @@ fn pending_broken_alias_is_present_and_marker_mode_is_exact() {
 }
 #[test]
 fn checked_close_failure_prevents_layout_or_admission_success() {
+    if crate::test_process::isolate_case(
+        "reservation_control::tests::checked_close_failure_prevents_layout_or_admission_success",
+    ) {
+        return;
+    }
     let tree = Tree::new();
     let binding = tree.binding();
     let mut lock = AdmissionLock::acquire(&tree.config).unwrap();
