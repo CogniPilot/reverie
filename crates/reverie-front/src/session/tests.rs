@@ -312,12 +312,21 @@ async fn qualify_grant_fairness() {
     let mut received = vec![0; MAX_DATA_BYTES];
     a.read_exact(&mut received).await.unwrap();
     assert_eq!(received, vec![9; MAX_DATA_BYTES]);
-    let receipt = h.peer.receive().await;
-    assert_eq!(receipt.id, first);
-    assert_eq!(receipt.body, Body::Written(MAX_DATA_BYTES as u64));
-    let credit = h.peer.receive().await;
-    assert_eq!(credit.id, waiting);
-    assert_eq!(credit.body, Body::Credit(MAX_DATA_BYTES as u32));
+    // Releasing the packet lease can wake grant distribution before the
+    // separate native-write event. Both independent controls must arrive.
+    let controls = [h.peer.receive().await, h.peer.receive().await];
+    assert!(
+        controls.iter().any(|frame| frame.generation == 1
+            && frame.id == first
+            && frame.body == Body::Written(MAX_DATA_BYTES as u64)),
+        "missing exact write receipt: {controls:?}"
+    );
+    assert!(
+        controls.iter().any(|frame| frame.generation == 1
+            && frame.id == waiting
+            && frame.body == Body::Credit(MAX_DATA_BYTES as u32)),
+        "freed credit must reach the existing waiter: {controls:?}"
+    );
     h.finish().await.unwrap();
 }
 
