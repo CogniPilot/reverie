@@ -25,7 +25,9 @@ pub(super) fn integer(raw: &str) -> bool {
     if signless.contains(':') {
         return signless.split(':').all(decimal);
     }
-    decimal(&value)
+    // SafeConstructor has already consumed its first sign before int(value).
+    // The conversion can consume a second sign or intervening whitespace.
+    decimal(signless)
 }
 fn decimal(value: &str) -> bool {
     let Some(value) = scalar_number(value) else {
