@@ -106,6 +106,6 @@ fn portable_verification_selects_only_portable_components() {
     assert!(output.status.success());
     assert_eq!(
         fs::read_to_string(root.path().join("trace")).expect("owned command trace"),
-        "fmt --all --check\nclippy --locked -p reverie-core -p reverie-contracts -p reverie-routes -p xtask --all-targets --all-features -- -D warnings\ntest --locked -p reverie-core -p reverie-contracts -p reverie-routes -p xtask --all-targets --all-features\n"
+        "fmt --all --check\nclippy --locked -p reverie-core -p reverie-contracts -p reverie-routes -p reverie-http -p reverie-ops-cli -p xtask --all-targets --all-features -- -D warnings\ntest --locked -p reverie-core -p reverie-contracts -p reverie-routes -p reverie-http -p reverie-ops-cli -p xtask --all-targets --all-features\n"
     );
 }

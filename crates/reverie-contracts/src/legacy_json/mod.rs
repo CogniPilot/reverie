@@ -27,6 +27,11 @@ pub(crate) fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_bytes_without_constants(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_without_constants(&text::python_bytes(raw)?)
 }
+/// OPS uses Python bytes JSON with close-time duplicate and literal constant
+/// refusal and the original decimal conversion cap, including ignored slots.
+pub(crate) fn decode_strict_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_ops(&text::python_bytes(raw)?)
+}
 /// Metadata and fixed perf readers use Python bytes decoding, ordinary signed
 /// integer conversion and close-time object_pairs_hook duplicate refusal.
 /// Unlike strict constant readers, literal NaN and infinities remain data.
