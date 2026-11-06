@@ -109,7 +109,7 @@ was tested, and CI checks the Rust workspace independently of image publishing.
 New Python and shell scripts, including recognized interpreter shebangs and
 staged-index conversions, are rejected by the Rust PR workflow under SPEC_0008
 while legacy implementations are being retired. The portable gate exercises
-core/contracts/xtask on Linux, macOS and Windows; native host adapters have their
+core/contracts/routes, shared HTTP, the OPS CLI and xtask on Linux, macOS and Windows; native host adapters have their
 separate Linux gate. Neither gate proves unported runtime paths are portable.
 
 Independent adversarial review is required for changed authorization and native

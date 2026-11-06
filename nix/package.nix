@@ -492,6 +492,9 @@ let
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
   memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
+  # Independently qualified candidate; selecting the installed client is a
+  # separate consumer change. The OPS daemon and grants remain server-owned.
+  opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -589,4 +592,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild memoryNativeCli laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild memoryNativeCli opsNativeCli laptopTools; }

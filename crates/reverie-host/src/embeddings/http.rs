@@ -18,45 +18,18 @@ use std::{
 };
 use tokio::net::TcpStream;
 type Response = hyper::Response<Incoming>;
-fn http1_builder() -> http1::Builder {
-    let mut builder = http1::Builder::new();
-    // Match the legacy response-head allowance without hyper's smaller
-    // aggregate default. Response bodies remain uncapped and streamed.
-    builder
-        .max_headers(99)
-        .max_buf_size(100 * 65536 + 2)
-        .max_header_size(100 * 65536 + 2)
-        .allow_obsolete_multiline_headers_in_responses(true);
-    builder
-}
+use reverie_http::http1_builder;
 async fn send_response(
     sender: &mut http1::SendRequest<Full<Bytes>>,
-    mut request: Request<Full<Bytes>>,
+    request: Request<Full<Bytes>>,
     allow_continue: bool,
 ) -> Result<Response> {
-    use std::future::{Future, poll_fn};
-    let (notify, mut notified) = tokio::sync::mpsc::channel(1);
-    hyper::ext::on_informational(&mut request, move |response| {
-        let status = response.status().as_u16();
-        if !allow_continue || status != 100 {
-            let _ = notify.try_send(status);
-        }
-    });
-    let response = sender.send_request(request);
-    let mut response = std::pin::pin!(response);
-    poll_fn(|cx| {
-        if let std::task::Poll::Ready(Some(status)) = notified.poll_recv(cx) {
-            return std::task::Poll::Ready(Err(LlamaError::HttpStatus(status)));
-        }
-        let result = response.as_mut().poll(cx);
-        // The connection driver can deliver an informational head and final
-        // response during this same poll. The first head still owns semantics.
-        if let std::task::Poll::Ready(Some(status)) = notified.poll_recv(cx) {
-            return std::task::Poll::Ready(Err(LlamaError::HttpStatus(status)));
-        }
-        result.map(|result| result.map_err(transport))
-    })
-    .await
+    reverie_http::send_response(sender, request, allow_continue)
+        .await
+        .map_err(|error| match error {
+            reverie_http::ResponseError::Informational(status) => LlamaError::HttpStatus(status),
+            reverie_http::ResponseError::Transport(error) => transport(error),
+        })
 }
 async fn tls(stream: BoxStream, host: &str, timeout: Duration) -> Result<BoxStream> {
     let host = super::idna::host_to_ascii(host).map_err(|_| LlamaError::InvalidEndpoint)?;

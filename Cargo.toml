@@ -11,6 +11,8 @@ members = [
     "crates/reverie-worker-client",
     "crates/reverie-worker-child",
     "crates/reverie-memory-cli",
+    "crates/reverie-http",
+    "crates/reverie-ops-cli",
     "crates/reverie-diagnostics",
     "crates/xtask",
 ]
@@ -44,6 +46,9 @@ unicode-normalization = "=0.1.25"
 idna = "=1.1.0"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
 rustls-platform-verifier = "0.7.1"
+reverie-http = { path = "crates/reverie-http" }
+getrandom = "=0.2.17"
+uuid = { version = "=1.18.1", default-features = false }
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }

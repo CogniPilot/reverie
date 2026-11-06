@@ -11,6 +11,7 @@ nix = { workspace = true, features = ["term", "fs"] }
 reverie-core.workspace = true
 reverie-contracts.workspace = true
 reverie-store.workspace = true
+reverie-http.workspace = true
 http.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
