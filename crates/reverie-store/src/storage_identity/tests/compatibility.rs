@@ -1,6 +1,23 @@
 use super::*;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
+#[test]
+fn searchable_metadata_ancestors_do_not_require_directory_listing_permission() {
+    let tree = Tree::new();
+    let parent = tree.root.join("search-only");
+    fs::create_dir(&parent).unwrap();
+    let path = parent.join("metadata.json");
+    tree.write(&path, "{\"employees\":[]}");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o111)).unwrap();
+    let result = read_metadata(&path, uid(), DEFAULT_METADATA_LIMIT);
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        result.is_ok(),
+        "search-only metadata parent refused: {}",
+        result.err().unwrap().code()
+    );
+    assert_eq!(tree.fd_count(), 0);
+}
 
 #[test]
 fn inaccessible_tail_is_path_data_but_never_metadata_custody() {
