@@ -248,6 +248,67 @@ fn checked_close_reports_lost_native_observation_and_still_consumes_owned_lock()
 }
 
 #[test]
+fn ordinary_entry_covers_all_journal_checks_then_restores_original_body_bound() {
+    crate::test_process::owning_case!(
+        ordinary_entry_covers_all_journal_checks_then_restores_original_body_bound
+    );
+    for (entry_seconds, operation_seconds) in [(15, None), (15, Some(35)), (35, Some(15))] {
+        let (setup, fixture, gate) = prepared();
+        let now = Instant::now();
+        let entry = now + Duration::from_secs(entry_seconds);
+        let operation = operation_seconds.map(|seconds| now + Duration::from_secs(seconds));
+        let entered_by = operation.map_or(entry, |operation| entry.min(operation));
+        let admission = gate
+            .admit_ordinary_launch(
+                &source_session(&setup),
+                AdmissionBounds {
+                    operation,
+                    entry: Some(entry),
+                },
+            )
+            .unwrap();
+        let entered = fixture.deadlines();
+        let entry_ceiling_held = entered.iter().all(|deadline| *deadline <= entered_by);
+        let restored_operation = *gate
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .active
+            .as_ref()
+            .unwrap()
+            .deadline
+            .lock()
+            .unwrap();
+        admission
+            .check_creation(&policy(BudgetMode::Admission, 512, 4096))
+            .unwrap();
+        let body = fixture.deadlines();
+        let body_bound_held = body[entered.len()..].iter().all(|deadline| {
+            operation.is_none_or(|operation| *deadline <= operation)
+                && (operation.is_some_and(|operation| operation <= entry) || *deadline > entry)
+        });
+        admission.close().unwrap();
+        assert!(
+            entered.len() > 4,
+            "journal guards add queries after the initial custody guard"
+        );
+        assert_eq!(
+            restored_operation, operation,
+            "restore the ORIGINAL operation bound"
+        );
+        assert!(
+            body_bound_held,
+            "entry only bounds re-entry, not the later body"
+        );
+        assert!(
+            entry_ceiling_held,
+            "every journal/check_launch observation must remain within the ORIGINAL entry ceiling"
+        );
+    }
+}
+
+#[test]
 fn actual_python_ordinary_creation_vectors_match_real_journal_and_held_scope() {
     crate::test_process::owning_case!(
         actual_python_ordinary_creation_vectors_match_real_journal_and_held_scope
@@ -300,4 +361,93 @@ fn actual_python_ordinary_creation_vectors_match_real_journal_and_held_scope() {
         );
         assert!(gate.inner.state.lock().unwrap().active.is_none());
     }
+}
+
+#[test]
+fn entry_deadline_spans_check_launch_journal_before_becoming_body_deadline() {
+    crate::test_process::owning_case!(
+        entry_deadline_spans_check_launch_journal_before_becoming_body_deadline
+    );
+    let (setup, fixture, gate) = prepared();
+    let baseline_queries = fixture.deadlines().len();
+    let baseline = gate.inner.admit(AdmissionBounds::default()).unwrap();
+    let entry_guard_queries = fixture.deadlines().len() - baseline_queries;
+    baseline.finish().unwrap();
+    assert!(entry_guard_queries > 0);
+    let before = fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap();
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let observations = observed.clone();
+    let weak = Arc::downgrade(&gate.inner);
+    let (reached, stage) = std::sync::mpsc::sync_channel(1);
+    let (release, wait) = std::sync::mpsc::sync_channel(1);
+    let mut queries = 0;
+    fixture.on_query(move || {
+        let inner = weak.upgrade().unwrap();
+        let active = inner.held(None).unwrap();
+        observations
+            .lock()
+            .unwrap()
+            .push(*active.deadline.lock().unwrap());
+        queries += 1;
+        if queries == entry_guard_queries + 1 {
+            // The control measured the real generic entry guard above. Its
+            // next query belongs to check_launch's actual journal ScopeGuard.
+            reached.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+        Ok(())
+    });
+    let entry = Instant::now() + Duration::from_secs(5);
+    let controller = std::thread::spawn(move || {
+        stage.recv_timeout(Duration::from_secs(10)).unwrap();
+        std::thread::sleep(
+            entry.saturating_duration_since(Instant::now()) + Duration::from_millis(10),
+        );
+        release.send(()).unwrap();
+    });
+    let result = gate.admit_ordinary_launch(
+        &source_session(&setup),
+        AdmissionBounds {
+            operation: None,
+            entry: Some(entry),
+        },
+    );
+    let accepted_after_expiry = result.is_ok() && Instant::now() >= entry;
+    let outcome = match result {
+        Ok(admission) => admission.close(),
+        Err(error) => Err(error),
+    };
+    controller.join().unwrap();
+    // Settle the actual admission/flock before any assertion or diagnostic.
+    assert!(gate.inner.state.lock().unwrap().active.is_none());
+    let mut lock = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
+    lock.close().unwrap();
+    assert_eq!(
+        fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap(),
+        before
+    );
+    let observations = observed.lock().unwrap();
+    assert!(
+        observations[..entry_guard_queries]
+            .iter()
+            .all(|end| *end == Some(entry))
+    );
+    eprintln!(
+        "ordinary-entry witness: entry_queries={entry_guard_queries}, journal_kept_entry={}, accepted_after_expiry={}, outcome={outcome:?}",
+        observations[entry_guard_queries] == Some(entry),
+        accepted_after_expiry
+    );
+    assert_eq!(
+        observations[entry_guard_queries],
+        Some(entry),
+        "check_launch's journal phase lost the original entry bound"
+    );
+    assert!(
+        !accepted_after_expiry,
+        "ordinary entry succeeded after its original ceiling"
+    );
+    assert!(
+        outcome.is_err(),
+        "expiry must refuse entry, not become body time"
+    );
 }

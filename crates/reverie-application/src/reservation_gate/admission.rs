@@ -38,6 +38,20 @@ pub(super) struct Entry {
 }
 impl Inner {
     pub(super) fn admit(self: &Arc<Self>, bounds: AdmissionBounds) -> Result<Admission> {
+        self.admit_selected(bounds, None)
+    }
+    pub(super) fn admit_launch(
+        self: &Arc<Self>,
+        bounds: AdmissionBounds,
+        session: &reverie_core::ids::ProfileSessionId,
+    ) -> Result<Admission> {
+        self.admit_selected(bounds, Some(session))
+    }
+    fn admit_selected(
+        self: &Arc<Self>,
+        bounds: AdmissionBounds,
+        ordinary_session: Option<&reverie_core::ids::ProfileSessionId>,
+    ) -> Result<Admission> {
         let end = bounds.validate()?;
         let entry = self.reserve_entry(end)?;
         // Never hold the waiting-state mutex across filesystem I/O. Another
@@ -61,6 +75,11 @@ impl Inner {
         let admission = entry.activate(active)?;
         let entered = (|| {
             self.guard(None)?;
+            // The fixed ordinary SID/journal phase is still entry work. Do not
+            // clear entered_by before it or renew it after a slow observation.
+            if let Some(session) = ordinary_session {
+                self.check_ordinary_launch(session)?;
+            }
             need(
                 end.is_none_or(|end| Instant::now() < end),
                 "RESERVATION_ADMISSION_DEADLINE",

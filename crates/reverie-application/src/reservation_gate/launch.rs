@@ -22,15 +22,12 @@ impl ReservationGate {
         session: &ProfileSessionId,
         bounds: AdmissionBounds,
     ) -> Result<OrdinaryLaunchAdmission> {
-        let admission = self.inner.admit(bounds)?;
-        match self.inner.check_ordinary_launch(session) {
-            Ok(()) => Ok(OrdinaryLaunchAdmission {
-                gate: self.inner.clone(),
-                session: session.clone(),
-                admission,
-            }),
-            Err(error) => admission.conclude(Err(error)),
-        }
+        let admission = self.inner.admit_launch(bounds, session)?;
+        Ok(OrdinaryLaunchAdmission {
+            gate: self.inner.clone(),
+            session: session.clone(),
+            admission,
+        })
     }
 }
 impl OrdinaryLaunchAdmission {
@@ -55,7 +52,10 @@ impl OrdinaryLaunchAdmission {
     }
 }
 impl Inner {
-    fn check_ordinary_launch(self: &Arc<Self>, session: &ProfileSessionId) -> Result<()> {
+    pub(super) fn check_ordinary_launch(
+        self: &Arc<Self>,
+        session: &ProfileSessionId,
+    ) -> Result<()> {
         self.held(None)?;
         let sid = JournalId::parse(session.as_str())?;
         need(
