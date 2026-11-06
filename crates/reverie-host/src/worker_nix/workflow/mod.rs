@@ -281,24 +281,34 @@ impl Workflows {
             .try_lock()
             .map_err(|_| NixError::Refused(NixFault::Retained))?
             .clone();
+        let mut result = Ok(());
         for record in records {
-            let mut record = record
-                .try_lock()
-                .map_err(|_| NixError::Refused(NixFault::Retained))?;
-            if record.phase == Phase::Held && runtime.cancellation().is_cancelled() {
-                record.outcome = Some(Err(NixError::Refused(NixFault::Cancelled)));
-                record.phase = Phase::Known;
-            }
-            if record.phase == Phase::Retained {
-                cleanup::finish(runtime, self, &mut record, Some(deadline));
-            }
-            if !matches!(record.phase, Phase::Held | Phase::Known | Phase::Consumed) {
-                return Err(record
-                    .last_settlement
-                    .clone()
-                    .map(NixError::Engine)
-                    .unwrap_or(NixError::Refused(NixFault::Retained)));
-            }
+            result = finalized(result, self.settle_record(runtime, &record, deadline));
+        }
+        result
+    }
+    fn settle_record(
+        &self,
+        runtime: &WorkerRuntime,
+        record: &RecordOwner,
+        deadline: Instant,
+    ) -> Result<()> {
+        let mut record = record
+            .try_lock()
+            .map_err(|_| NixError::Refused(NixFault::Retained))?;
+        if record.phase == Phase::Held && runtime.cancellation().is_cancelled() {
+            record.outcome = Some(Err(NixError::Refused(NixFault::Cancelled)));
+            record.phase = Phase::Known;
+        }
+        if record.phase == Phase::Retained {
+            cleanup::finish(runtime, self, &mut record, Some(deadline));
+        }
+        if !matches!(record.phase, Phase::Held | Phase::Known | Phase::Consumed) {
+            return Err(record
+                .last_settlement
+                .clone()
+                .map(NixError::Engine)
+                .unwrap_or(NixError::Refused(NixFault::Retained)));
         }
         Ok(())
     }

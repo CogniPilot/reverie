@@ -21,7 +21,12 @@ then begins its 300-second budget and global helper serialization. Logs and
 removal each have their separate source 20-second client budget. The first
 service stop clamps every subsequent client and settlement to the same
 34-second deadline. Close requests that stop, drains actual records, then seals
-the same captured client. Returned owners and unrelated process contexts remain
+the same captured client. Explicit global settlement always attempts that
+client's actual native job and every retained record even when a different
+helper remains unknown; typed primary and secondary failures are preserved.
+Per-record cleanup alone settles only its exact call and cannot cancel another
+query. Admission is permanently sealed only after those owners confirm cleanup.
+Returned owners and unrelated process contexts remain
 the installing broker's responsibility; closing this runtime is not a global
 storage release acknowledgement.
 
@@ -62,6 +67,8 @@ work is settled through that call's identity, never a different active query;
 an expired unsubmitted removal leaves the helper and its resource owners
 retained. Actual owned competing-client tests cover both first admission after
 Busy and expiry with zero removal dispatches.
+Unknown create/removal controls also retain a real employee flock across both
+current and historical transports, even after caller workflow handles drop.
 
 RAM retention does not survive a service crash. Restart requires the actual
 writer census, source fences and fixed prior-helper checks. The real broker's

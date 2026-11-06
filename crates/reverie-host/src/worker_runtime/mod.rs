@@ -22,12 +22,19 @@ pub struct WorkerRuntime {
 pub enum RuntimeError {
     Engine(EngineError),
     Nix(NixError),
+    Finalization {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
 }
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Engine(error) => error.fmt(output),
             Self::Nix(error) => error.fmt(output),
+            Self::Finalization { primary, secondary } => {
+                write!(output, "{primary}; additional cleanup: {secondary}")
+            }
         }
     }
 }
@@ -36,6 +43,7 @@ impl std::error::Error for RuntimeError {
         match self {
             Self::Engine(error) => Some(error),
             Self::Nix(error) => Some(error),
+            Self::Finalization { primary, .. } => Some(primary.as_ref()),
         }
     }
 }
@@ -63,17 +71,29 @@ impl WorkerRuntime {
         self.worker_identity().connection_limit()
     }
     pub fn settle_owned(&self, deadline: Instant) -> Result<(), RuntimeError> {
-        self.nix.settle(self, deadline).map_err(RuntimeError::Nix)?;
-        self.installed_engine()
+        let client = self
+            .installed_engine()
             .settle_owned(deadline)
-            .map_err(RuntimeError::Engine)
+            .map_err(RuntimeError::Engine);
+        let records = self.nix.settle(self, deadline).map_err(RuntimeError::Nix);
+        match (records, client) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(primary), Err(secondary)) => Err(RuntimeError::Finalization {
+                primary: Box::new(primary),
+                secondary: Box::new(secondary),
+            }),
+        }
     }
     /// Request the first stop, drain actual helper records, then seal the SAME
     /// client. Unconfirmed records retain all resources and prevent sealing.
     /// Returned storage owners remain App's duty; this is no writer-release ACK.
     pub fn close(&self, deadline: Instant) -> Result<(), RuntimeError> {
         let deadline = deadline.min(self.request_stop());
-        self.nix.settle(self, deadline).map_err(RuntimeError::Nix)?;
+        // A retained helper must not hide a different actual client job.
+        // Settle native work without sealing cleanup admission, then attempt
+        // every retained record. Seal only after both owners confirm cleanup.
+        self.settle_owned(deadline)?;
         self.installed_engine()
             .close(deadline)
             .map_err(RuntimeError::Engine)

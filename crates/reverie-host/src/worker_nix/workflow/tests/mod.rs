@@ -10,6 +10,8 @@ use std::{
     sync::OnceLock,
 };
 mod admission;
+mod employee;
+mod global_stop;
 mod retained;
 static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(0);
