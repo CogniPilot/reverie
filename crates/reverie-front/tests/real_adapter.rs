@@ -2,6 +2,8 @@
 #![cfg(target_os = "linux")]
 #[path = "support/shutdown.rs"]
 mod shutdown;
+#[path = "support/streams.rs"]
+mod streams;
 mod support;
 use support::*;
 #[test]
