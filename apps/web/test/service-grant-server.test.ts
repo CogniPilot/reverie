@@ -20,6 +20,7 @@ import { callerOf, registerOwnerPolicy, OWNER_COOKIE, SERVICE_HEADER } from '../
 import { registerAuthMiddleware } from '../src/web/middleware/auth.js';
 import { createServiceAuthorization } from '../src/service-authorization.js';
 import { MemoryScopePublisher } from '../src/memory-scope-publisher.js';
+import { GoalNonceStore } from '../src/goal-nonce-store.js';
 import { registerMemoryScopeRoutes } from '../src/web/routes/memory-scope-routes.js';
 import { registerOfficeRoutes } from '../src/web/routes/office-routes.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
@@ -478,6 +479,55 @@ it.runIf(Boolean(process.env.NIX_REVERIE_TEST_MEMORY_CLI))(
   },
   30_000
 );
+
+it.each([
+  'disappear',
+  'pid-loss',
+  'pane-exit',
+  'new-generation',
+  'owner-change',
+  'mutable-source',
+  'unchanged',
+] as const)('rechecks actual current binding after durable nonce I/O (%s)', async (kind) => {
+  expect((await call('POST', '/api/service-grants', owner, memoryGrant())).statusCode).toBe(200);
+  const mutableView = company.view(undefined);
+  if (kind === 'mutable-source') vi.spyOn(company, 'view').mockReturnValue(mutableView);
+  const claim = GoalNonceStore.prototype.claim;
+  let actualClaim = false;
+  vi.spyOn(GoalNonceStore.prototype, 'claim').mockImplementation(async function (
+    this: GoalNonceStore,
+    ...args: Parameters<typeof claim>
+  ) {
+    // Preserve the actual durable claim and its original opaque handle. Only
+    // interleave current owned data after the real awaited operation finishes.
+    const handle = await claim.apply(this, args);
+    actualClaim = true;
+    if (kind === 'disappear') sessions.delete(SESSION);
+    if (kind === 'pid-loss') sessions.get(SESSION).pid = 0;
+    if (kind === 'pane-exit') sessions.get(SESSION).paneExit = 0;
+    if (kind === 'new-generation') {
+      sessions.set(SESSION, { ...sessions.get(SESSION), pid: process.pid });
+      await store.update((state) => {
+        state.employees[0]!.sessionGeneration = 2;
+      });
+    }
+    if (kind === 'owner-change')
+      await store.update((state) => {
+        state.employees[0]!.owner = 'other-owner';
+      });
+    if (kind === 'mutable-source') mutableView.employees[0]!.sessionGeneration = 2;
+    return handle;
+  });
+  try {
+    const response = await askScope(scopeRequest());
+    expect(actualClaim).toBe(true);
+    expect(JSON.parse(fs.readFileSync(join(root, 'nonces/ledger.json'), 'utf8')).revision).toBeGreaterThan(0);
+    if (kind === 'mutable-source') expect(mutableView.employees[0]!.sessionGeneration).toBe(2);
+    expect(response.statusCode, response.body).toBe(kind === 'unchanged' ? 200 : 403);
+  } finally {
+    vi.restoreAllMocks();
+  }
+});
 
 it.runIf(Boolean(process.env.NIX_REVERIE_TEST_MEMORY_CLI))(
   'matching legacy metadata grants nothing: actual API rejects wrong actor/path/grant and withholds a revoked native result',

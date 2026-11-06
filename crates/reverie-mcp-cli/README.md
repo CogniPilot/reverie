@@ -20,7 +20,9 @@ Installed memory reads ask the actual fixed-session Office API at
 `POST /api/agent/memory-scope` before and after reading history. That route uses
 the existing current employee and owner-issued `ServiceGrant` authority, checks
 revocation and canonical policy generation, and withholds results after a policy
-change. Host issuer keys stay in the protected server composition. The Office
+change. The route re-observes the actual live caller after durable nonce I/O,
+matching the detached request binding rather than a mutable employee reference.
+Host issuer keys stay in the protected server composition. The Office
 phone supplies its constructor-bound parent session and host Basic credentials;
 the employee receives no global service credential or signer. The response
 contains selection/policy metadata only, with no configuration path or program.

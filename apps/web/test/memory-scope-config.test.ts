@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
 import { MemoryScopeCatalog, MemoryScopeConfigSchema } from '../src/memory-scope-config.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import { MemoryContextBindingSchema } from '../src/installed-memory-context.js';
+import { matchesMemoryCallerBinding } from '../src/memory-scope-publisher.js';
 
 const issuer = { principal: 'memory', epoch: 'e1' };
 const path = [47, 55296, 56320, 47, 105];
@@ -63,4 +66,45 @@ it('refuses ambiguous IDs/scopes, invalid codepoints and request-style permissio
   const duplicate = configuration();
   duplicate.instances[1]!.instanceRef = 'a';
   expect(MemoryScopeConfigSchema.safeParse(duplicate).success).toBe(false);
+});
+
+it('matches only the four detached binding facts and preserves absent, empty and surrogate owners', () => {
+  const sessionId = '11111111-2222-4333-8444-555555555555';
+  const binding = MemoryContextBindingSchema.parse({
+    employeeId: 'sam',
+    sessionId,
+    sessionGeneration: 1,
+    ownerCodepoints: null,
+  });
+  const observed = (owner?: string) => ({
+    owner,
+    sessionId,
+    employee: EmployeeSchema.parse({
+      id: 'sam',
+      sessionId,
+      sessionGeneration: 1,
+      name: 'Synthetic employee',
+      icon: 'S',
+      position: 'Specialist',
+      expertise: ['Synthetic memory checks'],
+      createdAt: 1,
+    }),
+  });
+  const caller = observed();
+  expect(matchesMemoryCallerBinding(undefined, binding)).toBe(false);
+  expect(matchesMemoryCallerBinding(caller, binding)).toBe(true);
+  for (const changed of [
+    { ...caller, owner: 'other-owner' },
+    { ...caller, sessionId: 'other-session' },
+    { ...caller, employee: { ...caller.employee, id: 'other-employee' } },
+    { ...caller, employee: { ...caller.employee, sessionGeneration: 2 } },
+  ])
+    expect(matchesMemoryCallerBinding(changed, binding)).toBe(false);
+  expect(matchesMemoryCallerBinding(observed(''), { ...binding, ownerCodepoints: [] })).toBe(true);
+  expect(matchesMemoryCallerBinding(observed(), { ...binding, ownerCodepoints: [] })).toBe(false);
+  expect(matchesMemoryCallerBinding(observed('\ud800'), { ...binding, ownerCodepoints: [55296] })).toBe(true);
+  expect(matchesMemoryCallerBinding(observed('\ufffd'), { ...binding, ownerCodepoints: [55296] })).toBe(false);
+  caller.employee.sessionGeneration = 2;
+  expect(binding.sessionGeneration).toBe(1);
+  expect(matchesMemoryCallerBinding(caller, binding)).toBe(false);
 });

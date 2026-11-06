@@ -1,6 +1,10 @@
 /** Path-free, authenticated current-employee memory policy. No native effect. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { MemoryScopePublisher, MemoryScopeRequestSchema } from '../../memory-scope-publisher.js';
+import {
+  MemoryScopePublisher,
+  MemoryScopeRequestSchema,
+  matchesMemoryCallerBinding,
+} from '../../memory-scope-publisher.js';
 import { currentEmployeeCaller, type EmployeeCallerSource } from '../employee-caller.js';
 import type { SessionPort } from '../ports/session-port.js';
 
@@ -14,13 +18,11 @@ export function registerMemoryScopeRoutes(
     reply.header('Cache-Control', 'no-store');
     reply.header('X-Content-Type-Options', 'nosniff');
     const refused = () =>
-      reply
-        .code(403)
-        .send({
-          success: false,
-          errorCode: 'MEMORY_SCOPE_FORBIDDEN',
-          error: 'Memory scope unavailable for this caller',
-        });
+      reply.code(403).send({
+        success: false,
+        errorCode: 'MEMORY_SCOPE_FORBIDDEN',
+        error: 'Memory scope unavailable for this caller',
+      });
     try {
       const caller = currentEmployeeCaller(request, ctx, source);
       if (!caller || !publisher) return refused();
@@ -30,7 +32,11 @@ export function registerMemoryScopeRoutes(
           .code(400)
           .send({ success: false, errorCode: 'MEMORY_SCOPE_INVALID', error: 'Invalid memory scope request' });
       const checked = await publisher.check(caller, parsed.data);
-      return checked ? { success: true, data: checked } : refused();
+      // The durable nonce claim awaits I/O. Re-observe the real runtime now;
+      // canonical grant metadata alone cannot see a vanished/exited session.
+      return checked && matchesMemoryCallerBinding(currentEmployeeCaller(request, ctx, source), parsed.data.binding)
+        ? { success: true, data: checked }
+        : refused();
     } catch {
       return refused();
     }

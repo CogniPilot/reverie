@@ -37,23 +37,30 @@ function ownerText(points: number[] | null): string | undefined {
   return points.map((point) => String.fromCodePoint(point)).join('');
 }
 
+/** Compare observed facts to the detached parsed request, never to a mutable
+ * employee reference retained across an await. This predicate grants nothing. */
+export function matchesMemoryCallerBinding(caller: Caller | undefined, binding: Request['binding']): boolean {
+  return (
+    caller !== undefined &&
+    binding.employeeId === caller.employee.id &&
+    binding.sessionId === caller.sessionId &&
+    binding.sessionGeneration === caller.employee.sessionGeneration &&
+    ownerText(binding.ownerCodepoints) === caller.owner
+  );
+}
+
 export class MemoryScopePublisher {
   constructor(private readonly authority: ServiceAuthorization) {}
 
   async check(caller: Caller, input: Request): Promise<MemoryScopeCheck | undefined> {
     const a = this.authority,
       catalog = a.loaded.memoryScopes;
-    if (
-      !catalog ||
-      input.binding.employeeId !== caller.employee.id ||
-      input.binding.sessionId !== caller.sessionId ||
-      input.binding.sessionGeneration !== caller.employee.sessionGeneration ||
-      ownerText(input.binding.ownerCodepoints) !== caller.owner
-    )
-      return undefined;
+    if (!catalog || !matchesMemoryCallerBinding(caller, input.binding)) return undefined;
+    const employeeId = input.binding.employeeId,
+      owner = ownerText(input.binding.ownerCodepoints);
     const resource = catalog.resource(input.resourceId);
     if (!resource || resource.instanceRef !== input.instanceRef) return undefined;
-    const eligible = this.eligible(caller, input);
+    const eligible = this.eligible(input);
     // Never select the first grant from an ambiguous owner configuration.
     if (eligible.length !== 1) return undefined;
     const grant = eligible[0]!;
@@ -74,13 +81,13 @@ export class MemoryScopePublisher {
     const lease = await a.auth.authenticate({ assertion }, MEMORY_READ_PURPOSE);
     if (
       !lease ||
-      lease.ownerId !== (caller.owner ?? '') ||
-      !lease.currentFor(caller.employee.id, resource.resourceId) ||
+      lease.ownerId !== (owner ?? '') ||
+      !lease.currentFor(employeeId, resource.resourceId) ||
       (input.expectedGrantRef && input.expectedGrantRef.policyGeneration !== lease.generation)
     )
       return undefined;
-    const fresh = this.eligible(caller, input);
-    if (fresh.length !== 1 || fresh[0]!.id !== grant.id || !lease.currentFor(caller.employee.id, resource.resourceId))
+    const fresh = this.eligible(input);
+    if (fresh.length !== 1 || fresh[0]!.id !== grant.id || !lease.currentFor(employeeId, resource.resourceId))
       return undefined;
     return Object.freeze({
       instanceRef: resource.instanceRef,
@@ -90,21 +97,22 @@ export class MemoryScopePublisher {
       grantRef: Object.freeze({ grantId: lease.grantId, policyGeneration: lease.generation }),
     });
   }
-  private eligible(caller: Caller, input: Request): readonly ServiceGrant[] {
+  private eligible(input: Request): readonly ServiceGrant[] {
     const a = this.authority,
       catalog = a.loaded.memoryScopes;
     if (!catalog) return [];
-    const now = a.now();
+    const now = a.now(),
+      owner = ownerText(input.binding.ownerCodepoints);
     return a.source
       .grantsFor(MEMORY_READ_PURPOSE)
       .filter(
         (grant) =>
-          grant.owner === caller.owner &&
+          grant.owner === owner &&
           grant.issuedAt <= now &&
           now < grant.expiresAt &&
           grant.resources.includes(input.resourceId) &&
           a.source.revoked(grant.id) === false &&
-          grant.employees[0]?.employeeId === caller.employee.id &&
+          grant.employees[0]?.employeeId === input.binding.employeeId &&
           catalog.acceptsGrant({ ...grant, employeeIds: grant.employees.map((row) => row.employeeId) })
       );
   }
