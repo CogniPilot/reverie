@@ -18,6 +18,7 @@ enum Frame {
         values: BTreeMap<Text, Value>,
         key: Option<Text>,
         phase: Phase,
+        duplicate: bool,
     },
 }
 enum Action {
@@ -29,20 +30,29 @@ enum Action {
 struct Cursor<'a> {
     source: &'a [u8],
     offset: usize,
-    reject_constants: bool,
+    purpose: Purpose,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Purpose {
+    Default,
+    NoConstants,
+    Metadata,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, false)
+    decode_with(source, Purpose::Default)
+}
+pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
+    decode_with(source, Purpose::Metadata)
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
-    decode_mode(source, true)
+    decode_with(source, Purpose::NoConstants)
 }
-fn decode_mode(source: &[u8], reject_constants: bool) -> Result<Value, Error> {
+fn decode_with(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
     let mut cursor = Cursor {
         source,
         offset: 0,
-        reject_constants,
+        purpose,
     };
     let root = parse(&mut cursor)?;
     cursor.whitespace();
@@ -57,15 +67,12 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     loop {
         match action {
             Action::Ready(value) => match frames.last_mut() {
-                Some(frame) => frame.attach(value)?,
+                Some(frame) => frame.attach(value, cursor.purpose)?,
                 None => return Ok(value),
             },
             Action::Push(frame) => frames.push(frame),
             Action::Close => {
-                let value = match frames.pop().ok_or(Error::InvalidJson)? {
-                    Frame::Array { values, .. } => Value(Node::Array(values)),
-                    Frame::Object { values, .. } => Value(Node::Object(values)),
-                };
+                let value = frames.pop().ok_or(Error::InvalidJson)?.finish()?;
                 action = Action::Ready(value);
                 continue;
             }
@@ -75,17 +82,33 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     }
 }
 impl Frame {
-    fn attach(&mut self, value: Value) -> Result<(), Error> {
+    fn finish(self) -> Result<Value, Error> {
+        match self {
+            Self::Array { values, .. } => Ok(Value(Node::Array(values))),
+            Self::Object {
+                duplicate: true, ..
+            } => Err(Error::DuplicateKey),
+            Self::Object { values, .. } => Ok(Value(Node::Object(values))),
+        }
+    }
+    fn attach(&mut self, value: Value, purpose: Purpose) -> Result<(), Error> {
         match self {
             Self::Array { values, phase } => {
                 values.push(value);
                 *phase = Phase::Next;
             }
-            Self::Object { values, key, phase } => {
+            Self::Object {
+                values,
+                key,
+                phase,
+                duplicate,
+            } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
-                if values.insert(key, value).is_some() {
+                let replaced = values.insert(key, value).is_some();
+                if replaced && purpose != Purpose::Metadata {
                     return Err(Error::DuplicateKey);
                 }
+                *duplicate |= replaced;
                 *phase = Phase::Next;
             }
         }
@@ -155,6 +178,7 @@ impl Cursor<'_> {
                     values: BTreeMap::new(),
                     key: None,
                     phase: Phase::First,
+                    duplicate: false,
                 })
             }
             Some(b'[') => {
@@ -168,7 +192,9 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
-            Some(b'N' | b'I') if self.reject_constants => return Err(Error::InvalidJson),
+            Some(b'N' | b'I') if self.purpose == Purpose::NoConstants => {
+                return Err(Error::InvalidJson);
+            }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
             Some(b'I') => self.literal("Infinity", Node::Number(Number::PositiveInfinity))?,
             Some(b'-' | b'0'..=b'9') => Action::Ready(Value(Node::Number(self.number()?))),
@@ -186,7 +212,7 @@ impl Cursor<'_> {
     fn number(&mut self) -> Result<Number, Error> {
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
-            if self.reject_constants {
+            if self.purpose == Purpose::NoConstants {
                 return Err(Error::InvalidJson);
             }
             self.offset += "-Infinity".len();
@@ -203,6 +229,11 @@ impl Cursor<'_> {
             .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
+            if self.purpose == Purpose::Metadata
+                && text.trim_start_matches('-').len() > super::DEFAULT_INT_MAX_DIGITS
+            {
+                return Err(Error::InvalidJson);
+            }
             return Ok(Number::Integer(
                 if text == "-0" { "0" } else { text }.to_owned(),
             ));

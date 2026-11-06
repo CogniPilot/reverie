@@ -36,7 +36,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn help() {
     println!(
-        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability."
+        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability."
     );
 }
 
@@ -56,6 +56,8 @@ fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
             "reverie-core",
             "-p",
             "reverie-contracts",
+            "-p",
+            "reverie-routes",
             "-p",
             "xtask",
         ]

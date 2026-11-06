@@ -52,7 +52,11 @@ records, `storage-owner.json`, historical plan-move edges and current employee
 selection. It uses shared private lossless JSON primitives, not the effective
 worker hash wrapper or a generic JSON editing API. The metadata reader preserves
 Python `json.loads(bytes)` UTF-8/BOM, UTF-16/32 and surrogatepass behavior, rejects
-duplicate keys and retains opaque unrelated identities. UUID validation applies
+duplicate keys when each object closes and retains opaque unrelated identities.
+Its named parser enforces Python's default 4300-digit signed integer-token bound;
+literal nonfinite values and exponent overflow remain accepted metadata data.
+Existing effective-worker hash parsing keeps its separate default behavior.
+UUID validation applies
 when selecting a storage identity. Owners retain Python's 200-codepoint bound;
 current GPU generations are positive Python integers without a JS-safe ceiling.
 Numeric duplicate-session comparison preserves Python bool/int/float equality
@@ -88,6 +92,9 @@ bounded employee policy map and literal rootless enabled flag, then replaces
 only the selected fixed profile/hash and adds the task-v1 marker. Unknown worker
 configuration fields remain lossless. These are data transforms, not native
 artifact custody, owner permission, full Docker validation or a kernel grant.
+The fixed artifact reader shares the metadata parse-hook purpose: default
+4300-digit integer conversion, object-close duplicate refusal and Python byte
+encoding detection, while accepting literal nonfinite constants.
 The separate Linux host adapter supplies fixed package observation and current
 employee bracketing; current production Python consumers remain selected.
 
@@ -156,3 +163,16 @@ filesystem adapter. Twenty-three actual Python cases cover bytes, policy hashes
 and refusals; six original staging cases also retain final effective hashes.
 This feature view assumes the caller's validated worker domain; it is not the
 full worker schema validator or an authorization interface.
+
+# Subscription profiles v1 JS codec
+
+`subscription_profiles_v1` is the forwarded request and the exact response bytes of the TS route
+`GET /api/subscription-profiles`. It is a separate codec from `profiles_v1`: the file grammar is
+ECMAScript `JSON.parse` (last duplicate key wins, lone surrogates kept, any nesting depth), the schema is
+zod 4.4.3 `subscriptionProfileSchema` (strict except `__proto__`, JS `trim`, UTF-16 lengths, Node
+`path.isAbsolute`), and the body is `JSON.stringify` output. Strings stay UTF-16 code units throughout.
+
+The request carries what only TS owns: its memoized CLI-registry modes, `os.homedir()`, `process.cwd()`,
+`process.platform`, `getDataDir()` and the three environment values the route reads. Bounds TS lacks
+(request, file and response size) are typed refusals that the forwarder answers with its curated 503.
+`reverie-routes` holds the read-only handler; its byte goldens are recorded from the TS route.
