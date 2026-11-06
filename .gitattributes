@@ -1,2 +1,5 @@
 # Preserve unified-diff context prefixes in the pinned upstream patch.
 nix/codex-observer/observer-r5.patch -whitespace
+
+# This frozen oracle is hashed as repository bytes on every platform.
+crates/reverie-contracts/tests/fixtures/valid-cpu-floats.json -text
