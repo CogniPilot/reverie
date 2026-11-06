@@ -14,5 +14,11 @@ tokio.workspace = true
 [target.'cfg(unix)'.dependencies]
 command-fds.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { workspace = true, features = ["signal", "process"] }
+
 [lints]
 workspace = true

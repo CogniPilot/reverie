@@ -335,8 +335,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "command-fds",
+ "nix",
  "reverie-contracts",
  "reverie-diagnostics",
+ "serde_json",
  "tokio",
 ]
 
