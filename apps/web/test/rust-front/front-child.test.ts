@@ -19,7 +19,7 @@ afterEach(() => {
 interface Running {
   child: ChildProcess;
   fake: FakeFront;
-  events: Array<Record<string, unknown>>;
+  events: Array<Record<string, unknown> & { event: string }>;
   exited: Promise<number | null>;
   /** Resolves when the child has ended its direction of the channel: everything it wrote has arrived. */
   channelEnded: Promise<void>;
@@ -33,14 +33,14 @@ function start(env: Record<string, string> = {}): Running {
   });
   children.push(child);
   const fake = new FakeFront(1n, child.stdio[3] as Duplex);
-  const events: Array<Record<string, unknown>> = [];
+  const events: Running['events'] = [];
   let partial = '';
   child.stderr?.on('data', (chunk: Buffer) => {
     const lines = (partial + chunk.toString()).split('\n');
     partial = lines.pop() ?? '';
     for (const line of lines)
       try {
-        events.push(JSON.parse(line) as Record<string, unknown>);
+        events.push(JSON.parse(line) as Running['events'][number]);
       } catch {
         // Not a lifecycle line.
       }
@@ -49,6 +49,19 @@ function start(env: Record<string, string> = {}): Running {
   const channelEnded = new Promise<void>((done) => fake.peer.once('end', () => done()));
   return { child, fake, events, exited, channelEnded };
 }
+
+/** Polls for a condition on the child's stderr events, which arrive outside FakeFront's frame-driven waits. */
+async function eventually(check: () => boolean, ms: number, what: string): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await sleep(5);
+  }
+}
+
+/** The lifecycle events in order, without the per-response ones. */
+const lifecycle = (events: Running['events']) =>
+  events.map((event) => event.event).filter((event) => !event.startsWith('response_'));
 
 async function ready(running: Running, port = 41000): Promise<void> {
   const request = await running.fake.next('bind_request');
@@ -98,7 +111,35 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
       encrypted: true,
       protocol: 'https',
     });
-    expect(running.events.map((event) => event.event)).toEqual(['bound', 'accepting', 'service_ready']);
+    const finishes = () => running.events.filter((event) => event.event === 'response_finish');
+    await eventually(() => finishes().length === 3, 5000, 'three response finishes');
+    expect(lifecycle(running.events)).toEqual(['bound', 'accepting', 'service_ready']);
+    expect(running.events.find((event) => event.event === 'service_ready')).toEqual({
+      event: 'service_ready',
+      port: 41000,
+    });
+    // Each response logs the shared app's events once its last byte is handed to the channel.
+    expect(finishes()).toEqual([
+      { event: 'response_finish', method: 'GET', url: '/hello', status: 200 },
+      { event: 'response_finish', method: 'POST', url: '/echo', status: 200 },
+      { event: 'response_finish', method: 'GET', url: '/peer', status: 200 },
+    ]);
+  }, 20_000);
+
+  it('logs an unfinished close for a destroyed response, which the front sees as abort', async () => {
+    const running = start();
+    await ready(running);
+    const destroyed = running.fake.open();
+    await running.fake.write(destroyed, 'GET /destroy HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    await running.fake.until(() => destroyed.aborted !== undefined, 5000, 'the destroy abort');
+    await eventually(
+      () => running.events.some((event) => event.event === 'response_close'),
+      5000,
+      'the response close event'
+    );
+    expect(running.events.filter((event) => event.event.startsWith('response_'))).toEqual([
+      { event: 'response_close', method: 'GET', url: '/destroy', finished: false },
+    ]);
   }, 20_000);
 
   it('on a shutdown frame, closes Fastify, sends unbind and exits 0', async () => {
@@ -108,13 +149,7 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     await running.channelEnded;
     expect(running.fake.frames.at(-1)?.body).toEqual({ kind: 'unbind', listener: 'main' });
     expect(await running.exited).toBe(0);
-    expect(running.events.map((event) => event.event)).toEqual([
-      'bound',
-      'accepting',
-      'service_ready',
-      'shutdown',
-      'closed',
-    ]);
+    expect(lifecycle(running.events)).toEqual(['bound', 'accepting', 'service_ready', 'shutdown', 'closed']);
   }, 20_000);
 
   it('on SIGTERM, does the same', async () => {
@@ -162,13 +197,38 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     expect(running.events.at(-1)).toEqual({ event: 'closed' });
   }, 20_000);
 
+  it('on shutdown with an ended response still held for credit, aborts it like the direct child truncates', async () => {
+    // The fronted pair of the direct child's truncation case: the response has called end(), but most of its body
+    // waits in the socket for credit the front has not granted. Node's server.close() destroys it as idle, which
+    // the front sees as abort, and the child still exits 0.
+    const running = start();
+    await ready(running);
+    const total = 1024 * 1024;
+    const held = running.fake.open({ credit: 64 * 1024 });
+    await running.fake.write(held, `GET /bytes?n=${total} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`);
+    await running.fake.until(
+      () => Buffer.concat(held.received).length === 64 * 1024,
+      5000,
+      'the first grant to be used'
+    );
+    running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
+    expect(await running.exited).toBe(0);
+    expect(held.aborted).toBe('destroy');
+    expect(Buffer.concat(held.received).length).toBeLessThan(total);
+    expect(running.events.some((event) => event.event === 'response_finish')).toBe(false);
+  }, 20_000);
+
   it('exits 71, not 0, when the channel cannot flush before the deadline', async () => {
     const running = start({ FRONT_CHILD_FINISH_MS: '500' });
     await ready(running);
     await congest(running);
     running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
     expect(await running.exited).toBe(71);
-    expect(running.events.at(-1)).toMatchObject({ event: 'unfinished' });
+    // The channel finish timed out, not Fastify's close: unbind went out and only the channel drain is pending.
+    expect(running.events.at(-1)).toEqual({
+      event: 'unfinished',
+      message: 'front channel did not flush within 500 ms',
+    });
   }, 20_000);
 
   it('binds the bridge on the main port when asked, and unbinds both on shutdown', async () => {
