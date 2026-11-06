@@ -211,6 +211,31 @@ describe('chat archive', () => {
     expect(await archive.sweep(NOW + 1000, ZONE)).toEqual([]);
   });
 
+  it('runs one sweep at a time, and idle() waits for the one still writing', async () => {
+    mkdirSync(archiveDir, { mode: 0o700 });
+    writeFileSync(join(archiveDir, '2026-W41.jsonl'), '{"a":1}\n', { mode: 0o600 });
+    const { gzipSync } = await import('node:zlib');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const archive = new ChatArchive(archiveDir, async (data) => {
+      await held;
+      return gzipSync(data);
+    });
+    const first = archive.sweep(NOW, ZONE);
+    const second = archive.sweep(NOW, ZONE);
+    let idle = false;
+    const waited = archive.idle().then(() => (idle = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(idle).toBe(false);
+    release();
+    await waited;
+    expect(await first).toEqual(['2026-W41.jsonl']);
+    // The second ran after the first had finished, so the day was already swept.
+    expect(await second).toEqual([]);
+    expect(readdirSync(archiveDir)).toEqual(['2026-W41.jsonl.gz']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('keeps the plain file when the .gz does not read back to the same bytes', async () => {
     mkdirSync(archiveDir, { mode: 0o700 });
     const old = join(archiveDir, '2026-W41.jsonl');
