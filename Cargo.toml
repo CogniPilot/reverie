@@ -9,6 +9,7 @@ members = [
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",
+    "crates/reverie-front",
     "crates/xtask",
 ]
 resolver = "3"
@@ -25,6 +26,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 toml = "0.9"
 sha2 = "0.10"
+command-fds = "0.3.3"
+tokio = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "io-util", "process", "signal", "sync", "macros"] }
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }

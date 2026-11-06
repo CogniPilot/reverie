@@ -1,5 +1,13 @@
 # Upstream credit
 
+The optional Rust front uses Tokio 1.54.1 (MIT) and command-fds 0.3.3
+(Apache-2.0, copyright 2021 The Android Open Source Project). Their upstream
+sources are https://github.com/tokio-rs/tokio and
+https://github.com/google/command-fds/. Cargo.lock pins the source checksums.
+The front uses command-fds' single owned fd mapping to fd 3; its reviewed
+pre-exec syscall boundary stays in that dependency. The front's packaging gate
+must retain the upstream licenses and any notices alongside the executable.
+
 Chat code highlighting includes highlight.js 11.12.0 (BSD-3-Clause), copyright
 2006 Ivan Sagalaev. Its license is retained at
 `apps/web/src/web/public/vendor/highlight-LICENSE.txt`; pinned inputs and hashes

@@ -1,0 +1,17 @@
+[package]
+name = "reverie-front"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+reverie-contracts.workspace = true
+tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+command-fds.workspace = true
+
+[lints]
+workspace = true
