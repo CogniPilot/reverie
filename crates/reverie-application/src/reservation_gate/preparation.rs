@@ -1,6 +1,7 @@
-//! Actual retained canonical claim + original native baseline producer. This
-//! has no start/stop/configuration-commit method; those effect owners remain
-//! unavailable until their complete protected producer is implemented.
+//! Actual retained canonical claim + original native baseline producer.
+//! Phase extensions publish PREPARING, stage and commit the protected policy
+//! file. Engine start/stop, source replacement and completion remain unavailable
+//! until their complete native producers and retained ownership are implemented.
 use super::claim::{ClaimedContext, TerminalClaim};
 use super::*;
 use crate::reservation_observer::WebsiteBinding;
