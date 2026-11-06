@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:http';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import { ChannelSocket } from '../../src/rust-front/channel-socket.js';
@@ -383,6 +384,54 @@ describe('connection rules, the receive pool and the writer', () => {
     await fake.until(() => c.credit > 0, 2000, 'the starved grant');
     expect(c.credit).toBe(64 * 1024);
     expect(front.poolInUse).toBe(128 * 1024);
+  });
+
+  it('gives a waiting connection the bytes a busy one frees, while neither busy connection closes', async () => {
+    const { fake, front } = await app({ poolBytes: 128 * 1024, grantBytes: 64 * 1024 });
+    const [a, b, c] = [fake.open(), fake.open(), fake.open()];
+    await fake.until(() => a.credit > 0 && b.credit > 0, 2000, 'two grants');
+    expect(c.credit).toBe(0);
+    // A and B each stream a body four times the pool and stay open afterwards (keep-alive).
+    const body = Buffer.alloc(512 * 1024, 0x61);
+    const post = Buffer.from(
+      `POST /count HTTP/1.1\r\nHost: x\r\ncontent-type: application/octet-stream\r\ncontent-length: ${body.length}\r\n\r\n`
+    );
+    const streaming = [a, b].map((connection) => fake.write(connection, Buffer.concat([post, body])));
+    // C can only send its request with bytes A or B free by being read.
+    expect(await fake.request(get('/big', 'Connection: close\r\n'))).toContain('HTTP/1.1 200 OK');
+    await Promise.all(streaming);
+    for (const connection of [a, b])
+      await fake.until(() => fake.text(connection).includes(`{"bytes":${body.length}}`), 2000, 'the streamed body');
+    expect([a, b].map((connection) => connection.ended || connection.aborted !== undefined)).toEqual([false, false]);
+    expect(front.poolInUse).toBeLessThanOrEqual(128 * 1024);
+  });
+
+  it('completes an empty write without credit or a data frame, so end still follows', async () => {
+    const fake = new FakeFront();
+    const front = new FrontChannel(fake.channel);
+    const server = createServer();
+    server.removeAllListeners('connection');
+    const accepted = new Promise<ChannelSocket>((resolve) => server.once('connection', resolve));
+    const bound = front.bind('main', { host: '127.0.0.1', port: 0, tls: false });
+    fake.send(0n, { kind: 'bound', listener: 'main', port: 1 });
+    await bound;
+    front.accepting('main', server);
+    const connection = fake.open({ credit: 0 });
+    const socket = await accepted;
+    const written = new Promise((resolve) => socket.write(Buffer.alloc(0), resolve));
+    socket.end();
+    await Promise.race([written, sleep(1000).then(() => Promise.reject(new Error('the empty write never completed')))]);
+    await fake.closed(connection);
+    expect(connection.ended).toBe(true);
+    expect(connection.received).toEqual([]);
+    // TS's only frames for it are its usual receive grant and the end: no data.
+    expect(
+      fake.frames
+        .filter((frame) => frame.id === connection.id && frame.body.kind !== 'credit')
+        .map((frame) => frame.body.kind)
+    ).toEqual(['end']);
+    expect(front.endedBy).toBeUndefined();
+    socket.destroy();
   });
 
   it('grants again as the consumer reads, so a body larger than one grant arrives whole', async () => {

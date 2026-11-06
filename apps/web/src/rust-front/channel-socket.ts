@@ -108,6 +108,12 @@ export class ChannelSocket extends Duplex {
   }
 
   override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+    // An empty write carries no bytes, so it needs no credit and sends no frame; holding it would also
+    // hold back `_final`, and with it `end`, which credit never gates.
+    if (chunk.length === 0) {
+      callback();
+      return;
+    }
     this.held = { chunk, callback };
     this.flush();
   }

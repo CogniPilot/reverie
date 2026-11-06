@@ -300,8 +300,10 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
     if (!connection || this.ended) return;
     connection.unread -= bytes;
     this.poolUsed -= bytes;
-    this.regrant(id);
+    // Connections already waiting are served first, in order. The consumer then tops up from what is left,
+    // or waits behind them: regranting it first would hand it back every byte it just freed.
     this.feedStarved();
+    this.regrant(id);
   }
 
   /** Tops the connection up to `grantBytes` granted and unread, as far as the pool allows. */
