@@ -10,6 +10,7 @@ mod history;
 mod host_jobs;
 mod observation;
 mod preparation;
+mod preparation_phase;
 mod recovery;
 mod terminal_claim;
 #[cfg(test)]
@@ -24,6 +25,7 @@ pub use error::GateError;
 use error::{Result, finalized, need};
 pub use history::HeadroomFacts;
 pub use preparation::RetainedPreparation;
+pub use preparation_phase::PreparationIntentFacts;
 pub use recovery::{NativeObservationState, RecoveryFacts, RecoveryObservation};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDataError, domain_digest},

@@ -26,8 +26,15 @@ impl ClaimEmployee {
     pub fn still_current(&self, metadata: &Metadata) -> Result<bool> {
         unchanged(metadata, &self.employee, &self.value)
     }
-    pub(super) fn data(&self) -> &Value {
+    pub(crate) fn data(&self) -> &Value {
         &self.value
+    }
+    /// Named publication projection DATA, not a registry write or scope grant.
+    pub(crate) fn projected(&self, value: Value) -> Self {
+        Self {
+            value,
+            employee: self.employee.clone(),
+        }
     }
 }
 impl ReservationEmployee {

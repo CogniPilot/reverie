@@ -18,6 +18,7 @@ pub mod reservation_draft;
 pub mod reservation_engine;
 pub mod reservation_history;
 pub mod reservation_observation;
+pub mod reservation_publication;
 pub mod resource_config;
 pub mod rootless;
 pub mod storage_identity;

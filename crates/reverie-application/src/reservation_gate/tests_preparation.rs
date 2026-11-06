@@ -1,5 +1,7 @@
 use super::*;
 use reverie_contracts::reservation_baseline::OriginalRuntimeTail;
+#[path = "tests_preparation_phase.rs"]
+mod phase_cases;
 fn fill(fixture: &Fixture, setup: &Setup) {
     for _ in 0..500 {
         fixture.inventory(&setup.rows);

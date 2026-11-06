@@ -18,11 +18,13 @@ held admission, native completion proof or start permit.
 | host-job `require_idle` | `host_jobs`, named contracts/native paths | Existing settled intent, ordered original spec and fixed receipt; no owned scope or begin/bind/finish producer |
 | `_retained_delta`, `check_headroom` | `history` | Actual admission, every retained source re-observed, complete capacity/inventory checks; fixed read-only INSTALL facts only |
 | `reserve`, `_observe_claim` | `claim`, fixed private `ClaimCapacity`, canonical `confirm_claim` | Actual durable metadata claim and selected profile/target checks; installed observer runs under journal flock; public reserve discards effect handles |
-| `_finish_claim` | `terminal_claim`, consumed exact store reader | Both stores/reader lock close before last native guards; full epoch/source/metadata fences and named journal stamp; uncertainty retains durable claims |
+| `_finish_claim` | `terminal_claim`, consumed exact store reader | Fresh terminal reader/store/lock close before last native guards; metadata/preview close their original store too, while the retained producer keeps its actual original store; full epoch/source/metadata fences and named journal stamp |
 | `cold_inspect`, `check_recovery` | `recovery` | Fresh matching/changed/unavailable source facts and unchanged journal; no handle resurrection, retry or positive capacity credit |
 | preparation `draft` for an already selected profile | `draft`, fixed `DraftCapacity` and named draft codec | Actual journal flock around observe/retained headroom; only then allocates opaque IDs, checks all occupied roles, closes store, bounds every directory entry and exclusively persists/fsyncs the fixed draft |
 | preparation `reserve`, `_RetainedClaim` | `preparation`, shared `claim` owner | Reuses exact approved IDs, real process-local journal handle and owned store, original canonical profile/context and exact source paths; replays cannot manufacture a handle |
 | native `capture_original`, `_account_mounts` | `preparation`, fixed `reservation_kernel` and named baseline codec | Actual selected source limits/storage/capacity hashes, physical cgroup identity, ordered source resolves/identities then sorted account references and fixed proc-root identities; no credential contents read |
+| `begin_prepare`, `_finish_phase` before publication | `preparation_phase`, retained handle, fixed publication codec/reader/writer | Latches before admission, durably records PREPARING before intent publication, preserves fresh-thread recipe semantics and original source/epoch/storage; exact selected operation and named journal/phase stamps fence the terminal result |
+| `confirm_publication`, `_finish_phase` after publication | same retained phase owner | Observes the normal server's exact intended employee rebind and unchanged storage identity; never writes that company row or acknowledges prepared/CLI/start state |
 
 The waiting-state mutex is never held through filesystem I/O. A private entering
 registration keeps other threads' waits bounded before the flock open returns;
@@ -33,8 +35,8 @@ and publicly inspectable secondary finalizer failures.
 
 The ordinary guard currently refuses every control transition marker. It does not claim
 the unported GPU/actor/image/perf/mount transition owners or their pending/row
-exceptions. RAM profile selection, preparation phase/publication latches,
-creation/stop/reload policies, preparation/start/completion boundaries and host-job begin/bind/finish remain
+exceptions. RAM profile selection, configuration staging/commit/reload,
+creation/stop policies, start/completion boundaries and host-job begin/bind/finish remain
 required. These must be real producers before a full Gate or launch claim. Caller
 owner/session authorization and future selected HTTP/broker integration remain
 separate obligations; captured worker/path data never supplies those permissions.
@@ -91,3 +93,21 @@ bindings fail before live profile I/O. Native baseline loss after publication
 retains the positive claim and closes owned descriptors without a fresh handle.
 The native account tests use owned fake-kernel trees and actual directory
 identities, source-first failures, raw trailing-dot behavior and namespace drift.
+
+The phase owner now has a real one-attempt PREPARING producer and readonly
+publication observation. Every error after the attempt closes its original
+store, keeps the durable claim and forbids reuse; no rollback or synthetic ACK
+is supplied. Fixed draft/publication writers share one private exclusive-file
+and checked-finalizer owner, with no public raw path/bytes editor. The terminal
+phase reader permits unrelated valid journal rows while requiring the entire
+selected operation and allowed phase to match. No engine/kernel producer runs
+after its final journal/phase metadata stamps.
+
+Twenty-two frozen actual old `begin_prepare` cases check recipe mode, disabled
+and missing nested data, fresh thread bookkeeping and lossless unknown fields.
+An actual old raw-surrogate witness confirms that copying must retain distinct
+unescaped codepoints even when the later escaped receipt reload changes them;
+that mismatch remains an uncertain PREPARING claim. Actual workflow regressions
+also cover lost transition ACK, retained exclusive names, premature publication,
+last-stamp drift, and fresh reader close ordering. These checks qualify source
+compatibility only, not a mutable broker reload, protected stop or launch.

@@ -7,14 +7,47 @@ pub struct TerminalJournalStamp {
     path: PathBuf,
     stamp: Stamp,
 }
+enum TerminalSelection<'a> {
+    Exact(&'a OperationDocument),
+    Preparation(&'a OperationView),
+}
+impl TerminalSelection<'_> {
+    fn assert_document(&self, document: &OperationDocument) -> Result<()> {
+        match self {
+            Self::Exact(expected) => need(document == *expected, "RESERVATION_CLAIM_CHANGED"),
+            Self::Preparation(view) => {
+                let expected = view.record();
+                need(
+                    document
+                        .operations()
+                        .get(&expected.data().id)
+                        .is_some_and(|op| {
+                            op == expected
+                                && matches!(
+                                    op.data().state,
+                                    OperationState::Preparing | OperationState::Prepared
+                                )
+                        }),
+                    "RESOURCE_PREPARATION_CLAIM_CHANGED",
+                )
+            }
+        }
+    }
+}
 impl TerminalJournalStamp {
     /// Only a named metadata observation; the actual gate retains admission.
     /// No fallible descriptor finalizer follows this check.
     pub fn assert_named_current(&self) -> Result<()> {
+        self.assert_current("RESERVATION_CLAIM_CHANGED")
+    }
+    pub fn assert_preparation_named_current(&self) -> Result<()> {
+        self.assert_current("RESOURCE_PREPARATION_CLAIM_CHANGED")
+    }
+    fn assert_current(&self, code: &'static str) -> Result<()> {
         let current = std::fs::symlink_metadata(&self.path).map_err(StoreError::io)?;
         need(
             self.stamp.same_generation(&Stamp::from_metadata(&current)),
-            "RESERVATION_CLAIM_CHANGED",
+            code,
         )
     }
 }
@@ -28,14 +61,25 @@ impl OperationStore {
         scope: &OperationScope,
         expected: &OperationDocument,
     ) -> Result<TerminalJournalStamp> {
-        let read = self.read_exact_terminal(scope, expected);
+        let read = self.read_terminal(scope, TerminalSelection::Exact(expected));
         let closed = self.close();
         finalized(read, closed)
     }
-    fn read_exact_terminal(
+    /// Consuming fixed preparation reader. Checks only the exact selected
+    /// operation/allowed phase, then closes its actual flock and owned store.
+    /// It returns no handle, completion proof, credit or launch permission.
+    pub fn into_preparation_terminal_stamp(
+        self,
+        scope: &OperationScope,
+        expected: &OperationView,
+    ) -> Result<TerminalJournalStamp> {
+        let read = self.read_terminal(scope, TerminalSelection::Preparation(expected));
+        finalized(read, self.close())
+    }
+    fn read_terminal(
         &self,
         scope: &OperationScope,
-        expected: &OperationDocument,
+        expected: TerminalSelection<'_>,
     ) -> Result<TerminalJournalStamp> {
         let inner = self
             .inner
@@ -49,7 +93,7 @@ impl OperationStore {
             directory.check()?;
             directory.check_lock_named(&lock, "operations.lock")?;
             let loaded = io::load(directory)?;
-            need(&loaded.document == expected, "RESERVATION_CLAIM_CHANGED")?;
+            expected.assert_document(&loaded.document)?;
             directory.check()?;
             directory.check_lock_named(&lock, "operations.lock")?;
             Ok(TerminalJournalStamp {

@@ -67,3 +67,60 @@ fn changed_selected_fields_refuse_before_installed_observer_and_observation_drif
     store.close().unwrap();
     assert_eq!(tree.descriptor_count(), 0);
 }
+#[test]
+fn preparation_confirmation_is_exact_but_terminal_reader_allows_unrelated_valid_rows() {
+    let tree = Tree::new();
+    let store = tree.initialized();
+    let (reserved, handle) = tree.claim(&store);
+    let preparing = store
+        .begin_effect(&scope(), &handle, Effect::Prepare, version(1))
+        .unwrap();
+    let calls = tree.observer.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        store
+            .confirm_preparation(&scope(), &reserved)
+            .unwrap_err()
+            .code(),
+        "RESOURCE_PREPARATION_CLAIM_CHANGED"
+    );
+    assert_eq!(
+        tree.observer.calls.load(Ordering::SeqCst),
+        calls,
+        "exact phase selection precedes native observer"
+    );
+    store
+        .confirm_claim(&scope(), &reserved)
+        .expect("ordinary claim confirmation keeps its legacy selected-field contract");
+    store.confirm_preparation(&scope(), &preparing).unwrap();
+    let old = store.snapshot(&scope()).unwrap();
+    store
+        .claim(
+            &scope(),
+            &id(21),
+            &request(id(12), 32),
+            &ClaimSelection::default(),
+        )
+        .unwrap();
+    assert_eq!(store.snapshot(&scope()).unwrap().operations().len(), 2);
+    let stamp = tree
+        .open()
+        .into_preparation_terminal_stamp(&scope(), &preparing)
+        .unwrap();
+    stamp.assert_preparation_named_current().unwrap();
+    assert_eq!(
+        tree.descriptor_count(),
+        1,
+        "fresh terminal reader and flock close; only the original retained store stays open"
+    );
+    assert_eq!(
+        tree.open()
+            .into_exact_terminal_stamp(&scope(), &old)
+            .err()
+            .unwrap()
+            .code(),
+        "RESERVATION_CLAIM_CHANGED",
+        "ordinary exact-document reader is unchanged"
+    );
+    store.close().unwrap();
+    assert_eq!(tree.descriptor_count(), 0);
+}

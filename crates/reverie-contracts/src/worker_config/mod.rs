@@ -77,6 +77,11 @@ impl EffectiveWorkerConfig {
         Self(Value(Node::Object(value)))
     }
 }
+/// Python dictionary equality for captured configuration DATA, distinct from
+/// byte/digest identity and never an authorization or applied-config receipt.
+pub fn equivalent(left: &EffectiveWorkerConfig, right: &EffectiveWorkerConfig) -> bool {
+    left.0.python_eq(&right.0)
+}
 
 /// Python json.dumps(effective_config, sort_keys=True).encode(), including all keys.
 pub fn encode_config(config: &EffectiveWorkerConfig) -> Vec<u8> {

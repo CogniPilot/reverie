@@ -86,8 +86,7 @@ fn digest(value: &Value) -> Result<JournalDigest> {
     Ok(JournalDigest::parse(&crate::digest::hex(&digest)).expect("SHA256"))
 }
 fn profile_value(profile: &ResourceProfile) -> Result<Value> {
-    crate::legacy_json::decode_utf8(&crate::profiles_v1::encode_profile(profile)?)
-        .map_err(|_| DraftDataError::Changed)
+    Ok(crate::profiles_v1::data(profile)?)
 }
 /// The source counts every native entry, then rejects the 256th draft itself.
 /// Codepoint spelling is retained; no canonical directory ordering is imposed.

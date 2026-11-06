@@ -69,10 +69,8 @@ fn binding_digest(
     // profiles_v1 is a closed ASCII schema: UUIDs, bounded integers and finite
     // CPU numbers only. Unlike arbitrary company/worker data, its encoded
     // strings cannot contain adjacent surrogate codepoints requiring a copy.
-    let bytes = crate::profiles_v1::encode_profile(profile)
-        .map_err(|_| ObservationDataError::Fingerprint)?;
     let profile =
-        crate::legacy_json::decode_utf8(&bytes).map_err(|_| ObservationDataError::Fingerprint)?;
+        crate::profiles_v1::data(profile).map_err(|_| ObservationDataError::Fingerprint)?;
     let fields = [
         (key("employee"), employee.deep_clone()),
         (key("native"), native.data().deep_clone()),

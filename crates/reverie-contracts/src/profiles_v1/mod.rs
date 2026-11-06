@@ -14,16 +14,18 @@ use std::fmt;
 
 pub const SCHEMA: &str = "reverie-employee-resource-profiles-v1";
 pub const MAX_BYTES: usize = 131_072;
+/// Lossless value bridge for this closed ASCII profile schema only. Unknown
+/// employee/worker values must use their own lossless copying, not this bridge.
+pub(crate) fn data(profile: &ResourceProfile) -> Result<crate::legacy_json::Value, CodecError> {
+    crate::legacy_json::decode_utf8(&encode_profile(profile)?).map_err(|_| CodecError::ClosedSchema)
+}
 /// Python profile dictionary equality (including numeric CPU equality), distinct
 /// from byte/digest identity and the encoding-sensitive checked-core Eq.
 pub fn equivalent(
     left: &reverie_core::profiles::ResourceProfile,
     right: &reverie_core::profiles::ResourceProfile,
 ) -> bool {
-    let value = |profile| {
-        let bytes = encode_profile(profile).expect("bounded closed ASCII profile");
-        crate::legacy_json::decode_utf8(&bytes).expect("profile encoder emits valid closed JSON")
-    };
+    let value = |profile| data(profile).expect("bounded closed ASCII profile");
     value(left).python_eq(&value(right))
 }
 

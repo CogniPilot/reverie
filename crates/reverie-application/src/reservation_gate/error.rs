@@ -1,6 +1,13 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    PublicationData(reverie_contracts::reservation_publication::PublicationDataError),
+    PreparationIntentUncertain {
+        cause: Box<Self>,
+    },
+    PreparationPublicationUncertain {
+        cause: Box<Self>,
+    },
     Draft(reverie_contracts::reservation_draft::DraftDataError),
     Baseline(reverie_contracts::reservation_baseline::BaselineDataError),
     HostJob(reverie_contracts::host_jobs::HostJobDataError),
@@ -32,6 +39,13 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::PublicationData(error) => error.code(),
+            Self::PreparationIntentUncertain { .. } => {
+                "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM"
+            }
+            Self::PreparationPublicationUncertain { .. } => {
+                "RESOURCE_PREPARATION_PUBLICATION_UNCERTAIN_KEEP_CLAIM"
+            }
             Self::Draft(error) => error.code(),
             Self::Baseline(error) => error.code(),
             Self::HostJob(error) => error.code(),
@@ -65,6 +79,9 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::PublicationData(error) => Some(error),
+            Self::PreparationIntentUncertain { cause }
+            | Self::PreparationPublicationUncertain { cause } => Some(cause),
             Self::Draft(error) => Some(error),
             Self::Baseline(error) => Some(error),
             Self::HostJob(error) => Some(error),
@@ -100,6 +117,10 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(
+    reverie_contracts::reservation_publication::PublicationDataError,
+    PublicationData
+);
 from_error!(reverie_contracts::reservation_draft::DraftDataError, Draft);
 from_error!(
     reverie_contracts::reservation_baseline::BaselineDataError,

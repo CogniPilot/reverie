@@ -143,6 +143,15 @@ impl Admission {
         self.finished = true;
         finalized(terminal, self.cleanup())
     }
+    pub(super) fn finish_preparation(
+        mut self,
+        claim: &super::preparation::RetainedPreparation,
+        phase: super::preparation_phase::PublicationPhase,
+    ) -> Result<()> {
+        let terminal = self.gate.finish_preparation(claim, phase);
+        self.finished = true;
+        finalized(terminal, self.cleanup())
+    }
     fn abort(mut self) -> Result<()> {
         self.finished = true;
         self.cleanup()

@@ -4,6 +4,8 @@
 mod draft;
 mod history;
 mod image;
+mod private_record;
+mod publication;
 #[cfg(test)]
 mod tests;
 use crate::{ObservationError, native};
@@ -13,6 +15,7 @@ pub use history::{
     settlement_pending_present,
 };
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
+pub use publication::{PublicationStamp, observe_publication, publish_publication};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDirectory, ControlIdentity},
     reservation_engine::{EngineDataError, ReservationConfiguration},

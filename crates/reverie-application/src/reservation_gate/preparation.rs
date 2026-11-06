@@ -20,14 +20,17 @@ use reverie_store::{
 /// claim and native capture. Data accessors convey no permission to effects.
 /// Dropping/closing retains the durable reservation and target-session fence.
 pub struct RetainedPreparation {
-    gate: Arc<Inner>,
-    store: Option<OperationStore>,
-    handle: OperationHandle,
-    view: OperationView,
-    terminal: TerminalClaim,
+    pub(super) gate: Arc<Inner>,
+    pub(super) store: Option<OperationStore>,
+    pub(super) handle: OperationHandle,
+    pub(super) view: OperationView,
+    pub(super) terminal: TerminalClaim,
     before: EffectiveWorkerConfig,
     paths: StoragePaths,
     baseline: OriginalSourceBaseline,
+    pub(super) preparing_attempted: bool,
+    pub(super) publication: Option<super::preparation_phase::PublicationBoundary>,
+    pub(super) published: bool,
 }
 impl RetainedPreparation {
     pub fn operation(&self) -> &OperationView {
@@ -54,11 +57,13 @@ impl RetainedPreparation {
     /// Checked exactly-once owned-store close; this does not release capacity,
     /// clear a target fence, acknowledge completion or permit retry.
     pub fn close(mut self) -> Result<()> {
-        self.store
-            .take()
-            .expect("live retained owner")
-            .close()
-            .map_err(Into::into)
+        self.close_owned()
+    }
+    pub(super) fn close_owned(&mut self) -> Result<()> {
+        match self.store.take() {
+            Some(store) => store.close().map_err(Into::into),
+            None => Ok(()),
+        }
     }
 }
 impl ReservationGate {
@@ -144,6 +149,9 @@ impl ReservationGate {
                     before,
                     paths,
                     baseline,
+                    preparing_attempted: false,
+                    publication: None,
+                    published: false,
                 })
             }
         }

@@ -94,8 +94,15 @@ pub struct OriginalBaselineFields<'a> {
 /// later actual receipt/hash phase, as in the original workflow.
 pub struct OriginalSourceBaseline {
     value: Value,
+    source: reverie_core::ids::ContainerId,
 }
 impl OriginalSourceBaseline {
+    pub fn source_container(&self) -> &reverie_core::ids::ContainerId {
+        &self.source
+    }
+    pub(crate) fn data(&self) -> &Value {
+        &self.value
+    }
     pub fn from_observed_data(fields: OriginalBaselineFields<'_>) -> Self {
         let scalar = |value: &UnsignedInteger| {
             Value(Node::Number(crate::legacy_json::Number::Integer(
@@ -156,7 +163,10 @@ impl OriginalSourceBaseline {
             .into_iter()
             .collect(),
         ));
-        Self { value }
+        Self {
+            value,
+            source: fields.source.id().clone(),
+        }
     }
     pub fn canonical_bytes(&self) -> Result<Vec<u8>> {
         crate::reservation_control::fingerprint(&self.value)
