@@ -105,6 +105,9 @@ pub struct Metadata(Value);
 /// must preserve its filesystem observation order. No editing API is exposed.
 pub struct OrderedMetadata(legacy_json::ordered::OrderedValue);
 impl OrderedMetadata {
+    pub(crate) fn ordered(&self) -> &legacy_json::ordered::OrderedValue {
+        &self.0
+    }
     pub(crate) fn as_value(&self) -> &Value {
         &self.0.value
     }

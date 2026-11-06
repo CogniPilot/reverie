@@ -1,6 +1,10 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    HostJob(reverie_contracts::host_jobs::HostJobDataError),
+    HostJobPath(reverie_host::host_jobs::HostJobPathError),
+    History(reverie_contracts::reservation_history::HistoryError),
+    Capacity(reverie_core::capacity::CapacityError),
     Resource(reverie_contracts::broker_resources::ResourceConfigError),
     Profile(reverie_store::StoreError),
     Identity(reverie_store::storage_identity::IdentityError),
@@ -23,6 +27,10 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::HostJob(error) => error.code(),
+            Self::HostJobPath(error) => error.code(),
+            Self::History(error) => error.code(),
+            Self::Capacity(error) => error.code(),
             Self::Resource(error) => error.code(),
             Self::Profile(error) => error.code(),
             Self::Identity(error) => error.code(),
@@ -49,6 +57,10 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::HostJob(error) => Some(error),
+            Self::HostJobPath(error) => Some(error),
+            Self::History(error) => Some(error),
+            Self::Capacity(error) => Some(error),
             Self::Resource(error) => Some(error),
             Self::Profile(error) => Some(error),
             Self::Identity(error) => Some(error),
@@ -77,6 +89,13 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(reverie_contracts::host_jobs::HostJobDataError, HostJob);
+from_error!(reverie_host::host_jobs::HostJobPathError, HostJobPath);
+from_error!(
+    reverie_contracts::reservation_history::HistoryError,
+    History
+);
+from_error!(reverie_core::capacity::CapacityError, Capacity);
 from_error!(ControlDataError, ControlData);
 from_error!(ImageHostError, Image);
 from_error!(ObserverError, Observer);

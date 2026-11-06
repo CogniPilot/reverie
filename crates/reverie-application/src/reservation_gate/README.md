@@ -14,6 +14,9 @@ held admission, native completion proof or start permit.
 | `_store`, readonly lookup | fixed weak service guard + canonical `OperationStore` | Every ordinary scope check observes native state; store and admission finalizers are checked |
 | `_profile` | existing `ProfileStore::snapshot` | Real canonical flock, profile read and checked store close; never a new JSON profile schema |
 | `observe` | `observation` | Current storage/start intent and full selected employee, owner/generation/profile, actual effective policy, full capacity/source/storage, exact hashes and repeated native/metadata/lock fences |
+| `active_operations`, historical `completed`/pending | `history`, named contracts and fixed native readers | Validates every pending fence in source order and historical receipt/profile/verified/plan hashes before excluding a completed row; no live completion proof |
+| host-job `require_idle` | `host_jobs`, named contracts/native paths | Existing settled intent, ordered original spec and fixed receipt; no owned scope or begin/bind/finish producer |
+| `_retained_delta`, `check_headroom` | `history` | Actual admission, every retained source re-observed, complete capacity/inventory checks; fixed read-only INSTALL facts only |
 | terminal readonly journal seam | existing consumed store reader | Available dependency only; not yet integrated into a completed claim workflow |
 
 The waiting-state mutex is never held through filesystem I/O. A private entering
@@ -26,8 +29,8 @@ and publicly inspectable secondary finalizer failures.
 The ordinary guard currently refuses every pending marker. It does not claim
 the unported GPU/actor/image/perf/mount transition owners or their pending/row
 exceptions. Preparation/start/completion boundaries, approved-claim target checks,
-claim retention/terminal finish, recovery/headroom/creation/stop/reload policies,
-host-job begin/bind/finish and historical completed/pending rule owners remain
+claim retention/terminal finish, recovery/creation/stop/reload policies and
+host-job begin/bind/finish remain
 required. These must be real producers before a full Gate or launch claim. Caller
 owner/session authorization and future selected HTTP/broker integration remain
 separate obligations; captured worker/path data never supplies those permissions.
@@ -46,3 +49,12 @@ Five hundred frozen actual Python CPU witnesses check nano-CPU arithmetic, and
 drift/CPU-kind, body-error, wrong-thread, lock-open and pre-open waiter regressions
 exercise the native/store composition. No company instance file, engine operation,
 mount, employee start/stop or live deployment is performed.
+
+The historical successor freezes32 actual old host-job idle cases,33 completed
+receipt cases and14 pending cases using owned metadata/path fixtures. It retains
+Python dictionary numeric equality and codepoints without interpreting receipts
+as execution authority. Pending enumeration drains all entries/errors and closes
+the directory before metadata reads, retaining a bounded native-order prefix
+through entry4097; every earlier file is checked before the count refusal.
+Real admission/journal integration verifies headroom, orphan fencing, retained
+source loss, the4096/4097 boundary and checked enumeration finalizer failures.

@@ -19,6 +19,14 @@ use std::{
 };
 pub use terminal::TerminalJournalStamp;
 
+/// Existing settlement-history directory observation. Drains every entry/error
+/// and checked-closes the DIR, retaining the native-order prefix through the
+/// first count violation. No lock, scope,
+/// journal validation or native-effect authority is conferred by these bytes.
+pub fn settlement_directory_names(directory: &Path) -> Result<Vec<Vec<u8>>> {
+    Ok(private_fs::settlement_directory_names(directory)?)
+}
+
 /// Must be fixed by trusted service installation and retain its live owner scope
 /// and outer native-admission guard. Directory custody is never authorization.
 pub trait ScopeGuard: Send + Sync {

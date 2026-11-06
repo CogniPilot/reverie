@@ -123,6 +123,145 @@ fn full_readside_observe_matches_actual_python_journal_bytes_and_hashes() {
         setup.employee().as_str()
     );
 }
+
+#[test]
+fn install_headroom_uses_real_admission_journal_and_same_native_origin() {
+    let setup = Setup::new();
+    let fixture = Fixture::new();
+    let gate = setup.gate(&fixture);
+    for _ in 0..12 {
+        fixture.inventory(&setup.rows);
+    }
+    let value = gate.check_headroom().unwrap();
+    assert_eq!(value.committed_bytes, 536870912);
+    assert_eq!(value.retained_bytes, 0);
+    assert!(value.budget_bytes >= value.committed_bytes);
+    assert!(gate.inner.state.lock().unwrap().active.is_none());
+    let mut lock = AdmissionLock::acquire(&gate.inner.config).unwrap();
+    lock.close().unwrap();
+}
+
+#[test]
+fn retained_delta_requires_current_old_source_instead_of_treating_a_hold_as_credit() {
+    use reverie_core::{operations::*, revision::ProfileVersion};
+    let setup = Setup::new();
+    let fixture = Fixture::new();
+    let gate = setup.gate(&fixture);
+    for _ in 0..36 {
+        fixture.inventory(&setup.rows);
+    }
+    let observed = operations_v1::decode_observation(setup.expected().as_bytes()).unwrap();
+    let data = observed.data();
+    let request = OperationRequest {
+        employee_id: data.employee_id.clone(),
+        pool_id: data.pool_id.clone(),
+        source_binding_digest: data.source_binding_digest.clone(),
+        profile_version: data.profile_version,
+        requested_memory_bytes: MemoryBytes::try_new(data.current_memory_bytes.get() + 256 * MIB)
+            .unwrap(),
+        preview_digest: JournalDigest::parse(&"a".repeat(64)).unwrap(),
+        observation_digest: operations_v1::observation_digest(&observed),
+    };
+    let op = Operation::try_new(OperationData {
+        id: JournalId::parse("88888888-2222-4333-8444-555555555555").unwrap(),
+        scope: gate.inner.scope.clone(),
+        idempotency_key: key(),
+        request_digest: operations_v1::request_digest(&request),
+        request,
+        reservation_id: JournalId::parse("99999999-2222-4333-8444-555555555555").unwrap(),
+        reserved_sid: JournalId::parse(
+            setup.oracle["profile"]["binding"]["target_sid"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap(),
+        observation: observed,
+        delta_bytes: 256 * MIB,
+        version: ProfileVersion::try_new(1).unwrap(),
+        state: OperationState::Reserved,
+        last_receipt_digest: None,
+        reason: None,
+    })
+    .unwrap();
+    let document = OperationDocument::empty().replacing(op).unwrap();
+    setup.tree.write(
+        "control/operations/operations.json",
+        &operations_v1::encode(&document).unwrap(),
+    );
+    assert_eq!(gate.check_headroom().unwrap().retained_bytes, 256 * MIB);
+    fs::remove_file(setup.tree.root.join("company.json")).unwrap();
+    assert!(
+        gate.check_headroom().is_err(),
+        "missing source evidence never credits or drops a retained hold"
+    );
+    assert_eq!(
+        fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap(),
+        operations_v1::encode(&document).unwrap()
+    );
+    assert!(gate.inner.state.lock().unwrap().active.is_none());
+}
+
+#[test]
+fn pending_count_includes_every_native_name_and_refuses_first_out_of_bound_position() {
+    let setup = Setup::new();
+    let fixture = Fixture::new();
+    let gate = setup.gate(&fixture);
+    for _ in 0..24 {
+        fixture.inventory(&setup.rows);
+    }
+    // Existing operations.json + operations.lock count too, even though no
+    // pending filename is selected. The first4096 names fit; entry4097 refuses.
+    for index in 0..4094 {
+        setup
+            .tree
+            .write(&format!("control/operations/unrelated-{index}"), b"{}");
+    }
+    assert!(gate.check_headroom().is_ok());
+    setup
+        .tree
+        .write("control/operations/one-more-unrelated", b"{}");
+    assert_eq!(
+        gate.check_headroom().unwrap_err().code(),
+        "RESOURCE_COMPLETION_PENDING_BOUND"
+    );
+    assert!(gate.inner.state.lock().unwrap().active.is_none());
+}
+
+#[test]
+fn headroom_host_job_and_orphan_pending_refuse_without_credit_or_success_guard() {
+    let setup = Setup::new();
+    let fixture = Fixture::new();
+    let gate = setup.gate(&fixture);
+    for _ in 0..12 {
+        fixture.inventory(&setup.rows);
+    }
+    setup
+        .tree
+        .write("control/operations/host-job.finish.pending.json", b"{}");
+    assert_eq!(
+        gate.check_headroom().unwrap_err().code(),
+        "HOST_JOB_FINISH_REQUIRES_RECONCILIATION"
+    );
+    assert_eq!(
+        fixture.events().len(),
+        7,
+        "only entry guard; body error skips success native guard"
+    );
+    fs::remove_file(
+        setup
+            .tree
+            .root
+            .join("control/operations/host-job.finish.pending.json"),
+    )
+    .unwrap();
+    let id = "99999999-2222-4333-8444-555555555555";
+    setup.tree.write(&format!("control/operations/settlement-{id}.pending.json"),&serde_json::to_vec(&json!({"schema":"reverie-resource-settlement-pending-v1","operationId":id,"reservationId":"88888888-2222-4333-8444-555555555555","verifiedReceiptDigest":"a".repeat(64)})).unwrap());
+    assert_eq!(
+        gate.check_headroom().unwrap_err().code(),
+        "RESOURCE_COMPLETION_ORPHAN_PENDING"
+    );
+    assert!(gate.inner.state.lock().unwrap().active.is_none());
+}
 #[test]
 fn profile_cpu_spelling_change_is_python_equal_without_rewriting_original_digest() {
     let setup = Setup::new();

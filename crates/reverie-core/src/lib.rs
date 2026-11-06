@@ -2,6 +2,7 @@
 pub mod capacity;
 pub mod decimal;
 pub mod device_policy;
+pub mod host_scope;
 pub mod ids;
 pub mod lease_policy;
 pub mod memory;

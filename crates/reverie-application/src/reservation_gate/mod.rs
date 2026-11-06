@@ -4,6 +4,8 @@
 mod admission;
 mod error;
 mod guard;
+mod history;
+mod host_jobs;
 mod observation;
 #[cfg(test)]
 mod tests;
@@ -14,6 +16,7 @@ use crate::{
 pub use admission::AdmissionBounds;
 pub use error::GateError;
 use error::{Result, finalized, need};
+pub use history::HeadroomFacts;
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDataError, domain_digest},
     reservation_engine::{EngineDataError, ReservationConfiguration},
@@ -125,6 +128,13 @@ impl ReservationGate {
         let result = self
             .inner
             .observe(&self.inner.scope, self.inner.option.pool(), employee);
+        admission.conclude(result)
+    }
+    /// Fixed read-only INSTALL budget observation under actual admission. This
+    /// qualifies retained old-source assumptions, never a candidate or permit.
+    pub fn check_headroom(&self) -> Result<HeadroomFacts> {
+        let admission = self.inner.admit(AdmissionBounds::default())?;
+        let result = self.inner.check_headroom();
         admission.conclude(result)
     }
 }

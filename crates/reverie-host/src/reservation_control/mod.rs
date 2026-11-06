@@ -1,10 +1,15 @@
 //! Actual private control metadata, directory and held-admission observations.
 //! Installing services supply captured configuration; no request path or Source
 //! constructor is exposed, and READY contents alone convey no authority.
+mod history;
 mod image;
 #[cfg(test)]
 mod tests;
 use crate::{ObservationError, native};
+pub use history::{
+    read_completion_receipt, read_settlement_pending, read_verification_receipt, settlement_names,
+    settlement_pending_present,
+};
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDirectory, ControlIdentity},
@@ -17,6 +22,9 @@ use std::os::unix::fs::MetadataExt;
 use std::{fmt, fs, io};
 pub enum ControlHostError {
     Native(ObservationError),
+    /// Preserve ledger/finalizer variants for typed inspection; no erased
+    /// io::Error wrapper is needed to reach a secondary checked-close error.
+    Journal(reverie_store::operations::JournalError),
     Metadata(IdentityError),
     Configuration(EngineDataError),
     Refused(&'static str),
@@ -25,6 +33,7 @@ impl ControlHostError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Native(e) => e.code(),
+            Self::Journal(e) => e.code(),
             Self::Metadata(e) => e.code(),
             Self::Configuration(e) => e.code(),
             Self::Refused(code) => code,
@@ -47,6 +56,7 @@ impl std::error::Error for ControlHostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Native(error) => Some(error),
+            Self::Journal(error) => Some(error),
             Self::Metadata(error) => Some(error),
             Self::Configuration(error) => Some(error),
             Self::Refused(_) => None,
@@ -146,10 +156,47 @@ pub fn assert_store_lock_names(
     Ok(())
 }
 pub fn read_marker(config: &ReservationConfiguration) -> Result<OrderedMetadata> {
-    let path = native::python_path(&config.control_paths()?.binding().codepoints())?;
-    let metadata = storage_identity::read_ordered_metadata(
+    read_private_ordered(config.control_paths()?.binding(), config.uid()?)
+}
+pub fn host_job_finishing_present(config: &ReservationConfiguration) -> Result<bool> {
+    present(&operation_leaf(config, "host-job.finish.pending.json")?)
+}
+pub fn read_host_job_intent(config: &ReservationConfiguration) -> Result<Option<OrderedMetadata>> {
+    let path = operation_leaf(config, "host-job.intent.json")?;
+    if !present(&path)? {
+        return Ok(None);
+    }
+    Ok(Some(read_private_ordered(&path, config.uid()?)?))
+}
+pub fn read_host_job_receipt(
+    config: &ReservationConfiguration,
+    job: &reverie_core::host_scope::HostJobId,
+) -> Result<reverie_contracts::storage_identity::Metadata> {
+    let path = operation_leaf(config, &format!("host-job-settled-{}.json", job.as_str()))?;
+    let path = native::python_path(&path.codepoints())?;
+    let metadata = storage_identity::read_metadata(
         &path,
         config.uid()?,
+        reverie_contracts::operations_v1::MAX_BYTES,
+    )?;
+    need(
+        fs::symlink_metadata(path)?.mode() & 0o7777 == 0o600,
+        "RESERVATION_PRIVATE_FILE",
+    )?;
+    Ok(metadata)
+}
+fn operation_leaf(config: &ReservationConfiguration, leaf: &str) -> Result<PosixPath> {
+    Ok(config
+        .control_paths()?
+        .root()
+        .join(&PosixPath::from_scalar_text("operations"))
+        .join(&PosixPath::from_scalar_text(leaf)))
+}
+fn read_private_ordered(path: &PosixPath, uid: u32) -> Result<OrderedMetadata> {
+    let path = native::python_path(&path.codepoints())?;
+    let metadata = storage_identity::read_ordered_metadata(
+        &path,
+        uid,
         reverie_contracts::operations_v1::MAX_BYTES,
     )?;
     need(

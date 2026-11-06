@@ -48,3 +48,22 @@ fn actual_guard_read_failure_and_checked_lock_close_both_survive_the_error_seam(
     store.close().unwrap();
     assert_eq!(tree.descriptor_count(), 0);
 }
+
+#[test]
+fn historical_directory_names_cannot_escape_a_failed_checked_close_or_fdopendir() {
+    let tree = Tree::new();
+    fs::write(tree.root.join("owned-receipt"), b"{}").unwrap();
+    faults::STATE.with(|state| state.borrow_mut().close = Some(CloseRole::Walk));
+    assert!(settlement_directory_names(&tree.root).is_err());
+    assert_eq!(
+        tree.descriptor_count(),
+        0,
+        "real DIR closed before the injected failure returned"
+    );
+    faults::STATE.with(|state| state.borrow_mut().close = Some(CloseRole::Walk));
+    let error = settlement_directory_names(&tree.root.join("owned-receipt")).unwrap_err();
+    let JournalError::Filesystem(crate::StoreError::Finalization { .. }) = error else {
+        panic!("fdopendir primary and checked close both retained")
+    };
+    assert_eq!(tree.descriptor_count(), 0);
+}

@@ -2,6 +2,7 @@
 pub mod broker_resources;
 pub mod device_policy;
 mod digest;
+pub mod host_jobs;
 pub mod kernel_accounting;
 pub mod kernel_mounts;
 pub mod lease_policy;
@@ -11,6 +12,7 @@ pub mod operations_v1;
 pub mod profiles_v1;
 pub mod reservation_control;
 pub mod reservation_engine;
+pub mod reservation_history;
 pub mod reservation_observation;
 pub mod resource_config;
 pub mod rootless;

@@ -2,6 +2,7 @@
 pub mod device_policy;
 pub mod embeddings;
 pub mod engine_metadata;
+pub mod host_jobs;
 pub mod lease_policy;
 mod native;
 mod observation;

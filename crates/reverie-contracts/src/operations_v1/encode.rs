@@ -122,7 +122,7 @@ fn observation(v: &CapacityObservation) -> Value {
         ("current_memory_bytes", string(v.current_memory_bytes.get())),
     ])
 }
-fn operation(op: &Operation) -> Value {
+pub(crate) fn operation(op: &Operation) -> Value {
     let v = op.data();
     map([
         ("id", string(v.id.as_str())),
