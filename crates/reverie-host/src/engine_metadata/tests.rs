@@ -141,19 +141,25 @@ fn actual_broker_inspection_shares_pending_constructor_and_closed_context_with_m
     let engine = Arc::new(ReadonlyEngine::new(bootstrap));
     let other = engine.clone();
     let name = laptop_name();
+    let cancellation = CancellationToken::new();
+    let captured = cancellation.clone();
     let task = std::thread::spawn(move || {
         crate::broker_engine::inspect_laptop(
             &other,
             &name,
-            Instant::now() + Duration::from_millis(80),
-            &CancellationToken::new(),
+            Instant::now() + Duration::from_secs(20),
+            &captured,
         )
     });
-    let until = deadline();
+    // Setup scheduling is separate from the pending-constructor assertion.
+    // Expiring an 80ms query before its supervisor runs never reaches this hook.
+    // BEFORE_SPAWN proves possible late work, not a completed fork or exec.
+    let until = Instant::now() + Duration::from_secs(15);
     while !gate.entered.load(Ordering::Acquire) {
         assert!(Instant::now() < until);
         std::thread::sleep(Duration::from_millis(1));
     }
+    cancellation.cancel();
     assert!(task.join().unwrap().unwrap_err().is_uncertain());
     assert_eq!(
         engine
