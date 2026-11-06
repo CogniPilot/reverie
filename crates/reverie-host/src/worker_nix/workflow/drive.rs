@@ -235,6 +235,20 @@ fn wait(runtime: &WorkerRuntime, record: &mut Record, id: &ContainerId) -> Resul
             NixHelperState::Failed => return Err(NixError::Refused(NixFault::HelperFailed)),
             NixHelperState::Running => {}
         }
+        // Test-only observation after the real checked call has returned and
+        // its stdout/exit/pipe cleanup completed. It supplies no result/permit.
+        #[cfg(test)]
+        if let Some(gate) = record.after_running_state.take() {
+            gate.entered.store(true, Ordering::Release);
+            let ceiling = Instant::now() + Duration::from_secs(15);
+            while !gate.released.load(Ordering::Acquire) {
+                assert!(
+                    Instant::now() < ceiling,
+                    "owning setup releases checked state"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         need(
             Instant::now() < record.deadline.expect("original budget"),
             NixFault::Deadline,

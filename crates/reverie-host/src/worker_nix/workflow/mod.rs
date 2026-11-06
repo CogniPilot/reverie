@@ -67,6 +67,8 @@ struct Record {
     last_settlement: Option<crate::engine_metadata::EngineError>,
     #[cfg(test)]
     before_remove: Option<Arc<crate::captured_client::test_hooks::Gate>>,
+    #[cfg(test)]
+    after_running_state: Option<Arc<crate::captured_client::test_hooks::Gate>>,
 }
 type RecordOwner = Arc<Mutex<Record>>;
 type RecordListGuard<'a> = std::sync::MutexGuard<'a, Vec<RecordOwner>>;
@@ -190,6 +192,8 @@ impl Workflows {
             last_settlement: None,
             #[cfg(test)]
             before_remove: None,
+            #[cfg(test)]
+            after_running_state: None,
         }));
         records.push(record.clone());
         Ok(NixWorkflow {
