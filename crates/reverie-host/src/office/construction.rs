@@ -30,6 +30,29 @@ impl OfficeConstruction {
     }
 }
 impl OfficeService {
+    /// Bind only beneath the socket root captured by the actual worker
+    /// constructor. Directory effects occur at this late phone phase; neither
+    /// an arbitrary directory nor a second configuration is accepted here.
+    pub fn bind_worker_retained(
+        &self,
+        session: ProfileSessionId,
+    ) -> std::result::Result<OfficePhone, OfficeBindFailure> {
+        let directory = self
+            .require_running()
+            .and_then(|()| {
+                let root = self
+                    .company
+                    .worker_socket_root
+                    .as_ref()
+                    .ok_or(OfficeError::Refused)?;
+                worker_path::prepare(root, &session)
+            })
+            .map_err(|error| OfficeBindFailure {
+                error,
+                construction: None,
+            })?;
+        self.bind_retained(directory, session)
+    }
     /// Same original constructor sequence; the private bind owner records an
     /// actual registry insertion before any thread can start or fail.
     pub fn bind_retained(

@@ -37,6 +37,7 @@ mod socket;
 mod test_hooks;
 #[cfg(test)]
 mod tests;
+mod worker_path;
 
 #[derive(Debug)]
 pub enum OfficeError {
@@ -95,6 +96,7 @@ fn finalized<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
 }
 struct Company {
     root: MetadataText,
+    worker_socket_root: Option<MetadataText>,
     address: address::AddressSource,
     native_jobs: native_jobs::NativeJobs,
     engine: Arc<InstalledWorkerEngine>,
@@ -146,6 +148,7 @@ impl OfficeService {
                     reverie_core::PythonText::try_new(crate::native::python_text(&company_root))
                         .expect("filesystem text"),
                 ),
+                worker_socket_root: None,
                 address: address::AddressSource::fixed(SocketAddr::new(address, 3000)),
                 native_jobs: native_jobs::NativeJobs::new(),
                 engine: Arc::clone(runtime.installed_engine()),
@@ -174,6 +177,7 @@ impl OfficeService {
         Ok(Self {
             company: Arc::new(Company {
                 root: envelope.path(WorkerPath::CompanyRoot).clone(),
+                worker_socket_root: Some(envelope.path(WorkerPath::ApiSocketRoot).clone()),
                 address: address::AddressSource::worker(envelope.base().container().to_owned()),
                 native_jobs: native_jobs::NativeJobs::new(),
                 engine: runtime.installed_engine().clone(),

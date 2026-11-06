@@ -377,3 +377,13 @@ unidentified-leaf failures remain negative across repeats. The compatibility
 Recovery must keep its real storage resources while construction cleanup is
 unconfirmed; neither a failed-construction token nor successful local close
 acknowledges global release, durable reconciliation or authorization.
+
+`bind_worker_retained` has no directory argument: it uses only the raw
+`apiSocketRoot` captured by the same `from_worker` configuration. At the actual
+phone phase it preserves the original `Path(root)/SID` recursive mkdir effects
+and refuses a final SID symlink, then resolves the root with the existing Python
+path owner before the private anchored bind. Missing components before `..`
+are created; regular-file traversal fails before resolution. Created directories
+remain on later failures. Trusted fixed-address constructors and their direct
+bind restrictions are unchanged. Root resolution grants neither writer exclusion
+nor authorization, and the existing no-overwrite socket policy remains in force.
