@@ -19,7 +19,10 @@ try {
   const require = createRequire(import.meta.url);
   const version = (require('../package.json') as { version: string }).version;
   const { config, memory } = installedMcpBootstrap(process.argv.slice(2), version);
-  await runMcpStdio(config, process, { memory, signal: stop.signal });
+  // This fixed consumer intentionally omits diagnostics: a pending libuv
+  // stderr write can keep Node alive after actual MCP work has settled.
+  // Protocol/error responses remain on stdout; launcher errors are bounded.
+  await runMcpStdio(config, process, { memory, signal: stop.signal, log: () => {} });
   process.exitCode = stopped === 'SIGTERM' ? 143 : stopped === 'SIGINT' ? 130 : 0;
 } catch {
   // Cleanup belongs to runMcpStdio before this negative result. Avoid a blocking

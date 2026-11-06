@@ -57,7 +57,8 @@ let
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-office-enforced-auth.test.ts test/company-hierarchy.test.ts \
-        test/native-memory-journal-api.test.ts \
+        test/native-memory-journal-api.test.ts test/installed-memory-access.test.ts \
+        test/memory-bridge-settlement.test.ts test/memory-scope-config.test.ts \
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
         test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \

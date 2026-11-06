@@ -3,8 +3,15 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { PassThrough } from 'node:stream';
 import { runMemoryBridge } from '../src/memory-bridge-process.js';
-import { createMcpServer } from '../src/mcp-server.js';
+import { createMcpServer, runMcpStdio } from '../src/mcp-server.js';
+
+const delayedChild = `import {writeFileSync} from 'node:fs';
+  process.stdin.resume();
+  const held=setInterval(()=>{},1000);
+  process.on('SIGTERM',()=>{clearInterval(held);setTimeout(()=>{writeFileSync(process.env.FINISHED,'closed');process.exit(0)},150)});
+  writeFileSync(process.env.STARTED,'started');`;
 
 async function waitFile(path: string): Promise<void> {
   const deadline = Date.now() + 5_000;
@@ -25,12 +32,7 @@ describe('memory child settlement', () => {
     const controller = new AbortController();
     const started = join(root, 'started');
     const finished = join(root, 'finished');
-    const source = `import {writeFileSync} from 'node:fs';
-      process.stdin.resume();
-      const held=setInterval(()=>{},1000);
-      process.on('SIGTERM',()=>{clearInterval(held);setTimeout(()=>{writeFileSync(process.env.FINISHED,'closed');process.exit(0)},150)});
-      writeFileSync(process.env.STARTED,'started');`;
-    const work = runMemoryBridge(process.execPath, ['--input-type=module', '-e', source], {
+    const work = runMemoryBridge(process.execPath, ['--input-type=module', '-e', delayedChild], {
       env: { STARTED: started, FINISHED: finished },
       input: '{}',
       timeoutMs: 10_000,
@@ -95,5 +97,69 @@ describe('memory child settlement', () => {
     await Promise.all([call, waiting]);
     expect(settled).toBe(true);
     expect(messages).toEqual([]);
+  });
+
+  it.each([false, true])('keeps protocol replies with an optional quiet logger (quiet=%s)', async (quiet) => {
+    const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
+    const work = runMcpStdio({ version: 'owned-stdio', allowAnySession: false }, io, {
+      memory: { python: '/unused', source: '/unused' },
+      ...(quiet ? { log: () => {} } : {}),
+    });
+    io.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+    io.stdin.write('{not json}\n');
+    io.stdin.end();
+    await work;
+    const messages = String(io.stdout.read())
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(messages[0].result.serverInfo.name).toBe('reverie');
+    expect(messages[1].error.code).toBe(-32700);
+    if (quiet) expect(io.stderr.read()).toBeNull();
+    else expect(String(io.stderr.read())).toContain('reverie mcp owned-stdio:');
+  });
+
+  it('quiet stdio EOF still waits for an actual cancelling child and releases no cancelled reply', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'reverie-memory-stdio-child-'));
+    const started = join(root, 'started');
+    const finished = join(root, 'finished');
+    const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
+    const work = runMcpStdio({ version: 'owned-stdio', allowAnySession: false }, io, {
+      log: () => {},
+      memory: { instance: '/owned/synthetic/config.json', python: '/unused', source: '/unused' },
+      memoryRunner: (_program, _args, options) =>
+        runMemoryBridge(process.execPath, ['--input-type=module', '-e', delayedChild], {
+          env: { STARTED: started, FINISHED: finished },
+          input: options.input,
+          timeoutMs: 10_000,
+          signal: options.signal,
+        }),
+    });
+    try {
+      io.stdin.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'memory_recall', arguments: { query: 'synthetic' } },
+        }) + '\n'
+      );
+      await waitFile(started);
+      io.stdin.end();
+      let settled = false;
+      const waiting = work.then(() => {
+        settled = true;
+      });
+      await delay(10);
+      expect(settled).toBe(false);
+      await waiting;
+      expect(await readFile(finished, 'utf8')).toBe('closed');
+      expect(io.stdout.read()).toBeNull();
+      expect(io.stderr.read()).toBeNull();
+    } finally {
+      io.stdin.end();
+      await work;
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

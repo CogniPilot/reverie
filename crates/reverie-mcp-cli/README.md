@@ -51,6 +51,10 @@ waits for real request completion and child `close`, including after an early
 `execFile` abort callback. A retained child gets one SIGKILL escalation after its
 initial cancellation; a missing close remains pending. No result from a cancelled
 call is emitted. The MCP process awaits settlement before exit.
+The fixed installed entry intentionally omits diagnostic logging so a full
+stderr stream cannot retain an idle Node process. Protocol and error responses
+still use stdout; ordinary standalone MCP logging is unchanged. Rust launcher
+errors before exec use the existing bounded diagnostic owner.
 
 ## Selection holds
 

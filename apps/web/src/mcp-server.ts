@@ -1508,9 +1508,9 @@ export function createMcpServer(options: McpServerOptions) {
 export async function runMcpStdio(
   config: McpConfig,
   io: { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process,
-  options: Pick<McpServerOptions, 'memory' | 'memoryRunner'> & { signal?: AbortSignal } = {}
+  options: Pick<McpServerOptions, 'memory' | 'memoryRunner' | 'log'> & { signal?: AbortSignal } = {}
 ): Promise<void> {
-  const log = (line: string) => io.stderr.write(`${line}\n`);
+  const log = options.log ?? ((line: string) => io.stderr.write(`${line}\n`));
   const server = createMcpServer({
     ...options,
     config,
