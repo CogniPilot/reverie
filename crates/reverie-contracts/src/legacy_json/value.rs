@@ -24,6 +24,22 @@ pub(crate) enum Node {
     Object(BTreeMap<Text, Value>),
 }
 pub(crate) struct Value(pub(crate) Node);
+impl Value {
+    pub(crate) fn is_finite(&self) -> bool {
+        let mut pending = vec![self];
+        while let Some(value) = pending.pop() {
+            match &value.0 {
+                Node::Number(Number::Nan | Number::PositiveInfinity | Number::NegativeInfinity) => {
+                    return false;
+                }
+                Node::Array(values) => pending.extend(values),
+                Node::Object(values) => pending.extend(values.values()),
+                _ => {}
+            }
+        }
+        true
+    }
+}
 pub(crate) fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value(Node::Null | Node::Bool(false))) => false,

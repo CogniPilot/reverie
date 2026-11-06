@@ -258,18 +258,11 @@ fn map<K: Ord>(
     Ok(result)
 }
 fn finite(data: &Value) -> Result<()> {
-    let mut pending = vec![data];
-    while let Some(value) = pending.pop() {
-        match &value.0 {
-            Node::Number(Number::Nan | Number::PositiveInfinity | Number::NegativeInfinity) => {
-                return Err(ResourceConfigError::NonfiniteData);
-            }
-            Node::Array(values) => pending.extend(values),
-            Node::Object(values) => pending.extend(values.values()),
-            _ => {}
-        }
+    if data.is_finite() {
+        Ok(())
+    } else {
+        Err(ResourceConfigError::NonfiniteData)
     }
-    Ok(())
 }
 fn replace(root: &mut Object, field: &str, id: &str, resource: &ResourceTemplate) {
     let value = root
