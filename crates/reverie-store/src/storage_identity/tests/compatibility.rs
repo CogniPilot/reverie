@@ -1,6 +1,23 @@
 use super::*;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
+#[test]
+fn searchable_metadata_ancestors_do_not_require_directory_listing_permission() {
+    let tree = Tree::new();
+    let parent = tree.root.join("search-only");
+    fs::create_dir(&parent).unwrap();
+    let path = parent.join("metadata.json");
+    tree.write(&path, "{\"employees\":[]}");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o111)).unwrap();
+    let result = read_metadata(&path, uid(), DEFAULT_METADATA_LIMIT);
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        result.is_ok(),
+        "search-only metadata parent refused: {}",
+        result.err().unwrap().code()
+    );
+    assert_eq!(tree.fd_count(), 0);
+}
 
 #[test]
 fn inaccessible_tail_is_path_data_but_never_metadata_custody() {
@@ -142,4 +159,31 @@ fn null_and_lone_surrogate_owners_survive_native_registry_and_lineage_matching()
             historical.owner()
         );
     }
+}
+#[test]
+fn native_metadata_reader_enforces_scoped_parse_hooks_and_checks_close_failure() {
+    let tree = Tree::new();
+    let raw = format!("{{\"opaque\":{}}}", "7".repeat(4301));
+    tree.write(&tree.company_file(), &raw);
+    assert_eq!(
+        read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+            .err()
+            .unwrap()
+            .code(),
+        "METADATA_JSON"
+    );
+    assert_eq!(tree.fd_count(), 0);
+    tree.write(&tree.company_file(), r#"{"x":0,"x":1,"tail":[}"#);
+    faults::STATE.with(|state| state.borrow_mut().close = Some(private_fs::CloseRole::Data));
+    let error = read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+        .err()
+        .unwrap();
+    match error {
+        IdentityError::Finalization { primary, secondary } => {
+            assert_eq!(primary.code(), "METADATA_JSON");
+            assert_eq!(secondary.code(), "STORE_IO");
+        }
+        other => panic!("expected parse and close failures, got{other:?}"),
+    }
+    assert_eq!(tree.fd_count(), 0);
 }

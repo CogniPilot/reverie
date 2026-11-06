@@ -69,6 +69,8 @@ import {
 import { isMultiUserMode } from '../../config/multiuser.js';
 import type { AuthUser } from '../../types.js';
 import { SseEvent } from '../sse-events.js';
+import { appendAdminAudit } from '../admin-audit.js';
+import { employeeCaseNames, removalErrorCode, removeCaseFolder } from '../case-removal.js';
 import type { EventPort, ConfigPort, SessionPort } from '../ports/index.js';
 import type { FastifyRequest } from 'fastify';
 import { dataPath, getDataDir } from '../../config/instance.js';
@@ -245,7 +247,11 @@ async function ensureCaseImage(
   return { ok: true, imageBuilding: true };
 }
 
-export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & ConfigPort & SessionPort): void {
+export function registerCaseRoutes(
+  app: FastifyInstance,
+  ctx: EventPort & ConfigPort & SessionPort,
+  deps: { employees?: () => Iterable<{ name: string }> } = {}
+): void {
   // ═══════════════════════════════════════════════════════════════
   // Case CRUD (list, create, link, detail, fix-plan)
   // ═══════════════════════════════════════════════════════════════
@@ -1580,7 +1586,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
 
   // ========== Delete / Unlink Case ==========
 
-  app.delete('/api/cases/:name', async (req): Promise<ApiResponse<{ name: string }>> => {
+  app.delete('/api/cases/:name', async (req, reply): Promise<ApiResponse<{ name: string }>> => {
     const { name } = req.params as { name: string };
     const user = getAuthUser(req);
 
@@ -1648,19 +1654,24 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       }
     }
 
-    // Case in CASES_DIR — delete the entire directory
-    const casePath = join(resolveCasesDir(getAuthUser(req)), name);
-    if (!existsSync(casePath)) {
-      return createErrorResponse(ApiErrorCode.NOT_FOUND, `Case "${name}" not found`);
+    // Case in CASES_DIR: move it to trash through the shared guarded removal, never rm it.
+    const removal = await removeCaseFolder(resolveCasesDir(user), name, {
+      sessions: ctx.sessions.values(),
+      employeeCases: employeeCaseNames(deps.employees?.() ?? []),
+    });
+    if (!removal.ok) {
+      reply.code(removal.status);
+      return createErrorResponse(removalErrorCode(removal), removal.message);
     }
-
-    try {
-      await fs.rm(casePath, { recursive: true, force: true });
-      ctx.broadcast(SseEvent.CaseDeleted, { name, type: 'deleted' });
-      return { success: true, data: { name } };
-    } catch (err) {
-      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
-    }
+    void appendAdminAudit({
+      admin: user.username,
+      action: 'case.delete',
+      target: name,
+      ip: req.ip,
+      detail: { owner: user.username, trashPath: removal.trashPath },
+    });
+    ctx.broadcast(SseEvent.CaseDeleted, { name, type: 'deleted' });
+    return { success: true, data: { name } };
   });
 
   // ========== Reorder Cases ==========

@@ -3,7 +3,7 @@
  *
  * Covers the admin user-management endpoints: multi-user gate, requireAdmin,
  * create (one-time password), patch + last-admin invariant, reset-password,
- * disable-revokes-sessions, and delete (last-admin refusal + delete-space).
+ * disable-revokes-sessions, delete (last-admin refusal + delete-space), and case delete to trash.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -189,10 +189,12 @@ describe('admin case-folder API', () => {
     expect(sl.status).toBe(400);
     await expect(fs.stat(path.join(spacesDir, 'outside'))).resolves.toBeTruthy();
 
-    // A real folder is deleted.
+    // A real folder is moved to the trash, not deleted.
     const del = await fetch(url('/api/admin/users/kim/cases/proj1'), { method: 'DELETE', headers: adminNoBody });
     expect(del.status).toBe(200);
     await expect(fs.stat(path.join(spacesDir, 'kim', 'cases', 'proj1'))).rejects.toBeTruthy();
+    const trashed = await fs.readdir(path.join(dataDir, 'case-trash'));
+    expect(trashed.filter((entry) => entry.startsWith('proj1-'))).toHaveLength(1);
 
     // Deleting it again 404s.
     const gone = await fetch(url('/api/admin/users/kim/cases/proj1'), { method: 'DELETE', headers: adminNoBody });

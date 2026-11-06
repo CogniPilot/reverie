@@ -1,0 +1,341 @@
+{
+ "spec": "route-frames-v1 (D1b spec r2)",
+ "routes": [
+  {
+   "key": "GET /api/subscription-profiles",
+   "statuses": [
+    200,
+    500
+   ],
+   "content_type": "application/json; charset=utf-8"
+  }
+ ],
+ "cases": [
+  {
+   "name": "request",
+   "direction": "to_handler",
+   "hex": "0000003b0101000000000000000100000000000000011e474554202f6170692f737562736372697074696f6e2d70726f66696c65737b22656e76223a7b7d7d",
+   "expect": {
+    "kind": "request",
+    "generation": "1",
+    "id": "1",
+    "route": "GET /api/subscription-profiles",
+    "json_hex": "7b22656e76223a7b7d7d"
+   }
+  },
+  {
+   "name": "smallest-request",
+   "direction": "to_handler",
+   "hex": "000000140101000000000000000700000000000000090158",
+   "expect": {
+    "kind": "request",
+    "generation": "7",
+    "id": "9",
+    "route": "X",
+    "json_hex": ""
+   }
+  },
+  {
+   "name": "empty-cancel",
+   "direction": "to_handler",
+   "hex": "00000012010400000000000000020000000000000003",
+   "expect": {
+    "kind": "cancel",
+    "generation": "2",
+    "id": "3"
+   }
+  },
+  {
+   "name": "smallest-response",
+   "direction": "to_front",
+   "hex": "0000001401020000000000000001000000000000000100c8",
+   "expect": {
+    "kind": "response",
+    "generation": "1",
+    "id": "1",
+    "status": 200,
+    "body_hex": ""
+   }
+  },
+  {
+   "name": "response",
+   "direction": "to_front",
+   "hex": "0000002501020000000000000001000000000000000101f47b2273756363657373223a66616c73657d",
+   "expect": {
+    "kind": "response",
+    "generation": "1",
+    "id": "1",
+    "status": 500,
+    "body_hex": "7b2273756363657373223a66616c73657d"
+   }
+  },
+  {
+   "name": "smallest-refusal",
+   "direction": "to_front",
+   "hex": "0000001301030000000000000001000000000000000158",
+   "expect": {
+    "kind": "refusal",
+    "generation": "1",
+    "id": "1",
+    "code": "X"
+   }
+  },
+  {
+   "name": "refusal",
+   "direction": "to_front",
+   "hex": "0000001f010300000000000000010000000000000002554e4b4e4f574e5f524f555445",
+   "expect": {
+    "kind": "refusal",
+    "generation": "1",
+    "id": "2",
+    "code": "UNKNOWN_ROUTE"
+   }
+  },
+  {
+   "name": "observe-one",
+   "direction": "to_front",
+   "hex": "00000015010500000000000000010000000000000001010102",
+   "expect": {
+    "kind": "observe",
+    "generation": "1",
+    "id": "1",
+    "observation": "subscription_modes",
+    "providers": [
+     "openai"
+    ]
+   }
+  },
+  {
+   "name": "observe-two",
+   "direction": "to_front",
+   "hex": "0000001601050000000000000001000000000000000101020102",
+   "expect": {
+    "kind": "observe",
+    "generation": "1",
+    "id": "1",
+    "observation": "subscription_modes",
+    "providers": [
+     "anthropic",
+     "openai"
+    ]
+   }
+  },
+  {
+   "name": "observed",
+   "direction": "to_handler",
+   "hex": "00000020010600000000000000010000000000000001017b226f70656e6169223a5b5d7d",
+   "expect": {
+    "kind": "observed",
+    "generation": "1",
+    "id": "1",
+    "observation": "subscription_modes",
+    "json_hex": "7b226f70656e6169223a5b5d7d"
+   }
+  },
+  {
+   "name": "max-id",
+   "direction": "to_handler",
+   "hex": "000000120104ffffffffffffffffffffffffffffffff",
+   "expect": {
+    "kind": "cancel",
+    "generation": "18446744073709551615",
+    "id": "18446744073709551615"
+   }
+  },
+  {
+   "name": "length-below-header",
+   "direction": "to_handler",
+   "hex": "000000110104000000000000000000000000000000",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-above-direction",
+   "direction": "to_handler",
+   "hex": "00010054",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "cancel-with-payload",
+   "direction": "to_handler",
+   "hex": "0000001301040000000000000001000000000000000100",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "refusal-too-long",
+   "direction": "to_front",
+   "hex": "000000530103000000000000000100000000000000014141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "refusal-max",
+   "direction": "to_front",
+   "hex": "0000005201030000000000000001000000000000000141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+   "expect": {
+    "kind": "refusal",
+    "generation": "1",
+    "id": "1",
+    "code": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   }
+  },
+  {
+   "name": "observe-too-long",
+   "direction": "to_front",
+   "hex": "000000170105000000000000000100000000000000010103010201",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "request-too-short",
+   "direction": "to_handler",
+   "hex": "0000001301010000000000000001000000000000000101",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "version-2",
+   "direction": "to_handler",
+   "hex": "00000012020400000000000000010000000000000001",
+   "error": "FRAME_VERSION"
+  },
+  {
+   "name": "unknown-kind",
+   "direction": "to_handler",
+   "hex": "00000012010900000000000000010000000000000001",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "wrong-direction",
+   "direction": "to_front",
+   "hex": "00000012010400000000000000010000000000000001",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "generation-zero",
+   "direction": "to_handler",
+   "hex": "00000012010400000000000000000000000000000001",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "id-zero",
+   "direction": "to_handler",
+   "hex": "00000012010400000000000000010000000000000000",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "truncated-length",
+   "direction": "to_handler",
+   "hex": "0000",
+   "error": "FRAME_TRUNCATED"
+  },
+  {
+   "name": "truncated-header",
+   "direction": "to_handler",
+   "hex": "00000012010400000000",
+   "error": "FRAME_TRUNCATED"
+  },
+  {
+   "name": "truncated-payload",
+   "direction": "to_handler",
+   "hex": "0000003b0101000000000000000100000000000000011e474554202f6170692f737562736372697074696f6e2d70726f66696c65737b22656e76223a",
+   "error": "FRAME_TRUNCATED"
+  },
+  {
+   "name": "route-len-zero",
+   "direction": "to_handler",
+   "hex": "000000140101000000000000000100000000000000010058",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "route-len-past-payload",
+   "direction": "to_handler",
+   "hex": "00000015010100000000000000010000000000000001056162",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "route-not-ascii",
+   "direction": "to_handler",
+   "hex": "0000001501010000000000000001000000000000000102c3a9",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "refusal-lowercase",
+   "direction": "to_front",
+   "hex": "00000015010300000000000000010000000000000001626164",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "observe-unknown-observation",
+   "direction": "to_front",
+   "hex": "00000015010500000000000000010000000000000001020101",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "observe-count-zero",
+   "direction": "to_front",
+   "hex": "00000015010500000000000000010000000000000001010001",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "observe-count-mismatch",
+   "direction": "to_front",
+   "hex": "00000015010500000000000000010000000000000001010201",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "observe-unknown-provider",
+   "direction": "to_front",
+   "hex": "00000015010500000000000000010000000000000001010103",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "observe-duplicate-provider",
+   "direction": "to_front",
+   "hex": "0000001601050000000000000001000000000000000101020101",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "observed-unknown-observation",
+   "direction": "to_handler",
+   "hex": "00000015010600000000000000010000000000000001027b7d",
+   "error": "FRAME_PAYLOAD"
+  }
+ ],
+ "boundaries": {
+  "request_max": {
+   "direction": "to_handler",
+   "kind": 1,
+   "route_len": 64,
+   "json_len": 65536,
+   "expect_ok": true
+  },
+  "request_max_plus_one": {
+   "direction": "to_handler",
+   "kind": 1,
+   "route_len": 64,
+   "json_len": 65537,
+   "error": "FRAME_LENGTH"
+  },
+  "response_max": {
+   "direction": "to_front",
+   "kind": 2,
+   "body_len": 8388608,
+   "expect_ok": true
+  },
+  "response_max_plus_one": {
+   "direction": "to_front",
+   "kind": 2,
+   "body_len": 8388609,
+   "error": "FRAME_LENGTH"
+  },
+  "observed_max": {
+   "direction": "to_handler",
+   "kind": 6,
+   "json_len": 65536,
+   "expect_ok": true
+  },
+  "observed_max_plus_one": {
+   "direction": "to_handler",
+   "kind": 6,
+   "json_len": 65537,
+   "error": "FRAME_LENGTH"
+  }
+ }
+}
