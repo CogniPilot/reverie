@@ -1439,7 +1439,8 @@ export class WebServer extends EventEmitter {
         }
       },
     });
-    registerCaseRoutes(this.app, ctx);
+    const employees = () => this.companyService?.registeredEmployees() ?? [];
+    registerCaseRoutes(this.app, ctx, { employees });
     // The registry's lifetime is the server's: it drops per-session wake state on every
     // cleanup path and resolves in-flight wakes on shutdown.
     // Company spawn hooks are registered after the shared room service is initialized.
@@ -1452,7 +1453,7 @@ export class WebServer extends EventEmitter {
     registerPlansPageRoutes(this.app);
     registerSearchRoutes(this.app, ctx);
     registerMeRoutes(this.app, ctx);
-    registerAdminRoutes(this.app, ctx);
+    registerAdminRoutes(this.app, ctx, { employees });
     registerOrchestratorRoutes(this.app, ctx);
     registerWebviewRoutes(this.app, ctx, this.basePath);
     registerTabLayoutRoutes(this.app, ctx);
