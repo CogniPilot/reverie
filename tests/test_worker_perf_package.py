@@ -43,12 +43,18 @@ class WorkerPerfPackageTests(unittest.TestCase):
                     cargo.write_text(updated.replace('[workspace.dependencies]', '[workspace.dependencies]\nunrelated = "1"'))
                     with (target / 'Cargo.lock').open('a') as file:
                         file.write('\n[[package]]\nname = "unrelated"\nversion = "1.0.0"\n')
+                if name in ('target_junk', 'metadata'):
+                    suffix = 'target/cache-entry' if name == 'target_junk' else '.git/index'
+                    ignored = target / 'crates/reverie-core' / suffix
+                    ignored.parent.mkdir(parents=True)
+                    ignored.write_text('unrelated generated state\n')
                 (target / 'unrelated-website.txt').write_text(unrelated)
                 return target
             sources = {name: source(name, **changes) for name, changes in {
                 'before': {}, 'release': {'unrelated': 'website B'},
                 'builder': {'builder_extra': '\n// changed builder input\n'},
                 'module': {'module_extra': '\n// changed policy module input\n'},
+                'target_junk': {}, 'metadata': {},
             }.items()}
             paths = {name: json.dumps(str(path)) for name, path in sources.items()}
             root = json.dumps(str(ROOT))
@@ -59,12 +65,16 @@ class WorkerPerfPackageTests(unittest.TestCase):
               factory = import (root + "/nix/worker-perf-profile.nix");
               base = import (root + "/nix/worker-docker-profile.nix") { inherit pkgs; };
               make = packages: selectedBase: source: factory {
-                pkgs = packages; src = builtins.toPath source; baseProfile = selectedBase;
+                pkgs = packages;
+                src = builtins.path { name = "policy-fixture-source"; path = builtins.toPath source; };
+                baseProfile = selectedBase;
               };
               before = make pkgs base BEFORE;
               release = make pkgs base RELEASE;
               builder = make pkgs base BUILDER;
               module = make pkgs base MODULE;
+              targetJunk = make pkgs base TARGET_JUNK;
+              metadata = make pkgs base METADATA;
               otherBase = make pkgs (pkgs.writeText "different-base.json" "changed base bytes") BEFORE;
               otherPkgs = make (pkgs // {
                 rustPlatform = pkgs.rustPlatform // {
@@ -76,6 +86,7 @@ class WorkerPerfPackageTests(unittest.TestCase):
             in { inherit (pkgs.stdenv.hostPlatform) system;
               before = identity before; release = identity release;
               builder = identity builder; module = identity module;
+              targetJunk = identity targetJunk; metadata = identity metadata;
               otherBase = identity otherBase; otherPkgs = identity otherPkgs;
             }'''
             for name, value in {'ROOT': root, **{key.upper(): val for key, val in paths.items()}}.items():
@@ -86,6 +97,8 @@ class WorkerPerfPackageTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             value = json.loads(result.stdout)
             self.assertEqual(value['before'], value['release'])
+            self.assertEqual(value['before'], value['targetJunk'])
+            self.assertEqual(value['before'], value['metadata'])
             for key in ('builder', 'module', 'otherBase', 'otherPkgs'):
                 with self.subTest(changed=key):
                     self.assertNotEqual(value['before']['drv'], value[key]['drv'])
