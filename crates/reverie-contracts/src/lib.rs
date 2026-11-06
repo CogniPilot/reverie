@@ -5,6 +5,7 @@ mod digest;
 pub mod js_json;
 pub mod lease_policy;
 mod legacy_json;
+pub mod operations_v1;
 pub mod profiles_v1;
 pub mod resource_config;
 pub mod rootless;

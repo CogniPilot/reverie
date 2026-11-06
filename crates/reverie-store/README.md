@@ -1,5 +1,50 @@
 # Reverie profile store
 
+## Resource operation journal
+
+`operations::OperationStore` ports the existing `operations.json` and
+`operations.lock` journal. Initialization is explicit and requires an empty
+existing private directory. A missing/corrupt/inaccessible journal never becomes
+an absent lookup result. Private custody is current-euid mode0700 directories,
+mode0600 single-link regular files, no-follow ancestor traversal and a real
+nonblocking exclusive flock. Profile and operation stores share the reviewed
+descriptor/stamp/temporary-pin implementation; their public APIs keep fixed
+separate leaf names and expose no generic file editor.
+
+Trusted service installation supplies a live scope guard and optional capacity
+observer. Those must remain inside the real host admission transaction; repeated
+observations do not create one. A scope digest or reference ID is not approval.
+Each new positive delta stays charged across cancellation, restart and recorded
+verification. Shrinking never creates capacity credit. Replays return a view,
+never a fresh effect handle; cold views show protected recovery and cannot retry.
+`OperationView::record` retains the canonical row separately from that presentation
+state, since a cold RESERVED row keeps version1 while showing recovery.
+
+Writes use a pinned private temporary, complete writes, file fsync, guarded CAS,
+rename, directory fsync, readback and final scope/root/lock/document checks. A
+rename attempt or later failure revokes all local handles and returns commit
+uncertainty; it never deletes a claim, rolls back or grants replay permission.
+Both primary and finalizer failures remain available. Initialization additionally
+uses atomic no-replace publication so a concurrently installed journal is retained.
+
+All begin/ACK/recovery phases and the completion journal transaction are present.
+`NativeCompletionProof` has no production constructor or inhabited source variant.
+Only owning tests can instantiate an inert fixture proof. The actual
+`worker_resource_finalization` settlement producer remains a required dependency:
+the application must own its live owner/readiness and pending-marker workflow,
+with typed native observations and terminal finalizers, before a reviewed mint
+seam can replace this unavailable boundary. No store-to-host dependency or
+callback/digest/wire completion mint is introduced. COMPLETED journal data alone
+does not prove native settlement or release the outer pending fence.
+
+Tests use owned files, genuine separate processes, post-install child termination,
+capacity races, restrictive umask and close/rename/fsync/rebinding faults. Existing
+profile-store finalizer tests remain unchanged. The active Python broker/journal
+consumer stays selected pending the coordinated full broker migration. No engine,
+kernel effect, public endpoint, live company edit or production cutover is provided.
+
+## Canonical profile persistence
+
 This is the C1 Rust persistence component for the existing
 `reverie-employee-resource-profiles-v1` schema. It uses `profiles.json` and
 `profiles.lock` in an existing private directory. It creates no endpoint,

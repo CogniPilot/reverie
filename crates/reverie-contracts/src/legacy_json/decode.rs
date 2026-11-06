@@ -2,6 +2,17 @@ use super::Error;
 use super::value::{Node, Number, Text, Value};
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
+mod journal;
+pub(crate) use journal::{JournalParseError, JournalParsed};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Purpose {
+    Default,
+    NoConstants,
+    Metadata,
+    Rootless,
+    Journal,
+}
 
 enum Phase {
     First,
@@ -19,6 +30,7 @@ enum Frame {
         key: Option<Text>,
         phase: Phase,
         duplicate: bool,
+        order: Option<Vec<Text>>,
     },
 }
 enum Action {
@@ -31,39 +43,46 @@ struct Cursor<'a> {
     source: &'a [u8],
     offset: usize,
     purpose: Purpose,
-}
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum Purpose {
-    Default,
-    NoConstants,
-    Metadata,
-    Rootless,
+    journal_error: Option<JournalParseError>,
+    root_object_orders: BTreeMap<Text, Vec<Text>>,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
-    decode_with(source, Purpose::Default)
+    decode_mode(source, Purpose::Default)
 }
 pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
-    decode_with(source, Purpose::Metadata)
-}
-pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
-    decode_with(source, Purpose::Rootless)
+    decode_mode(source, Purpose::Metadata)
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
-    decode_with(source, Purpose::NoConstants)
+    decode_mode(source, Purpose::NoConstants)
 }
-fn decode_with(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
-    let mut cursor = Cursor {
-        source,
-        offset: 0,
-        purpose,
-    };
-    let root = parse(&mut cursor)?;
+pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, Purpose::Rootless)
+}
+pub(super) fn decode_journal(source: &[u8]) -> Result<JournalParsed, JournalParseError> {
+    journal::decode(source)
+}
+fn decode_mode(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
+    finish(&mut Cursor::new(source, purpose))
+}
+fn finish(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
+    let root = parse(cursor)?;
     cursor.whitespace();
-    if cursor.offset != source.len() {
+    if cursor.offset != cursor.source.len() {
         return Err(Error::InvalidJson);
     }
     Ok(root)
+}
+impl<'a> Cursor<'a> {
+    fn new(source: &'a [u8], purpose: Purpose) -> Self {
+        Self {
+            source,
+            offset: 0,
+            purpose,
+            journal_error: None,
+            root_object_orders: BTreeMap::new(),
+        }
+    }
 }
 fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     let mut frames: Vec<Frame> = Vec::new();
@@ -76,7 +95,10 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
             },
             Action::Push(frame) => frames.push(frame),
             Action::Close => {
-                let value = frames.pop().ok_or(Error::InvalidJson)?.finish()?;
+                let value = frames
+                    .pop()
+                    .ok_or(Error::InvalidJson)?
+                    .close(cursor, &frames)?;
                 action = Action::Ready(value);
                 continue;
             }
@@ -86,15 +108,6 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     }
 }
 impl Frame {
-    fn finish(self) -> Result<Value, Error> {
-        match self {
-            Self::Array { values, .. } => Ok(Value(Node::Array(values))),
-            Self::Object {
-                duplicate: true, ..
-            } => Err(Error::DuplicateKey),
-            Self::Object { values, .. } => Ok(Value(Node::Object(values))),
-        }
-    }
     fn attach(&mut self, value: Value, purpose: Purpose) -> Result<(), Error> {
         match self {
             Self::Array { values, phase } => {
@@ -106,17 +119,47 @@ impl Frame {
                 key,
                 phase,
                 duplicate,
+                order,
             } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
-                let replaced = values.insert(key, value).is_some();
-                if replaced && !matches!(purpose, Purpose::Metadata | Purpose::Rootless) {
-                    return Err(Error::DuplicateKey);
+                if let Some(order) = order {
+                    order.push(key.clone());
                 }
-                *duplicate |= replaced && purpose == Purpose::Metadata;
+                let previous = values.insert(key, value);
+                if previous.is_some() {
+                    *duplicate = duplicate_value(purpose)?;
+                }
                 *phase = Phase::Next;
             }
         }
         Ok(())
+    }
+    fn close(self, cursor: &mut Cursor<'_>, parents: &[Frame]) -> Result<Value, Error> {
+        match self {
+            Self::Array { values, .. } => Ok(Value(Node::Array(values))),
+            Self::Object {
+                values,
+                duplicate,
+                order,
+                ..
+            } => {
+                if duplicate {
+                    return Err(Error::DuplicateKey);
+                }
+                if let (
+                    Some(order),
+                    [
+                        Frame::Object {
+                            key: Some(parent), ..
+                        },
+                    ],
+                ) = (order, parents)
+                {
+                    cursor.root_object_orders.insert(parent.clone(), order);
+                }
+                Ok(Value(Node::Object(values)))
+            }
+        }
     }
     fn step(&mut self, cursor: &mut Cursor<'_>) -> Result<Action, Error> {
         cursor.whitespace();
@@ -143,6 +186,13 @@ impl Frame {
                 Phase::Next => next(cursor, b'}', phase),
             },
         }
+    }
+}
+fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
+    match purpose {
+        Purpose::Rootless => Ok(false),
+        Purpose::Journal | Purpose::Metadata => Ok(true),
+        _ => Err(Error::DuplicateKey),
     }
 }
 fn next(cursor: &mut Cursor<'_>, closing: u8, phase: &mut Phase) -> Result<Action, Error> {
@@ -183,6 +233,7 @@ impl Cursor<'_> {
                     key: None,
                     phase: Phase::First,
                     duplicate: false,
+                    order: (self.purpose == Purpose::Journal).then(Vec::new),
                 })
             }
             Some(b'[') => {
@@ -210,10 +261,16 @@ impl Cursor<'_> {
         if !self.source[self.offset..].starts_with(literal.as_bytes()) {
             return Err(Error::InvalidJson);
         }
+        if self.purpose == Purpose::Journal && matches!(literal, "NaN" | "Infinity") {
+            return self.journal_failure(JournalParseError::JsonNumber);
+        }
         self.offset += literal.len();
         Ok(Action::Ready(Value(node)))
     }
     fn number(&mut self) -> Result<Number, Error> {
+        if self.purpose == Purpose::Journal {
+            return journal::number(self);
+        }
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
             if self.purpose == Purpose::NoConstants {
@@ -233,8 +290,11 @@ impl Cursor<'_> {
             .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
+            // Named default Python decoders use the runtime's decimal
+            // conversion cap even for ignored/overwritten fields.
+            // Other named readers keep their separately frozen number policy.
             if matches!(self.purpose, Purpose::Metadata | Purpose::Rootless)
-                && text.trim_start_matches('-').len() > super::DEFAULT_INT_MAX_DIGITS
+                && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);
             }

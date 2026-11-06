@@ -1,4 +1,41 @@
 use super::*;
+
+#[test]
+fn named_journal_parse_hooks_do_not_change_existing_reader_policies() {
+    let raw = br#"{"key":1,"key":2,"later":0.5}"#;
+    assert_eq!(decode_utf8(raw).err(), Some(Error::DuplicateKey));
+    assert_eq!(
+        decode_bytes_without_constants(raw).err(),
+        Some(Error::DuplicateKey)
+    );
+    assert!(decode_rootless_profile(raw).is_ok());
+    assert_eq!(
+        decode_journal(raw).err(),
+        Some(JournalParseError::JsonNumber)
+    );
+    let long = format!(
+        "{{\"key\":{},\"key\":1}}",
+        "1".repeat(DEFAULT_INT_MAX_DIGITS + 1)
+    );
+    assert_eq!(
+        decode_rootless_profile(long.as_bytes()).err(),
+        Some(Error::InvalidJson)
+    );
+    assert_eq!(
+        decode_utf8(long.as_bytes()).err(),
+        Some(Error::DuplicateKey)
+    );
+    assert_eq!(
+        decode_journal(long.as_bytes()).err(),
+        Some(JournalParseError::DocumentInteger)
+    );
+    let one = format!("{{\"key\":{}}}", "1".repeat(DEFAULT_INT_MAX_DIGITS));
+    assert!(decode_rootless_profile(one.as_bytes()).is_ok());
+    assert!(
+        decode_utf8(format!("{{\"key\":{}}}", "1".repeat(DEFAULT_INT_MAX_DIGITS + 1)).as_bytes())
+            .is_ok()
+    );
+}
 #[test]
 fn merged_rootless_and_metadata_readers_keep_distinct_duplicate_and_shared_integer_rules() {
     let raw = br#"{"x":0,"x":1}"#;
