@@ -4,11 +4,17 @@
 let
   lib = pkgs.lib;
   original = src.origSrc or src;
+  keep = import ./source-filter-policy.nix { inherit lib; };
   manifest = builtins.fromTOML (builtins.readFile (original + "/Cargo.toml"));
   lock = builtins.fromTOML (builtins.readFile (original + "/Cargo.lock"));
-  crates = map (name: {
+  crates = map (name: let crateRoot = original + "/crates/${name}"; in {
     inherit name;
-    path = builtins.path { path = original + "/crates/${name}"; inherit name; };
+    path = builtins.path {
+      path = crateRoot;
+      inherit name;
+      filter = path: type: keep
+        ("crates/${name}" + lib.removePrefix (toString crateRoot) (toString path)) type;
+    };
     manifest = builtins.fromTOML (builtins.readFile (original + "/crates/${name}/Cargo.toml"));
   }) members;
   sections = value: [

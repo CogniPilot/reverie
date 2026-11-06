@@ -126,13 +126,21 @@ class SourceFilterTests(unittest.TestCase):
                 shutil.copytree(ROOT / member, root / member, dirs_exist_ok=True,
                                 ignore=shutil.ignore_patterns("target"))
             expression = f'''let pkgs = import {self.library.parent} {{}};
-              src = import {ROOT}/nix/source-filter.nix {{ inherit (pkgs) lib; src = {root}; }};
+              captured = builtins.path {{ name = "console-cache-source"; path = {root}; }};
+              src = import {ROOT}/nix/source-filter.nix {{ inherit (pkgs) lib; src = captured; }};
               in (import {ROOT}/nix/package.nix {{ inherit pkgs src; }}).console.drvPath'''
             baseline = self.evaluate(expression)
             unrelated = root / "README.md"
             unrelated.write_text("documentation edit\n")
             self.assertEqual(self.evaluate(expression), baseline)
             unrelated.unlink()
+            for relative in ("crates/reverie-core/target/cache-entry",
+                             "crates/reverie-core/.git/index"):
+                generated = root / relative
+                generated.parent.mkdir(parents=True)
+                generated.write_text("unrelated generated state\n")
+                self.assertEqual(self.evaluate(expression), baseline)
+                shutil.rmtree(generated.parent)
             cargo = root / "Cargo.toml"
             cargo_before = cargo.read_text()
             unused = cargo_before.replace('members = [', 'members = [\n"crates/unrelated",', 1)
