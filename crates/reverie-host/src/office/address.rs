@@ -11,6 +11,9 @@ use std::{
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
+fn fresh(at: Instant) -> bool {
+    at.elapsed() < Duration::from_secs(2)
+}
 pub(super) struct Cache {
     value: Option<(OfficeAddressData, Instant)>,
     inflight: Option<Arc<NativeJob>>,
@@ -39,6 +42,13 @@ impl AddressSource {
         *current.write().map_err(|_| OfficeError::Unconfirmed)? = address;
         Ok(())
     }
+    #[cfg(test)]
+    pub(super) fn observed_lookup(&self) -> Option<Arc<NativeJob>> {
+        let Self::Worker { cache, .. } = self else {
+            return None;
+        };
+        cache.lock().unwrap().inflight.clone()
+    }
     pub(super) async fn targets(
         &self,
         company: &Company,
@@ -66,11 +76,7 @@ async fn literal(
     loop {
         let job = {
             let mut state = cache_lock(cache).await?;
-            if let Some((value, _)) = state
-                .value
-                .as_ref()
-                .filter(|(_, at)| at.elapsed() < Duration::from_secs(2))
-            {
+            if let Some((value, _)) = state.value.as_ref().filter(|(_, at)| fresh(*at)) {
                 return Ok(value.clone());
             }
             if let Some(job) = &state.inflight {
@@ -97,10 +103,14 @@ async fn literal(
             state.inflight = None;
         }
         match outcome {
-            Ok(NativeValue::Address(value, at)) => {
+            Ok(NativeValue::Address(value, at)) if fresh(at) => {
                 state.value = Some((value.clone(), at));
                 return Ok(value);
             }
+            // An aborted HTTP waiter may leave its completed lookup here.
+            // Its original completion time is not renewed by another waiter;
+            // discard an expired result and select a fresh fixed query.
+            Ok(NativeValue::Address(..)) => (),
             Ok(NativeValue::Socket(_)) => return Err(OfficeError::Unconfirmed),
             Err(error) if owner => return Err(error),
             // As with the original address_lock, another waiter gets its own

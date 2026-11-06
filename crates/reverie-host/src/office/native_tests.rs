@@ -1,4 +1,6 @@
 //! Actual fixed Rust child, local owned sockets and real request seats.
+#[path = "freshness_tests.rs"]
+mod freshness;
 use super::*;
 use reverie_contracts::{worker_config, worker_schema::WorkerEnvelope};
 fn fixture() -> Fixture {
