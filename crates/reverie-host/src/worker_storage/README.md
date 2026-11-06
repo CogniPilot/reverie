@@ -134,3 +134,23 @@ controlled compiled Rust child on the same captured client, real owned symlink
 resolution, 21 strict native launch-binding reads, exact argv/error phase
 comparison and held-flock/late-constructor/finalizer controls. No live company
 data or container engine is used by these tests.
+
+The fixed preparation methods also operate through the actual `LaunchStorage`
+sum. Held employee/session leases delegate to their existing checked methods;
+genuine service-resolved legacy sessions reuse the same private filesystem
+purpose owners without acquiring a synthetic lease or creating `storage-locks`.
+Legacy lineage recording remains a no-op before any metadata read. Fresh
+binding drift refuses preparation rather than silently changing the selected
+legacy identity. Every operation refuses a consumed-unconfirmed owner, even
+when its ordinary feature branch would otherwise be a no-op.
+
+Five actual old direct-function recipes compare complete bytes, modes and
+symlinks for the unleased legacy path, including CRLF/Unicode owner text,
+occupied aliases, repeated preparation and missing-company lineage no-op.
+The reference deliberately omits `storage_guard`, as the real Broker does for
+this branch. Existing lease recipes and temporary/instruction tests still use
+the same implementations. The installing lifecycle must preserve the original
+phase order and reuse short circuits: storage preparation first; prior laptop
+inspection/disposition; Nix guard and effective preparation; then temporary,
+alias and instruction writes only on the actual non-reuse path. These resource
+methods neither prove that disposition nor authorize a container/start effect.

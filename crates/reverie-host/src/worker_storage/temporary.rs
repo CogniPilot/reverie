@@ -13,7 +13,7 @@ use std::{
         unix::fs::{DirBuilderExt, MetadataExt},
     },
 };
-fn path_text(
+pub(super) fn path_text(
     config: &Configuration,
     paths: &StoragePaths,
 ) -> Result<reverie_contracts::reservation_engine::StoragePathText> {
@@ -68,7 +68,11 @@ fn private(file: &File, uid: u32) -> Result<()> {
         StorageFault::PrivateDirectory,
     )
 }
-fn temporary(config: &Configuration, paths: &StoragePaths, effects: &mut bool) -> Result<PathBuf> {
+pub(super) fn temporary(
+    config: &Configuration,
+    paths: &StoragePaths,
+    effects: &mut bool,
+) -> Result<PathBuf> {
     let root = config.scratch()?;
     let scratch = paths.scratch();
     let original = path_text(config, paths)?;
@@ -142,12 +146,7 @@ impl StorageLease {
         if !self.config.data.has_shared_workspace()? {
             return Ok(());
         }
-        let target = self.paths.home().join("workspace");
-        let result = match std::os::unix::fs::symlink("/reverie_workspace", target) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-            Err(error) => Err(error.into()),
-        };
+        let result = workspace_alias(&self.paths);
         partial(finalized(result, self.assert_current()), true)
     }
     pub fn write_storage_instructions(&mut self) -> Result<()> {
@@ -156,6 +155,13 @@ impl StorageLease {
         let original = path_text(&self.config, &self.paths)?;
         let result = instructions(self.paths.home(), original.home(), &mut effects);
         partial(finalized(result, self.assert_current()), effects)
+    }
+}
+pub(super) fn workspace_alias(paths: &StoragePaths) -> Result<()> {
+    match std::os::unix::fs::symlink("/reverie_workspace", paths.home().join("workspace")) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -170,7 +176,7 @@ fn signature(info: &std::fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
         info.ctime_nsec(),
     )
 }
-fn instructions(home: &Path, original: &PosixPath, effects: &mut bool) -> Result<()> {
+pub(super) fn instructions(home: &Path, original: &PosixPath, effects: &mut bool) -> Result<()> {
     // Keep Python text provenance through the existing shared path resolver.
     let text = original.codepoints();
     need(

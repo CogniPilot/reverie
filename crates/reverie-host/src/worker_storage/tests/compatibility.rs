@@ -47,7 +47,7 @@ fn setup_entry(tree: &Tree, row: &Value) {
         .unwrap();
     }
 }
-fn snapshot(root: &Path, parent: &Path, result: &mut Vec<Value>) -> std::io::Result<()> {
+pub(super) fn snapshot(root: &Path, parent: &Path, result: &mut Vec<Value>) -> std::io::Result<()> {
     let mut entries = stdfs::read_dir(parent)?
         .map(|v| v.unwrap().path())
         .collect::<Vec<_>>();

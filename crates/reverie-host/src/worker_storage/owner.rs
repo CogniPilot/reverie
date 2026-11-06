@@ -1,4 +1,5 @@
 //! Actual service-produced storage resources. These are not API/start grants.
+mod preparation;
 use super::*;
 use crate::{
     engine_metadata::EngineError, installed_worker_engine::InstalledWorkerEngine,
