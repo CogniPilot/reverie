@@ -142,19 +142,27 @@ fn pending_constructor_remains_owned_across_all_clones_and_close_never_reopens()
     let starts = bootstrap.hooks.starts.clone();
     let installed = InstalledWorkerEngine::new(bootstrap);
     let reader = installed.readonly();
+    let cancellation = CancellationToken::new();
+    let query_cancellation = cancellation.clone();
     let task = std::thread::spawn(move || {
         reader.query(
             EngineQuery::InventoryIds,
-            Instant::now() + Duration::from_millis(80),
-            &CancellationToken::new(),
+            Instant::now() + Duration::from_secs(20),
+            &query_cancellation,
         )
     });
     let until = deadline();
-    while !gate.entered.load(Ordering::Acquire) {
-        assert!(Instant::now() < until);
+    while !gate.entered.load(Ordering::Acquire) && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(1));
     }
-    assert!(task.join().unwrap().unwrap_err().is_uncertain());
+    let entered = gate.entered.load(Ordering::Acquire);
+    cancellation.cancel();
+    if !entered {
+        gate.released.store(true, Ordering::Release);
+    }
+    let result = task.join().unwrap();
+    assert!(entered, "owned constructor actually reached its gate");
+    assert!(result.unwrap_err().is_uncertain());
     let other = installed.readonly();
     assert_eq!(
         other
