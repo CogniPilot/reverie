@@ -2,6 +2,7 @@
 //! admission authority; installing services own their actual effect boundaries.
 pub mod broker_engine;
 mod captured_client;
+pub mod command_telemetry;
 pub mod creation_budget;
 pub mod device_policy;
 pub mod embeddings;

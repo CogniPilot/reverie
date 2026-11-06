@@ -16,7 +16,7 @@ fn main() {
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
         "gpu-info"=>gpu_info(&args),
-        "storage-writer" | "image-refresh" => {
+        "storage-writer" | "image-refresh" | "command-telemetry" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);

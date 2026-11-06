@@ -19,3 +19,5 @@ pub use error::{StoreError, StoreFault};
 mod faults;
 #[cfg(test)]
 mod tests;
+
+pub mod command_failures;

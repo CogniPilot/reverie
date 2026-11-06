@@ -1,0 +1,204 @@
+[
+  {
+    "name": "empty",
+    "sql": "",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "normal",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',127,'COMMAND_NOT_FOUND')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [
+        {
+          "tool": "shell",
+          "category": "COMMAND_NOT_FOUND",
+          "exit": 127,
+          "count": 1
+        }
+      ],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "unknown-tool",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','arbitrary-secret',1,'NONZERO')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "wrong-category",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',127,'NONZERO')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "zero-exit",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',0,'NONZERO')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "bad-exit",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',256,'NONZERO')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "real-exit",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',1.5,'NONZERO')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "blob-tool",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands',x'7368656c6c',1,'NONZERO')",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "invalid-text-tool",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands',CAST(x'ff' AS TEXT),1,'NONZERO')",
+    "reopen": false,
+    "report": null
+  },
+  {
+    "name": "invalid-text-category",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',1,CAST(x'ff' AS TEXT))",
+    "reopen": false,
+    "report": null
+  },
+  {
+    "name": "invalid-text-after-bad-tool",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands',x'',1,CAST(x'ff' AS TEXT))",
+    "reopen": false,
+    "report": null
+  },
+  {
+    "name": "counters",
+    "sql": "UPDATE counters SET n=9223372036854775807 WHERE name='evicted';UPDATE counters SET n=-1 WHERE name='expired'",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 2147483647,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "expired",
+    "sql": "INSERT INTO failures VALUES ('00000000-0000-0000-0000-000000000000',1000000,'11111111-1111-1111-1111-111111111111','hands','shell',1,'NONZERO');UPDATE failures SET t=1",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 1,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "malformed-counter",
+    "sql": "UPDATE counters SET n='bad'",
+    "reopen": false,
+    "report": {
+      "v": 1,
+      "employee_id": "11111111-1111-1111-1111-111111111111",
+      "harness": "hands",
+      "counts": [],
+      "evicted": 0,
+      "expired": 0,
+      "dropped": 0,
+      "provenance": "SELF_REPORTED_RESULT"
+    }
+  },
+  {
+    "name": "binding-reopen",
+    "sql": "UPDATE binding SET employee='foreign'",
+    "reopen": true,
+    "report": null
+  },
+  {
+    "name": "origin-reopen",
+    "sql": "UPDATE telemetry_origin SET provenance='foreign'",
+    "reopen": true,
+    "report": null
+  }
+]

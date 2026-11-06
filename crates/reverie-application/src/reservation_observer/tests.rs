@@ -193,6 +193,7 @@ impl Source for Arc<Fixture> {
                 EngineQuery::InspectBatch(_) => "inspect",
                 EngineQuery::InspectStopped(_) => "stopped",
                 EngineQuery::GpuInformation => "gpu-info",
+                EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
             }
             .to_owned(),
         );
