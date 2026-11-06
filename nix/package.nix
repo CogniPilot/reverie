@@ -43,6 +43,8 @@ let
       # The route frame cases are shared with the Rust codec in reverie-contracts.
       mkdir -p test/fixtures/route-frames-v1
       cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/route-frames-v1/cases.json"} test/fixtures/route-frames-v1/cases.json
+      mkdir -p test/fixtures/route-frames-v2
+      cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/route-frames-v2/cases.json"} test/fixtures/route-frames-v2/cases.json
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
@@ -137,6 +139,7 @@ let
       npm test -- test/routes/subscription-profiles-rust-goldens.test.ts
       npm test -- test/rust-routes/frames.test.ts test/rust-routes/channel.test.ts test/rust-routes/config.test.ts \
         test/routes/subscription-profiles-forwarder.test.ts
+      npm test -- test/rust-front/frames.test.ts
       npm test -- test/board-permissions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
