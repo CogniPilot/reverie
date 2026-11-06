@@ -489,8 +489,7 @@ let
   # Candidate only: source preparation/admission consumers still select the
   # existing child entry point until the complete broker transition is reviewed.
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
-  # Candidate: the full retained host preparation workflow must qualify before
-  # the worker image replaces its existing bootstrap entry point.
+  # Same fixed native helper selected by the worker image; no shell fallback.
   workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
