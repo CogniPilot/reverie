@@ -1,0 +1,104 @@
+[
+  {
+    "name": "pid-False",
+    "kind": "pid",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": false}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "pid-0",
+    "kind": "pid",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "pid--1",
+    "kind": "pid",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": -1}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "pid-1.0",
+    "kind": "pid",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 1.0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "pid-'123'",
+    "kind": "pid",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": \"123\"}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "pid-None",
+    "kind": "pid",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": null}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "website-baseline",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": null
+  },
+  {
+    "name": "website-running",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_REQUIRED"
+  },
+  {
+    "name": "website-pidbool",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": false}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_REQUIRED"
+  },
+  {
+    "name": "website-paused",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0, \"Paused\": 1}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_REQUIRED"
+  },
+  {
+    "name": "website-restartempty",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0, \"Restarting\": []}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": null
+  },
+  {
+    "name": "website-worker",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": {\"reverie.worker\": false}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_REQUIRED"
+  },
+  {
+    "name": "website-labels",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": [1]}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_REQUIRED"
+  },
+  {
+    "name": "website-memorybool",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": true, \"MemorySwap\": 536870912, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_LIMITS"
+  },
+  {
+    "name": "website-mismatch",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870913, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_LIMITS"
+  },
+  {
+    "name": "website-taskfloat",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 128.0, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_LIMITS"
+  },
+  {
+    "name": "website-tasklarge",
+    "kind": "website",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}, \"Config\": {\"Labels\": {}}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912, \"PidsLimit\": 32769, \"NanoCpus\": 0}, \"Image\": \"invalid\"}",
+    "error": "RESERVATION_STOPPED_WEBSITE_LIMITS"
+  }
+]

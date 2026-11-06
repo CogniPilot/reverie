@@ -32,6 +32,21 @@ pub(crate) fn decode_journal(raw: &[u8]) -> Result<JournalParsed, JournalParseEr
     let raw = text::python_bytes(raw).map_err(JournalParseError::Json)?;
     decode::decode_journal(&raw)
 }
+/// Engine stdout has already undergone strict UTF-8 decoding; unlike bytes JSON
+/// there is no BOM/UTF16/32 auto-detection at this purpose boundary.
+pub(crate) fn decode_engine_inventory(raw: &[u8]) -> Result<Value, Error> {
+    decode_python_str(raw)
+}
+/// Named callers supply Python `str` JSON as strict UTF-8. This deliberately
+/// does not perform the bytes decoder's BOM/UTF16/32 detection.
+pub(crate) fn decode_python_str(raw: &[u8]) -> Result<Value, Error> {
+    std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+    decode::decode_last_wins(raw)
+}
+pub(crate) fn decode_engine_stopped(raw: &[u8]) -> Result<Value, Error> {
+    std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+    decode::decode_engine_stopped(raw)
+}
 pub(crate) fn decode_bytes_without_constants(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_without_constants(&text::python_bytes(raw)?)
 }

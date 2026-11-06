@@ -1,0 +1,391 @@
+{
+  "inventory": [
+    {
+      "name": "complete",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        "7d11b6f5e282ac9bbf3f5e14b4fd88b5b18133ccce8e3ad40b1b83b995ce03bf"
+      ],
+      "mountHashes": [
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b"
+      ]
+    },
+    {
+      "name": "mount_permutation",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}, {\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        "7d11b6f5e282ac9bbf3f5e14b4fd88b5b18133ccce8e3ad40b1b83b995ce03bf"
+      ],
+      "mountHashes": [
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b"
+      ]
+    },
+    {
+      "name": "duplicate_mount_preserved",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}, {\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        "f0b7f52b18a75d6d904951eb54b24937fd8740def16d50c09319abd5029387fe"
+      ],
+      "mountHashes": [
+        "dd4c503d0834f81c9e43ac5cd7f0130a6df0e73509732eb4a35580c9b23cb6c5"
+      ]
+    },
+    {
+      "name": "bad_mount_None",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": null}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "bad_mount_{}",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": {}}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "bad_mount_['bad']",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [\"bad\"]}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "nonfinite_unrelated_retained",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": NaN, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        null
+      ],
+      "mountHashes": [
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b"
+      ]
+    },
+    {
+      "name": "nonfinite_mount_refuses",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}, \"Other\": Infinity}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "duplicate_id",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "uppercase_id",
+      "ids": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "batches": [],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "empty",
+      "ids": "",
+      "batches": [],
+      "accepted": true,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "batch_boundary",
+      "ids": "0000000000000000000000000000000000000000000000000000000000000001\n0000000000000000000000000000000000000000000000000000000000000002\n0000000000000000000000000000000000000000000000000000000000000003\n0000000000000000000000000000000000000000000000000000000000000004\n0000000000000000000000000000000000000000000000000000000000000005\n0000000000000000000000000000000000000000000000000000000000000006\n0000000000000000000000000000000000000000000000000000000000000007\n0000000000000000000000000000000000000000000000000000000000000008\n0000000000000000000000000000000000000000000000000000000000000009\n000000000000000000000000000000000000000000000000000000000000000a\n000000000000000000000000000000000000000000000000000000000000000b\n000000000000000000000000000000000000000000000000000000000000000c\n000000000000000000000000000000000000000000000000000000000000000d\n000000000000000000000000000000000000000000000000000000000000000e\n000000000000000000000000000000000000000000000000000000000000000f\n0000000000000000000000000000000000000000000000000000000000000010\n0000000000000000000000000000000000000000000000000000000000000011\n0000000000000000000000000000000000000000000000000000000000000012\n0000000000000000000000000000000000000000000000000000000000000013\n0000000000000000000000000000000000000000000000000000000000000014\n0000000000000000000000000000000000000000000000000000000000000015\n0000000000000000000000000000000000000000000000000000000000000016\n0000000000000000000000000000000000000000000000000000000000000017\n0000000000000000000000000000000000000000000000000000000000000018\n0000000000000000000000000000000000000000000000000000000000000019\n000000000000000000000000000000000000000000000000000000000000001a\n000000000000000000000000000000000000000000000000000000000000001b\n000000000000000000000000000000000000000000000000000000000000001c\n000000000000000000000000000000000000000000000000000000000000001d\n000000000000000000000000000000000000000000000000000000000000001e\n000000000000000000000000000000000000000000000000000000000000001f\n0000000000000000000000000000000000000000000000000000000000000020\n0000000000000000000000000000000000000000000000000000000000000021\n0000000000000000000000000000000000000000000000000000000000000022\n0000000000000000000000000000000000000000000000000000000000000023",
+      "batches": [
+        "{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000001\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000002\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000003\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000004\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000005\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000006\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000007\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000008\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000009\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000a\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000b\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000c\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000d\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000e\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000f\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000010\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000011\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000012\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000013\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000014\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000015\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000016\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000017\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000018\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000019\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001a\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001b\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001c\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001d\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001e\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001f\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000020\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}",
+        "{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000021\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000022\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000023\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        "be68caf94e05871d441cdf8930d9c9ce2afdb790d99e5af9531c2092a8ad78e8",
+        "22a41dff75d04eb1695153502c2a6039c128740b5102fe899cba494ce73351b8",
+        "656bf61d5574e2bb35f1224a448428bc8dee5f7c870828acbbb13e3680a3ae3d",
+        "05cc53a89ee95c1bf92c3de72622b017c59bdcb87f18f89fdf538f36b793adbf",
+        "29fdae30676fadfcf1fab6ccc2e0abadb80e9e4294524f9639fc55555393e3e9",
+        "ca7742679b80bdb80ae364c2d082c6f046906b7ac5aa9fe6950f88ca5227cdc0",
+        "d1e29baff16805917238314016e1d36419b4ae534b397149717a2ef8d73cdef9",
+        "0456c71d217acd5a52f4189492b3869e75bc1d53dae7782a986ba9147388ba88",
+        "956381970885f40d28c4b1668155a03a0cd2f4883cf26198be2698e3885fd895",
+        "93ccbfe233a3c327306ae33b6ba0fdb4cc8878ff621250cbde7cff7015679c9b",
+        "c7cad39dcf5485c655d9a8aef7de6f7241e6a1e2770aee303451968c7fc9acba",
+        "1b0aaeff653f3d2229f5b7d717526b2fae04d7dc302a34a9fabec323b3bcf504",
+        "e08a416560e140fd3af6b8f165fe1989bd57220c7fef4e63917caa2d8b41e5bc",
+        "7f19df694d3deb49250df0c6ead893613c6631109ae24dce0e853654e04f7652",
+        "ce8cd3592419b7c61819ffe4677797cf7ad78e4296bc184cc8dd383c160ebf90",
+        "ec7b46ddaa6069f22346648d1a2528a41197f4eb32aba6d7197da6f53a9b307a",
+        "5cfb2a6207bdaac0ee79719c7995820ca40e2f799c7d80edd7ee776d3e8df31c",
+        "9ae2f8991bc8c4c848b9df50d229c95003b08ae86c8f64adb694ce0675f0d7a3",
+        "d0e6e1ab0bd3cdb0ee04f20b8c921011dcf3d31bf4e50cdba05d5d479a22a46c",
+        "ad7e9e86d43283ff7b9d35bf0215d5f889a02f162d3824720b5f9502c130df42",
+        "87cd9896fddf341278888def53d61871d9ec6b34067601cf4aa7507e8bd085a1",
+        "d7736b9daa41dfcd403ad14053c45a17b54732a4983bd91ca3bc893f0e5fd188",
+        "5f4342bfb542464550091d4c5c4ef4d1696f8ba158c2ecdfb60608a7899ee193",
+        "906e11552d50e2d660fcd8fefeba3639069479a2bda59064b4b38a8adb8e9a99",
+        "f992d87815e8fa998926a62e43fd4a29b8b0968b7f2f6832c735a954d9321ba5",
+        "b2ae1af83ff428dc4b028de75c1bf427418cc9570471573a361f9df578fff9b2",
+        "eac8ccf50a858064451a80be82fb8fc261491eaab8c369ff64c12e0f93829925",
+        "b68e0c8ea1882b174eeadb8ee37c7ef4cb9a6cf129e46974039c92651c0f66a9",
+        "3185c726f55b19f29365fa395bd22982d3baea20a4e1602d2b1c8feebc94a26e",
+        "78c2c579346c3ac617a1e72e989e6e54bfc9c6d0d86fb742a60e49c056b18958",
+        "449559edf6af630e303bfe736c0b3c6c383fe764b6a910b041d0a5089cad80c6",
+        "8a9b5ada675c363d30b3ade02218c2dfb8caecbc5147472b0716713721770371",
+        "b264d93a4ee4123a88c0cfa226e17227b0a680a0c3af24ae6abb64e3a915b22a",
+        "ff3818c216c4306fcaaf96340cff5219968acc07ac5c20ff641b494a224efa8f",
+        "4f7e141ac4ed4f8d733ffabc5da867cd3241a0520670b600d9dce5d039282f04"
+      ],
+      "mountHashes": [
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b"
+      ]
+    },
+    {
+      "name": "cross_batch_permutation",
+      "ids": "0000000000000000000000000000000000000000000000000000000000000001\n0000000000000000000000000000000000000000000000000000000000000002\n0000000000000000000000000000000000000000000000000000000000000003\n0000000000000000000000000000000000000000000000000000000000000004\n0000000000000000000000000000000000000000000000000000000000000005\n0000000000000000000000000000000000000000000000000000000000000006\n0000000000000000000000000000000000000000000000000000000000000007\n0000000000000000000000000000000000000000000000000000000000000008\n0000000000000000000000000000000000000000000000000000000000000009\n000000000000000000000000000000000000000000000000000000000000000a\n000000000000000000000000000000000000000000000000000000000000000b\n000000000000000000000000000000000000000000000000000000000000000c\n000000000000000000000000000000000000000000000000000000000000000d\n000000000000000000000000000000000000000000000000000000000000000e\n000000000000000000000000000000000000000000000000000000000000000f\n0000000000000000000000000000000000000000000000000000000000000010\n0000000000000000000000000000000000000000000000000000000000000011\n0000000000000000000000000000000000000000000000000000000000000012\n0000000000000000000000000000000000000000000000000000000000000013\n0000000000000000000000000000000000000000000000000000000000000014\n0000000000000000000000000000000000000000000000000000000000000015\n0000000000000000000000000000000000000000000000000000000000000016\n0000000000000000000000000000000000000000000000000000000000000017\n0000000000000000000000000000000000000000000000000000000000000018\n0000000000000000000000000000000000000000000000000000000000000019\n000000000000000000000000000000000000000000000000000000000000001a\n000000000000000000000000000000000000000000000000000000000000001b\n000000000000000000000000000000000000000000000000000000000000001c\n000000000000000000000000000000000000000000000000000000000000001d\n000000000000000000000000000000000000000000000000000000000000001e\n000000000000000000000000000000000000000000000000000000000000001f\n0000000000000000000000000000000000000000000000000000000000000020\n0000000000000000000000000000000000000000000000000000000000000021\n0000000000000000000000000000000000000000000000000000000000000022\n0000000000000000000000000000000000000000000000000000000000000023",
+      "batches": [
+        "{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000004\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000005\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000006\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000007\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000008\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000009\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000a\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000b\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000c\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000d\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000e\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000000f\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000010\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000011\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000012\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000013\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000014\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000015\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000016\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000017\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000018\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000019\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001a\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001b\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001c\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001d\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001e\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"000000000000000000000000000000000000000000000000000000000000001f\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000020\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000021\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000022\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000023\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}",
+        "{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000001\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000002\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}\n{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000003\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        "be68caf94e05871d441cdf8930d9c9ce2afdb790d99e5af9531c2092a8ad78e8",
+        "22a41dff75d04eb1695153502c2a6039c128740b5102fe899cba494ce73351b8",
+        "656bf61d5574e2bb35f1224a448428bc8dee5f7c870828acbbb13e3680a3ae3d",
+        "05cc53a89ee95c1bf92c3de72622b017c59bdcb87f18f89fdf538f36b793adbf",
+        "29fdae30676fadfcf1fab6ccc2e0abadb80e9e4294524f9639fc55555393e3e9",
+        "ca7742679b80bdb80ae364c2d082c6f046906b7ac5aa9fe6950f88ca5227cdc0",
+        "d1e29baff16805917238314016e1d36419b4ae534b397149717a2ef8d73cdef9",
+        "0456c71d217acd5a52f4189492b3869e75bc1d53dae7782a986ba9147388ba88",
+        "956381970885f40d28c4b1668155a03a0cd2f4883cf26198be2698e3885fd895",
+        "93ccbfe233a3c327306ae33b6ba0fdb4cc8878ff621250cbde7cff7015679c9b",
+        "c7cad39dcf5485c655d9a8aef7de6f7241e6a1e2770aee303451968c7fc9acba",
+        "1b0aaeff653f3d2229f5b7d717526b2fae04d7dc302a34a9fabec323b3bcf504",
+        "e08a416560e140fd3af6b8f165fe1989bd57220c7fef4e63917caa2d8b41e5bc",
+        "7f19df694d3deb49250df0c6ead893613c6631109ae24dce0e853654e04f7652",
+        "ce8cd3592419b7c61819ffe4677797cf7ad78e4296bc184cc8dd383c160ebf90",
+        "ec7b46ddaa6069f22346648d1a2528a41197f4eb32aba6d7197da6f53a9b307a",
+        "5cfb2a6207bdaac0ee79719c7995820ca40e2f799c7d80edd7ee776d3e8df31c",
+        "9ae2f8991bc8c4c848b9df50d229c95003b08ae86c8f64adb694ce0675f0d7a3",
+        "d0e6e1ab0bd3cdb0ee04f20b8c921011dcf3d31bf4e50cdba05d5d479a22a46c",
+        "ad7e9e86d43283ff7b9d35bf0215d5f889a02f162d3824720b5f9502c130df42",
+        "87cd9896fddf341278888def53d61871d9ec6b34067601cf4aa7507e8bd085a1",
+        "d7736b9daa41dfcd403ad14053c45a17b54732a4983bd91ca3bc893f0e5fd188",
+        "5f4342bfb542464550091d4c5c4ef4d1696f8ba158c2ecdfb60608a7899ee193",
+        "906e11552d50e2d660fcd8fefeba3639069479a2bda59064b4b38a8adb8e9a99",
+        "f992d87815e8fa998926a62e43fd4a29b8b0968b7f2f6832c735a954d9321ba5",
+        "b2ae1af83ff428dc4b028de75c1bf427418cc9570471573a361f9df578fff9b2",
+        "eac8ccf50a858064451a80be82fb8fc261491eaab8c369ff64c12e0f93829925",
+        "b68e0c8ea1882b174eeadb8ee37c7ef4cb9a6cf129e46974039c92651c0f66a9",
+        "3185c726f55b19f29365fa395bd22982d3baea20a4e1602d2b1c8feebc94a26e",
+        "78c2c579346c3ac617a1e72e989e6e54bfc9c6d0d86fb742a60e49c056b18958",
+        "449559edf6af630e303bfe736c0b3c6c383fe764b6a910b041d0a5089cad80c6",
+        "8a9b5ada675c363d30b3ade02218c2dfb8caecbc5147472b0716713721770371",
+        "b264d93a4ee4123a88c0cfa226e17227b0a680a0c3af24ae6abb64e3a915b22a",
+        "ff3818c216c4306fcaaf96340cff5219968acc07ac5c20ff641b494a224efa8f",
+        "4f7e141ac4ed4f8d733ffabc5da867cd3241a0520670b600d9dce5d039282f04"
+      ],
+      "mountHashes": [
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b",
+        "094d003cddd03cb3e23d66e7e0387a0b6270209723cedd1465bd18ed09b17b0b"
+      ]
+    },
+    {
+      "name": "duplicate_lastwins",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\":\"bad\",\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Mounts\":[]}"
+      ],
+      "accepted": true,
+      "rowHashes": [
+        "dd06294d0102ecd7b7a76a0508e2db073e650f5224c889b960e1be998da59663"
+      ],
+      "mountHashes": [
+        "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      ]
+    },
+    {
+      "name": "utf8_bom",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "\ufeff{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Other\": {\"surrogate\": \"\\ud800\", \"number\": 1.0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}]}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    },
+    {
+      "name": "raw_int4301",
+      "ids": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "batches": [
+        "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Mounts\":[],\"x\":11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}"
+      ],
+      "accepted": false,
+      "rowHashes": [],
+      "mountHashes": []
+    }
+  ],
+  "stopped": [
+    {
+      "name": "stopped",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": \"exited\", \"StartedAt\": \"2026-01-01T00:00:00Z\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": true,
+      "state": "{\"Dead\":false,\"Paused\":false,\"Pid\":0,\"Restarting\":false,\"Running\":false,\"StartedAt\":\"2026-01-01T00:00:00Z\",\"Status\":\"exited\"}"
+    },
+    {
+      "name": "changed_running",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": true, \"Pid\": 0, \"Status\": \"exited\", \"StartedAt\": \"2026-01-01T00:00:00Z\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": false,
+      "state": null
+    },
+    {
+      "name": "changed_mount",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": \"exited\", \"StartedAt\": \"2026-01-01T00:00:00Z\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": false, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": false,
+      "state": null
+    },
+    {
+      "name": "flag_integer",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": \"exited\", \"StartedAt\": \"2026-01-01T00:00:00Z\", \"Paused\": 0, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": false,
+      "state": null
+    },
+    {
+      "name": "status_any_json",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": {\"opaque\": true}, \"StartedAt\": \"2026-01-01T00:00:00Z\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": true,
+      "state": "{\"Dead\":false,\"Paused\":false,\"Pid\":0,\"Restarting\":false,\"Running\":false,\"StartedAt\":\"2026-01-01T00:00:00Z\",\"Status\":{\"opaque\":true}}"
+    },
+    {
+      "name": "unknown_row_field",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": \"exited\", \"StartedAt\": \"2026-01-01T00:00:00Z\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}, \"Unknown\": true}",
+      "accepted": false,
+      "state": null
+    },
+    {
+      "name": "overflow_removed",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": 1e309, \"StartedAt\": \"time\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": true,
+      "state": "{\"Dead\":false,\"Paused\":false,\"Pid\":0,\"Restarting\":false,\"Running\":false,\"StartedAt\":\"time\",\"Status\":Infinity}"
+    },
+    {
+      "name": "literal_nonfinite_removed",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": NaN, \"StartedAt\": \"time\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": false,
+      "state": null
+    },
+    {
+      "name": "integer4301_removed",
+      "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/owned-site\", \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111, \"StartedAt\": \"time\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned/a\", \"Destination\": \"/a\", \"RW\": true, \"Propagation\": \"rprivate\", \"Extra\": {\"preserved\": true}}, {\"Type\": \"bind\", \"Source\": \"/owned/b\", \"Destination\": \"/b\", \"RW\": false}], \"HostConfig\": {\"Memory\": 512, \"MemorySwap\": 512, \"PidsLimit\": 128, \"NanoCpus\": 0}, \"Config\": {\"Labels\": {}}}",
+      "accepted": false,
+      "state": null
+    }
+  ]
+}

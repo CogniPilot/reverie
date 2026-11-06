@@ -1,4 +1,6 @@
 //! Checked domain values. No wire decoder, process authority or host effects.
+pub mod capacity;
+pub mod decimal;
 pub mod device_policy;
 pub mod ids;
 pub mod lease_policy;

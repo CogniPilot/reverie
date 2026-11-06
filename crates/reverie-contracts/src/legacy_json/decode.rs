@@ -11,6 +11,7 @@ enum Purpose {
     NoConstants,
     Rootless,
     Journal,
+    StrictEngine,
 }
 
 enum Phase {
@@ -54,6 +55,9 @@ pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
 }
 pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
     decode_mode(source, Purpose::Rootless)
+}
+pub(super) fn decode_engine_stopped(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, Purpose::StrictEngine)
 }
 pub(super) fn decode_journal(source: &[u8]) -> Result<JournalParsed, JournalParseError> {
     journal::decode(source)
@@ -187,7 +191,7 @@ impl Frame {
 fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
     match purpose {
         Purpose::Rootless => Ok(false),
-        Purpose::Journal => Ok(true),
+        Purpose::Journal | Purpose::StrictEngine => Ok(true),
         _ => Err(Error::DuplicateKey),
     }
 }
@@ -243,7 +247,9 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
-            Some(b'N' | b'I') if self.purpose == Purpose::NoConstants => {
+            Some(b'N' | b'I')
+                if matches!(self.purpose, Purpose::NoConstants | Purpose::StrictEngine) =>
+            {
                 return Err(Error::InvalidJson);
             }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
@@ -269,18 +275,22 @@ impl Cursor<'_> {
         }
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
-            if self.purpose == Purpose::NoConstants {
+            if matches!(self.purpose, Purpose::NoConstants | Purpose::StrictEngine) {
                 return Err(Error::InvalidJson);
             }
             self.offset += "-Infinity".len();
             return Ok(Number::NegativeInfinity);
         }
-        while self
-            .source
-            .get(self.offset)
-            .is_some_and(|b| b"0123456789-+.eE".contains(b))
-        {
-            self.offset += 1;
+        if self.purpose == Purpose::StrictEngine {
+            self.offset = journal::number_end(self.source, begin).ok_or(Error::InvalidJson)?;
+        } else {
+            while self
+                .source
+                .get(self.offset)
+                .is_some_and(|b| b"0123456789-+.eE".contains(b))
+            {
+                self.offset += 1;
+            }
         }
         let text = std::str::from_utf8(&self.source[begin..self.offset])
             .map_err(|_| Error::InvalidJson)?;
@@ -289,7 +299,7 @@ impl Cursor<'_> {
             // The rootless-purpose default Python decoder uses its runtime's
             // decimal conversion cap even for ignored/overwritten fields.
             // Other named readers keep their separately frozen number policy.
-            if self.purpose == Purpose::Rootless
+            if matches!(self.purpose, Purpose::Rootless | Purpose::StrictEngine)
                 && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);
