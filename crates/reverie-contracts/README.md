@@ -285,3 +285,9 @@ Python integer syntax/table owner without imposing reservation counter bounds.
 The memory-policy owner reads only its generated finite projected swap field;
 the full worker input's closed header forbids supplying that internal field.
 None of these readers constructs native identity, effects or authority.
+
+`worker_storage::scratch_label_bytes` preserves the existing descriptive drive
+label's insertion order, spaced ASCII JSON and finite floating clock spelling.
+Six synthetic vectors evaluate the original Python call's actual AST. Nil IDs
+retain their existing profile namespace semantics. Descriptive label bytes do
+not establish employee ownership, filesystem custody or permission to start.

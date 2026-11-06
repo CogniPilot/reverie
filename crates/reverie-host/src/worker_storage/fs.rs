@@ -1,4 +1,5 @@
 //! Anchored storage-purpose resources; no new unsafe syscall implementation.
+mod label;
 use super::error::{Result, StorageFault, finalized, need};
 use crate::native;
 use nix::sys::stat::{Mode, mkdirat};
@@ -46,6 +47,13 @@ fn walk(path: &Path) -> Result<File> {
     Ok(parent)
 }
 impl Directory {
+    pub(crate) fn write_scratch_label(
+        &self,
+        paths: &super::StoragePaths,
+        effects: &mut bool,
+    ) -> Result<super::LabelDisposition> {
+        label::write(self, paths, effects)
+    }
     pub(crate) fn nix_log_writer(&self) -> Result<File> {
         self.check()?;
         Ok(native::open_at_mode(

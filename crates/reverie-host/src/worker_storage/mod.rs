@@ -14,7 +14,9 @@ pub use owner::{
     LaunchStorage, StorageAcquireFailure, StorageCloseFailure, StorageOwnerError,
     StorageOwnershipKind, StorageSelection,
 };
+mod label;
 mod temporary;
+pub use label::LabelDisposition;
 #[cfg(test)]
 mod tests;
 use crate::native;
