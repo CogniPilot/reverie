@@ -74,10 +74,18 @@ fn missing_names_and_bad_policy_do_not_create_memory_or_silently_skip_rules() {
         missing.clone(),
     )
     .unwrap();
-    assert!(matches!(
-        configured.check(&MetadataText::from_scalar_text("ordinary")),
-        Err(ScreenError::RegexCompatibilityRequired)
-    ));
+    assert_eq!(
+        configured
+            .check(&MetadataText::from_scalar_text("ordinary"))
+            .unwrap(),
+        ""
+    );
+    assert_eq!(
+        configured
+            .check(&MetadataText::from_scalar_text("POLICY"))
+            .unwrap(),
+        "configured output policy"
+    );
     assert!(!missing.exists());
 }
 #[test]
@@ -103,4 +111,39 @@ fn invalid_names_plus_actual_checked_close_failure_preserves_both_errors() {
     assert!(
         matches!(read_names(&path),Err(ScreenError::Finalization{primary,secondary}) if matches!(*primary,ScreenError::Utf8(_))&&matches!(*secondary,ScreenError::Native(_)))
     );
+}
+#[test]
+fn compiled_policy_precedes_private_names_but_compiles_every_rule_before_search() {
+    let tree = Tree::new();
+    let path = tree.0.join("invalid-utf8");
+    std::fs::write(&path, [0xff]).unwrap();
+    let screen = MemoryScreen::from_parts(
+        PythonTextRef::from_scalar_text(r#"{"denied_patterns":["(?a:\\W)","(?i:policy)"]}"#),
+        path.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        screen
+            .check(&MetadataText::from_scalar_text("POLICY"))
+            .unwrap(),
+        "configured output policy"
+    );
+    assert!(matches!(
+        screen.check(&MetadataText::from_scalar_text("Σ")),
+        Err(ScreenError::Utf8(_))
+    ));
+    assert!(matches!(
+        MemoryScreen::from_parts(
+            PythonTextRef::from_scalar_text(r#"{"denied_patterns":["a","("]}"#),
+            path.clone()
+        ),
+        Err(ScreenError::Regex(_))
+    ));
+    assert!(matches!(
+        MemoryScreen::from_parts(
+            PythonTextRef::from_scalar_text(r#"{"denied_patterns":["(",null]}"#),
+            path
+        ),
+        Err(ScreenError::Policy(_))
+    ));
 }

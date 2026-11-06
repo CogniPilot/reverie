@@ -17,6 +17,7 @@ pub mod posix_text;
 pub mod privacy_floor;
 pub mod profiles;
 pub(crate) mod python_text;
+pub use python_text::regex as python_regex;
 pub use python_text::{python_lowercase_character, python_lowercase_string, python_numeric_text};
 pub mod resource_projection;
 pub mod resources;
