@@ -23,8 +23,10 @@ impl ReturnTo {
         }
     }
 }
-/// A move-only actual resource transition. Runtime also retains the workflow,
-/// so dropping this handle never makes an unknown helper's resources available.
+/// A move-only actual resource transition. While the actual Registry/Runtime
+/// remains retained, dropping this handle leaves its workflow resources held.
+/// Last-owner/process exit is NOT confirmed shutdown or global writer release;
+/// the complete installing lifetime must retain unknowns until real settlement.
 #[must_use = "retain until checked one-shot resource reclamation"]
 pub struct NixStoragePreparation {
     destination: ReturnTo,
