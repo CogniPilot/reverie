@@ -22,6 +22,24 @@ unconfirmed save, never “nothing was saved,” and is not automatically retrie
 Native client cleanup finishes before response publication. Process uncertainty
 retains the same actual client rather than starting another one.
 
+The candidate binds the canonical Nix Node executable and the console's raw
+TypeScript CLI entry at compilation. It does not select a `reverie` wrapper from
+PATH, read an executable override from the environment, or fall back to Python.
+A developer build without those package facts refuses a requested journal
+operation; recall outside a session still reads only its initialized legacy data.
+The TypeScript client retains the supported session/credential-file authentication
+flow. The server checks the current employee, readable turn and every quoted source.
+The reused console output still carries its existing shell source files for other
+commands; this binding does not retire that broader console migration debt.
+
+MCP may receive a checked native executable binding from the final installing
+runtime, which owns both console and memory without a build dependency cycle.
+That constructor is executable-origin data, never an employee/project grant.
+The native screen/read child receives captured model, proxy and screening settings,
+including owner rules, while session and journal credentials stay in the MCP
+process. The existing MCP runtime selector remains unchanged until the real
+authenticated installation scope producer is implemented and reviewed.
+
 Shutdown distinguishes completed close, pending native work, and consumed
 negative finalization. Constructors, unreaped children, held descriptors and
 unknown owner state remain pending. A consumed failure still keeps the library
@@ -46,8 +64,12 @@ from the legacy employee/project memory tables and Handsroom data.
 
 The journal transport uses the common retained process owner. Its 60-second,
 8 MiB combined transport policy is separate from embedding HTTP semantics and
-the broker metadata capture policy. Actual supported Rust/TypeScript journal
-client packaging, launch/auth binding, configured endpoint-scheme inventory,
-owner-regex compatibility and coordinated single-writer cutover remain required.
-Synthetic child fixtures prove transport/cancellation/refusal behavior; they do
-not prove API authentication, a live save, or a completed company migration.
+the broker metadata capture policy. Launch/auth binding, configured endpoint-scheme
+inventory, owner-regex compatibility and coordinated single-writer cutover remain
+required. Host child fixtures qualify retained transport behavior; the console's
+`native-memory-journal-api.test.ts` qualifies actual clients, enforced middleware
+and policy, current company/source stores and durable journal behavior using
+synthetic accounts. Its native artifact cases require the explicit test-only
+`NIX_REVERIE_TEST_MEMORY_CLI` qualification path; a normal TypeScript test run
+does not claim native package or installed scope acceptance. Neither test mode
+proves a live company migration or grants a caller access.

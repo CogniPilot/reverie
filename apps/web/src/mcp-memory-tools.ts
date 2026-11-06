@@ -3,9 +3,9 @@
  *
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
- * can select another agent's store. Each call runs the reverie's existing portable memory bridge
- * (`python -m reverie.memory_cli`) with the request on stdin, never interpolated into a command line, so the
- * bridge's own scope rules and hard floors apply unchanged.
+ * can select another agent's store. The final installing runtime can supply a checked native bridge
+ * binding; the existing portable Python adapter remains selected until that actual scope producer is
+ * available. Requests go on stdin, never into a command line, and cannot select either executable.
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
  *
@@ -21,6 +21,7 @@ import type { AgentDeps } from './cli-agent.js';
 import { agentJournalRecall, agentJournalSave } from './cli-agent-journal.js';
 import type { ToolDefinition, ToolResult } from './mcp-server.js';
 import { environmentEntry, envValue } from './config/reverie-env.js';
+import type { InstalledMemoryBridge } from './installed-memory-bridge.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
 
@@ -29,14 +30,21 @@ const TEXT_MAX = 2000;
 const BRIDGE_TIMEOUT_MS = 60_000;
 const PROJECT = /^[a-z0-9][a-z0-9_-]{0,63}$/; // the same rule the project store enforces
 
-export interface MemoryToolsConfig {
+export type MemoryToolsConfig = {
   /** Absolute path of the calling agent's instance configuration; unset = the tools do not exist. */
   instance?: string;
-  /** Interpreter that runs the bridge. */
+} & ({
+  /** Final-runtime bootstrap only. Executable origin grants no caller scope.
+   * The legacy selector stays unchanged until the real installer supplies this. */
+  native: InstalledMemoryBridge;
+  python?: never;
+  source?: never;
+} | {
+  /** Existing selected adapter, retained until the real installed scope is available. */
+  native?: undefined;
   python: string;
-  /** Python source root on PYTHONPATH (python/, containing the reverie package). */
   source: string;
-}
+});
 
 /** Runs one journal verb as the session this MCP server runs in; undefined when it runs outside any session. */
 export type JournalPort = (verb: (deps: AgentDeps) => Promise<number>) => Promise<{ code: number; out: string[]; err: string[] }>;
@@ -47,7 +55,7 @@ const ID = /^[A-Za-z0-9_-]{1,100}$/;
 const quote = (value: string): string => (/^[A-Za-z0-9_./:=@%+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`);
 
 export type BridgeRunner = (
-  python: string,
+  program: string,
   args: string[],
   options: { env: NodeJS.ProcessEnv; input: string; timeoutMs: number }
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
@@ -110,9 +118,9 @@ export function memoryToolDefinitions(): ToolDefinition[] {
   ];
 }
 
-const defaultRunner: BridgeRunner = (python, args, { env, input, timeoutMs }) =>
+const defaultRunner: BridgeRunner = (program, args, { env, input, timeoutMs }) =>
   new Promise((resolve) => {
-    const child = execFile(python, args, { env, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) =>
+    const child = execFile(program, args, { env, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) =>
       resolve({ stdout: String(stdout), stderr: String(stderr), code: error ? (typeof error.code === 'number' ? error.code : 1) : 0 })
     );
     child.stdin?.on('error', () => {});
@@ -141,6 +149,7 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
 
   /** Only what the bridge needs: never forward this process's room or session credentials to it. */
   function bridgeEnv(): NodeJS.ProcessEnv {
+    if (config.native) return config.instance ? config.native.environment(config.instance) : {};
     const apiBase = envValue(process.env, 'API_BASE');
     const embedUrl = envValue(process.env, 'EMBED_URL');
     return {
@@ -151,6 +160,12 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
       ...(apiBase ? environmentEntry('API_BASE', apiBase) : {}),
       ...(embedUrl ? environmentEntry('EMBED_URL', embedUrl) : {}),
     };
+  }
+
+  function bridge(input: string) {
+    const options = { env: bridgeEnv(), input, timeoutMs: BRIDGE_TIMEOUT_MS };
+    if (config.native) return runner(config.native.executable, [], options);
+    return runner(config.python, ['-m', 'reverie.memory_cli'], options);
   }
 
   async function journalVerb(verb: (deps: AgentDeps) => Promise<number>): Promise<unknown> {
@@ -175,8 +190,7 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
     if (!field('quote') && !field('source')) missing.push('quote or source');
     if (missing.length) return refuse(`memory_remember needs ${missing.join(', ')} from the message you are acting on.`);
     // The same hard floors the old store applied, checked by the bridge without writing anything; fail closed.
-    const screened = await runner(config.python, ['-m', 'reverie.memory_cli'], {
-      env: bridgeEnv(), input: JSON.stringify({ action: 'screen', text: field('text') }), timeoutMs: BRIDGE_TIMEOUT_MS });
+    const screened = await bridge(JSON.stringify({ action: 'screen', text: field('text') }));
     let floor: unknown = 'unchecked';
     try { floor = screened.code === 0 ? (JSON.parse(screened.stdout) as { floor?: unknown }).floor : 'unchecked'; } catch { /* stays unchecked */ }
     if (floor !== '') return failure(floor === 'unchecked' ? 'Memory save failed: the hard-floor check did not run; nothing was saved.'
@@ -223,11 +237,7 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
       const body = request(name, args);
       if (typeof body === 'string') return failure(body);
       if (name === 'memory_remember') return remember(args);
-      const out = await runner(config.python, ['-m', 'reverie.memory_cli'], {
-        env: bridgeEnv(),
-        input: JSON.stringify(body),
-        timeoutMs: BRIDGE_TIMEOUT_MS,
-      });
+      const out = await bridge(JSON.stringify(body));
       if (out.code !== 0) {
         let reason = out.stderr.trim();
         try {

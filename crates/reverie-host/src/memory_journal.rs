@@ -2,6 +2,7 @@
 //! the session and readable turn. Arguments/replies are data, not owner/native
 //! permission. Supported memory callers enforce their screening before save.
 mod error;
+mod installed;
 mod signals;
 pub use crate::captured_client::CancellationToken;
 use crate::{
@@ -28,15 +29,11 @@ pub const MAX_JOURNAL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 #[must_use = "retain and explicitly settle the actual journal client before shutdown"]
 pub struct MemoryJournalClient {
     client: CapturedClient,
+    entrypoint: Option<OsString>,
     unknown_save: AtomicBool,
 }
 impl MemoryJournalClient {
     pub fn capture() -> Result<Option<Self>> {
-        Self::capture_installed(OsStr::new("reverie"))
-    }
-    /// Bootstrap only. Product packaging must bind its supported Rust/TS client;
-    /// there is no Python fallback or request-selected executable/argv prefix.
-    pub fn capture_installed(program: &OsStr) -> Result<Option<Self>> {
         let environment = std::env::vars_os().collect::<Vec<_>>();
         if !environment
             .iter()
@@ -44,12 +41,17 @@ impl MemoryJournalClient {
         {
             return Ok(None);
         }
-        Self::from_snapshot(
-            program,
+        let (program, entrypoint) = installed::command()?;
+        let mut selected = Self::from_snapshot(
+            program.as_os_str(),
             environment,
             std::env::current_dir()
                 .map_err(|_| JournalClientError::new(JournalClientFault::Bootstrap))?,
-        )
+        )?;
+        if let Some(client) = &mut selected {
+            client.entrypoint = Some(entrypoint.into_os_string());
+        }
+        Ok(selected)
     }
     fn from_snapshot(
         program: &OsStr,
@@ -62,9 +64,7 @@ impl MemoryJournalClient {
                 .find(|(key, _)| key == OsStr::new(name))
                 .map(|(_, value)| value)
         };
-        if selected("REVERIE_SESSION_ID").is_none_or(|value| value.is_empty())
-            || selected("PATH").is_some_and(|value| value.is_empty())
-        {
+        if selected("REVERIE_SESSION_ID").is_none_or(|value| value.is_empty()) {
             return Ok(None);
         }
         let Some(command) = InstalledCommand::from_snapshot(program, environment, directory, true)
@@ -76,6 +76,7 @@ impl MemoryJournalClient {
     fn from_command(command: InstalledCommand) -> Self {
         Self {
             client: CapturedClient::new(command),
+            entrypoint: None,
             unknown_save: AtomicBool::new(false),
         }
     }
@@ -133,7 +134,8 @@ impl MemoryJournalClient {
         cancellation: &CancellationToken,
         save: bool,
     ) -> Result<CapturedOutput> {
-        let mut args = ["agent", "journal"].map(OsString::from).to_vec();
+        let mut args = self.entrypoint.iter().cloned().collect::<Vec<_>>();
+        args.extend(["agent", "journal"].map(OsString::from));
         for value in arguments {
             args.push(
                 native::python_path(value.codepoints())
