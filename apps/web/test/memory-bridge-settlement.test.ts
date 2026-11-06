@@ -35,6 +35,17 @@ async function waitFile(path: string): Promise<void> {
 }
 
 describe('memory child settlement', () => {
+  it('preserves a real child zero exit and output accepted within the original deadline', async () => {
+    const began = performance.now();
+    const result = await runMemoryBridge(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], {
+      env: {},
+      input: '{"owned":"success"}',
+      timeoutMs: 10_000,
+    });
+    expect(performance.now() - began).toBeLessThan(10_000);
+    expect(result).toEqual({ stdout: '{"owned":"success"}', stderr: '', code: 0 });
+  });
+
   it('refuses late zero exit when the bridge deadline callback is delayed until after actual close', async () => {
     const root = await mkdtemp(join(tmpdir(), 'reverie-memory-delayed-timer-'));
     const started = join(root, 'started');
