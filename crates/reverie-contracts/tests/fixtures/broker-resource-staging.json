@@ -1,0 +1,137 @@
+{
+  "oracle": "Existing frozen Python ProfileStore.stage_config, owned synthetic profiles; no live state",
+  "cases": [
+    {
+      "name": "new-target-float",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}",
+      "document": "{\"profiles\":{\"11111111-1111-4111-8111-111111111111\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"employee_id\":\"11111111-1111-4111-8111-111111111111\",\"target_generation\":2,\"target_sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":1.0,\"memoryMiB\":4096,\"pidsLimit\":512,\"poolMemoryMiB\":8192,\"poolTasksMax\":1024},\"version\":1}},\"revision\":1,\"schema\":\"reverie-employee-resource-profiles-v1\"}",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "binding": {
+        "employee_id": "11111111-1111-4111-8111-111111111111",
+        "current_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "target_sid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "current_generation": 1,
+        "target_generation": 2
+      },
+      "revision": 1,
+      "version": 1,
+      "owners": {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "11111111-1111-4111-8111-111111111111",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "11111111-1111-4111-8111-111111111111"
+      },
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 1.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}}",
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "profile_sha256": "b11ce1268888efcc4f8ec04a9226e484c3a26d062188a361d56e20d6e4378fc9"
+    },
+    {
+      "name": "integer-cpu",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}",
+      "document": "{\"profiles\":{\"11111111-1111-4111-8111-111111111111\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"employee_id\":\"11111111-1111-4111-8111-111111111111\",\"target_generation\":2,\"target_sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":1,\"memoryMiB\":4096,\"pidsLimit\":512,\"poolMemoryMiB\":8192,\"poolTasksMax\":1024},\"version\":1}},\"revision\":1,\"schema\":\"reverie-employee-resource-profiles-v1\"}",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "binding": {
+        "employee_id": "11111111-1111-4111-8111-111111111111",
+        "current_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "target_sid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "current_generation": 1,
+        "target_generation": 2
+      },
+      "revision": 1,
+      "version": 1,
+      "owners": {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "11111111-1111-4111-8111-111111111111",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "11111111-1111-4111-8111-111111111111"
+      },
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 1, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 1, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}}",
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "profile_sha256": "8e2a4da0509d55b37b0ed0cffc717b7e8b1ac22d3ddc36097fc1e9ed85e17fd8"
+    },
+    {
+      "name": "signed-zero",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}",
+      "document": "{\"profiles\":{\"11111111-1111-4111-8111-111111111111\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"employee_id\":\"11111111-1111-4111-8111-111111111111\",\"target_generation\":2,\"target_sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":-0.0,\"memoryMiB\":4096,\"pidsLimit\":512,\"poolMemoryMiB\":8192,\"poolTasksMax\":1024},\"version\":1}},\"revision\":1,\"schema\":\"reverie-employee-resource-profiles-v1\"}",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "binding": {
+        "employee_id": "11111111-1111-4111-8111-111111111111",
+        "current_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "target_sid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "current_generation": 1,
+        "target_generation": 2
+      },
+      "revision": 1,
+      "version": 1,
+      "owners": {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "11111111-1111-4111-8111-111111111111",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "11111111-1111-4111-8111-111111111111"
+      },
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}}",
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "profile_sha256": "8fca9f5ad9d98b505641a000a70d237fe85ece01270bc2d61eb07b1d9ca247b1"
+    },
+    {
+      "name": "global-pool-key-null",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"22222222-2222-4222-8222-222222222222\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"resourceReservations\": null, \"sessionResources\": {\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 1024}}}",
+      "document": "{\"profiles\":{\"11111111-1111-4111-8111-111111111111\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"employee_id\":\"11111111-1111-4111-8111-111111111111\",\"target_generation\":2,\"target_sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":0.25,\"memoryMiB\":4096,\"pidsLimit\":512,\"poolMemoryMiB\":8192,\"poolTasksMax\":1024},\"version\":1}},\"revision\":1,\"schema\":\"reverie-employee-resource-profiles-v1\"}",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "binding": {
+        "employee_id": "11111111-1111-4111-8111-111111111111",
+        "current_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "target_sid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "current_generation": 1,
+        "target_generation": 2
+      },
+      "revision": 1,
+      "version": 1,
+      "owners": {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "11111111-1111-4111-8111-111111111111",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "11111111-1111-4111-8111-111111111111"
+      },
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 0.25, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}, \"22222222-2222-4222-8222-222222222222\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"resourceReservations\": null, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 0.25, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}, \"cccccccc-cccc-4ccc-8ccc-cccccccccccc\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 512, \"poolTasksMax\": 1024}}}",
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "profile_sha256": "0db7fbcff680642e5d5cc812ddb0c040137577b4e694dfe00af7e213a84b9be1"
+    },
+    {
+      "name": "same-session",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"resourceReservations\": null}",
+      "document": "{\"profiles\":{\"11111111-1111-4111-8111-111111111111\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"employee_id\":\"11111111-1111-4111-8111-111111111111\",\"target_generation\":1,\"target_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":0.5,\"memoryMiB\":4096,\"pidsLimit\":512,\"poolMemoryMiB\":8192,\"poolTasksMax\":1024},\"version\":1}},\"revision\":1,\"schema\":\"reverie-employee-resource-profiles-v1\"}",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "binding": {
+        "employee_id": "11111111-1111-4111-8111-111111111111",
+        "current_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "target_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current_generation": 1,
+        "target_generation": 1
+      },
+      "revision": 1,
+      "version": 1,
+      "owners": {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "11111111-1111-4111-8111-111111111111",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "11111111-1111-4111-8111-111111111111"
+      },
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 0.5, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"resourceReservations\": null, \"sessionResources\": {\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\": {\"budgetMode\": \"admission\", \"cpus\": 0.5, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048}}}",
+      "target": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "profile_sha256": "ee40e3d16a8a9f459f968b5c9cd78b8c897551936349b1f79c3b8f0952b37d86"
+    },
+    {
+      "name": "unrelated-entry-bytes",
+      "input": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"22222222-2222-4222-8222-222222222222\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"sessionResources\": {\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}}",
+      "document": "{\"profiles\":{\"11111111-1111-4111-8111-111111111111\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"employee_id\":\"11111111-1111-4111-8111-111111111111\",\"target_generation\":2,\"target_sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":3.125,\"memoryMiB\":4096,\"pidsLimit\":512,\"poolMemoryMiB\":8192,\"poolTasksMax\":1024},\"version\":1}},\"revision\":1,\"schema\":\"reverie-employee-resource-profiles-v1\"}",
+      "employee": "11111111-1111-4111-8111-111111111111",
+      "binding": {
+        "employee_id": "11111111-1111-4111-8111-111111111111",
+        "current_sid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "target_sid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "current_generation": 1,
+        "target_generation": 2
+      },
+      "revision": 1,
+      "version": 1,
+      "owners": {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "11111111-1111-4111-8111-111111111111",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "11111111-1111-4111-8111-111111111111"
+      },
+      "output": "{\"budgetMode\": \"admission\", \"cpus\": 0, \"employeeResources\": {\"11111111-1111-4111-8111-111111111111\": {\"budgetMode\": \"admission\", \"cpus\": 3.125, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}, \"22222222-2222-4222-8222-222222222222\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}, \"image\": \"synthetic-immutable-image\", \"maintenanceSessions\": [], \"memoryMiB\": 512, \"opaque\": {\"float\": 1.0, \"integer\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"negative\": -0.0, \"text\": \"spaces : , and \\\" quotes \\\\ \\ud800\", \"unicode\": {\"\\ue000\": 2, \"\\ud800\\udc00\": 1}}, \"pidsLimit\": 128, \"poolMemoryMiB\": 16384, \"poolTasksMax\": 2048, \"sessionResources\": {\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\": {\"budgetMode\": \"admission\", \"cpus\": 3.125, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}, \"cccccccc-cccc-4ccc-8ccc-cccccccccccc\": {\"budgetMode\": \"admission\", \"cpus\": -0.0, \"memoryMiB\": 4096, \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024}}}",
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "profile_sha256": "c348cac62d981e4882a99133f118779b25eb07e98daa9eb47c18940cc97065b0"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 mod lineage;
 mod registry;
 
-use crate::legacy_json::{self, Node, Number, Text, Value};
+use crate::legacy_json::{self, Node, Number, Text, Value, truthy};
 pub use lineage::StoredBinding;
 pub use registry::{CompanyRecords, CurrentEmployee, RegistryEmployee};
 use reverie_core::ids::{ProfileEmployeeId, ProfileSessionId};
@@ -60,6 +60,9 @@ type Result<T> = std::result::Result<T, IdentityDataError>;
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct MetadataText(Text);
 impl MetadataText {
+    pub(crate) fn from_text(value: Text) -> Self {
+        Self(value)
+    }
     pub fn from_scalar_text(value: &str) -> Self {
         Self(Text(value.chars().map(u32::from).collect()))
     }
@@ -138,17 +141,6 @@ fn is_one(value: Option<&Value>) -> bool {
         Some(Value(Node::Number(Number::Integer(value)))) => value == "1",
         Some(Value(Node::Number(Number::Float(value)))) => *value == 1.0,
         _ => false,
-    }
-}
-fn truthy(value: Option<&Value>) -> bool {
-    match value {
-        None | Some(Value(Node::Null | Node::Bool(false))) => false,
-        Some(Value(Node::Number(Number::Integer(value)))) => value != "0",
-        Some(Value(Node::Number(Number::Float(value)))) => *value != 0.0,
-        Some(Value(Node::String(value))) => !value.0.is_empty(),
-        Some(Value(Node::Array(value))) => !value.is_empty(),
-        Some(Value(Node::Object(value))) => !value.is_empty(),
-        _ => true,
     }
 }
 fn employee_id(value: &MetadataText) -> Result<ProfileEmployeeId> {

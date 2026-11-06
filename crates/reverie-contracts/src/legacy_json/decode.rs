@@ -35,6 +35,7 @@ struct Cursor<'a> {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Purpose {
     Default,
+    NoConstants,
     Metadata,
 }
 
@@ -43,6 +44,9 @@ pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
 }
 pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
     decode_with(source, Purpose::Metadata)
+}
+pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
+    decode_with(source, Purpose::NoConstants)
 }
 fn decode_with(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
     let mut cursor = Cursor {
@@ -101,7 +105,7 @@ impl Frame {
             } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
                 let replaced = values.insert(key, value).is_some();
-                if replaced && purpose == Purpose::Default {
+                if replaced && purpose != Purpose::Metadata {
                     return Err(Error::DuplicateKey);
                 }
                 *duplicate |= replaced;
@@ -188,6 +192,9 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
+            Some(b'N' | b'I') if self.purpose == Purpose::NoConstants => {
+                return Err(Error::InvalidJson);
+            }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
             Some(b'I') => self.literal("Infinity", Node::Number(Number::PositiveInfinity))?,
             Some(b'-' | b'0'..=b'9') => Action::Ready(Value(Node::Number(self.number()?))),
@@ -205,6 +212,9 @@ impl Cursor<'_> {
     fn number(&mut self) -> Result<Number, Error> {
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
+            if self.purpose == Purpose::NoConstants {
+                return Err(Error::InvalidJson);
+            }
             self.offset += "-Infinity".len();
             return Ok(Number::NegativeInfinity);
         }

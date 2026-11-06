@@ -2,8 +2,9 @@
 //! Inputs are projected data, never evidence of validation, readiness or authority.
 mod encode;
 
-use crate::legacy_json::{self, Node, Value};
+use crate::legacy_json::{self, Node, Text, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fmt;
 
 pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
@@ -46,10 +47,32 @@ impl std::error::Error for WorkerConfigError {}
 /// Legacy nonfinite data spellings are preserved here, not admitted into resource
 /// policy types or strict wire schemas.
 pub struct EffectiveWorkerConfig(Value);
+impl Clone for EffectiveWorkerConfig {
+    fn clone(&self) -> Self {
+        Self(self.0.deep_clone())
+    }
+}
+impl EffectiveWorkerConfig {
+    pub(crate) fn as_value(&self) -> &Value {
+        &self.0
+    }
+    pub(crate) fn into_value(self) -> Value {
+        self.0
+    }
+    pub(crate) fn from_object(value: BTreeMap<Text, Value>) -> Self {
+        Self(Value(Node::Object(value)))
+    }
+}
 
 /// Python json.dumps(effective_config, sort_keys=True).encode(), including all keys.
 pub fn encode_config(config: &EffectiveWorkerConfig) -> Vec<u8> {
-    encode::encode(&config.0, false)
+    encode_data(&config.0)
+}
+pub(crate) fn encode_data(value: &Value) -> Vec<u8> {
+    encode::encode(value, false)
+}
+pub(crate) fn compact_data(value: &Value) -> Vec<u8> {
+    encode::compact(value)
 }
 /// Excludes only top-level image, maintenanceSessions and opsConfig.
 pub fn encode_policy(config: &EffectiveWorkerConfig) -> Vec<u8> {

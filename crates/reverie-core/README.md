@@ -11,6 +11,9 @@ invariants are private; public constructors return checked values.
   versions and generations, retaining JavaScript-safe bounds.
 - Resource policies preserve admission/pool differences and finite CPU limits.
   CPU values retain integer versus float encoding identity and signed float zero.
+- `TaskPerfPolicies` validates the bounded employee task-v1 map and its rootless
+  Docker prerequisite. Its fixed rule matches only the low signed32-bit CPU=-1
+  argument; selection and rule data never grant a capability or start permission.
 - `ResourceTemplate` validates six-field configuration before a reservation-pool
   override. `PoolLimits` owns pool bounds; resolving a template enforces the
   effective memory/pool relationship and yields a strict `ResourcePolicy`.
@@ -27,10 +30,31 @@ These values are data. Owner authorization, current binding provenance and nativ
 effect authority remain responsibilities of their application/runtime owners.
 See the [specification index](../../spec/README.md).
 
+`lease_policy` owns the legacy lease grant's pure POSIX lexical path rules,
+control-directory and mount namespace/alias checks, and native ELF64 static
+header policy. Codepoint path data retain lone surrogates; the lease socket's
+UTF-8 byte bound is checked separately. A canonical nil employee/session UUID
+remains accepted. ELF header acceptance neither executes the binary nor proves
+its immutable host custody, mounted identity or kernel behavior.
+
 Resource staging here is only the pure resource-map portion of Python
 `ProfileStore.stage_config`. Its input binding and owner map are data, not grants.
 The application must obtain them from current trusted sources and retain store
-custody through full staging. GPU, perf, memory, storage and lease projections,
+custody through full staging. Host-backed GPU, perf, memory, storage and lease facts,
 the legacy effective-config digest, admission and compatibility checks remain
 with the owning application/host components. This crate neither constructs that
 digest nor persists/reloads config, creates an endpoint or cuts over a consumer.
+
+## GPU and soft-memory policy data
+
+`device_policy` owns bounded GPU maps, physical NVIDIA CDI token syntax and
+soft-memory/swap policy rules. Device token hex case and absent-versus-empty
+legacy GPU maps survive projection. Legacy SID grants take priority over an
+employee-derived grant, and the two explicit maps share the 32-entry bound.
+
+Soft-memory policies require swap and optionally a high threshold, with bounded
+pool commitments. A selected high threshold requires the actual checked
+effective `ResourcePolicy` RAM ceiling and must be strictly smaller. Unselected
+and swap-only projections do not inspect a RAM ceiling. Checked swap byte counts
+are commitment data; they provide no disk reservation, swap admission, cgroup
+write or start permission. These types do not resolve employee identity.
