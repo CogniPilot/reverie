@@ -20,8 +20,12 @@ use std::{
 };
 const LOCK_NAME: &std::ffi::CStr = c".memory-lifecycle-v1.lock";
 pub(crate) fn memory_lock_file(parent: &File, create: bool) -> crate::observation::Result<File> {
-    let base =
-        libc::O_CLOEXEC | libc::O_NOFOLLOW | if create { libc::O_RDWR } else { libc::O_RDONLY };
+    // Opening a substituted FIFO must not wait for a peer before the caller
+    // checks that the held descriptor is an owned single-link regular file.
+    let base = libc::O_CLOEXEC
+        | libc::O_NOFOLLOW
+        | libc::O_NONBLOCK
+        | if create { libc::O_RDWR } else { libc::O_RDONLY };
     let flags = base
         | if create {
             libc::O_CREAT | libc::O_EXCL

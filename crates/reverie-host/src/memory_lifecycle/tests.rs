@@ -29,6 +29,9 @@ impl Tree {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args(["--exact", ENTRY, "--nocapture"])
+            .env_clear()
+            .env("HOME", &self.0)
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("OWNED_MEMORY_LIFECYCLE", case)
             .env(
                 "REVERIE_INSTANCE_CONFIG",
@@ -88,6 +91,34 @@ fn a_foreign_control_replacement_survives_refusal_and_closure_stays_fenced() {
     Tree::new().run("replace");
 }
 #[test]
+fn a_fifo_control_refuses_without_waiting_for_a_writer_or_creating_a_database() {
+    use std::os::unix::process::ExitStatusExt;
+    let tree = Tree::new();
+    let mut child = tree
+        .command("fifo")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let limit = Instant::now() + Duration::from_secs(5);
+    while !tree.0.join("state/fifo-ready").exists() && Instant::now() < limit {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(tree.0.join("state/fifo-ready").exists());
+    let limit = Instant::now() + Duration::from_secs(2);
+    while child.try_wait().unwrap().is_none() && Instant::now() < limit {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if child.try_wait().unwrap().is_none() {
+        child.kill().unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.signal(), Some(libc::SIGKILL));
+        panic!("recall blocked opening the owned FIFO control");
+    }
+    successful(child.wait_with_output().unwrap());
+    assert!(!tree.0.join("state/memory.sqlite").exists());
+}
+#[test]
 fn lifecycle_child() {
     let Ok(case) = std::env::var("OWNED_MEMORY_LIFECYCLE") else {
         return;
@@ -133,8 +164,28 @@ fn lifecycle_child() {
             held.close().unwrap();
         }
         "replace" => replacement(&configuration),
+        "fifo" => fifo(&configuration),
         _ => panic!("unknown owned case"),
     }
+}
+fn fifo(configuration: &MemoryConfiguration) {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    let directory = scope_directory(configuration, &MemoryScope::Private).unwrap();
+    let path = directory.join(".memory-lifecycle-v1.lock");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(directory.join("fifo-ready"), b"test-sync-only").unwrap();
+    assert!(matches!(
+        MemoryOperationLock::recall(configuration, &MemoryScope::Private),
+        Err(LifecycleError::Custody)
+    ));
+    assert!(fs::symlink_metadata(path).unwrap().file_type().is_fifo());
 }
 fn same_process_locks(configuration: &MemoryConfiguration) {
     let scope = MemoryScope::Private;
