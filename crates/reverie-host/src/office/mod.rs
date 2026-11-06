@@ -92,6 +92,8 @@ pub struct OfficeService {
 pub struct OfficePhone {
     id: u64,
     owned: Arc<OwnedOffice>,
+    origin: Arc<InstalledWorkerEngine>,
+    session: ProfileSessionId,
 }
 impl OfficeService {
     /// The same service-captured worker engine supplies stop/cancellation;
@@ -153,8 +155,11 @@ impl OfficeService {
                 return Err(error);
             }
         };
-        let context =
-            server::Context::new(Arc::clone(&self.company), session, Arc::clone(&closing));
+        let context = server::Context::new(
+            Arc::clone(&self.company),
+            session.clone(),
+            Arc::clone(&closing),
+        );
         let payload = Arc::new(Mutex::new(Some(server::PreparedOffice::new(
             runtime, listener, socket, context,
         ))));
@@ -179,7 +184,12 @@ impl OfficeService {
             }
         }
         drop(slot);
-        let phone = OfficePhone { id, owned };
+        let phone = OfficePhone {
+            id,
+            owned,
+            origin: Arc::clone(&self.company.engine),
+            session,
+        };
         if let Err(error) = self.require_running() {
             phone.request_close();
             return Err(error);
@@ -233,6 +243,19 @@ impl OfficeService {
     }
 }
 impl OfficePhone {
+    pub(crate) fn assert_runtime_session(
+        &self,
+        runtime: &WorkerRuntime,
+        session: &ProfileSessionId,
+    ) -> Result<()> {
+        if !Arc::ptr_eq(&self.origin, runtime.installed_engine()) || &self.session != session {
+            return Err(OfficeError::Refused);
+        }
+        if self.owned.closing.load(Ordering::Acquire) {
+            return Err(OfficeError::Closed);
+        }
+        Ok(())
+    }
     pub fn request_close(&self) {
         self.owned.closing.store(true, Ordering::Release);
     }

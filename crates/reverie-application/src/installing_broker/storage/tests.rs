@@ -37,6 +37,8 @@ fn end() -> Instant {
 }
 use crate::test_process::engine_program as program;
 use crate::test_process::isolate_case as isolate;
+#[path = "nix/network/tests.rs"]
+mod network_cases;
 #[path = "nix/tests.rs"]
 mod nix_cases;
 struct Tree(PathBuf);

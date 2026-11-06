@@ -17,11 +17,13 @@ pub struct WorkerRuntime {
     engine: Arc<InstalledWorkerEngine>,
     identity: WorkerServiceIdentity,
     nix: Workflows,
+    laptop: crate::worker_laptop::Workflows,
 }
 #[derive(Debug)]
 pub enum RuntimeError {
     Engine(EngineError),
     Nix(NixError),
+    Laptop(crate::worker_laptop::LaptopError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -32,6 +34,7 @@ impl std::fmt::Display for RuntimeError {
         match self {
             Self::Engine(error) => error.fmt(output),
             Self::Nix(error) => error.fmt(output),
+            Self::Laptop(error) => error.fmt(output),
             Self::Finalization { primary, secondary } => {
                 write!(output, "{primary}; additional cleanup: {secondary}")
             }
@@ -43,6 +46,7 @@ impl std::error::Error for RuntimeError {
         match self {
             Self::Engine(error) => Some(error),
             Self::Nix(error) => Some(error),
+            Self::Laptop(error) => Some(error),
             Self::Finalization { primary, .. } => Some(primary.as_ref()),
         }
     }
@@ -53,6 +57,7 @@ impl WorkerRuntime {
             engine: Arc::new(engine),
             identity: WorkerServiceIdentity::capture(base),
             nix: Workflows::new(base.connection_limit()),
+            laptop: crate::worker_laptop::Workflows::new(base.connection_limit()),
         }
     }
     pub fn readonly(&self) -> ReadonlyEngine {
@@ -76,7 +81,19 @@ impl WorkerRuntime {
             .settle_owned(deadline)
             .map_err(RuntimeError::Engine);
         let records = self.nix.settle(self, deadline).map_err(RuntimeError::Nix);
-        match (records, client) {
+        let laptop = self
+            .laptop
+            .settle(self, deadline)
+            .map_err(RuntimeError::Laptop);
+        let resources = match (records, laptop) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(primary), Err(secondary)) => Err(RuntimeError::Finalization {
+                primary: Box::new(primary),
+                secondary: Box::new(secondary),
+            }),
+        };
+        match (resources, client) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
             (Err(primary), Err(secondary)) => Err(RuntimeError::Finalization {
@@ -85,7 +102,7 @@ impl WorkerRuntime {
             }),
         }
     }
-    /// Request the first stop, drain actual helper records, then seal the SAME
+    /// Request the first stop, settle all actual retained records, then seal the SAME
     /// client. Unconfirmed records retain all resources and prevent sealing.
     /// Returned storage owners remain App's duty; this is no writer-release ACK.
     pub fn close(&self, deadline: Instant) -> Result<(), RuntimeError> {
@@ -106,5 +123,8 @@ impl WorkerRuntime {
     }
     pub(crate) fn nix_workflows(&self) -> &Workflows {
         &self.nix
+    }
+    pub(crate) fn laptop_workflows(&self) -> &crate::worker_laptop::Workflows {
+        &self.laptop
     }
 }

@@ -284,3 +284,22 @@ existing `worker_launch::prepare_create` data API remains compatible and delegat
 that same sequence. Same-runtime provenance and a plan are not an authorization,
 a protected start, a supervised Created/Started result or a lifecycle registry
 entry; those actual consuming producers remain required.
+
+`NixStoragePreparation::retain_network` now atomically replaces the registry's
+actual Nix workflow with the same Runtime's laptop record. It transfers the
+original storage/Nix owners directly after checking the unique storage-owner
+identity, request and genuine same-runtime/session Office phone. A pure refusal
+returns every supplied input while Nix retains its actual resources. The legacy
+path still creates no employee registry entry or imaginary lease. No engine
+query runs under the registry mutex; `run` uses fixed network inspect/create
+commands outside it, with the original shared capture and stop budget.
+
+Known network results have one-shot return of those exact owners; employee
+registry restoration uses the real returned storage object. Unknown native or
+daemon outcomes keep the laptop record and refuse direct aliases/release. This
+is not a laptop-created/started result, API permission or global capacity credit.
+Owned controls cover both storage kinds, refused aliases, native cancellation,
+available registry mutex during actual child I/O and retained resources at stop.
+The full canonical launch sequence and its telemetry/cold-temporary fences,
+private record/create/start, recovery, viewer and whole-service shutdown remain
+required before selecting the Rust worker service.
