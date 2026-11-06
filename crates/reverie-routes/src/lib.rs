@@ -2,4 +2,5 @@
 //! the moved-route list; the list is empty by default.
 pub mod channel;
 mod node_path;
+pub mod settings;
 pub mod subscription_profiles;

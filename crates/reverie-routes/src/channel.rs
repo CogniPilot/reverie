@@ -4,10 +4,12 @@
 //! only valid frames are the next request (`id == last + 1`) and a late cancel of the request it
 //! already answered. While Awaiting, only that request's observation or cancel is valid. Every
 //! request gets exactly one response or refusal, so TS always knows which frame comes next.
+use crate::settings;
 use crate::subscription_profiles::{self, Pending, Read as ProfilesRead};
 use reverie_contracts::route_frames_v1::{
-    self as frames, Body, Direction, Frame, FrameError, Observation,
+    self as frames, Body, Direction, Frame, FrameError, Media, Observation,
 };
+use reverie_contracts::settings_v1::ContentType;
 use reverie_contracts::subscription_profiles_v1::{self as profiles, Refusal, Response};
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -112,9 +114,32 @@ impl<I: Read, O: Write> Channel<'_, I, O> {
     }
 
     fn request(&mut self, id: u64, route: &str, json: &[u8]) -> Result<(), Fatal> {
-        if route != frames::SUBSCRIPTION_PROFILES {
-            return self.refuse(id, UNKNOWN_ROUTE);
+        match route {
+            frames::SUBSCRIPTION_PROFILES => self.subscription_profiles(id, json),
+            frames::SETTINGS => self.settings(id, json),
+            _ => self.refuse(id, UNKNOWN_ROUTE),
         }
+    }
+
+    /// Settings answers in one step, always with a typed response.
+    fn settings(&mut self, id: u64, json: &[u8]) -> Result<(), Fatal> {
+        match settings::answer(json) {
+            Ok(response) => self.send(
+                id,
+                Body::TypedResponse {
+                    media: match response.content_type {
+                        ContentType::Json => Media::ApplicationJsonUtf8,
+                        ContentType::PlainText => Media::TextPlainUtf8,
+                    },
+                    status: response.status,
+                    body: response.body,
+                },
+            ),
+            Err(refusal) => self.refuse(id, refusal.code()),
+        }
+    }
+
+    fn subscription_profiles(&mut self, id: u64, json: &[u8]) -> Result<(), Fatal> {
         let read = profiles::decode_request(json)
             .and_then(|request| subscription_profiles::read(&request));
         match read {
