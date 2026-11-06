@@ -24,6 +24,12 @@ pub(crate) fn decode_utf8(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode(&text::python_bytes(raw)?)
 }
+/// worker_storage.read_metadata uses Python bytes decoding, ordinary signed
+/// integer conversion and close-time object_pairs_hook duplicate refusal.
+/// Unlike strict constant readers, literal NaN and infinities remain data.
+pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_metadata(&text::python_bytes(raw)?)
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {

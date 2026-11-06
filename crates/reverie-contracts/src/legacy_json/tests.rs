@@ -127,3 +127,21 @@ fn strict_engine_hooks_are_isolated_from_existing_purposes() {
     assert!(decode_engine_inventory(b"\xef\xbb\xbf{}").is_err());
     assert!(decode_rootless_profile(b"\xef\xbb\xbf{}").is_ok());
 }
+#[test]
+fn metadata_hooks_do_not_change_existing_hash_data_or_default_byte_mode() {
+    let raw = format!("{{\"opaque\":{}}}", "7".repeat(4301));
+    assert!(decode_utf8(raw.as_bytes()).is_ok());
+    assert!(decode_bytes(raw.as_bytes()).is_ok());
+    assert_eq!(
+        decode_metadata_bytes(raw.as_bytes()).err(),
+        Some(Error::InvalidJson)
+    );
+    let raw = br#"{"x":0,"x":1,"later":[}"#;
+    assert_eq!(decode_utf8(raw).err(), Some(Error::DuplicateKey));
+    assert_eq!(decode_bytes(raw).err(), Some(Error::DuplicateKey));
+    assert_eq!(decode_metadata_bytes(raw).err(), Some(Error::InvalidJson));
+    assert_eq!(
+        decode_metadata_bytes(br#"[{"x":0,"x":1},{"later":[}]"#).err(),
+        Some(Error::DuplicateKey)
+    );
+}

@@ -14,6 +14,7 @@ pub(super) enum Purpose {
     Rootless,
     Journal,
     StrictEngine,
+    Metadata,
 }
 
 enum Phase {
@@ -64,6 +65,9 @@ pub(super) fn decode_last_wins(source: &[u8]) -> Result<Value, Error> {
 }
 pub(super) fn decode_engine_stopped(source: &[u8]) -> Result<Value, Error> {
     decode_mode(source, Purpose::StrictEngine)
+}
+pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, Purpose::Metadata)
 }
 pub(super) fn decode_journal(source: &[u8]) -> Result<JournalParsed, JournalParseError> {
     journal::decode(source)
@@ -234,7 +238,7 @@ impl Frame {
 fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
     match purpose {
         Purpose::Rootless => Ok(false),
-        Purpose::Journal | Purpose::StrictEngine => Ok(true),
+        Purpose::Journal | Purpose::StrictEngine | Purpose::Metadata => Ok(true),
         _ => Err(Error::DuplicateKey),
     }
 }
@@ -333,7 +337,7 @@ impl Cursor<'_> {
             self.offset += "-Infinity".len();
             return Ok(Number::NegativeInfinity);
         }
-        if self.purpose == Purpose::StrictEngine {
+        if matches!(self.purpose, Purpose::StrictEngine | Purpose::Metadata) {
             self.offset = journal::number_end(self.source, begin).ok_or(Error::InvalidJson)?;
         } else {
             while self
@@ -351,8 +355,10 @@ impl Cursor<'_> {
             // The rootless-purpose default Python decoder uses its runtime's
             // decimal conversion cap even for ignored/overwritten fields.
             // Other named readers keep their separately frozen number policy.
-            if matches!(self.purpose, Purpose::Rootless | Purpose::StrictEngine)
-                && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
+            if matches!(
+                self.purpose,
+                Purpose::Rootless | Purpose::StrictEngine | Purpose::Metadata
+            ) && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);
             }

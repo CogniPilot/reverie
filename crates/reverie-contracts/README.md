@@ -79,7 +79,11 @@ records, `storage-owner.json`, historical plan-move edges and current employee
 selection. It uses shared private lossless JSON primitives, not the effective
 worker hash wrapper or a generic JSON editing API. The metadata reader preserves
 Python `json.loads(bytes)` UTF-8/BOM, UTF-16/32 and surrogatepass behavior, rejects
-duplicate keys and retains opaque unrelated identities. UUID validation applies
+duplicate keys when each object closes and retains opaque unrelated identities.
+Its named parser enforces Python's default 4300-digit signed integer-token bound;
+literal nonfinite values and exponent overflow remain accepted metadata data.
+Existing effective-worker hash parsing keeps its separate default behavior.
+UUID validation applies
 when selecting a storage identity. Owners retain Python's 200-codepoint bound;
 current GPU generations are positive Python integers without a JS-safe ceiling.
 Numeric duplicate-session comparison preserves Python bool/int/float equality
