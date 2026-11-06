@@ -194,11 +194,13 @@ fn settlement_after_expired_actual_stop_does_not_take_the_callers_fresh_budget()
     bootstrap.hooks.gate = Some(gate.clone());
     let installed = InstalledWorkerEngine::new(bootstrap);
     let reader = installed.readonly();
+    let cancellation = CancellationToken::new();
+    let query_cancellation = cancellation.clone();
     let task = std::thread::spawn(move || {
         reader.query(
             EngineQuery::InventoryIds,
-            Instant::now() + Duration::from_millis(40),
-            &CancellationToken::new(),
+            Instant::now() + Duration::from_secs(20),
+            &query_cancellation,
         )
     });
     let end = deadline();
@@ -206,6 +208,10 @@ fn settlement_after_expired_actual_stop_does_not_take_the_callers_fresh_budget()
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(1));
     }
+    // Establish the actual pending constructor before ending its query. A
+    // short startup deadline could expire before the constructor reached this
+    // gate, testing scheduler timing instead of expired-stop settlement.
+    cancellation.cancel();
     assert!(task.join().unwrap().unwrap_err().is_uncertain());
     installed.expire_stop_for_owned_test();
     let before = Instant::now();
