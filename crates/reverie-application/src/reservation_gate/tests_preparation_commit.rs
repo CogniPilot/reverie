@@ -245,7 +245,7 @@ fn ordinary_reload_reads_real_file_and_cannot_install_changed_projections_for_ac
     let broker =
         ReservationGate::new(load_owner_config(&path).unwrap(), fixture.observer()).unwrap();
     broker.reload_owner_configuration().unwrap();
-    let before = broker.installed_snapshot().unwrap();
+    let before = broker.inner.installed.snapshot().unwrap();
     let staged = claim.stage_configuration().unwrap();
     let bytes =
         reverie_contracts::reservation_policy::PolicyCandidateData::capture(staged.configuration())
@@ -256,7 +256,7 @@ fn ordinary_reload_reads_real_file_and_cannot_install_changed_projections_for_ac
         "RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION"
     );
     assert!(
-        Arc::ptr_eq(&before, &broker.installed_snapshot().unwrap()),
+        Arc::ptr_eq(&before, &broker.inner.installed.snapshot().unwrap()),
         "failed file reload never swaps the installed snapshot"
     );
     assert_eq!(claim.operation().state(), OperationState::Preparing);

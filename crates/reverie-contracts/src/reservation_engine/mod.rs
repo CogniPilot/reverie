@@ -8,8 +8,8 @@ use crate::legacy_json::{self, Node, Number, Text, Value};
 use crate::storage_identity::MetadataText;
 pub use binding::{NativeLimitBinding, NativeStorageBinding};
 pub use config::{
-    ControlPaths, ObservedMemoryPolicy, ReservationConfiguration, StorageIdentityRef,
-    StoragePathText,
+    ControlBindingPaths, ControlPaths, ObservedMemoryPolicy, ReservationConfiguration,
+    StorageIdentityRef, StoragePathText,
 };
 use reverie_core::{decimal::UnsignedInteger, ids::ContainerId};
 pub use row::{ContainerRow, DeclaredLimits, StoppedWebsite};

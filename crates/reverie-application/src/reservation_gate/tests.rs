@@ -111,6 +111,36 @@ fn prepare(fixture: &Fixture, censuses: usize) {
 fn key() -> JournalId {
     JournalId::parse("33333333-2222-4333-8444-555555555555").unwrap()
 }
+#[test]
+fn installing_broker_and_reserved_gate_share_one_current_snapshot_owner() {
+    use reverie_host::{
+        engine_metadata::EngineBootstrap, installed_worker_engine::InstalledWorkerEngine,
+        worker_runtime::WorkerRuntime,
+    };
+    let tree = Tree::new();
+    let snapshot = load_owner_config(&tree.root.join("worker.json")).unwrap();
+    let bootstrap = EngineBootstrap::from_service(
+        std::env::current_exe().unwrap().as_os_str(),
+        std::collections::BTreeMap::new(),
+        tree.root.clone(),
+    )
+    .unwrap();
+    let runtime = WorkerRuntime::new(
+        InstalledWorkerEngine::new(bootstrap),
+        snapshot.envelope().base(),
+    );
+    let broker = crate::installing_broker::InstallingBroker::new(snapshot, runtime).unwrap();
+    let gate = broker.resource_reservations().unwrap().unwrap();
+    assert!(
+        Arc::ptr_eq(
+            &broker.configuration().unwrap(),
+            &gate.inner.installed.snapshot().unwrap()
+        ),
+        "both public service views retain the exact same validated snapshot, not a second load/capture"
+    );
+    gate.settle_owned(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+}
 
 #[test]
 fn readonly_lookup_uses_actual_admission_canonical_store_and_final_guard() {

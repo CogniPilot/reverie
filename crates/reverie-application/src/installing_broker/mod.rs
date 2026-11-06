@@ -1,6 +1,8 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+#[cfg(test)]
+mod bootstrap_tests;
 mod creation;
 mod storage;
 use crate::{
@@ -107,7 +109,8 @@ impl InstalledWorker {
     }
 }
 pub struct InstallingBroker {
-    gate: ReservationGate,
+    installed: Arc<InstalledWorker>,
+    gate: Option<ReservationGate>,
     storage: Arc<storage::StorageRegistry>,
 }
 impl InstallingBroker {
@@ -116,20 +119,51 @@ impl InstallingBroker {
         snapshot: ValidatedWorkerSnapshot,
         runtime: reverie_host::worker_runtime::WorkerRuntime,
     ) -> Result<Self, GateError> {
-        let observer = NativeObserver::new(runtime.readonly());
+        let installed = InstalledWorker::capture(snapshot);
+        let current = installed.snapshot()?;
+        let has_option = reverie_contracts::worker_validation::WorkerValidationData::new(
+            current.configuration(),
+        )
+        .reservation()?
+        .is_some();
+        let gate = if has_option
+            || reverie_host::reservation_control::prior_control_present(
+                installed.resources()?.as_ref(),
+            )? {
+            Some(ReservationGate::from_installed(
+                installed.clone(),
+                NativeObserver::new(runtime.readonly()),
+            )?)
+        } else {
+            None
+        };
         Ok(Self {
-            gate: ReservationGate::new(snapshot, observer)?,
+            installed,
+            gate,
             storage: Arc::new(storage::StorageRegistry::new(runtime)),
         })
     }
     pub fn configuration(&self) -> Result<Arc<ValidatedWorkerSnapshot>, GateError> {
-        self.gate.installed_snapshot()
+        self.installed.snapshot()
     }
-    pub fn resource_reservations(&self) -> &ReservationGate {
-        &self.gate
+    /// Feature absence is not a no-op admission permit. Recheck the original
+    /// durable marker/pending fence whenever an unreserved caller selects it.
+    pub fn resource_reservations(&self) -> Result<Option<&ReservationGate>, GateError> {
+        if self.gate.is_none()
+            && reverie_host::reservation_control::prior_control_present(
+                self.installed.resources()?.as_ref(),
+            )?
+        {
+            return Err(GateError::Refused(
+                "RESERVATION_INSTALL_REQUIRES_RECONCILIATION",
+            ));
+        }
+        Ok(self.gate.as_ref())
     }
     pub fn reload_resources(&self) -> Result<(), GateError> {
-        self.gate.reload_owner_configuration()
+        self.resource_reservations()?
+            .ok_or(GateError::Refused("RESERVATION_NOT_CONFIGURED"))?
+            .reload_owner_configuration()
     }
     /// Current intent from the actual installed configuration; this observation
     /// is not API authorization, storage eligibility or a start permission.

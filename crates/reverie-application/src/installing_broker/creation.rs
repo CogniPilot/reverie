@@ -174,7 +174,7 @@ impl InstallingBroker {
         resources: &EffectiveWorkerConfig,
         admission: Option<&OrdinaryLaunchAdmission>,
     ) -> Result<()> {
-        let lifecycle = self.gate.laptop_lifecycle()?;
+        let lifecycle = self.installed.lifecycle()?;
         let snapshot = self.configuration()?;
         let registered = lifecycle
             .entries()
@@ -190,7 +190,7 @@ impl InstallingBroker {
         check(
             &inputs,
             &registered,
-            Some(&self.gate),
+            self.gate.as_ref(),
             admission,
             &Installed(&self.storage.runtime),
         )

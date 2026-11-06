@@ -158,8 +158,13 @@ through this legacy-memory service.
 `InstallingBroker::new` consumes the actual service `WorkerRuntime` and creates
 its reservation observer from that exact runtime's read-only handle. There is
 no independent engine recapture, optional fake runtime or public registry setter.
-The existing bootstrap currently requires the real reservation-control setup;
-it is not yet the complete optional-reservations worker service.
+The broker and optional reservation gate now share the same actual installed
+snapshot owner. Genuine feature absence bootstraps without creating control
+state; a removed option cannot hide an existing marker or pending fence.
+The checked feature getter reobserves those fences for an unreserved service
+and refuses late appearance. It returns no no-op admission or start permit.
+The complete canonical launch/stop service and its optional admission consumer
+remain separate required lifecycle integration.
 
 `claim_storage` performs fresh service-selected resolution before the private
 registry lock. Genuine legacy paths bypass the employee lock, census and

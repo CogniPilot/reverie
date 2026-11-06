@@ -92,6 +92,12 @@ impl ReservationGate {
     /// The full existing validator must succeed before this constructor exists.
     pub fn new(snapshot: ValidatedWorkerSnapshot, observer: NativeObserver) -> Result<Self> {
         let installed = crate::installing_broker::InstalledWorker::capture(snapshot);
+        Self::from_installed(installed, observer)
+    }
+    pub(crate) fn from_installed(
+        installed: Arc<crate::installing_broker::InstalledWorker>,
+        observer: NativeObserver,
+    ) -> Result<Self> {
         let snapshot = installed.snapshot()?;
         let option = WorkerValidationData::new(snapshot.configuration())
             .reservation()?
@@ -130,12 +136,6 @@ impl ReservationGate {
                 changed: Condvar::new(),
             }),
         })
-    }
-    pub(crate) fn installed_snapshot(&self) -> Result<Arc<ValidatedWorkerSnapshot>> {
-        self.inner.installed.snapshot()
-    }
-    pub(crate) fn laptop_lifecycle(&self) -> Result<crate::installing_broker::LaptopLifecycle<'_>> {
-        self.inner.installed.lifecycle()
     }
     /// Fixed readonly lookup with actual admission, canonical journal locking,
     /// checked store close and the admission's final native/image guard.

@@ -135,6 +135,19 @@ impl AdmissionLock {
 pub fn pending_present(config: &ReservationConfiguration) -> Result<bool> {
     present(config.control_paths()?.pending())
 }
+/// Original configured()'s marker/pending observation when the option is
+/// absent. This is DATA, not custody or proof of absence: Python lexists maps
+/// all OS/value errors to false and follows ancestors. Active control guards
+/// keep their independent strict traversal/error rules unchanged.
+pub fn prior_control_present(config: &ReservationConfiguration) -> Result<bool> {
+    let Some(paths) = config.control_binding_paths()? else {
+        return Ok(false);
+    };
+    let lexists = |path: &PosixPath| {
+        native::python_path(&path.codepoints()).is_ok_and(|path| fs::symlink_metadata(path).is_ok())
+    };
+    Ok(lexists(paths.binding()) || lexists(paths.pending()))
+}
 /// Native path DATA selected from this captured option, without opening the
 /// journal, acquiring admission or manufacturing a scope guard.
 pub fn operation_directory(config: &ReservationConfiguration) -> Result<std::path::PathBuf> {

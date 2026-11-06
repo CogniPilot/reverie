@@ -69,17 +69,25 @@ impl ReservationConfiguration {
         let selected =
             object(field(self.root(), "resourceReservations").ok_or(EngineDataError::Policy)?)?;
         let root = path(field(selected, "directory"))?;
-        let binding = path(field(self.root(), "stateRoot"))?.join(&PosixPath::from_scalar_text(
+        let binding = self
+            .control_binding_paths()?
+            .ok_or(EngineDataError::Policy)?;
+        Ok(ControlPaths { root, binding })
+    }
+    /// Fixed marker/pending path DATA, independent of the optional control
+    /// directory. The original configured() also accepts partial transport
+    /// configuration without stateRoot; it does not invent a path in that case.
+    pub fn control_binding_paths(&self) -> Result<Option<ControlBindingPaths>> {
+        let Some(state) = field(self.root(), "stateRoot") else {
+            return Ok(None);
+        };
+        let binding = path(Some(state))?.join(&PosixPath::from_scalar_text(
             "resource-reservation-control.json",
         ));
         let pending = binding.parent().join(&PosixPath::from_scalar_text(
             "resource-reservation-control.pending",
         ));
-        Ok(ControlPaths {
-            root,
-            binding,
-            pending,
-        })
+        Ok(Some(ControlBindingPaths { binding, pending }))
     }
     /// Reconstruct Python text from this same config and existing checked
     /// storage identity, without fsdecode changing untouched surrogate inputs.
@@ -101,6 +109,9 @@ impl ReservationConfiguration {
 }
 pub struct ControlPaths {
     root: PosixPath,
+    binding: ControlBindingPaths,
+}
+pub struct ControlBindingPaths {
     binding: PosixPath,
     pending: PosixPath,
 }
@@ -112,6 +123,14 @@ impl ControlPaths {
     pub fn root(&self) -> &PosixPath {
         &self.root
     }
+    pub fn binding(&self) -> &PosixPath {
+        self.binding.binding()
+    }
+    pub fn pending(&self) -> &PosixPath {
+        self.binding.pending()
+    }
+}
+impl ControlBindingPaths {
     pub fn binding(&self) -> &PosixPath {
         &self.binding
     }

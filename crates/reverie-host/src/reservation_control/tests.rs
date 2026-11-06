@@ -1,6 +1,8 @@
 use super::*;
 #[path = "tests_draft.rs"]
 mod draft_cases;
+#[path = "tests_optional.rs"]
+mod optional_cases;
 use reverie_contracts::{reservation_control::domain_digest, worker_config};
 use std::{
     os::unix::fs::{PermissionsExt, symlink},
