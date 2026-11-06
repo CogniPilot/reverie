@@ -118,6 +118,8 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   private finished = false;
   /** Runs once the writer has handed every queued frame to the channel. */
   private onIdle: (() => void) | undefined;
+  /** The one finish in flight, shared by every caller so none is left waiting on a replaced hook. */
+  private finishing: Promise<void> | undefined;
   private readonly link: ConnLink;
 
   constructor(
@@ -190,11 +192,13 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   /**
    * Writes every queued frame, then ends TS's direction of the channel. It resolves once the channel has flushed
    * them, so a clean exit after it means the front was sent everything, `unbind` included. It rejects if the
-   * generation ends first or the channel has not flushed within `timeoutMs`.
+   * generation ends first or the channel has not flushed within `timeoutMs`. Later calls share the first call's
+   * outcome and deadline.
    */
   finish(timeoutMs: number): Promise<void> {
+    if (this.finishing) return this.finishing;
     if (this.ended) return Promise.reject(this.ended);
-    return new Promise((resolve, reject) => {
+    this.finishing = new Promise((resolve, reject) => {
       const done = (error?: Error | null) => {
         clearTimeout(timer);
         this.off('fault', done);
@@ -209,6 +213,7 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
       };
       this.pump();
     });
+    return this.finishing;
   }
 
   /** Asks the front to close `listener`. Connections it accepted before this keep running. */

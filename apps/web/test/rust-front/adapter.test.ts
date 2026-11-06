@@ -489,13 +489,31 @@ describe('connection rules, the receive pool and the writer', () => {
     expect(front.endedBy).toBeUndefined();
   });
 
+  it('finish() called twice while backpressured completes both callers, on the first deadline', async () => {
+    const { fake, front } = await app();
+    const big = fake.open();
+    fake.peer.pause();
+    await fake.write(big, get('/big'));
+    await sleep(100);
+    const first = front.finish(2000);
+    const second = front.finish(10);
+    expect(second).toBe(first);
+    await sleep(100);
+    fake.peer.resume();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+    expect(front.finish(10)).toBe(first);
+  });
+
   it('finish() rejects when the channel does not flush in time', async () => {
     const { fake, front } = await app();
     const big = fake.open();
     fake.peer.pause();
     await fake.write(big, get('/big'));
     await sleep(100);
-    await expect(front.finish(200)).rejects.toThrow(/did not flush within 200 ms/);
+    const failed = front.finish(200);
+    await expect(failed).rejects.toThrow(/did not flush within 200 ms/);
+    // A settled finish is the outcome for every later call too: a retry does not restart it.
+    expect(front.finish(5000)).toBe(failed);
   });
 
   it('discards a connection’s queued data when its abort is queued behind it', async () => {
