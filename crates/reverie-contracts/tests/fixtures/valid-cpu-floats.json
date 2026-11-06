@@ -1,0 +1,2502 @@
+[
+  {
+    "name": "valid_cpu_random_0",
+    "raw": "{\"cpus\":19.60645115394141}",
+    "f64_bits": "40339b406200ccc1"
+  },
+  {
+    "name": "valid_cpu_random_1",
+    "raw": "{\"cpus\":37.801686304899434}",
+    "f64_bits": "4042e69da82698da"
+  },
+  {
+    "name": "valid_cpu_random_2",
+    "raw": "{\"cpus\":11.764508228891675}",
+    "f64_bits": "4027876d9f6139aa"
+  },
+  {
+    "name": "valid_cpu_random_3",
+    "raw": "{\"cpus\":55.43570311931322}",
+    "f64_bits": "404bb7c51eac1b94"
+  },
+  {
+    "name": "valid_cpu_random_4",
+    "raw": "{\"cpus\":3.0316515752600104}",
+    "f64_bits": "400840d28a84de78"
+  },
+  {
+    "name": "valid_cpu_random_5",
+    "raw": "{\"cpus\":26.20971043071758}",
+    "f64_bits": "403a35af95318fe4"
+  },
+  {
+    "name": "valid_cpu_random_6",
+    "raw": "{\"cpus\":29.890797071657804}",
+    "f64_bits": "403de40b46e22491"
+  },
+  {
+    "name": "valid_cpu_random_7",
+    "raw": "{\"cpus\":17.415397355936864}",
+    "f64_bits": "40316a577b2a97fd"
+  },
+  {
+    "name": "valid_cpu_random_8",
+    "raw": "{\"cpus\":39.83044999047403}",
+    "f64_bits": "4043ea4c2f6f0655"
+  },
+  {
+    "name": "valid_cpu_random_9",
+    "raw": "{\"cpus\":23.38683385135248}",
+    "f64_bits": "403763078b148b6d"
+  },
+  {
+    "name": "valid_cpu_random_10",
+    "raw": "{\"cpus\":44.79890928644406}",
+    "f64_bits": "40466642a8d4dfbc"
+  },
+  {
+    "name": "valid_cpu_random_11",
+    "raw": "{\"cpus\":47.39749621137339}",
+    "f64_bits": "4047b2e127e610f9"
+  },
+  {
+    "name": "valid_cpu_random_12",
+    "raw": "{\"cpus\":36.89856869298533}",
+    "f64_bits": "404273044c86ca6d"
+  },
+  {
+    "name": "valid_cpu_random_13",
+    "raw": "{\"cpus\":53.32711404116707}",
+    "f64_bits": "404aa9dedf766fff"
+  },
+  {
+    "name": "valid_cpu_random_14",
+    "raw": "{\"cpus\":42.08660210239667}",
+    "f64_bits": "40450b15c716c77e"
+  },
+  {
+    "name": "valid_cpu_random_15",
+    "raw": "{\"cpus\":36.873583179668096}",
+    "f64_bits": "40426fd192d9814d"
+  },
+  {
+    "name": "valid_cpu_random_16",
+    "raw": "{\"cpus\":5.764573874879272}",
+    "f64_bits": "40170eec742fee0c"
+  },
+  {
+    "name": "valid_cpu_random_17",
+    "raw": "{\"cpus\":4.374399225558836}",
+    "f64_bits": "40117f6282b5b114"
+  },
+  {
+    "name": "valid_cpu_random_18",
+    "raw": "{\"cpus\":60.74097624516418}",
+    "f64_bits": "404e5ed84f420be8"
+  },
+  {
+    "name": "valid_cpu_random_19",
+    "raw": "{\"cpus\":33.77906536770196}",
+    "f64_bits": "4040e3b869f9dcf2"
+  },
+  {
+    "name": "valid_cpu_random_20",
+    "raw": "{\"cpus\":16.21603296314241}",
+    "f64_bits": "4030374defaf8dfc"
+  },
+  {
+    "name": "valid_cpu_random_21",
+    "raw": "{\"cpus\":36.80534821345525}",
+    "f64_bits": "40426715a6775756"
+  },
+  {
+    "name": "valid_cpu_random_22",
+    "raw": "{\"cpus\":24.543599672994134}",
+    "f64_bits": "40388b295921a048"
+  },
+  {
+    "name": "valid_cpu_random_23",
+    "raw": "{\"cpus\":47.25568798884996}",
+    "f64_bits": "4047a0ba624f0b98"
+  },
+  {
+    "name": "valid_cpu_random_24",
+    "raw": "{\"cpus\":2.2207155154290046}",
+    "f64_bits": "4001c4067f03e61c"
+  },
+  {
+    "name": "valid_cpu_random_25",
+    "raw": "{\"cpus\":34.68160091768749}",
+    "f64_bits": "4041573eb2e93218"
+  },
+  {
+    "name": "valid_cpu_random_26",
+    "raw": "{\"cpus\":7.205970163962865}",
+    "f64_bits": "401cd2e9d7b8b066"
+  },
+  {
+    "name": "valid_cpu_random_27",
+    "raw": "{\"cpus\":11.467765102963313}",
+    "f64_bits": "4026ef7ee856e000"
+  },
+  {
+    "name": "valid_cpu_random_28",
+    "raw": "{\"cpus\":4.350068020573497}",
+    "f64_bits": "401166783b2ef45a"
+  },
+  {
+    "name": "valid_cpu_random_29",
+    "raw": "{\"cpus\":25.913533117648328}",
+    "f64_bits": "4039e9dd4e701ccc"
+  },
+  {
+    "name": "valid_cpu_random_30",
+    "raw": "{\"cpus\":16.781189165723926}",
+    "f64_bits": "4030c7fc035ec617"
+  },
+  {
+    "name": "valid_cpu_random_31",
+    "raw": "{\"cpus\":7.295583130133517}",
+    "f64_bits": "401d2ead5814b0ea"
+  },
+  {
+    "name": "valid_cpu_random_32",
+    "raw": "{\"cpus\":4.53575231741263}",
+    "f64_bits": "4012249c41682c80"
+  },
+  {
+    "name": "valid_cpu_random_33",
+    "raw": "{\"cpus\":30.322548855077624}",
+    "f64_bits": "403e52928fcfebaf"
+  },
+  {
+    "name": "valid_cpu_random_34",
+    "raw": "{\"cpus\":53.047991141345626}",
+    "f64_bits": "404a862492df49e1"
+  },
+  {
+    "name": "valid_cpu_random_35",
+    "raw": "{\"cpus\":60.938228847837784}",
+    "f64_bits": "404e7817e204d043"
+  },
+  {
+    "name": "valid_cpu_random_36",
+    "raw": "{\"cpus\":48.1088584172481}",
+    "f64_bits": "40480def1296fcca"
+  },
+  {
+    "name": "valid_cpu_random_37",
+    "raw": "{\"cpus\":3.8709995784181452}",
+    "f64_bits": "400ef7cea08115f5"
+  },
+  {
+    "name": "valid_cpu_random_38",
+    "raw": "{\"cpus\":43.84417444312219}",
+    "f64_bits": "4045ec0de87caa17"
+  },
+  {
+    "name": "valid_cpu_random_39",
+    "raw": "{\"cpus\":25.749733635100057}",
+    "f64_bits": "4039bfee8b237748"
+  },
+  {
+    "name": "valid_cpu_random_40",
+    "raw": "{\"cpus\":17.58396586742975}",
+    "f64_bits": "4031957ec97e974f"
+  },
+  {
+    "name": "valid_cpu_random_41",
+    "raw": "{\"cpus\":47.17939100091044}",
+    "f64_bits": "404796f648c90db4"
+  },
+  {
+    "name": "valid_cpu_random_42",
+    "raw": "{\"cpus\":44.13946360527207}",
+    "f64_bits": "404611d9f183d01a"
+  },
+  {
+    "name": "valid_cpu_random_43",
+    "raw": "{\"cpus\":18.973399197357395}",
+    "f64_bits": "4032f930b0969a48"
+  },
+  {
+    "name": "valid_cpu_random_44",
+    "raw": "{\"cpus\":8.398781060311958}",
+    "f64_bits": "4020cc2d07f89bae"
+  },
+  {
+    "name": "valid_cpu_random_45",
+    "raw": "{\"cpus\":15.725900469287444}",
+    "f64_bits": "402f73a939ef7b33"
+  },
+  {
+    "name": "valid_cpu_random_46",
+    "raw": "{\"cpus\":29.890909435147755}",
+    "f64_bits": "403de412a407a84e"
+  },
+  {
+    "name": "valid_cpu_random_47",
+    "raw": "{\"cpus\":24.946349735320183}",
+    "f64_bits": "4038f243f9ebc748"
+  },
+  {
+    "name": "valid_cpu_random_48",
+    "raw": "{\"cpus\":61.48952346709129}",
+    "f64_bits": "404ebea8b478e40c"
+  },
+  {
+    "name": "valid_cpu_random_49",
+    "raw": "{\"cpus\":6.515671305486055}",
+    "f64_bits": "401a100c23823164"
+  },
+  {
+    "name": "valid_cpu_random_50",
+    "raw": "{\"cpus\":52.76793220407181}",
+    "f64_bits": "404a624b9a3b044e"
+  },
+  {
+    "name": "valid_cpu_random_51",
+    "raw": "{\"cpus\":60.086000105837236}",
+    "f64_bits": "404e0b020d2d0301"
+  },
+  {
+    "name": "valid_cpu_random_52",
+    "raw": "{\"cpus\":62.38031127581564}",
+    "f64_bits": "404f30ae0a35f6d0"
+  },
+  {
+    "name": "valid_cpu_random_53",
+    "raw": "{\"cpus\":51.94790348070056}",
+    "f64_bits": "4049f954e6b8afce"
+  },
+  {
+    "name": "valid_cpu_random_54",
+    "raw": "{\"cpus\":7.438213171872811}",
+    "f64_bits": "401dc0baf4277b09"
+  },
+  {
+    "name": "valid_cpu_random_55",
+    "raw": "{\"cpus\":27.964646351950105}",
+    "f64_bits": "403bf6f31035d4d7"
+  },
+  {
+    "name": "valid_cpu_random_56",
+    "raw": "{\"cpus\":16.905009013315677}",
+    "f64_bits": "4030e7aeabb2c6ac"
+  },
+  {
+    "name": "valid_cpu_random_57",
+    "raw": "{\"cpus\":37.194263059949364}",
+    "f64_bits": "404298dd9ca8a6d6"
+  },
+  {
+    "name": "valid_cpu_random_58",
+    "raw": "{\"cpus\":15.119327264551462}",
+    "f64_bits": "402e3d1876958a12"
+  },
+  {
+    "name": "valid_cpu_random_59",
+    "raw": "{\"cpus\":25.533115329085554}",
+    "f64_bits": "4039887a3f076b32"
+  },
+  {
+    "name": "valid_cpu_random_60",
+    "raw": "{\"cpus\":7.991819941733785}",
+    "f64_bits": "401ff79fa59511a5"
+  },
+  {
+    "name": "valid_cpu_random_61",
+    "raw": "{\"cpus\":32.203074699260725}",
+    "f64_bits": "404019fe5a0bfc24"
+  },
+  {
+    "name": "valid_cpu_random_62",
+    "raw": "{\"cpus\":40.668012316929925}",
+    "f64_bits": "404455816d774505"
+  },
+  {
+    "name": "valid_cpu_random_63",
+    "raw": "{\"cpus\":8.81703930100488}",
+    "f64_bits": "4021a252f9aab9af"
+  },
+  {
+    "name": "valid_cpu_random_64",
+    "raw": "{\"cpus\":0.44455232517492066}",
+    "f64_bits": "3fdc738b987f2bb1"
+  },
+  {
+    "name": "valid_cpu_random_65",
+    "raw": "{\"cpus\":28.47817545943069}",
+    "f64_bits": "403c7a69b4f8012d"
+  },
+  {
+    "name": "valid_cpu_random_66",
+    "raw": "{\"cpus\":5.233058124431482}",
+    "f64_bits": "4014eea6c9fa0052"
+  },
+  {
+    "name": "valid_cpu_random_67",
+    "raw": "{\"cpus\":58.824978285693}",
+    "f64_bits": "404d6998e3727b15"
+  },
+  {
+    "name": "valid_cpu_random_68",
+    "raw": "{\"cpus\":1.6966055759203813}",
+    "f64_bits": "3ffb254be36ca0e7"
+  },
+  {
+    "name": "valid_cpu_random_69",
+    "raw": "{\"cpus\":14.06721773989688}",
+    "f64_bits": "402c226a5d1522e2"
+  },
+  {
+    "name": "valid_cpu_random_70",
+    "raw": "{\"cpus\":47.305138523986685}",
+    "f64_bits": "4047a70ec776a2e2"
+  },
+  {
+    "name": "valid_cpu_random_71",
+    "raw": "{\"cpus\":35.32169592582371}",
+    "f64_bits": "4041a92d550455ab"
+  },
+  {
+    "name": "valid_cpu_random_72",
+    "raw": "{\"cpus\":4.561625845946368}",
+    "f64_bits": "40123f1ad883b642"
+  },
+  {
+    "name": "valid_cpu_random_73",
+    "raw": "{\"cpus\":58.790743572872415}",
+    "f64_bits": "404d653715dc812e"
+  },
+  {
+    "name": "valid_cpu_random_74",
+    "raw": "{\"cpus\":16.987426692372694}",
+    "f64_bits": "4030fcc7fee6f02c"
+  },
+  {
+    "name": "valid_cpu_random_75",
+    "raw": "{\"cpus\":33.327655065531204}",
+    "f64_bits": "4040a9f099e769a2"
+  },
+  {
+    "name": "valid_cpu_random_76",
+    "raw": "{\"cpus\":50.742451082370565}",
+    "f64_bits": "40495f08a316d4a8"
+  },
+  {
+    "name": "valid_cpu_random_77",
+    "raw": "{\"cpus\":42.17435435193829}",
+    "f64_bits": "404516513e4fbec0"
+  },
+  {
+    "name": "valid_cpu_random_78",
+    "raw": "{\"cpus\":20.453549553527967}",
+    "f64_bits": "4034741bd2d3849d"
+  },
+  {
+    "name": "valid_cpu_random_79",
+    "raw": "{\"cpus\":18.053583278645448}",
+    "f64_bits": "40320db7a23d6508"
+  },
+  {
+    "name": "valid_cpu_random_80",
+    "raw": "{\"cpus\":6.961975231856201}",
+    "f64_bits": "401bd910090189a0"
+  },
+  {
+    "name": "valid_cpu_random_81",
+    "raw": "{\"cpus\":49.71062645675959}",
+    "f64_bits": "4048daf5cec7ba37"
+  },
+  {
+    "name": "valid_cpu_random_82",
+    "raw": "{\"cpus\":27.71670338333612}",
+    "f64_bits": "403bb779df785c77"
+  },
+  {
+    "name": "valid_cpu_random_83",
+    "raw": "{\"cpus\":55.377616332848746}",
+    "f64_bits": "404bb055bb6402aa"
+  },
+  {
+    "name": "valid_cpu_random_84",
+    "raw": "{\"cpus\":9.625693380043739}",
+    "f64_bits": "4023405ae1f9391e"
+  },
+  {
+    "name": "valid_cpu_random_85",
+    "raw": "{\"cpus\":49.576138078445894}",
+    "f64_bits": "4048c9bee47e73e4"
+  },
+  {
+    "name": "valid_cpu_random_86",
+    "raw": "{\"cpus\":10.594880981931764}",
+    "f64_bits": "402530943d74d18f"
+  },
+  {
+    "name": "valid_cpu_random_87",
+    "raw": "{\"cpus\":24.46148537689015}",
+    "f64_bits": "40387623e7d9534f"
+  },
+  {
+    "name": "valid_cpu_random_88",
+    "raw": "{\"cpus\":54.085179727891095}",
+    "f64_bits": "404b0ae72b58c987"
+  },
+  {
+    "name": "valid_cpu_random_89",
+    "raw": "{\"cpus\":6.444622119901622}",
+    "f64_bits": "4019c74b056038fe"
+  },
+  {
+    "name": "valid_cpu_random_90",
+    "raw": "{\"cpus\":51.756669477444525}",
+    "f64_bits": "4049e0da8ba1c0b9"
+  },
+  {
+    "name": "valid_cpu_random_91",
+    "raw": "{\"cpus\":3.0157345304403336}",
+    "f64_bits": "400820396ced45f0"
+  },
+  {
+    "name": "valid_cpu_random_92",
+    "raw": "{\"cpus\":30.99370103796955}",
+    "f64_bits": "403efe6330f4149a"
+  },
+  {
+    "name": "valid_cpu_random_93",
+    "raw": "{\"cpus\":0.3123527276588118}",
+    "f64_bits": "3fd3fd964b871a7b"
+  },
+  {
+    "name": "valid_cpu_random_94",
+    "raw": "{\"cpus\":48.3500214135678}",
+    "f64_bits": "40482ccd806e1632"
+  },
+  {
+    "name": "valid_cpu_random_95",
+    "raw": "{\"cpus\":13.949236798291373}",
+    "f64_bits": "402be6025d99a474"
+  },
+  {
+    "name": "valid_cpu_random_96",
+    "raw": "{\"cpus\":58.778688865689794}",
+    "f64_bits": "404d63ac13a5f2d1"
+  },
+  {
+    "name": "valid_cpu_random_97",
+    "raw": "{\"cpus\":59.04836056760042}",
+    "f64_bits": "404d8630add82141"
+  },
+  {
+    "name": "valid_cpu_random_98",
+    "raw": "{\"cpus\":16.724627255273926}",
+    "f64_bits": "4030b9812bfb3117"
+  },
+  {
+    "name": "valid_cpu_random_99",
+    "raw": "{\"cpus\":10.666857814974342}",
+    "f64_bits": "4025556e6334cb2c"
+  },
+  {
+    "name": "valid_cpu_random_100",
+    "raw": "{\"cpus\":3.6450516699281126}",
+    "f64_bits": "400d2910d994924a"
+  },
+  {
+    "name": "valid_cpu_random_101",
+    "raw": "{\"cpus\":11.847973111511862}",
+    "f64_bits": "4027b229881ba960"
+  },
+  {
+    "name": "valid_cpu_random_102",
+    "raw": "{\"cpus\":58.98991415677834}",
+    "f64_bits": "404d7eb581d09aee"
+  },
+  {
+    "name": "valid_cpu_random_103",
+    "raw": "{\"cpus\":1.5636304520899817}",
+    "f64_bits": "3ff904a15d6c1942"
+  },
+  {
+    "name": "valid_cpu_random_104",
+    "raw": "{\"cpus\":7.974342036283396}",
+    "f64_bits": "401fe5b9eb33d228"
+  },
+  {
+    "name": "valid_cpu_random_105",
+    "raw": "{\"cpus\":0.45128981514287964}",
+    "f64_bits": "3fdce1eead439e93"
+  },
+  {
+    "name": "valid_cpu_random_106",
+    "raw": "{\"cpus\":62.23399155702761}",
+    "f64_bits": "404f1df36f727ca2"
+  },
+  {
+    "name": "valid_cpu_random_107",
+    "raw": "{\"cpus\":8.7770885165722}",
+    "f64_bits": "40218dde8bc98cac"
+  },
+  {
+    "name": "valid_cpu_random_108",
+    "raw": "{\"cpus\":63.43496875387512}",
+    "f64_bits": "404fb7ad0e5e5677"
+  },
+  {
+    "name": "valid_cpu_random_109",
+    "raw": "{\"cpus\":4.392817371533631}",
+    "f64_bits": "4011923eb7902688"
+  },
+  {
+    "name": "valid_cpu_random_110",
+    "raw": "{\"cpus\":6.640866331328279}",
+    "f64_bits": "401a903f4378a65c"
+  },
+  {
+    "name": "valid_cpu_random_111",
+    "raw": "{\"cpus\":44.33561550711096}",
+    "f64_bits": "40462af572ed8938"
+  },
+  {
+    "name": "valid_cpu_random_112",
+    "raw": "{\"cpus\":2.1189407519264973}",
+    "f64_bits": "4000f397357d7cd6"
+  },
+  {
+    "name": "valid_cpu_random_113",
+    "raw": "{\"cpus\":20.211705528282405}",
+    "f64_bits": "4034363255605af7"
+  },
+  {
+    "name": "valid_cpu_random_114",
+    "raw": "{\"cpus\":8.135775835089452}",
+    "f64_bits": "40204584690697b3"
+  },
+  {
+    "name": "valid_cpu_random_115",
+    "raw": "{\"cpus\":52.01842034556588}",
+    "f64_bits": "404a025b990ee4ab"
+  },
+  {
+    "name": "valid_cpu_random_116",
+    "raw": "{\"cpus\":47.66288799947827}",
+    "f64_bits": "4047d4d9839355c4"
+  },
+  {
+    "name": "valid_cpu_random_117",
+    "raw": "{\"cpus\":22.92265262394616}",
+    "f64_bits": "4036ec32f65d6ad7"
+  },
+  {
+    "name": "valid_cpu_random_118",
+    "raw": "{\"cpus\":43.74080068743334}",
+    "f64_bits": "4045ded28e92b0b5"
+  },
+  {
+    "name": "valid_cpu_random_119",
+    "raw": "{\"cpus\":34.20366909261216}",
+    "f64_bits": "40411a11d42dfcd4"
+  },
+  {
+    "name": "valid_cpu_random_120",
+    "raw": "{\"cpus\":11.166166517869387}",
+    "f64_bits": "40265513c71fe0e1"
+  },
+  {
+    "name": "valid_cpu_random_121",
+    "raw": "{\"cpus\":24.672133333120563}",
+    "f64_bits": "4038ac10ee1c4de6"
+  },
+  {
+    "name": "valid_cpu_random_122",
+    "raw": "{\"cpus\":59.08962809117417}",
+    "f64_bits": "404d8b78eeec32af"
+  },
+  {
+    "name": "valid_cpu_random_123",
+    "raw": "{\"cpus\":3.4349462082351496}",
+    "f64_bits": "400b7ac513df1d07"
+  },
+  {
+    "name": "valid_cpu_random_124",
+    "raw": "{\"cpus\":61.674907405740235}",
+    "f64_bits": "404ed6635da9bdc3"
+  },
+  {
+    "name": "valid_cpu_random_125",
+    "raw": "{\"cpus\":33.99526736720808}",
+    "f64_bits": "4040ff64ebcc77a5"
+  },
+  {
+    "name": "valid_cpu_random_126",
+    "raw": "{\"cpus\":17.279788772830003}",
+    "f64_bits": "403147a03cad17c4"
+  },
+  {
+    "name": "valid_cpu_random_127",
+    "raw": "{\"cpus\":11.68881809538349}",
+    "f64_bits": "402760acc3f12155"
+  },
+  {
+    "name": "valid_cpu_random_128",
+    "raw": "{\"cpus\":51.53230307628666}",
+    "f64_bits": "4049c42281d81b0f"
+  },
+  {
+    "name": "valid_cpu_random_129",
+    "raw": "{\"cpus\":19.098178322496302}",
+    "f64_bits": "4033192236ec4c3a"
+  },
+  {
+    "name": "valid_cpu_random_130",
+    "raw": "{\"cpus\":24.0809349906469}",
+    "f64_bits": "403814b827d1ee35"
+  },
+  {
+    "name": "valid_cpu_random_131",
+    "raw": "{\"cpus\":23.38977400312232}",
+    "f64_bits": "403763c83aa43dca"
+  },
+  {
+    "name": "valid_cpu_random_132",
+    "raw": "{\"cpus\":14.817192767538694}",
+    "f64_bits": "402da2671726367d"
+  },
+  {
+    "name": "valid_cpu_random_133",
+    "raw": "{\"cpus\":29.47476046691794}",
+    "f64_bits": "403d7989e6e6d8a3"
+  },
+  {
+    "name": "valid_cpu_random_134",
+    "raw": "{\"cpus\":50.3398682879175}",
+    "f64_bits": "40492b80cdd6c6ce"
+  },
+  {
+    "name": "valid_cpu_random_135",
+    "raw": "{\"cpus\":27.795784783839228}",
+    "f64_bits": "403bcbb88d353e71"
+  },
+  {
+    "name": "valid_cpu_random_136",
+    "raw": "{\"cpus\":39.40079280958908}",
+    "f64_bits": "4043b34d2dc4d41a"
+  },
+  {
+    "name": "valid_cpu_random_137",
+    "raw": "{\"cpus\":30.534679663744715}",
+    "f64_bits": "403e88e0c4359ead"
+  },
+  {
+    "name": "valid_cpu_random_138",
+    "raw": "{\"cpus\":20.22261690949428}",
+    "f64_bits": "403438fd6bf9d085"
+  },
+  {
+    "name": "valid_cpu_random_139",
+    "raw": "{\"cpus\":26.06986338532622}",
+    "f64_bits": "403a11e2911b29f9"
+  },
+  {
+    "name": "valid_cpu_random_140",
+    "raw": "{\"cpus\":51.049487305155786}",
+    "f64_bits": "40498655999a9b0b"
+  },
+  {
+    "name": "valid_cpu_random_141",
+    "raw": "{\"cpus\":60.434421808393104}",
+    "f64_bits": "404e379b2241dbd9"
+  },
+  {
+    "name": "valid_cpu_random_142",
+    "raw": "{\"cpus\":44.905880283870054}",
+    "f64_bits": "404673f3e298a813"
+  },
+  {
+    "name": "valid_cpu_random_143",
+    "raw": "{\"cpus\":19.06092922962263}",
+    "f64_bits": "40330f990ed89984"
+  },
+  {
+    "name": "valid_cpu_random_144",
+    "raw": "{\"cpus\":16.073229894320452}",
+    "f64_bits": "403012bf31c13225"
+  },
+  {
+    "name": "valid_cpu_random_145",
+    "raw": "{\"cpus\":61.30282032067827}",
+    "f64_bits": "404ea6c2d0f6f04f"
+  },
+  {
+    "name": "valid_cpu_random_146",
+    "raw": "{\"cpus\":2.9828162761042694}",
+    "f64_bits": "4007dccec79ec137"
+  },
+  {
+    "name": "valid_cpu_random_147",
+    "raw": "{\"cpus\":62.443871408980044}",
+    "f64_bits": "404f38d0c7409970"
+  },
+  {
+    "name": "valid_cpu_random_148",
+    "raw": "{\"cpus\":56.80340700374467}",
+    "f64_bits": "404c66d60a6b3af8"
+  },
+  {
+    "name": "valid_cpu_random_149",
+    "raw": "{\"cpus\":27.834725590669148}",
+    "f64_bits": "403bd5b093890eeb"
+  },
+  {
+    "name": "valid_cpu_random_150",
+    "raw": "{\"cpus\":38.5318511650998}",
+    "f64_bits": "40434413b2f038b9"
+  },
+  {
+    "name": "valid_cpu_random_151",
+    "raw": "{\"cpus\":21.49339037739855}",
+    "f64_bits": "40357e4ed4ef167f"
+  },
+  {
+    "name": "valid_cpu_random_152",
+    "raw": "{\"cpus\":12.324087917366668}",
+    "f64_bits": "4028a5eed9fc3cb8"
+  },
+  {
+    "name": "valid_cpu_random_153",
+    "raw": "{\"cpus\":13.554972509459578}",
+    "f64_bits": "402b1c255b549daa"
+  },
+  {
+    "name": "valid_cpu_random_154",
+    "raw": "{\"cpus\":6.940075418580843}",
+    "f64_bits": "401bc2a3216a501c"
+  },
+  {
+    "name": "valid_cpu_random_155",
+    "raw": "{\"cpus\":62.88701181653235}",
+    "f64_bits": "404f71899a6b9604"
+  },
+  {
+    "name": "valid_cpu_random_156",
+    "raw": "{\"cpus\":63.95802627775686}",
+    "f64_bits": "404ffaa09ae5d650"
+  },
+  {
+    "name": "valid_cpu_random_157",
+    "raw": "{\"cpus\":26.222503259415532}",
+    "f64_bits": "403a38f5f93e7170"
+  },
+  {
+    "name": "valid_cpu_random_158",
+    "raw": "{\"cpus\":10.525642049599927}",
+    "f64_bits": "40250d20f468de42"
+  },
+  {
+    "name": "valid_cpu_random_159",
+    "raw": "{\"cpus\":13.620873193752209}",
+    "f64_bits": "402b3de3175c41f3"
+  },
+  {
+    "name": "valid_cpu_random_160",
+    "raw": "{\"cpus\":27.028119662852404}",
+    "f64_bits": "403b0732d9a8535c"
+  },
+  {
+    "name": "valid_cpu_random_161",
+    "raw": "{\"cpus\":24.21909941955441}",
+    "f64_bits": "40383816e6498f0c"
+  },
+  {
+    "name": "valid_cpu_random_162",
+    "raw": "{\"cpus\":6.807981337320547}",
+    "f64_bits": "401b3b5f75ae47c7"
+  },
+  {
+    "name": "valid_cpu_random_163",
+    "raw": "{\"cpus\":61.35399012211402}",
+    "f64_bits": "404ead4f8c5ecb1b"
+  },
+  {
+    "name": "valid_cpu_random_164",
+    "raw": "{\"cpus\":60.3158166026238}",
+    "f64_bits": "404e286cadade6ca"
+  },
+  {
+    "name": "valid_cpu_random_165",
+    "raw": "{\"cpus\":60.90986713939898}",
+    "f64_bits": "404e747686c3b63c"
+  },
+  {
+    "name": "valid_cpu_random_166",
+    "raw": "{\"cpus\":13.253085316712259}",
+    "f64_bits": "402a8194660cc100"
+  },
+  {
+    "name": "valid_cpu_random_167",
+    "raw": "{\"cpus\":27.043508590861162}",
+    "f64_bits": "403b0b236106d7ff"
+  },
+  {
+    "name": "valid_cpu_random_168",
+    "raw": "{\"cpus\":45.56696663775546}",
+    "f64_bits": "4046c8925cdf8a99"
+  },
+  {
+    "name": "valid_cpu_random_169",
+    "raw": "{\"cpus\":19.263899038948328}",
+    "f64_bits": "4033438ee32dba99"
+  },
+  {
+    "name": "valid_cpu_random_170",
+    "raw": "{\"cpus\":7.2996049282046105}",
+    "f64_bits": "401d32cba2616fda"
+  },
+  {
+    "name": "valid_cpu_random_171",
+    "raw": "{\"cpus\":33.08015266101118}",
+    "f64_bits": "40408a427140dd7d"
+  },
+  {
+    "name": "valid_cpu_random_172",
+    "raw": "{\"cpus\":12.201949823429546}",
+    "f64_bits": "40286765f79e2031"
+  },
+  {
+    "name": "valid_cpu_random_173",
+    "raw": "{\"cpus\":56.61599161526809}",
+    "f64_bits": "404c4ed8d03117e5"
+  },
+  {
+    "name": "valid_cpu_random_174",
+    "raw": "{\"cpus\":59.88059766016869}",
+    "f64_bits": "404df0b76c93ade8"
+  },
+  {
+    "name": "valid_cpu_random_175",
+    "raw": "{\"cpus\":50.522765739119315}",
+    "f64_bits": "404942e9fcdc7e4d"
+  },
+  {
+    "name": "valid_cpu_random_176",
+    "raw": "{\"cpus\":18.41172142511402}",
+    "f64_bits": "403269669347ed5f"
+  },
+  {
+    "name": "valid_cpu_random_177",
+    "raw": "{\"cpus\":24.65114535155976}",
+    "f64_bits": "4038a6b17635e43f"
+  },
+  {
+    "name": "valid_cpu_random_178",
+    "raw": "{\"cpus\":52.374442090637174}",
+    "f64_bits": "404a2fedb7eac42a"
+  },
+  {
+    "name": "valid_cpu_random_179",
+    "raw": "{\"cpus\":17.811999774663736}",
+    "f64_bits": "4031cfdf379c8a45"
+  },
+  {
+    "name": "valid_cpu_random_180",
+    "raw": "{\"cpus\":53.16513993087663}",
+    "f64_bits": "404a95234e25307d"
+  },
+  {
+    "name": "valid_cpu_random_181",
+    "raw": "{\"cpus\":50.57746786237253}",
+    "f64_bits": "404949ea7787b0c6"
+  },
+  {
+    "name": "valid_cpu_random_182",
+    "raw": "{\"cpus\":39.48694020038869}",
+    "f64_bits": "4043be540e75e378"
+  },
+  {
+    "name": "valid_cpu_random_183",
+    "raw": "{\"cpus\":6.857273560339856}",
+    "f64_bits": "401b6dd91ec58a68"
+  },
+  {
+    "name": "valid_cpu_random_184",
+    "raw": "{\"cpus\":42.21313175783716}",
+    "f64_bits": "40451b47e6c4d326"
+  },
+  {
+    "name": "valid_cpu_random_185",
+    "raw": "{\"cpus\":57.57475229169933}",
+    "f64_bits": "404cc9917bac1329"
+  },
+  {
+    "name": "valid_cpu_random_186",
+    "raw": "{\"cpus\":4.302857889207853}",
+    "f64_bits": "4011362060e5eeeb"
+  },
+  {
+    "name": "valid_cpu_random_187",
+    "raw": "{\"cpus\":46.62336391370696}",
+    "f64_bits": "40474fca63837061"
+  },
+  {
+    "name": "valid_cpu_random_188",
+    "raw": "{\"cpus\":61.09951355271302}",
+    "f64_bits": "404e8cbcdc2f34a2"
+  },
+  {
+    "name": "valid_cpu_random_189",
+    "raw": "{\"cpus\":52.66923994852805}",
+    "f64_bits": "404a55a9a7960d67"
+  },
+  {
+    "name": "valid_cpu_random_190",
+    "raw": "{\"cpus\":52.7193104478814}",
+    "f64_bits": "404a5c125d60a92e"
+  },
+  {
+    "name": "valid_cpu_random_191",
+    "raw": "{\"cpus\":15.571967879455297}",
+    "f64_bits": "402f24d8f9513ef6"
+  },
+  {
+    "name": "valid_cpu_random_192",
+    "raw": "{\"cpus\":23.550527340854536}",
+    "f64_bits": "40378cef5c1c862a"
+  },
+  {
+    "name": "valid_cpu_random_193",
+    "raw": "{\"cpus\":22.034666781869625}",
+    "f64_bits": "403608dfec16633a"
+  },
+  {
+    "name": "valid_cpu_random_194",
+    "raw": "{\"cpus\":31.49734208416383}",
+    "f64_bits": "403f7f51cf92687b"
+  },
+  {
+    "name": "valid_cpu_random_195",
+    "raw": "{\"cpus\":29.969291180597285}",
+    "f64_bits": "403df8237780f771"
+  },
+  {
+    "name": "valid_cpu_random_196",
+    "raw": "{\"cpus\":2.172419340140906}",
+    "f64_bits": "4001611d6418d322"
+  },
+  {
+    "name": "valid_cpu_random_197",
+    "raw": "{\"cpus\":46.450321681806315}",
+    "f64_bits": "404739a4241004d8"
+  },
+  {
+    "name": "valid_cpu_random_198",
+    "raw": "{\"cpus\":27.78532527566926}",
+    "f64_bits": "403bc90b13c7b8be"
+  },
+  {
+    "name": "valid_cpu_random_199",
+    "raw": "{\"cpus\":62.60492741983109}",
+    "f64_bits": "404f4d6e42fe5069"
+  },
+  {
+    "name": "valid_cpu_random_200",
+    "raw": "{\"cpus\":7.089175028186239}",
+    "f64_bits": "401c5b50b2d6b817"
+  },
+  {
+    "name": "valid_cpu_random_201",
+    "raw": "{\"cpus\":11.197207466151117}",
+    "f64_bits": "402664f860834aca"
+  },
+  {
+    "name": "valid_cpu_random_202",
+    "raw": "{\"cpus\":25.863473862821593}",
+    "f64_bits": "4039dd0c9f81c500"
+  },
+  {
+    "name": "valid_cpu_random_203",
+    "raw": "{\"cpus\":34.18858747726588}",
+    "f64_bits": "40411823a26ba563"
+  },
+  {
+    "name": "valid_cpu_random_204",
+    "raw": "{\"cpus\":46.274800939719405}",
+    "f64_bits": "4047232cad5c80a1"
+  },
+  {
+    "name": "valid_cpu_random_205",
+    "raw": "{\"cpus\":53.36340365525373}",
+    "f64_bits": "404aae8402cf47e3"
+  },
+  {
+    "name": "valid_cpu_random_206",
+    "raw": "{\"cpus\":46.886505885435646}",
+    "f64_bits": "40477179065cd42d"
+  },
+  {
+    "name": "valid_cpu_random_207",
+    "raw": "{\"cpus\":8.170315670658832}",
+    "f64_bits": "402057339d96f3b5"
+  },
+  {
+    "name": "valid_cpu_random_208",
+    "raw": "{\"cpus\":7.542460056116203}",
+    "f64_bits": "401e2b7aa6219f26"
+  },
+  {
+    "name": "valid_cpu_random_209",
+    "raw": "{\"cpus\":55.312092090768736}",
+    "f64_bits": "404ba7f2a2359893"
+  },
+  {
+    "name": "valid_cpu_random_210",
+    "raw": "{\"cpus\":28.33706300831391}",
+    "f64_bits": "403c5649c2e5664d"
+  },
+  {
+    "name": "valid_cpu_random_211",
+    "raw": "{\"cpus\":61.96386072262535}",
+    "f64_bits": "404efb5fc9c4c993"
+  },
+  {
+    "name": "valid_cpu_random_212",
+    "raw": "{\"cpus\":22.112128231097884}",
+    "f64_bits": "40361cb46f8d8614"
+  },
+  {
+    "name": "valid_cpu_random_213",
+    "raw": "{\"cpus\":50.81355408178124}",
+    "f64_bits": "404968228a47638d"
+  },
+  {
+    "name": "valid_cpu_random_214",
+    "raw": "{\"cpus\":9.182017396913881}",
+    "f64_bits": "40225d31625e18aa"
+  },
+  {
+    "name": "valid_cpu_random_215",
+    "raw": "{\"cpus\":33.477993248251096}",
+    "f64_bits": "4040bd2ee1fc7940"
+  },
+  {
+    "name": "valid_cpu_random_216",
+    "raw": "{\"cpus\":36.942011238706414}",
+    "f64_bits": "40427893d3035ab0"
+  },
+  {
+    "name": "valid_cpu_random_217",
+    "raw": "{\"cpus\":13.950861956462463}",
+    "f64_bits": "402be6d760dc08a1"
+  },
+  {
+    "name": "valid_cpu_random_218",
+    "raw": "{\"cpus\":26.650037349992743}",
+    "f64_bits": "403aa668d90765b8"
+  },
+  {
+    "name": "valid_cpu_random_219",
+    "raw": "{\"cpus\":43.06035543853514}",
+    "f64_bits": "404587b9ba1d5274"
+  },
+  {
+    "name": "valid_cpu_random_220",
+    "raw": "{\"cpus\":25.905984147663844}",
+    "f64_bits": "4039e7ee93bce920"
+  },
+  {
+    "name": "valid_cpu_random_221",
+    "raw": "{\"cpus\":30.888175732926353}",
+    "f64_bits": "403ee35f7c1e04ff"
+  },
+  {
+    "name": "valid_cpu_random_222",
+    "raw": "{\"cpus\":2.726412129100838}",
+    "f64_bits": "4005cfb1298f3f23"
+  },
+  {
+    "name": "valid_cpu_random_223",
+    "raw": "{\"cpus\":25.27616459884316}",
+    "f64_bits": "403946b2b9205826"
+  },
+  {
+    "name": "valid_cpu_random_224",
+    "raw": "{\"cpus\":13.730039104528391}",
+    "f64_bits": "402b75c7af7d804a"
+  },
+  {
+    "name": "valid_cpu_random_225",
+    "raw": "{\"cpus\":40.56591973854566}",
+    "f64_bits": "404448700ed89b74"
+  },
+  {
+    "name": "valid_cpu_random_226",
+    "raw": "{\"cpus\":21.771502799965354}",
+    "f64_bits": "4035c581351e9fa6"
+  },
+  {
+    "name": "valid_cpu_random_227",
+    "raw": "{\"cpus\":10.623377664550217}",
+    "f64_bits": "40253f2b5b74999f"
+  },
+  {
+    "name": "valid_cpu_random_228",
+    "raw": "{\"cpus\":50.897886452630026}",
+    "f64_bits": "404972edf17ac8a1"
+  },
+  {
+    "name": "valid_cpu_random_229",
+    "raw": "{\"cpus\":17.007794731123898}",
+    "f64_bits": "403101fed5e3421d"
+  },
+  {
+    "name": "valid_cpu_random_230",
+    "raw": "{\"cpus\":52.90999468922162}",
+    "f64_bits": "404a747ab4badeca"
+  },
+  {
+    "name": "valid_cpu_random_231",
+    "raw": "{\"cpus\":49.47727797740173}",
+    "f64_bits": "4048bd1771dc054e"
+  },
+  {
+    "name": "valid_cpu_random_232",
+    "raw": "{\"cpus\":15.65488637518902}",
+    "f64_bits": "402f4f4d445810cf"
+  },
+  {
+    "name": "valid_cpu_random_233",
+    "raw": "{\"cpus\":14.05556720390467}",
+    "f64_bits": "402c1c734df7005f"
+  },
+  {
+    "name": "valid_cpu_random_234",
+    "raw": "{\"cpus\":18.967074896137092}",
+    "f64_bits": "4032f792386bb100"
+  },
+  {
+    "name": "valid_cpu_random_235",
+    "raw": "{\"cpus\":5.1374289980125845}",
+    "f64_bits": "40148cba2feff1c4"
+  },
+  {
+    "name": "valid_cpu_random_236",
+    "raw": "{\"cpus\":61.652197840607755}",
+    "f64_bits": "404ed37b3805f750"
+  },
+  {
+    "name": "valid_cpu_random_237",
+    "raw": "{\"cpus\":46.168320380747886}",
+    "f64_bits": "4047158b85b147fe"
+  },
+  {
+    "name": "valid_cpu_random_238",
+    "raw": "{\"cpus\":24.74533958002378}",
+    "f64_bits": "4038bece93209dd4"
+  },
+  {
+    "name": "valid_cpu_random_239",
+    "raw": "{\"cpus\":61.08280525951134}",
+    "f64_bits": "404e8a995cdcc4dd"
+  },
+  {
+    "name": "valid_cpu_random_240",
+    "raw": "{\"cpus\":15.026849635189135}",
+    "f64_bits": "402e0dbf3c4217ff"
+  },
+  {
+    "name": "valid_cpu_random_241",
+    "raw": "{\"cpus\":30.27866597460428}",
+    "f64_bits": "403e4756a73f6ef0"
+  },
+  {
+    "name": "valid_cpu_random_242",
+    "raw": "{\"cpus\":32.44399007867809}",
+    "f64_bits": "404038d4aab9d5df"
+  },
+  {
+    "name": "valid_cpu_random_243",
+    "raw": "{\"cpus\":47.22632627671595}",
+    "f64_bits": "40479cf8426a5c38"
+  },
+  {
+    "name": "valid_cpu_random_244",
+    "raw": "{\"cpus\":28.658161268967344}",
+    "f64_bits": "403ca87d41c5b567"
+  },
+  {
+    "name": "valid_cpu_random_245",
+    "raw": "{\"cpus\":4.8819651485757865}",
+    "f64_bits": "40138721df35610f"
+  },
+  {
+    "name": "valid_cpu_random_246",
+    "raw": "{\"cpus\":0.518161897548211}",
+    "f64_bits": "3fe094c842801780"
+  },
+  {
+    "name": "valid_cpu_random_247",
+    "raw": "{\"cpus\":14.203541801609548}",
+    "f64_bits": "402c6836a18a9059"
+  },
+  {
+    "name": "valid_cpu_random_248",
+    "raw": "{\"cpus\":61.47547511440046}",
+    "f64_bits": "404ebcdc5e5934b7"
+  },
+  {
+    "name": "valid_cpu_random_249",
+    "raw": "{\"cpus\":35.317542363081685}",
+    "f64_bits": "4041a8a53a6843e4"
+  },
+  {
+    "name": "valid_cpu_random_250",
+    "raw": "{\"cpus\":23.273247995010166}",
+    "f64_bits": "403745f394a24428"
+  },
+  {
+    "name": "valid_cpu_random_251",
+    "raw": "{\"cpus\":13.089043926196993}",
+    "f64_bits": "402a2d972a5dd8d8"
+  },
+  {
+    "name": "valid_cpu_random_252",
+    "raw": "{\"cpus\":1.7633657791320385}",
+    "f64_bits": "3ffc36bf09041f65"
+  },
+  {
+    "name": "valid_cpu_random_253",
+    "raw": "{\"cpus\":32.557997479665175}",
+    "f64_bits": "4040476c761f34c8"
+  },
+  {
+    "name": "valid_cpu_random_254",
+    "raw": "{\"cpus\":7.879430281874803}",
+    "f64_bits": "401f84895f2f0eaf"
+  },
+  {
+    "name": "valid_cpu_random_255",
+    "raw": "{\"cpus\":38.53697575017369}",
+    "f64_bits": "404344bb9f12dedb"
+  },
+  {
+    "name": "valid_cpu_random_256",
+    "raw": "{\"cpus\":33.2293070525869}",
+    "f64_bits": "40409d59eef9cd2b"
+  },
+  {
+    "name": "valid_cpu_random_257",
+    "raw": "{\"cpus\":33.10617996724038}",
+    "f64_bits": "40408d974e1f64d6"
+  },
+  {
+    "name": "valid_cpu_random_258",
+    "raw": "{\"cpus\":12.128471032137258}",
+    "f64_bits": "402841c6f4830699"
+  },
+  {
+    "name": "valid_cpu_random_259",
+    "raw": "{\"cpus\":41.81954338201638}",
+    "f64_bits": "4044e8e6cc2bb4f0"
+  },
+  {
+    "name": "valid_cpu_random_260",
+    "raw": "{\"cpus\":28.78328393390977}",
+    "f64_bits": "403cc8854bbf9fec"
+  },
+  {
+    "name": "valid_cpu_random_261",
+    "raw": "{\"cpus\":41.18586480004806}",
+    "f64_bits": "404497ca6af2d78d"
+  },
+  {
+    "name": "valid_cpu_random_262",
+    "raw": "{\"cpus\":25.83663411552072}",
+    "f64_bits": "4039d62da744e11f"
+  },
+  {
+    "name": "valid_cpu_random_263",
+    "raw": "{\"cpus\":45.262992053777076}",
+    "f64_bits": "4046a1a9b93f0a4b"
+  },
+  {
+    "name": "valid_cpu_random_264",
+    "raw": "{\"cpus\":46.59284229705642}",
+    "f64_bits": "40474be241a2c57c"
+  },
+  {
+    "name": "valid_cpu_random_265",
+    "raw": "{\"cpus\":19.278200650703962}",
+    "f64_bits": "4033473828687fdb"
+  },
+  {
+    "name": "valid_cpu_random_266",
+    "raw": "{\"cpus\":63.99925943691598}",
+    "f64_bits": "404fffe7bbb4e302"
+  },
+  {
+    "name": "valid_cpu_random_267",
+    "raw": "{\"cpus\":47.300196713982146}",
+    "f64_bits": "4047a66cd88e75c2"
+  },
+  {
+    "name": "valid_cpu_random_268",
+    "raw": "{\"cpus\":24.562921942043623}",
+    "f64_bits": "4038901ba7034736"
+  },
+  {
+    "name": "valid_cpu_random_269",
+    "raw": "{\"cpus\":15.657313882698109}",
+    "f64_bits": "402f508b71faca52"
+  },
+  {
+    "name": "valid_cpu_random_270",
+    "raw": "{\"cpus\":49.92507785975265}",
+    "f64_bits": "4048f668f388f216"
+  },
+  {
+    "name": "valid_cpu_random_271",
+    "raw": "{\"cpus\":22.562679060726477}",
+    "f64_bits": "4036900bbc23f6d7"
+  },
+  {
+    "name": "valid_cpu_random_272",
+    "raw": "{\"cpus\":17.237800321653857}",
+    "f64_bits": "40313ce07b5c7b4a"
+  },
+  {
+    "name": "valid_cpu_random_273",
+    "raw": "{\"cpus\":27.850305019419885}",
+    "f64_bits": "403bd9ad96fa0876"
+  },
+  {
+    "name": "valid_cpu_random_274",
+    "raw": "{\"cpus\":30.049143027412548}",
+    "f64_bits": "403e0c94a32f9036"
+  },
+  {
+    "name": "valid_cpu_random_275",
+    "raw": "{\"cpus\":46.677429928984}",
+    "f64_bits": "404756b6061f28b0"
+  },
+  {
+    "name": "valid_cpu_random_276",
+    "raw": "{\"cpus\":35.49651126216817}",
+    "f64_bits": "4041bf8dae588dd2"
+  },
+  {
+    "name": "valid_cpu_random_277",
+    "raw": "{\"cpus\":10.886137719986817}",
+    "f64_bits": "4025c5b3d7de30d6"
+  },
+  {
+    "name": "valid_cpu_random_278",
+    "raw": "{\"cpus\":31.54540988887453}",
+    "f64_bits": "403f8b9ffb83a190"
+  },
+  {
+    "name": "valid_cpu_random_279",
+    "raw": "{\"cpus\":8.768647726240156}",
+    "f64_bits": "4021898c31dcb145"
+  },
+  {
+    "name": "valid_cpu_random_280",
+    "raw": "{\"cpus\":7.009601854850382}",
+    "f64_bits": "401c09d5119240d9"
+  },
+  {
+    "name": "valid_cpu_random_281",
+    "raw": "{\"cpus\":29.246788574232845}",
+    "f64_bits": "403d3f2d89375b46"
+  },
+  {
+    "name": "valid_cpu_random_282",
+    "raw": "{\"cpus\":32.68285307860242}",
+    "f64_bits": "40405767bacc4900"
+  },
+  {
+    "name": "valid_cpu_random_283",
+    "raw": "{\"cpus\":14.63416228641536}",
+    "f64_bits": "402d44b0eb510568"
+  },
+  {
+    "name": "valid_cpu_random_284",
+    "raw": "{\"cpus\":53.051433786645966}",
+    "f64_bits": "404a869561dfc6e5"
+  },
+  {
+    "name": "valid_cpu_random_285",
+    "raw": "{\"cpus\":35.30854592156479}",
+    "f64_bits": "4041a77e6ec937ad"
+  },
+  {
+    "name": "valid_cpu_random_286",
+    "raw": "{\"cpus\":58.46816602633814}",
+    "f64_bits": "404d3becdd461c3c"
+  },
+  {
+    "name": "valid_cpu_random_287",
+    "raw": "{\"cpus\":9.88626539446682}",
+    "f64_bits": "4023c5c493e99f81"
+  },
+  {
+    "name": "valid_cpu_random_288",
+    "raw": "{\"cpus\":58.79306212582704}",
+    "f64_bits": "404d65830f4b0fcb"
+  },
+  {
+    "name": "valid_cpu_random_289",
+    "raw": "{\"cpus\":52.79882921593223}",
+    "f64_bits": "404a66400926c256"
+  },
+  {
+    "name": "valid_cpu_random_290",
+    "raw": "{\"cpus\":31.60823067712584}",
+    "f64_bits": "403f9bb50172adee"
+  },
+  {
+    "name": "valid_cpu_random_291",
+    "raw": "{\"cpus\":53.78345235885933}",
+    "f64_bits": "404ae4482ab9a32f"
+  },
+  {
+    "name": "valid_cpu_random_292",
+    "raw": "{\"cpus\":11.229556493667648}",
+    "f64_bits": "402675886dc1c622"
+  },
+  {
+    "name": "valid_cpu_random_293",
+    "raw": "{\"cpus\":63.23532591942479}",
+    "f64_bits": "404f9e1f28e3ea51"
+  },
+  {
+    "name": "valid_cpu_random_294",
+    "raw": "{\"cpus\":28.02527402189956}",
+    "f64_bits": "403c06785bb97f3b"
+  },
+  {
+    "name": "valid_cpu_random_295",
+    "raw": "{\"cpus\":28.693903071691548}",
+    "f64_bits": "403cb1a3a1b78257"
+  },
+  {
+    "name": "valid_cpu_random_296",
+    "raw": "{\"cpus\":39.57335199739489}",
+    "f64_bits": "4043c9639926f423"
+  },
+  {
+    "name": "valid_cpu_random_297",
+    "raw": "{\"cpus\":15.29200135294361}",
+    "f64_bits": "402e9581338a8fa5"
+  },
+  {
+    "name": "valid_cpu_random_298",
+    "raw": "{\"cpus\":9.033918272454926}",
+    "f64_bits": "4022115dbc5ddc88"
+  },
+  {
+    "name": "valid_cpu_random_299",
+    "raw": "{\"cpus\":14.63642217828526}",
+    "f64_bits": "402d45d920b45e59"
+  },
+  {
+    "name": "valid_cpu_random_300",
+    "raw": "{\"cpus\":47.28090358768122}",
+    "f64_bits": "4047a3f4a61535c0"
+  },
+  {
+    "name": "valid_cpu_random_301",
+    "raw": "{\"cpus\":34.918968570228394}",
+    "f64_bits": "404175a0c3199767"
+  },
+  {
+    "name": "valid_cpu_random_302",
+    "raw": "{\"cpus\":22.334511652230542}",
+    "f64_bits": "403655a28e3e760b"
+  },
+  {
+    "name": "valid_cpu_random_303",
+    "raw": "{\"cpus\":30.609981380236313}",
+    "f64_bits": "403e9c27bd5f48ae"
+  },
+  {
+    "name": "valid_cpu_random_304",
+    "raw": "{\"cpus\":4.121102104480604}",
+    "f64_bits": "40107c0230a8e246"
+  },
+  {
+    "name": "valid_cpu_random_305",
+    "raw": "{\"cpus\":38.41387316156896}",
+    "f64_bits": "404334f9cbb6d0be"
+  },
+  {
+    "name": "valid_cpu_random_306",
+    "raw": "{\"cpus\":15.016026441879863}",
+    "f64_bits": "402e08349e277d92"
+  },
+  {
+    "name": "valid_cpu_random_307",
+    "raw": "{\"cpus\":59.26665569694964}",
+    "f64_bits": "404da221c61cd86c"
+  },
+  {
+    "name": "valid_cpu_random_308",
+    "raw": "{\"cpus\":62.65162884060737}",
+    "f64_bits": "404f536892e7c500"
+  },
+  {
+    "name": "valid_cpu_random_309",
+    "raw": "{\"cpus\":17.190040908183263}",
+    "f64_bits": "403130a6855d8c9c"
+  },
+  {
+    "name": "valid_cpu_random_310",
+    "raw": "{\"cpus\":13.284564368580346}",
+    "f64_bits": "402a91b26bc151a7"
+  },
+  {
+    "name": "valid_cpu_random_311",
+    "raw": "{\"cpus\":50.17653038235556}",
+    "f64_bits": "404916988c2d7bd7"
+  },
+  {
+    "name": "valid_cpu_random_312",
+    "raw": "{\"cpus\":55.90441912106128}",
+    "f64_bits": "404bf3c401796aea"
+  },
+  {
+    "name": "valid_cpu_random_313",
+    "raw": "{\"cpus\":16.755502282779958}",
+    "f64_bits": "4030c16898fc97e0"
+  },
+  {
+    "name": "valid_cpu_random_314",
+    "raw": "{\"cpus\":43.07836783449883}",
+    "f64_bits": "40458a07f50b1d8b"
+  },
+  {
+    "name": "valid_cpu_random_315",
+    "raw": "{\"cpus\":54.74719150689814}",
+    "f64_bits": "404b5fa3f8a6fcfd"
+  },
+  {
+    "name": "valid_cpu_random_316",
+    "raw": "{\"cpus\":35.73473769121001}",
+    "f64_bits": "4041de0be2797159"
+  },
+  {
+    "name": "valid_cpu_random_317",
+    "raw": "{\"cpus\":63.5622822366879}",
+    "f64_bits": "404fc7f8dd44d91f"
+  },
+  {
+    "name": "valid_cpu_random_318",
+    "raw": "{\"cpus\":26.84484184266745}",
+    "f64_bits": "403ad8478e148c90"
+  },
+  {
+    "name": "valid_cpu_random_319",
+    "raw": "{\"cpus\":52.18203212259341}",
+    "f64_bits": "404a174cd41eae1a"
+  },
+  {
+    "name": "valid_cpu_random_320",
+    "raw": "{\"cpus\":45.141499431415696}",
+    "f64_bits": "4046921ca7432aa0"
+  },
+  {
+    "name": "valid_cpu_random_321",
+    "raw": "{\"cpus\":35.01383163515624}",
+    "f64_bits": "404181c53c2a52b8"
+  },
+  {
+    "name": "valid_cpu_random_322",
+    "raw": "{\"cpus\":35.356868565353146}",
+    "f64_bits": "4041adadde8094c3"
+  },
+  {
+    "name": "valid_cpu_random_323",
+    "raw": "{\"cpus\":52.70739234966051}",
+    "f64_bits": "404a5a8bd51f9dc2"
+  },
+  {
+    "name": "valid_cpu_random_324",
+    "raw": "{\"cpus\":35.27803334267382}",
+    "f64_bits": "4041a39698b8fda6"
+  },
+  {
+    "name": "valid_cpu_random_325",
+    "raw": "{\"cpus\":6.91122111185435}",
+    "f64_bits": "401ba51725ab5b55"
+  },
+  {
+    "name": "valid_cpu_random_326",
+    "raw": "{\"cpus\":38.75300341832877}",
+    "f64_bits": "404360626a7fbfc7"
+  },
+  {
+    "name": "valid_cpu_random_327",
+    "raw": "{\"cpus\":4.874387877454637}",
+    "f64_bits": "40137f5f8926bf00"
+  },
+  {
+    "name": "valid_cpu_random_328",
+    "raw": "{\"cpus\":8.642925335937536}",
+    "f64_bits": "4021492d82773e39"
+  },
+  {
+    "name": "valid_cpu_random_329",
+    "raw": "{\"cpus\":29.480935315333614}",
+    "f64_bits": "403d7b1e93aad96d"
+  },
+  {
+    "name": "valid_cpu_random_330",
+    "raw": "{\"cpus\":50.076556577184554}",
+    "f64_bits": "404909cc9b1da693"
+  },
+  {
+    "name": "valid_cpu_random_331",
+    "raw": "{\"cpus\":34.11156512252452}",
+    "f64_bits": "40410e47c4144efb"
+  },
+  {
+    "name": "valid_cpu_random_332",
+    "raw": "{\"cpus\":17.937472768563893}",
+    "f64_bits": "4031effe3721df5c"
+  },
+  {
+    "name": "valid_cpu_random_333",
+    "raw": "{\"cpus\":17.621677285754483}",
+    "f64_bits": "40319f263e1afb47"
+  },
+  {
+    "name": "valid_cpu_random_334",
+    "raw": "{\"cpus\":9.542671905007877}",
+    "f64_bits": "402315d91788ef07"
+  },
+  {
+    "name": "valid_cpu_random_335",
+    "raw": "{\"cpus\":15.091270032374586}",
+    "f64_bits": "402e2ebaf2184eb3"
+  },
+  {
+    "name": "valid_cpu_random_336",
+    "raw": "{\"cpus\":15.563273591395559}",
+    "f64_bits": "402f2065656b7d21"
+  },
+  {
+    "name": "valid_cpu_random_337",
+    "raw": "{\"cpus\":5.904087238730224}",
+    "f64_bits": "40179dc90b8c4f1c"
+  },
+  {
+    "name": "valid_cpu_random_338",
+    "raw": "{\"cpus\":22.135867484236805}",
+    "f64_bits": "403622c83621630a"
+  },
+  {
+    "name": "valid_cpu_random_339",
+    "raw": "{\"cpus\":5.582053999848765}",
+    "f64_bits": "40165405f6b76cfd"
+  },
+  {
+    "name": "valid_cpu_random_340",
+    "raw": "{\"cpus\":61.902397094623275}",
+    "f64_bits": "404ef381bf7cb4c9"
+  },
+  {
+    "name": "valid_cpu_random_341",
+    "raw": "{\"cpus\":49.88723431179698}",
+    "f64_bits": "4048f190e4d8874f"
+  },
+  {
+    "name": "valid_cpu_random_342",
+    "raw": "{\"cpus\":52.04249938416268}",
+    "f64_bits": "404a05709eac8a18"
+  },
+  {
+    "name": "valid_cpu_random_343",
+    "raw": "{\"cpus\":11.893755342971797}",
+    "f64_bits": "4027c99a4ce160d6"
+  },
+  {
+    "name": "valid_cpu_random_344",
+    "raw": "{\"cpus\":38.91686467474648}",
+    "f64_bits": "4043755bd2587268"
+  },
+  {
+    "name": "valid_cpu_random_345",
+    "raw": "{\"cpus\":37.19985982112814}",
+    "f64_bits": "4042999501b1c3d0"
+  },
+  {
+    "name": "valid_cpu_random_346",
+    "raw": "{\"cpus\":62.06244681469718}",
+    "f64_bits": "404f07fe41d96e90"
+  },
+  {
+    "name": "valid_cpu_random_347",
+    "raw": "{\"cpus\":12.619439297550377}",
+    "f64_bits": "40293d2725c9ac13"
+  },
+  {
+    "name": "valid_cpu_random_348",
+    "raw": "{\"cpus\":25.855195014126156}",
+    "f64_bits": "4039daee0f795fc5"
+  },
+  {
+    "name": "valid_cpu_random_349",
+    "raw": "{\"cpus\":13.224041003422862}",
+    "f64_bits": "402a72b5809d5414"
+  },
+  {
+    "name": "valid_cpu_random_350",
+    "raw": "{\"cpus\":39.13414941429186}",
+    "f64_bits": "4043912bced9949f"
+  },
+  {
+    "name": "valid_cpu_random_351",
+    "raw": "{\"cpus\":51.81413236978558}",
+    "f64_bits": "4049e8357d4f6c0a"
+  },
+  {
+    "name": "valid_cpu_random_352",
+    "raw": "{\"cpus\":52.847468486586166}",
+    "f64_bits": "404a6c79d8ed239c"
+  },
+  {
+    "name": "valid_cpu_random_353",
+    "raw": "{\"cpus\":14.01243780490618}",
+    "f64_bits": "402c065e3f7a9cb5"
+  },
+  {
+    "name": "valid_cpu_random_354",
+    "raw": "{\"cpus\":21.373679398909022}",
+    "f64_bits": "40355fa973fd80d1"
+  },
+  {
+    "name": "valid_cpu_random_355",
+    "raw": "{\"cpus\":4.790043024512807}",
+    "f64_bits": "4013290109e2dc9a"
+  },
+  {
+    "name": "valid_cpu_random_356",
+    "raw": "{\"cpus\":36.50971738790373}",
+    "f64_bits": "4042413e6b5b9fe1"
+  },
+  {
+    "name": "valid_cpu_random_357",
+    "raw": "{\"cpus\":27.561159701562232}",
+    "f64_bits": "403b8fa829860afc"
+  },
+  {
+    "name": "valid_cpu_random_358",
+    "raw": "{\"cpus\":58.21187483087512}",
+    "f64_bits": "404d1b1eb6e6ba22"
+  },
+  {
+    "name": "valid_cpu_random_359",
+    "raw": "{\"cpus\":32.35639695385178}",
+    "f64_bits": "40402d9e6a5697fd"
+  },
+  {
+    "name": "valid_cpu_random_360",
+    "raw": "{\"cpus\":14.559114667966844}",
+    "f64_bits": "402d1e44471b4353"
+  },
+  {
+    "name": "valid_cpu_random_361",
+    "raw": "{\"cpus\":38.28891713923695}",
+    "f64_bits": "404324fb3ca02367"
+  },
+  {
+    "name": "valid_cpu_random_362",
+    "raw": "{\"cpus\":22.653907576001206}",
+    "f64_bits": "4036a7667ca58825"
+  },
+  {
+    "name": "valid_cpu_random_363",
+    "raw": "{\"cpus\":41.58556217874027}",
+    "f64_bits": "4044caf3b393bb63"
+  },
+  {
+    "name": "valid_cpu_random_364",
+    "raw": "{\"cpus\":35.811922633269454}",
+    "f64_bits": "4041e7ed14b26323"
+  },
+  {
+    "name": "valid_cpu_random_365",
+    "raw": "{\"cpus\":31.305288072042117}",
+    "f64_bits": "403f4e275bed47a0"
+  },
+  {
+    "name": "valid_cpu_random_366",
+    "raw": "{\"cpus\":52.50599548014148}",
+    "f64_bits": "404a40c475bb90d4"
+  },
+  {
+    "name": "valid_cpu_random_367",
+    "raw": "{\"cpus\":25.458911995221985}",
+    "f64_bits": "4039757b41ab3875"
+  },
+  {
+    "name": "valid_cpu_random_368",
+    "raw": "{\"cpus\":10.491250343711549}",
+    "f64_bits": "4024fb852a40c79c"
+  },
+  {
+    "name": "valid_cpu_random_369",
+    "raw": "{\"cpus\":29.756802478592835}",
+    "f64_bits": "403dc1bdcea71685"
+  },
+  {
+    "name": "valid_cpu_random_370",
+    "raw": "{\"cpus\":38.65781622079962}",
+    "f64_bits": "4043543352698e6c"
+  },
+  {
+    "name": "valid_cpu_random_371",
+    "raw": "{\"cpus\":37.45150340690009}",
+    "f64_bits": "4042b9cadd175590"
+  },
+  {
+    "name": "valid_cpu_random_372",
+    "raw": "{\"cpus\":24.94709256008969}",
+    "f64_bits": "4038f274a873dec1"
+  },
+  {
+    "name": "valid_cpu_random_373",
+    "raw": "{\"cpus\":49.60470093446771}",
+    "f64_bits": "4048cd66d718b321"
+  },
+  {
+    "name": "valid_cpu_random_374",
+    "raw": "{\"cpus\":62.212977229141316}",
+    "f64_bits": "404f1b42d67cfa32"
+  },
+  {
+    "name": "valid_cpu_random_375",
+    "raw": "{\"cpus\":46.41040381371125}",
+    "f64_bits": "404734881cb70591"
+  },
+  {
+    "name": "valid_cpu_random_376",
+    "raw": "{\"cpus\":42.4771413821562}",
+    "f64_bits": "40453d12f803f6ed"
+  },
+  {
+    "name": "valid_cpu_random_377",
+    "raw": "{\"cpus\":41.21732847971089}",
+    "f64_bits": "40449bd16b6c6c81"
+  },
+  {
+    "name": "valid_cpu_random_378",
+    "raw": "{\"cpus\":53.0978676900357}",
+    "f64_bits": "404a8c86edb004ea"
+  },
+  {
+    "name": "valid_cpu_random_379",
+    "raw": "{\"cpus\":16.24932789069216}",
+    "f64_bits": "40303fd3f3e080e5"
+  },
+  {
+    "name": "valid_cpu_random_380",
+    "raw": "{\"cpus\":20.082196126195953}",
+    "f64_bits": "4034150ace29de98"
+  },
+  {
+    "name": "valid_cpu_random_381",
+    "raw": "{\"cpus\":42.58610232386316}",
+    "f64_bits": "40454b0566a48d0a"
+  },
+  {
+    "name": "valid_cpu_random_382",
+    "raw": "{\"cpus\":14.544784870584051}",
+    "f64_bits": "402d16ee0ae50737"
+  },
+  {
+    "name": "valid_cpu_random_383",
+    "raw": "{\"cpus\":33.997720177637106}",
+    "f64_bits": "4040ffb54b76c15e"
+  },
+  {
+    "name": "valid_cpu_random_384",
+    "raw": "{\"cpus\":21.828473779820648}",
+    "f64_bits": "4035d416db8dec56"
+  },
+  {
+    "name": "valid_cpu_random_385",
+    "raw": "{\"cpus\":41.85398968355364}",
+    "f64_bits": "4044ed4f88b0fdfd"
+  },
+  {
+    "name": "valid_cpu_random_386",
+    "raw": "{\"cpus\":39.31212049160741}",
+    "f64_bits": "4043a7f39073eec1"
+  },
+  {
+    "name": "valid_cpu_random_387",
+    "raw": "{\"cpus\":15.24167474924866}",
+    "f64_bits": "402e7bbccaf09580"
+  },
+  {
+    "name": "valid_cpu_random_388",
+    "raw": "{\"cpus\":40.32891939951896}",
+    "f64_bits": "40442a1a07e7fa19"
+  },
+  {
+    "name": "valid_cpu_random_389",
+    "raw": "{\"cpus\":22.091661157776674}",
+    "f64_bits": "403617771b0af6dd"
+  },
+  {
+    "name": "valid_cpu_random_390",
+    "raw": "{\"cpus\":9.037525109541642}",
+    "f64_bits": "402213367dbc8535"
+  },
+  {
+    "name": "valid_cpu_random_391",
+    "raw": "{\"cpus\":53.27120549367214}",
+    "f64_bits": "404aa2b6dc92e8a0"
+  },
+  {
+    "name": "valid_cpu_random_392",
+    "raw": "{\"cpus\":41.26074256731717}",
+    "f64_bits": "4044a160032fa6b3"
+  },
+  {
+    "name": "valid_cpu_random_393",
+    "raw": "{\"cpus\":3.476673710586506}",
+    "f64_bits": "400bd03a4e6ea7f6"
+  },
+  {
+    "name": "valid_cpu_random_394",
+    "raw": "{\"cpus\":24.93542530313788}",
+    "f64_bits": "4038ef78085cd3fd"
+  },
+  {
+    "name": "valid_cpu_random_395",
+    "raw": "{\"cpus\":17.092510703053787}",
+    "f64_bits": "403117aec80c255f"
+  },
+  {
+    "name": "valid_cpu_random_396",
+    "raw": "{\"cpus\":1.2012688494019053}",
+    "f64_bits": "3ff33865af5e27dd"
+  },
+  {
+    "name": "valid_cpu_random_397",
+    "raw": "{\"cpus\":2.6606155295267593}",
+    "f64_bits": "400548f0cb746092"
+  },
+  {
+    "name": "valid_cpu_random_398",
+    "raw": "{\"cpus\":7.928759045775545}",
+    "f64_bits": "401fb70c9c7de16a"
+  },
+  {
+    "name": "valid_cpu_random_399",
+    "raw": "{\"cpus\":9.25099455039438}",
+    "f64_bits": "402280825b92d60f"
+  },
+  {
+    "name": "valid_cpu_random_400",
+    "raw": "{\"cpus\":18.722042891499743}",
+    "f64_bits": "4032b8d7cd8d4cf9"
+  },
+  {
+    "name": "valid_cpu_random_401",
+    "raw": "{\"cpus\":59.073841586267356}",
+    "f64_bits": "404d8973a41f0d31"
+  },
+  {
+    "name": "valid_cpu_random_402",
+    "raw": "{\"cpus\":15.049464750639093}",
+    "f64_bits": "402e1953719c9972"
+  },
+  {
+    "name": "valid_cpu_random_403",
+    "raw": "{\"cpus\":30.716822969973933}",
+    "f64_bits": "403eb781b5cd0f44"
+  },
+  {
+    "name": "valid_cpu_random_404",
+    "raw": "{\"cpus\":17.730847183646965}",
+    "f64_bits": "4031bb18cd10232e"
+  },
+  {
+    "name": "valid_cpu_random_405",
+    "raw": "{\"cpus\":62.34065838480378}",
+    "f64_bits": "404f2b9ab1a6eb93"
+  },
+  {
+    "name": "valid_cpu_random_406",
+    "raw": "{\"cpus\":53.32142784787349}",
+    "f64_bits": "404aa9248c3751f5"
+  },
+  {
+    "name": "valid_cpu_random_407",
+    "raw": "{\"cpus\":3.795848505876007}",
+    "f64_bits": "400e5de5d24a769c"
+  },
+  {
+    "name": "valid_cpu_random_408",
+    "raw": "{\"cpus\":41.6560606254573}",
+    "f64_bits": "4044d3f9cb694426"
+  },
+  {
+    "name": "valid_cpu_random_409",
+    "raw": "{\"cpus\":46.31049155795904}",
+    "f64_bits": "404727be2ff78f20"
+  },
+  {
+    "name": "valid_cpu_random_410",
+    "raw": "{\"cpus\":21.030990340190904}",
+    "f64_bits": "403507eefba19ca2"
+  },
+  {
+    "name": "valid_cpu_random_411",
+    "raw": "{\"cpus\":29.22675601736625}",
+    "f64_bits": "403d3a0caeaec25e"
+  },
+  {
+    "name": "valid_cpu_random_412",
+    "raw": "{\"cpus\":41.992618062817236}",
+    "f64_bits": "4044ff0e1bd29c05"
+  },
+  {
+    "name": "valid_cpu_random_413",
+    "raw": "{\"cpus\":32.61906541571799}",
+    "f64_bits": "40404f3d89194bf5"
+  },
+  {
+    "name": "valid_cpu_random_414",
+    "raw": "{\"cpus\":56.850458990474834}",
+    "f64_bits": "404c6cdbd71756dc"
+  },
+  {
+    "name": "valid_cpu_random_415",
+    "raw": "{\"cpus\":56.08356573902769}",
+    "f64_bits": "404c0ab2483a1852"
+  },
+  {
+    "name": "valid_cpu_random_416",
+    "raw": "{\"cpus\":28.08715309870229}",
+    "f64_bits": "403c164faa5cabe1"
+  },
+  {
+    "name": "valid_cpu_random_417",
+    "raw": "{\"cpus\":48.095544733846715}",
+    "f64_bits": "40480c3acf51969d"
+  },
+  {
+    "name": "valid_cpu_random_418",
+    "raw": "{\"cpus\":31.835037851522486}",
+    "f64_bits": "403fd5c50a673610"
+  },
+  {
+    "name": "valid_cpu_random_419",
+    "raw": "{\"cpus\":32.56267803355757}",
+    "f64_bits": "40404805d5742757"
+  },
+  {
+    "name": "valid_cpu_random_420",
+    "raw": "{\"cpus\":50.17843258574987}",
+    "f64_bits": "404916d6e1042b0f"
+  },
+  {
+    "name": "valid_cpu_random_421",
+    "raw": "{\"cpus\":22.924013642381755}",
+    "f64_bits": "4036ec8c28771665"
+  },
+  {
+    "name": "valid_cpu_random_422",
+    "raw": "{\"cpus\":5.152902629385909}",
+    "f64_bits": "40149c9281c2bd53"
+  },
+  {
+    "name": "valid_cpu_random_423",
+    "raw": "{\"cpus\":6.478934502444709}",
+    "f64_bits": "4019ea6dce63b448"
+  },
+  {
+    "name": "valid_cpu_random_424",
+    "raw": "{\"cpus\":20.072667882603916}",
+    "f64_bits": "4034129a5cc340de"
+  },
+  {
+    "name": "valid_cpu_random_425",
+    "raw": "{\"cpus\":31.2337489573962}",
+    "f64_bits": "403f3bd6f8bf7da4"
+  },
+  {
+    "name": "valid_cpu_random_426",
+    "raw": "{\"cpus\":43.0057649344107}",
+    "f64_bits": "404580bce7c660f7"
+  },
+  {
+    "name": "valid_cpu_random_427",
+    "raw": "{\"cpus\":45.164688805459335}",
+    "f64_bits": "4046951485d4bb8a"
+  },
+  {
+    "name": "valid_cpu_random_428",
+    "raw": "{\"cpus\":3.0876181728704175}",
+    "f64_bits": "4008b37128181c18"
+  },
+  {
+    "name": "valid_cpu_random_429",
+    "raw": "{\"cpus\":58.57800094414435}",
+    "f64_bits": "404d49fbef58141c"
+  },
+  {
+    "name": "valid_cpu_random_430",
+    "raw": "{\"cpus\":49.85258415976537}",
+    "f64_bits": "4048ed217a4da3d4"
+  },
+  {
+    "name": "valid_cpu_random_431",
+    "raw": "{\"cpus\":27.797078846764848}",
+    "f64_bits": "403bcc0d5bfb303c"
+  },
+  {
+    "name": "valid_cpu_random_432",
+    "raw": "{\"cpus\":4.935973200143317}",
+    "f64_bits": "4013be6fc2323129"
+  },
+  {
+    "name": "valid_cpu_random_433",
+    "raw": "{\"cpus\":15.61165944726158}",
+    "f64_bits": "402f392b6d548e4c"
+  },
+  {
+    "name": "valid_cpu_random_434",
+    "raw": "{\"cpus\":51.841158848224026}",
+    "f64_bits": "4049ebab17d7ee7e"
+  },
+  {
+    "name": "valid_cpu_random_435",
+    "raw": "{\"cpus\":43.95326878052414}",
+    "f64_bits": "4045fa04b61e5312"
+  },
+  {
+    "name": "valid_cpu_random_436",
+    "raw": "{\"cpus\":25.09429727663998}",
+    "f64_bits": "40391823ddc74545"
+  },
+  {
+    "name": "valid_cpu_random_437",
+    "raw": "{\"cpus\":39.274949985248696}",
+    "f64_bits": "4043a3318fa556e4"
+  },
+  {
+    "name": "valid_cpu_random_438",
+    "raw": "{\"cpus\":58.54823863209952}",
+    "f64_bits": "404d462caef9a2b7"
+  },
+  {
+    "name": "valid_cpu_random_439",
+    "raw": "{\"cpus\":5.407652324382361}",
+    "f64_bits": "4015a16f9c657147"
+  },
+  {
+    "name": "valid_cpu_random_440",
+    "raw": "{\"cpus\":9.823411506079463}",
+    "f64_bits": "4023a596316385d6"
+  },
+  {
+    "name": "valid_cpu_random_441",
+    "raw": "{\"cpus\":53.99229944164314}",
+    "f64_bits": "404aff03ab08d922"
+  },
+  {
+    "name": "valid_cpu_random_442",
+    "raw": "{\"cpus\":38.65394481353954}",
+    "f64_bits": "404353b476b1c544"
+  },
+  {
+    "name": "valid_cpu_random_443",
+    "raw": "{\"cpus\":48.681347940262455}",
+    "f64_bits": "4048573668c84fe6"
+  },
+  {
+    "name": "valid_cpu_random_444",
+    "raw": "{\"cpus\":7.973974553146786}",
+    "f64_bits": "401fe55995d39b4d"
+  },
+  {
+    "name": "valid_cpu_random_445",
+    "raw": "{\"cpus\":46.577999649522965}",
+    "f64_bits": "404749fbe47be67a"
+  },
+  {
+    "name": "valid_cpu_random_446",
+    "raw": "{\"cpus\":6.934317945314123}",
+    "f64_bits": "401bbcbdd7ecc2a3"
+  },
+  {
+    "name": "valid_cpu_random_447",
+    "raw": "{\"cpus\":32.37984513871353}",
+    "f64_bits": "4040309ec3f828db"
+  },
+  {
+    "name": "valid_cpu_random_448",
+    "raw": "{\"cpus\":15.879121257947933}",
+    "f64_bits": "402fc21c2e7835a2"
+  },
+  {
+    "name": "valid_cpu_random_449",
+    "raw": "{\"cpus\":26.686812507823394}",
+    "f64_bits": "403aafd2f1cb95d1"
+  },
+  {
+    "name": "valid_cpu_random_450",
+    "raw": "{\"cpus\":25.59157774089638}",
+    "f64_bits": "40399771a38a3107"
+  },
+  {
+    "name": "valid_cpu_random_451",
+    "raw": "{\"cpus\":41.68835430228002}",
+    "f64_bits": "4044d81bfe682d42"
+  },
+  {
+    "name": "valid_cpu_random_452",
+    "raw": "{\"cpus\":32.71049604798462}",
+    "f64_bits": "40405af188d503fe"
+  },
+  {
+    "name": "valid_cpu_random_453",
+    "raw": "{\"cpus\":46.10256317880698}",
+    "f64_bits": "40470d20ca4d5ff9"
+  },
+  {
+    "name": "valid_cpu_random_454",
+    "raw": "{\"cpus\":25.918189872839104}",
+    "f64_bits": "4039eb0e7dd35cc3"
+  },
+  {
+    "name": "valid_cpu_random_455",
+    "raw": "{\"cpus\":7.194122740882246}",
+    "f64_bits": "401cc6c81c9dff1c"
+  },
+  {
+    "name": "valid_cpu_random_456",
+    "raw": "{\"cpus\":9.445710987519925}",
+    "f64_bits": "4022e4343b05bb5d"
+  },
+  {
+    "name": "valid_cpu_random_457",
+    "raw": "{\"cpus\":17.28996707571404}",
+    "f64_bits": "40314a3b48431bca"
+  },
+  {
+    "name": "valid_cpu_random_458",
+    "raw": "{\"cpus\":27.831339046811433}",
+    "f64_bits": "403bd4d2a2c1f163"
+  },
+  {
+    "name": "valid_cpu_random_459",
+    "raw": "{\"cpus\":62.06808856710905}",
+    "f64_bits": "404f08b7204c7b81"
+  },
+  {
+    "name": "valid_cpu_random_460",
+    "raw": "{\"cpus\":9.506455823011134}",
+    "f64_bits": "4023034e2d796736"
+  },
+  {
+    "name": "valid_cpu_random_461",
+    "raw": "{\"cpus\":45.44033659988856}",
+    "f64_bits": "4046b85cf31fe069"
+  },
+  {
+    "name": "valid_cpu_random_462",
+    "raw": "{\"cpus\":58.1990612807807}",
+    "f64_bits": "404d197ad70d6d2e"
+  },
+  {
+    "name": "valid_cpu_random_463",
+    "raw": "{\"cpus\":10.582827815455428}",
+    "f64_bits": "40252a68684d290e"
+  },
+  {
+    "name": "valid_cpu_random_464",
+    "raw": "{\"cpus\":16.93358042452858}",
+    "f64_bits": "4030eeff206f893a"
+  },
+  {
+    "name": "valid_cpu_random_465",
+    "raw": "{\"cpus\":1.8169663541250303}",
+    "f64_bits": "3ffd124b4fce63c7"
+  },
+  {
+    "name": "valid_cpu_random_466",
+    "raw": "{\"cpus\":52.30243949502055}",
+    "f64_bits": "404a26b6565e10e6"
+  },
+  {
+    "name": "valid_cpu_random_467",
+    "raw": "{\"cpus\":61.38164405788657}",
+    "f64_bits": "404eb0d9b665aaf3"
+  },
+  {
+    "name": "valid_cpu_random_468",
+    "raw": "{\"cpus\":35.481865629677976}",
+    "f64_bits": "4041bdadc5e04445"
+  },
+  {
+    "name": "valid_cpu_random_469",
+    "raw": "{\"cpus\":34.27111667264249}",
+    "f64_bits": "404122b3f37d332e"
+  },
+  {
+    "name": "valid_cpu_random_470",
+    "raw": "{\"cpus\":60.06610741027296}",
+    "f64_bits": "404e0876352692a4"
+  },
+  {
+    "name": "valid_cpu_random_471",
+    "raw": "{\"cpus\":60.52418561451103}",
+    "f64_bits": "404e431883a3ade5"
+  },
+  {
+    "name": "valid_cpu_random_472",
+    "raw": "{\"cpus\":23.68835908231692}",
+    "f64_bits": "4037b0384d0274ac"
+  },
+  {
+    "name": "valid_cpu_random_473",
+    "raw": "{\"cpus\":14.437460862877616}",
+    "f64_bits": "402cdffadec6adb9"
+  },
+  {
+    "name": "valid_cpu_random_474",
+    "raw": "{\"cpus\":62.883442257157796}",
+    "f64_bits": "404f7114a2c932d6"
+  },
+  {
+    "name": "valid_cpu_random_475",
+    "raw": "{\"cpus\":30.028447823048886}",
+    "f64_bits": "403e07485b45a32a"
+  },
+  {
+    "name": "valid_cpu_random_476",
+    "raw": "{\"cpus\":17.928325493728508}",
+    "f64_bits": "4031eda6bd539b64"
+  },
+  {
+    "name": "valid_cpu_random_477",
+    "raw": "{\"cpus\":0.4524112637550869}",
+    "f64_bits": "3fdcf44e5f8ae362"
+  },
+  {
+    "name": "valid_cpu_random_478",
+    "raw": "{\"cpus\":1.9459686600379955}",
+    "f64_bits": "3fff22b0089e7754"
+  },
+  {
+    "name": "valid_cpu_random_479",
+    "raw": "{\"cpus\":11.91424736639703}",
+    "f64_bits": "4027d4183b16423d"
+  },
+  {
+    "name": "valid_cpu_random_480",
+    "raw": "{\"cpus\":59.449179685897306}",
+    "f64_bits": "404db97eb84e7a6e"
+  },
+  {
+    "name": "valid_cpu_random_481",
+    "raw": "{\"cpus\":17.87351251792378}",
+    "f64_bits": "4031df9e84312116"
+  },
+  {
+    "name": "valid_cpu_random_482",
+    "raw": "{\"cpus\":55.50883763805805}",
+    "f64_bits": "404bc121977b3773"
+  },
+  {
+    "name": "valid_cpu_random_483",
+    "raw": "{\"cpus\":58.066918981832515}",
+    "f64_bits": "404d0890cd1b39e4"
+  },
+  {
+    "name": "valid_cpu_random_484",
+    "raw": "{\"cpus\":19.243674750842864}",
+    "f64_bits": "40333e6177edbb26"
+  },
+  {
+    "name": "valid_cpu_random_485",
+    "raw": "{\"cpus\":46.67652242761269}",
+    "f64_bits": "404756984972cdb3"
+  },
+  {
+    "name": "valid_cpu_random_486",
+    "raw": "{\"cpus\":30.631394246140392}",
+    "f64_bits": "403ea1a30da60e39"
+  },
+  {
+    "name": "valid_cpu_random_487",
+    "raw": "{\"cpus\":16.317797538039915}",
+    "f64_bits": "4030515b2df0a179"
+  },
+  {
+    "name": "valid_cpu_random_488",
+    "raw": "{\"cpus\":45.20759910885838}",
+    "f64_bits": "40469a929b8b9cdd"
+  },
+  {
+    "name": "valid_cpu_random_489",
+    "raw": "{\"cpus\":4.490513704753813}",
+    "f64_bits": "4011f6493980a134"
+  },
+  {
+    "name": "valid_cpu_random_490",
+    "raw": "{\"cpus\":56.60541728038511}",
+    "f64_bits": "404c4d7e503dd7fa"
+  },
+  {
+    "name": "valid_cpu_random_491",
+    "raw": "{\"cpus\":59.29835292028467}",
+    "f64_bits": "404da6306db1a4f6"
+  },
+  {
+    "name": "valid_cpu_random_492",
+    "raw": "{\"cpus\":26.411617918575313}",
+    "f64_bits": "403a695fcababa83"
+  },
+  {
+    "name": "valid_cpu_random_493",
+    "raw": "{\"cpus\":44.93704493349484}",
+    "f64_bits": "404677f116a01f15"
+  },
+  {
+    "name": "valid_cpu_random_494",
+    "raw": "{\"cpus\":43.18652962369379}",
+    "f64_bits": "404597e033e4c000"
+  },
+  {
+    "name": "valid_cpu_random_495",
+    "raw": "{\"cpus\":33.875655219791476}",
+    "f64_bits": "4040f0157861c9bd"
+  },
+  {
+    "name": "valid_cpu_random_496",
+    "raw": "{\"cpus\":58.15854036087435}",
+    "f64_bits": "404d144b0cf08693"
+  },
+  {
+    "name": "valid_cpu_random_497",
+    "raw": "{\"cpus\":16.73785378259995}",
+    "f64_bits": "4030bce3fc497f26"
+  },
+  {
+    "name": "valid_cpu_random_498",
+    "raw": "{\"cpus\":35.124995396010206}",
+    "f64_bits": "40418fffd96101d8"
+  },
+  {
+    "name": "valid_cpu_random_499",
+    "raw": "{\"cpus\":42.59578995446647}",
+    "f64_bits": "40454c42d860dc02"
+  }
+]

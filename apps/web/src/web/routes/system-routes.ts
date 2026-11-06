@@ -1,4 +1,6 @@
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
+import type { RouteChannel } from '../../rust-routes/channel.js';
+import { registerSettingsGet } from './settings-get-route.js';
 /**
  * @fileoverview System, config, settings, subagent, and debug routes.
  * Covers status, stats, config CRUD, settings, subagent monitoring,
@@ -150,7 +152,8 @@ export function resolveSpanUrl(hostHeader: string | undefined, fallbackPort = '3
 export function registerSystemRoutes(
   app: FastifyInstance,
   ctx: SessionPort & EventPort & ConfigPort & InfraPort & AuthPort & TabLayoutPort,
-  verifiedOwner: OwnerVerifier = NO_OWNER
+  verifiedOwner: OwnerVerifier = NO_OWNER,
+  rustSettings?: RouteChannel
 ): void {
   const windowStatesPath = dataPath('subagent-window-states.json');
   const parentMapPath = dataPath('subagent-parents.json');
@@ -942,20 +945,7 @@ export function registerSystemRoutes(
 
   // ========== Settings ==========
 
-  app.get('/api/settings', async () => {
-    // A plain read. This route must NEVER write settings.json: readJsonConfig()
-    // answers `{}` for ANY read failure (a parse error, EACCES, EMFILE, a read
-    // that lands inside PUT's non-atomic write), not only for a missing file,
-    // and every page load calls this route, so a "persist the default when the
-    // key is absent" reconcile here replaced a whole settings file with one key
-    // on the first unlucky read. The plan-usage default is resolved by the
-    // READERS instead: an absent `showPlanUsageLimits` means ON to
-    // readPlanUsageTelemetryEnabled() (hooks-config.ts), the same way an absent
-    // `workspaceHooksEnabled` means ON, and the client resolves its own display
-    // default through planUsageChipEnabled(). Pinned by
-    // test/routes/system-routes-settings-get-plan-usage-default.test.ts.
-    return readJsonConfig(SETTINGS_PATH, 'settings', {});
-  });
+  registerSettingsGet(app, { settingsPath: SETTINGS_PATH, verifiedOwner, rust: rustSettings });
 
   app.put('/api/settings', async (req, reply) => {
     // `claudeVoiceEnabled` is a retired key (Claude voice dictation was removed). A tab

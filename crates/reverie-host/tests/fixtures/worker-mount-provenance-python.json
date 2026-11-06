@@ -1,0 +1,312 @@
+{
+  "oracle": "Actual full worker.validate_config, owned filesystem, no patched validation. Preserves Python str component provenance versus byte canonicalization; strict symlink/file behavior.",
+  "cases": [
+    {
+      "name": "control-'byte-\\udcc2\\udc80'-'byte-\\udcc2\\udc80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\udcc2\\udc80\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "control-'byte-\\udcc2\\udc80'-'byte-\\x80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\u0080\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          98,
+          121,
+          116,
+          101,
+          45,
+          56514,
+          56448
+        ]
+      ]
+    },
+    {
+      "name": "control-'byte-\\x80'-'byte-\\udcc2\\udc80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\u0080\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\udcc2\\udc80\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          98,
+          121,
+          116,
+          101,
+          45,
+          128
+        ]
+      ]
+    },
+    {
+      "name": "control-'byte-\\x80'-'byte-\\x80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\u0080\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\u0080\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "symlink-prefix-relative-'byte-\\udcc2\\udc80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80/relative\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\udcc2\\udc80\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "symlink-prefix-relative-'byte-\\x80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80/relative\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\u0080\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          98,
+          121,
+          116,
+          101,
+          45,
+          56514,
+          56448,
+          47,
+          105,
+          110,
+          115,
+          105,
+          100,
+          101
+        ]
+      ]
+    },
+    {
+      "name": "symlink-prefix-absolute-'byte-\\udcc2\\udc80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80/absolute\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\udcc2\\udc80\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          98,
+          121,
+          116,
+          101,
+          45,
+          128,
+          47,
+          105,
+          110,
+          115,
+          105,
+          100,
+          101
+        ]
+      ]
+    },
+    {
+      "name": "symlink-prefix-absolute-'byte-\\x80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80/absolute\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/byte-\\u0080\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "attachment-provenance-'byte-\\udcc2\\udc80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/reverie_workspace\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80\"}, {\"destination\": \"/projects/alias\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80/attachments\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "attachment-provenance-'byte-\\x80'",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/reverie_workspace\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\udcc2\\udc80\"}, {\"destination\": \"/projects/alias\", \"readOnly\": false, \"source\": \"$ROOT/byte-\\u0080/attachments\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          98,
+          121,
+          116,
+          101,
+          45,
+          56514,
+          56448
+        ],
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          98,
+          121,
+          116,
+          101,
+          45,
+          128,
+          47,
+          97,
+          116,
+          116,
+          97,
+          99,
+          104,
+          109,
+          101,
+          110,
+          116,
+          115
+        ]
+      ]
+    },
+    {
+      "name": "strict-resolve-file-source/",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/file-source/\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          102,
+          105,
+          108,
+          101,
+          45,
+          115,
+          111,
+          117,
+          114,
+          99,
+          101
+        ]
+      ]
+    },
+    {
+      "name": "strict-resolve-file-source/.",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/file-source/.\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          102,
+          105,
+          108,
+          101,
+          45,
+          115,
+          111,
+          117,
+          114,
+          99,
+          101
+        ]
+      ]
+    },
+    {
+      "name": "strict-resolve-chain-0",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/chain-0\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          115,
+          111,
+          117,
+          114,
+          99,
+          101
+        ]
+      ]
+    },
+    {
+      "name": "strict-resolve-loop",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/loop\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "strict-resolve-file-dot",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/file-dot\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "strict-resolve-file-trailing",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/file-trailing\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "strict-resolve-file-parent",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/file-parent\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "strict-resolve-dir-parent",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/dir-parent\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": true,
+      "resolved": [
+        [
+          36,
+          82,
+          79,
+          79,
+          84,
+          47,
+          111,
+          116,
+          104,
+          101,
+          114
+        ]
+      ]
+    },
+    {
+      "name": "strict-resolve-missing",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/missing\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    },
+    {
+      "name": "strict-resolve-dangling",
+      "raw": "{\"apiSocketRoot\": \"$ROOT/api\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT\", \"cpus\": 1.0, \"deployment\": \"office\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 4096, \"mounts\": [{\"destination\": \"/projects/source\", \"readOnly\": false, \"source\": \"$ROOT/dangling\"}], \"pidsLimit\": 512, \"poolMemoryMiB\": 8192, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"office-server\", \"socket\": \"$ROOT/control/broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1}",
+      "accepted": false,
+      "resolved": []
+    }
+  ]
+}

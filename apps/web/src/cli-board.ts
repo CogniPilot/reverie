@@ -14,7 +14,7 @@ import { EXIT, describeFailure, resolveChatRoom, runAgentVerb, type AgentDeps, t
 import { GLYPH, palette } from './cli-style.js';
 import { zonedMs, zonedStamp } from './board-logic.js';
 import { DecisionOptionsSchema, IssueSchema, ISSUE_STATUSES, ISSUE_TITLE_MAX, type BoardView, type Issue } from './board-types.js';
-import { describeTrack, GATE_STATES, REVIEW_KINDS, REVIEW_VERDICTS, type TrackRecord } from './board-track.js';
+import { CI_CONCLUSIONS, describeTrack, GATE_STATES, REVIEW_KINDS, REVIEW_VERDICTS, type TrackRecord } from './board-track.js';
 
 type Result = { ok: true; data: unknown } | { ok: false; code: number };
 
@@ -224,9 +224,26 @@ export async function boardTrackShow(deps: AgentDeps, options: { id: string }): 
   return EXIT.ok;
 }
 
-export async function boardTrackHead(deps: AgentDeps, options: { id: string; sha: string; branch?: string }): Promise<number> {
+export async function boardTrackIdentify(
+  deps: AgentDeps,
+  options: { id: string; repository: string; number: string }
+): Promise<number> {
+  const number = Number(options.number.replace(/^#/, ''));
+  if (!Number.isInteger(number) || number <= 0) return fail(deps, 'the pull request number is a positive integer');
+  return trackDone(deps, await trackWrite(deps, options.id, { op: 'identify', repository: options.repository, number }));
+}
+
+export async function boardTrackHead(
+  deps: AgentDeps,
+  options: { id: string; sha: string; branch?: string; base?: string; seal?: string }
+): Promise<number> {
   const body: Record<string, unknown> = { op: 'head', sha: options.sha.toLowerCase() };
   if (options.branch) body.branch = options.branch;
+  if (options.base) body.base = options.base.toLowerCase();
+  if (options.seal) {
+    if (!/^[0-9a-f]{64}$/.test(options.seal)) return fail(deps, '--seal is the 64-hex sha256 of the packet SHA256SUMS');
+    body.seal = options.seal;
+  }
   return trackDone(deps, await trackWrite(deps, options.id, body));
 }
 
@@ -279,6 +296,23 @@ export async function boardTrackApplied(
     return EXIT.refused;
   }
   return EXIT.ok;
+}
+
+/** Record a CI result seen for the latest head: an observation with who and when, never merge authority. */
+export async function boardTrackCi(
+  deps: AgentDeps,
+  options: { id: string; head: string; name: string; conclusion?: string; url?: string }
+): Promise<number> {
+  if (!(CI_CONCLUSIONS as readonly string[]).includes(options.conclusion ?? ''))
+    return fail(deps, `--conclusion is ${CI_CONCLUSIONS.join('|')}`);
+  const body: Record<string, unknown> = {
+    op: 'ci',
+    head: options.head.toLowerCase(),
+    name: options.name,
+    conclusion: options.conclusion,
+  };
+  if (options.url) body.url = options.url;
+  return trackDone(deps, await trackWrite(deps, options.id, body));
 }
 
 export async function boardTrackGate(
@@ -451,22 +485,42 @@ each head starts every gate named so far as open, so a pass on an earlier head i
 result or applied body names its head and is refused once a newer head has landed.
 
 Examples:
-  reverie board track head TASK_ID HEAD_SHA --branch BRANCH
+  reverie board track identify TASK_ID OWNER/REPO PR_NUMBER
+  reverie board track head TASK_ID HEAD_SHA --branch BRANCH --base BASE_SHA --seal SUMS_SHA256
   reverie board track review TASK_ID HEAD_SHA --kind text --verdict GO --body-file PR-BODY.md --from ROOM:MESSAGE_ID
   reverie board track applied TASK_ID HEAD_SHA --body-file PR-BODY.md     # exits 4 if not the approved body
-  reverie board track gate TASK_ID HEAD_SHA "nix test registration" --state covered --note "partition test passes"`);
+  reverie board track gate TASK_ID HEAD_SHA "nix test registration" --state covered --note "partition test passes"
+  reverie board track ci TASK_ID HEAD_SHA "Test" --conclusion success --url RUN_URL   # an observation, not authority`);
   track
     .command('show <id>')
     .description('Print the latest head, its current reviews, the applied body and its gates')
     .option('--json', 'The whole record')
     .action((id: string, o: { json?: boolean }) => runAgentVerb(json(o), (d) => boardTrackShow(d, { id })));
   track
+    .command('identify <id> <repository> <number>')
+    .description('Name the pull request this card tracks (owner/repo and number); set once (card owner or board lead)')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, repository: string, number: string, o: { json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackIdentify(d, { id, repository, number }))
+    );
+  track
     .command('head <id> <sha>')
     .description('Record a new head; every earlier review becomes superseded (card owner or board lead)')
     .option('--branch <name>', 'The branch the head is on')
+    .option('--base <sha>', 'The commit the head was built on')
+    .option('--seal <sha256>', 'sha256 of the sealed packet SHA256SUMS for this head')
     .option('--json', 'Machine-readable output')
-    .action((id: string, sha: string, o: { branch?: string; json?: boolean }) =>
-      runAgentVerb(json(o), (d) => boardTrackHead(d, { id, sha, branch: o.branch }))
+    .action((id: string, sha: string, o: { branch?: string; base?: string; seal?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackHead(d, { id, sha, branch: o.branch, base: o.base, seal: o.seal }))
+    );
+  track
+    .command('ci <id> <head> <name>')
+    .description('Record a CI result seen for this head, which must be the latest: an observation, not merge authority')
+    .option('--conclusion <conclusion>', CI_CONCLUSIONS.join('|'))
+    .option('--url <url>', 'The run it was read from')
+    .option('--json', 'Machine-readable output')
+    .action((id: string, head: string, name: string, o: { conclusion?: string; url?: string; json?: boolean }) =>
+      runAgentVerb(json(o), (d) => boardTrackCi(d, { id, head, name, conclusion: o.conclusion, url: o.url }))
     );
   track
     .command('review <id> <head>')

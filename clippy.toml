@@ -1,0 +1,7 @@
+# Complexity settings copied from CogniPilot/rumoca at
+# 0bab7e08c42dced38488abd298a4b9bb77d2b0cc (2026-11-05).
+# Rumoca-specific IR import aliases do not apply to Reverie.
+excessive-nesting-threshold = 4
+too-many-lines-threshold = 100
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250

@@ -4,6 +4,7 @@ let
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
   imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
+  laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
   claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
@@ -25,7 +26,7 @@ let
   '';
   baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     caCertificates pkgs.sudo pkgs.tini ]
-    ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare ]
+    ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare laptopTools ]
       # Laptops build Rust (the autoenv cargo/rustc shims pass through to these);
       # the server image does not, and the toolchain closure is about 2.4 GB.
       ++ [ pkgs.rustc pkgs.cargo ]
@@ -138,9 +139,12 @@ pkgs.dockerTools.buildLayeredImage {
       mkdir -p opt/reverie/autoenv/bin opt/reverie/autoenv/lib
       cp ${src}/scripts/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
       cp ${src}/scripts/reverie-autoenv bin/reverie-autoenv
-      cp ${src}/scripts/reverie-cargo-defaults bin/reverie-cargo-defaults
-      cp ${src}/scripts/reverie-build-jobs bin/reverie-build-jobs
-      sed -i '1c#!${memory}/bin/python3' bin/reverie-autoenv bin/reverie-cargo-defaults bin/reverie-build-jobs
+      for command in reverie-cargo-defaults reverie-build-jobs; do
+        test -L "bin/$command"
+        unlink "bin/$command"
+        cp ${laptopTools}/bin/"$command" "bin/$command"
+      done
+      sed -i '1c#!${memory}/bin/python3' bin/reverie-autoenv
       sed -i '1c#!${pkgs.bash}/bin/bash' opt/reverie/autoenv/lib/shim
       chmod 755 bin/reverie-autoenv bin/reverie-cargo-defaults bin/reverie-build-jobs opt/reverie/autoenv/lib/shim
       for tool in cargo rustc rustdoc pkg-config; do

@@ -934,6 +934,14 @@ describe('typed assignment check-ins, real durable Board/ledger', () => {
       expect(escalation()?.text).not.toContain('you assigned this card');
     });
 
+    it('names the original check-in message so chat read --message can open it', async () => {
+      await watch.tick();
+      const prompt = posts.find((p) => p.text.includes('[assignment-checkin:'))!;
+      at += 300001;
+      await watch.tick();
+      expect(escalation()?.text).toContain(`check-in ${watch.status().entries[0]!.id} (message ${prompt.id}).`);
+    });
+
     it('treats an assignee requester as no requester', async () => {
       await setTask({ requester: 'worker' });
       await watch.tick();

@@ -1582,6 +1582,11 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-expert-profile .ca-profile-management label small, .ca-expert-profile .ca-profile-management label p { grid-column: 2; margin: 0; }
 .ca-expert-profile .ca-profile-management h3 { font-size: 13px; margin: 10px 0 4px; }
 .ca-expert-profile .ca-profile-management .ca-company-actions { flex-wrap: wrap; align-items: center; gap: 6px; }
+.ca-expert-profile .ca-employee-gpu > .ca-hint { display: flex; align-items: center; gap: 7px; margin: 6px 0; }
+.ca-expert-profile .ca-employee-gpu .ca-gpu-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 8px 0 6px; font-size: 12px; }
+.ca-expert-profile .ca-employee-gpu .ca-gpu-facts dt { color: var(--ca-muted, var(--text-muted)); }
+.ca-expert-profile .ca-employee-gpu .ca-gpu-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ca-expert-profile .ca-employee-gpu .ca-company-actions { display: flex; margin: 4px 0 6px; }
 .ca-expert-profile .ca-profile-save-error { margin: 0; }
 .ca-expert-profile .ca-profile-save-error:empty { display: none; }
 .ca-expert-profile .ca-profile-footer { display: flex; align-items: center; flex-wrap: nowrap; border-top: 1px solid var(--ca-line); padding-top: 9px; background: var(--ca-composer-bg); }

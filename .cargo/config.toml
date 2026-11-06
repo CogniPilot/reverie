@@ -1,0 +1,3 @@
+[alias]
+# Same cargo-xtask convention as CogniPilot/rumoca; no shell wrapper.
+xtask = "run --locked --package xtask --bin xtask --"

@@ -8574,7 +8574,8 @@ class ReverieChatApp {
     const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), { text: 'Save GPU request' });
     const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), { text: 'Refresh status' });
     save.disabled = true;
-    group.append(wrap, devices, facts, state, error, save, refresh,
+    const actions = this.el('div', 'ca-company-actions'); actions.append(save, refresh);
+    group.append(wrap, devices, facts, state, error, actions,
       this.el('p', 'ca-hint', 'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'));
     container.append(group);
     let report = null, busy = false, sequence = 0;
@@ -8780,7 +8781,7 @@ class ReverieChatApp {
     const general = this.el('fieldset', 'ca-profile-permissions');
     general.append(this.el('legend', '', 'Recovery, office, plans and goals'), label, officeLabel, ...planLabels, goalLabel);
     preferenceStatus.classList.add('ca-profile-permission-status');
-    container.append(this.el('p', 'ca-hint', 'Permission checkboxes save immediately. They do not need Save profile.'), general, boardFields, preferenceStatus);
+    container.append(general, boardFields, preferenceStatus);
   }
 
   employeeLifecycleFields(container, employee, onSaved, dialog) {
@@ -8871,7 +8872,8 @@ class ReverieChatApp {
     dialog._companyOrigin = this.companyPage;
     const heading = this.el('header', 'ca-profile-edit-heading');
     heading.append(this.literalText('h2', '', employee.name), this.button('ca-btn', `Close profile for ${employee.name}`, () => dialog.close(), { text: 'Close' }));
-    dialog.append(heading, this.employeeHealthBadge(employee), this.el('p', 'ca-hint', 'Profile details and Sleep / Dream use Save profile. Permission checkboxes below save immediately.'));
+    // The footer hint states the save rule for the selected tab; a second copy here repeated it.
+    dialog.append(heading, this.employeeHealthBadge(employee));
     const contextActions = this.el('div', 'ca-dialog-actions');
     contextActions.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }), this.button('ca-btn', `View startup context for ${employee.name}`, () => this.openStartupContext(employee), { text: 'View startup context' }));
     dialog.append(contextActions);
@@ -8967,7 +8969,8 @@ class ReverieChatApp {
         tab.setAttribute('aria-selected', String(id === key)); tab.tabIndex = id === key ? 0 : -1;
       }
       form.hidden = key === 'permissions' || key === 'credentials';
-      save.hidden = key === 'credentials';
+      // Permissions and PATs save as they change, so Save profile would do nothing on those tabs.
+      save.hidden = key === 'credentials' || key === 'permissions';
       saveHint.textContent = key === 'credentials'
         ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
         : key === 'permissions'
@@ -9142,9 +9145,9 @@ class ReverieChatApp {
     const host = this.el('section', 'ca-profile-memory');
     const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
     const row = this.el('div', 'ca-company-actions');
-    const label = this.el('label', 'ca-hint', 'Memory (MiB) ');
+    const label = this.el('label', 'ca-hint', 'Hard memory ceiling (MiB) ');
     const input = this.el('input', 'ca-field');
-    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '512'; input.required = true;
+    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '1'; input.required = true;
     input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`); label.append(input);
     const draftBox = this.el('div', 'ca-profile-memory-draft');
     const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
@@ -9204,8 +9207,9 @@ class ReverieChatApp {
         const result = await this.app._chatApi('/api/company/resources/operations', { method: 'POST', body: { employeeId: employee.id } });
         if (!await currentOwner()) return;
         if (!result.ok || !Array.isArray(result.data) || result.data.length > 200 || result.data.some(item =>
-          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string')) throw new Error();
-        for (const item of result.data) if (!['completed', 'not-started'].includes(item.phase)) tracked.add(item.id);
+          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string'
+          || typeof item.blocksFurtherChanges !== 'boolean')) throw new Error();
+        for (const item of result.data) if (item.blocksFurtherChanges) tracked.add(item.id);
         discoveryFailed = false;
         if (tracked.size) { retain(); status.textContent = unconfirmed; }
         else status.textContent = storageFailed ? 'The local recovery record is unavailable. Do not start another change; inspect owner operations.' : '';
@@ -9226,11 +9230,14 @@ class ReverieChatApp {
             if (!await currentOwner()) return;
             const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
             if (!await currentOwner()) return;
-            const phase = result.ok && result.data?.id === operationId ? result.data.phase : null;
-            if (phase === 'completed' || phase === 'not-started') {
+            const confirmed = result.ok && result.data?.id === operationId
+              && typeof result.data.phase === 'string' && typeof result.data.blocksFurtherChanges === 'boolean';
+            const phase = confirmed ? result.data.phase : null;
+            if (confirmed && result.data.blocksFurtherChanges === false) {
               tracked.delete(operationId); retain(operationId);
               status.textContent = phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
-                : 'The restart was not dispatched. You can prepare a new preview.';
+                : phase === 'not-started' ? 'The restart was not dispatched. You can prepare a new preview.'
+                  : 'The earlier operation is settled. You can prepare a new preview.';
             } else status.textContent = !result.ok
               ? `Status could not be read (${result.status ?? 'network'}). The outcome is unknown; do not start another change.`
               : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
@@ -9249,6 +9256,15 @@ class ReverieChatApp {
         const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
         if (!dialog.isConnected || !await currentOwner()) return;
         if (!result.ok) {
+          const blockers = ['RESOURCE_PREVIEW_HOST_UNCONFIGURED', 'RESOURCE_PREVIEW_HOST_UNAVAILABLE',
+            'RESOURCE_PREVIEW_BUSY', 'RESOURCE_PREVIEW_PENDING'];
+          if (blockers.includes(result.errorCode) && typeof result.error === 'string') {
+            status.textContent = result.error;
+            // Only Preview's closed pre-dispatch diagnostics reach here. Apply
+            // uncertainty always keeps its retained operation and retry fence.
+            if (result.errorCode === 'RESOURCE_PREVIEW_PENDING') { discoveryFailed = true; sync(); }
+            return;
+          }
           status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
             : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
               : 'No preview: the laptop may be busy, or a previous change needs inspection. Check status before trying again.';
@@ -9258,7 +9274,8 @@ class ReverieChatApp {
         const draft = result.data, r = draft?.resources || {};
         if (!uuid.test(draft?.operationId) || !uuid.test(draft?.draftId)) throw new Error();
         status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
-        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} processes, ${r.cpus} CPUs. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
+        const cpu = r.cpus === 0 ? 'uncapped CPU' : `${r.cpus} CPUs`;
+        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} tasks, ${cpu}. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
         const note = this.el('textarea', 'ca-field');
         note.rows = 3; note.maxLength = 12000; note.required = true;
         note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
@@ -9286,7 +9303,7 @@ class ReverieChatApp {
     }, { text: 'Preview' });
     row.append(label, preview, check);
     host.append(this.el('h3', '', 'Laptop memory'),
-      this.el('p', 'ca-hint', 'Changes this expert\'s laptop memory by restarting it on a new laptop. Processes, CPUs and the shared pool stay as they are.'),
+      this.el('p', 'ca-hint', 'Changes this expert\'s hard memory ceiling by restarting the laptop. Task limits, CPU limits and the shared pool stay as they are. A soft memory limit controls reclaim pressure; it does not remove the hard ceiling or increase pool capacity.'),
       row, draftBox, status);
     container.append(host); status.textContent = 'Checking previous memory changes…'; sync(); void discover();
   }

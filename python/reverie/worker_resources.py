@@ -79,7 +79,7 @@ def resource_config(config,sid):
     validate_session_resources(config)
     # Native control custody is not a laptop grant and must not change any
     # existing laptop's create arguments or reattachment policy label.
-    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy','resourceActorConfig','employeeGpuGrants','employeePerfPolicies','employeeMemoryPolicies','laptopSwapPoolMiB')}
+    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy','resourceActorConfig','employeeGpuGrants','employeePerfPolicies','employeeMemoryPolicies','laptopSwapPoolMiB','softLimitHelperSocket')}
     employee_gpu=config.get('employeeGpuGrants',{})
     if type(employee_gpu)is not dict:raise ValueError('Invalid owner employee GPU grant map')
     if employee_gpu:
@@ -145,6 +145,6 @@ def policy_digest(config,sid):
 
 def validate_resource_reload(before,after):
     validate_session_resources(after)
-    ignored=RESOURCE_FIELDS|{'sessionResources','employeeResources','employeeMemoryPolicies','laptopSwapPoolMiB'}
+    ignored=RESOURCE_FIELDS|{'sessionResources','employeeResources','employeeMemoryPolicies','laptopSwapPoolMiB','softLimitHelperSocket'}
     if {k:v for k,v in before.items() if k not in ignored}!={k:v for k,v in after.items() if k not in ignored}:
         raise ValueError('Resource reload cannot change laptop grants, images or control paths')

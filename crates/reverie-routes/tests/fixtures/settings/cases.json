@@ -1,0 +1,472 @@
+{
+ "spec": "D2 settings slice spec r3 (129ec35d) section 5",
+ "cases": [
+  {
+   "name": "missing",
+   "kind": "missing"
+  },
+  {
+   "name": "directory",
+   "kind": "dir"
+  },
+  {
+   "name": "unreadable-invalid",
+   "kind": "unreadable",
+   "text": "not json",
+   "note": "invalid JSON, so a privileged reader that can open it answers the same default"
+  },
+  {
+   "name": "empty",
+   "kind": "file",
+   "text": ""
+  },
+  {
+   "name": "bom",
+   "kind": "file",
+   "text": "﻿{}"
+  },
+  {
+   "name": "invalid-utf8-in-string",
+   "kind": "file",
+   "hex": "5b22618062225d"
+  },
+  {
+   "name": "invalid-utf8-outside",
+   "kind": "file",
+   "hex": "ff7b7d"
+  },
+  {
+   "name": "whitespace-only",
+   "kind": "file",
+   "text": " \t\r\n"
+  },
+  {
+   "name": "syntax-error",
+   "kind": "file",
+   "text": "{\"a\":1,}"
+  },
+  {
+   "name": "relative-path",
+   "kind": "file",
+   "text": "{\"relative\":true}",
+   "relative": true
+  },
+  {
+   "name": "object",
+   "kind": "file",
+   "text": "{\"b\":1,\"1\":2,\"a\":3,\"0\":4}"
+  },
+  {
+   "name": "index-keys",
+   "kind": "file",
+   "text": "{\"01\":1,\"4294967295\":2,\"-1\":3,\"4294967294\":4,\"10\":5,\"2\":6}"
+  },
+  {
+   "name": "array",
+   "kind": "file",
+   "text": "[1,2]"
+  },
+  {
+   "name": "nested",
+   "kind": "file",
+   "text": "{\"a\":[{\"b\":{\"c\":[true,false,null]}}]}"
+  },
+  {
+   "name": "duplicate-keys",
+   "kind": "file",
+   "text": "{\"a\":1,\"b\":2,\"a\":3}"
+  },
+  {
+   "name": "proto-key",
+   "kind": "file",
+   "text": "{\"__proto__\":{\"x\":1}}"
+  },
+  {
+   "name": "scalar-number",
+   "kind": "file",
+   "text": "5"
+  },
+  {
+   "name": "scalar-true",
+   "kind": "file",
+   "text": "true"
+  },
+  {
+   "name": "scalar-false",
+   "kind": "file",
+   "text": "false"
+  },
+  {
+   "name": "scalar-null",
+   "kind": "file",
+   "text": "null"
+  },
+  {
+   "name": "scalar-negative-zero",
+   "kind": "file",
+   "text": "-0"
+  },
+  {
+   "name": "scalar-big-number",
+   "kind": "file",
+   "text": "1e400"
+  },
+  {
+   "name": "string",
+   "kind": "file",
+   "text": "\"hello\""
+  },
+  {
+   "name": "string-json-looking",
+   "kind": "file",
+   "text": "\"{\\\"x\\\":1}\""
+  },
+  {
+   "name": "string-escapes",
+   "kind": "file",
+   "text": "\"a\\n\\t\\u0001\\u00e9\\u2028\\\"\""
+  },
+  {
+   "name": "string-lone-surrogate",
+   "kind": "file",
+   "text": "\"a\\ud800b\""
+  },
+  {
+   "name": "string-pair",
+   "kind": "file",
+   "text": "\"\\ud83d\\ude00\""
+  },
+  {
+   "name": "strings-in-array",
+   "kind": "file",
+   "text": "[\"\\u0001\\ud800\\u2028é\",\"\\\\\\\"\\/\\b\\f\\n\\r\\t\"]"
+  },
+  {
+   "name": "numbers",
+   "kind": "file",
+   "text": "[1e21,1e-7,0.000001,5e-324,1e400,-0,12345678901234567890,0.1]"
+  },
+  {
+   "name": "numbers-boundaries",
+   "kind": "file",
+   "text": "[0.30000000000000004,9007199254740993,1.7976931348623157e308,2.2250738585072014e-308,123456789e-30,1e-6,1e-7,1e20,1e21,1187533140485141.25,-1.5,2.5e+3,1E2]"
+  },
+  {
+   "name": "success-true",
+   "kind": "file",
+   "text": "{\"success\":true,\"x\":1}"
+  },
+  {
+   "name": "success-false",
+   "kind": "file",
+   "text": "{\"success\":false}"
+  },
+  {
+   "name": "success-null",
+   "kind": "file",
+   "text": "{\"success\":null}"
+  },
+  {
+   "name": "success-0",
+   "kind": "file",
+   "text": "{\"success\":0}"
+  },
+  {
+   "name": "success-1",
+   "kind": "file",
+   "text": "{\"success\":1}"
+  },
+  {
+   "name": "success-string-false",
+   "kind": "file",
+   "text": "{\"success\":\"false\"}"
+  },
+  {
+   "name": "success-string-true",
+   "kind": "file",
+   "text": "{\"success\":\"true\"}"
+  },
+  {
+   "name": "success-empty-array",
+   "kind": "file",
+   "text": "{\"success\":[]}"
+  },
+  {
+   "name": "success-empty-object",
+   "kind": "file",
+   "text": "{\"success\":{}}"
+  },
+  {
+   "name": "success-array-false",
+   "kind": "file",
+   "text": "{\"success\":[false]}"
+  },
+  {
+   "name": "success-false-known",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"NOT_FOUND\"}"
+  },
+  {
+   "name": "success-false-code-INVALID_INPUT",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"INVALID_INPUT\"}"
+  },
+  {
+   "name": "success-false-code-UNAUTHORIZED",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"UNAUTHORIZED\"}"
+  },
+  {
+   "name": "success-false-code-NOT_FOUND",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"NOT_FOUND\"}"
+  },
+  {
+   "name": "success-false-code-SESSION_BUSY",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"SESSION_BUSY\"}"
+  },
+  {
+   "name": "success-false-code-CONFLICT",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"CONFLICT\"}"
+  },
+  {
+   "name": "success-false-code-ALREADY_EXISTS",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"ALREADY_EXISTS\"}"
+  },
+  {
+   "name": "success-false-code-OPERATION_FAILED",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"OPERATION_FAILED\"}"
+  },
+  {
+   "name": "success-false-code-FORBIDDEN",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"FORBIDDEN\"}"
+  },
+  {
+   "name": "success-false-code-PASSWORD_CHANGE_REQUIRED",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"PASSWORD_CHANGE_REQUIRED\"}"
+  },
+  {
+   "name": "success-false-code-USER_EXISTS",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"USER_EXISTS\"}"
+  },
+  {
+   "name": "success-false-code-USER_NOT_FOUND",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"USER_NOT_FOUND\"}"
+  },
+  {
+   "name": "success-false-code-LAST_ADMIN",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"LAST_ADMIN\"}"
+  },
+  {
+   "name": "success-false-code-RATE_LIMITED",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"RATE_LIMITED\"}"
+  },
+  {
+   "name": "success-false-code-INTERNAL_ERROR",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"INTERNAL_ERROR\"}"
+  },
+  {
+   "name": "success-false-unknown",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"NOPE\"}"
+  },
+  {
+   "name": "success-false-nonstring",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":5}"
+  },
+  {
+   "name": "success-false-null-code",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":null}"
+  },
+  {
+   "name": "inherited-__defineGetter__",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"__defineGetter__\"}"
+  },
+  {
+   "name": "inherited-__defineSetter__",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"__defineSetter__\"}"
+  },
+  {
+   "name": "inherited-__lookupGetter__",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"__lookupGetter__\"}"
+  },
+  {
+   "name": "inherited-__lookupSetter__",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"__lookupSetter__\"}"
+  },
+  {
+   "name": "inherited-__proto__",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"__proto__\"}"
+  },
+  {
+   "name": "inherited-constructor",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"constructor\"}"
+  },
+  {
+   "name": "inherited-hasOwnProperty",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"hasOwnProperty\"}"
+  },
+  {
+   "name": "inherited-isPrototypeOf",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"isPrototypeOf\"}"
+  },
+  {
+   "name": "inherited-propertyIsEnumerable",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"propertyIsEnumerable\"}"
+  },
+  {
+   "name": "inherited-toLocaleString",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"toLocaleString\"}"
+  },
+  {
+   "name": "inherited-toString",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"toString\"}"
+  },
+  {
+   "name": "inherited-valueOf",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"valueOf\"}"
+  },
+  {
+   "name": "success-dup-true-then-1",
+   "kind": "file",
+   "text": "{\"success\":true,\"success\":1}"
+  },
+  {
+   "name": "success-dup-1-then-false",
+   "kind": "file",
+   "text": "{\"success\":1,\"success\":false,\"errorCode\":\"NOT_FOUND\"}"
+  },
+  {
+   "name": "success-dup-false-then-true",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"NOT_FOUND\",\"success\":true}"
+  },
+  {
+   "name": "errorcode-dup",
+   "kind": "file",
+   "text": "{\"success\":false,\"errorCode\":\"NOPE\",\"errorCode\":\"CONFLICT\"}"
+  },
+  {
+   "name": "array-with-success",
+   "kind": "file",
+   "text": "[{\"success\":false,\"errorCode\":\"NOT_FOUND\"}]"
+  },
+  {
+   "name": "depth-1000-array",
+   "kind": "file",
+   "nest": {
+    "open": "[",
+    "close": "]",
+    "depth": 1000
+   }
+  },
+  {
+   "name": "depth-1000-object",
+   "kind": "file",
+   "nest": {
+    "open": "{\"a\":",
+    "inner": "1",
+    "close": "}",
+    "depth": 1000
+   }
+  },
+  {
+   "name": "depth-1001-array",
+   "kind": "file",
+   "nest": {
+    "open": "[",
+    "close": "]",
+    "depth": 1001
+   },
+   "deviation": "DEPTH_BOUND"
+  },
+  {
+   "name": "depth-10k-array",
+   "kind": "file",
+   "nest": {
+    "open": "[",
+    "close": "]",
+    "depth": 10000
+   },
+   "deviation": "DEPTH_BOUND"
+  },
+  {
+   "name": "depth-100k-object",
+   "kind": "file",
+   "nest": {
+    "open": "{\"a\":",
+    "inner": "1",
+    "close": "}",
+    "depth": 100000
+   },
+   "deviation": "DEPTH_BOUND"
+  },
+  {
+   "name": "depth-deep-invalid",
+   "kind": "file",
+   "nest": {
+    "open": "[",
+    "close": "",
+    "depth": 5000
+   },
+   "note": "deep but not JSON: the default, not a depth refusal"
+  },
+  {
+   "name": "size-at-bound",
+   "kind": "file",
+   "fill": {
+    "prefix": "\"",
+    "char": "a",
+    "suffix": "\"",
+    "bytes": 1048576
+   }
+  },
+  {
+   "name": "size-bound-plus-one",
+   "kind": "file",
+   "fill": {
+    "prefix": "\"",
+    "char": "a",
+    "suffix": "\"",
+    "bytes": 1048577
+   },
+   "deviation": "FILE_BOUND"
+  },
+  {
+   "name": "size-at-bound-object",
+   "kind": "file",
+   "fill": {
+    "prefix": "{\"k\":\"",
+    "char": "\u0001",
+    "suffix": "\"}",
+    "bytes": 1048576
+   },
+   "note": "control characters expand sixfold in stringify"
+  }
+ ]
+}

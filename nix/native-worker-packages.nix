@@ -36,6 +36,8 @@ rec {
     runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) pkgs.docker-client ];
     text = ''exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -I -B ${workerBrokerSource}/python/reverie/worker.py broker "$@"'';
   };
+  # Root soft-limit helper: one connection per instance, immutable source, no broker configuration.
+  softLimitHelper = import ./soft-limit-helper.nix { inherit pkgs src; };
   workerServiceCheck = pkgs.writeShellApplication {
     name = "reverie-worker-service-check";
     runtimeInputs = [ pkgs.python3 pkgs.docker-client ];

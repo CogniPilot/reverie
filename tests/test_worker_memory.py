@@ -134,6 +134,43 @@ print(json.dumps(m.effective_config(json.load(sys.stdin),sys.argv[2])))
             self.assertIn('LAPTOP_SOFT_LIMIT_WRITE_AUTHORITY', str(caught.exception))
             self.assertEqual((self.leaf / 'memory.high').read_text(), 'max\n')
 
+    def test_configured_root_helper_applies_soft_limit_and_broker_never_opens_writer(self):
+        self.config['softLimitHelperSocket'] = '/run/reverie-soft-limit/soft-limit.sock'
+        validate_config(self.config)
+        self.assertEqual(policy_digest(self.config, F.SID), self.row['Config']['Labels']['reverie.worker-policy'])
+        import os
+        opened = os.open
+        def guarded(path, flags, *args, **kwargs):
+            if path == 'memory.high' and flags & os.O_WRONLY:
+                raise AssertionError('broker wrote memory.high itself')
+            return opened(path, flags, *args, **kwargs)
+        calls = []
+        def helper(path, sid, cid, expected):
+            calls.append((path, sid, cid, expected))
+            (self.leaf / 'memory.high').write_text(str(1024 * M.MIB) + '\n')  # The root helper's effect.
+            return 1024 * M.MIB
+        with patch.object(M.os, 'open', guarded), patch.object(M, 'request_soft_limit', helper):
+            M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+        self.assertEqual(calls, [('/run/reverie-soft-limit/soft-limit.sock', F.SID, self.row['Id'], 1024 * M.MIB)])
+        refused = M.SoftLimitHelperRefused('KERNEL_UNQUALIFIED')
+        (self.leaf / 'memory.high').write_text('max\n')
+        with patch.object(M, 'request_soft_limit', side_effect=refused), self.assertRaises(M.SoftLimitHelperRefused):
+            M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+        for bad in ['relative.sock', 7, '/run//x.sock']:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_config(dict(self.config, softLimitHelperSocket=bad))
+
+    def test_broker_write_path_uses_the_shared_fenced_writer(self):
+        from reverie import worker_memory_authority as A
+        seen = []
+        real = A.apply_high
+        def spy(entry, pid, cgroup, proc, recheck):
+            seen.append((entry, pid))
+            return real(entry, pid, cgroup, proc, recheck)
+        with patch.object(A, 'apply_high', spy):
+            M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
+        self.assertEqual(seen, [({'memoryMaxMiB': 2048, 'memoryHighMiB': 1024}, self.row['State']['Pid'])])
+
     def test_foreign_identity_or_pid_change_never_writes_soft_limit(self):
         with self.assertRaisesRegex(RuntimeError, 'identity changed'):
             M.configure_started(self.f.native, self.row['Name'][1:], F.SID, '9' * 64)
@@ -162,13 +199,13 @@ print(json.dumps(m.effective_config(json.load(sys.stdin),sys.argv[2])))
     def test_missing_or_symlinked_controller_is_not_created_or_followed(self):
         high = self.leaf / 'memory.high'
         high.unlink()
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaisesRegex(RuntimeError, 'identity changed'):  # Typed refusal before any write.
             M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
         self.assertFalse(high.exists())
         other = self.f.root / 'private-control'
         other.write_text('max\n')
         high.symlink_to(other)
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(RuntimeError, 'identity changed'):
             M.configure_started(self.f.native, self.row['Name'][1:], F.SID, self.row['Id'])
         self.assertEqual(other.read_text(), 'max\n')
 

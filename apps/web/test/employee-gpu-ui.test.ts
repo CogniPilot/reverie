@@ -32,6 +32,15 @@ describe('employee GPU settings', () => {
     expect(h.container.textContent).toContain('Active device accessUnknown');
     expect(calls).toEqual([`/api/company/employees/${EID}/gpu-access`]);
   });
+  it('lays the status out as one label/value list and the two actions as one row', async () => {
+    const h = await fixture(() => Promise.resolve({ok: true, data: {gpuAccess: status()}}));
+    const facts = h.container.querySelector('dl.ca-gpu-facts')!;
+    expect([...facts.children].map(node => node.tagName)).toEqual(['DT', 'DD', 'DT', 'DD', 'DT', 'DD']);
+    const save = h.container.querySelector('[aria-label="Save GPU request for Synthetic Expert"]')!;
+    const refresh = h.container.querySelector('[aria-label="Refresh GPU status for Synthetic Expert"]')!;
+    expect(save.parentElement).toBe(refresh.parentElement);
+    expect(save.parentElement!.classList.contains('ca-company-actions')).toBe(true);
+  });
   it('shows no-grant/new defaults off without sending an implicit disable', async () => {
     const calls: unknown[] = [];
     const off = {...status(), applied: {known: true, enabled: false, deviceUuid: null, source: 'none'},

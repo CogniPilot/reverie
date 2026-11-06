@@ -88,6 +88,7 @@
           codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
           codexObserverNativeCheck = self.packages.${system}.codexObserver.tests.native;
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
+          policyArtifacts = import ./nix/policy-artifacts.nix { inherit pkgs; src = source; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
           chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
           dockerImageWithChatLanguages = import ./nix/image.nix {
@@ -252,6 +253,7 @@
       nixosModules.workerIsolation = { config, lib, pkgs, ... }: import ./nix/worker-isolation.nix {
         inherit config lib pkgs;
         brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
+        softLimitHelperPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.softLimitHelper;
       };
       nixosModules.reveriePrune = { config, lib, pkgs, ... }: {
         imports = [
@@ -350,6 +352,23 @@
             mkdir -p "$out"
             printf '%s\n' "$checks" > "$out/checks.json"
           '';
+          softLimitHelperService = let
+            evaluated = import ./tests/soft_limit_helper_eval.nix {
+              inherit nixpkgs system;
+              brokerPackage = packages.workerBroker;
+              softLimitHelperPackage = packages.softLimitHelper;
+            };
+          in pkgs.runCommand "reverie-soft-limit-helper-evaluation" {
+            checks = builtins.toJSON evaluated.checks;
+          } ''
+            mkdir -p "$out"
+            printf '%s\n' "$checks" > "$out/checks.json"
+          '';
+          # Builds the helper and imports it from its immutable source; usage only, no socket or cgroup.
+          softLimitHelperPackage = pkgs.runCommand "reverie-soft-limit-helper-package" { } ''
+            ${packages.softLimitHelper}/bin/reverie-soft-limit-helper --help > "$out"
+            grep -q -- '--broker-uid' "$out"
+          '';
           pruneService = let
             evaluated = import ./tests/prune_service_eval.nix {
               inherit nixpkgs system;
@@ -446,7 +465,7 @@
         let pkgs = pkgsFor system; in {
           voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
           default = pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl ];
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

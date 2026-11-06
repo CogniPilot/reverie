@@ -98,10 +98,18 @@ describe('journal CLI', () => {
   });
 
   it('prints refusals with their gates, and recall rows with source status and the unverified interpretation', async () => {
-    const refused = fixture(false, { status: 403, json: { success: false, error: 'save_needs_reason_this_turn',
+    const refused = fixture(false, { status: 403, json: { success: false, error: 'save_needs_reason_this_turn', errorCode: 'JOURNAL_NEEDS_REASON',
       gates: [{ gate: 'reason', outcome: 'fail', detail: 'save_needs_reason_this_turn' }] } });
     expect(await agentJournalSave(refused.deps, { room: 'r', turn: 't', text: 'T', tag: ['lesson'], source: ['m'], quote: ['q'] })).toBe(4);
+    expect(refused.errors.join('\n').split('\n')[0]).toBe('NOT SAVED: reason: save_needs_reason_this_turn');
+    expect(refused.errors.join('\n')).toContain('hint: add --reason "<why save now>"');
     expect(refused.errors.join('\n')).toContain('reason: fail');
+    const quiet = fixture(true, { status: 403, json: { success: false, error: 'turn message is read-only; no journal write', errorCode: 'JOURNAL_READ_ONLY',
+      gates: [{ gate: 'read_only', outcome: 'fail' }] } });
+    expect(await agentJournalSave(quiet.deps, { room: 'r', turn: 't', text: 'T', tag: ['lesson'], source: ['m'], quote: ['q'] })).toBe(4);
+    expect(JSON.parse(quiet.output[0]!)).toMatchObject({ success: false, saved: false, code: 'JOURNAL_READ_ONLY',
+      hint: 'the turn asked for no writes, so nothing was saved' });
+    expect(JSON.stringify(JSON.parse(quiet.output[0]!))).not.toMatch(/different turn|another turn/);
     const recall = fixture(false, { status: 200, json: { success: true, data: { entries: [entry] } } });
     expect(await agentJournalRecall(recall.deps, ['re-test'])).toBe(0);
     expect(recall.output[0]).toContain('#4 2026-10-30T04:00:00.000Z (10 h ago) [lesson]');

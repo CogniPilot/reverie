@@ -418,6 +418,47 @@ describe('blocked move contextual recovery', () => {
     h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();await vi.waitFor(()=>expect(h.dialog.open).toBe(false));
     expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(1);
   });
+  it('treats a server refusal as definite: shows its reason and keeps Adopt available, not unconfirmed',async()=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');
+    h.fetch.mockImplementation(async(path:string)=>path.endsWith('/resolve')
+      ?{ok:false,status:409,json:async()=>({success:false,error:'Multiple unresolved moves name this employee; inspect the journal before recovery'})}
+      :reply(held));
+    h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.status')!.textContent).toContain('Recovery refused: Multiple unresolved moves'));
+    expect(h.dialog.querySelector('.status')!.textContent).not.toContain('unconfirmed');
+    expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).not.toContain('unconfirmed');
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false);
+  });
+  it('clears a lost-response hold once Refresh shows the move still held, and adopts again only on a click',async()=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');let lost=true;
+    h.fetch.mockImplementation(async(path:string)=>{
+      if(path.endsWith('/resolve')){if(lost){lost=false;throw new Error('Connection lost');}return reply({...held,phase:'completed',recoveryAction:'adopt-existing'});}
+      return reply(held);
+    });
+    const adopt=()=>h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
+    adopt().click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).toContain('unconfirmed'));
+    expect(adopt().disabled).toBe(true);
+    h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();
+    await vi.waitFor(()=>expect(adopt().disabled).toBe(false));
+    expect(h.dialog.querySelector('.status')!.textContent).toContain('did not take effect');
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(1);
+    adopt().click();
+    await vi.waitFor(()=>expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(2));
+  });
+  it('keeps a lost-response hold while Refresh shows the recovery still checking',async()=>{
+    const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');let checking=false;
+    h.fetch.mockImplementation(async(path:string)=>{if(path.endsWith('/resolve')){checking=true;throw new Error('Connection lost');}
+      return reply(checking?{...held,phase:'checking',recoveryAction:'adopt-existing'}:held);});
+    h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.click();
+    await vi.waitFor(()=>expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).toContain('unconfirmed'));
+    const refresh=h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!;refresh.click();
+    expect(refresh.disabled).toBe(true);
+    await vi.waitFor(()=>expect(refresh.disabled).toBe(false));
+    expect(h.dialog.querySelector('.status')!.textContent).not.toContain('did not take effect');
+    expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).toContain('unconfirmed');
+    expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(1);
+  });
   it('uses the exact blocker for force conflicts without forcing a second move', async()=>{
     const h=harness();vi.spyOn(h.dom.window,'confirm').mockReturnValue(true);await h.methods.openPlanMove('alex','second');
     h.fetch.mockImplementation(async(path:string)=>path.endsWith('/force')?conflict():reply(held));

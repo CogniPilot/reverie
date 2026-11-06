@@ -17,6 +17,7 @@ import {ResourceOwnerAuthority, ResourceOwnerAuthorizationError, type ResourceAp
 import {ResourceSessionPublication} from './resource-session-publication.js';
 import {ResourceNativeClient} from './resource-native-client.js';
 import {ResourceReplacementRuntime} from './resource-replacement-runtime.js';
+import {RESOURCE_PREVIEW_BLOCKERS, type ResourceOperationSummary, type ResourcePreviewBlocker} from './types/resource-preview.js';
 
 const UUID = z.string().uuid().refine(value => value === value.toLowerCase());
 const Memory = z.number().int().min(512).max(1048576);
@@ -32,6 +33,16 @@ type Preview = {context: ResourcePreviewContext; approval: Readonly<ResourceAppr
   publication: ResourceSessionPublication; snapshot: PlanMoveSnapshot; attempted: boolean};
 function need(value: unknown): asserts value {
   if (!value) throw new PlanMoveError('Protected resource replacement is unavailable or changed', 503);
+}
+class ResourcePreviewBlocked extends PlanMoveError {
+  constructor(readonly code: ResourcePreviewBlocker) {
+    super(RESOURCE_PREVIEW_BLOCKERS[code], 503);
+  }
+}
+/** Server-owned policy. Clients render this field rather than interpreting phases
+ * as permission to discard a retained operation or prepare another change. */
+function operationView<T extends {phase: string}>(record: T): T & {blocksFurtherChanges: boolean} {
+  return {...record, blocksFurtherChanges: !['completed', 'not-started'].includes(record.phase)};
 }
 export class ResourceReplacementController {
   readonly #authority: ResourceOwnerAuthority;
@@ -73,12 +84,29 @@ export class ResourceReplacementController {
   }
   async preview(request: FastifyRequest, employeeId: string, memoryMiB: number): Promise<Readonly<Record<string, unknown>>> {
     UUID.parse(employeeId); Memory.parse(memoryMiB); const context = this.#authority.capturePreview(request, employeeId);
-    need(this.#socket && this.#previews.size < 256 && !this.#applying.has(employeeId));
-    need((await this.operations(request, employeeId)).every(row => ['completed', 'not-started'].includes(row.phase)));
+    if (!this.#socket) throw new ResourcePreviewBlocked('RESOURCE_PREVIEW_HOST_UNCONFIGURED');
+    // A preview's authority cannot survive its deadline. Drop only expired
+    // lookup entries; executing contexts and durable attempt journals remain
+    // owned by Apply/result and cannot be reconstructed from a new preview.
+    const now = Date.now();
+    for (const [id, preview] of this.#previews)
+      if (now >= preview.context.expiresAtEpochMs) this.#previews.delete(id);
+    need(this.#previews.size < 256);
+    if (this.#applying.has(employeeId)) throw new ResourcePreviewBlocked('RESOURCE_PREVIEW_BUSY');
+    if ((await this.operations(request, employeeId)).some(row => row.blocksFurtherChanges))
+      throw new ResourcePreviewBlocked('RESOURCE_PREVIEW_PENDING');
     const executor = planMoveExecutor(this.#runtime(request, context), context.owner);
     const before = await executor.snapshot(employeeId, context.owner, 'runtime-refresh');
-    need(!before.working && before.runtimeDigest && ['claude','codex'].includes(before.mode ?? ''));
-    const native = await ResourceNativeClient.open(this.#socket, this.#authority, context);
+    if (before.working) throw new ResourcePreviewBlocked('RESOURCE_PREVIEW_BUSY');
+    need(before.runtimeDigest && ['claude','codex'].includes(before.mode ?? ''));
+    let native: ResourceNativeClient;
+    try {native = await ResourceNativeClient.open(this.#socket, this.#authority, context);}
+    catch {
+      // Opening sends only the fixed purpose greeting. No draft or restart was
+      // requested. A changed owner still receives the authorization refusal.
+      this.#authority.assertContext(context);
+      throw new ResourcePreviewBlocked('RESOURCE_PREVIEW_HOST_UNAVAILABLE');
+    }
     try {
       const draft = Draft.parse(await native.request('draft', {employeeId, memoryMiB, idempotencyKey: randomUUID()}));
       need(draft.resources.memoryMiB === memoryMiB && draft.resources.memoryMiB <= draft.resources.poolMemoryMiB);
@@ -96,6 +124,7 @@ export class ResourceReplacementController {
   }
   async apply(request: FastifyRequest, previewId: string, handoff: string): Promise<unknown> {
     UUID.parse(previewId); need(typeof handoff === 'string' && handoff.trim().length > 0 && handoff.length <= 12000 &&
+      // eslint-disable-next-line no-control-regex -- Handoffs must reject terminal control bytes.
       !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(handoff));
     const preview = this.#previews.get(previewId); need(preview && !preview.attempted && this.#socket);
     const context = this.#authority.capture(request, preview.approval);
@@ -108,7 +137,7 @@ export class ResourceReplacementController {
     this.#inflight.add(operationId);
     try {
       const history = await this.operations(request, preview.approval.employeeId);
-      need(history.every(row => ['completed', 'not-started'].includes(row.phase)));
+      need(history.every(row => !row.blocksFurtherChanges));
       await this.#store.resourceAttemptStart(operationId, preview.approval.employeeId, context.owner,
         history.filter(row => row.phase === 'completed').map(row => row.id));
       registered = true;
@@ -143,17 +172,17 @@ export class ResourceReplacementController {
       this.#inflight.delete(operationId); this.#applying.delete(preview.approval.employeeId);
     }
   }
-  async operations(request: FastifyRequest, employeeId: string): Promise<Array<{id: string; employeeId: string; phase: string}>> {
+  async operations(request: FastifyRequest, employeeId: string): Promise<ResourceOperationSummary[]> {
     UUID.parse(employeeId);
     const owner = this.#authority.requestOwner(request);
     need(this.#company.view(owner).employees.some(row => row.id === employeeId));
     const records = (await this.#moves.list(owner)).filter(row => row.employeeId === employeeId && row.resourceIntent);
     const attempts = (await this.#store.resourceAttempts(owner)).filter(row => row.employeeId === employeeId);
     need(this.#authority.requestOwner(request) === owner);
-    const rows = new Map(records.map(row => [row.id, {id: row.id, employeeId, phase: row.phase as string}]));
+    const rows = new Map(records.map(row => [row.id, operationView({id: row.id, employeeId, phase: row.phase as string})]));
     for (const attempt of attempts) if (!rows.has(attempt.operationId)) rows.set(attempt.operationId,
-      {id: attempt.operationId, employeeId, phase: attempt.phase === 'not-started' ? 'not-started' :
-        attempt.phase === 'preparing' && this.#inflight.has(attempt.operationId) ? 'preparing' : 'unknown'});
+      operationView({id: attempt.operationId, employeeId, phase: attempt.phase === 'not-started' ? 'not-started' :
+        attempt.phase === 'preparing' && this.#inflight.has(attempt.operationId) ? 'preparing' : 'unknown'}));
     return [...rows.values()];
   }
   async result(request: FastifyRequest, operationId: string): Promise<unknown> {
@@ -168,9 +197,9 @@ export class ResourceReplacementController {
       const attempt = attempts.find(row => row.operationId === operationId) ??
         await this.#store.settledResourceAttempt(operationId, owner);
       need(attempt && this.#authority.requestOwner(request) === owner);
-      return {id: operationId, employeeId: attempt.employeeId,
+      return operationView({id: operationId, employeeId: attempt.employeeId,
         phase: attempt.phase === 'not-started' ? 'not-started' :
-          attempt.phase === 'preparing' && this.#inflight.has(operationId) ? 'preparing' : 'unknown'};
+          attempt.phase === 'preparing' && this.#inflight.has(operationId) ? 'preparing' : 'unknown'});
     }
     need(record.resourceIntent);
     need(this.#authority.requestOwner(request) === owner && record.owner === owner);
@@ -190,7 +219,7 @@ export class ResourceReplacementController {
         need(record?.resourceIntent);
       } finally {native.close();}
     }
-    return record;
+    return operationView(record);
   }
   close(): void {
     this.#authority.close(); for (const entry of this.#operations.values()) entry.runtime.close();
@@ -201,7 +230,10 @@ export function registerResourceReplacementRoutes(app: FastifyInstance, controll
   need(controller instanceof ResourceReplacementController);
   const execute = async (reply: {code(n: number): {send(value: unknown): unknown}}, action: () => Promise<unknown>) => {
     try {return {success: true, data: await action()};}
-    catch (error) {return reply.code(error instanceof ResourceOwnerAuthorizationError ? 403 : error instanceof PlanMoveError ? error.status : 503)
+    catch (error) {
+      if (error instanceof ResourcePreviewBlocked)
+        return reply.code(error.status).send({success: false, errorCode: error.code, error: error.message});
+      return reply.code(error instanceof ResourceOwnerAuthorizationError ? 403 : error instanceof PlanMoveError ? error.status : 503)
       .send({success: false, errorCode: 'RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY'});}
   };
   app.post('/api/company/resources/preview', async (request, reply) => {

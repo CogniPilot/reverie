@@ -12,6 +12,8 @@
  *   carried forward as covered.
  * - A gate result and an applied body name the head they are for, and are refused unless it is the latest head, so a
  *   check that finishes after a new head lands cannot mark the new head.
+ * - The pull request's repository and number are set once and never change. CI results are observations stamped with
+ *   who recorded them and when, bound to the latest head and appended, never authority to merge.
  *
  * Pure: the board route applies these inside its serialized write, and stamps who and when from the caller.
  */
@@ -22,17 +24,37 @@ const sha256 = z.string().regex(/^[0-9a-f]{64}$/, 'A body digest is 64 lowercase
 const ms = z.number().int().nonnegative();
 const label = (max: number) => z.string().trim().min(1).max(max);
 const ref = z.object({ roomId: label(100), messageId: label(100) }).strict();
+const repository = z.string().regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/, 'A repository is owner/name');
+/** Plain http(s) URLs only, as everywhere on the board. */
+const httpUrl = z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'A link is an http(s) URL');
 
 /** Caps: a write past one is refused, never made room for by dropping older entries. */
-export const TRACK_LIMITS = { heads: 50, reviews: 200, applied: 50, gates: 20 };
+export const TRACK_LIMITS = { heads: 50, reviews: 200, applied: 50, gates: 20, ci: 50 };
 export const GATE_STATES = ['open', 'covered', 'n/a'] as const;
 export const REVIEW_KINDS = ['source', 'text'] as const;
 export const REVIEW_VERDICTS = ['GO', 'HOLD'] as const;
+export const CI_CONCLUSIONS = ['success', 'failure', 'cancelled', 'pending', 'skipped'] as const;
 
 const GateSchema = z
   .object({ name: label(80), state: z.enum(GATE_STATES), note: label(300).optional(), at: ms, by: label(100) })
   .strict();
-const HeadSchema = z.object({ sha, at: ms, by: label(100), gates: z.array(GateSchema).max(TRACK_LIMITS.gates) }).strict();
+const CiSchema = z
+  .object({ name: label(80), conclusion: z.enum(CI_CONCLUSIONS), url: httpUrl.optional(), at: ms, by: label(100) })
+  .strict();
+const HeadSchema = z
+  .object({
+    sha,
+    /** The commit the head was built on, when the author names it. */
+    base: sha.optional(),
+    /** sha256 of the sealed packet's SHA256SUMS manifest for this head. */
+    seal: sha256.optional(),
+    at: ms,
+    by: label(100),
+    gates: z.array(GateSchema).max(TRACK_LIMITS.gates),
+    /** CI results as observed, appended in order; never authority to merge. */
+    ci: z.array(CiSchema).max(TRACK_LIMITS.ci).default([]),
+  })
+  .strict();
 const ReviewSchema = z
   .object({
     head: sha,
@@ -61,6 +83,8 @@ const AppliedSchema = z
 
 export const TrackRecordSchema = z
   .object({
+    /** The pull request this card tracks; set once. */
+    pr: z.object({ repository, number: z.number().int().positive() }).strict().optional(),
     branch: label(100).optional(),
     heads: z.array(HeadSchema).max(TRACK_LIMITS.heads),
     reviews: z.array(ReviewSchema).max(TRACK_LIMITS.reviews),
@@ -71,7 +95,10 @@ export type TrackRecord = z.infer<typeof TrackRecordSchema>;
 
 /** One change to a track record, as the route accepts it; who and when come from the caller, never the body. */
 export const TrackOpSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('head'), sha, branch: label(100).optional() }).strict(),
+  z.object({ op: z.literal('identify'), repository, number: z.number().int().positive() }).strict(),
+  z
+    .object({ op: z.literal('head'), sha, branch: label(100).optional(), base: sha.optional(), seal: sha256.optional() })
+    .strict(),
   z
     .object({
       op: z.literal('review'),
@@ -85,6 +112,9 @@ export const TrackOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('applied'), head: sha, bodySha256: sha256 }).strict(),
   z
     .object({ op: z.literal('gate'), head: sha, name: label(80), state: z.enum(GATE_STATES), note: label(300).optional() })
+    .strict(),
+  z
+    .object({ op: z.literal('ci'), head: sha, name: label(80), conclusion: z.enum(CI_CONCLUSIONS), url: httpUrl.optional() })
     .strict(),
 ]);
 export type TrackOp = z.infer<typeof TrackOpSchema>;
@@ -135,12 +165,26 @@ export function applyTrackOp(current: TrackRecord | undefined, op: TrackOp, by: 
   const track = structuredClone(current ?? empty());
   const head = latestHead(track);
   switch (op.op) {
+    case 'identify': {
+      if (track.pr && (track.pr.repository !== op.repository || track.pr.number !== op.number))
+        throw new TrackError(`This card already tracks ${track.pr.repository}#${track.pr.number}`, 409);
+      track.pr = { repository: op.repository, number: op.number };
+      return track;
+    }
     case 'head': {
       if (head && sameCommit(head.sha, op.sha)) throw new TrackError(`${op.sha} is already the latest head`, 409);
       if (track.heads.length >= TRACK_LIMITS.heads) throw new TrackError('This track has the most heads it can hold', 409);
       for (const review of track.reviews) if (!review.supersededAt) review.supersededAt = at;
       const gates = (head?.gates ?? []).map((g) => ({ name: g.name, state: 'open' as const, at, by }));
-      track.heads.push({ sha: op.sha, at, by, gates });
+      track.heads.push({
+        sha: op.sha,
+        ...(op.base ? { base: op.base } : {}),
+        ...(op.seal ? { seal: op.seal } : {}),
+        at,
+        by,
+        gates,
+        ci: [],
+      });
       if (op.branch) track.branch = op.branch;
       return track;
     }
@@ -177,6 +221,14 @@ export function applyTrackOp(current: TrackRecord | undefined, op: TrackOp, by: 
       else latest.gates.push(gate);
       return track;
     }
+    case 'ci': {
+      const latest = requireLatest(head, op.head, 'recording a CI result');
+      // A head stored before CI results existed has no list yet.
+      const observed = (latest.ci ??= []);
+      if (observed.length >= TRACK_LIMITS.ci) throw new TrackError('This head has the most CI results it can hold', 409);
+      observed.push({ name: op.name, conclusion: op.conclusion, ...(op.url ? { url: op.url } : {}), at, by });
+      return track;
+    }
   }
 }
 
@@ -200,7 +252,12 @@ function describeApplied(track: TrackRecord, applied: TrackRecord['applied'][num
 export function describeTrack(track: TrackRecord | undefined): string[] {
   const head = latestHead(track);
   if (!track || !head) return ['No track record yet.'];
-  const lines = [`head ${head.sha}${track.branch ? ` (${track.branch})` : ''}, ${track.heads.length} head(s) so far`];
+  const lines = [
+    ...(track.pr ? [`pull request ${track.pr.repository}#${track.pr.number}`] : []),
+    `head ${head.sha}${track.branch ? ` (${track.branch})` : ''}, ${track.heads.length} head(s) so far`,
+    ...(head.base ? [`base ${head.base}`] : []),
+    ...(head.seal ? [`packet seal ${head.seal.slice(0, 8)}`] : []),
+  ];
   const reviews = currentReviews(track);
   for (const kind of REVIEW_KINDS) {
     const last = reviews.filter((r) => r.kind === kind).at(-1);
@@ -211,5 +268,8 @@ export function describeTrack(track: TrackRecord | undefined): string[] {
   const applied = track.applied.filter((a) => sameCommit(a.head, head.sha)).at(-1);
   if (applied) lines.push(...describeApplied(track, applied));
   for (const gate of head.gates) lines.push(`gate ${gate.name}: ${gate.state}${gate.note ? ` (${gate.note})` : ''}`);
+  // The newest observation per check, labelled as what it is.
+  const latestCi = new Map((head.ci ?? []).map((c) => [c.name, c]));
+  for (const c of latestCi.values()) lines.push(`CI ${c.name}: ${c.conclusion} (observed by ${c.by}; not merge authority)`);
   return lines;
 }
