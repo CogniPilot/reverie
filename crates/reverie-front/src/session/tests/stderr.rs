@@ -16,6 +16,7 @@ fn full_stderr_does_not_stall_connection_cap_or_cleanup() {
         .args([
             "--exact",
             "session::tests::stderr::full_stderr_does_not_stall_connection_cap_or_cleanup",
+            "--nocapture",
         ])
         .env(CHILD_FLAG, "child")
         .stdin(Stdio::null())

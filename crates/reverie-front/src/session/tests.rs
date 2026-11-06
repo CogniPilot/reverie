@@ -3,6 +3,8 @@ use reverie_contracts::route_frames_v2::{Direction, read_frame};
 use std::{io::Write, net::Shutdown, os::unix::net::UnixStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(target_os = "linux")]
+mod listener_release;
+#[cfg(target_os = "linux")]
 mod stderr;
 
 struct Peer(UnixStream);
@@ -145,7 +147,7 @@ async fn qualify_half_close() {
 }
 
 #[test]
-fn bridge_is_tagged_unbind_closes_listener_and_extra_connections_are_closed() {
+fn bridge_is_tagged_unbind_preserves_client_and_extra_connections_are_closed() {
     runtime().block_on(qualify_bridge_and_cap());
 }
 async fn qualify_bridge_and_cap() {
@@ -171,7 +173,8 @@ async fn qualify_bridge_and_cap() {
         h.peer.non_credit().await.body,
         Body::Data(b"barrier".to_vec())
     );
-    assert!(TcpStream::connect(("127.0.0.1", bridge)).await.is_err());
+    // Exact listener release is checked independently in listener_release.
+    // Another concurrent fixture may already own this ephemeral endpoint.
     h.peer.send(id, Body::Abort(AbortReason::Destroy)).await;
     h.finish().await.unwrap();
 }
