@@ -1,5 +1,6 @@
 //! Linux host observations. Returned data never grants owner or effect authority.
 pub mod device_policy;
+pub mod embeddings;
 pub mod engine_metadata;
 pub mod lease_policy;
 mod native;

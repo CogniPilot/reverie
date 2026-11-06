@@ -37,15 +37,28 @@ impl MemoryMetadata {
         Ok(result)
     }
     pub fn external_episode(source: &str, visibility: &str) -> Self {
+        Self::external_episode_text(
+            &MetadataText::from_scalar_text(source),
+            &MetadataText::from_scalar_text(visibility),
+        )
+    }
+    pub fn external_episode_text(source: &MetadataText, visibility: &MetadataText) -> Self {
         Self(object(vec![
-            ("external_source", string(source)),
-            ("visibility", string(visibility)),
+            ("external_source", embedding::codepoint_string(source)),
+            ("visibility", embedding::codepoint_string(visibility)),
         ]))
     }
     pub fn dream(recall: &str, tone: &str, ideas: Option<&Self>) -> Self {
+        Self::dream_text(
+            &MetadataText::from_scalar_text(recall),
+            &MetadataText::from_scalar_text(tone),
+            ideas,
+        )
+    }
+    pub fn dream_text(recall: &MetadataText, tone: &MetadataText, ideas: Option<&Self>) -> Self {
         let mut fields = vec![
-            ("recall", string(recall)),
-            ("tone", string(tone)),
+            ("recall", embedding::codepoint_string(recall)),
+            ("tone", embedding::codepoint_string(tone)),
             ("released", boolean(false)),
         ];
         if let Some(ideas) = ideas
@@ -57,9 +70,12 @@ impl MemoryMetadata {
         Self(object(fields))
     }
     pub fn project(project: &str, source: &str) -> Self {
+        Self::project_text(project, &MetadataText::from_scalar_text(source))
+    }
+    pub fn project_text(project: &str, source: &MetadataText) -> Self {
         Self(object(vec![
             ("project", string(project)),
-            ("source", string(source)),
+            ("source", embedding::codepoint_string(source)),
             ("visibility", string("project")),
         ]))
     }
@@ -99,6 +115,30 @@ impl MemoryMetadata {
     }
 }
 impl MemorySources {
+    /// Existing add_reflection/add_dream perform list(source_ids) before
+    /// embedding. Preserve integer width and Python iteration of JSON data.
+    pub fn iterated(&self) -> Result<Self> {
+        use crate::legacy_json::ordered::OrderNode;
+        let items = match &self.0.value.0 {
+            Node::Array(_) => return Ok(self.clone()),
+            Node::String(value) => value
+                .0
+                .iter()
+                .map(|&cp| OrderedValue::scalar(Value(Node::String(Text(vec![cp])))))
+                .collect(),
+            Node::Object(_) => {
+                let OrderNode::Object(fields) = &self.0.graph.nodes[self.0.graph.root] else {
+                    unreachable!("private source field order")
+                };
+                fields
+                    .iter()
+                    .map(|(key, _)| OrderedValue::scalar(Value(Node::String(key.clone()))))
+                    .collect()
+            }
+            _ => return Err(MemoryJsonError::ExpectedSourcesIterable),
+        };
+        Ok(Self(OrderedValue::array(items)))
+    }
     pub fn new(ids: &[i64]) -> Self {
         Self(OrderedValue::array(
             ids.iter().copied().map(integer).collect(),

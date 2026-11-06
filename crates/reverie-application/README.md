@@ -96,3 +96,12 @@ the complete read-side reservation observation over these same owners. Its
 [checkpoint audit](src/reservation_gate/README.md) records source phases, real
 lock/finalizer handling, compatible hashes and still-required claim/effect owners.
 It is inactive and does not select a broker or grant a launch/completion permit.
+
+`project_memory::ProjectMemory` preserves the separate lowercase project
+namespace, default lexical model, six-result lookup, source/fact validation and
+original 8,000/1,000-codepoint limits. Its scalar convenience methods share
+lossless query/fact/source input paths. `memory_import::migrate_history` preserves
+the existing user/assistant pairing, idle marker, file-mtime-derived timestamps,
+per-episode commits and final one-time state marker. It does not reset a database
+or silently re-embed records. Trusted service installation selects these paths;
+the library is not an arbitrary-file operator API or a selected product route.

@@ -161,3 +161,29 @@ fn ordered_capture_clone_emit_and_drop_are_iterative() {
     let memory = MemoryMetadata::decode(&raw).unwrap();
     assert_eq!(memory.clone().json(), raw);
 }
+#[test]
+fn source_iteration_preserves_python_width_order_and_surrogate_characters() {
+    for (raw, expected) in [
+        (
+            r#"[9223372036854775808, {"x": 1}, null, true]"#,
+            r#"[9223372036854775808, {"x": 1}, null, true]"#,
+        ),
+        (
+            r#"{"z":0,"a":1,"z":2,"\ud800":3}"#,
+            r#"["z", "a", "\ud800"]"#,
+        ),
+        (r#""A\ud800𝄞""#, r#"["A", "\ud800", "\ud834\udd1e"]"#),
+    ] {
+        assert_eq!(
+            MemorySources::decode(raw)
+                .unwrap()
+                .iterated()
+                .unwrap()
+                .json(),
+            expected
+        );
+    }
+    for raw in ["null", "false", "12", "1.5"] {
+        assert!(MemorySources::decode(raw).unwrap().iterated().is_err());
+    }
+}

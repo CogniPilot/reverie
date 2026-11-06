@@ -61,15 +61,48 @@ pub(crate) fn lower_codepoints(chars: &[u32]) -> Vec<u32> {
     }
     output
 }
+/// Frozen Python 3.13 lowercase of one character. IDNA nameprep applies this
+/// per character, independently of whole-string sigma context.
+pub fn python_lowercase_character(value: char) -> String {
+    lower_codepoints(&[u32::from(value)])
+        .into_iter()
+        .map(|cp| char::from_u32(cp).expect("scalar lowercase mapping"))
+        .collect()
+}
+pub fn python_lowercase_string(value: &str) -> String {
+    lower(value)
+}
+pub fn python_numeric_text(value: &str) -> Option<String> {
+    numeric_ascii(&value.chars().map(u32::from).collect::<Vec<_>>())
+}
 pub fn normalize_utterance(text: &str) -> String {
-    let mut text = trim_text(text);
-    while let Some(value) = text.chars().next() {
-        if contains(tables::ALNUM, value) {
-            break;
+    normalize_utterance_text(PythonTextRef::from_scalar_text(text))
+        .codepoints()
+        .iter()
+        .map(|&cp| char::from_u32(cp).expect("scalar voice normalization"))
+        .collect()
+}
+pub fn normalize_utterance_text(text: PythonTextRef<'_>) -> PythonText {
+    let points = text.codepoints();
+    let first = points
+        .iter()
+        .position(|&cp| contains_point(tables::ALNUM, cp))
+        .unwrap_or(points.len());
+    let lowered = lower_codepoints(&points[first..]);
+    let mut output = Vec::new();
+    let mut separator = false;
+    for point in lowered {
+        if contains_point(tables::WHITESPACE, point) {
+            separator = !output.is_empty();
+        } else {
+            if separator {
+                output.push(32);
+                separator = false;
+            }
+            output.push(point);
         }
-        text = text[value.len_utf8()..].trim_start_matches(whitespace);
     }
-    collapse_whitespace(&lower(text))
+    PythonText::try_new(output).expect("checked input and frozen lower facts")
 }
 /// Python's string repr for JSON-representable metadata recall. Lone
 /// surrogates are escaped; the returned Rust string is always scalar text.

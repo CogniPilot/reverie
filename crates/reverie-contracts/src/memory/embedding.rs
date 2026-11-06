@@ -5,6 +5,7 @@ use reverie_core::memory::{EmbeddingError, parse_embedding_float_text};
 pub enum EmbeddingContractError {
     InvalidJson,
     Shape,
+    InvalidText,
     Number(EmbeddingError),
 }
 impl fmt::Display for EmbeddingContractError {
@@ -114,9 +115,42 @@ fn number(value: &Value) -> std::result::Result<f64, EmbeddingError> {
     }
 }
 pub fn encode_embedding_request(input: &str, model: &str) -> Vec<u8> {
-    let mut fields = vec![("input", string(input))];
-    if !model.is_empty() {
-        fields.push(("model", string(model)));
+    encode_embedding_request_text(
+        &MetadataText::from_scalar_text(input),
+        &MetadataText::from_scalar_text(model),
+    )
+}
+pub fn encode_embedding_request_text(input: &MetadataText, model: &MetadataText) -> Vec<u8> {
+    let mut fields = vec![("input", codepoint_string(input))];
+    if !model.codepoints().is_empty() {
+        fields.push(("model", codepoint_string(model)));
     }
     object(fields).encode()
+}
+pub(super) fn codepoint_string(input: &MetadataText) -> OrderedValue {
+    OrderedValue::scalar(Value(Node::String(Text(input.codepoints().to_vec()))))
+}
+pub fn embedding_text(input: reverie_core::memory::EmbeddingText<'_>) -> MetadataText {
+    MetadataText::from_python_text(input.as_python_text_ref().into_owned())
+}
+pub fn embedding_model_name(model: &MetadataText) -> MetadataText {
+    let mut name = "llama:".chars().map(u32::from).collect::<Vec<_>>();
+    if model.codepoints().is_empty() {
+        name.extend("default".chars().map(u32::from));
+    } else {
+        name.extend_from_slice(model.codepoints());
+    }
+    MetadataText::from_text(Text(name))
+}
+/// Named embedding input/model string decoder. This is data, not provider or
+/// owner approval; raw WTF8/UTF16/32 bytes retain their original codepoints.
+pub fn decode_embedding_text(
+    raw: &[u8],
+) -> std::result::Result<MetadataText, EmbeddingContractError> {
+    let mut document = legacy_json::decode_embedding_bytes(raw)
+        .map_err(|_| EmbeddingContractError::InvalidJson)?;
+    match std::mem::replace(&mut document.value.0, Node::Null) {
+        Node::String(text) => Ok(MetadataText::from_text(text)),
+        _ => Err(EmbeddingContractError::Shape),
+    }
 }

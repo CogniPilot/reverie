@@ -229,3 +229,41 @@ through `JournalError::guard_failure`; stable codes still drive decisions.
 The boxed cause and outer secondary close errors remain available to trusted
 diagnostics. No callback, guard authority or completion proof is created by
 constructing an error value.
+
+## Employee and project memory persistence
+
+`memory::MemoryStore` preserves the existing memory SQLite schema, row IDs,
+native-endian float32 vector BLOBs, metadata/source JSON, claims, state, beliefs
+and dream summaries. Initialization migrates the legacy assistant column and
+schema version without resetting rows or re-embedding. Unknown extension tables
+(including documents and ballots) survive initialization, backup and restore.
+This uses ordinary SQLite filesystem behavior; it does not weaken or reuse the
+private profile store's stricter custody rules. The installing service selects
+and authorizes the employee/project namespace. No operator database editor or
+production consumer is introduced.
+
+Scalar convenience inputs coexist with lossless checked Python-text inputs for
+queries, model names, records and voice normalization. SQL TEXT binds still
+reject unencodable surrogates at their actual boundary, after embedding where
+the source does so. Source-ID JSON retains arbitrary integer width and existing
+`list(source_ids)` iteration. SQLite connection-local defaults explicitly match
+the legacy foreign-key and secure-delete settings. URI-looking names remain
+literal files; empty MemoryStore paths retain the source's directory refusal,
+while `:memory:` aliases remain ephemeral.
+
+Transactions preserve the existing commit points, including explicit operations
+that commit an outer atomic prefix and failed re-embedding that leaves a prefix
+uncommitted. A write's own transaction rolls back a failed COMMIT; explicit
+`atomic` leaves that failed transaction open, matching the two Python contexts.
+Retrieval uses the pinned CPython ranking policy, including NaN run ordering,
+and returns pre-touch access timestamps while committing the selected touch.
+
+The new curated `backup_to`/`restore_from` endpoints copy every SQLite table and
+original BLOB. Their caller authorizes paths and quiesces other writers for
+restore. Same-file, symlink/hardlink aliases and ephemeral snapshot names refuse;
+copying has a two-second budget instead of an unbounded busy loop. Restore first
+qualifies and migrates a private SQLite temporary. An error after attempting
+destination replacement reports uncertainty and retains the selected snapshot;
+it does not claim rollback or remove a recovery file. Checked connection-close
+errors retain primary and finalizer failures. Synthetic Python-created databases
+and an explicit reverse-interop qualification cover both language directions.

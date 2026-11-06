@@ -1,4 +1,4 @@
-use super::{numeric::python_sum, text};
+use super::{EmbeddingText, numeric::python_sum};
 use blake2::{Blake2b, Digest, digest::consts::U8};
 use std::{collections::BTreeMap, fmt};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12,6 +12,7 @@ pub enum EmbeddingError {
     InvalidBlob,
     Allocation,
     InvalidNumber,
+    InvalidText,
     Backend(String),
 }
 impl fmt::Display for EmbeddingError {
@@ -21,16 +22,31 @@ impl fmt::Display for EmbeddingError {
 }
 impl std::error::Error for EmbeddingError {}
 pub trait Embedder: Send + Sync {
-    fn name(&self) -> &str;
+    fn name(&self) -> EmbeddingText<'_>;
     fn dimensions(&self) -> usize;
-    fn embed(&self, text: &str, kind: EmbeddingKind) -> Result<Vec<f64>, EmbeddingError>;
+    fn embed_text(
+        &self,
+        text: EmbeddingText<'_>,
+        kind: EmbeddingKind,
+    ) -> Result<Vec<f64>, EmbeddingError>;
+    fn embed(&self, text: &str, kind: EmbeddingKind) -> Result<Vec<f64>, EmbeddingError> {
+        self.embed_text(EmbeddingText::from_scalar_text(text), kind)
+    }
 }
 const STOPWORDS: &str = "a an the and or but if then so of to in on at by for with from as is are was were be been being am i me my you your he she it its we they them this that these those do does did have has had not no yes just like about what which who whom how when where why there here very can could would should will shall may might must oh ok okay hey hi hello well too also ever even really";
 pub fn tokenize(source: &str) -> Vec<String> {
-    text::lower(source)
-        .split(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '\'')
-        .filter(|word| word.len() > 1 && !STOPWORDS.split(' ').any(|stop| stop == *word))
-        .map(str::to_owned)
+    tokenize_embedding_text(EmbeddingText::from_scalar_text(source))
+}
+fn tokenize_embedding_text(source: EmbeddingText<'_>) -> Vec<String> {
+    crate::python_text::lower_codepoints(&source.codepoints())
+        .split(|&cp| !matches!(cp,97..=122|48..=57|39))
+        .filter(|word| word.len() > 1)
+        .map(|word| {
+            word.iter()
+                .map(|&cp| char::from_u32(cp).expect("ASCII regex member"))
+                .collect::<String>()
+        })
+        .filter(|word| !STOPWORDS.split(' ').any(|stop| stop == word))
         .collect()
 }
 #[derive(Clone, Debug)]
@@ -39,6 +55,9 @@ pub struct HashedEmbedder {
     name: String,
 }
 impl HashedEmbedder {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
     pub fn new(dimensions: usize) -> Self {
         Self {
             dimensions,
@@ -52,19 +71,23 @@ impl Default for HashedEmbedder {
     }
 }
 impl Embedder for HashedEmbedder {
-    fn name(&self) -> &str {
-        &self.name
+    fn name(&self) -> EmbeddingText<'_> {
+        EmbeddingText::from_scalar_text(&self.name)
     }
     fn dimensions(&self) -> usize {
         self.dimensions
     }
-    fn embed(&self, source: &str, _kind: EmbeddingKind) -> Result<Vec<f64>, EmbeddingError> {
+    fn embed_text(
+        &self,
+        source: EmbeddingText<'_>,
+        _kind: EmbeddingKind,
+    ) -> Result<Vec<f64>, EmbeddingError> {
         let mut vector = Vec::new();
         vector
             .try_reserve_exact(self.dimensions)
             .map_err(|_| EmbeddingError::Allocation)?;
         vector.resize(self.dimensions, 0.0);
-        let words = tokenize(source);
+        let words = tokenize_embedding_text(source);
         let mut features = words.clone();
         features.extend(
             words

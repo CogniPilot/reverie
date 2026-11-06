@@ -181,3 +181,41 @@ supports canonical control metadata and the actual captured current-image file;
 it retains the original Source, complete before/after census, mount table,
 deadline and context origin. Declaration parsing is not a custody/effect grant,
 and unported preparation/transport/host-job owners are not fabricated as selectors.
+
+## Configured embeddings
+
+`embeddings` implements the configured HTTP(S) llama embedding backend and the
+existing single startup probe followed by the genuine hashed-backend fallback.
+After selection, later provider failures propagate. Neither response data nor
+fallback grants model-selection, persistence or owner authority. Existing Python
+entrypoints remain selected until coordinated service migration.
+
+Hyper owns HTTP framing and rustls with its ring provider and platform verifier
+owns TLS. Tokio supplies native I/O. The purpose adapter preserves raw request
+targets, JSON bytes, per-blocking-I/O timeout behavior, unbounded response bodies,
+urllib redirect counts/method changes and no POST retries/replays. Interim status
+and large accepted response-head cases have actual Python witnesses; this is not
+a claim that every malformed HTTP parser diagnostic matches http.client.
+Lossless model/prefix/query codepoints remain distinct from SQL-storable text.
+Configured URL text also retains codepoints through suffixing and Request's
+strip/unwrap phase: discarded surrogate fragments are accepted, while actual
+non-scalar network text refuses before connecting. Scalar constructors remain
+available and do not normalize the request target.
+
+Host headers retain urllib's Latin-1 behavior. DNS/SNI independently use its
+IDNA2003/nameprep rules, using the maintained `idna` crate's Punycode primitive
+and frozen Unicode3.2 facts. Unicode normalization is adapted to those facts;
+modern UTS46 conversion would change accepted routes. The dependency inventory
+still includes idna's transitive ICU dependencies and SQLite/ring native code;
+the port does not imply a dependency-free runtime.
+
+Proxy routing, environment precedence, CONNECT, redirects and TLS are qualified
+with synthetic local servers and task-owned certificates. One reviewed security
+fix intentionally differs from urllib: Proxy-Authorization stays with the
+selected proxy and never follows a bypassed origin or another proxy's route.
+It is removed before inner CONNECT-origin requests. No provider, private endpoint
+or billing API is used by qualification. Incidental non-HTTP urllib transports
+(for example file/data/FTP origins) remain unproven; their configured use must be
+inventoried through supported settings before cutover, then covered by named
+adapters or an explicit reviewed compatibility decision. No Python fallback is
+hidden behind unsupported transports.

@@ -75,6 +75,9 @@ impl MetadataText {
     pub fn codepoints(&self) -> &[u32] {
         self.0.codepoints()
     }
+    pub fn as_python_text_ref(&self) -> reverie_core::PythonTextRef<'_> {
+        self.0.as_text_ref()
+    }
     pub fn scalar_text(&self) -> Option<String> {
         self.0
             .codepoints()

@@ -6,7 +6,10 @@ mod history;
 use crate::legacy_json::ordered::OrderedValue;
 use crate::legacy_json::{Node, Number, Text, Value};
 use crate::storage_identity::MetadataText;
-pub use embedding::{EmbeddingContractError, EmbeddingResponse, encode_embedding_request};
+pub use embedding::{
+    EmbeddingContractError, EmbeddingResponse, decode_embedding_text, embedding_model_name,
+    embedding_text, encode_embedding_request, encode_embedding_request_text,
+};
 pub use fields::{MemoryMetadata, MemorySources};
 pub use history::{LegacyEpisode, LegacyHistory};
 use std::fmt;
@@ -17,6 +20,7 @@ pub enum MemoryJsonError {
     ExpectedHistoryTurn,
     ExpectedHistoryText,
     InvalidCodepoint,
+    ExpectedSourcesIterable,
 }
 impl fmt::Display for MemoryJsonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

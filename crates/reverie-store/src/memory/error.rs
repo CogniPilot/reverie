@@ -1,0 +1,112 @@
+use reverie_core::memory::{EmbeddingError, MemoryMathError};
+use std::{fmt, io};
+#[derive(Debug)]
+pub enum MemoryError {
+    Sqlite(rusqlite::Error),
+    Io(io::Error),
+    Embedding(EmbeddingError),
+    Math(MemoryMathError),
+    Ranking(reverie_core::memory::MemoryRankError),
+    Json(reverie_contracts::memory::MemoryJsonError),
+    Missing(i64),
+    ProtectedBelief(i64),
+    EmptyBelief,
+    EmptyExternalSource,
+    MissingExternalMemory,
+    NotDream(i64),
+    AmbiguousAssistantColumns,
+    MissingAssistantColumn,
+    Closed,
+    Poisoned,
+    RollbackAfterPanic(Box<Self>),
+    ActiveTransaction,
+    Integrity,
+    SameDatabase,
+    EphemeralSnapshot,
+    SnapshotTimeout,
+    BackupUncertain(Box<Self>),
+    RestoreUncertain(Box<Self>),
+    Finalization {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
+}
+impl fmt::Display for MemoryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sqlite(e) => e.fmt(f),
+            Self::Io(e) => e.fmt(f),
+            Self::Embedding(e) => e.fmt(f),
+            Self::Math(e) => e.fmt(f),
+            Self::Ranking(e) => e.fmt(f),
+            Self::Json(e) => e.fmt(f),
+            Self::Missing(id) => write!(f, "memory or belief {id} does not exist"),
+            Self::ProtectedBelief(id) => write!(
+                f,
+                "belief {id} is protected and is never removed by the system"
+            ),
+            Self::Finalization { primary, secondary } => {
+                write!(f, "{primary}; finalizer: {secondary}")
+            }
+            value => write!(f, "{value:?}"),
+        }
+    }
+}
+impl std::error::Error for MemoryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Sqlite(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::Embedding(e) => Some(e),
+            Self::Math(e) => Some(e),
+            Self::Ranking(e) => Some(e),
+            Self::Json(e) => Some(e),
+            Self::Finalization { primary, .. } => Some(primary),
+            Self::BackupUncertain(e) | Self::RestoreUncertain(e) | Self::RollbackAfterPanic(e) => {
+                Some(e)
+            }
+            _ => None,
+        }
+    }
+}
+impl From<rusqlite::Error> for MemoryError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Sqlite(e)
+    }
+}
+impl From<io::Error> for MemoryError {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+impl From<EmbeddingError> for MemoryError {
+    fn from(e: EmbeddingError) -> Self {
+        Self::Embedding(e)
+    }
+}
+impl From<MemoryMathError> for MemoryError {
+    fn from(e: MemoryMathError) -> Self {
+        Self::Math(e)
+    }
+}
+impl From<reverie_core::memory::MemoryRankError> for MemoryError {
+    fn from(error: reverie_core::memory::MemoryRankError) -> Self {
+        Self::Ranking(error)
+    }
+}
+impl From<reverie_contracts::memory::MemoryJsonError> for MemoryError {
+    fn from(e: reverie_contracts::memory::MemoryJsonError) -> Self {
+        Self::Json(e)
+    }
+}
+pub type Result<T> = std::result::Result<T, MemoryError>;
+pub(super) fn finalized<T>(primary: Result<T>, finalizer: Result<()>) -> Result<T> {
+    match (primary, finalizer) {
+        (Ok(v), Ok(())) => Ok(v),
+        (Err(e), Ok(())) | (Ok(_), Err(e)) => Err(e),
+        (Err(primary), Err(secondary)) => Err(MemoryError::Finalization {
+            primary: Box::new(primary),
+            secondary: Box::new(secondary),
+        }),
+    }
+}

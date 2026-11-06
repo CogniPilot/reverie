@@ -1,15 +1,22 @@
 //! Existing memory retrieval and lexical embeddings. Data is not model authority.
 mod embedding;
+mod embedding_text;
 mod float_text;
 mod numeric;
 use crate::python_text as text;
+mod ranking;
 pub use embedding::{
     Embedder, EmbeddingError, EmbeddingKind, HashedEmbedder, cosine, normalize, pack, tokenize,
     unpack,
 };
+pub use embedding_text::EmbeddingText;
 pub use float_text::parse_embedding_float_text;
 pub use numeric::{MemoryMathError, recency_score, score_memory};
-pub use text::{collapse_whitespace, normalize_utterance, quoted_memory_text, trim_text};
+pub use ranking::{MemoryRank, MemoryRankError, memory_rank_order};
+pub use text::{
+    collapse_whitespace, normalize_utterance, normalize_utterance_text, quoted_memory_text,
+    trim_text,
+};
 
 pub const EPISODE: &str = "episode";
 pub const REFLECTION: &str = "reflection";
@@ -21,6 +28,13 @@ pub fn episode_text(user: &str, assistant: &str) -> String {
         trim_text(user),
         trim_text(assistant)
     )
+}
+pub fn episode_text_codepoints(user: EmbeddingText<'_>, assistant: EmbeddingText<'_>) -> Vec<u32> {
+    let mut result = "User: ".chars().map(u32::from).collect::<Vec<_>>();
+    result.extend_from_slice(&user.trimmed().codepoints());
+    result.extend("\nAssistant: ".chars().map(u32::from));
+    result.extend_from_slice(&assistant.trimmed().codepoints());
+    result
 }
 pub fn clamp_importance(value: f64) -> f64 {
     numeric::clamp(value, 1.0, 10.0)

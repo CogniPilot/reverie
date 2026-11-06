@@ -5,6 +5,7 @@
 //! admission/authorization checks remain outside this crate.
 
 mod error;
+pub mod memory;
 pub mod operations;
 mod private_fs;
 pub mod profiles;

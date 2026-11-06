@@ -34,6 +34,13 @@ port. No positive-only decay or finite-only weight restriction is introduced.
 This component performs no SQLite, HTTP, provider selection, re-embedding or
 deployment. Persistence and service workflows remain separate owners.
 
+Retrieval ordering pins CPython3.13.15's powersort/count-run/gallop policy in
+safe Rust. NaN keys make the exact run schedule observable, so a different
+stable sorter changes retained results. Eighty actual Python rank vectors span
+minrun boundaries and unordered/finite run shapes; SQLite retrieval adds120
+end-to-end vectors. The original PSF license and source provenance are retained
+beside the narrowly scoped implementation. It grants no persistence authority.
+
 `operations` owns the existing resource journal's checked nonnil identifiers,
 unsigned memory references, phase/receipt rules, conservative positive deltas,
 idempotency uniqueness and shared pool accounting. Core completion candidates
