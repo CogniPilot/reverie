@@ -69,19 +69,7 @@ impl ResourceConfiguration {
     /// Settings from this captured worker config, not separate request paths.
     /// They are data for the native reader and carry no owner/effect authority.
     pub fn identity_settings(&self) -> Result<ResourceIdentitySettings> {
-        let fields = root(&self.source);
-        let uid = match fields.get(&key("uid")) {
-            Some(Value(Node::Number(crate::legacy_json::Number::Integer(uid)))) => uid
-                .parse()
-                .map_err(|_| ResourceConfigError::ResourceShape)?,
-            _ => return Err(ResourceConfigError::ResourceShape),
-        };
-        Ok(ResourceIdentitySettings {
-            company: path(fields, "companyFile")?,
-            state: path(fields, "stateRoot")?,
-            scratch: path(fields, "scratchRoot")?,
-            uid,
-        })
+        ResourceIdentitySettings::capture_worker_config(&self.source)
     }
     /// The existing six-field profile projection, reusing the same global-pool
     /// presence rule as session/EID selection. No effective feature projection.
@@ -118,6 +106,23 @@ pub struct ResourceIdentitySettings {
     uid: u32,
 }
 impl ResourceIdentitySettings {
+    /// Capture only identity DATA. Storage consumers must not validate unrelated
+    /// resource maps before their original filesystem/registry phases.
+    pub fn capture_worker_config(source: &EffectiveWorkerConfig) -> Result<Self> {
+        let fields = root(source);
+        let uid = match fields.get(&key("uid")) {
+            Some(Value(Node::Number(crate::legacy_json::Number::Integer(uid)))) => uid
+                .parse()
+                .map_err(|_| ResourceConfigError::ResourceShape)?,
+            _ => return Err(ResourceConfigError::ResourceShape),
+        };
+        Ok(Self {
+            company: path(fields, "companyFile")?,
+            state: path(fields, "stateRoot")?,
+            scratch: path(fields, "scratchRoot")?,
+            uid,
+        })
+    }
     pub fn company_file(&self) -> &MetadataText {
         &self.company
     }

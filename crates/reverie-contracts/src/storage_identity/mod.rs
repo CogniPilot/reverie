@@ -1,5 +1,5 @@
 //! Named read-side laptop registry/lineage facts. No authorization or write API.
-mod lineage;
+pub(crate) mod lineage;
 mod registry;
 
 use crate::legacy_json::{self, Node, Number, Text, Value, truthy};

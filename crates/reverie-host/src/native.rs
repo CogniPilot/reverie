@@ -22,6 +22,7 @@ pub(crate) use child_record::{
     create_private as create_child_receipt, publish as publish_child_receipt,
 };
 pub(crate) use lease::open_at;
+pub(crate) use lease::open_at_mode;
 mod passwd;
 pub(crate) use memory_profile::publish as publish_memory_profile;
 pub(crate) use memory_profile::{

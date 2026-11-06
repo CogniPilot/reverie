@@ -127,16 +127,27 @@ fn directory(path: &Path, uid: Option<u32>) -> Result<File> {
     Ok(parent)
 }
 pub(crate) fn open_at(parent: i32, name: &OsStr, flags: i32) -> std::io::Result<File> {
+    open_at_mode(parent, name, flags, 0)
+}
+/// Private syscall owner. Purpose-specific callers supply fixed creation modes;
+/// these parameters are not a request-selected file-creation interface.
+pub(crate) fn open_at_mode(
+    parent: i32,
+    name: &OsStr,
+    flags: i32,
+    mode: u32,
+) -> std::io::Result<File> {
     let name = CString::new(name.as_bytes()).map_err(|_| std::io::ErrorKind::InvalidInput)?;
     // SAFETY: name remains a valid terminated byte string throughout openat;
     // parent is a borrowed live directory descriptor (or AT_FDCWD). These
-    // read-only calls create no file; a successful result is one newly owned fd.
+    // mode is supplied for O_CREAT by a fixed private purpose wrapper. A
+    // successful result is one newly owned fd, adopted exactly once below.
     let fd = unsafe {
         libc::openat(
             parent,
             name.as_ptr(),
             flags | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0,
+            mode,
         )
     };
     if fd < 0 {

@@ -21,6 +21,7 @@ pub mod worker_child;
 pub mod worker_identity;
 pub mod worker_launch;
 pub mod worker_mounts;
+pub mod worker_storage;
 pub mod worker_validation;
 
 pub use observation::{ObservationError, ObservationFault};
