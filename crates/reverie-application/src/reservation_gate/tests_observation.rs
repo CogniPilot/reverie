@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 #[path = "tests_claim.rs"]
 mod claim_cases;
+#[path = "tests_launch.rs"]
+mod launch_cases;
 #[path = "tests_preparation.rs"]
 mod preparation_cases;
 #[path = "tests_profile_selection.rs"]

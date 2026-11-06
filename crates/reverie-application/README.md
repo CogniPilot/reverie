@@ -188,3 +188,23 @@ restart a fresh cleanup budget. An owning control establishes that late stop
 does not release the lease or finish the waiting task until the original mutex
 is actually released. This is preserved source behavior and a required final
 shutdown integration boundary, not a claimed whole-service 34-second bound.
+
+`ReservationGate::admit_ordinary_launch` retains the real thread/process-bound
+allocation scope through ordinary launch checks. It refuses a durable active
+reserved target, preserving the separate protected-start producer. Its
+`check_creation` uses the original host-job, launch, exact admission/pool policy,
+native capacity, retained-delta and final inventory order. Candidate ceilings
+include existing committed and retained bytes. Checked success runs the final
+native guard; checked body failure preserves the primary and close failures.
+Closing this local scope does not prove global resource release or confer
+API, container, protected-start or lifecycle permission.
+
+This is the reservation-specific creation phase. The canonical broker must
+also complete the distinct running-peer/cgroup census, outside-pool ceiling,
+maximum-worker and candidate-swap checks before calling it; the legacy
+no-reservations pool/headroom branch remains separate. Real storage waiting,
+owned Nix/laptop/Office/viewer registration and final settlement remain required
+before selecting the complete worker service. The 10 actual Python method
+vectors use synthetic downstream capacity facts; the Rust controls additionally
+own real admission/journal locks and durable claims, and claim no live engine
+or installed-runtime qualification.
