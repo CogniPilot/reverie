@@ -352,6 +352,7 @@ import { registerBotWatches } from '../bot-watches-runtime.js';
 import { appendBurnLog, burnLogLines, burnWatchData, hostLoadData, plansPaceData } from '../cron/post-sources.js';
 import { AccountLoginService, defaultLoginDeps } from '../account-login.js';
 import { computeFrontendBuildId } from './frontend-build-id.js';
+import { closeThroughFront, type FrontChannel } from '../rust-front/front.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -585,7 +586,9 @@ export class WebServer extends EventEmitter {
     private readonly goalPorts?: GoalServerInput,
     /** Explicit tracked service authentication config; absent means /api/service-decisions always answers 403. */
     private readonly serviceAuthConfig?: string,
-    private readonly resourceReplacementEnabled: boolean = false
+    private readonly resourceReplacementEnabled: boolean = false,
+    /** The Rust front's channel, when the front owns the listening sockets and TLS; absent, TS listens itself. */
+    private readonly front?: FrontChannel
   ) {
     super();
     this.setMaxListeners(0);
@@ -608,7 +611,7 @@ export class WebServer extends EventEmitter {
     // bridge — all hitting the raw port) pass through unchanged. Then apply the
     // existing /api/v1 alias rewrite.
     const rewriteUrl = (req: { url?: string }): string => rewriteApiV1Url(stripBasePath(this.basePath, req.url || ''));
-    if (https) {
+    if (https && !front) {
       const { key, cert } = getOrCreateSelfSignedCert();
       this.app = Fastify({
         logger: false,
@@ -617,8 +620,12 @@ export class WebServer extends EventEmitter {
         routerOptions: { maxParamLength: MAX_ROUTE_PARAM_LENGTH },
       });
     } else {
+      // Behind the front, TLS is the front's: it reads these same files once asked to bind with TLS, and
+      // `this.https` keeps every cookie, header and protocol rule as it is.
+      if (https) getOrCreateSelfSignedCert();
       this.app = Fastify({ logger: false, rewriteUrl, routerOptions: { maxParamLength: MAX_ROUTE_PARAM_LENGTH } });
     }
+    if (front) closeThroughFront(this.app, front);
     this.mux = createMultiplexer();
     this.sse = new SseStreamManager(
       {
@@ -4283,13 +4290,20 @@ export class WebServer extends EventEmitter {
       this._eventLoopMonitor = startEventLoopMonitor();
     }
 
-    await this.app.listen({ port: this.port, host: this.host });
     // A `port: 0` bind gets its number from the OS. Everything below and every later
     // reader (the banner, REVERIE_API_URL, the docker bridge listener, the
     // unauthenticated-bind warnings, the route context's getter) must see that number,
     // not the 0 that was asked for.
-    const address = this.app.server.address();
-    if (address !== null && typeof address === 'object') this.port = address.port;
+    if (this.front) {
+      // The front binds first, so connections wait in the kernel backlog until every route is ready.
+      this.port = await this.front.bind('main', { host: this.host, port: this.port, tls: this.https });
+      await this.app.ready();
+      this.front.accepting('main', this.app.server);
+    } else {
+      await this.app.listen({ port: this.port, host: this.host });
+      const address = this.app.server.address();
+      if (address !== null && typeof address === 'object') this.port = address.port;
+    }
     // Registry restoration and HTTP readiness must precede replay: prompted members can call the API immediately.
     try {
       await this.chatroomService.startDelivery();
@@ -4552,6 +4566,7 @@ export class WebServer extends EventEmitter {
     // Start team watcher for agent team awareness (always on — lightweight polling)
     this.teamWatcher.start();
     console.log('Team watcher started - monitoring ~/.claude/teams/ for agent team activity');
+    this.front?.serviceReady();
   }
 
   /**
@@ -5400,6 +5415,18 @@ export class WebServer extends EventEmitter {
       (this.app as unknown as { routing: (r: unknown, s: unknown) => void }).routing(req, res);
     };
     let server: import('node:http').Server | import('node:https').Server;
+    if (this.front) {
+      // The front binds the bridge too and terminates its TLS; this server never listens.
+      const http = await import('node:http');
+      server = http.createServer(handler);
+      await this.front.bind('bridge', { host: bridgeHost, port: this.port, tls: this.https });
+      this.front.accepting('bridge', server);
+      this._dockerBridgeServer = server;
+      console.log(
+        `[Docker] in-container hooks reachable at ${this.https ? 'https' : 'http'}://${bridgeHost}:${this.port} (hook endpoints only)`
+      );
+      return;
+    }
     if (this.https) {
       const https = await import('node:https');
       const { key, cert } = getOrCreateSelfSignedCert();
@@ -5444,6 +5471,7 @@ export class WebServer extends EventEmitter {
     }
 
     if (this._dockerBridgeServer) {
+      this.front?.unbind('bridge');
       this._dockerBridgeServer.close();
       this._dockerBridgeServer = null;
     }
