@@ -19,7 +19,7 @@ impl<'tx, 'connection> TransactionDocuments<'tx, 'connection> {
             return Ok(false);
         }
         let change = model.prepare(&current.body, reason)?;
-        write::install_initial_in_atomic(self.tx, &self.context, &change)?;
+        write::install_initial_in_atomic(self.tx, &self.context, model, reason, &change)?;
         Ok(true)
     }
     pub fn vote(
@@ -156,7 +156,11 @@ impl<'tx, 'connection> TransactionDocuments<'tx, 'connection> {
             &name,
             change.body(),
             revision,
-            Some((&change, vote)),
+            Some(write::SelfIntent {
+                model,
+                reason,
+                vote,
+            }),
         )?;
         self.read(&name, None)
     }

@@ -1,4 +1,12 @@
 use super::*;
+/// Named self-write intent. Prepared prechecks are not the current writer body;
+/// the writer must prepare this same draft/reason again after its revision CAS.
+#[derive(Clone, Copy)]
+pub(super) struct SelfIntent<'a, 'vote> {
+    pub(super) model: &'a SelfModelDraft,
+    pub(super) reason: &'a MetadataText,
+    pub(super) vote: Option<&'a RecordedBallot<'vote>>,
+}
 impl MemoryDocuments<'_> {
     pub fn write(
         &self,
@@ -13,10 +21,10 @@ impl MemoryDocuments<'_> {
         name: &DocumentName,
         body: &DocumentBody,
         revision: DocumentRevision,
-        change: Option<(&SelfModelChange, Option<&RecordedBallot<'_>>)>,
+        intent: Option<SelfIntent<'_, '_>>,
     ) -> Result<DocumentEnvelope> {
         self.store
-            .session(|tx| install_on(tx, &self.context(), name, body, revision, change))?;
+            .session(|tx| install_on(tx, &self.context(), name, body, revision, intent))?;
         self.read(name, None)
     }
     pub fn save_self(
@@ -46,7 +54,8 @@ impl MemoryDocuments<'_> {
         let current = self.self_model()?;
         let change = model.prepare(&current.body, reason)?;
         // Preserve the source's pre-CAS core-change check. The writer repeats
-        // the actual recorded-ballot check once the SQLite write lock is held.
+        // preparation and recorded-ballot check against the actual current body
+        // once the SQLite writer lock is held.
         self.store.session(|tx| {
             self.context()
                 .check_self_vote(tx, current.revision.value(), &change, vote)
@@ -55,7 +64,11 @@ impl MemoryDocuments<'_> {
             &DocumentName::from_scalar_text("self"),
             change.body(),
             revision,
-            Some((&change, vote)),
+            Some(SelfIntent {
+                model,
+                reason,
+                vote,
+            }),
         )
     }
 }
@@ -97,14 +110,16 @@ pub(super) fn install_on(
     name: &DocumentName,
     body: &DocumentBody,
     revision: DocumentRevision,
-    change: Option<(&SelfModelChange, Option<&RecordedBallot<'_>>)>,
+    intent: Option<SelfIntent<'_, '_>>,
 ) -> Result<()> {
     let encoded = body.bounded_json_text()?;
-    tx.connection_scope(|tx| install_fields(tx, context, name, &encoded, revision, change))
+    tx.connection_scope(|tx| install_fields(tx, context, name, &encoded, revision, intent))
 }
 pub(super) fn install_initial_in_atomic(
     tx: &mut MemoryTransaction<'_>,
     context: &DocumentContext<'_>,
+    model: &SelfModelDraft,
+    reason: &MetadataText,
     change: &SelfModelChange,
 ) -> Result<()> {
     if tx.depth == 0 || tx.db.is_autocommit() {
@@ -118,7 +133,11 @@ pub(super) fn install_initial_in_atomic(
             &DocumentName::from_scalar_text("self"),
             &encoded,
             DocumentRevision::try_new(0)?,
-            Some((change, None)),
+            Some(SelfIntent {
+                model,
+                reason,
+                vote: None,
+            }),
         )
     })
 }
@@ -128,11 +147,11 @@ fn install_fields(
     name: &DocumentName,
     encoded: &MetadataText,
     revision: DocumentRevision,
-    change: Option<(&SelfModelChange, Option<&RecordedBallot<'_>>)>,
+    intent: Option<SelfIntent<'_, '_>>,
 ) -> Result<()> {
     tx.begin_write()?;
     let selected = name_text(name)?;
-    tx.db.execute(
+    let inserted = tx.db.execute(
         "INSERT OR IGNORE INTO reverie_documents VALUES (?,0,'null',?)",
         params![selected, (context.clock)()],
     )?;
@@ -147,9 +166,14 @@ fn install_fields(
             current,
         });
     }
-    if let Some((change, vote)) = change {
-        context.check_self_vote(tx, current, change, vote)?;
-    }
+    let change = intent
+        .map(|intent| prepare_current(tx, context, &selected, inserted != 0, current, intent))
+        .transpose()?;
+    let prepared = change
+        .as_ref()
+        .map(|change| change.body().bounded_json_text())
+        .transpose()?;
+    let encoded = prepared.as_ref().unwrap_or(encoded);
     tx.db.execute("INSERT OR IGNORE INTO reverie_document_history SELECT name,revision,body,? FROM reverie_documents WHERE name=? AND revision>0",params![(context.clock)(),selected])?;
     tx.db.execute(
         "UPDATE reverie_documents SET revision=?,body=?,updated_at=? WHERE name=?",
@@ -160,10 +184,32 @@ fn install_fields(
             selected
         ],
     )?;
-    if let Some((change, _)) = change {
+    if let Some(change) = &change {
         update_beliefs(tx, change)?;
     }
     Ok(())
+}
+fn prepare_current(
+    tx: &MemoryTransaction<'_>,
+    context: &DocumentContext<'_>,
+    name: &str,
+    inserted: bool,
+    revision: i64,
+    intent: SelfIntent<'_, '_>,
+) -> Result<SelfModelChange> {
+    let current = if inserted {
+        context.initial_self.clone()
+    } else {
+        let raw: String = tx.db.query_row(
+            "SELECT body FROM reverie_documents WHERE name=?",
+            [name],
+            |row| row.get(0),
+        )?;
+        DocumentBody::decode_json(&raw)?
+    };
+    let change = intent.model.prepare(&current, intent.reason)?;
+    context.check_self_vote(tx, revision, &change, intent.vote)?;
+    Ok(change)
 }
 fn update_beliefs(tx: &mut MemoryTransaction<'_>, change: &SelfModelChange) -> Result<()> {
     let mut root = tx

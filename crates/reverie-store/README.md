@@ -279,11 +279,21 @@ memory files; this does not promise a filesystem with no ancillary changes.
 on the same private connection. Revisions use real SQLite writer-reserved CAS;
 raw archived bodies, IDs, extra developer suffixes and tables survive. A
 `RecordedBallot` is constructed only by an actual vote on that same store and
-week; a core revision rechecks the three-week persisted streak and exact proposal
-inside its writer transaction. Digests, wire fields and booleans cannot mint it.
+week; after reserving the SQLite writer and matching the requested revision,
+the named self writer prepares its change again from the current stored body.
+It checks the three-week persisted streak and exact proposal against that body,
+and uses that body's persona fallback and prior belief root. A concurrent update
+cannot turn a preflight no-core-change result into permission to revert its core.
+The original preflight checks still precede CAS conflicts. Digests, wire fields
+and booleans cannot mint a recorded ballot.
 Ordinary document operations retain source Connection-context commit/rollback
 semantics. The separate initial-identity CAS preserves a real outer transaction
 for curated startup; it never replaces an existing self document.
+
+The generic document `write` methods preserve trusted low-level compatibility,
+including arbitrary document names. They are not an end-user permission boundary:
+supported caller services must expose named plan/profile/self operations and must
+not route a generic `write("self", ...)` around the self-model checks.
 
 `atomic_immediate` reserves the writer before a startup idempotency-marker read.
 It preserves named transaction methods and exposes no SQL callback. Explicit

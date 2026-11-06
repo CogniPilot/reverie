@@ -1,4 +1,189 @@
 use super::*;
+std::thread_local! {
+    static COMPETING_SELF: std::cell::RefCell<Option<(std::path::PathBuf,DocumentBody)>> =
+        const { std::cell::RefCell::new(None) };
+    static RACE_TIME:std::cell::Cell<f64>=const{std::cell::Cell::new(100.0)};
+}
+fn interleaving_clock() -> f64 {
+    let competing = COMPETING_SELF.with(|slot| slot.borrow_mut().take());
+    if let Some((path, body)) = competing {
+        let competing = MemoryStore::open(path).unwrap();
+        competing
+            .documents(None)
+            .write(&DocumentName::from_scalar_text("self"), &body, revision(1))
+            .unwrap();
+        competing.close().unwrap();
+    }
+    RACE_TIME.with(std::cell::Cell::get)
+}
+struct SelfRace {
+    path: std::path::PathBuf,
+    store: MemoryStore,
+}
+impl SelfRace {
+    fn new() -> Self {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "memory-stale-self-{}-{nonce}.sqlite",
+            std::process::id()
+        ));
+        let store = MemoryStore::open(&path).unwrap();
+        let documents = store.documents(None);
+        documents.initialize().unwrap();
+        documents
+            .save_self(
+                &draft(r#"{"persona":"p-old","consciousness":"A","directives":[]}"#),
+                &text("initial"),
+                revision(0),
+            )
+            .unwrap();
+        Self { path, store }
+    }
+    fn arm(&self, body: &str) {
+        COMPETING_SELF.with(|slot| {
+            *slot.borrow_mut() = Some((self.path.clone(), DocumentBody::decode_json(body).unwrap()))
+        });
+    }
+    fn documents(&self) -> MemoryDocuments<'_> {
+        let mut documents = self.store.documents(None);
+        documents.clock = interleaving_clock;
+        documents
+    }
+}
+impl Drop for SelfRace {
+    fn drop(&mut self) {
+        COMPETING_SELF.with(|slot| slot.borrow_mut().take());
+        self.store.close().unwrap();
+        std::fs::remove_file(&self.path).unwrap();
+    }
+}
+#[test]
+fn concurrent_self_body_cannot_reuse_stale_no_core_change_to_bypass_ballot() {
+    for transactional in [false, true] {
+        let race = SelfRace::new();
+        let documents = race.documents();
+        let model = draft(r#"{"persona":"p-old","consciousness":"A","directives":[]}"#);
+        race.arm(r#"{"persona":"p-new","consciousness":"B","directives":[]}"#);
+        let outcome = if transactional {
+            race.store.atomic(|tx| {
+                documents
+                    .in_transaction(tx)?
+                    .save_self(&model, &text("style"), revision(2))
+            })
+        } else {
+            documents.save_self(&model, &text("style"), revision(2))
+        };
+        assert!(
+            matches!(outcome, Err(MemoryError::CoreChangeRequiresVote)),
+            "fresh body requires actual ballot, not stale no-change intent"
+        );
+        let current = documents.self_model().unwrap();
+        assert_eq!(current.revision.value(), 2);
+        let body: serde_json::Value = serde_json::from_slice(&current.body.as_json()).unwrap();
+        assert_eq!(body["consciousness"], "B");
+        assert_eq!(
+            documents
+                .history(&DocumentName::from_scalar_text("self"))
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+}
+#[test]
+fn concurrent_persona_fallback_uses_current_writer_body_and_stale_revision_keeps_cas_priority() {
+    let race = SelfRace::new();
+    let documents = race.documents();
+    let model = draft(r#"{"consciousness":"A","directives":[]}"#);
+    race.arm(r#"{"persona":"latest persona","consciousness":"A","directives":[]}"#);
+    let updated = documents
+        .save_self(&model, &text("style only"), revision(2))
+        .unwrap();
+    assert_eq!(updated.revision.value(), 3);
+    let body: serde_json::Value = serde_json::from_slice(&updated.body.as_json()).unwrap();
+    assert_eq!(body["persona"], "latest persona");
+    let other = SelfRace::new();
+    let documents = other.documents();
+    other.arm(r#"{"persona":"p-new","consciousness":"B","directives":[]}"#);
+    assert!(matches!(
+        documents.save_self(&model, &text("style"), revision(1)),
+        Err(MemoryError::DocumentConflict {
+            expected: 1,
+            current: 2
+        })
+    ));
+}
+#[test]
+fn concurrent_current_core_requires_real_vote_and_updates_its_actual_belief_root() {
+    let race = SelfRace::new();
+    let mut documents = race.store.documents(None);
+    let root = race.store.add_belief("B", 5.0, None, true, None).unwrap();
+    let child = race
+        .store
+        .add_belief("retained child", 4.0, Some(root.id), false, None)
+        .unwrap();
+    let model = draft(r#"{"consciousness":"A","directives":[]}"#);
+    let proposal = model
+        .prepare(&documents.self_model().unwrap().body, &text("proposal"))
+        .unwrap()
+        .core_proposal();
+    let category = BallotCategory::parse("core").unwrap();
+    documents.clock = week_zero;
+    documents
+        .vote(&category, &proposal, &text("vote one"))
+        .unwrap();
+    documents.clock = week_one;
+    documents
+        .vote(&category, &proposal, &text("vote two"))
+        .unwrap();
+    documents.clock = week_two;
+    let vote = documents
+        .vote(&category, &proposal, &text("vote three"))
+        .unwrap();
+    assert!(vote.outcome().approved);
+    RACE_TIME.with(|time| time.set(week_two()));
+    documents.clock = interleaving_clock;
+    race.arm(r#"{"persona":"latest persona","consciousness":"B","directives":[]}"#);
+    let result = documents
+        .save_self_with_vote(&model, &text("authorized return"), revision(2), &vote)
+        .unwrap();
+    assert_eq!(result.revision.value(), 3);
+    let beliefs = race.store.beliefs().unwrap();
+    let changed = beliefs.iter().find(|belief| belief.id == root.id).unwrap();
+    assert_eq!(changed.text, "A");
+    assert!(!changed.protected);
+    assert_eq!(
+        beliefs
+            .iter()
+            .find(|belief| belief.id == child.id)
+            .unwrap()
+            .parent_id,
+        Some(root.id)
+    );
+    assert_eq!(
+        race.store.get_state("self_model_root_id", None).unwrap(),
+        Some(root.id.to_string())
+    );
+}
+#[test]
+fn early_core_gate_still_precedes_write_and_read_revision_checks() {
+    let race = SelfRace::new();
+    let documents = race.documents();
+    race.arm(r#"{"persona":"other","consciousness":"B","directives":[]}"#);
+    let changed = draft(r#"{"consciousness":"C","directives":[]}"#);
+    assert!(matches!(
+        documents.save_self(&changed, &text("core"), revision(99)),
+        Err(MemoryError::CoreChangeRequiresVote)
+    ));
+    assert_eq!(documents.self_model().unwrap().revision.value(), 1);
+    assert!(
+        COMPETING_SELF.with(|slot| slot.borrow().is_some()),
+        "no writer clock/native I/O happened on early refusal"
+    );
+}
 fn revision(value: i64) -> DocumentRevision {
     DocumentRevision::try_new(value).unwrap()
 }
