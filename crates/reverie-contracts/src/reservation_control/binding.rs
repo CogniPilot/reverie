@@ -42,6 +42,19 @@ pub struct ControlBinding {
     domain: ControlDomainDigest,
     order: Vec<ControlDirectory>,
 }
+impl Clone for ControlBinding {
+    fn clone(&self) -> Self {
+        Self {
+            original: self.original.deep_clone(),
+            directories: self.directories.clone(),
+            admission: self.admission.clone(),
+            state: self.state.clone(),
+            locks: self.locks.clone(),
+            domain: self.domain.clone(),
+            order: self.order.clone(),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlDirectory {
     Root,
@@ -58,6 +71,24 @@ impl ControlDirectory {
     }
 }
 impl ControlBinding {
+    /// Purpose-private GPU projection of marker DATA. The actual application
+    /// must publish the two files under its real pending/admission producer;
+    /// this method grants no reload or transition permission.
+    pub(crate) fn gpu_rebound(&self, config: &EffectiveWorkerConfig) -> Result<Self> {
+        let mut next = self.clone();
+        next.domain = domain_digest(config)?;
+        let Node::Object(fields) = &mut next.original.0 else {
+            unreachable!("checked binding object");
+        };
+        fields.insert(
+            key("configurationDigest"),
+            Value(Node::String(key(&next.domain.to_hex()))),
+        );
+        Ok(next)
+    }
+    pub(crate) fn gpu_data(&self) -> Value {
+        self.original.deep_clone()
+    }
     /// Preserve the constructor's original check order. The config's option
     /// has already been validated by its owning worker option parser. Its copy
     /// in the marker is compared with Python equality, not revalidated against

@@ -41,4 +41,8 @@ impl PythonText {
     pub fn as_text_ref(&self) -> super::PythonTextRef<'_> {
         super::PythonTextRef::from_owned(self)
     }
+    /// The same frozen Python str.lower owner used by scalar and memory text.
+    pub fn lowercase(&self) -> Self {
+        Self(super::lower_codepoints(&self.0))
+    }
 }

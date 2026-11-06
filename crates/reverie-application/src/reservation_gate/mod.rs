@@ -5,7 +5,9 @@ mod admission;
 mod claim;
 mod draft;
 mod error;
+mod gpu_access;
 mod guard;
+pub(crate) use gpu_access::PublishedGpu;
 mod history;
 mod host_jobs;
 mod image_refresh;
@@ -47,7 +49,7 @@ use reverie_host::reservation_control::{self, AdmissionLock, ControlHostError, I
 use reverie_store::operations::{JournalError, OperationStore, OperationView, ScopeGuard};
 use std::{
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, Weak},
+    sync::{Arc, Condvar, Mutex, RwLock, Weak},
     thread::ThreadId,
     time::Instant,
 };
@@ -58,13 +60,14 @@ pub struct ReservationGate {
 struct Inner {
     installed: Arc<crate::installing_broker::InstalledWorker>,
     source_path: Option<PathBuf>,
-    binding: ControlBinding,
+    binding: RwLock<ControlBinding>,
     scope: OperationScope,
     observer: NativeObserver,
     option: reverie_core::worker_options::ReservationOption,
     identity: reverie_store::storage_identity::StorageIdentityConfig,
     state: Mutex<State>,
     changed: Condvar,
+    failed_gpu: Mutex<Vec<Arc<gpu_access::TransitionRecord>>>,
     #[cfg(test)]
     entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
 }
@@ -80,6 +83,7 @@ struct Active {
     context: Mutex<ObservationContext>,
     policy_ack: Mutex<Option<Arc<preparation_policy::PolicyAckFence>>>,
     deadline: Mutex<Option<Instant>>,
+    gpu_transition: Mutex<Option<Arc<gpu_access::TransitionRecord>>>,
 }
 impl ReservationGate {
     /// Stop/settle the same persistent owned metadata-client context before an
@@ -89,7 +93,12 @@ impl ReservationGate {
         self.inner.observer.cancellation()
     }
     pub fn settle_owned(&self, end: Instant) -> Result<()> {
-        Ok(self.inner.observer.settle_owned(end)?)
+        // Native constructors must still be settled when publication evidence
+        // prevents acknowledgement; neither failure suppresses the other.
+        finalized(
+            self.inner.observer.settle_owned(end).map_err(Into::into),
+            self.inner.assert_no_failed_gpu(),
+        )
     }
     /// Installing-service input, never a request-selected Source/config path.
     /// The full existing validator must succeed before this constructor exists.
@@ -130,13 +139,14 @@ impl ReservationGate {
             inner: Arc::new(Inner {
                 installed,
                 source_path,
-                binding,
+                binding: RwLock::new(binding),
                 scope,
                 observer,
                 option,
                 identity,
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
+                failed_gpu: Mutex::new(Vec::new()),
                 #[cfg(test)]
                 entry_capture_pause: Mutex::new(None),
             }),

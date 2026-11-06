@@ -52,6 +52,22 @@ struct Cursor<'a> {
     root_object_orders: BTreeMap<Text, Vec<Text>>,
     orders: Option<Vec<OrderNode>>,
     ready_order: Option<usize>,
+    constant_refusal: bool,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GpuControlParseError {
+    Json(Error),
+    Nonfinite,
+}
+pub(super) fn decode_gpu_control(source: &[u8]) -> Result<Value, GpuControlParseError> {
+    let mut cursor = Cursor::new(source, Purpose::StrictEngine);
+    finish(&mut cursor).map_err(|error| {
+        if cursor.constant_refusal {
+            GpuControlParseError::Nonfinite
+        } else {
+            GpuControlParseError::Json(error)
+        }
+    })
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
@@ -99,6 +115,7 @@ impl<'a> Cursor<'a> {
             root_object_orders: BTreeMap::new(),
             orders: None,
             ready_order: None,
+            constant_refusal: false,
         }
     }
 }
@@ -303,6 +320,8 @@ impl Cursor<'_> {
             Some(b'N' | b'I')
                 if matches!(self.purpose, Purpose::NoConstants | Purpose::StrictEngine) =>
             {
+                self.constant_refusal = self.source[self.offset..].starts_with(b"NaN")
+                    || self.source[self.offset..].starts_with(b"Infinity");
                 return Err(Error::InvalidJson);
             }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
@@ -332,6 +351,7 @@ impl Cursor<'_> {
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
             if matches!(self.purpose, Purpose::NoConstants | Purpose::StrictEngine) {
+                self.constant_refusal = true;
                 return Err(Error::InvalidJson);
             }
             self.offset += "-Infinity".len();

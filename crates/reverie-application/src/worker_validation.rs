@@ -127,6 +127,14 @@ pub struct ValidatedWorkerSnapshot {
     source_path: Option<std::path::PathBuf>,
 }
 impl ValidatedWorkerSnapshot {
+    pub(crate) fn validate_gpu_candidate(
+        &self,
+        candidate: &reverie_contracts::gpu_access::GpuCandidate,
+    ) -> Result<Self> {
+        let mut next = validate_captured(candidate.after().clone())?;
+        next.source_path = self.source_path.clone();
+        Ok(next)
+    }
     /// Actual loader-selected entry data. None preserves the embedded captured
     /// configuration mode; this path is not authorization or retained custody.
     pub fn source_path(&self) -> Option<&std::path::Path> {

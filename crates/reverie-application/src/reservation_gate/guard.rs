@@ -49,44 +49,70 @@ impl Inner {
         Ok(active.clone())
     }
     pub(super) fn guard(&self, scope: Option<&OperationScope>) -> Result<ObservedInventory> {
+        self.assert_no_failed_gpu()?;
         let active = self.held(scope)?;
         let inherited = *active
             .deadline
             .lock()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        let context = self.native_context()?;
+        let (context, config, binding) = self.guard_view(&active, inherited)?;
         let end = context.deadline(inherited)?;
-        let config = self.config()?;
         need(
-            domain_digest(config.configuration())? == *self.binding.domain(),
+            domain_digest(config.configuration())? == *binding.domain(),
             "RESERVATION_DOMAIN_CHANGED",
         )?;
-        need(
-            !reservation_control::pending_present(&config)?,
-            "RESERVATION_INSTALL_REQUIRES_RECONCILIATION",
-        )?;
+        if reservation_control::pending_present(&config)? {
+            self.gpu_pending_current(&active)?;
+        }
         let image = self
             .source_path
             .as_deref()
             .map(|path| reservation_control::capture_current_image(path, config.configuration()))
             .transpose()?;
         need(
-            self.binding
-                .matches_metadata(&reservation_control::read_marker(&config)?),
+            binding.matches_metadata(&reservation_control::read_marker(&config)?),
             "RESERVATION_BINDING_CHANGED",
         )?;
         let lock = active
             .lock
             .lock()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        reservation_control::guard_layout(&config, &self.binding, &lock)?;
+        reservation_control::guard_layout(&config, &binding, &lock)?;
         drop(lock);
         let rows = context.custody(Some(end))?;
+        self.gpu_rows_current(&active, &rows)?;
         need(Instant::now() < end, "RESERVATION_OBSERVATION_DEADLINE")?;
         if let Some(image) = image {
             image.assert_current()?;
         }
         Ok(rows)
+    }
+    fn guard_view(
+        &self,
+        active: &Arc<Active>,
+        bound: Option<Instant>,
+    ) -> Result<(
+        ObservationContext,
+        Arc<ReservationConfiguration>,
+        ControlBinding,
+    )> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+        need(
+            state
+                .active
+                .as_ref()
+                .is_some_and(|selected| Arc::ptr_eq(selected, active)),
+            "RESERVATION_ADMISSION_LOCK_REQUIRED",
+        )?;
+        let context = active
+            .context
+            .lock()
+            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+        let (config, binding) = self.installed.bound_resources(&self.binding)?;
+        Ok((context.with_inherited(bound), config, binding))
     }
     pub(super) fn store(self: &Arc<Self>) -> Result<OperationStore> {
         // The path comes from the captured validated option. This conversion

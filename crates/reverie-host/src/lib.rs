@@ -6,6 +6,7 @@ pub mod creation_budget;
 pub mod device_policy;
 pub mod embeddings;
 pub mod engine_metadata;
+pub mod gpu_access;
 pub mod host_jobs;
 pub mod installed_worker_engine;
 pub mod lease_policy;

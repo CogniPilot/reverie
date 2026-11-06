@@ -7,6 +7,7 @@ pub(crate) mod ordered;
 mod tests;
 mod text;
 mod value;
+pub(crate) use decode::GpuControlParseError;
 pub(crate) use decode::{JournalParseError, JournalParsed};
 pub(crate) use equality::numeric_key;
 pub(crate) use value::{Node, Number, Text, Value, truthy};
@@ -69,6 +70,10 @@ pub(crate) fn decode_python_str_ordered(raw: &[u8]) -> Result<ordered::OrderedVa
 /// cap and literal constant refusal; exponent overflow remains data.
 pub(crate) fn decode_strict_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_engine_stopped(&text::python_bytes(raw)?)
+}
+pub(crate) fn decode_gpu_control_bytes(raw: &[u8]) -> Result<Value, GpuControlParseError> {
+    let raw = text::python_bytes(raw).map_err(GpuControlParseError::Json)?;
+    decode::decode_gpu_control(&raw)
 }
 pub(crate) fn decode_ops_private_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::StrictEngine)

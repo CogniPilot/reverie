@@ -34,16 +34,26 @@ const STOPPED_ENGINE_FORMAT: &str = concat!(
     "\"Memory\":{{json .HostConfig.Memory}},\"MemorySwap\":{{json .HostConfig.MemorySwap}},",
     "\"PidsLimit\":{{json .HostConfig.PidsLimit}},\"NanoCpus\":{{json .HostConfig.NanoCpus}}}}"
 );
+const GPU_INFORMATION_FORMAT: &str = concat!(
+    "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},\"KernelVersion\":{{json .KernelVersion}},",
+    "\"ServerVersion\":{{json .ServerVersion}},\"CDISpecDirs\":{{json .CDISpecDirs}}}"
+);
 
 pub enum EngineQuery<'a> {
     InventoryIds,
     InspectBatch(&'a [ContainerId]),
     InspectStopped(&'a ContainerId),
+    GpuInformation,
 }
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
             Self::InventoryIds => return Ok(["ps", "-aq", "--no-trunc"].map(Into::into).to_vec()),
+            Self::GpuInformation => {
+                return Ok(["info", "--format", GPU_INFORMATION_FORMAT]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::InspectBatch(ids) if !ids.is_empty() && ids.len() <= 32 => (ENGINE_FORMAT, ids),
             Self::InspectBatch(_) => return Err(EngineError::new(EngineFault::Query)),
             Self::InspectStopped(id) => (STOPPED_ENGINE_FORMAT, std::slice::from_ref(id)),

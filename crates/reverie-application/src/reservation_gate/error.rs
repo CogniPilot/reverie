@@ -1,6 +1,11 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    GpuData(reverie_contracts::gpu_access::GpuDataError),
+    GpuHost(reverie_host::gpu_access::GpuHostError),
+    GpuApplyUncertain {
+        cause: Box<Self>,
+    },
     Intent(reverie_host::worker_intent::IntentHostError),
     LaptopData(reverie_contracts::broker_laptop::LaptopReadError),
     FullPolicy(crate::worker_validation::WorkerValidationError),
@@ -49,6 +54,9 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::GpuData(error) => error.code(),
+            Self::GpuHost(error) => error.code(),
+            Self::GpuApplyUncertain { .. } => "GPU_APPLY_REQUIRES_RECONCILIATION",
             Self::Intent(error) => error.code(),
             Self::LaptopData(error) => error.code(),
             Self::FullPolicy(error) => error.code(),
@@ -99,6 +107,9 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::GpuData(error) => Some(error),
+            Self::GpuHost(error) => Some(error),
+            Self::GpuApplyUncertain { cause } => Some(cause),
             Self::Intent(error) => Some(error),
             Self::LaptopData(error) => Some(error),
             Self::FullPolicy(error) => Some(error),
@@ -195,6 +206,8 @@ from_error!(
 );
 from_error!(crate::resource_staging::ResourceServiceError, Effective);
 from_error!(reverie_core::operations::OperationError, Operation);
+from_error!(reverie_contracts::gpu_access::GpuDataError, GpuData);
+from_error!(reverie_host::gpu_access::GpuHostError, GpuHost);
 pub(super) type Result<T> = std::result::Result<T, GateError>;
 pub(super) fn need(value: bool, code: &'static str) -> Result<()> {
     if value {

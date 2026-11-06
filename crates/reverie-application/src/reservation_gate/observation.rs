@@ -198,7 +198,8 @@ impl Inner {
                 .is_some_and(|latest| profiles_v1::equivalent(latest, profile)),
             "RESERVATION_PROFILE_CHANGED_DURING_OBSERVATION",
         )?;
-        reservation_control::assert_store_lock_names(self.config()?.as_ref(), &self.binding)?;
+        let (config, binding) = self.installed.bound_resources(&self.binding)?;
+        reservation_control::assert_store_lock_names(&config, &binding)?;
         Ok(())
     }
 }
