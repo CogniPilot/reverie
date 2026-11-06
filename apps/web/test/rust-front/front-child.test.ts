@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { FakeFront, type FakeConnection } from './fake-front.js';
+import { responseBody, sseBody } from './http-body.js';
 
 const web = resolve(import.meta.dirname, '../..');
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -289,8 +290,8 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     running.fake.receipt(stream);
     await running.fake.closed(stream, 10_000);
     await eventually(() => genuine(running.events).length === 1, 5000, 'the SSE response to finish');
-    const text = running.fake.text(stream);
-    expect(text.split('data: ').length - 1).toBe(events);
+    // The whole stream, byte for byte, as the front received it.
+    expect(responseBody(Buffer.concat(stream.received)).toString('latin1')).toBe(sseBody(events, size));
     expect(writes().map((event) => event.seq)).toEqual([...Array(events).keys()]);
     expect(drains().map((event) => event.seq)).toEqual(
       writes()

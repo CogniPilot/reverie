@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import { connect as connectTls } from 'node:tls';
+import { responseBody, sseBody } from './http-body.js';
 
 const web = resolve(import.meta.dirname, '../..');
 const tlsDir = resolve(import.meta.dirname, 'fixtures/tls');
@@ -315,9 +316,8 @@ describe.runIf(process.platform !== 'win32')('the direct-Node child of the paire
     await stalled(writes, drains);
     expect(writes().length).toBeLessThan(events);
     const { bytes } = await drain(socket);
-    const text = bodyOf(bytes).toString('latin1');
-    expect(text.split('data: ').length - 1).toBe(events);
-    expect(text.split('').filter((char) => char === 'x').length).toBe(events * size);
+    // The whole stream, byte for byte, as the client decoded it.
+    expect(responseBody(bytes).toString('latin1')).toBe(sseBody(events, size));
     await until(() => genuine(running).length === 1, 5000, 'the SSE response to finish');
     expect(writes().map((entry) => entry.seq)).toEqual([...Array(events).keys()]);
     // Every write that reported backpressure drained before the next one.
