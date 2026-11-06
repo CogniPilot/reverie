@@ -3,10 +3,12 @@ use super::value::{Node, Number, Text, Value};
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 mod journal;
+mod ordered;
+use super::ordered::OrderNode;
 pub(crate) use journal::{JournalParseError, JournalParsed};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-enum Purpose {
+pub(super) enum Purpose {
     Default,
     NoConstants,
     Rootless,
@@ -24,6 +26,7 @@ enum Frame {
     Array {
         values: Vec<Value>,
         phase: Phase,
+        order: Option<Vec<usize>>,
     },
     Object {
         values: BTreeMap<Text, Value>,
@@ -31,6 +34,7 @@ enum Frame {
         phase: Phase,
         duplicate: bool,
         order: Option<Vec<Text>>,
+        children: Option<BTreeMap<Text, usize>>,
     },
 }
 enum Action {
@@ -45,6 +49,8 @@ struct Cursor<'a> {
     purpose: Purpose,
     journal_error: Option<JournalParseError>,
     root_object_orders: BTreeMap<Text, Vec<Text>>,
+    orders: Option<Vec<OrderNode>>,
+    ready_order: Option<usize>,
 }
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
@@ -61,6 +67,12 @@ pub(super) fn decode_engine_stopped(source: &[u8]) -> Result<Value, Error> {
 }
 pub(super) fn decode_journal(source: &[u8]) -> Result<JournalParsed, JournalParseError> {
     journal::decode(source)
+}
+pub(super) fn decode_ordered(
+    source: &[u8],
+    purpose: Purpose,
+) -> Result<super::ordered::OrderedValue, Error> {
+    ordered::decode(source, purpose)
 }
 fn decode_mode(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
     finish(&mut Cursor::new(source, purpose))
@@ -81,6 +93,8 @@ impl<'a> Cursor<'a> {
             purpose,
             journal_error: None,
             root_object_orders: BTreeMap::new(),
+            orders: None,
+            ready_order: None,
         }
     }
 }
@@ -90,7 +104,7 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     loop {
         match action {
             Action::Ready(value) => match frames.last_mut() {
-                Some(frame) => frame.attach(value, cursor.purpose)?,
+                Some(frame) => frame.attach(value, cursor)?,
                 None => return Ok(value),
             },
             Action::Push(frame) => frames.push(frame),
@@ -108,9 +122,16 @@ fn parse(cursor: &mut Cursor<'_>) -> Result<Value, Error> {
     }
 }
 impl Frame {
-    fn attach(&mut self, value: Value, purpose: Purpose) -> Result<(), Error> {
+    fn attach(&mut self, value: Value, cursor: &mut Cursor<'_>) -> Result<(), Error> {
         match self {
-            Self::Array { values, phase } => {
+            Self::Array {
+                values,
+                phase,
+                order,
+            } => {
+                if let Some(order) = order {
+                    order.push(cursor.ready_order.take().ok_or(Error::InvalidJson)?);
+                }
                 values.push(value);
                 *phase = Phase::Next;
             }
@@ -120,14 +141,23 @@ impl Frame {
                 phase,
                 duplicate,
                 order,
+                children,
             } => {
                 let key = key.take().ok_or(Error::InvalidJson)?;
-                if let Some(order) = order {
+                if let Some(order) = order
+                    && (cursor.purpose == Purpose::Journal || !values.contains_key(&key))
+                {
                     order.push(key.clone());
+                }
+                if let Some(children) = children {
+                    children.insert(
+                        key.clone(),
+                        cursor.ready_order.take().ok_or(Error::InvalidJson)?,
+                    );
                 }
                 let previous = values.insert(key, value);
                 if previous.is_some() {
-                    *duplicate = duplicate_value(purpose)?;
+                    *duplicate = duplicate_value(cursor.purpose)?;
                 }
                 *phase = Phase::Next;
             }
@@ -136,26 +166,39 @@ impl Frame {
     }
     fn close(self, cursor: &mut Cursor<'_>, parents: &[Frame]) -> Result<Value, Error> {
         match self {
-            Self::Array { values, .. } => Ok(Value(Node::Array(values))),
+            Self::Array { values, order, .. } => {
+                if let Some(order) = order {
+                    cursor.capture_order(OrderNode::Array(order));
+                }
+                Ok(Value(Node::Array(values)))
+            }
             Self::Object {
                 values,
                 duplicate,
                 order,
+                children,
                 ..
             } => {
                 if duplicate {
                     return Err(Error::DuplicateKey);
                 }
-                if let (
-                    Some(order),
-                    [
-                        Frame::Object {
-                            key: Some(parent), ..
-                        },
-                    ],
-                ) = (order, parents)
+                if cursor.purpose == Purpose::Journal
+                    && let (
+                        Some(order),
+                        [
+                            Frame::Object {
+                                key: Some(parent), ..
+                            },
+                        ],
+                    ) = (order.as_ref(), parents)
                 {
-                    cursor.root_object_orders.insert(parent.clone(), order);
+                    cursor
+                        .root_object_orders
+                        .insert(parent.clone(), order.clone());
+                }
+                if let Some(children) = children {
+                    let order = ordered::object_order(order, children)?;
+                    cursor.capture_order(OrderNode::Object(order));
                 }
                 Ok(Value(Node::Object(values)))
             }
@@ -233,7 +276,9 @@ impl Cursor<'_> {
                     key: None,
                     phase: Phase::First,
                     duplicate: false,
-                    order: (self.purpose == Purpose::Journal).then(Vec::new),
+                    order: (self.purpose == Purpose::Journal || self.orders.is_some())
+                        .then(Vec::new),
+                    children: self.orders.is_some().then(BTreeMap::new),
                 })
             }
             Some(b'[') => {
@@ -241,9 +286,13 @@ impl Cursor<'_> {
                 Action::Push(Frame::Array {
                     values: Vec::new(),
                     phase: Phase::First,
+                    order: self.orders.is_some().then(Vec::new),
                 })
             }
-            Some(b'"') => Action::Ready(Value(Node::String(self.string()?))),
+            Some(b'"') => {
+                let value = Value(Node::String(self.string()?));
+                self.scalar(value)
+            }
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
@@ -254,7 +303,10 @@ impl Cursor<'_> {
             }
             Some(b'N') => self.literal("NaN", Node::Number(Number::Nan))?,
             Some(b'I') => self.literal("Infinity", Node::Number(Number::PositiveInfinity))?,
-            Some(b'-' | b'0'..=b'9') => Action::Ready(Value(Node::Number(self.number()?))),
+            Some(b'-' | b'0'..=b'9') => {
+                let value = Value(Node::Number(self.number()?));
+                self.scalar(value)
+            }
             _ => return Err(Error::InvalidJson),
         };
         Ok(action)
@@ -267,7 +319,7 @@ impl Cursor<'_> {
             return self.journal_failure(JournalParseError::JsonNumber);
         }
         self.offset += literal.len();
-        Ok(Action::Ready(Value(node)))
+        Ok(self.scalar(Value(node)))
     }
     fn number(&mut self) -> Result<Number, Error> {
         if self.purpose == Purpose::Journal {

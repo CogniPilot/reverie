@@ -4,6 +4,7 @@ pub mod decimal;
 pub mod device_policy;
 pub mod ids;
 pub mod lease_policy;
+pub mod memory;
 pub mod operations;
 pub mod posix_path;
 pub mod profiles;
