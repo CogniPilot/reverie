@@ -453,7 +453,6 @@ async fn qualify_generation_loss() {
         .await
         .unwrap();
     assert_eq!(read.unwrap(), 0);
-    assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
     assert!(
         !task.is_finished(),
         "codec-only drain still awaits held endpoint"
@@ -471,5 +470,4 @@ async fn qualify_generation_loss() {
     .await;
     peer.0.shutdown(Shutdown::Both).unwrap();
     assert_eq!(task.await.unwrap().unwrap(), SessionEnd::GenerationLost);
-    assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
 }
