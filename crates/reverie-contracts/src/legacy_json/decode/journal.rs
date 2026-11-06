@@ -52,7 +52,7 @@ pub(super) fn number(cursor: &mut Cursor<'_>) -> Result<Number, Error> {
 }
 // Match the JSON numeric PREFIX before invoking its callback, as Python's
 // decoder does. A malformed suffix must not hide an earlier integer-hook fault.
-fn number_end(raw: &[u8], begin: usize) -> Option<usize> {
+pub(super) fn number_end(raw: &[u8], begin: usize) -> Option<usize> {
     let mut end = begin + usize::from(raw.get(begin) == Some(&b'-'));
     match raw.get(end)? {
         b'0' => end += 1,

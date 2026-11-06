@@ -44,6 +44,18 @@ impl PosixPath {
     pub fn is_absolute(&self) -> bool {
         self.anchor != 0
     }
+    pub fn has_parent_component(&self) -> bool {
+        self.parts.iter().any(|part| part == &[46, 46])
+    }
+    pub fn is_single_rooted(&self) -> bool {
+        self.anchor == 1
+    }
+    pub fn relative_to(&self, root: &Self) -> Option<Self> {
+        self.is_relative_to(root).then(|| Self {
+            anchor: 0,
+            parts: self.parts[root.parts.len()..].to_vec(),
+        })
+    }
     pub fn codepoints(&self) -> Vec<u32> {
         let mut result = vec![47; usize::from(self.anchor)];
         for (index, part) in self.parts.iter().enumerate() {

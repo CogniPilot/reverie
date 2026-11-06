@@ -10,8 +10,13 @@ members = [
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",
+    "crates/reverie-worker-child",
+    "crates/reverie-nix-store-prepare",
+    "crates/reverie-memory-cli",
     "crates/reverie-http",
     "crates/reverie-ops-cli",
+    "crates/reverie-mcp-cli",
+    "crates/reverie-diagnostics",
     "crates/xtask",
 ]
 resolver = "3"
@@ -24,16 +29,28 @@ publish = false
 [workspace.dependencies]
 clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
+nix = { version = "0.31.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 toml = "0.9"
 sha2 = "0.10"
+libyaml-safer = "=0.3.0"
+regex-lite = "=0.1.9"
+blake2 = "0.10.6"
+rusqlite = { version = "0.41.1", features = ["bundled", "backup"] }
 http = "1.4"
-hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
+hyper = { version = "1.12", default-features = false, features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 http-body-util = "0.1.5"
 bytes = "1.11"
 tokio = { version = "1.50", default-features = false, features = ["rt", "time", "net", "io-util", "sync"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+base64 = "0.22"
+socket2 = "0.6.5"
+unicode-normalization = "=0.1.25"
+idna = "=1.1.0"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+rustls-platform-verifier = "0.7.1"
 reverie-http = { path = "crates/reverie-http" }
 getrandom = "=0.2.17"
 uuid = { version = "=1.18.1", default-features = false }
@@ -41,6 +58,8 @@ reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-application = { path = "crates/reverie-application" }
+reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.
 # Every member must opt in with [lints] workspace = true.

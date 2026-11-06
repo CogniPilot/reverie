@@ -48,3 +48,9 @@ https://github.com/openai/codex under Apache-2.0. The exact observer patch,
 source checksum and locked dependency provenance are retained under
 `nix/codex-observer/`; its package retains the upstream LICENSE and any NOTICE.
 This optional candidate is separate from the default provider CLI installer.
+
+The native CDI compatibility constructor/resolver follows PyYAML 6.0.3 (MIT),
+copyright 2017-2021 Ingy döt Net and 2006-2016 Kirill Simonov. The upstream notice
+is retained at `crates/reverie-contracts/src/gpu_access/cdi/PYYAML_LICENSE.txt`.
+The underlying safe Rust grammar parser is the pinned `libyaml-safer` dependency;
+no Python interpreter is used by the native CDI reader.

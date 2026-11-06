@@ -1,0 +1,151 @@
+{
+  "source": "python/reverie/worker_memory.py",
+  "sourceSha256": "ee6e17767610eb810344e1e97dd9761ecd06eadc105dd20ecfa3c91bcad5a295",
+  "scope": "Actual check_swap_budget with finite generated-projection candidate shape, raw peer observations and owned meminfo. No live host/engine or launch grant.",
+  "cases": [
+    {
+      "name": "absent",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 268435457}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": null
+    },
+    {
+      "name": "zero",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 268435457}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": null
+    },
+    {
+      "name": "at-boundary",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 768, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 268435457}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": null
+    },
+    {
+      "name": "over-boundary",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 769, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 268435457}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Laptop swap admission is full"
+      }
+    },
+    {
+      "name": "whole-pool",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 1024, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 268435457}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Laptop swap admission is full"
+      }
+    },
+    {
+      "name": "huge-current",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111112}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Laptop swap admission is full"
+      }
+    },
+    {
+      "name": "strict-float-total",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 1.0}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite laptop RAM and swap declarations required"
+      }
+    },
+    {
+      "name": "strict-bool-total",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": true}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite laptop RAM and swap declarations required"
+      }
+    },
+    {
+      "name": "strict-zero-memory",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 0, \"MemorySwap\": 1}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite laptop RAM and swap declarations required"
+      }
+    },
+    {
+      "name": "zero-pool",
+      "config": {
+        "laptopSwapPoolMiB": 0
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 0}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 1}}]",
+      "meminfo": "SwapTotal: 2097152 kB\n",
+      "error": null
+    },
+    {
+      "name": "swap-capacity",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 1}}]",
+      "meminfo": "SwapTotal: 1 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Laptop swap pool exceeds actual host swap capacity"
+      }
+    },
+    {
+      "name": "malformed-swap",
+      "config": {
+        "laptopSwapPoolMiB": 1024
+      },
+      "candidateText": "{\"laptopMemoryPolicy\": {\"swapMiB\": 0, \"swapPoolMiB\": 1024}}",
+      "rowsText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\"}}, \"State\": {\"Running\": true}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": 1}}]",
+      "meminfo": "SwapTotal: nope kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Host swap capacity is unavailable"
+      }
+    }
+  ]
+}

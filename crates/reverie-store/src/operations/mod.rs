@@ -2,11 +2,18 @@
 //! Trusted installation supplies guards/observation, never a wire callback.
 mod claim;
 mod completion;
+mod confirmation;
+mod draft;
 mod error;
 mod io;
+mod terminal;
 mod transition;
 use crate::private_fs::{self, CloseRole, Directory, Stamp};
 pub use completion::NativeCompletionProof;
+pub use draft::{
+    DraftObservation, DraftObserver, DraftReferences, DraftSnapshot, allocate_draft_references,
+    allocate_profile_target,
+};
 pub use error::{JournalError, Result};
 use error::{finalized, need};
 use reverie_core::operations::*;
@@ -16,11 +23,36 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
+pub use terminal::TerminalJournalStamp;
+
+/// Existing settlement-history directory observation. Drains every entry/error
+/// and checked-closes the DIR, retaining the native-order prefix through the
+/// first count violation. No lock, scope,
+/// journal validation or native-effect authority is conferred by these bytes.
+pub fn settlement_directory_names(directory: &Path) -> Result<Vec<Vec<u8>>> {
+    Ok(private_fs::settlement_directory_names(directory)?)
+}
+/// Fixed preparation-policy temporary purpose, using the existing sole native
+/// CSPRNG owner. The resulting name is DATA, not directory/file custody.
+pub fn allocate_policy_temporary_name() -> Result<String> {
+    Ok(private_fs::random_name(".resource-preparing-")?)
+}
+/// Adjacent owner-GPU publication uses the same sole CSPRNG owner; the name is
+/// not file custody, an atomic CAS or permission to replace any existing file.
+pub fn allocate_gpu_temporary_name() -> Result<String> {
+    Ok(private_fs::random_name(".gpu-")?)
+}
 
 /// Must be fixed by trusted service installation and retain its live owner scope
 /// and outer native-admission guard. Directory custody is never authorization.
 pub trait ScopeGuard: Send + Sync {
     fn assert_scope(&self, scope: &OperationScope) -> Result<()>;
+    /// Fixed read-only terminal-reader seam. A production gate may assert its
+    /// actual held admission and scope without introducing fresh engine I/O at
+    /// this phase. Ordinary readers and every write still call assert_scope.
+    fn assert_terminal_admission(&self, scope: &OperationScope) -> Result<()> {
+        self.assert_scope(scope)
+    }
 }
 /// Repeated capacity checks do not replace the native host admission transaction.
 pub trait CapacityObserver: Send + Sync {
@@ -90,6 +122,7 @@ pub struct OperationStore {
     inner: Mutex<Inner>,
     guard: Arc<dyn ScopeGuard>,
     observer: Option<Arc<dyn CapacityObserver>>,
+    draft_observer: Option<Arc<dyn DraftObserver>>,
     #[cfg(test)]
     identity: Arc<()>,
 }
@@ -154,6 +187,7 @@ impl OperationStore {
             }),
             guard,
             observer,
+            draft_observer: None,
             #[cfg(test)]
             identity: Arc::new(()),
         })

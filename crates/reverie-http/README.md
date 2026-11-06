@@ -1,14 +1,12 @@
 # Shared HTTP transport
 
-This crate owns the request-phase socket timeout accounting and maintained
-Hyper HTTP/1 parser configuration used by the OPS client. Consumers own
-destinations, authentication, status policy, redirects, body bounds and effect
-semantics. This crate provides no authority.
+This crate owns the existing request-phase socket timeout accounting and
+maintained Hyper HTTP/1 parser configuration shared by embedding requests and
+the OPS client. Consumers own destinations, authentication, status policy,
+redirects, body bounds and effect semantics. This crate provides no authority.
 
-The implementation is preserved from the separately qualified native-backend
-candidate. This main-based client composition includes no embedding adapter or
-memory runtime. Future HTTP consumers should reuse this owner. The builder
-retains its aggregate header buffer allowance, maximum header count
+The extraction preserves the embedding transport's implementation and behavior.
+The builder retains its aggregate header buffer allowance, maximum header count
 and obsolete multiline-header support. It does **not** implement a full copy of
 CPython's HTTP parser. Independent old/new executable probes found these
 differences in that existing Hyper configuration:
@@ -29,9 +27,9 @@ decoded body bytes; it forwards no chunk extensions and calls no `addTrailers`.
 These raw-server differences are outside that supported OPS producer. Actual
 Office-handler-plus-relay qualification is separate from raw TCP fixtures.
 
-External-server HTTP compatibility remains open; this client composition
-neither resolves those differences nor qualifies an embedding consumer or
-runtime selection. Parser limits
+The embedding adapter can contact external servers. Its HTTP compatibility
+inventory remains open; this extraction neither resolves those differences
+nor qualifies a new embedding consumer or runtime selection. Parser limits
 must remain explicit in that acceptance. Reimplementing framing in an IO
 scanner or silently lowering the aggregate buffer would create another parser
 or reject previously accepted collections of valid headers.

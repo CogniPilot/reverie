@@ -1,0 +1,4358 @@
+{
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "source_sha256": "4a467f09fe0454e64a232d7a5f5b5a90b2c7f2e28dec58c0ae674c30289e5cef",
+  "cases": [
+    {
+      "name": "new private",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "repeat private",
+      "steps": [
+        "private",
+        "private",
+        "args"
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "migration lock only",
+      "steps": [],
+      "migration": true,
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "normalized session root migration /.",
+      "steps": [],
+      "migration": true,
+      "config": {
+        "stateRoot": "$ROOT/state/."
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "raw storage identity root refuses /.",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "stateRoot": "$ROOT/state/."
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "normalized session root migration //",
+      "steps": [],
+      "migration": true,
+      "config": {
+        "stateRoot": "$ROOT/state//"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "raw storage identity root refuses //",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "stateRoot": "$ROOT/state//"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "normalized session root migration /../state",
+      "steps": [],
+      "migration": true,
+      "config": {
+        "stateRoot": "$ROOT/state/../state"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        }
+      ]
+    },
+    {
+      "name": "raw storage identity root refuses /../state",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "stateRoot": "$ROOT/state/../state"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        }
+      ]
+    },
+    {
+      "name": "deep missing root parents",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "stateRoot": "$ROOT/new-a/new-b/state"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/new-a/new-b/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/new-a/new-b/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "new-a",
+          "mode": 493,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "new-a/new-b",
+          "mode": 493,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "new-a/new-b/state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "new-a/new-b/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "new-a/new-b/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "new-a/new-b/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "budget pool",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "budgetMode": "pool"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--cgroup-parent",
+            "fixture.slice",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "budget session",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "budgetMode": "session"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "readonly accounts reversed",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "mounts": [
+          {
+            "source": "$ROOT/passwd",
+            "destination": "/etc/passwd",
+            "readOnly": true
+          },
+          {
+            "source": "$ROOT/group",
+            "destination": "/etc/group",
+            "readOnly": true
+          },
+          {
+            "source": "$ROOT/work",
+            "destination": "/workspace",
+            "readOnly": false
+          }
+        ]
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--mount",
+            "type=bind,src=$ROOT/group,dst=/etc/group,readonly",
+            "--mount",
+            "type=bind,src=$ROOT/passwd,dst=/etc/passwd,readonly",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o700",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o500",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 320
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "PermissionError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 320,
+          "links": 0,
+          "kind": "dir"
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o400",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 256
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "PermissionError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 256,
+          "links": 0,
+          "kind": "dir"
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o0",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 0
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "PermissionError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 0,
+          "links": 0,
+          "kind": "dir",
+          "unreadable": true
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o711",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 457
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 457,
+          "links": 0,
+          "kind": "dir"
+        }
+      ]
+    },
+    {
+      "name": "outside controls {'stateRoot': '$ROOT/scratch/state'}",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "stateRoot": "$ROOT/scratch/state"
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        }
+      ]
+    },
+    {
+      "name": "outside controls {'stateRoot': '$ROOT/work/state', 'mounts': [{'source': '$ROOT/work', 'destination': '/workspace', 'readOnly': False}]}",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "config": {
+        "stateRoot": "$ROOT/work/state",
+        "mounts": [
+          {
+            "source": "$ROOT/work",
+            "destination": "/workspace",
+            "readOnly": false
+          }
+        ]
+      },
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        }
+      ]
+    },
+    {
+      "name": "legacy requires migration",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix/original",
+          "text": "keep",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix/original",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "keep"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback version True",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": true}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": true}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback version 1.0",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1.0}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1.0}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback legacy 1",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": 1, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": 1, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback legacy 1.0",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": 1.0, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": 1.0, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback sessionId '00000000-0000-0000-0000-000000000000'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": true, \"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"version\": 1}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback extra 'foreign'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"extra\": \"foreign\", \"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"extra\": \"foreign\", \"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback missing store",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback public",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 420
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 420,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback duplicate lastwins",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"version\":9,\"version\":1,\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"legacy\":true}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"version\":9,\"version\":1,\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"legacy\":true}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback BOM refuses",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "\ufeff{\"version\": 1, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"legacy\": true}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "JSONDecodeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "\ufeff{\"version\": 1, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"legacy\": true}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback newline text",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\r\n  \"version\": 1,\r\n  \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\r\n  \"legacy\": true\r\n}",
+          "mode": 384
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\r\n  \"version\": 1,\r\n  \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\r\n  \"legacy\": true\r\n}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback oversized integer overwritten",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "{\"version\":99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999,\"version\":1,\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"legacy\":true}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"version\":99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999,\"version\":1,\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"legacy\":true}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "rollback symlink",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "foreign.json",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 384
+        },
+        {
+          "kind": "link",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "target": "$ROOT/foreign.json"
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "foreign.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 511,
+          "links": 0,
+          "kind": "link",
+          "target": "$ROOT/foreign.json"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "hardlink store lock allowed",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "lock-source",
+          "text": "",
+          "mode": 384
+        },
+        {
+          "kind": "hardlink",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "target": "lock-source"
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "lock-source",
+          "mode": 384,
+          "links": 2,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 2,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "hardlink rollback allowed",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "rollback-source",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}",
+          "mode": 384
+        },
+        {
+          "kind": "hardlink",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "target": "rollback-source"
+        },
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [
+        {
+          "path": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "rollback-source",
+          "mode": 384,
+          "links": 2,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 2,
+          "kind": "file",
+          "text": "{\"legacy\": true, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "symlink store lock",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "lock-source",
+          "text": "preserved",
+          "mode": 384
+        },
+        {
+          "kind": "link",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "target": "$ROOT/lock-source"
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "OSError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "lock-source",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "preserved"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 511,
+          "links": 0,
+          "kind": "link",
+          "target": "$ROOT/lock-source"
+        }
+      ]
+    },
+    {
+      "name": "new employee ready",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [
+        {
+          "path": "$ROOT/state/employees/11111111-2222-4333-8444-555555555555/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/employees/11111111-2222-4333-8444-555555555555/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee ignores rollback",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "text": "invalid ignored",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [
+        {
+          "path": "$ROOT/state/employees/11111111-2222-4333-8444-555555555555/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/employees/11111111-2222-4333-8444-555555555555/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-rollback.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "invalid ignored"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 version True",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": true}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": true}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 version 2.0",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2.0}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2.0}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 token 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 token 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 sessionId '00000000-0000-0000-0000-000000000000'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 state 'copying'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"copying\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"copying\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 employeeId '00000000-0000-0000-0000-000000000000'",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"00000000-0000-0000-0000-000000000000\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"00000000-0000-0000-0000-000000000000\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee v2 extra False",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"extra\": false, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"extra\": false, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee canonical v2",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [
+        {
+          "path": "$ROOT/state/employees/11111111-2222-4333-8444-555555555555/nix"
+        },
+        {
+          "name": "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "args": [
+            "create",
+            "--name",
+            "fixture-nix-prepare-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--init",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--network",
+            "none",
+            "--user",
+            "$UID:$GID",
+            "--label",
+            "reverie.nix-prepare=fixture",
+            "--label",
+            "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "--memory",
+            "512m",
+            "--memory-swap",
+            "512m",
+            "--pids-limit",
+            "128",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=268435456,mode=1777",
+            "--tmpfs",
+            "/nix/store/.links:rw,nosuid,nodev,size=1048576,mode=1777",
+            "--mount",
+            "type=bind,src=$ROOT/state/employees/11111111-2222-4333-8444-555555555555/nix,dst=/target/nix",
+            "--env",
+            "HOME=/tmp/nix-bootstrap-home",
+            "--env",
+            "TMPDIR=/tmp",
+            "--entrypoint",
+            "/bin/reverie-nix-store-prepare",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "unknown employee data fenced",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"state\": \"employee-canonical\", \"token\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"version\": 2}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "migration bypass guard only",
+      "steps": [],
+      "migration": true,
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "private rechecks migration fence",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "migration": true,
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "text": "{}",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": []}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": []}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix-migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{}"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "employee global migration fence",
+      "steps": [
+        "private",
+        "args"
+      ],
+      "employee": true,
+      "setup": [
+        {
+          "kind": "file",
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.migration.json",
+          "text": "fence",
+          "mode": 384
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "results": [],
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "links": 0,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.migration.json",
+          "mode": 384,
+          "links": 1,
+          "kind": "file",
+          "text": "fence"
+        }
+      ]
+    }
+  ],
+  "snapshot_encoding": "raw UTF-8 file bytes, no read_text newline normalization"
+}

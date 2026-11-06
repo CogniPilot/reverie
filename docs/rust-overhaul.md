@@ -79,6 +79,15 @@ admission, reservation, effect and reconciliation consumers migrate. See
 [`reverie-application`](../crates/reverie-application/README.md) for the exact
 service boundary and compatibility evidence.
 
+The memory persistence cohort adds native MemoryStore/ProjectMemory and history
+import libraries plus the configured HTTP(S)/hashed embedding adapters. Synthetic
+legacy databases, reverse-language writes, all-table backup/restore and model/
+vector/ranking fixtures qualify source compatibility. The active Python callers
+remain selected; employee namespaces, authorization, consistent live snapshots
+and single-writer cutover still belong to the coordinated service migration.
+Incidental non-HTTP urllib endpoint schemes need a supported-settings inventory
+and named adapter or explicit compatibility decision before that selection.
+
 The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
 claims a complete Rust backend or an installed rollout.

@@ -1,0 +1,4185 @@
+{
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "source_sha256": "efdc16f1194a9880c4c2dffd4083ef4e407f49efbab423af724646318f5e1dc7",
+  "cases": [
+    {
+      "name": "('prepare',)",
+      "steps": [
+        "prepare"
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "('prepare', 'prepare', 'validate')",
+      "steps": [
+        "prepare",
+        "prepare",
+        "validate"
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "('record', 'prepare', 'record')",
+      "steps": [
+        "record",
+        "prepare",
+        "record"
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "('validate',)",
+      "steps": [
+        "validate"
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "FileNotFoundError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "nil ad hoc",
+      "steps": [
+        "prepare",
+        "record",
+        "validate"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/session-00000000-0000-0000-0000-000000000000.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "owner None",
+      "steps": [
+        "prepare",
+        "record"
+      ],
+      "company_text": "{\"employees\": [{\"desiredRunning\": false, \"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"desiredRunning\": false, \"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "owner 'owner-a'",
+      "steps": [
+        "prepare",
+        "record"
+      ],
+      "company_text": "{\"employees\": [{\"desiredRunning\": false, \"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"owner-a\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"desiredRunning\": false, \"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"owner-a\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"owner-a\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "owner '\\ud800'",
+      "steps": [
+        "prepare",
+        "record"
+      ],
+      "company_text": "{\"employees\": [{\"desiredRunning\": false, \"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"\\ud800\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"desiredRunning\": false, \"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"\\ud800\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"\\ud800\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "paired home",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home/preserved",
+          "text": "retain original"
+        }
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home/preserved",
+          "mode": 384,
+          "kind": "file",
+          "text": "retain original"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "paired nix",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix/preserved",
+          "text": "retain original"
+        }
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix/preserved",
+          "mode": 384,
+          "kind": "file",
+          "text": "retain original"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "paired scratch-nix",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix/preserved",
+          "text": "retain original"
+        }
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix/preserved",
+          "mode": 384,
+          "kind": "file",
+          "text": "retain original"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "paired old-home",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/00000000-0000-0000-0000-000000000000/home/preserved",
+          "text": "retain original"
+        }
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/preserved",
+          "mode": 384,
+          "kind": "file",
+          "text": "retain original"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "ready numeric 1",
+      "steps": [
+        "prepare",
+        "validate"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448
+        },
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "ready numeric True",
+      "steps": [
+        "prepare",
+        "validate"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448
+        },
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": true}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": true}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "ready numeric 1.0",
+      "steps": [
+        "prepare",
+        "validate"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448
+        },
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1.0}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1.0}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "foreign identity",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"00000000-0000-0000-0000-000000000000\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"00000000-0000-0000-0000-000000000000\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "foreign state",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"creating\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"creating\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "foreign kind",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"session\", \"state\": \"ready\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"session\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "foreign version",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 2}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 2}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "foreign extra",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"extra\": \"opaque\", \"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"extra\": \"opaque\", \"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "missing home",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "FileNotFoundError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "missing nix",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "FileNotFoundError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "dangling oldhome",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "link",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home",
+          "target": "$ROOT/absent"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home",
+          "mode": 511,
+          "kind": "link",
+          "target": "$ROOT/absent"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "dangling marker",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "link",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "target": "$ROOT/absent"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 511,
+          "kind": "link",
+          "target": "$ROOT/absent"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "dangling marker with legacy",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home",
+          "mode": 448
+        },
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "link",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "target": "$ROOT/absent"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 511,
+          "kind": "link",
+          "target": "$ROOT/absent"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "symlink marker",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "foreign.json",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "kind": "link",
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "target": "$ROOT/foreign.json"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "foreign.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 511,
+          "kind": "link",
+          "target": "$ROOT/foreign.json"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical checking",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "checking"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"checking\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"checking\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical completed",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical creating",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "creating"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"creating\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"creating\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical failed",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "failed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"failed\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"failed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical quiescing",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "quiescing"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"quiescing\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"quiescing\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical recovery-required",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "recovery-required"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"recovery-required\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"recovery-required\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical starting",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "starting"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"starting\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"starting\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical stopping",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "stopping"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"stopping\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"stopping\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical waiting",
+      "steps": [
+        "prepare"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "waiting"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"waiting\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"waiting\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "historical no publication",
+      "steps": [
+        "record"
+      ],
+      "session": "00000000-0000-0000-0000-000000000000",
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "unknown phase",
+      "steps": [
+        "prepare"
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "foreign"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"foreign\"}]",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"foreign\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "unrelated unknown phase",
+      "steps": [
+        "prepare"
+      ],
+      "journal": [
+        {
+          "employeeId": "00000000-0000-0000-0000-000000000000",
+          "owner": null,
+          "oldSession": "not-uuid",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "foreign"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"00000000-0000-0000-0000-000000000000\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"not-uuid\", \"owner\": null, \"phase\": \"foreign\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"00000000-0000-0000-0000-000000000000\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"not-uuid\", \"owner\": null, \"phase\": \"foreign\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "false endpoint",
+      "steps": [
+        "prepare"
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": false,
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": false, \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": false, \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "invalid endpoint",
+      "steps": [
+        "prepare"
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": 123,
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": 123, \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": 123, \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "nonobject journal",
+      "steps": [
+        "prepare"
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        null
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, null]",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, null]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "oversized journal",
+      "steps": [
+        "prepare"
+      ],
+      "journal": [
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        },
+        {
+          "employeeId": "11111111-2222-4333-8444-555555555555",
+          "owner": null,
+          "oldSession": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "newSession": "00000000-0000-0000-0000-000000000000",
+          "phase": "completed"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "journal_text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "plan-moves.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "[{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}, {\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"newSession\": \"00000000-0000-0000-0000-000000000000\", \"oldSession\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"owner\": null, \"phase\": \"completed\"}]"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "equal",
+      "steps": [
+        "prepare"
+      ],
+      "config": {
+        "scratchRoot": "$ROOT/state"
+      },
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        }
+      ]
+    },
+    {
+      "name": "under",
+      "steps": [
+        "prepare"
+      ],
+      "config": {
+        "scratchRoot": "$ROOT"
+      },
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        }
+      ]
+    },
+    {
+      "name": "shared",
+      "steps": [
+        "prepare"
+      ],
+      "config": {
+        "mounts": [
+          {
+            "source": "$ROOT"
+          }
+        ]
+      },
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        }
+      ]
+    },
+    {
+      "name": "invalid mount",
+      "steps": [
+        "prepare"
+      ],
+      "config": {
+        "mounts": [
+          {
+            "source": "$ROOT/other"
+          },
+          false
+        ]
+      },
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "TypeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        }
+      ]
+    },
+    {
+      "name": "overlap before malformed",
+      "steps": [
+        "prepare"
+      ],
+      "config": {
+        "mounts": [
+          {
+            "source": "$ROOT"
+          },
+          false
+        ]
+      },
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        }
+      ]
+    },
+    {
+      "name": "ignored maps",
+      "steps": [
+        "prepare"
+      ],
+      "config": {
+        "employeeResources": {
+          "invalid": null
+        },
+        "poolMemoryMiB": false
+      },
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o700",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 448
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o500",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 320
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "PermissionError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 320,
+          "kind": "dir"
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o400",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 256
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "PermissionError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 256,
+          "kind": "dir"
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o0",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 0
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "PermissionError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 0,
+          "kind": "dir",
+          "unreadable": true
+        }
+      ]
+    },
+    {
+      "name": "state mode 0o711",
+      "steps": [
+        "prepare"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state",
+          "mode": 457
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 457,
+          "kind": "dir"
+        }
+      ]
+    },
+    {
+      "name": "lineage 0",
+      "steps": [
+        "record"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": true}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": true}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "lineage 1",
+      "steps": [
+        "record"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1.0}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1.0}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "lineage 2",
+      "steps": [
+        "record"
+      ],
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"foreign\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "ValueError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/storage-owner.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employeeId\": \"11111111-2222-4333-8444-555555555555\", \"owner\": \"foreign\", \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"version\": 1}"
+        }
+      ]
+    },
+    {
+      "name": "fence False",
+      "steps": [
+        "prepare"
+      ],
+      "migration": false,
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/storage-locks",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.migration.json",
+          "text": "fence"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": false,
+      "reference_error": "RuntimeError",
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.migration.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "fence"
+        }
+      ]
+    },
+    {
+      "name": "fence True",
+      "steps": [
+        "prepare"
+      ],
+      "migration": true,
+      "setup": [
+        {
+          "kind": "dir",
+          "path": "state/storage-locks",
+          "mode": 448
+        },
+        {
+          "kind": "file",
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.migration.json",
+          "text": "fence"
+        }
+      ],
+      "company_text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}",
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}]}"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/nix",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/employees/11111111-2222-4333-8444-555555555555/storage.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"identity\": \"11111111-2222-4333-8444-555555555555\", \"kind\": \"employee\", \"state\": \"ready\", \"version\": 1}"
+        },
+        {
+          "path": "state/storage-locks",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.lock",
+          "mode": 384,
+          "kind": "file",
+          "text": ""
+        },
+        {
+          "path": "state/storage-locks/employee-11111111-2222-4333-8444-555555555555.migration.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "fence"
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,12 @@
 # Reverie application services
 
+`worker_validation::{validate_captured,load_owner_config}` composes the complete
+ordered worker validator and its compatible owner-file loader. The returned
+snapshot retains original data and readonly observations; no native mount,
+start, owner or publication authority is created. Its
+[ownership/compatibility audit](src/worker_validation/README.md) inventories the
+still-Python runtime consumers and separate startup/effect obligations.
+
 This crate owns workflows across the core, contracts, store and native host
 adapters. HTTP/CLI transports should call these services after authenticating
 and admitting the operation; they should not reproduce workflow decisions.
@@ -34,6 +41,25 @@ without current GPU/perf. Refusal tests exercise stale profiles, custody changes
 during resolution, dual failures and inactive/legacy feature bypasses. All
 fixtures use owned synthetic files, never company instance data.
 
+`reservation_observer::NativeObserver` owns the complete read-side reservation
+observation workflow over one persistent supervised engine client and the fixed
+Linux kernel adapter. A captured context binds all censuses and row handles to
+the same configuration snapshot. Public contract rows cannot be submitted as
+native observation handles. This is an internal broker service, without a wire
+constructor, request-selected proc/cgroup roots or arbitrary engine arguments.
+The [observation audit](src/reservation_observer/README.md) maps each legacy
+method and its remaining effect/admission obligations.
+
+Captured observation contexts retain the same persistent engine/kernel source
+and shared cancellation after the installing handle is moved or dropped. Census
+data may be compared across contexts using Python structural equality, but row
+handles remain bound to their original context and cannot be rebound by equal
+data. The owner loader retains its optional source path only after full
+validation; embedded captured configurations retain no file binding. The actual
+reader and recorded path share Python's lexical `Path` spelling, including
+relative and '..' components and the exact double-slash anchor. This is source
+data, not configuration custody or a permission grant.
+
 `tests/installed_policy.rs` is a separate, ignored qualification for all four
 selected features together: current-employee GPU, the real fixed perf
 derivative, memory and the immutable lease peer mount data. Its Python oracle
@@ -60,3 +86,220 @@ nix develop --command env TMPDIR="$TMPDIR" \
 This only reads the immutable sources and owned synthetic company metadata.
 It never executes the peer, invokes an engine, creates a socket, mounts anything,
 changes a profile or qualifies an owner permission or live kernel effect.
+
+`worker_launch` prepares checked request/create/tmux/account data with actual
+readonly account/hostname observations. See its [boundary and consumer
+inventory](src/worker_launch/README.md); plans are never admission/effect permits.
+
+`reservation_gate` now composes actual ordinary admission, canonical lookup and
+the complete read-side reservation observation over these same owners. Its
+[checkpoint audit](src/reservation_gate/README.md) records source phases, real
+lock/finalizer handling, compatible hashes and still-required claim/effect owners.
+It is inactive and does not select a broker or grant a launch/completion permit.
+
+`InstallingBroker` owns a current validated configuration snapshot distinct from
+each retained preparation's original source. Resource reload performs the real
+owner-file load/full validation, active-operation fences and ordered registered
+laptop inspection before an internal snapshot CAS updates that same observer
+origin. Its registry has no public data-created registration constructor; actual
+supervised launch/recovery producers remain required before it can own laptops.
+An empty initial registry never establishes ownership of global engine inventory.
+
+`RetainedPreparation::commit_configuration` stages and fully validates its own
+candidate, retains the actual owner-file/directory binding, publishes durable
+attempt/before evidence and an exclusive temporary, then performs the adjacent
+original-file stamp check and rename/fsync/checked close. It reloads the same
+installing state, rechecks the actual current file and live claim, and only then
+records `PREPARED_CONFIG_ONLY_SOURCE_UNCHANGED`. After an attempted failure it
+retains evidence and refuses replay; it never rolls back a possible publication.
+This implements policy-file preparation, not an engine start, source stop,
+capacity release, API authorization or a selected product workflow.
+
+`project_memory::ProjectMemory` preserves the separate lowercase project
+namespace, default lexical model, six-result lookup, source/fact validation and
+original 8,000/1,000-codepoint limits. Its scalar convenience methods share
+lossless query/fact/source input paths. `memory_import::migrate_history` preserves
+the existing user/assistant pairing, idle marker, file-mtime-derived timestamps,
+per-episode commits and final one-time state marker. It does not reset a database
+or silently re-embed records. Trusted service installation selects these paths;
+the library is not an arbitrary-file operator API or a selected product route.
+
+`memory_startup::StartedMemory` is an explicit installed-instance workflow:
+selected embedding probe/re-embedding, atomic selected seeds plus initial-self
+CAS, one atomic new history batch/marker, and deterministic missing-profile
+publication. It preserves IDs/BLOBs, existing self documents and owner profiles.
+Unlike the old per-episode importer, an unmarked historical partial import is
+an explicit ambiguity refusal; it is never reset or imported a second time.
+Seed membership uses the actual normalized persisted text and includes this
+new batch, avoiding the old duplicate insertion on repeated/whitespace seeds.
+These are intentional curated startup corrections, qualified separately from
+the retained legacy helper.
+
+`memory_recall::MemoryRecall` receives the already selected model and opens only
+an existing READ_ONLY store. It never runs startup, probes/reselects a model,
+re-embeds, seeds, imports, initializes documents or refreshes a profile. Pending
+initialization, required profile refresh and selected model mismatch return
+typed refusals. Readiness is checked before/after recall. Closing its originating
+StartedMemory fences attached recall handles; each reader still requires its
+own checked close. Readiness and local closed flags are functional state, never
+owner/admission/shutdown evidence.
+
+No request selects an employee ID, DB path, profile path or model. The real
+installed namespace lifecycle/caller integration remains a required successor:
+authenticate the current caller, serialize startup against recall, retain and
+close all handles before shutdown, and replace the existing memory_cli consumers
+through a path-free API. A host must not reinterpret a guest's filesystem or
+loopback endpoint. Current Python/CLI consumers remain selected. Hands room
+memory and the Office employee journal are separate stores and are not routed
+through this legacy-memory service.
+
+# Installing storage ownership
+
+`InstallingBroker::new` consumes the actual service `WorkerRuntime` and creates
+its reservation observer from that exact runtime's read-only handle. There is
+no independent engine recapture, optional fake runtime or public registry setter.
+The broker and optional reservation gate now share the same actual installed
+snapshot owner. Genuine feature absence bootstraps without creating control
+state; a removed option cannot hide an existing marker or pending fence.
+The checked feature getter reobserves those fences for an unreserved service
+and refuses late appearance. It returns no no-op admission or start permit.
+The complete canonical launch/stop service and its optional admission consumer
+remain separate required lifecycle integration.
+
+`claim_storage` performs fresh service-selected resolution before the private
+registry lock. Genuine legacy paths bypass the employee lock, census and
+registry; employee claims retain actual move-only owners, recheck exact prior
+bindings and census writers on the original same client. Fresh acquired guard
+paths are retained even when the source permits an identity/kind change. Claim
+handle Drop does not release a laptop-lifetime owner. Failed writer cleanup
+retains the real unconfirmed owner and both primary/secondary errors; it cannot
+be reused as a positive registration. Launch-wait bytes use strict metadata and
+the original nine-field projection, separately from permissive allowed() data.
+
+Exact claim-handle consumption settles the same native client before and after
+local resource close; unknown close/settlement keeps a fenced registry entry
+and returns the exact handle. It neither stops a container nor proves global
+unlock, storage exclusivity, admission completion or capacity release. The real
+launch/stop producer must also inventory and settle viewer/Office/other owned
+constructor contexts and confirm native laptop disposition before a global
+acknowledgement. Actual Nix ownership transfer, laptop registration, mutable
+launch/recovery, and this terminal release caller remain required integration;
+no plan, path, label or returned claim grants API or engine authority.
+
+A release that already selected the source's unbounded mutex path remains in
+flight when the first stop arrives later. The real stop producer must retain
+that exact task and the registry's resources; it cannot infer completion or
+restart a fresh cleanup budget. An owning control establishes that late stop
+does not release the lease or finish the waiting task until the original mutex
+is actually released. This is preserved source behavior and a required final
+shutdown integration boundary, not a claimed whole-service 34-second bound.
+
+`ReservationGate::admit_ordinary_launch` retains the real thread/process-bound
+allocation scope through ordinary launch checks. It refuses a durable active
+reserved target, preserving the separate protected-start producer. Its
+`check_creation` uses the original host-job, launch, exact admission/pool policy,
+native capacity, retained-delta and final inventory order. Candidate ceilings
+include existing committed and retained bytes. Checked success runs the final
+native guard; checked body failure preserves the primary and close failures.
+Closing this local scope does not prove global resource release or confer
+API, container, protected-start or lifecycle permission.
+
+`InstallingBroker::check_creation_budget` composes the distinct running-peer
+names/registry union, optional inspect, ownership/running/PID/cgroup checks,
+outside-pool ceilings, maximum workers and candidate swap before that explicit
+gate phase. The absent-control branch retains the original pool/headroom rule;
+present explicit control never falls back. `check_pool` retains the separate
+activation/task-headroom phase. Both use the actual installing snapshot and
+same runtime; neither registers a laptop or grants effects. Candidate swap is
+read from the existing finite memory projection: the worker loader rejects
+owner-authored `laptopMemoryPolicy` input.
+
+Fixtures cover 55 actual legacy budget, 23 pool, 12 swap and two paired native
+lookup-priority cases. These use synthetic engine results/owned files; separate
+controls exercise the real held gate and controlled supervised Rust clients.
+Actual storage waiting, owned Nix/laptop/Office/viewer registration, fresh
+canonical invocation points and final settlement remain required before
+selecting the complete worker service. No live company/engine or installed
+runtime qualification is inferred from these tests.
+
+`InstallingBroker::refresh_launch_configuration` implements the existing normal
+launch's image-only refresh through the actual retained-path loader. It loads
+before the lifecycle mutex, then compares against current RAM with Python's
+full equality for `{**current, "image": loaded["image"]}`. It publishes only after
+that check, under lifecycle → Gate state → active context → current-state order.
+An entry that captured older data may adopt only this same image-only projection
+under its original entry ceiling. The native origin, engine context, existing
+operation bound and all previously retained snapshots remain unchanged.
+
+Actual loader fixtures reproduce thirteen old `Broker.handle` prefixes, including
+inactive NaN data, integer/float/bool equality and absent-vs-null refusal. Owned
+race controls cover an old entry capture, a real pending client at the unlocked
+preparation boundary and an older load publishing after a newer one. The latter
+can leave RAM behind disk, as the source permits; reserved admission independently
+refuses the image mismatch. The controlled pending-client case does not qualify
+the full Nix workflow or laptop launch. There is no file write, engine create,
+authorization, registration or global-release acknowledgement in this operation;
+no-reservations policy reload and the canonical launch/lifecycle consumer remain
+required before complete worker-service selection.
+
+`StorageClaim::retain_nix` now performs the actual storage-to-Nix transition.
+For an employee, the installing registry atomically replaces its direct owner
+with the same Runtime-owned `NixWorkflow` before the first client can run.
+For legacy session storage, the real owner moves into that Runtime record with
+no invented employee lease or employee registry entry. Both retain the exact
+service origin. Named preparation methods delegate to the existing held owner;
+no caller home/scratch/path or generic filesystem editor is accepted.
+
+`NixStoragePreparation::run` executes outside the registry mutex. Checked
+one-shot `reclaim` restores the exact direct storage and returns the actual Nix
+guard plus its result; a definitive retention failure returns the original
+claim/guard. Unknown helper/client/removal outcomes retain the workflow and
+refuse direct aliases, further preparation and release. Dropping a preparation
+handle does not acknowledge settlement. Its resources remain held only while the
+actual Registry/Runtime remains retained; the last owner/process exit supplies
+no global-release guarantee. The complete installing service still needs actual
+process-lifetime retention of unknowns or confirmed structured shutdown.
+The application controller must retain these handles and settle them during
+real launch/recovery/stop; the public resource result is not API authorization,
+Gate admission, laptop ownership or global capacity-release proof. Ordinary
+release already waiting on an unbounded mutex when stop arrives remains an
+explicit whole-service shutdown obligation.
+
+Six owned controls exercise actual legacy and employee locks, definite rejection,
+image opt-out, a fixed supervised helper create/start/remove, a long helper with
+the registry mutex available, and unknown create/removal retaining guards through
+service stop. Helper effects are controlled Rust child processes and owned files,
+not a live engine, company or production activation.
+
+The Nix resource handoff also forwards the exact `prepared_path` returned by the
+real successful Host workflow. Later rollback metadata cannot replace that data;
+image opt-out/negative results provide no path. `into_parts` remains compatible,
+so the actual laptop-mount consumer must retain the returned data alongside its
+same original resource owners before composing create arguments.
+
+`StorageClaim::prepare_create_plan` uses the existing effective-config resolver
+once while retaining actual custody, then delegates to the one Host observation
+owner. Unknown Nix/consumed owners refuse before another native lookup. The
+existing `worker_launch::prepare_create` data API remains compatible and delegates
+that same sequence. Same-runtime provenance and a plan are not an authorization,
+a protected start, a supervised Created/Started result or a lifecycle registry
+entry; those actual consuming producers remain required.
+
+`NixStoragePreparation::retain_network` now atomically replaces the registry's
+actual Nix workflow with the same Runtime's laptop record. It transfers the
+original storage/Nix owners directly after checking the unique storage-owner
+identity, request and genuine same-runtime/session Office phone. A pure refusal
+returns every supplied input while Nix retains its actual resources. The legacy
+path still creates no employee registry entry or imaginary lease. No engine
+query runs under the registry mutex; `run` uses fixed network inspect/create
+commands outside it, with the original shared capture and stop budget.
+
+Known network results have one-shot return of those exact owners; employee
+registry restoration uses the real returned storage object. Unknown native or
+daemon outcomes keep the laptop record and refuse direct aliases/release. This
+is not a laptop-created/started result, API permission or global capacity credit.
+Owned controls cover both storage kinds, refused aliases, native cancellation,
+available registry mutex during actual child I/O and retained resources at stop.
+The full canonical launch sequence and its telemetry/cold-temporary fences,
+private record/create/start, recovery, viewer and whole-service shutdown remain
+required before selecting the Rust worker service.

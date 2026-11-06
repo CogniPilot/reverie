@@ -12,11 +12,7 @@ let
     else null;
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   humanToolkit = import ./human-terminal-toolkit.nix { inherit pkgs src; };
-  nixPrepare = pkgs.writeShellApplication {
-    name = "reverie-nix-store-prepare";
-    runtimeInputs = [ pkgs.nix pkgs.coreutils ];
-    text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile (src + "/scripts/reverie-nix-store-prepare"));
-  };
+  nixPrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
   # dockerTools.caCertificates, but from the runtime's CA bundle rather than the pinned nixpkgs' older one.
   caCertificates = pkgs.runCommand "ca-certificates" { } ''
     mkdir -p $out/etc/ssl/certs $out/etc/pki/tls/certs
