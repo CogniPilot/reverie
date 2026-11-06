@@ -33,6 +33,9 @@ pub fn read_verification_receipt(
 ) -> Result<Metadata> {
     read_receipt(config, &format!("verified-{}.json", id.as_str()))
 }
+pub fn read_prepared_policy(config: &ReservationConfiguration, id: &JournalId) -> Result<Metadata> {
+    read_receipt(config, &format!("prepared-{}.json", id.as_str()))
+}
 pub fn settlement_pending_present(
     config: &ReservationConfiguration,
     id: &JournalId,

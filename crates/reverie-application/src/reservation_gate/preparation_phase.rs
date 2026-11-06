@@ -15,8 +15,8 @@ use reverie_core::{
 };
 use reverie_store::storage_identity::{self, StorageKind};
 pub(super) struct PublicationBoundary {
-    receipt: PublicationIntent,
-    signature: reservation_control::PublicationStamp,
+    pub(super) receipt: PublicationIntent,
+    pub(super) signature: reservation_control::PublicationStamp,
 }
 #[derive(Clone, Copy)]
 pub(super) enum PublicationPhase {

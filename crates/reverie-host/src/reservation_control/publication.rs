@@ -55,6 +55,24 @@ pub fn publish_publication(
     let info = fs::symlink_metadata(&path)?;
     Ok(PublicationStamp::capture(path, &info))
 }
+/// Native _terminal reads/parses before comparing the original named stamp.
+pub fn assert_native_publication(
+    config: &ReservationConfiguration,
+    id: &JournalId,
+    expected: &PublicationStamp,
+    receipt: &PublicationIntent,
+) -> Result<()> {
+    let path = path(config, id)?;
+    let data = super::history::read_receipt(config, &format!("publication-{}.json", id.as_str()))?;
+    need(
+        receipt.matches_metadata(&data),
+        "RESOURCE_NATIVE_PHASE_CHANGED",
+    )?;
+    need(
+        expected.path == path && expected.matches(&fs::symlink_metadata(&path)?),
+        "RESOURCE_NATIVE_PHASE_CHANGED",
+    )
+}
 pub fn observe_publication(
     config: &ReservationConfiguration,
     id: &JournalId,

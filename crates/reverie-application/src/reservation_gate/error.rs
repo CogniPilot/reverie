@@ -6,6 +6,10 @@ pub enum GateError {
     GpuApplyUncertain {
         cause: Box<Self>,
     },
+    StartData(reverie_contracts::reservation_baseline::StartDataError),
+    NativeStartIntentUncertain {
+        cause: Box<Self>,
+    },
     Intent(reverie_host::worker_intent::IntentHostError),
     LaptopData(reverie_contracts::broker_laptop::LaptopReadError),
     FullPolicy(crate::worker_validation::WorkerValidationError),
@@ -57,6 +61,10 @@ impl GateError {
             Self::GpuData(error) => error.code(),
             Self::GpuHost(error) => error.code(),
             Self::GpuApplyUncertain { .. } => "GPU_APPLY_REQUIRES_RECONCILIATION",
+            Self::StartData(error) => error.code(),
+            Self::NativeStartIntentUncertain { .. } => {
+                "RESOURCE_NATIVE_START_INTENT_UNCERTAIN_KEEP_CLAIM"
+            }
             Self::Intent(error) => error.code(),
             Self::LaptopData(error) => error.code(),
             Self::FullPolicy(error) => error.code(),
@@ -110,6 +118,8 @@ impl std::error::Error for GateError {
             Self::GpuData(error) => Some(error),
             Self::GpuHost(error) => Some(error),
             Self::GpuApplyUncertain { cause } => Some(cause),
+            Self::StartData(error) => Some(error),
+            Self::NativeStartIntentUncertain { cause } => Some(cause),
             Self::Intent(error) => Some(error),
             Self::LaptopData(error) => Some(error),
             Self::FullPolicy(error) => Some(error),
@@ -156,6 +166,10 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(
+    reverie_contracts::reservation_baseline::StartDataError,
+    StartData
+);
 from_error!(reverie_host::worker_intent::IntentHostError, Intent);
 from_error!(
     reverie_contracts::broker_laptop::LaptopReadError,

@@ -41,6 +41,7 @@ fn original_accounts_use_owned_source_and_proc_identities_sorting_only_after_sou
         tail.accounts()[0].identity(),
         native::reservation_identity_text(&native::python_text(&first)).unwrap()
     );
+    source_release::accounts(&fixture, &tail, end()).unwrap();
     fixture.identity_paths.borrow_mut().insert(
         path("/proc/123/root/instances/default/accounts/z").codepoints(),
         PosixPath::try_new(&native::python_text(&second)).unwrap(),
@@ -49,6 +50,43 @@ fn original_accounts_use_owned_source_and_proc_identities_sorting_only_after_sou
         baseline::observe(&fixture, row, limits.binding(), end())
             .err()
             .unwrap()
+            .code(),
+        "RESOURCE_NATIVE_ACCOUNT_BINDING_CHANGED"
+    );
+}
+#[test]
+fn terminal_accounts_use_original_order_and_a_changed_first_source_precedes_later_missing_source() {
+    let fixture = Fixture::new();
+    let first = fixture.root.join("first");
+    let second = fixture.root.join("second");
+    fs::create_dir(&first).unwrap();
+    fs::create_dir(&second).unwrap();
+    let rows = fixture.row_with_mounts(json!([
+        mount(&first, "/instances/default/accounts/z"),
+        mount(&second, "/instances/default/console/accounts/a")
+    ]));
+    let mut declarations =
+        reverie_contracts::reservation_baseline::AccountDeclarations::new(&rows.rows()[0]).unwrap();
+    let mut accounts = Vec::new();
+    while let Some(declaration) = declarations.next_declaration().unwrap() {
+        let selected = declaration.source().unwrap();
+        accounts.push(
+            declaration
+                .observe(native::reservation_identity_text(selected.codepoints()).unwrap())
+                .unwrap(),
+        );
+    }
+    let tail = reverie_contracts::reservation_baseline::OriginalRuntimeTail::from_observed_data(
+        [1, 2],
+        accounts,
+    );
+    source_release::accounts(&fixture, &tail, end()).unwrap();
+    fs::rename(&first, fixture.root.join("preserved-first")).unwrap();
+    fs::create_dir(&first).unwrap();
+    fs::remove_dir(&second).unwrap();
+    assert_eq!(
+        source_release::accounts(&fixture, &tail, end())
+            .unwrap_err()
             .code(),
         "RESOURCE_NATIVE_ACCOUNT_BINDING_CHANGED"
     );

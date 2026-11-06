@@ -1,5 +1,7 @@
 use super::*;
 use reverie_core::ids::ProfileSessionId;
+#[path = "tests_preparation_start.rs"]
+mod native_start_cases;
 fn preparing() -> (
     Setup,
     Arc<Fixture>,

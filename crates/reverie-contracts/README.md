@@ -320,3 +320,11 @@ first-row lookup, falsey-label fallback and exact worker/session comparison.
 Twenty-nine actual AST cases include ignored extra rows, raw integer limits,
 last-key-wins, nonfinite extras and wrong-shape/ownership priority. These labels
 remain descriptive data and cannot construct a native laptop or effect grant.
+
+`reservation_baseline` retains the original native/runtime DATA alongside the
+unchanged baseline encoding. Named start comparisons preserve Python dictionary
+numeric equality (including bool/int/float equality) before later native readers
+apply their strict rules. The named intent codec hashes finite baseline data only
+at the original late receipt phase; five original-Python fingerprint/byte vectors
+cover numeric provenance, lone-surrogate text and nonfinite refusal. It cannot
+manufacture a live claim, process birth, effect result or launch permit.

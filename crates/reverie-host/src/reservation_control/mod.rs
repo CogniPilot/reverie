@@ -12,12 +12,20 @@ mod tests;
 use crate::{ObservationError, native};
 pub use draft::{publish_draft, read_draft};
 pub use history::{
-    read_completion_receipt, read_settlement_pending, read_verification_receipt, settlement_names,
-    settlement_pending_present,
+    read_completion_receipt, read_prepared_policy, read_settlement_pending,
+    read_verification_receipt, settlement_names, settlement_pending_present,
 };
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
 pub use policy::{PolicyBinding, PolicyFileStamp, PolicyTransaction, publish_prepared_policy};
-pub use publication::{PublicationStamp, observe_publication, publish_publication};
+pub use publication::{
+    PublicationStamp, assert_native_publication, observe_publication, publish_publication,
+};
+pub fn publish_start_intent(
+    config: &ReservationConfiguration,
+    record: &reverie_contracts::reservation_baseline::StartIntentRecord,
+) -> Result<()> {
+    private_record::publish(config, private_record::PrivateRecord::StartIntent(record))
+}
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDirectory, ControlIdentity},
     reservation_engine::{EngineDataError, ReservationConfiguration},

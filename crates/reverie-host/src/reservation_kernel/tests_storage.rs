@@ -129,3 +129,36 @@ fn worker_identity_keeps_legacy_refusal_of_raw_state_and_scratch_alias_spelling(
     }
     assert!(paths.home().exists());
 }
+#[test]
+fn native_start_target_storage_matches_captured_four_fields_in_fixed_destination_order() {
+    use reverie_contracts::reservation_baseline::{
+        OriginalBaselineFields, OriginalRuntimeTail, OriginalSourceBaseline,
+    };
+    let fixture = Fixture::new();
+    let (config, rows, paths) = setup(&fixture);
+    let observed = storage::observe(&fixture, &config, &rows.rows()[0], &paths, end()).unwrap();
+    let source = fixture.row();
+    let row = &source.rows()[0];
+    let limits = limits::observe(&fixture, row, None, end()).unwrap();
+    let number = UnsignedInteger::from_u64(0);
+    let baseline = OriginalSourceBaseline::from_observed_data(OriginalBaselineFields {
+        source: row,
+        native: limits.binding(),
+        storage: observed.binding(),
+        site: limits.binding(),
+        commitments: &[],
+        total: &number,
+        budget: &number,
+        runtime: &OriginalRuntimeTail::from_observed_data([1, 2], vec![]),
+    });
+    source_release::target_storage(&fixture, &paths, &baseline, end()).unwrap();
+    fs::rename(paths.home(), paths.home().with_file_name("preserved-home")).unwrap();
+    fs::create_dir(paths.home()).unwrap();
+    fs::remove_dir(paths.nix()).unwrap();
+    assert_eq!(
+        source_release::target_storage(&fixture, &paths, &baseline, end())
+            .unwrap_err()
+            .code(),
+        "RESOURCE_NATIVE_STORAGE_CHANGED"
+    );
+}
