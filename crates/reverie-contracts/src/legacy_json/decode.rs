@@ -9,6 +9,7 @@ pub(crate) use journal::{JournalParseError, JournalParsed};
 enum Purpose {
     Default,
     NoConstants,
+    Metadata,
     Rootless,
     Journal,
 }
@@ -48,6 +49,9 @@ struct Cursor<'a> {
 
 pub(super) fn decode(source: &[u8]) -> Result<Value, Error> {
     decode_mode(source, Purpose::Default)
+}
+pub(super) fn decode_metadata(source: &[u8]) -> Result<Value, Error> {
+    decode_mode(source, Purpose::Metadata)
 }
 pub(super) fn decode_without_constants(source: &[u8]) -> Result<Value, Error> {
     decode_mode(source, Purpose::NoConstants)
@@ -187,7 +191,7 @@ impl Frame {
 fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
     match purpose {
         Purpose::Rootless => Ok(false),
-        Purpose::Journal => Ok(true),
+        Purpose::Journal | Purpose::Metadata => Ok(true),
         _ => Err(Error::DuplicateKey),
     }
 }
@@ -286,10 +290,10 @@ impl Cursor<'_> {
             .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
-            // The rootless-purpose default Python decoder uses its runtime's
-            // decimal conversion cap even for ignored/overwritten fields.
+            // Named default Python decoders use the runtime's decimal
+            // conversion cap even for ignored/overwritten fields.
             // Other named readers keep their separately frozen number policy.
-            if self.purpose == Purpose::Rootless
+            if matches!(self.purpose, Purpose::Metadata | Purpose::Rootless)
                 && text.strip_prefix('-').unwrap_or(text).len() > super::DEFAULT_INT_MAX_DIGITS
             {
                 return Err(Error::InvalidJson);

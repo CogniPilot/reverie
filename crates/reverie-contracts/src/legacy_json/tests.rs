@@ -37,6 +37,34 @@ fn named_journal_parse_hooks_do_not_change_existing_reader_policies() {
     );
 }
 #[test]
+fn merged_rootless_and_metadata_readers_keep_distinct_duplicate_and_shared_integer_rules() {
+    let raw = br#"{"x":0,"x":1}"#;
+    assert!(
+        decode_rootless_profile(raw)
+            .unwrap()
+            .python_eq(&decode_utf8(br#"{"x":1}"#).unwrap())
+    );
+    assert_eq!(decode_metadata_bytes(raw).err(), Some(Error::DuplicateKey));
+    for raw in [
+        br#"{"x":0,"x":1,"later":[}"#.as_slice(),
+        br#"[{"x":0,"x":1},{"later":[}]"#.as_slice(),
+    ] {
+        assert_eq!(decode_rootless_profile(raw).err(), Some(Error::InvalidJson));
+    }
+    for digits in [4300, 4301] {
+        let raw = format!("{{\"opaque\":{},\"opaque\":0}}", "7".repeat(digits));
+        assert_eq!(
+            decode_rootless_profile(raw.as_bytes()).is_ok(),
+            digits == 4300
+        );
+    }
+    for raw in ["[NaN]", "Infinity", r#""\ud800""#] {
+        let metadata = decode_metadata_bytes(raw.as_bytes()).unwrap();
+        assert!(metadata.python_eq(&decode_rootless_profile(raw.as_bytes()).unwrap()));
+        assert!(metadata.python_eq(&decode_rootless_profile(&utf16(raw, true, true)).unwrap()));
+    }
+}
+#[test]
 fn python_numeric_equality_preserves_exact_large_integer_comparison_and_nan_identity() {
     for (left, right, equal) in [
         ("true", "1", true),
@@ -110,4 +138,22 @@ fn utf16(text: &str, little: bool, bom: bool) -> Vec<u8> {
         });
     }
     raw
+}
+#[test]
+fn metadata_hooks_do_not_change_existing_hash_data_or_default_byte_mode() {
+    let raw = format!("{{\"opaque\":{}}}", "7".repeat(4301));
+    assert!(decode_utf8(raw.as_bytes()).is_ok());
+    assert!(decode_bytes(raw.as_bytes()).is_ok());
+    assert_eq!(
+        decode_metadata_bytes(raw.as_bytes()).err(),
+        Some(Error::InvalidJson)
+    );
+    let raw = br#"{"x":0,"x":1,"later":[}"#;
+    assert_eq!(decode_utf8(raw).err(), Some(Error::DuplicateKey));
+    assert_eq!(decode_bytes(raw).err(), Some(Error::DuplicateKey));
+    assert_eq!(decode_metadata_bytes(raw).err(), Some(Error::InvalidJson));
+    assert_eq!(
+        decode_metadata_bytes(br#"[{"x":0,"x":1},{"later":[}]"#).err(),
+        Some(Error::DuplicateKey)
+    );
 }

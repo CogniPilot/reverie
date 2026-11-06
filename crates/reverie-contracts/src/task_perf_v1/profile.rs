@@ -78,8 +78,8 @@ impl TaskPerfArtifactData {
         if base.len() > super::MAX_ARTIFACT_BYTES || selected.len() > super::MAX_ARTIFACT_BYTES {
             return Err(TaskPerfError::ArtifactBound);
         }
-        if crate::digest::hex(&Sha256::digest(base).into()) != manifest.base_sha256()
-            || crate::digest::hex(&Sha256::digest(selected).into()) != manifest.profile_sha256()
+        if artifact_sha256(base) != manifest.base_sha256()
+            || artifact_sha256(selected) != manifest.profile_sha256()
         {
             return Err(TaskPerfError::Digest);
         }
@@ -103,4 +103,7 @@ impl TaskPerfArtifactData {
     pub fn selected(&self) -> &TaskPerfProfile {
         &self.selected
     }
+}
+pub(super) fn artifact_sha256(raw: &[u8]) -> String {
+    crate::digest::hex(&Sha256::digest(raw).into())
 }
