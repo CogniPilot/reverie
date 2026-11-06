@@ -4,7 +4,12 @@ use super::*;
 use reverie_contracts::worker_config::EffectiveWorkerConfig;
 use reverie_host::worker_nix::{NixDisposition, NixError, NixProgress, NixStoreGuard, NixWorkflow};
 mod error;
+mod network;
 pub use error::{NixStorageError, NixStorageReclaimFailure, NixStorageRetainFailure};
+pub use network::{
+    NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
+    NetworkStorageRetainFailure, NetworkStorageReturned,
+};
 
 enum ReturnTo {
     Legacy {

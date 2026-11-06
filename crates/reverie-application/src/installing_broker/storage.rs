@@ -10,8 +10,9 @@ mod tests;
 use super::*;
 pub use error::{StorageReleaseFailure, StorageWorkflowError};
 pub use nix::{
-    NixStorageError, NixStoragePreparation, NixStorageReclaimFailure, NixStorageRetainFailure,
-    NixStorageReturned,
+    NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
+    NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
+    NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
 };
 use reverie_host::{
     worker_runtime::WorkerRuntime,
@@ -32,6 +33,7 @@ struct Entry {
 enum EntryOwner {
     Direct(Box<LaunchStorage>),
     Nix(reverie_host::worker_nix::NixWorkflow),
+    Laptop(reverie_host::worker_laptop::LaptopWorkflow),
 }
 pub(super) struct StorageRegistry {
     pub(super) runtime: WorkerRuntime,
@@ -170,6 +172,11 @@ impl StorageRegistry {
         };
         if matches!(entries[index].owner, EntryOwner::Nix(_)) {
             return Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"));
+        }
+        if matches!(entries[index].owner, EntryOwner::Laptop(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_LAPTOP_STORAGE_RETAINED",
+            ));
         }
         let entry = entries.remove(index);
         let EntryOwner::Direct(owner) = entry.owner else {

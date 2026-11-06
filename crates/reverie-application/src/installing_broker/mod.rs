@@ -17,9 +17,10 @@ use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 pub use storage::{
-    NixStorageError, NixStoragePreparation, NixStorageReclaimFailure, NixStorageRetainFailure,
-    NixStorageReturned, OwnedCreatePreparationError, StorageClaim, StorageReleaseFailure,
-    StorageWorkflowError,
+    NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
+    NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
+    NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
+    OwnedCreatePreparationError, StorageClaim, StorageReleaseFailure, StorageWorkflowError,
 };
 struct CurrentInstalled {
     snapshot: Arc<ValidatedWorkerSnapshot>,

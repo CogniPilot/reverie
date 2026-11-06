@@ -2,9 +2,11 @@
 //! decoding/preparation is not peer admission, storage custody or start authority.
 mod create;
 mod helpers;
+mod network;
 mod request;
 pub use create::{CreateArguments, CreateObservations, CreatePreparation, create_arguments};
 pub use helpers::{LaunchSettings, employee_hostname, temporary_environment, tmux_exec_args};
+pub use network::{NetworkDataError, assert_network_labels};
 pub fn account_mount_arguments(entries: &[(MetadataText, MetadataText)]) -> Vec<MetadataText> {
     entries
         .iter()

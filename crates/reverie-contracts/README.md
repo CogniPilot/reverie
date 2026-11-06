@@ -291,3 +291,10 @@ label's insertion order, spaced ASCII JSON and finite floating clock spelling.
 Six synthetic vectors evaluate the original Python call's actual AST. Nil IDs
 retain their existing profile namespace semantics. Descriptive label bytes do
 not establish employee ownership, filesystem custody or permission to start.
+
+`worker_launch::assert_network_labels` preserves the original successful
+optional-inspection branch: complete default Python JSON string decoding,
+first-row lookup, falsey-label fallback and exact worker/session comparison.
+Twenty-nine actual AST cases include ignored extra rows, raw integer limits,
+last-key-wins, nonfinite extras and wrong-shape/ownership priority. These labels
+remain descriptive data and cannot construct a native laptop or effect grant.

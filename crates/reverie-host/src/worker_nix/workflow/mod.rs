@@ -176,6 +176,31 @@ pub(crate) struct Workflows {
     records: Mutex<Vec<RecordOwner>>,
 }
 impl Workflows {
+    pub(crate) fn assert_laptop_plan(
+        &self,
+        runtime: &WorkerRuntime,
+        workflow: &NixWorkflow,
+        plan: &crate::worker_launch::ObservedCreatePlan,
+    ) -> std::result::Result<(), crate::worker_laptop::LaptopError> {
+        use crate::worker_laptop::LaptopError;
+        self.bound(runtime, workflow).map_err(LaptopError::Nix)?;
+        let record = workflow
+            .record
+            .try_lock()
+            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_NIX_RETAINED"))?;
+        if record.phase != Phase::Known || record.turn || !matches!(&record.outcome, Some(Ok(_))) {
+            return Err(LaptopError::Refused("WORKER_LAPTOP_NIX_RETAINED"));
+        }
+        plan.assert_storage_owner(runtime, &record.resources().storage)
+            .map_err(LaptopError::Plan)
+    }
+    pub(crate) fn reclaim_for_laptop(
+        &self,
+        runtime: &WorkerRuntime,
+        workflow: &NixWorkflow,
+    ) -> Result<NixReturned> {
+        self.reclaim(runtime, workflow)
+    }
     pub(crate) fn new(maximum: usize) -> Self {
         Self {
             maximum,

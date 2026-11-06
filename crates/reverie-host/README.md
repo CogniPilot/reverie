@@ -269,7 +269,7 @@ the original 34-second shared budget before launch cancellation, and never
 extends it on repeated calls. Readonly cleanup observations may still use the
 same captured client before final close; no replacement runner is created.
 Both `settle_owned` and `close` share the same first-deadline clamp; close also
-permanently seals the context. This cut has no retained Nix/laptop workflows: their real consumer must
+permanently seals the context. The Runtime's retained Nix/network consumers must
 settle actual resource-owning cleanup before the final client seal, or retain an
 explicit unconfirmed result. A deadline bounds the wait/kill attempt, not kernel
 completion or a guaranteed reap.
@@ -314,3 +314,21 @@ new owner at the same paths/SID cannot satisfy it. `NixReturned` compares its
 actual owner independently of status/path DATA. A consumed-unconfirmed owner
 still refuses even with a matching identity. These are provenance checks, not
 filesystem freshness, admission or permission to launch.
+
+`worker_laptop` transfers a known successful actual Nix record, the same-owner observed
+plan, checked request and genuine same-runtime/session Office phone into one
+bounded record before fixed network inspect/create. It uses the same captured
+client with the original 4 MiB/20-second policy and first-stop ceiling. Optional
+inspect exit failure precedes JSON parsing; successful replies use the original
+default-JSON/first-row/label rules. Network create is never replayed after admission.
+Unknown replies/native cleanup retain the exact owners; original errors and
+additional settlement failures remain data, not fabricated completion.
+
+The network phase has checked one-shot return of the same resources, without
+closing them or acknowledging writer/capacity release. Last runtime/handle loss
+quarantines unreclaimed records for process lifetime instead of dropping their
+actual guards. This does not survive process exit or prove daemon reconciliation.
+The application supplies the atomic registry transition. Its complete canonical
+launch caller, create/private-record/start, stop/recovery, viewer and whole-service
+shutdown consumers remain required.
+No laptop-created/started object or selected backend is claimed by network success.
