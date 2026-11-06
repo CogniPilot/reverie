@@ -26,6 +26,7 @@ held admission, native completion proof or start permit.
 | native `capture_original`, `_account_mounts` | `preparation`, fixed `reservation_kernel` and named baseline codec | Actual selected source limits/storage/capacity hashes, physical cgroup identity, ordered source resolves/identities then sorted account references and fixed proc-root identities; no credential contents read |
 | `begin_prepare`, `_finish_phase` before publication | `preparation_phase`, retained handle, fixed publication codec/reader/writer | Latches before admission, durably records PREPARING before intent publication, preserves fresh-thread recipe semantics and original source/epoch/storage; exact selected operation and named journal/phase stamps fence the terminal result |
 | `confirm_publication`, `_finish_phase` after publication | same retained phase owner | Observes the normal server's exact intended employee rebind and unchanged storage identity; never writes that company row or acknowledges prepared/CLI/start state |
+| `stage_configuration`, `compatibility_candidate` | `preparation_stage`, contracts `resource_reload`, existing `resource_staging` | Actual snapshot + profile lock through effective projection, OLD6 freeze and repeated source/peer effective reads, then the same publication fence; returns staged data without file publication, reload or start |
 
 The waiting-state mutex is never held through filesystem I/O. A private entering
 registration keeps other threads' waits bounded before the flock open returns;
@@ -123,3 +124,18 @@ target-generation overflow is checked only at that original late phase.
 Current CPU numeric representation (including signed zero) is preserved. Six
 real workflow controls and five actual old preview/profile tests cover these
 paths. This changes neither the company binding nor the installed worker policy.
+
+Readonly configuration staging now uses the real retained claim after observed
+publication and the canonical ProfileStore snapshot/locked projection service.
+The complete reload-domain comparison, nonselected policies and original source
+six-field freeze share the named `resource_reload` data owner. Native effective
+resolution remains interleaved at the original phases: first freeze, then fresh
+before/after policy digest resolutions, then each peer in the source's actual
+session-map insertion order. Captured config/hash bytes remain sorted; insertion
+order is separately retained data, with no authority or eager SID validation.
+Twenty-two actual legacy candidates/refusals, real staging/no-write controls and
+two simultaneous native peer faults verify compatibility and first-fault order.
+Body failures skip terminal native producers and still close admission, matching
+the source context manager. Staging never marks PREPARED or mutates the profile,
+company, policy file or broker configuration. The protected policy CAS and actual
+shared installing-broker reload/lifecycle owners remain required.

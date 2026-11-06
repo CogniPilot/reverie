@@ -11,6 +11,7 @@ mod host_jobs;
 mod observation;
 mod preparation;
 mod preparation_phase;
+mod preparation_stage;
 mod profile_selection;
 mod recovery;
 mod terminal_claim;
@@ -27,6 +28,7 @@ use error::{Result, finalized, need};
 pub use history::HeadroomFacts;
 pub use preparation::RetainedPreparation;
 pub use preparation_phase::PreparationIntentFacts;
+pub use preparation_stage::StagedPreparation;
 pub use recovery::{NativeObservationState, RecoveryFacts, RecoveryObservation};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDataError, domain_digest},

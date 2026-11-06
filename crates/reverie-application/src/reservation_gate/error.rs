@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Reload(reverie_contracts::resource_reload::ReloadDataError),
     Value(reverie_core::ValueError),
     PublicationData(reverie_contracts::reservation_publication::PublicationDataError),
     PreparationIntentUncertain {
@@ -40,6 +41,7 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Reload(error) => error.code(),
             Self::Value(error) => error.code(),
             Self::PublicationData(error) => error.code(),
             Self::PreparationIntentUncertain { .. } => {
@@ -81,6 +83,7 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Reload(error) => Some(error),
             Self::Value(error) => Some(error),
             Self::PublicationData(error) => Some(error),
             Self::PreparationIntentUncertain { cause }
@@ -120,6 +123,7 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(reverie_contracts::resource_reload::ReloadDataError, Reload);
 from_error!(reverie_core::ValueError, Value);
 from_error!(
     reverie_contracts::reservation_publication::PublicationDataError,

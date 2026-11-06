@@ -20,6 +20,169 @@ fn record_source_binding(setup: &Setup) {
     setup.tree.write(&format!("state/{sid}/storage-owner.json"),&serde_json::to_vec(&json!({"version":1,"employeeId":setup.employee().as_str(),"sessionId":sid,"owner":setup.oracle["employee"]["owner"]})).unwrap());
 }
 #[test]
+fn actual_profile_stage_freezes_source_policy_after_publication_without_config_write_or_reload() {
+    let setup = Setup::new();
+    record_source_binding(&setup);
+    let fixture = Fixture::new();
+    let (_gate, mut claim) = retained(&setup, &fixture);
+    assert_eq!(
+        claim.stage_configuration().err().unwrap().code(),
+        "RESOURCE_PREPARATION_PUBLICATION_REQUIRED"
+    );
+    claim.begin_prepare().unwrap();
+    let path = setup.tree.root.join(format!(
+        "control/operations/publication-{}.json",
+        claim.operation_id().as_str()
+    ));
+    let receipt: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    setup.tree.write(
+        "company.json",
+        &serde_json::to_vec(&json!({"employees":[receipt["afterEmployee"]]})).unwrap(),
+    );
+    claim.confirm_publication().unwrap();
+    let policy = fs::read(setup.tree.root.join("worker.json")).unwrap();
+    let profiles = fs::read(setup.tree.root.join("control/profiles/profiles.json")).unwrap();
+    let journal = fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap();
+    let staged = claim.stage_configuration().unwrap();
+    let source = claim.profile().binding().current_session();
+    let target = claim.profile().binding().target_session();
+    let before =
+        crate::resource_staging::effective_config(claim.source_configuration().clone(), source)
+            .unwrap();
+    let after =
+        crate::resource_staging::effective_config(staged.configuration().clone(), source).unwrap();
+    assert_eq!(
+        worker_config::policy_digest(&before),
+        worker_config::policy_digest(&after)
+    );
+    let candidate: Value =
+        serde_json::from_slice(&worker_config::encode_config(staged.configuration())).unwrap();
+    assert_eq!(
+        candidate["sessionResources"][source.as_str()]["memoryMiB"],
+        512
+    );
+    assert_eq!(
+        candidate["sessionResources"][target.as_str()]["memoryMiB"],
+        claim.profile().resources().memory_mib()
+    );
+    assert_eq!(
+        candidate["employeeResources"][claim.profile().binding().employee().as_str()]["memoryMiB"],
+        claim.profile().resources().memory_mib()
+    );
+    assert_eq!(staged.profile_version(), claim.profile().version());
+    assert_eq!(
+        fs::read(setup.tree.root.join("worker.json")).unwrap(),
+        policy
+    );
+    assert_eq!(
+        fs::read(setup.tree.root.join("control/profiles/profiles.json")).unwrap(),
+        profiles
+    );
+    assert_eq!(
+        fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap(),
+        journal
+    );
+    assert!(worker_config::equivalent(
+        claim.source_configuration(),
+        &worker_config::decode(&policy).unwrap()
+    ));
+    // Readonly staging is repeatable but never acknowledges PREPARED.
+    claim.stage_configuration().unwrap();
+    assert_eq!(claim.operation().state(), OperationState::Preparing);
+    claim.close().unwrap();
+}
+#[test]
+fn old6_native_peer_reads_follow_original_order_even_when_hash_encoding_sorts_keys() {
+    let mut setup = Setup::new();
+    let first = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    let second = "11111111-1111-4111-8111-111111111111";
+    let mut config: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
+    config["employeeMemoryPolicies"] = json!({setup.employee().as_str():{"swapMiB":0}});
+    let mut raw = serde_json::to_string(&config).unwrap();
+    raw.pop();
+    let policy = setup.oracle["profile"]["resources"].to_string();
+    raw.push_str(&format!(
+        ",\"sessionResources\":{{\"{first}\":{policy},\"{second}\":{policy}}}}}"
+    ));
+    setup.tree.raw = raw.into_bytes();
+    setup.tree.write("worker.json", &setup.tree.raw);
+    setup.tree.marker(&config);
+    let sid = reverie_core::ids::ProfileSessionId::parse(
+        setup.oracle["employee"]["sessionId"].as_str().unwrap(),
+    )
+    .unwrap();
+    let before = worker_config::decode(&setup.tree.raw).unwrap();
+    let effective = crate::resource_staging::effective_config(before, &sid).unwrap();
+    setup.rows[1]["Config"]["Labels"]["reverie.worker-policy"] =
+        json!(worker_config::policy_digest(&effective).to_hex());
+    record_source_binding(&setup);
+    let fixture = Fixture::new();
+    let (_gate, mut claim) = retained(&setup, &fixture);
+    claim.begin_prepare().unwrap();
+    let path = setup.tree.root.join(format!(
+        "control/operations/publication-{}.json",
+        claim.operation_id().as_str()
+    ));
+    let receipt: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    setup.tree.write(
+        "company.json",
+        &serde_json::to_vec(&json!({"employees":[receipt["afterEmployee"]]})).unwrap(),
+    );
+    claim.confirm_publication().unwrap();
+    for (sid, raw) in [(first, b"{".as_slice()), (second, b"{}".as_slice())] {
+        let directory = setup.tree.root.join("state").join(sid);
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        setup
+            .tree
+            .write(&format!("state/{sid}/storage-owner.json"), raw);
+    }
+    let error = |sid| {
+        crate::resource_staging::effective_config(
+            claim.source_configuration().clone(),
+            &reverie_core::ids::ProfileSessionId::parse(sid).unwrap(),
+        )
+        .err()
+        .unwrap()
+        .code()
+    };
+    let first_error = error(first);
+    let second_error = error(second);
+    assert_ne!(
+        first_error, second_error,
+        "two independent native faults distinguish order"
+    );
+    let initial = fixture.events().len();
+    let admission = claim.gate.admit(AdmissionBounds::default()).unwrap();
+    let entry_events = fixture.events().len() - initial;
+    admission
+        .conclude::<()>(Err(GateError::Refused("OWNED_BODY_FAILURE")))
+        .unwrap_err();
+    let initial = fixture.events().len();
+    assert_eq!(
+        claim.stage_configuration().err().unwrap().code(),
+        first_error
+    );
+    assert_eq!(
+        fixture.events().len() - initial,
+        entry_events,
+        "failed body skips post-yield native producers while admission still closes"
+    );
+    fs::remove_file(
+        setup
+            .tree
+            .root
+            .join(format!("state/{first}/storage-owner.json")),
+    )
+    .unwrap();
+    assert_eq!(
+        claim.stage_configuration().err().unwrap().code(),
+        second_error
+    );
+    assert_eq!(claim.operation().state(), OperationState::Preparing);
+    claim.close().unwrap();
+}
+#[test]
 fn actual_preparing_is_durable_once_before_normal_rebind_and_readonly_publication_ack() {
     let setup = Setup::new();
     record_source_binding(&setup);

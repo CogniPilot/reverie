@@ -21,6 +21,9 @@ pub(crate) enum Error {
 pub(crate) fn decode_utf8(raw: &[u8]) -> Result<Value, Error> {
     decode::decode(raw)
 }
+pub(crate) fn decode_ordered_utf8(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    decode::decode_ordered(raw, decode::Purpose::Default)
+}
 /// worker_storage.read_metadata uses Python bytes decoding, ordinary signed
 /// integer conversion and close-time object_pairs_hook duplicate refusal.
 /// Unlike strict constant readers, literal NaN and infinities remain data.
@@ -49,6 +52,10 @@ pub(crate) fn decode_engine_inventory(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_python_str(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_last_wins(raw)
+}
+pub(crate) fn decode_python_str_ordered(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+    decode::decode_ordered(raw, decode::Purpose::Rootless)
 }
 /// Shared strict Python bytes hooks: close-time duplicates, default integer
 /// cap and literal constant refusal; exponent overflow remains data.

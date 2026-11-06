@@ -232,6 +232,13 @@ decoder checks nonnil IDs only at its actual claim boundary. Resource CPU
 numeric equality remains distinct from kind-sensitive profile/hash identity.
 These data objects and digests cannot construct admission or native permits.
 
+`resource_reload` owns the exact resource-reload domain comparison and staged
+OLD6 data checks. Named stages leave native storage/effective resolution to the
+application at the source's actual boundaries. Config capture retains only the
+session-resource key insertion order needed by that native peer loop; duplicate
+and numeric parser policies and sorted config/policy hashes stay unchanged.
+These candidates are not installed configuration or permission to reload/start.
+
 ## Memory instance and document data
 
 `memory_instance` preserves the closed instance schema, owner-selected text,
