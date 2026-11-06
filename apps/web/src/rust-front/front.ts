@@ -114,6 +114,10 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
   private readonly rotation: bigint[] = [];
   private writable = true;
   private ended: FrontFault | undefined;
+  /** Set once `finish` has ended TS's direction: the channel closing after that is the expected end, not a fault. */
+  private finished = false;
+  /** Runs once the writer has handed every queued frame to the channel. */
+  private onIdle: (() => void) | undefined;
   private readonly link: ConnLink;
 
   constructor(
@@ -133,8 +137,8 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
       consumed: (id, bytes) => this.consumed(id, bytes),
     };
     channel.on('data', (chunk: Buffer) => this.read(chunk));
-    channel.on('end', () => this.fault('CHANNEL_CLOSED'));
-    channel.on('error', () => this.fault('CHANNEL_CLOSED'));
+    channel.on('end', () => this.finished || this.fault('CHANNEL_CLOSED'));
+    channel.on('error', () => this.finished || this.fault('CHANNEL_CLOSED'));
     channel.on('drain', () => {
       this.writable = true;
       this.pump();
@@ -181,6 +185,30 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
 
   serviceReady(): void {
     this.sendControl({ kind: 'service_ready' });
+  }
+
+  /**
+   * Writes every queued frame, then ends TS's direction of the channel. It resolves once the channel has flushed
+   * them, so a clean exit after it means the front was sent everything, `unbind` included. It rejects if the
+   * generation ends first or the channel has not flushed within `timeoutMs`.
+   */
+  finish(timeoutMs: number): Promise<void> {
+    if (this.ended) return Promise.reject(this.ended);
+    return new Promise((resolve, reject) => {
+      const done = (error?: Error | null) => {
+        clearTimeout(timer);
+        this.off('fault', done);
+        if (error) reject(error);
+        else resolve();
+      };
+      const timer = setTimeout(() => done(new Error(`front channel did not flush within ${timeoutMs} ms`)), timeoutMs);
+      this.once('fault', done);
+      this.onIdle = () => {
+        this.finished = true;
+        this.channel.end((error?: Error | null) => done(error));
+      };
+      this.pump();
+    });
   }
 
   /** Asks the front to close `listener`. Connections it accepted before this keep running. */
@@ -421,7 +449,12 @@ export class FrontChannel extends EventEmitter<{ fault: [FrontFault]; shutdown: 
         if (!wire) continue;
       } else {
         const id = this.rotation.shift();
-        if (id === undefined) return;
+        if (id === undefined) {
+          const idle = this.onIdle;
+          this.onIdle = undefined;
+          idle?.();
+          return;
+        }
         const queue = this.streams.get(id) as Buffer[];
         wire = queue.shift() as Buffer;
         if (queue.length > 0) this.rotation.push(id);

@@ -9,6 +9,7 @@
  *   FRONT_CHILD_PORT         main bind port (default 0)
  *   FRONT_CHILD_TLS          "1" asks the front to bind main with TLS (default plain)
  *   FRONT_CHILD_BRIDGE_HOST  also bind a bridge listener on this host and the main port; it answers "bridge"
+ *   FRONT_CHILD_FINISH_MS    how long shutdown waits for the channel to flush (default 5000)
  *
  * Routes on main:
  *   GET  /hello            200 "hello"
@@ -19,8 +20,10 @@
  *   GET  /peer             200 JSON of the peer and local facts the request arrived with
  *
  * Lifecycle, one JSON object per line on stderr: {"event":"bound","listener":"main","port":N}, then
- * "accepting" and "service_ready"; "shutdown" with the signal; "closed"; or "fault" with its code.
- * A `shutdown` frame, SIGTERM or SIGINT closes Fastify (its preClose hook sends `unbind`), then exits 0.
+ * "accepting" and "service_ready"; "shutdown" with the signal; then "closed", "unfinished" or "fault" with its code.
+ * A `shutdown` frame, SIGTERM or SIGINT closes Fastify (its preClose hook sends `unbind`), waits until every queued
+ * frame has been flushed to fd 3 and TS's direction has ended, and exits 0. If that does not happen within
+ * FRONT_CHILD_FINISH_MS it logs "unfinished" and exits 71: a clean exit always means `unbind` was sent.
  * A channel fault, including end of the channel, exits 70 without closing.
  */
 import { createServer } from 'node:http';
@@ -69,6 +72,12 @@ async function shutdown(signal: string): Promise<void> {
   closing = true;
   log('shutdown', { signal });
   await app.close();
+  try {
+    await front.finish(bounded(process.env.FRONT_CHILD_FINISH_MS, 600_000) || 5000);
+  } catch (error) {
+    log('unfinished', { message: (error as Error).message });
+    process.exit(71);
+  }
   log('closed');
   process.exit(0);
 }

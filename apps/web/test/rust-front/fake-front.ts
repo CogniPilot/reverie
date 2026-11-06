@@ -21,6 +21,8 @@ export interface FakeConnection {
   aborted: AbortReason | undefined;
   /** Credit TS has granted for client bytes, and not yet used. */
   credit: number;
+  /** Grant back every response byte as it arrives, as a front draining to a fast client would. */
+  replenish: boolean;
 }
 
 export const LOOPBACK: SocketFacts = { address: '127.0.0.1', port: 50000 };
@@ -89,10 +91,18 @@ export class FakeFront {
       local?: SocketFacts;
       encrypted?: boolean;
       credit?: number;
+      replenish?: boolean;
     } = {}
   ): FakeConnection {
     const id = this.nextId++;
-    const connection: FakeConnection = { id, received: [], ended: false, aborted: undefined, credit: 0 };
+    const connection: FakeConnection = {
+      id,
+      received: [],
+      ended: false,
+      aborted: undefined,
+      credit: 0,
+      replenish: options.replenish ?? false,
+    };
     this.connections.set(id, connection);
     this.send(id, {
       kind: 'conn_open',
@@ -146,7 +156,10 @@ export class FakeFront {
     this.frames.push(frame);
     const connection = this.connections.get(frame.id);
     if (connection) {
-      if (frame.body.kind === 'data') connection.received.push(frame.body.bytes);
+      if (frame.body.kind === 'data') {
+        connection.received.push(frame.body.bytes);
+        if (connection.replenish) this.send(frame.id, { kind: 'credit', bytes: frame.body.bytes.length });
+      }
       if (frame.body.kind === 'end') connection.ended = true;
       if (frame.body.kind === 'abort') connection.aborted = frame.body.reason;
       if (frame.body.kind === 'credit') connection.credit += frame.body.bytes;

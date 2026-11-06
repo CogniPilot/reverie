@@ -465,6 +465,39 @@ describe('connection rules, the receive pool and the writer', () => {
     expect(response.subarray(response.indexOf('\r\n\r\n') + 4)).toEqual(Buffer.alloc(300 * 1024, 0x62));
   });
 
+  it('finish() flushes frames queued behind backpressure before ending the channel', async () => {
+    const { fake, front } = await app();
+    const big = fake.open();
+    fake.peer.pause();
+    await fake.write(big, get('/big'));
+    await sleep(100);
+    front.unbind('main');
+    let settled = false;
+    const finished = front.finish(2000).then(() => (settled = true));
+    await sleep(100);
+    expect(settled).toBe(false);
+    const ended = new Promise((resolve) => fake.peer.once('end', resolve));
+    fake.peer.resume();
+    await finished;
+    await ended;
+    expect(fake.frames.some((frame) => frame.body.kind === 'unbind')).toBe(true);
+    const response = Buffer.concat(big.received);
+    expect(response.subarray(response.indexOf('\r\n\r\n') + 4)).toEqual(Buffer.alloc(300 * 1024, 0x62));
+    // The channel ending after finish() is the expected end, not a fault.
+    fake.peer.end();
+    await sleep(20);
+    expect(front.endedBy).toBeUndefined();
+  });
+
+  it('finish() rejects when the channel does not flush in time', async () => {
+    const { fake, front } = await app();
+    const big = fake.open();
+    fake.peer.pause();
+    await fake.write(big, get('/big'));
+    await sleep(100);
+    await expect(front.finish(200)).rejects.toThrow(/did not flush within 200 ms/);
+  });
+
   it('discards a connection’s queued data when its abort is queued behind it', async () => {
     const { fake } = await app();
     const killed = fake.open();

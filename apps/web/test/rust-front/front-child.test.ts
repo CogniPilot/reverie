@@ -9,6 +9,7 @@ import type { Duplex } from 'node:stream';
 import { FakeFront } from './fake-front.js';
 
 const web = resolve(import.meta.dirname, '../..');
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const children: ChildProcess[] = [];
 
 afterEach(() => {
@@ -20,6 +21,8 @@ interface Running {
   fake: FakeFront;
   events: Array<Record<string, unknown>>;
   exited: Promise<number | null>;
+  /** Resolves when the child has ended its direction of the channel: everything it wrote has arrived. */
+  channelEnded: Promise<void>;
 }
 
 function start(env: Record<string, string> = {}): Running {
@@ -43,7 +46,8 @@ function start(env: Record<string, string> = {}): Running {
       }
   });
   const exited = new Promise<number | null>((done) => child.on('exit', (code) => done(code)));
-  return { child, fake, events, exited };
+  const channelEnded = new Promise<void>((done) => fake.peer.once('end', () => done()));
+  return { child, fake, events, exited, channelEnded };
 }
 
 async function ready(running: Running, port = 41000): Promise<void> {
@@ -62,11 +66,24 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     expect(hello).toMatch(/^HTTP\/1\.1 200 OK\r\n/);
     expect(hello.endsWith('hello')).toBe(true);
 
-    // Larger than one 64 KiB grant each way, so credit flows across the real fd in both directions.
+    // Larger than one 64 KiB grant each way. The response gets one 64 KiB grant and must stop there; only grants given
+    // as its bytes arrive let it finish, so this exercises response-credit replenishment across the real fd.
     const body = Buffer.alloc(300 * 1024, 0x61);
-    const echoed = await running.fake.request(
+    const echo = running.fake.open({ credit: 64 * 1024 });
+    await running.fake.write(
+      echo,
       `POST /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\ncontent-type: application/octet-stream\r\ncontent-length: ${body.length}\r\n\r\n${body.toString('latin1')}`
     );
+    const sent = () => Buffer.concat(echo.received).length;
+    await running.fake.until(() => sent() === 64 * 1024, 5000, 'the first grant to be used');
+    await sleep(200);
+    expect(sent()).toBe(64 * 1024);
+    expect(echo.ended).toBe(false);
+    echo.replenish = true;
+    running.fake.send(echo.id, { kind: 'credit', bytes: 64 * 1024 });
+    await running.fake.closed(echo, 5000);
+    running.fake.send(echo.id, { kind: 'end' });
+    const echoed = running.fake.text(echo);
     expect(echoed.slice(echoed.indexOf('\r\n\r\n') + 4)).toBe(body.toString('latin1'));
 
     const peer = await running.fake.request('GET /peer HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n', {
@@ -88,8 +105,9 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     const running = start();
     await ready(running);
     running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
-    expect(await running.exited).toBe(0);
+    await running.channelEnded;
     expect(running.fake.frames.at(-1)?.body).toEqual({ kind: 'unbind', listener: 'main' });
+    expect(await running.exited).toBe(0);
     expect(running.events.map((event) => event.event)).toEqual([
       'bound',
       'accepting',
@@ -103,8 +121,9 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     const running = start();
     await ready(running);
     running.child.kill('SIGTERM');
-    expect(await running.exited).toBe(0);
+    await running.channelEnded;
     expect(running.fake.frames.at(-1)?.body).toEqual({ kind: 'unbind', listener: 'main' });
+    expect(await running.exited).toBe(0);
   }, 20_000);
 
   it('exits 70 when the channel ends', async () => {
@@ -113,6 +132,39 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     running.fake.peer.end();
     expect(await running.exited).toBe(70);
     expect(running.events.at(-1)).toEqual({ event: 'fault', code: 'CHANNEL_CLOSED' });
+  }, 20_000);
+
+  /** A response far larger than the socket buffers, read by nobody: the child's writes back up behind it. */
+  async function congest(running: Running): Promise<void> {
+    const big = running.fake.open({ credit: 16 * 1024 * 1024 });
+    await running.fake.write(big, 'GET /bytes?n=8388608 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    // Stop reading only once the request (which needs TS's request credit) is out.
+    running.fake.peer.pause();
+    await sleep(300);
+  }
+
+  it('on shutdown behind a congested channel, exits 0 only after unbind has been delivered', async () => {
+    const running = start();
+    await ready(running);
+    await congest(running);
+    running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
+    await sleep(500);
+    // Fastify has closed, but unbind is still queued behind the unread bytes: the child must still be waiting.
+    expect(running.child.exitCode).toBeNull();
+    running.fake.peer.resume();
+    await running.channelEnded;
+    expect(running.fake.frames.some((frame) => frame.body.kind === 'unbind')).toBe(true);
+    expect(await running.exited).toBe(0);
+    expect(running.events.at(-1)).toEqual({ event: 'closed' });
+  }, 20_000);
+
+  it('exits 71, not 0, when the channel cannot flush before the deadline', async () => {
+    const running = start({ FRONT_CHILD_FINISH_MS: '500' });
+    await ready(running);
+    await congest(running);
+    running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
+    expect(await running.exited).toBe(71);
+    expect(running.events.at(-1)).toMatchObject({ event: 'unfinished' });
   }, 20_000);
 
   it('binds the bridge on the main port when asked, and unbinds both on shutdown', async () => {
