@@ -578,47 +578,92 @@ describe('native memory supported TypeScript journal path', () => {
       expect(missing.content[0]!.text).toMatch(/initialized/);
       await expect(stat(join(directory, 'mcp-state'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(requests.length).toBe(beforeRecall);
-      const beforePolicy = requests.length;
-      const blockedOut: Array<Record<string, unknown>> = [];
-      const blocked = createMcpServer({
-        config: {
-          allowAnySession: false,
-          version: 'qualification',
-          apiUrl: url,
-          selfId: SID,
-          auth: { username: ALICE, password: PASSWORD },
-        },
-        write: (value) => {
-          blockedOut.push(value);
-        },
-        modes: ['shell'],
-        memory: {
-          instance,
-          native: InstalledMemoryBridge.capture(candidate, {
-            ...installation,
-            REVERIE_OUTPUT_POLICY: '{"denied_patterns":["owner-rule"]}',
-          }),
-        },
-        memoryRunner: async (program, args, options) => {
-          const reply = await run(program, args, options.env, options.input);
-          return { ...reply, code: reply.code ?? 1 };
-        },
-      });
-      await blocked.handleLine(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 3,
-          method: 'tools/call',
-          params: {
-            name: 'memory_remember',
-            arguments: { room, turn: message.id, tag: 'lesson', text: QUOTE, quote: QUOTE },
-          },
-        })
-      );
-      const refused = blockedOut[0]!.result as { content: Array<{ text: string }>; isError: boolean };
-      expect(refused.isError).toBe(true);
-      expect(refused.content[0]!.text).toContain('hard-floor check did not run');
-      expect(requests.length).toBe(beforePolicy);
     }
   );
+
+  for (const rule of [
+    { name: 'matching', pattern: 'Synthetic records', outcome: 'blocked' },
+    { name: 'nonmatching', pattern: 'owner-rule', outcome: 'allowed' },
+    { name: 'invalid', pattern: '[', outcome: 'unavailable' },
+  ] as const) {
+    it.runIf(Boolean(process.env.NIX_REVERIE_TEST_MEMORY_CLI))(
+      `applies a ${rule.name} owner regex through the actual native MCP screen and journal API`,
+      async () => {
+        const candidate = process.env.NIX_REVERIE_TEST_MEMORY_CLI!;
+        const instance = join(directory, `policy-${rule.name}-instance.json`);
+        await writeFile(
+          instance,
+          JSON.stringify({
+            id: `synthetic-policy-${rule.name}`,
+            agent_name: 'Synthetic employee',
+            owner_name: 'Synthetic owner',
+            data_dir: `policy-${rule.name}-state`,
+            persona: 'Synthetic test persona.',
+          })
+        );
+        const installation = environment({
+          REVERIE_EMBED_DIMS: '8',
+          REVERIE_OUTPUT_POLICY: JSON.stringify({ denied_patterns: [rule.pattern] }),
+        });
+        const out: Array<Record<string, unknown>> = [];
+        let childCalls = 0;
+        const beforePolicy = requests.length;
+        const server = createMcpServer({
+          config: {
+            allowAnySession: false,
+            version: 'qualification',
+            apiUrl: url,
+            selfId: SID,
+            auth: { username: ALICE, password: PASSWORD },
+          },
+          write: (value) => {
+            out.push(value);
+          },
+          modes: ['shell'],
+          memory: {
+            instance,
+            native: InstalledMemoryBridge.capture(candidate, installation),
+          },
+          memoryRunner: async (program, args, options) => {
+            expect(program).toBe(candidate);
+            expect(args).toEqual([]);
+            for (const key of ['REVERIE_USERNAME', 'REVERIE_PASSWORD', 'NODE_OPTIONS', 'PYTHONPATH'])
+              expect(options.env[key], key).toBeUndefined();
+            childCalls += 1;
+            const reply = await run(program, args, options.env, options.input);
+            return { ...reply, code: reply.code ?? 1 };
+          },
+        });
+        const message = chat.post(room, { kind: 'user', name: 'Synthetic user' }, `Remember this: ${QUOTE}.`, 'all', {
+          deliver: false,
+        });
+        await server.handleLine(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'tools/call',
+            params: {
+              name: 'memory_remember',
+              arguments: { room, turn: message.id, tag: 'lesson', text: QUOTE, quote: QUOTE },
+            },
+          })
+        );
+        expect(childCalls).toBe(1);
+        const result = out[0]!.result as { content: Array<{ text: string }>; isError?: boolean };
+        if (rule.outcome === 'allowed') {
+          expect(result.isError).not.toBe(true);
+          expect(JSON.parse(result.content[0]!.text)).toMatchObject({ turnId: message.id, replayed: false });
+          expect(journal.receipt(ALICE, SID, message.id)).toMatchObject({ status: 'committed' });
+          expect(requests.slice(beforePolicy)).toContainEqual({ method: 'POST', path: '/api/agent/journal/save' });
+        } else {
+          expect(result.isError).toBe(true);
+          expect(result.content[0]!.text).toContain(
+            rule.outcome === 'blocked' ? 'crossed a hard floor' : 'hard-floor check did not run'
+          );
+          expect(requests.length).toBe(beforePolicy);
+          expect(journal.receipt(ALICE, SID, message.id)).toMatchObject({ status: 'not_found', attempts: [] });
+        }
+      }
+    );
+  }
 });
