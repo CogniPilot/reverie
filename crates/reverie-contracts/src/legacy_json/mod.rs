@@ -6,6 +6,7 @@ mod equality;
 mod tests;
 mod text;
 mod value;
+pub(crate) use decode::{JournalParseError, JournalParsed};
 pub(crate) use equality::numeric_key;
 pub(crate) use value::{Node, Number, Text, Value, truthy};
 /// Frozen standard Python 3.13 integer conversion bound. Only named readers
@@ -31,4 +32,13 @@ pub(crate) fn decode_bytes_without_constants(raw: &[u8]) -> Result<Value, Error>
 /// Unlike strict constant readers, literal NaN and infinities remain data.
 pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_metadata(&text::python_bytes(raw)?)
+}
+/// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
+/// Keep this mode purpose-private; strict profile/perf/registry readers differ.
+pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_last_wins(&text::python_bytes(raw)?)
+}
+pub(crate) fn decode_journal(raw: &[u8]) -> Result<JournalParsed, JournalParseError> {
+    let raw = text::python_bytes(raw).map_err(JournalParseError::Json)?;
+    decode::decode_journal(&raw)
 }

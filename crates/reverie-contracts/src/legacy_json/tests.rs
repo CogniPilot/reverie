@@ -1,4 +1,69 @@
 use super::*;
+
+#[test]
+fn named_journal_parse_hooks_do_not_change_existing_reader_policies() {
+    let raw = br#"{"key":1,"key":2,"later":0.5}"#;
+    assert_eq!(decode_utf8(raw).err(), Some(Error::DuplicateKey));
+    assert_eq!(
+        decode_bytes_without_constants(raw).err(),
+        Some(Error::DuplicateKey)
+    );
+    assert!(decode_rootless_profile(raw).is_ok());
+    assert_eq!(
+        decode_journal(raw).err(),
+        Some(JournalParseError::JsonNumber)
+    );
+    let long = format!(
+        "{{\"key\":{},\"key\":1}}",
+        "1".repeat(DEFAULT_INT_MAX_DIGITS + 1)
+    );
+    assert_eq!(
+        decode_rootless_profile(long.as_bytes()).err(),
+        Some(Error::InvalidJson)
+    );
+    assert_eq!(
+        decode_utf8(long.as_bytes()).err(),
+        Some(Error::DuplicateKey)
+    );
+    assert_eq!(
+        decode_journal(long.as_bytes()).err(),
+        Some(JournalParseError::DocumentInteger)
+    );
+    let one = format!("{{\"key\":{}}}", "1".repeat(DEFAULT_INT_MAX_DIGITS));
+    assert!(decode_rootless_profile(one.as_bytes()).is_ok());
+    assert!(
+        decode_utf8(format!("{{\"key\":{}}}", "1".repeat(DEFAULT_INT_MAX_DIGITS + 1)).as_bytes())
+            .is_ok()
+    );
+}
+#[test]
+fn merged_rootless_and_metadata_readers_keep_distinct_duplicate_and_shared_integer_rules() {
+    let raw = br#"{"x":0,"x":1}"#;
+    assert!(
+        decode_rootless_profile(raw)
+            .unwrap()
+            .python_eq(&decode_utf8(br#"{"x":1}"#).unwrap())
+    );
+    assert_eq!(decode_metadata_bytes(raw).err(), Some(Error::DuplicateKey));
+    for raw in [
+        br#"{"x":0,"x":1,"later":[}"#.as_slice(),
+        br#"[{"x":0,"x":1},{"later":[}]"#.as_slice(),
+    ] {
+        assert_eq!(decode_rootless_profile(raw).err(), Some(Error::InvalidJson));
+    }
+    for digits in [4300, 4301] {
+        let raw = format!("{{\"opaque\":{},\"opaque\":0}}", "7".repeat(digits));
+        assert_eq!(
+            decode_rootless_profile(raw.as_bytes()).is_ok(),
+            digits == 4300
+        );
+    }
+    for raw in ["[NaN]", "Infinity", r#""\ud800""#] {
+        let metadata = decode_metadata_bytes(raw.as_bytes()).unwrap();
+        assert!(metadata.python_eq(&decode_rootless_profile(raw.as_bytes()).unwrap()));
+        assert!(metadata.python_eq(&decode_rootless_profile(&utf16(raw, true, true)).unwrap()));
+    }
+}
 #[test]
 fn python_numeric_equality_preserves_exact_large_integer_comparison_and_nan_identity() {
     for (left, right, equal) in [

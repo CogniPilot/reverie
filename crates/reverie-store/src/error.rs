@@ -46,6 +46,9 @@ pub enum StoreError {
     },
     Profile(ProfileError),
     Codec(CodecError),
+    DirectoryRecheck {
+        cause: Box<StoreError>,
+    },
     PreparationRetained {
         cause: Box<StoreError>,
     },
@@ -83,6 +86,7 @@ impl StoreError {
             Self::Refused(fault) | Self::Io { fault, .. } => fault.code(),
             Self::Profile(error) => error.code(),
             Self::Codec(error) => error.code(),
+            Self::DirectoryRecheck { .. } => StoreFault::DirectoryRebound.code(),
             Self::PreparationRetained { .. } => "STORE_PREPARATION_FAILED_RETAIN_RAW",
             Self::Finalization { .. } => "STORE_FINALIZATION_FAILED_RETAIN_EVIDENCE",
             Self::CommitUncertain { .. } => "COMMIT_OUTCOME_UNCERTAIN_RETAIN_EVIDENCE",
@@ -101,6 +105,7 @@ impl std::error::Error for StoreError {
             Self::CommitUncertain { cause } => Some(cause),
             Self::PreparationRetained { cause } => Some(cause),
             Self::Finalization { primary, .. } => Some(primary),
+            Self::DirectoryRecheck { cause } => Some(cause),
             _ => None,
         }
     }

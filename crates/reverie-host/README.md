@@ -136,3 +136,13 @@ provenance, relative versus absolute symlink targets, strict file suffixes,
 cycles and a 100-link acyclic chain. Another 136 actual Python filesystem-byte vectors
 qualify the shared surrogateescape decoder/encoder. Only owned synthetic files
 are created. No engine call, mount, real socket or company instance data is used.
+
+`rootless` completes the readonly rootless profile, account and image-policy
+service over captured data. Production sub-ID reads are fixed to `/etc/subuid`
+and `/etc/subgid` with real passwd/UID lookup; no public source override exists.
+It returns original security/runtime argument data after actual profile/hash,
+applicable syscall, fixed-perf and subordinate-grant qualification. Engine image
+inspection remains input data, and each effect consumer must freshly bind it
+and requalify before use. No engine call, capability change or selected product
+consumer is added. The [compatibility audit](../reverie-contracts/src/rootless/README.md)
+records accepted Python quirks, observation hardening and remaining boundaries.
