@@ -1091,6 +1091,9 @@ export class ChatroomService {
         // Logged by syncDatabase.
       }
     }
+    // Any commit above, the last full compare included, may have started a gzip sweep that is still
+    // writing into the archive directory.
+    await this.archive.idle();
     this.db?.close();
     this.db = undefined;
     this.pendingStore?.close();
