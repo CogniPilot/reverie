@@ -12,12 +12,15 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 mod lease;
 mod passwd;
+pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 mod text;
 pub(crate) use text::{python_path, python_text};
 mod resolve;
+mod worker_config;
 pub(crate) use passwd::username;
-pub(crate) use resolve::resolve_strict_text;
+pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};
+pub(crate) use worker_config::read_worker_config;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Stamp {
