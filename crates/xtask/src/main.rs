@@ -3,7 +3,7 @@
 
 use std::error::Error;
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 mod worker_package;
 
@@ -27,7 +27,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             verify(true)?
         }
         [command] if command == "verify-worker-package" => {
-            worker_package::verify(workspace_root()?)?
+            worker_package::verify(&workspace_root()?)?
         }
         _ => return Err("expected a cargo xtask verification command (or --help)".into()),
     }
@@ -40,16 +40,25 @@ fn help() {
     );
 }
 
-fn workspace_root() -> Result<&'static Path, Box<dyn Error>> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+fn workspace_root() -> Result<PathBuf, Box<dyn Error>> {
+    // Cargo supplies the current invocation's package directory at runtime.
+    // A cached executable can have been compiled in a different checkout.
+    let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .ok_or("invoke this runner with cargo xtask")?;
+    if !manifest.is_absolute() {
+        return Err("cargo xtask requires an absolute package directory".into());
+    }
+    manifest
         .parent()
         .and_then(Path::parent)
+        .map(Path::to_path_buf)
         .ok_or_else(|| "xtask is not inside the workspace crates directory".into())
 }
 fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
     let root = workspace_root()?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    step(&cargo, &["fmt", "--all", "--check"], root)?;
+    step(&cargo, &["fmt", "--all", "--check"], &root)?;
     let packages: &[&str] = if portable {
         &[
             "-p",
@@ -67,11 +76,11 @@ fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
     let mut clippy = vec!["clippy", "--locked"];
     clippy.extend_from_slice(packages);
     clippy.extend_from_slice(&["--all-targets", "--all-features", "--", "-D", "warnings"]);
-    step(&cargo, &clippy, root)?;
+    step(&cargo, &clippy, &root)?;
     let mut tests = vec!["test", "--locked"];
     tests.extend_from_slice(packages);
     tests.extend_from_slice(&["--all-targets", "--all-features"]);
-    step(&cargo, &tests, root)
+    step(&cargo, &tests, &root)
 }
 
 fn step(program: &OsStr, arguments: &[&str], root: &Path) -> Result<(), Box<dyn Error>> {
