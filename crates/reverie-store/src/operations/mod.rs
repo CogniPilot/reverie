@@ -2,6 +2,7 @@
 //! Trusted installation supplies guards/observation, never a wire callback.
 mod claim;
 mod completion;
+mod confirmation;
 mod error;
 mod io;
 mod terminal;

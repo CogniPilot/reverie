@@ -17,7 +17,9 @@ held admission, native completion proof or start permit.
 | `active_operations`, historical `completed`/pending | `history`, named contracts and fixed native readers | Validates every pending fence in source order and historical receipt/profile/verified/plan hashes before excluding a completed row; no live completion proof |
 | host-job `require_idle` | `host_jobs`, named contracts/native paths | Existing settled intent, ordered original spec and fixed receipt; no owned scope or begin/bind/finish producer |
 | `_retained_delta`, `check_headroom` | `history` | Actual admission, every retained source re-observed, complete capacity/inventory checks; fixed read-only INSTALL facts only |
-| terminal readonly journal seam | existing consumed store reader | Available dependency only; not yet integrated into a completed claim workflow |
+| `reserve`, `_observe_claim` | `claim`, fixed private `ClaimCapacity`, canonical `confirm_claim` | Actual durable metadata claim and selected profile/target checks; installed observer runs under journal flock; public reserve discards effect handles |
+| `_finish_claim` | `terminal_claim`, consumed exact store reader | Both stores/reader lock close before last native guards; full epoch/source/metadata fences and named journal stamp; uncertainty retains durable claims |
+| `cold_inspect`, `check_recovery` | `recovery` | Fresh matching/changed/unavailable source facts and unchanged journal; no handle resurrection, retry or positive capacity credit |
 
 The waiting-state mutex is never held through filesystem I/O. A private entering
 registration keeps other threads' waits bounded before the flock open returns;
@@ -26,11 +28,10 @@ native finalization, matching the original context manager, but still close ever
 owned store/lock. Stable guard error codes retain their complete source errors
 and publicly inspectable secondary finalizer failures.
 
-The ordinary guard currently refuses every pending marker. It does not claim
+The ordinary guard currently refuses every control transition marker. It does not claim
 the unported GPU/actor/image/perf/mount transition owners or their pending/row
-exceptions. Preparation/start/completion boundaries, approved-claim target checks,
-claim retention/terminal finish, recovery/creation/stop/reload policies and
-host-job begin/bind/finish remain
+exceptions. Retained preparation ownership, creation/stop/reload policies,
+preparation/start/completion boundaries and host-job begin/bind/finish remain
 required. These must be real producers before a full Gate or launch claim. Caller
 owner/session authorization and future selected HTTP/broker integration remain
 separate obligations; captured worker/path data never supplies those permissions.
@@ -50,11 +51,19 @@ drift/CPU-kind, body-error, wrong-thread, lock-open and pre-open waiter regressi
 exercise the native/store composition. No company instance file, engine operation,
 mount, employee start/stop or live deployment is performed.
 
-The historical successor freezes32 actual old host-job idle cases,33 completed
-receipt cases and14 pending cases using owned metadata/path fixtures. It retains
+The historical successor freezes 32 actual old host-job idle cases, 33 completed
+receipt cases and 14 pending cases using owned metadata/path fixtures. It retains
 Python dictionary numeric equality and codepoints without interpreting receipts
 as execution authority. Pending enumeration drains all entries/errors and closes
 the directory before metadata reads, retaining a bounded native-order prefix
-through entry4097; every earlier file is checked before the count refusal.
+through entry 4097; every earlier file is checked before the count refusal.
 Real admission/journal integration verifies headroom, orphan fencing, retained
-source loss, the4096/4097 boundary and checked enumeration finalizer failures.
+source loss, the 4096/4097 boundary and checked enumeration finalizer failures.
+
+Claim regressions use actual private journal/flock files and controlled native
+observations to test reserve/replay, pre-publication target and snapshot refusal,
+durable publication followed by response loss, and cold matches/changed/unavailable
+states. A terminal native hook observes both actual journal descriptors closed,
+then changes the named journal generation; the response remains uncertain and
+retains the positive claim. No retained preparation handle or live effect is
+exposed by the public metadata entry.

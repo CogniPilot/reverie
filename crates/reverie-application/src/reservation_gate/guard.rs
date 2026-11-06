@@ -1,5 +1,8 @@
 use super::*;
 struct InstalledGuard(Weak<Inner>);
+pub(super) fn installed(gate: &Arc<Inner>) -> Arc<dyn ScopeGuard> {
+    Arc::new(InstalledGuard(Arc::downgrade(gate)))
+}
 impl ScopeGuard for InstalledGuard {
     fn assert_scope(&self, scope: &OperationScope) -> std::result::Result<(), JournalError> {
         let gate = self
@@ -87,10 +90,6 @@ impl Inner {
         // The path comes from the captured validated option. This conversion
         // retains its codepoints through the one native text owner.
         let path = reverie_host::reservation_control::operation_directory(&self.config)?;
-        Ok(OperationStore::open(
-            path,
-            Arc::new(InstalledGuard(Arc::downgrade(self))),
-            None,
-        )?)
+        Ok(OperationStore::open(path, installed(self), None)?)
     }
 }

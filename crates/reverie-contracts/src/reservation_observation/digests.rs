@@ -50,6 +50,22 @@ pub fn source_binding_digest(
     storage: &NativeStorageBinding,
     profile: &ResourceProfile,
 ) -> Result<JournalDigest> {
+    binding_digest(employee.data(), native, storage, profile)
+}
+pub fn claim_source_binding_digest(
+    employee: &ClaimEmployee,
+    native: &NativeLimitBinding,
+    storage: &NativeStorageBinding,
+    profile: &ResourceProfile,
+) -> Result<JournalDigest> {
+    binding_digest(employee.data(), native, storage, profile)
+}
+fn binding_digest(
+    employee: &Value,
+    native: &NativeLimitBinding,
+    storage: &NativeStorageBinding,
+    profile: &ResourceProfile,
+) -> Result<JournalDigest> {
     // profiles_v1 is a closed ASCII schema: UUIDs, bounded integers and finite
     // CPU numbers only. Unlike arbitrary company/worker data, its encoded
     // strings cannot contain adjacent surrogate codepoints requiring a copy.
@@ -58,7 +74,7 @@ pub fn source_binding_digest(
     let profile =
         crate::legacy_json::decode_utf8(&bytes).map_err(|_| ObservationDataError::Fingerprint)?;
     let fields = [
-        (key("employee"), employee.data().deep_clone()),
+        (key("employee"), employee.deep_clone()),
         (key("native"), native.data().deep_clone()),
         (key("storage"), storage.data().deep_clone()),
         (key("profile"), profile),

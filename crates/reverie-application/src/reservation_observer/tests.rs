@@ -15,6 +15,7 @@ struct State {
     targets: Vec<[Vec<u32>; 3]>,
     storage: Option<[[u64; 4]; 3]>,
     after_storage: Option<Box<dyn FnOnce() -> std::io::Result<()> + Send>>,
+    on_query: Option<Box<dyn FnMut() -> Result<()> + Send>>,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -30,6 +31,7 @@ impl Fixture {
             targets: Vec::new(),
             storage: None,
             after_storage: None,
+            on_query: None,
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -71,6 +73,9 @@ impl Fixture {
     ) {
         self.0.lock().unwrap().after_storage = Some(Box::new(hook));
     }
+    pub(crate) fn on_query(&self, hook: impl FnMut() -> Result<()> + Send + 'static) {
+        self.0.lock().unwrap().on_query = Some(Box::new(hook));
+    }
 }
 impl Source for Arc<Fixture> {
     fn query(&self, query: EngineQuery<'_>, end: Instant, _: &CancellationToken) -> Result<String> {
@@ -84,6 +89,9 @@ impl Source for Arc<Fixture> {
             .to_owned(),
         );
         state.deadlines.push(end);
+        if let Some(hook) = state.on_query.as_mut() {
+            hook()?;
+        }
         state
             .outputs
             .pop_front()

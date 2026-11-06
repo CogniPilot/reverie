@@ -124,6 +124,20 @@ pub fn operation_directory(config: &ReservationConfiguration) -> Result<std::pat
 pub fn profile_directory(config: &ReservationConfiguration) -> Result<std::path::PathBuf> {
     store_directory(config, "profiles")
 }
+/// Source lexists check selected from captured stateRoot + canonical profile
+/// SID. Neither the path's absence nor the SID is execution authorization.
+pub fn session_directory_present(
+    config: &ReservationConfiguration,
+    session: &reverie_core::ids::ProfileSessionId,
+) -> Result<bool> {
+    present(
+        &config
+            .control_paths()?
+            .binding()
+            .parent()
+            .join(&PosixPath::from_scalar_text(session.as_str())),
+    )
+}
 fn store_directory(config: &ReservationConfiguration, name: &str) -> Result<std::path::PathBuf> {
     Ok(native::python_path(
         &config

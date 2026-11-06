@@ -138,6 +138,11 @@ impl Admission {
         self.finished = true;
         finalized(guard, self.cleanup())
     }
+    pub(super) fn finish_claim(mut self, claim: super::claim::TerminalClaim) -> Result<()> {
+        let terminal = self.gate.finish_claim(&claim);
+        self.finished = true;
+        finalized(terminal, self.cleanup())
+    }
     fn abort(mut self) -> Result<()> {
         self.finished = true;
         self.cleanup()

@@ -6,10 +6,36 @@ pub struct ReservationEmployee {
     employee: ProfileEmployeeId,
     session: ProfileSessionId,
 }
+/// One freshly read EID row retained for terminal claim comparison/hash. Its
+/// unrelated fields and SID remain data; no generation/start gate is added.
+pub struct ClaimEmployee {
+    value: Value,
+    employee: ProfileEmployeeId,
+}
+impl ClaimEmployee {
+    pub fn capture(metadata: &Metadata, employee: &ProfileEmployeeId) -> Result<Self> {
+        let selected = eid_rows(metadata, employee)?;
+        if selected.len() != 1 {
+            return Err(ObservationDataError::CurrentEmployee);
+        }
+        Ok(Self {
+            value: selected[0].deep_clone(),
+            employee: employee.clone(),
+        })
+    }
+    pub fn still_current(&self, metadata: &Metadata) -> Result<bool> {
+        unchanged(metadata, &self.employee, &self.value)
+    }
+    pub(super) fn data(&self) -> &Value {
+        &self.value
+    }
+}
 impl ReservationEmployee {
     /// The first matching EID's raw SID, before storage_paths' separate full
     /// registry/lineage selection. Unrelated rows are deliberately not given
     /// UUID/generation/owner requirements at this first selection phase.
+    /// Like next(generator, ''), iteration stops at the first matching EID;
+    /// only that selected row's indexed sessionId is a required field here.
     pub fn first_session(
         metadata: &Metadata,
         employee: &ProfileEmployeeId,
@@ -17,8 +43,11 @@ impl ReservationEmployee {
         for row in employees(metadata)? {
             let row = object(row)?;
             if matches_text(row.get(&key("id")), employee.as_str()) {
-                return Ok(match row.get(&key("sessionId")) {
-                    Some(Value(Node::String(text))) => Some(
+                let session = row
+                    .get(&key("sessionId"))
+                    .ok_or(ObservationDataError::CompanyStructure)?;
+                return Ok(match session {
+                    Value(Node::String(text)) => Some(
                         crate::storage_identity::MetadataText::from_text(text.clone()),
                     ),
                     _ => None,
@@ -101,12 +130,19 @@ impl ReservationEmployee {
     /// Later old observe() compares every current row with the EID, independent
     /// of SID, against this one exact original row. No global registry rewrite.
     pub fn still_current(&self, metadata: &Metadata) -> Result<bool> {
-        let mut selected = Vec::new();
-        for value in employees(metadata)? {
-            if matches_text(object(value)?.get(&key("id")), self.employee.as_str()) {
-                selected.push(value);
-            }
-        }
-        Ok(selected.len() == 1 && selected[0].python_eq(&self.value))
+        unchanged(metadata, &self.employee, &self.value)
     }
+}
+fn eid_rows<'a>(metadata: &'a Metadata, employee: &ProfileEmployeeId) -> Result<Vec<&'a Value>> {
+    let mut selected = Vec::new();
+    for value in employees(metadata)? {
+        if matches_text(object(value)?.get(&key("id")), employee.as_str()) {
+            selected.push(value);
+        }
+    }
+    Ok(selected)
+}
+fn unchanged(metadata: &Metadata, employee: &ProfileEmployeeId, value: &Value) -> Result<bool> {
+    let selected = eid_rows(metadata, employee)?;
+    Ok(selected.len() == 1 && selected[0].python_eq(value))
 }

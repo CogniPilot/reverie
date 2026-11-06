@@ -7,8 +7,10 @@ use crate::{
     legacy_json::{Node, Number, Text, Value},
     storage_identity::Metadata,
 };
-pub use digests::{PoolWebsite, pool_revision_digest, source_binding_digest};
-pub use employee::ReservationEmployee;
+pub use digests::{
+    PoolWebsite, claim_source_binding_digest, pool_revision_digest, source_binding_digest,
+};
+pub use employee::{ClaimEmployee, ReservationEmployee};
 pub use observation::{ReservationObservation, ReservationObservationFields};
 use reverie_core::{
     ids::{ProfileEmployeeId, ProfileSessionId},
@@ -18,6 +20,9 @@ use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObservationDataError {
+    /// Original company indexing/iteration raises KeyError, TypeError or
+    /// AttributeError here, outside cold recovery's ordinary refusal catch.
+    CompanyStructure,
     CurrentEmployee,
     Generation,
     Fingerprint,
@@ -25,6 +30,7 @@ pub enum ObservationDataError {
 impl ObservationDataError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::CompanyStructure => "RESERVATION_COMPANY_STRUCTURE",
             Self::CurrentEmployee => "RESERVATION_CURRENT_EMPLOYEE_REQUIRED",
             Self::Generation => "RESERVATION_GENERATION",
             Self::Fingerprint => "RESERVATION_OBSERVATION_FINGERPRINT",
@@ -45,7 +51,7 @@ fn object(value: &Value) -> Result<&Object> {
     if let Node::Object(fields) = &value.0 {
         Ok(fields)
     } else {
-        Err(ObservationDataError::CurrentEmployee)
+        Err(ObservationDataError::CompanyStructure)
     }
 }
 fn matches_text(value: Option<&Value>, text: &str) -> bool {
@@ -55,6 +61,10 @@ fn employees(metadata: &Metadata) -> Result<&[Value]> {
     let root = object(metadata.as_value())?;
     match root.get(&key("employees")) {
         Some(Value(Node::Array(values))) => Ok(values),
-        _ => Err(ObservationDataError::CurrentEmployee),
+        // Python permits iteration of empty dictionaries/strings. They select
+        // no session and reach the ordinary storage-identity refusal later.
+        Some(Value(Node::Object(values))) if values.is_empty() => Ok(&[]),
+        Some(Value(Node::String(value))) if value.0.is_empty() => Ok(&[]),
+        _ => Err(ObservationDataError::CompanyStructure),
     }
 }

@@ -19,6 +19,9 @@ pub enum GateError {
     Policy(WorkerValidationError),
     Configuration(EngineDataError),
     Refused(&'static str),
+    ClaimUncertain {
+        cause: Box<Self>,
+    },
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -45,6 +48,7 @@ impl GateError {
             Self::Policy(_) => "WORKER_VALIDATION_DATA",
             Self::Configuration(error) => error.code(),
             Self::Refused(code) => code,
+            Self::ClaimUncertain { .. } => "CLAIM_OR_RESPONSE_UNCERTAIN_KEEP_ALL_CLAIMS",
             Self::Finalization { .. } => "RESERVATION_ADMISSION_FINALIZATION",
         }
     }
@@ -76,6 +80,7 @@ impl std::error::Error for GateError {
             Self::Configuration(error) => Some(error),
             Self::Finalization { primary, .. } => Some(primary),
             Self::Refused(_) => None,
+            Self::ClaimUncertain { cause } => Some(cause),
         }
     }
 }

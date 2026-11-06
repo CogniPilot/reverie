@@ -2,11 +2,14 @@
 //! not an HTTP authority or a process/start permit. Effect-owner cohorts remain
 //! separate from the read-side admission dependencies.
 mod admission;
+mod claim;
 mod error;
 mod guard;
 mod history;
 mod host_jobs;
 mod observation;
+mod recovery;
+mod terminal_claim;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -17,6 +20,7 @@ pub use admission::AdmissionBounds;
 pub use error::GateError;
 use error::{Result, finalized, need};
 pub use history::HeadroomFacts;
+pub use recovery::{NativeObservationState, RecoveryFacts, RecoveryObservation};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDataError, domain_digest},
     reservation_engine::{EngineDataError, ReservationConfiguration},

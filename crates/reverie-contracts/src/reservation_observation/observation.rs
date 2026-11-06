@@ -42,6 +42,12 @@ impl ReservationObservation {
     pub fn journal_data(&self) -> operations::Result<operations::CapacityObservation> {
         crate::operations_v1::decode_observation(&self.canonical_bytes())
     }
+    /// Existing recovery compares the entire observation dictionary. A fresh
+    /// nil profile SID can be changed DATA without becoming a valid journal ID.
+    pub fn matches_journal(&self, stored: &operations::CapacityObservation) -> bool {
+        self.value()
+            .python_eq(&crate::operations_v1::observation(stored))
+    }
     fn value(&self) -> Value {
         let fields = &self.0;
         let entries = [

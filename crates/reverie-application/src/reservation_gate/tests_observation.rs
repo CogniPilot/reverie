@@ -2,6 +2,8 @@ use super::*;
 use reverie_core::ids::ProfileEmployeeId;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+#[path = "tests_claim.rs"]
+mod claim_cases;
 fn sha(raw: &[u8]) -> String {
     Sha256::digest(raw)
         .iter()

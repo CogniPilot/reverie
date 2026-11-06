@@ -3,6 +3,7 @@ mod decode;
 mod encode;
 use crate::legacy_json::{Node, Number, Text, Value};
 pub use decode::{decode, decode_observation, decode_request, decode_scope};
+pub(crate) use encode::observation;
 pub(crate) use encode::operation;
 pub use encode::{encode, observation_digest, operation_digest, request_digest, scope_digest};
 use reverie_core::operations::{OperationError, Result};
