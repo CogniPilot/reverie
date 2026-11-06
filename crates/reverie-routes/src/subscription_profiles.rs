@@ -1,12 +1,15 @@
-//! `GET /api/subscription-profiles` after TS authorized it: `readSubscriptionProfiles()` plus each
-//! profile's modes, as the TS route answers. Read-only; it never opens credential contents.
+//! `GET /api/subscription-profiles` after TS authorized it: `readSubscriptionProfiles()`, then each
+//! profile's modes, as the TS route answers. The route observes the modes only after a read that
+//! found profiles, so [`read`] stops there and [`finish`] takes the observed modes. Read-only; it
+//! never opens credential contents.
 use crate::node_path::{join, resolve};
 use reverie_contracts::subscription_profiles_v1::{
-    self as v1, JsString, MAX_FILE_BYTES, Platform, Profile, Provider, Refusal, Request, Response,
+    self as v1, JsString, MAX_FILE_BYTES, Modes, Platform, Profile, Provider, Refusal, Request,
+    Response,
 };
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read as _};
 use std::path::PathBuf;
 
 const FILE: &str = "subscription-profiles.json";
@@ -15,8 +18,35 @@ const ACCOUNT_DIRS: [(Provider, &str); 2] = [
     (Provider::Openai, ".codex-accounts"),
 ];
 
+/// Where a read leaves the route.
+#[derive(Debug, Eq, PartialEq)]
+pub enum Read {
+    /// The answer needs no modes: an invalid file, or no profiles (TS maps none).
+    Done(Response),
+    /// Profiles were read; their providers' modes are observed next.
+    NeedModes(Pending),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Pending {
+    profiles: Vec<Profile>,
+}
+
+impl Pending {
+    /// The distinct providers of the read profiles, in first-appearance order.
+    pub fn providers(&self) -> Vec<Provider> {
+        let mut providers = Vec::new();
+        for profile in &self.profiles {
+            if !providers.contains(&profile.provider) {
+                providers.push(profile.provider);
+            }
+        }
+        providers
+    }
+}
+
 /// Only Node `path.posix` semantics are implemented; a win32 front gets a refusal, never different paths.
-pub fn get(request: &Request) -> Result<Response, Refusal> {
+pub fn read(request: &Request) -> Result<Read, Refusal> {
     if !cfg!(unix) || Platform::from_node(&request.platform) != Platform::Posix {
         return Err(Refusal::Platform);
     }
@@ -24,12 +54,19 @@ pub fn get(request: &Request) -> Result<Response, Refusal> {
     let profiles = match host.read(&join(&[&request.data_dir, FILE]))? {
         Contents::Found(raw) => match v1::parse_file(&raw, Platform::Posix) {
             Ok(profiles) => profiles,
-            Err(v1::InvalidFile) => return Ok(v1::invalid_file()),
+            Err(v1::InvalidFile) => return Ok(Read::Done(v1::invalid_file())),
         },
         Contents::Missing => discover(request, &host),
-        Contents::Failed => return Ok(v1::invalid_file()),
+        Contents::Failed => return Ok(Read::Done(v1::invalid_file())),
     };
-    v1::profiles_response(&profiles, &request.modes_by_provider)
+    if profiles.is_empty() {
+        return v1::profiles_response(&profiles, &Modes::default()).map(Read::Done);
+    }
+    Ok(Read::NeedModes(Pending { profiles }))
+}
+
+pub fn finish(pending: Pending, modes: &Modes) -> Result<Response, Refusal> {
+    v1::profiles_response(&pending.profiles, modes)
 }
 
 /// The ENOENT branch: default logins with a credential file, then sorted account folders.
