@@ -247,3 +247,35 @@ fn actual_long_helper_runs_outside_registry_lock_and_restores_owners_after_compl
     assert_eq!(trace(&tree, "create"), 1);
     assert_eq!(trace(&tree, "rm"), 1);
 }
+
+#[test]
+fn actual_app_handoff_preserves_prepared_path_data_across_later_owner_marker_drift() {
+    crate::test_process::owning_case!(
+        actual_app_handoff_preserves_prepared_path_data_across_later_owner_marker_drift
+    );
+    let tree = Tree::new();
+    tree.write("company.json", br#"{"employees":[]}"#);
+    let registry = registry(&tree, "");
+    let claim = claim(&tree, &registry, 'a');
+    let preparation = retain(&tree, claim, 'a');
+    let progress = preparation.run().unwrap();
+    let expected = tree.0.join("state").join(SID).join("nix");
+    tree.write(
+        &format!("state/{SID}/nix-rollback.json"),
+        serde_json::to_vec(&json!({"version":1,"sessionId":SID,"legacy":true}))
+            .unwrap()
+            .as_slice(),
+    );
+    let returned = preparation.reclaim().unwrap();
+    let prepared = returned.prepared_path().unwrap().to_owned();
+    let (claim, guard, outcome) = returned.into_parts();
+    let later = guard.selected_path().unwrap();
+    guard.close().unwrap();
+    claim.release(end()).unwrap();
+    registry.runtime.close(end()).unwrap();
+    assert_eq!(progress, NixProgress::Prepared);
+    assert_eq!(outcome.unwrap(), NixDisposition::Prepared);
+    assert_eq!(prepared, expected);
+    assert_ne!(prepared, later);
+    assert_eq!(trace(&tree, "create"), 1);
+}

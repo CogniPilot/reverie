@@ -176,6 +176,7 @@ pub(super) fn execute(
         .resources_mut()
         .guard
         .prepare_private_store(&prepared)?;
+    record.prepared_store = Some(selected.clone());
     let plan = record
         .resources()
         .guard

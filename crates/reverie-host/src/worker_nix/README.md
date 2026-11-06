@@ -82,3 +82,13 @@ guard paths; `worker_store_maintenance.py` uses selection and helper arguments.
 Those entry points must migrate before deleting their shared Python module.
 The native guest package is a candidate until image/source consumers qualify;
 there is no Python fallback within it.
+
+A known-successful `NixReturned::prepared_path` retains the exact native path
+returned by the actual private-store preparation used for that helper. It is
+absent for image opt-out and known-negative results, and unknown records cannot
+be reclaimed. Existing `into_parts` callers remain compatible; a laptop mount
+consumer must retain this returned path DATA before consuming the parts. It must
+not reconstruct it from `Prepared` or rerun current rollback selection. The
+synthetic original-Python fixture and owned Rust rollback-drift case demonstrate
+that the later metadata lookup can select a different store. This result grants
+no mount/start permission and does not replace either real resource guard.

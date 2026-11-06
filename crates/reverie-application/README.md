@@ -270,3 +270,9 @@ image opt-out, a fixed supervised helper create/start/remove, a long helper with
 the registry mutex available, and unknown create/removal retaining guards through
 service stop. Helper effects are controlled Rust child processes and owned files,
 not a live engine, company or production activation.
+
+The Nix resource handoff also forwards the exact `prepared_path` returned by the
+real successful Host workflow. Later rollback metadata cannot replace that data;
+image opt-out/negative results provide no path. `into_parts` remains compatible,
+so the actual laptop-mount consumer must retain the returned data alongside its
+same original resource owners before composing create arguments.

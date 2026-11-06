@@ -228,3 +228,73 @@ fn concurrent_close_during_dispatched_removal_retains_unknown_and_never_replays_
     assert!(!tree.root.join("removed").exists());
     assert!(NixStoreGuard::acquire_migration(&tree.source('a'), workflow.session()).is_err());
 }
+
+#[test]
+fn successful_return_keeps_exact_helper_store_when_later_rollback_selection_changes() {
+    let tree = Tree::new();
+    let runtime = tree.runtime("success", Hooks::default());
+    let workflow = tree.retain(&runtime, 'a');
+    let progress = runtime.run_nix_store(&workflow).unwrap();
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/prepared-path-return.json")).unwrap();
+    let expected = PathBuf::from(
+        reference["returned"]
+            .as_str()
+            .unwrap()
+            .replace("$ROOT", tree.root.to_str().unwrap()),
+    );
+    let expected_later = PathBuf::from(
+        reference["laterLookup"]
+            .as_str()
+            .unwrap()
+            .replace("$ROOT", tree.root.to_str().unwrap()),
+    );
+    let marker = tree.root.join("state").join(SID).join("nix-rollback.json");
+    fs::write(
+        &marker,
+        serde_json::to_vec(&json!({"version":1,"sessionId":SID,"legacy":true})).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
+    let returned = runtime
+        .reclaim_nix_store(workflow)
+        .unwrap_or_else(|_| panic!("settled helper must return owners"));
+    let actual = returned.prepared_path().unwrap().to_owned();
+    let (guard, storage, outcome) = returned.into_parts();
+    let later = guard.selected_path().unwrap();
+    close_resources(guard, storage);
+    runtime.close(end()).unwrap();
+    assert_eq!(progress, NixProgress::Prepared);
+    assert_eq!(outcome.unwrap(), NixDisposition::Prepared);
+    assert_eq!(actual, expected);
+    assert_eq!(later, expected_later);
+    assert_ne!(
+        actual, later,
+        "a fresh lookup would mount a different store than the helper prepared"
+    );
+    assert_eq!(count(&tree, "create"), 1);
+    assert_eq!(count(&tree, "rm"), 1);
+}
+
+#[test]
+fn noop_and_known_negative_never_return_a_prepared_store_path() {
+    for (mode, image, expected) in [
+        ("success", 'b', NixProgress::NoHelper),
+        ("helper-failed", 'a', NixProgress::Rejected),
+    ] {
+        let tree = Tree::new();
+        let runtime = tree.runtime(mode, Hooks::default());
+        let workflow = tree.retain(&runtime, image);
+        let progress = runtime.run_nix_store(&workflow).unwrap();
+        let returned = runtime
+            .reclaim_nix_store(workflow)
+            .unwrap_or_else(|_| panic!("known result must return exact owners"));
+        let has_path = returned.prepared_path().is_some();
+        let (guard, storage, outcome) = returned.into_parts();
+        close_resources(guard, storage);
+        runtime.close(end()).unwrap();
+        assert_eq!(progress, expected);
+        assert!(!has_path);
+        assert_eq!(outcome.is_err(), mode == "helper-failed");
+    }
+}
