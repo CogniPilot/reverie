@@ -42,7 +42,11 @@ impl Inner {
         let entry = self.reserve_entry(end)?;
         // Never hold the waiting-state mutex across filesystem I/O. Another
         // thread's bounded wait must remain bounded while this open stalls.
-        let lock = match AdmissionLock::acquire(&self.config) {
+        let config = match self.config() {
+            Ok(config) => config,
+            Err(error) => return finalized(Err(error), entry.cancel()),
+        };
+        let lock = match AdmissionLock::acquire(&config) {
             Ok(lock) => lock,
             Err(error) => return finalized(Err(error.into()), entry.cancel()),
         };
@@ -50,10 +54,9 @@ impl Inner {
             thread: std::thread::current().id(),
             process: std::process::id(),
             lock: Mutex::new(lock),
-            context: self
-                .observer
-                .capture(self.config.configuration().clone(), None),
+            context: Mutex::new(self.observer.capture(config.configuration().clone(), None)),
             deadline: Mutex::new(end),
+            policy_ack: Mutex::new(None),
         });
         let admission = entry.activate(active)?;
         let entered = (|| {

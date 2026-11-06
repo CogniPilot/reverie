@@ -90,7 +90,8 @@ impl RetainedPreparation {
             baseline: self.original_baseline(),
             before: self.source_configuration(),
         })?;
-        let signature = reservation_control::publish_publication(&self.gate.config, &receipt)?;
+        let signature =
+            reservation_control::publish_publication(self.gate.config()?.as_ref(), &receipt)?;
         self.publication = Some(PublicationBoundary { receipt, signature });
         store.confirm_preparation(&self.gate.scope, &self.view)?;
         Ok(())
@@ -136,7 +137,7 @@ impl Inner {
             .store()?
             .into_preparation_terminal_stamp(&self.scope, &claim.view)?;
         let file = reservation_control::observe_publication(
-            &self.config,
+            self.config()?.as_ref(),
             claim.operation_id(),
             &boundary.signature,
             &boundary.receipt,
@@ -184,11 +185,15 @@ impl Inner {
             )? == observed.source_binding,
             "RESOURCE_PREPARATION_SOURCE_CHANGED",
         )?;
+        if let Some(phase) = &claim.policy {
+            native.custody_policy(&phase.binding, None)?;
+        }
         need(
             self.guard(None)?.equivalent(&rows),
             "RESOURCE_PREPARATION_NATIVE_CHANGED",
         )?;
         // No further engine/kernel/custody producer may follow these stamps.
+        claim.assert_policy_current()?;
         stamp.assert_preparation_named_current()?;
         file.assert_named_current()?;
         self.finish_preparation_metadata(claim, phase)
@@ -200,7 +205,10 @@ impl Inner {
     ) -> Result<()> {
         let boundary = claim.publication.as_ref().expect("checked boundary");
         need(
-            worker_config::equivalent(self.config.configuration(), claim.source_configuration()),
+            worker_config::equivalent(
+                self.config()?.configuration(),
+                claim.expected_live_configuration(),
+            ),
             "RESOURCE_PREPARATION_CONFIG_CHANGED",
         )?;
         let binding = claim.terminal.profile.binding();
@@ -239,7 +247,7 @@ impl Inner {
                     && target.kind() == StorageKind::Session
                     && target.identity() == binding.target_session().as_str()
                     && !reservation_control::session_directory_present(
-                        &self.config,
+                        self.config()?.as_ref(),
                         binding.target_session(),
                     )?
             }

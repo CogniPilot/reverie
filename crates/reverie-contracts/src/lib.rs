@@ -1,4 +1,5 @@
 //! Named legacy wire codecs. Decoded values and digests confer no authority.
+pub mod broker_laptop;
 pub mod broker_resources;
 pub mod device_policy;
 mod digest;
@@ -19,6 +20,7 @@ pub mod reservation_draft;
 pub mod reservation_engine;
 pub mod reservation_history;
 pub mod reservation_observation;
+pub mod reservation_policy;
 pub mod reservation_publication;
 pub mod resource_config;
 pub mod resource_reload;
@@ -28,6 +30,7 @@ pub mod subscription_profiles_v1;
 pub mod task_perf_v1;
 pub mod worker_child;
 pub mod worker_config;
+pub mod worker_intent;
 pub mod worker_launch;
 pub mod worker_schema;
 pub mod worker_storage;

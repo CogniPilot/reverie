@@ -76,6 +76,143 @@ fn deadline() -> Instant {
 fn settle(engine: &ReadonlyEngine) {
     engine.settle_owned(deadline()).unwrap();
 }
+fn laptop_name() -> reverie_core::worker_laptop::WorkerContainerName {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../reverie-contracts/tests/fixtures/broker-laptop-python.json"
+    ))
+    .unwrap();
+    let config = reverie_contracts::worker_config::decode(
+        &serde_json::to_vec(&fixture["configuration"]).unwrap(),
+    )
+    .unwrap();
+    let envelope = reverie_contracts::worker_schema::WorkerEnvelope::capture(config).unwrap();
+    reverie_core::worker_laptop::WorkerContainerName::for_session(
+        envelope.base(),
+        &reverie_core::ids::ProfileSessionId::parse(fixture["session"].as_str().unwrap()).unwrap(),
+    )
+}
+#[test]
+fn actual_broker_inspection_has_fixed_derived_name_argv_and_preserves_optional_status() {
+    let tree = Tree::new();
+    let engine = tree.engine("argv");
+    let name = laptop_name();
+    let output =
+        crate::broker_engine::inspect_laptop(&engine, &name, deadline(), &CancellationToken::new())
+            .unwrap();
+    assert!(output.succeeded);
+    assert_eq!(
+        output.stdout,
+        format!("inspect\0{}", name.as_str()).as_bytes()
+    );
+    assert_eq!(
+        engine
+            .query(
+                EngineQuery::InventoryIds,
+                deadline(),
+                &CancellationToken::new()
+            )
+            .unwrap(),
+        "ps\0-aq\0--no-trunc"
+    );
+    let engine = tree.engine("failure");
+    let output =
+        crate::broker_engine::inspect_laptop(&engine, &name, deadline(), &CancellationToken::new())
+            .unwrap();
+    assert!(!output.succeeded);
+    assert!(output.stdout.is_empty());
+    let error = engine
+        .query(
+            EngineQuery::InventoryIds,
+            deadline(),
+            &CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(error.fault(), EngineFault::Exit);
+    assert!(!error.to_string().contains("synthetic-private-diagnostic"));
+    settle(&engine);
+}
+#[test]
+fn actual_broker_inspection_shares_pending_constructor_and_closed_context_with_metadata() {
+    let tree = Tree::new();
+    let mut bootstrap = tree.bootstrap("stall");
+    let gate = Arc::new(Gate::default());
+    bootstrap.hooks.gate = Some(gate.clone());
+    let starts = bootstrap.hooks.starts.clone();
+    let engine = Arc::new(ReadonlyEngine::new(bootstrap));
+    let other = engine.clone();
+    let name = laptop_name();
+    let task = std::thread::spawn(move || {
+        crate::broker_engine::inspect_laptop(
+            &other,
+            &name,
+            Instant::now() + Duration::from_millis(80),
+            &CancellationToken::new(),
+        )
+    });
+    let until = deadline();
+    while !gate.entered.load(Ordering::Acquire) {
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(task.join().unwrap().unwrap_err().is_uncertain());
+    assert_eq!(
+        engine
+            .query(
+                EngineQuery::InventoryIds,
+                deadline(),
+                &CancellationToken::new()
+            )
+            .unwrap_err()
+            .fault(),
+        EngineFault::Busy
+    );
+    assert_eq!(
+        crate::broker_engine::inspect_laptop(
+            &engine,
+            &laptop_name(),
+            deadline(),
+            &CancellationToken::new()
+        )
+        .unwrap_err()
+        .fault(),
+        EngineFault::Busy
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    gate.released.store(true, Ordering::Release);
+    settle(&engine);
+    engine.close(deadline()).unwrap();
+    assert!(
+        crate::broker_engine::inspect_laptop(
+            &engine,
+            &laptop_name(),
+            deadline(),
+            &CancellationToken::new()
+        )
+        .is_err()
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+}
+#[test]
+fn actual_broker_inspection_rejects_combined_four_mib_overflow_and_invalid_utf8() {
+    let tree = Tree::new();
+    let name = laptop_name();
+    for (mode, fault) in [
+        ("dual-over", EngineFault::OutputBound),
+        ("badout", EngineFault::Utf8),
+        ("baderr", EngineFault::Utf8),
+    ] {
+        let engine = tree.engine(mode);
+        let error = crate::broker_engine::inspect_laptop(
+            &engine,
+            &name,
+            deadline(),
+            &CancellationToken::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.fault(), fault);
+        settle(&engine);
+    }
+}
 #[test]
 fn different_private_policies_share_the_same_pending_context_and_closed_admission() {
     use crate::captured_client::Policy;

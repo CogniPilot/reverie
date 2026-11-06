@@ -154,7 +154,7 @@ impl Inner {
             captured: Mutex::new(None),
         });
         let store = OperationStore::open_draft(
-            reservation_control::operation_directory(&self.config)?,
+            reservation_control::operation_directory(self.config()?.as_ref())?,
             super::guard::installed(self),
             capacity.clone(),
         )?;
@@ -180,9 +180,9 @@ impl Inner {
                 "RESERVATION_TARGET_NATIVE_BINDING_CHANGED",
             ))?;
         reservation_draft::validate_directory_names(&reservation_control::settlement_names(
-            &self.config,
+            self.config()?.as_ref(),
         )?)?;
-        reservation_control::publish_draft(&self.config, &record)?;
+        reservation_control::publish_draft(self.config()?.as_ref(), &record)?;
         let employee = ClaimEmployee::capture(
             &storage_identity::read_company_metadata(&self.identity)?,
             &eid,

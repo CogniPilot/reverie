@@ -97,6 +97,24 @@ the complete read-side reservation observation over these same owners. Its
 lock/finalizer handling, compatible hashes and still-required claim/effect owners.
 It is inactive and does not select a broker or grant a launch/completion permit.
 
+`InstallingBroker` owns a current validated configuration snapshot distinct from
+each retained preparation's original source. Resource reload performs the real
+owner-file load/full validation, active-operation fences and ordered registered
+laptop inspection before an internal snapshot CAS updates that same observer
+origin. Its registry has no public data-created registration constructor; actual
+supervised launch/recovery producers remain required before it can own laptops.
+An empty initial registry never establishes ownership of global engine inventory.
+
+`RetainedPreparation::commit_configuration` stages and fully validates its own
+candidate, retains the actual owner-file/directory binding, publishes durable
+attempt/before evidence and an exclusive temporary, then performs the adjacent
+original-file stamp check and rename/fsync/checked close. It reloads the same
+installing state, rechecks the actual current file and live claim, and only then
+records `PREPARED_CONFIG_ONLY_SOURCE_UNCHANGED`. After an attempted failure it
+retains evidence and refuses replay; it never rolls back a possible publication.
+This implements policy-file preparation, not an engine start, source stop,
+capacity release, API authorization or a selected product workflow.
+
 `project_memory::ProjectMemory` preserves the separate lowercase project
 namespace, default lexical model, six-result lookup, source/fact validation and
 original 8,000/1,000-codepoint limits. Its scalar convenience methods share

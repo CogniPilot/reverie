@@ -1,5 +1,5 @@
-//! Narrow Linux read-only syscall boundary. Purpose wrappers own path and
-//! metadata policies; these helpers never supply authorization or write files.
+//! Narrow Linux syscall boundary. Purpose wrappers own metadata and write
+//! policies; these helpers never supply authorization or effect permission.
 #![allow(unsafe_code)]
 
 use crate::observation::{ObservationError, ObservationFault, Result, finalized, need};
@@ -32,9 +32,17 @@ pub(crate) use memory_profile::{
     create as create_memory_profile, entry as memory_profile_entry, remove as remove_memory_profile,
 };
 mod reservation;
-pub(crate) use control::{HeldAdmission, control_directory, open_admission};
+pub(crate) use control::{
+    ControlDirectorySnapshot, HeldAdmission, control_directory, held_control_directory,
+    open_admission,
+};
+mod policy;
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
+pub(crate) use policy::{
+    PolicyEntryStamp, create_policy_temporary, named_policy_entry, open_policy_child_directory,
+    open_policy_original, policy_effective_uid, replace_policy,
+};
 pub(crate) use reservation::{
     read_reservation, reservation_identity, reservation_identity_text, reservation_location,
 };

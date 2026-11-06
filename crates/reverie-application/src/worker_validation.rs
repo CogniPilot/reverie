@@ -53,7 +53,17 @@ impl std::fmt::Display for WorkerValidationCause {
         out.write_str(self.code())
     }
 }
-impl std::error::Error for WorkerValidationCause {}
+impl std::error::Error for WorkerValidationCause {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Data(error) => Some(error),
+            Self::Native(error) => Some(error),
+            Self::Rootless(error) => Some(error),
+            Self::Mount(error) => Some(error),
+            Self::Lease(error) => Some(error),
+        }
+    }
+}
 impl From<reverie_contracts::worker_validation::WorkerValidationError> for WorkerValidationCause {
     fn from(value: reverie_contracts::worker_validation::WorkerValidationError) -> Self {
         Self::Data(value)

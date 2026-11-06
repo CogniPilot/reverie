@@ -239,6 +239,15 @@ session-resource key insertion order needed by that native peer loop; duplicate
 and numeric parser policies and sorted config/policy hashes stay unchanged.
 These candidates are not installed configuration or permission to reload/start.
 
+`reservation_policy` preserves compact finite policy candidate bytes/hashes and
+the exact prepared receipt schema, separately from spaced full-worker hashes.
+`broker_laptop` preserves the optional inspect consumer's first-row, Running
+truthiness and identity-before-policy phases. `worker_intent` preserves the
+separate permissive company JSON text and strict detached plan-data rules of
+`Broker.allowed`; neither is the stronger storage identity/eligibility schema.
+None of these data objects mint an applied receipt, registered native laptop or
+effect authority.
+
 ## Memory instance and document data
 
 `memory_instance` preserves the closed instance schema, owner-selected text,

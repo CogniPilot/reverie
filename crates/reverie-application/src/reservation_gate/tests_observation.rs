@@ -143,7 +143,7 @@ fn install_headroom_uses_real_admission_journal_and_same_native_origin() {
     assert_eq!(value.retained_bytes, 0);
     assert!(value.budget_bytes >= value.committed_bytes);
     assert!(gate.inner.state.lock().unwrap().active.is_none());
-    let mut lock = AdmissionLock::acquire(&gate.inner.config).unwrap();
+    let mut lock = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
     lock.close().unwrap();
 }
 

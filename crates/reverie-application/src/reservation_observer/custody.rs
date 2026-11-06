@@ -1,12 +1,31 @@
 use super::*;
-use reverie_host::{reservation_control::CurrentImageBinding, reservation_kernel::CustodyPaths};
+use reverie_host::{
+    reservation_control::{CurrentImageBinding, PolicyBinding},
+    reservation_kernel::CustodyPaths,
+};
 /// Only actual service-owned target producers belong here. This is not a wire
 /// selector or an inventory/source constructor, and grants no effect authority.
 pub(super) enum SelectedTargets<'a> {
     Control,
     CurrentImage(&'a CurrentImageBinding),
+    PreparedPolicy(&'a PolicyBinding),
+    LoadedPolicy(&'a crate::worker_validation::ValidatedWorkerSnapshot),
 }
 impl ObservationContext {
+    pub(crate) fn custody_loaded_policy(
+        &self,
+        snapshot: &crate::worker_validation::ValidatedWorkerSnapshot,
+        supplied: Option<Instant>,
+    ) -> Result<ObservedInventory> {
+        self.custody_selected(SelectedTargets::LoadedPolicy(snapshot), supplied)
+    }
+    pub fn custody_policy(
+        &self,
+        policy: &PolicyBinding,
+        supplied: Option<Instant>,
+    ) -> Result<ObservedInventory> {
+        self.custody_selected(SelectedTargets::PreparedPolicy(policy), supplied)
+    }
     pub fn custody_current_image(
         &self,
         image: &CurrentImageBinding,
@@ -24,6 +43,18 @@ impl ObservationContext {
             SelectedTargets::Control => CustodyPaths::control(&self.config)?,
             SelectedTargets::CurrentImage(image) => {
                 CustodyPaths::current_image(&self.config, image)?
+            }
+            SelectedTargets::PreparedPolicy(policy) => CustodyPaths::prepared_policy(policy)?,
+            SelectedTargets::LoadedPolicy(snapshot) => {
+                use std::os::unix::ffi::OsStrExt;
+                let path = snapshot.source_path().ok_or(ObserverError::Refused(
+                    "RESOURCE_PREPARATION_CONFIG_FILE_REQUIRED",
+                ))?;
+                let binding = reverie_core::posix_path::PosixPath::try_new(
+                    &reverie_core::posix_text::decode(path.as_os_str().as_bytes()),
+                )
+                .expect("native path codepoints");
+                CustodyPaths::declared(binding.parent(), binding)?
             }
         };
         let source = &self.observer.source;

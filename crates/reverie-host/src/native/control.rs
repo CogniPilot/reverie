@@ -5,11 +5,19 @@ use super::*;
 use reverie_contracts::reservation_control::ControlIdentity;
 use reverie_core::posix_path::PosixPath;
 use std::os::fd::AsRawFd;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ControlDirectorySnapshot {
     pub(crate) device: u64,
     pub(crate) inode: u64,
 }
 pub(crate) fn control_directory(path: &PosixPath, owner: u32) -> Result<ControlDirectorySnapshot> {
+    let (file, identity) = held_control_directory(path, owner)?;
+    finalized(Ok(identity), close(file))
+}
+pub(crate) fn held_control_directory(
+    path: &PosixPath,
+    owner: u32,
+) -> Result<(File, ControlDirectorySnapshot)> {
     let file = directory(path, owner)?;
     let result = (|| {
         let metadata = file.metadata()?;
@@ -22,7 +30,10 @@ pub(crate) fn control_directory(path: &PosixPath, owner: u32) -> Result<ControlD
             inode: metadata.ino(),
         })
     })();
-    finalized(result, close(file))
+    match result {
+        Ok(identity) => Ok((file, identity)),
+        Err(error) => finalized(Err(error), close(file)),
+    }
 }
 fn directory(path: &PosixPath, owner: u32) -> Result<File> {
     need(

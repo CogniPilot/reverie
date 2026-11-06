@@ -35,7 +35,16 @@ impl fmt::Display for WorkerValidationHostError {
         out.write_str(self.code())
     }
 }
-impl std::error::Error for WorkerValidationHostError {}
+impl std::error::Error for WorkerValidationHostError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Loader(error) => Some(error),
+            Self::Data(error) => Some(error),
+            Self::Observation(error) => Some(error),
+            Self::Selector | Self::Cold | Self::Ops => None,
+        }
+    }
+}
 impl From<WorkerValidationError> for WorkerValidationHostError {
     fn from(value: WorkerValidationError) -> Self {
         Self::Data(value)

@@ -9,9 +9,11 @@ impl ScopeGuard for InstalledGuard {
             .0
             .upgrade()
             .ok_or_else(|| JournalError::refusal("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
-        gate.guard(Some(scope))
-            .map(|_| ())
-            .map_err(|error| JournalError::guard_failure(error.code(), error))
+        let checked = (|| {
+            gate.guard(Some(scope))?;
+            gate.assert_policy_ack()
+        })();
+        checked.map_err(|error| JournalError::guard_failure(error.code(), error))
     }
     fn assert_terminal_admission(
         &self,
@@ -52,34 +54,34 @@ impl Inner {
             .deadline
             .lock()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        let end = active.context.deadline(inherited)?;
+        let context = self.native_context()?;
+        let end = context.deadline(inherited)?;
+        let config = self.config()?;
         need(
-            domain_digest(self.config.configuration())? == *self.binding.domain(),
+            domain_digest(config.configuration())? == *self.binding.domain(),
             "RESERVATION_DOMAIN_CHANGED",
         )?;
         need(
-            !reservation_control::pending_present(&self.config)?,
+            !reservation_control::pending_present(&config)?,
             "RESERVATION_INSTALL_REQUIRES_RECONCILIATION",
         )?;
         let image = self
             .source_path
             .as_deref()
-            .map(|path| {
-                reservation_control::capture_current_image(path, self.config.configuration())
-            })
+            .map(|path| reservation_control::capture_current_image(path, config.configuration()))
             .transpose()?;
         need(
             self.binding
-                .matches_metadata(&reservation_control::read_marker(&self.config)?),
+                .matches_metadata(&reservation_control::read_marker(&config)?),
             "RESERVATION_BINDING_CHANGED",
         )?;
         let lock = active
             .lock
             .lock()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        reservation_control::guard_layout(&self.config, &self.binding, &lock)?;
+        reservation_control::guard_layout(&config, &self.binding, &lock)?;
         drop(lock);
-        let rows = active.context.custody(Some(end))?;
+        let rows = context.custody(Some(end))?;
         need(Instant::now() < end, "RESERVATION_OBSERVATION_DEADLINE")?;
         if let Some(image) = image {
             image.assert_current()?;
@@ -89,7 +91,7 @@ impl Inner {
     pub(super) fn store(self: &Arc<Self>) -> Result<OperationStore> {
         // The path comes from the captured validated option. This conversion
         // retains its codepoints through the one native text owner.
-        let path = reverie_host::reservation_control::operation_directory(&self.config)?;
+        let path = reverie_host::reservation_control::operation_directory(self.config()?.as_ref())?;
         Ok(OperationStore::open(path, installed(self), None)?)
     }
 }

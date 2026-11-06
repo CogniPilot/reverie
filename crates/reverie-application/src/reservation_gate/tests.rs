@@ -125,7 +125,7 @@ fn readonly_lookup_uses_actual_admission_canonical_store_and_final_guard() {
         20,
         "entry, two journal guards, and terminal admission guard"
     );
-    let mut lock = AdmissionLock::acquire(&gate.inner.config).unwrap();
+    let mut lock = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
     lock.close().unwrap();
     assert_eq!(fs::read(tree.root.join("worker.json")).unwrap(), tree.raw);
 }
@@ -204,7 +204,7 @@ fn changed_image_and_pending_refuse_and_release_the_actual_flock() {
     );
     assert!(fixture.events().is_empty());
     assert!(gate.inner.state.lock().unwrap().active.is_none());
-    let mut lock = AdmissionLock::acquire(&gate.inner.config).unwrap();
+    let mut lock = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
     lock.close().unwrap();
 }
 #[test]
@@ -221,7 +221,7 @@ fn failed_body_closes_store_and_admission_without_success_native_finalizer_queri
         "only entry and first journal scope guard ran"
     );
     assert!(gate.inner.state.lock().unwrap().active.is_none());
-    let mut lock = AdmissionLock::acquire(&gate.inner.config).unwrap();
+    let mut lock = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
     lock.close().unwrap();
 }
 #[test]

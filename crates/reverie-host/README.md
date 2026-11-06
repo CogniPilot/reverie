@@ -273,3 +273,17 @@ permanently seals the context. This cut has no retained Nix/laptop workflows: th
 settle actual resource-owning cleanup before the final client seal, or retain an
 explicit unconfirmed result. A deadline bounds the wait/kill attempt, not kernel
 completion or a guaranteed reap.
+
+`reservation_control::PolicyTransaction` implements the fixed owner-file CAS
+resource, including private temporary publication, directory fsync, retained
+stamps and checked finalizers. Its bindings/receipt bytes are DATA; only the
+application's actual retained claim and reload sequence can acknowledge them.
+`broker_engine` uses the original shared captured client for the closed laptop
+inspection query, with the source's 4 MiB/20 s policy and optional exit status.
+It does not recapture a process context or expose arbitrary engine arguments.
+
+`worker_intent::read_allowed` ports actual `Broker.allowed`: permissive company
+UTF-8 text first, first matching session's vacation/desired-running intent, then
+strict 1 MiB plan metadata only for detached sessions. Current-row selection
+precedes UID lookup and fallback I/O; no storage/generation/owner check replaces
+that separate policy. These are current intent facts, never start permission.

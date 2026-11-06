@@ -1,6 +1,14 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Intent(reverie_host::worker_intent::IntentHostError),
+    LaptopData(reverie_contracts::broker_laptop::LaptopReadError),
+    FullPolicy(crate::worker_validation::WorkerValidationError),
+    PolicyFile(reverie_contracts::worker_config::WorkerConfigError),
+    PolicyData(reverie_contracts::reservation_policy::PolicyDataError),
+    PreparationConfigUncertain {
+        cause: Box<Self>,
+    },
     Reload(reverie_contracts::resource_reload::ReloadDataError),
     Value(reverie_core::ValueError),
     PublicationData(reverie_contracts::reservation_publication::PublicationDataError),
@@ -41,6 +49,14 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Intent(error) => error.code(),
+            Self::LaptopData(error) => error.code(),
+            Self::FullPolicy(error) => error.code(),
+            Self::PolicyFile(error) => error.code(),
+            Self::PolicyData(error) => error.code(),
+            Self::PreparationConfigUncertain { .. } => {
+                "RESOURCE_PREPARATION_CONFIG_UNCERTAIN_KEEP_ALL_EVIDENCE"
+            }
             Self::Reload(error) => error.code(),
             Self::Value(error) => error.code(),
             Self::PublicationData(error) => error.code(),
@@ -83,6 +99,12 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Intent(error) => Some(error),
+            Self::LaptopData(error) => Some(error),
+            Self::FullPolicy(error) => Some(error),
+            Self::PolicyFile(error) => Some(error),
+            Self::PolicyData(error) => Some(error),
+            Self::PreparationConfigUncertain { cause } => Some(cause),
             Self::Reload(error) => Some(error),
             Self::Value(error) => Some(error),
             Self::PublicationData(error) => Some(error),
@@ -123,6 +145,20 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(reverie_host::worker_intent::IntentHostError, Intent);
+from_error!(
+    reverie_contracts::broker_laptop::LaptopReadError,
+    LaptopData
+);
+from_error!(crate::worker_validation::WorkerValidationError, FullPolicy);
+from_error!(
+    reverie_contracts::worker_config::WorkerConfigError,
+    PolicyFile
+);
+from_error!(
+    reverie_contracts::reservation_policy::PolicyDataError,
+    PolicyData
+);
 from_error!(reverie_contracts::resource_reload::ReloadDataError, Reload);
 from_error!(reverie_core::ValueError, Value);
 from_error!(

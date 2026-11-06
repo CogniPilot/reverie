@@ -3,6 +3,12 @@ use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
+    fn inspect_laptop(
+        &self,
+        name: &reverie_core::worker_laptop::WorkerContainerName,
+        end: Instant,
+        cancellation: &CancellationToken,
+    ) -> Result<reverie_host::broker_engine::LaptopInspectOutput>;
     fn query(
         &self,
         query: EngineQuery<'_>,
@@ -59,6 +65,19 @@ impl Installed {
     }
 }
 impl Source for Installed {
+    fn inspect_laptop(
+        &self,
+        name: &reverie_core::worker_laptop::WorkerContainerName,
+        end: Instant,
+        cancellation: &CancellationToken,
+    ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
+        Ok(reverie_host::broker_engine::inspect_laptop(
+            &self.engine,
+            name,
+            end,
+            cancellation,
+        )?)
+    }
     fn query(
         &self,
         query: EngineQuery<'_>,

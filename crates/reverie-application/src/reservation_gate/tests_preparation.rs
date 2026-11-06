@@ -86,7 +86,7 @@ fn approved_preview_persists_exact_data_without_claim_and_retains_real_original_
     assert_eq!(retained.scope(), &gate.inner.scope);
     assert_eq!(
         worker_config::encode_config(retained.source_configuration()),
-        worker_config::encode_config(gate.inner.config.configuration())
+        worker_config::encode_config(gate.inner.config().unwrap().configuration())
     );
     let replay = gate
         .retain_draft(&preview.draft_id(), &preview.digest())

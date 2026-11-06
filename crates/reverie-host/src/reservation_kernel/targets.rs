@@ -49,6 +49,11 @@ impl CustodyPaths {
             .map_err(|_| ReservationKernelError::Refused("RESERVATION_CONTROL_PATH"))?;
         Self::declared(config.control_paths()?.root().clone(), binding)
     }
+    pub fn prepared_policy(policy: &crate::reservation_control::PolicyBinding) -> Result<Self> {
+        let binding = PosixPath::try_new(&native::python_text(policy.path()))
+            .map_err(|_| ReservationKernelError::Refused("RESERVATION_CONTROL_PATH"))?;
+        Self::declared(binding.parent(), binding)
+    }
     pub fn paths(&self) -> [&PosixPath; 3] {
         [&self.root, &self.binding, &self.pending]
     }

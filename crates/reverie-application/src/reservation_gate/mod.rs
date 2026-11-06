@@ -10,10 +10,13 @@ mod history;
 mod host_jobs;
 mod observation;
 mod preparation;
+mod preparation_commit;
 mod preparation_phase;
+mod preparation_policy;
 mod preparation_stage;
 mod profile_selection;
 mod recovery;
+mod reload;
 mod terminal_claim;
 #[cfg(test)]
 mod tests;
@@ -30,6 +33,7 @@ pub use preparation::RetainedPreparation;
 pub use preparation_phase::PreparationIntentFacts;
 pub use preparation_stage::StagedPreparation;
 pub use recovery::{NativeObservationState, RecoveryFacts, RecoveryObservation};
+pub(crate) use reload::InspectedReload;
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDataError, domain_digest},
     reservation_engine::{EngineDataError, ReservationConfiguration},
@@ -49,7 +53,7 @@ pub struct ReservationGate {
     inner: Arc<Inner>,
 }
 struct Inner {
-    config: ReservationConfiguration,
+    installed: Arc<crate::installing_broker::InstalledWorker>,
     source_path: Option<PathBuf>,
     binding: ControlBinding,
     scope: OperationScope,
@@ -68,7 +72,8 @@ struct Active {
     thread: ThreadId,
     process: u32,
     lock: Mutex<AdmissionLock>,
-    context: ObservationContext,
+    context: Mutex<ObservationContext>,
+    policy_ack: Mutex<Option<Arc<preparation_policy::PolicyAckFence>>>,
     deadline: Mutex<Option<Instant>>,
 }
 impl ReservationGate {
@@ -84,6 +89,8 @@ impl ReservationGate {
     /// Installing-service input, never a request-selected Source/config path.
     /// The full existing validator must succeed before this constructor exists.
     pub fn new(snapshot: ValidatedWorkerSnapshot, observer: NativeObserver) -> Result<Self> {
+        let installed = crate::installing_broker::InstalledWorker::capture(snapshot);
+        let snapshot = installed.snapshot()?;
         let option = WorkerValidationData::new(snapshot.configuration())
             .reservation()?
             .ok_or(GateError::Refused("RESERVATION_POLICY_REMOVED"))?;
@@ -99,7 +106,7 @@ impl ReservationGate {
             reverie_store::storage_identity::StorageIdentityConfig::capture_worker_settings(
                 &resources.identity_settings()?,
             );
-        let config = ReservationConfiguration::capture(snapshot.into_configuration());
+        let config = ReservationConfiguration::capture(snapshot.configuration().clone());
         need(
             !reservation_control::pending_present(&config)?,
             "RESERVATION_INSTALL_REQUIRES_RECONCILIATION",
@@ -110,7 +117,7 @@ impl ReservationGate {
         )?;
         Ok(Self {
             inner: Arc::new(Inner {
-                config,
+                installed,
                 source_path,
                 binding,
                 scope,
@@ -121,6 +128,9 @@ impl ReservationGate {
                 changed: Condvar::new(),
             }),
         })
+    }
+    pub(crate) fn installed_snapshot(&self) -> Result<Arc<ValidatedWorkerSnapshot>> {
+        self.inner.installed.snapshot()
     }
     /// Fixed readonly lookup with actual admission, canonical journal locking,
     /// checked store close and the admission's final native/image guard.
@@ -149,5 +159,10 @@ impl ReservationGate {
         let admission = self.inner.admit(AdmissionBounds::default())?;
         let result = self.inner.check_headroom();
         admission.conclude(result)
+    }
+}
+impl Inner {
+    fn config(&self) -> Result<Arc<ReservationConfiguration>> {
+        self.installed.resources()
     }
 }

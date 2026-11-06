@@ -4,6 +4,7 @@
 mod draft;
 mod history;
 mod image;
+mod policy;
 mod private_record;
 mod publication;
 #[cfg(test)]
@@ -15,6 +16,7 @@ pub use history::{
     settlement_pending_present,
 };
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
+pub use policy::{PolicyBinding, PolicyFileStamp, PolicyTransaction, publish_prepared_policy};
 pub use publication::{PublicationStamp, observe_publication, publish_publication};
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDirectory, ControlIdentity},
@@ -26,6 +28,7 @@ use reverie_store::storage_identity::{self, IdentityError};
 use std::os::unix::fs::MetadataExt;
 use std::{fmt, fs, io};
 pub enum ControlHostError {
+    PolicyData(reverie_contracts::reservation_policy::PolicyDataError),
     Draft(reverie_contracts::reservation_draft::DraftDataError),
     Finalization {
         primary: Box<Self>,
@@ -42,6 +45,7 @@ pub enum ControlHostError {
 impl ControlHostError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::PolicyData(error) => error.code(),
             Self::Draft(e) => e.code(),
             Self::Finalization { primary, .. } => primary.code(),
             Self::Native(e) => e.code(),
@@ -67,6 +71,7 @@ impl fmt::Display for ControlHostError {
 impl std::error::Error for ControlHostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::PolicyData(error) => Some(error),
             Self::Draft(error) => Some(error),
             Self::Finalization { primary, .. } => Some(primary),
             Self::Native(error) => Some(error),

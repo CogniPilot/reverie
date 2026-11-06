@@ -31,11 +31,12 @@ impl Inner {
     fn consistent_pending(&self, document: &OperationDocument) -> Result<()> {
         // Path.iterdir consumes/checked-closes the native enumeration first.
         // The count includes every entry; no sorting can move a file failure.
-        let names = reservation_control::settlement_names(&self.config)?;
+        let names = reservation_control::settlement_names(self.config()?.as_ref())?;
         for (index, name) in names.iter().enumerate() {
             reservation_history::validate_pending_position(index)?;
             if let Some(id) = reservation_history::pending_operation_id(name)? {
-                let data = reservation_control::read_settlement_pending(&self.config, &id)?;
+                let data =
+                    reservation_control::read_settlement_pending(self.config()?.as_ref(), &id)?;
                 reservation_history::validate_pending(&id, &data, document)?;
             }
         }
@@ -46,12 +47,12 @@ impl Inner {
             return Ok(false);
         }
         let id = &operation.data().id;
-        let receipt = reservation_control::read_completion_receipt(&self.config, id)?;
+        let receipt = reservation_control::read_completion_receipt(self.config()?.as_ref(), id)?;
         let completed = HistoricalCompletion::capture(operation, &receipt)?;
-        let verified = reservation_control::read_verification_receipt(&self.config, id)?;
+        let verified = reservation_control::read_verification_receipt(self.config()?.as_ref(), id)?;
         completed.assert_verified_and_plan(&verified)?;
         Ok(!reservation_control::settlement_pending_present(
-            &self.config,
+            self.config()?.as_ref(),
             id,
         )?)
     }

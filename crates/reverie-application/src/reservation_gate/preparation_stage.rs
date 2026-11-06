@@ -55,8 +55,9 @@ impl RetainedPreparation {
         }
     }
     fn stage_body(&self) -> Result<StagedPreparation> {
-        let profiles =
-            ProfileStore::open(reservation_control::profile_directory(&self.gate.config)?)?;
+        let profiles = ProfileStore::open(reservation_control::profile_directory(
+            self.gate.config()?.as_ref(),
+        )?)?;
         let result = (|| {
             let snapshot = profiles.snapshot()?;
             let profile = self.profile();

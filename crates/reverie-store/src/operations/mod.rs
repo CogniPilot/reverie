@@ -32,6 +32,11 @@ pub use terminal::TerminalJournalStamp;
 pub fn settlement_directory_names(directory: &Path) -> Result<Vec<Vec<u8>>> {
     Ok(private_fs::settlement_directory_names(directory)?)
 }
+/// Fixed preparation-policy temporary purpose, using the existing sole native
+/// CSPRNG owner. The resulting name is DATA, not directory/file custody.
+pub fn allocate_policy_temporary_name() -> Result<String> {
+    Ok(private_fs::random_name(".resource-preparing-")?)
+}
 
 /// Must be fixed by trusted service installation and retain its live owner scope
 /// and outer native-admission guard. Directory custody is never authorization.

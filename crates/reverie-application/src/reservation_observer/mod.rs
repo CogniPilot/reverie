@@ -96,6 +96,29 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    /// Only the installing broker's completed real reload uses this transition.
+    /// Captured source, deadline and row origin remain exactly the same.
+    pub(crate) fn with_applied_configuration(&self, config: EffectiveWorkerConfig) -> Self {
+        Self {
+            observer: self.observer.clone(),
+            config: ReservationConfiguration::capture(config),
+            inherited: self.inherited,
+            origin: self.origin.clone(),
+        }
+    }
+    pub(crate) fn inspect_laptop(
+        &self,
+        name: &reverie_core::worker_laptop::WorkerContainerName,
+        supplied: Option<Instant>,
+    ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
+        let end = self.deadline(supplied)?;
+        let output = self
+            .observer
+            .source
+            .inspect_laptop(name, end, &self.observer.cancellation)?;
+        self.check(end)?;
+        Ok(output)
+    }
     /// Internal operation bound update only: preserve the same captured worker
     /// data, persistent source and opaque census origin across admission phases.
     pub(crate) fn with_inherited(&self, inherited: Option<Instant>) -> Self {

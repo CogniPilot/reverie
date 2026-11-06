@@ -1,5 +1,6 @@
 //! Linux host observations and owned resources. Neither grants owner or
 //! admission authority; installing services own their actual effect boundaries.
+pub mod broker_engine;
 mod captured_client;
 pub mod device_policy;
 pub mod embeddings;
@@ -24,6 +25,7 @@ pub mod task_perf;
 pub mod terminal_pty;
 pub mod worker_child;
 pub mod worker_identity;
+pub mod worker_intent;
 pub mod worker_launch;
 pub mod worker_mounts;
 pub mod worker_storage;

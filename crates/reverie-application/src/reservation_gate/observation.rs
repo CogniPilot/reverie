@@ -30,10 +30,16 @@ impl Inner {
             .deadline
             .lock()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        Ok(active.context.with_inherited(bound))
+        let context = active
+            .context
+            .lock()
+            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+        Ok(context.with_inherited(bound))
     }
     pub(super) fn profile(&self, employee: &ProfileEmployeeId) -> Result<Option<ResourceProfile>> {
-        let store = ProfileStore::open(reservation_control::profile_directory(&self.config)?)?;
+        let store = ProfileStore::open(reservation_control::profile_directory(
+            self.config()?.as_ref(),
+        )?)?;
         let read = store.snapshot().map_err(Into::into);
         let document = finalized(read, store.close().map_err(Into::into))?;
         Ok(document.profiles().get(employee).cloned())
@@ -67,10 +73,10 @@ impl Inner {
             "RESERVATION_PROFILE_BINDING",
         )?;
         let current = resource_staging::effective_config(
-            self.config.configuration().clone(),
+            self.config()?.configuration().clone(),
             paths.session(),
         )?;
-        let projected = ResourceConfiguration::capture(self.config.configuration().clone())?
+        let projected = ResourceConfiguration::capture(self.config()?.configuration().clone())?
             .project_profile_policy(profile.resources())?;
         need(
             resource_config::same_non_memory_resources(&projected, &current),
@@ -141,7 +147,7 @@ impl Inner {
         paths: &StoragePaths,
         eid: &ProfileEmployeeId,
     ) -> Result<(ObservedRow<'a>, NativeLimitBinding)> {
-        let deployment = self.config.deployment()?;
+        let deployment = self.config()?.deployment()?;
         let name = format!("/{deployment}-agent-{}", paths.session());
         let mut targets = Vec::new();
         for row in rows.rows() {
@@ -160,7 +166,7 @@ impl Inner {
                 "RESERVATION_SOURCE_POLICY",
             )?;
             let latest = resource_staging::effective_config(
-                self.config.configuration().clone(),
+                self.config()?.configuration().clone(),
                 paths.session(),
             )?;
             need(
@@ -192,7 +198,7 @@ impl Inner {
                 .is_some_and(|latest| profiles_v1::equivalent(latest, profile)),
             "RESERVATION_PROFILE_CHANGED_DURING_OBSERVATION",
         )?;
-        reservation_control::assert_store_lock_names(&self.config, &self.binding)?;
+        reservation_control::assert_store_lock_names(self.config()?.as_ref(), &self.binding)?;
         Ok(())
     }
 }

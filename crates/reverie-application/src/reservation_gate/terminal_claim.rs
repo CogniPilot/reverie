@@ -40,7 +40,7 @@ impl Inner {
         )?;
         let binding = claim.profile.binding();
         let paths = storage_identity::storage_paths(&self.identity, binding.current_session())?;
-        let deployment = self.config.deployment()?;
+        let deployment = self.config()?.deployment()?;
         let mut source = None;
         for row in rows.rows() {
             if row.data().label_is("reverie.worker", &deployment)?

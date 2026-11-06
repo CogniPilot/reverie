@@ -31,6 +31,8 @@ pub struct RetainedPreparation {
     pub(super) preparing_attempted: bool,
     pub(super) publication: Option<super::preparation_phase::PublicationBoundary>,
     pub(super) published: bool,
+    pub(super) policy: Option<super::preparation_policy::PolicyPhase>,
+    pub(super) live: Arc<std::sync::atomic::AtomicBool>,
 }
 impl RetainedPreparation {
     pub fn operation(&self) -> &OperationView {
@@ -60,6 +62,7 @@ impl RetainedPreparation {
         self.close_owned()
     }
     pub(super) fn close_owned(&mut self) -> Result<()> {
+        self.live.store(false, std::sync::atomic::Ordering::Release);
         match self.store.take() {
             Some(store) => store.close().map_err(Into::into),
             None => Ok(()),
@@ -74,7 +77,7 @@ impl ReservationGate {
         id: &JournalId,
         digest: &JournalDigest,
     ) -> Result<RetainedPreparation> {
-        let metadata = reservation_control::read_draft(&self.inner.config, id)?;
+        let metadata = reservation_control::read_draft(self.inner.config()?.as_ref(), id)?;
         let draft = DraftRecord::capture(&metadata, id, &self.inner.scope, digest)?;
         let profile = self.inner.profile(&draft.employee()?)?;
         draft.assert_current_profile(profile.as_ref())?;
@@ -119,7 +122,7 @@ impl ReservationGate {
                 context.handle.is_some(),
                 "RESERVATION_REPLAY_HAS_NO_ACTIVE_HANDLE",
             )?;
-            let before = self.inner.config.configuration().clone();
+            let before = self.inner.config()?.configuration().clone();
             let binding = context.terminal.profile.binding();
             let paths =
                 storage_identity::storage_paths(&self.inner.identity, binding.current_session())?;
@@ -152,9 +155,16 @@ impl ReservationGate {
                     preparing_attempted: false,
                     publication: None,
                     published: false,
+                    policy: None,
+                    live: Arc::new(std::sync::atomic::AtomicBool::new(true)),
                 })
             }
         }
+    }
+}
+impl Drop for RetainedPreparation {
+    fn drop(&mut self) {
+        self.live.store(false, std::sync::atomic::Ordering::Release);
     }
 }
 impl Inner {
@@ -163,7 +173,7 @@ impl Inner {
         claim: &TerminalClaim,
         paths: &StoragePaths,
     ) -> Result<OriginalSourceBaseline> {
-        let deployment = self.config.deployment()?;
+        let deployment = self.config()?.deployment()?;
         let mut source = None;
         for row in claim.native.rows() {
             if row.data().label_is("reverie.worker", &deployment)?

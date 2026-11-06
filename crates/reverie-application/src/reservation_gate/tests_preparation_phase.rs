@@ -19,6 +19,8 @@ fn record_source_binding(setup: &Setup) {
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
     setup.tree.write(&format!("state/{sid}/storage-owner.json"),&serde_json::to_vec(&json!({"version":1,"employeeId":setup.employee().as_str(),"sessionId":sid,"owner":setup.oracle["employee"]["owner"]})).unwrap());
 }
+#[path = "tests_preparation_commit.rs"]
+mod commit_cases;
 #[test]
 fn actual_profile_stage_freezes_source_policy_after_publication_without_config_write_or_reload() {
     let setup = Setup::new();

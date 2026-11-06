@@ -76,17 +76,7 @@ impl Inner {
                 && storage_identity::storage_start_allowed(&self.identity, &paths)?,
             "RESOURCE_PREPARATION_CURRENT_EMPLOYEE_REQUIRED",
         )?;
-        let current =
-            crate::resource_staging::effective_config(self.config.configuration().clone(), &sid)?;
-        let current = checked_effective_policy(&current)?;
-        let resources = ResourcePolicy::try_new(
-            current.budget_mode(),
-            memory,
-            current.pids_limit(),
-            current.cpus(),
-            current.pool_memory_mib(),
-            current.pool_tasks_max(),
-        )?;
+        let resources = self.selected_memory_resources(&sid, memory)?;
         need(
             resources.budget_mode() == BudgetMode::Admission,
             "RESOURCE_PREPARATION_ADMISSION_REQUIRED",
@@ -101,7 +91,9 @@ impl Inner {
             self.target_is_unpublished(&target)? && self.target_is_absent(&rows, &target)?,
             "RESOURCE_PREPARATION_DRAFT_IDS",
         )?;
-        let profiles = ProfileStore::open(reservation_control::profile_directory(&self.config)?)?;
+        let profiles = ProfileStore::open(reservation_control::profile_directory(
+            self.config()?.as_ref(),
+        )?)?;
         let result = (|| {
             let snapshot = profiles.snapshot()?;
             let old = snapshot.profiles().get(&eid);
@@ -143,5 +135,22 @@ impl Inner {
             Ok(())
         })();
         finalized(result, profiles.close().map_err(Into::into))
+    }
+    fn selected_memory_resources(
+        &self,
+        sid: &ProfileSessionId,
+        memory: u32,
+    ) -> Result<ResourcePolicy> {
+        let current =
+            crate::resource_staging::effective_config(self.config()?.configuration().clone(), sid)?;
+        let current = checked_effective_policy(&current)?;
+        Ok(ResourcePolicy::try_new(
+            current.budget_mode(),
+            memory,
+            current.pids_limit(),
+            current.cpus(),
+            current.pool_memory_mib(),
+            current.pool_tasks_max(),
+        )?)
     }
 }

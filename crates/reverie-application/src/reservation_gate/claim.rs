@@ -181,7 +181,7 @@ impl Inner {
     }
     fn claim_store(self: &Arc<Self>, observer: Arc<ClaimCapacity>) -> Result<OperationStore> {
         Ok(OperationStore::open(
-            reservation_control::operation_directory(&self.config)?,
+            reservation_control::operation_directory(self.config()?.as_ref())?,
             super::guard::installed(self),
             Some(observer),
         )?)
@@ -265,6 +265,6 @@ impl Inner {
         let paths = storage_identity::storage_paths(&self.identity, target)?;
         Ok(paths.kind() == StorageKind::Session
             && paths.identity() == target.as_str()
-            && !reservation_control::session_directory_present(&self.config, target)?)
+            && !reservation_control::session_directory_present(self.config()?.as_ref(), target)?)
     }
 }

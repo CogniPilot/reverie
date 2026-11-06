@@ -17,9 +17,18 @@ struct State {
     after_storage: Option<Box<dyn FnOnce() -> std::io::Result<()> + Send>>,
     on_query: Option<Box<dyn FnMut() -> Result<()> + Send>>,
     original_runtime: Option<reverie_contracts::reservation_baseline::OriginalRuntimeTail>,
+    laptop_outputs: VecDeque<reverie_host::broker_engine::LaptopInspectOutput>,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
+    pub(crate) fn laptop_inspection(&self, stdout: &str, succeeded: bool) {
+        self.0.lock().unwrap().laptop_outputs.push_back(
+            reverie_host::broker_engine::LaptopInspectOutput {
+                stdout: stdout.as_bytes().to_vec(),
+                succeeded,
+            },
+        );
+    }
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(State {
             outputs: VecDeque::new(),
@@ -34,6 +43,7 @@ impl Fixture {
             after_storage: None,
             on_query: None,
             original_runtime: None,
+            laptop_outputs: VecDeque::new(),
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -86,6 +96,21 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn inspect_laptop(
+        &self,
+        name: &reverie_core::worker_laptop::WorkerContainerName,
+        _: Instant,
+        _: &CancellationToken,
+    ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push(format!("laptop:{}", name.as_str()));
+        state
+            .laptop_outputs
+            .pop_front()
+            .ok_or(ObserverError::Refused(
+                "OWNED_LAPTOP_INSPECTION_FIXTURE_EXHAUSTED",
+            ))
+    }
     fn query(&self, query: EngineQuery<'_>, end: Instant, _: &CancellationToken) -> Result<String> {
         let mut state = self.0.lock().unwrap();
         state.events.push(

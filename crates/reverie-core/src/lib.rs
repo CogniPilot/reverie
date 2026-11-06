@@ -24,6 +24,7 @@ pub mod rootless;
 pub mod shutdown;
 pub mod task_perf;
 pub mod worker_child;
+pub mod worker_laptop;
 pub mod worker_launch;
 pub mod worker_options;
 pub mod worker_schema;

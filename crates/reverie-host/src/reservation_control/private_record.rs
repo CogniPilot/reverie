@@ -12,6 +12,9 @@ use std::{
 pub(super) enum PrivateRecord<'a> {
     Draft(&'a DraftRecord),
     Publication(&'a PublicationIntent),
+    PolicyAttempt(&'a reverie_contracts::reservation_policy::PolicyAttemptRecord),
+    PolicyBefore(&'a reverie_core::operations::JournalId, &'a [u8]),
+    PreparedPolicy(&'a reverie_contracts::reservation_policy::PreparedPolicyRecord),
 }
 impl PrivateRecord<'_> {
     fn name(&self) -> String {
@@ -20,12 +23,30 @@ impl PrivateRecord<'_> {
             Self::Publication(value) => {
                 format!("publication-{}.json", value.operation_id().as_str())
             }
+            Self::PolicyAttempt(value) => {
+                format!("config-attempt-{}.json", value.operation_id().as_str())
+            }
+            Self::PolicyBefore(operation, _) => {
+                format!("config-before-{}.json", operation.as_str())
+            }
+            Self::PreparedPolicy(value) => {
+                format!("prepared-{}.json", value.operation_id().as_str())
+            }
         }
     }
     fn bytes(&self) -> Result<Vec<u8>> {
         match self {
             Self::Draft(value) => value.canonical_bytes().map_err(ControlHostError::Draft),
             Self::Publication(value) => Ok(value.canonical_bytes()),
+            Self::PolicyAttempt(value) => Ok(value.canonical_bytes().to_vec()),
+            Self::PolicyBefore(_, raw) => {
+                need(
+                    raw.len() <= reverie_contracts::operations_v1::MAX_BYTES,
+                    "RESOURCE_PREPARATION_CONFIG_BOUND",
+                )?;
+                Ok(raw.to_vec())
+            }
+            Self::PreparedPolicy(value) => Ok(value.canonical_bytes().to_vec()),
         }
     }
 }
