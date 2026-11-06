@@ -43,15 +43,22 @@ impl TaskPerfConfiguration {
         Self::from_value(value)
     }
     fn from_value(value: Value) -> Result<Self> {
-        let fields = object(&value).ok_or(TaskPerfError::PolicyMap)?;
+        let policies = Self::validate_value(&value)?;
+        Ok(Self { value, policies })
+    }
+    /// Borrowed pure feature validation; other worker fields are not checked.
+    pub fn validate(config: &EffectiveWorkerConfig) -> Result<TaskPerfPolicies> {
+        Self::validate_value(config.as_value())
+    }
+    fn validate_value(value: &Value) -> Result<TaskPerfPolicies> {
+        let fields = object(value).ok_or(TaskPerfError::PolicyMap)?;
         let policies = policy_entries(fields.get(&key("employeePerfPolicies")))?;
         let enabled = fields
             .get(&key("rootlessDocker"))
             .and_then(object)
             .and_then(|v| v.get(&key("enabled")))
             .is_some_and(|v| matches!(v.0, Node::Bool(true)));
-        let policies = TaskPerfPolicies::try_new(policies, enabled)?;
-        Ok(Self { value, policies })
+        Ok(TaskPerfPolicies::try_new(policies, enabled)?)
     }
     pub fn policies(&self) -> &TaskPerfPolicies {
         &self.policies

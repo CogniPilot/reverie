@@ -90,18 +90,18 @@ fn open_read(path: &Path) -> Result<File> {
     let mut parent = private_fs::open_at(
         libc::AT_FDCWD,
         OsStr::new("/"),
-        libc::O_RDONLY | libc::O_DIRECTORY,
+        libc::O_PATH | libc::O_DIRECTORY,
         0,
     )?;
     let components: Vec<_> = path.components().skip(1).collect();
     for (index, component) in components.iter().enumerate() {
-        let flags = libc::O_RDONLY
-            | libc::O_NONBLOCK
-            | if index + 1 == components.len() {
-                0
-            } else {
-                libc::O_DIRECTORY
-            };
+        // Metadata lookup needs search permission on ancestors, not directory
+        // listing permission. The actual data leaf remains a readable fd.
+        let flags = if index + 1 == components.len() {
+            libc::O_RDONLY | libc::O_NONBLOCK
+        } else {
+            libc::O_PATH | libc::O_DIRECTORY
+        };
         let next = private_fs::open_at(parent.as_raw_fd(), component.as_os_str(), flags, 0);
         let closed = private_fs::close(parent, CloseRole::Walk, path);
         parent = match (next, closed) {

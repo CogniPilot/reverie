@@ -98,6 +98,11 @@ encoding detection, while accepting literal nonfinite constants.
 The separate Linux host adapter supplies fixed package observation and current
 employee bracketing; current production Python consumers remain selected.
 
+`produce_task_perf` reuses that derivative and the existing private encoder/hash
+owners for build-only selected-profile/manifest bytes. Its declared paths are
+data, not installed custody. The Rust Nix producer adds only the original
+trailing newline and refuses output exceeding the installed artifact bound.
+
 ## GPU and soft-memory projections
 
 `device_policy::{gpu,memory}` exposes named feature validation/projection over
@@ -158,6 +163,12 @@ filesystem adapter. Twenty-three actual Python cases cover bytes, policy hashes
 and refusals; six original staging cases also retain final effective hashes.
 This feature view assumes the caller's validated worker domain; it is not the
 full worker schema validator or an authorization interface.
+
+`worker_schema::WorkerEnvelope` now checks the complete pure envelope/base and
+mount declaration unit while retaining the captured data exactly. Its separate
+feature method reuses existing map/lease policy owners. Native source custody,
+remaining optional domains and full ordered validation remain open; see the
+[source-backed ownership audit](src/worker_schema/README.md).
 
 # Subscription profiles v1 JS codec
 

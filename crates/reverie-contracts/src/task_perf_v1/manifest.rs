@@ -7,6 +7,13 @@ pub enum PerfSystem {
     Aarch64Linux,
 }
 impl PerfSystem {
+    pub fn from_name(name: &str) -> Result<Self> {
+        match name {
+            "x86_64-linux" => Ok(Self::X86_64Linux),
+            "aarch64-linux" => Ok(Self::Aarch64Linux),
+            _ => Err(TaskPerfError::System),
+        }
+    }
     pub fn from_linux_uname(system: &str, machine: &str) -> Result<Self> {
         match (system, machine) {
             ("Linux", "x86_64") => Ok(Self::X86_64Linux),
@@ -51,7 +58,7 @@ impl TaskPerfManifest {
             return Err(TaskPerfError::Manifest);
         }
         if !matches!(&fields[&key("version")].0, Node::Number(Number::Integer(version)) if version=="1")
-            || string(&fields[&key("purpose")]).as_deref() != Some("worker-task-perf-profile-v1")
+            || string(&fields[&key("purpose")]).as_deref() != Some(super::MANIFEST_PURPOSE)
             || string(&fields[&key("system")]).as_deref() != Some(observed_system.name())
         {
             return Err(TaskPerfError::Manifest);
