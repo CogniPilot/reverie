@@ -36,8 +36,11 @@ impl InstalledMemory {
     /// Bootstrap only, in the real calling process filesystem/network scope.
     /// Captures configuration/candidates once without probing or creating state.
     pub fn capture_current() -> Result<Self> {
+        Self::capture_instance(None)
+    }
+    pub fn capture_instance(instance: Option<&std::path::Path>) -> Result<Self> {
         let mut namespace = MemoryNamespace::capture_current()?;
-        let configured = MemoryConfiguration::capture()
+        let configured = MemoryConfiguration::capture_instance(instance)
             .map_err(MemoryLifecycleError::Configuration)
             .and_then(|configuration| {
                 namespace.assert_current()?;

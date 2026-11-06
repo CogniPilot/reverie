@@ -44,7 +44,12 @@ impl MemoryConfiguration {
     /// Capture once at bootstrap instead of consulting mutable process env on
     /// individual API requests. Organizational instance labels grant no scope.
     pub fn capture() -> Result<Self, InstanceLoadError> {
-        let environment = std::env::vars_os()
+        Self::capture_instance(None)
+    }
+    /// Existing CLI --instance selection is bootstrap data. Request bodies
+    /// cannot call this path or override selected models/dimensions/prefixes.
+    pub fn capture_instance(instance: Option<&Path>) -> Result<Self, InstanceLoadError> {
+        let mut environment = std::env::vars_os()
             .filter_map(|(key, value)| {
                 let key = key.to_str()?;
                 if key == "HOME" || key.starts_with("REVERIE_") {
@@ -58,6 +63,17 @@ impl MemoryConfiguration {
                 }
             })
             .collect::<BTreeMap<_, _>>();
+        if let Some(instance) = instance {
+            let instance = if instance.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                instance
+            };
+            environment.insert(
+                "REVERIE_INSTANCE_CONFIG".into(),
+                PythonText::try_new(native::python_text(instance)).expect("OS text"),
+            );
+        }
         let home = match environment.get("HOME") {
             Some(home) => home.clone(),
             None => PythonText::try_new(native::home_directory(None)?).expect("NSS codepoints"),

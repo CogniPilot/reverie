@@ -8,6 +8,38 @@ use crate::{
     python_text::{lower_codepoints, space_point, word_point},
 };
 
+/// Source splitlines/strip semantics: only column-zero '#' starts a comment.
+pub fn protected_name_lines(text: PythonTextRef<'_>) -> Vec<PythonText> {
+    let points = text.codepoints();
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut index = 0;
+    while index < points.len() {
+        if crate::python_text::linebreak_point(points[index]) {
+            push_name(&points[start..index], &mut lines);
+            if points[index] == 13 && points.get(index + 1) == Some(&10) {
+                index += 1;
+            }
+            start = index + 1;
+        }
+        index += 1;
+    }
+    if start < points.len() {
+        push_name(&points[start..], &mut lines);
+    }
+    lines
+}
+fn push_name(points: &[u32], lines: &mut Vec<PythonText>) {
+    if points.first() == Some(&35) {
+        return;
+    }
+    let line = PythonTextRef::from_codepoints(points)
+        .expect("input text checked")
+        .trimmed();
+    if !line.is_empty() {
+        lines.push(line.into_owned());
+    }
+}
 pub fn targets_private_person(text: PythonTextRef<'_>, names: &[PythonText]) -> bool {
     let text = text.codepoints();
     let names = names

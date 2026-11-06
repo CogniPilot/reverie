@@ -747,6 +747,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-memory-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-application",
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-diagnostics",
+ "reverie-host",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-routes"
 version = "0.1.0"
 dependencies = [

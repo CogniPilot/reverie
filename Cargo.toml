@@ -10,6 +10,7 @@ members = [
     "crates/reverie-routes",
     "crates/reverie-worker-client",
     "crates/reverie-worker-child",
+    "crates/reverie-memory-cli",
     "crates/reverie-diagnostics",
     "crates/xtask",
 ]
@@ -47,6 +48,7 @@ reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-application = { path = "crates/reverie-application" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.

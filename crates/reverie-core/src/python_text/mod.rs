@@ -32,6 +32,12 @@ pub(crate) fn decimal_point(value: u32) -> bool {
 fn whitespace(value: char) -> bool {
     contains(tables::WHITESPACE, value)
 }
+pub(crate) fn linebreak_point(value: u32) -> bool {
+    matches!(
+        value,
+        10 | 11 | 12 | 13 | 28 | 29 | 30 | 0x85 | 0x2028 | 0x2029
+    )
+}
 pub fn trim_text(text: &str) -> &str {
     text.trim_matches(whitespace)
 }

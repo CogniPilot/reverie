@@ -38,9 +38,9 @@ impl JournalSaveRequest {
         };
         let mut missing = Vec::new();
         for name in ["room", "turn", "tag"] {
-            if !get(name)
+            if get(name)
                 .and_then(as_text)
-                .is_some_and(|text| !text.as_python_text_ref().trimmed().is_empty())
+                .is_none_or(|text| text.as_python_text_ref().trimmed().is_empty())
             {
                 missing.push(name);
             }
@@ -53,7 +53,7 @@ impl JournalSaveRequest {
                 .and_then(as_text)
                 .is_some_and(|text| TAGS.iter().any(|tag| text.as_python_text_ref() == *tag))
         {
-            missing.push("a valid journal tag");
+            missing.push("a tag from: decision, promise, correction, preference, identity, relationship, open-question, lesson, personal-reflection");
         }
         let mut arguments = vec![
             scalar("save"),

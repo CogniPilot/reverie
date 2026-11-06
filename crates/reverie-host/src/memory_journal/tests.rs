@@ -1,0 +1,196 @@
+use super::*;
+use crate::captured_client::test_hooks::Hooks;
+use reverie_contracts::memory_cli::MemoryRequest;
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    process::Command,
+    sync::{OnceLock, atomic::AtomicUsize},
+};
+static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
+static NEXT: AtomicUsize = AtomicUsize::new(0);
+fn program() -> &'static Path {
+    PROGRAM.get_or_init(|| {
+        let path = std::env::temp_dir().join(format!("journal-child-build-{}", std::process::id()));
+        fs::create_dir(&path).unwrap();
+        let source = path.join("child.rs");
+        fs::write(
+            &source,
+            include_str!("../../tests/support/memory_journal_child.rs"),
+        )
+        .unwrap();
+        let program = path.join("compiled");
+        assert!(
+            Command::new("rustc")
+                .arg("--edition=2024")
+                .arg(source)
+                .arg("-o")
+                .arg(&program)
+                .status()
+                .unwrap()
+                .success()
+        );
+        program
+    })
+}
+struct Tree {
+    root: PathBuf,
+}
+impl Tree {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "journal-client-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        Self { root }
+    }
+    fn client(&self, mode: &str, hooks: Hooks) -> MemoryJournalClient {
+        let path = self.root.join(mode);
+        fs::hard_link(program(), &path).unwrap();
+        let environment = vec![
+            (
+                OsString::from("REVERIE_SESSION_ID"),
+                OsString::from("synthetic-session"),
+            ),
+            (OsString::from("RAW_PROBE"), OsString::from("first")),
+            (OsString::from("RAW_PROBE"), OsString::from("second")),
+            (
+                OsString::from("OWNED_JOURNAL_TRACE"),
+                self.root.join("trace").into_os_string(),
+            ),
+            (
+                OsString::from("OWNED_JOURNAL_EFFECT"),
+                self.root.join("effect").into_os_string(),
+            ),
+        ];
+        let mut command =
+            InstalledCommand::from_snapshot(path.as_os_str(), environment, self.root.clone(), true)
+                .unwrap();
+        command.hooks = hooks;
+        MemoryJournalClient::from_command(command)
+    }
+}
+impl Drop for Tree {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).unwrap();
+    }
+}
+fn request() -> JournalSaveRequest {
+    let request=MemoryRequest::decode(reverie_core::PythonTextRef::from_scalar_text(r#"{"action":"remember","private":true,"text":"Synthetic verified handoff","room":"room-1","turn":"message-9","tag":"lesson","source":"commit:synthetic"}"#)).unwrap();
+    let MemoryRequest::Remember { request } = request else {
+        unreachable!()
+    };
+    request
+}
+fn deadline() -> Instant {
+    Instant::now() + Duration::from_secs(2)
+}
+#[test]
+fn actual_public_client_argv_and_duplicate_environment_are_preserved_and_replies_stay_data() {
+    let tree = Tree::new();
+    let client = tree.client("success", Hooks::default());
+    let request = request();
+    let data = client
+        .save(&request, deadline(), &CancellationToken::new())
+        .unwrap();
+    let data: serde_json::Value = serde_json::from_slice(data.as_json()).unwrap();
+    assert_eq!(data["entryId"], "synthetic-id");
+    assert_eq!(
+        data["environment"],
+        serde_json::json!(["6669727374", "7365636f6e64"])
+    );
+    let args = data["argv"].as_array().unwrap();
+    assert_eq!(args[0], "6167656e74");
+    assert_eq!(args[1], "6a6f75726e616c");
+    assert_eq!(args[2], "73617665");
+    assert_eq!(args.last().unwrap(), "2d2d6a736f6e");
+    let entries = client
+        .recall(
+            &MetadataText::from_scalar_text(" query "),
+            None,
+            deadline(),
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(entries.as_json()).unwrap(),
+        serde_json::json!([{"entryId":"synthetic-id"}])
+    );
+    assert!(!client.has_unconfirmed_save());
+    client.close(deadline()).unwrap();
+}
+#[test]
+fn malformed_and_nonzero_save_results_never_confirm_or_automatically_retry() {
+    for mode in ["nonzero", "empty", "badutf8"] {
+        let tree = Tree::new();
+        let client = tree.client(mode, Hooks::default());
+        let error = client
+            .save(&request(), deadline(), &CancellationToken::new())
+            .err()
+            .unwrap();
+        assert!(error.save_is_unconfirmed());
+        assert!(client.has_unconfirmed_save());
+        assert!(tree.root.join("effect").is_file());
+        assert_eq!(
+            client
+                .save(&request(), deadline(), &CancellationToken::new())
+                .err()
+                .unwrap()
+                .fault(),
+            JournalClientFault::UnknownSave
+        );
+        client.close(deadline()).unwrap();
+        assert_eq!(
+            fs::read_to_string(tree.root.join("trace")).unwrap(),
+            "started\n"
+        );
+    }
+}
+#[test]
+fn combined_pipe_bound_and_deadline_keep_real_owned_cleanup() {
+    for mode in ["dual", "hold"] {
+        let tree = Tree::new();
+        let client = tree.client(mode, Hooks::default());
+        let limit = if mode == "hold" {
+            Instant::now() + Duration::from_millis(60)
+        } else {
+            deadline()
+        };
+        let error = client
+            .save(&request(), limit, &CancellationToken::new())
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.fault(),
+            if mode == "dual" {
+                JournalClientFault::OutputBound
+            } else {
+                JournalClientFault::Deadline
+            }
+        );
+        assert!(error.save_is_unconfirmed());
+        client.close(deadline()).unwrap();
+    }
+}
+#[test]
+fn actual_pipe_close_failure_remains_uncertain_and_fences_the_client() {
+    let tree = Tree::new();
+    let hooks = Hooks::default();
+    hooks.close_failed.store(true, Ordering::SeqCst);
+    let client = tree.client("success", hooks);
+    let error = client
+        .save(&request(), deadline(), &CancellationToken::new())
+        .err()
+        .unwrap();
+    assert!(error.process_is_unconfirmed());
+    assert!(error.save_is_unconfirmed());
+    assert!(client.close(deadline()).is_err());
+    assert_eq!(
+        fs::read_to_string(tree.root.join("trace")).unwrap(),
+        "started\n"
+    );
+}
