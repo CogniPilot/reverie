@@ -16,6 +16,7 @@ import {
 } from '../../subscription-profiles.js';
 import { SubscriptionUsageReader } from '../../subscription-usage.js';
 import type { RouteChannel } from '../../rust-routes/channel.js';
+import { publishOutcome } from '../../rust-routes/publish.js';
 import { SUBSCRIPTION_PROFILES } from '../../rust-routes/frames.js';
 import { getDataDir } from '../../config/instance.js';
 import { homedir } from 'node:os';
@@ -194,9 +195,8 @@ const FORWARDED_ENV = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'XDG_DATA_HOME'] as co
 /**
  * The moved GET: the Rust handler reads the profiles, and this route keeps everything only TS owns.
  * `getDataDir()` runs where the TS route calls it, before any await; the CLI-registry modes are read
- * only when the handler asks, after its read found profiles, as the TS route reads them. A reply is
- * published only if its generation is still live, the response can still be written and the caller
- * is still authorized; the TS route itself is never run as a fallback.
+ * only when the handler asks, after its read found profiles, as the TS route reads them. Publication
+ * is `publishOutcome`'s one tick.
  */
 async function forwardSubscriptionProfiles(
   channel: RouteChannel,
@@ -221,24 +221,7 @@ async function forwardSubscriptionProfiles(
       step = await ticket.answer(Buffer.from(JSON.stringify(modes)));
     }
     if (step.kind !== 'done') throw new Error('the Rust route handler asked twice');
-    // One synchronous tick: generation, then liveness, then authorization, then publication.
-    const outcome = step.outcome;
-    const current = outcome.kind === 'response' && channel.isCurrent(outcome.generation);
-    if (reply.sent || reply.raw.destroyed || reply.raw.writableEnded || req.raw.socket?.destroyed) {
-      reply.hijack();
-      return undefined;
-    }
-    if (!authorized()) return reply.code(403).send(forbidden());
-    if (current && outcome.kind === 'response')
-      return reply.code(outcome.status).type(RUST_CONTENT_TYPE).send(outcome.body);
-    return reply
-      .code(503)
-      .send(
-        createErrorResponse(
-          ApiErrorCode.OPERATION_FAILED,
-          `The Rust route handler could not answer (request ${outcome.generation}-${outcome.id}). Nothing was changed.`
-        )
-      );
+    return publishOutcome(channel, step.outcome, req, reply, authorized, forbidden, RUST_CONTENT_TYPE);
   } catch (error) {
     ticket.abandon();
     throw error;

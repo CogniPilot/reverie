@@ -3,6 +3,7 @@
 //! u64 generation | u64 id` (18 bytes, no padding), then the kind's payload; `length` counts
 //! everything after itself. A reader checks `length` against its direction after 4 bytes and
 //! against the kind after 6, so no payload buffer is allocated for a frame it would refuse.
+use crate::settings_v1;
 use crate::subscription_profiles_v1::{self as profiles, Provider};
 use std::fmt;
 use std::io::{self, Read};
@@ -15,22 +16,66 @@ pub const MAX_REQUEST_JSON_BYTES: usize = profiles::MAX_REQUEST_BYTES;
 pub const MAX_OBSERVED_JSON_BYTES: usize = 64 << 10;
 pub const MAX_REFUSAL_CODE_BYTES: usize = 64;
 
-/// A route the handler serves, with the statuses its responses may carry. The content type is
-/// fixed per route, so a response frame carries no headers.
+/// A route the handler serves, with the statuses its responses may carry and how they are typed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Route {
     pub key: &'static str,
     pub statuses: &'static [u16],
-    pub content_type: &'static str,
+    pub reply: Reply,
+}
+
+/// How a route's responses carry their content type. A frame carries no headers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reply {
+    /// `response` frames only, all with this content type.
+    Fixed(&'static str),
+    /// `typed_response` frames only, each with one of these media.
+    Typed(&'static [Media]),
+}
+
+/// The finite media a `typed_response` may name.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Media {
+    ApplicationJsonUtf8,
+    TextPlainUtf8,
+}
+
+const MEDIA: [Media; 2] = [Media::ApplicationJsonUtf8, Media::TextPlainUtf8];
+
+impl Media {
+    pub fn byte(self) -> u8 {
+        match self {
+            Self::ApplicationJsonUtf8 => 1,
+            Self::TextPlainUtf8 => 2,
+        }
+    }
+    fn from_byte(byte: u8) -> Option<Self> {
+        MEDIA.into_iter().find(|media| media.byte() == byte)
+    }
+    pub fn content_type(self) -> &'static str {
+        match self {
+            Self::ApplicationJsonUtf8 => "application/json; charset=utf-8",
+            Self::TextPlainUtf8 => "text/plain; charset=utf-8",
+        }
+    }
 }
 
 pub const SUBSCRIPTION_PROFILES: &str = "GET /api/subscription-profiles";
+pub const SETTINGS: &str = "GET /api/settings";
 
-pub const ROUTES: &[Route] = &[Route {
-    key: SUBSCRIPTION_PROFILES,
-    statuses: &[200, 500],
-    content_type: profiles::CONTENT_TYPE,
-}];
+pub const ROUTES: &[Route] = &[
+    Route {
+        key: SUBSCRIPTION_PROFILES,
+        statuses: &[200, 500],
+        reply: Reply::Fixed(profiles::CONTENT_TYPE),
+    },
+    Route {
+        key: SETTINGS,
+        // {200, 400, 500} and every ErrorStatus value; a test checks it against that fixture.
+        statuses: &[200, 400, 401, 403, 404, 409, 422, 429, 500],
+        reply: Reply::Typed(&[Media::ApplicationJsonUtf8, Media::TextPlainUtf8]),
+    },
+];
 
 pub fn route(key: &str) -> Option<&'static Route> {
     ROUTES.iter().find(|route| route.key == key)
@@ -53,15 +98,17 @@ pub enum Kind {
     Cancel,
     Observe,
     Observed,
+    TypedResponse,
 }
 
-const KINDS: [Kind; 6] = [
+const KINDS: [Kind; 7] = [
     Kind::Request,
     Kind::Response,
     Kind::Refusal,
     Kind::Cancel,
     Kind::Observe,
     Kind::Observed,
+    Kind::TypedResponse,
 ];
 
 impl Kind {
@@ -73,6 +120,7 @@ impl Kind {
             Self::Cancel => 4,
             Self::Observe => 5,
             Self::Observed => 6,
+            Self::TypedResponse => 7,
         }
     }
     fn from_byte(byte: u8) -> Option<Self> {
@@ -81,7 +129,9 @@ impl Kind {
     pub fn direction(self) -> Direction {
         match self {
             Self::Request | Self::Cancel | Self::Observed => Direction::ToHandler,
-            Self::Response | Self::Refusal | Self::Observe => Direction::ToFront,
+            Self::Response | Self::Refusal | Self::Observe | Self::TypedResponse => {
+                Direction::ToFront
+            }
         }
     }
     /// The inclusive `length` range of this kind.
@@ -93,6 +143,7 @@ impl Kind {
             Self::Cancel => (0, 0),
             Self::Observe => (3, 4),
             Self::Observed => (2, 1 + MAX_OBSERVED_JSON_BYTES),
+            Self::TypedResponse => (3, 3 + settings_v1::MAX_RESPONSE_BYTES),
         };
         (HEADER_BYTES + payload.0, HEADER_BYTES + payload.1)
     }
@@ -161,6 +212,11 @@ pub enum Body {
         observation: Observation,
         json: Vec<u8>,
     },
+    TypedResponse {
+        media: Media,
+        status: u16,
+        body: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,6 +266,7 @@ impl Body {
             Self::Cancel => Kind::Cancel,
             Self::Observe { .. } => Kind::Observe,
             Self::Observed { .. } => Kind::Observed,
+            Self::TypedResponse { .. } => Kind::TypedResponse,
         }
     }
     fn payload(&self) -> Vec<u8> {
@@ -231,6 +288,11 @@ impl Body {
                 .chain(providers.iter().map(|provider| provider_byte(*provider)))
                 .collect(),
             Self::Observed { observation, json } => [&[observation.byte()][..], json].concat(),
+            Self::TypedResponse {
+                media,
+                status,
+                body,
+            } => [&[media.byte()][..], &status.to_be_bytes(), body].concat(),
         }
     }
 }
@@ -377,6 +439,16 @@ fn body(kind: Kind, payload: &[u8]) -> Option<Body> {
             Body::Observed {
                 observation: Observation::from_byte(observation)?,
                 json: json.to_vec(),
+            }
+        }
+        Kind::TypedResponse => {
+            let (&media, rest) = payload.split_first()?;
+            let (status, body) = rest.split_at_checked(2)?;
+            // The front checks the media and status against the route it dispatched.
+            Body::TypedResponse {
+                media: Media::from_byte(media)?,
+                status: u16::from_be_bytes(status.try_into().ok()?),
+                body: body.to_vec(),
             }
         }
     })

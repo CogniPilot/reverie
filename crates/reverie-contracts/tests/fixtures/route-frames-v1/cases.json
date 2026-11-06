@@ -1,5 +1,5 @@
 {
- "spec": "route-frames-v1 (D1b spec r2)",
+ "spec": "route-frames-v1 (D1b spec r2; typed responses from D2 spec r3)",
  "routes": [
   {
    "key": "GET /api/subscription-profiles",
@@ -8,6 +8,24 @@
     500
    ],
    "content_type": "application/json; charset=utf-8"
+  },
+  {
+   "key": "GET /api/settings",
+   "statuses": [
+    200,
+    400,
+    401,
+    403,
+    404,
+    409,
+    422,
+    429,
+    500
+   ],
+   "media": [
+    "application/json; charset=utf-8",
+    "text/plain; charset=utf-8"
+   ]
   }
  ],
  "cases": [
@@ -296,6 +314,62 @@
    "direction": "to_handler",
    "hex": "00000015010600000000000000010000000000000001027b7d",
    "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "typed-response-json",
+   "direction": "to_front",
+   "hex": "0000002f0107000000000000000100000000000000010100c87b2273756363657373223a747275652c2264617461223a7b7d7d",
+   "expect": {
+    "kind": "typed_response",
+    "generation": "1",
+    "id": "1",
+    "media": 1,
+    "status": 200,
+    "body_hex": "7b2273756363657373223a747275652c2264617461223a7b7d7d"
+   }
+  },
+  {
+   "name": "smallest-typed-response",
+   "direction": "to_front",
+   "hex": "000000150107000000000000000300000000000000040200c8",
+   "expect": {
+    "kind": "typed_response",
+    "generation": "3",
+    "id": "4",
+    "media": 2,
+    "status": 200,
+    "body_hex": ""
+   }
+  },
+  {
+   "name": "typed-media-zero",
+   "direction": "to_front",
+   "hex": "000000160107000000000000000100000000000000010000c878",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "typed-media-three",
+   "direction": "to_front",
+   "hex": "000000160107000000000000000100000000000000010300c878",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "typed-media-255",
+   "direction": "to_front",
+   "hex": "00000015010700000000000000010000000000000001ff00c8",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "typed-too-short",
+   "direction": "to_front",
+   "hex": "000000140107000000000000000100000000000000010100",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "typed-wrong-direction",
+   "direction": "to_handler",
+   "hex": "000000150107000000000000000100000000000000010100c8",
+   "error": "FRAME_KIND"
   }
  ],
  "boundaries": {
@@ -335,6 +409,18 @@
    "direction": "to_handler",
    "kind": 6,
    "json_len": 65537,
+   "error": "FRAME_LENGTH"
+  },
+  "typed_response_max": {
+   "direction": "to_front",
+   "kind": 7,
+   "body_len": 8388608,
+   "expect_ok": true
+  },
+  "typed_response_max_plus_one": {
+   "direction": "to_front",
+   "kind": 7,
+   "body_len": 8388609,
    "error": "FRAME_LENGTH"
   }
  }

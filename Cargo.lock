@@ -290,6 +290,7 @@ version = "0.1.0"
 dependencies = [
  "reverie-contracts",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

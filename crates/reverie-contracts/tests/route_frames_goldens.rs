@@ -2,7 +2,7 @@
 //! (apps/web/test/rust-routes/frames.test.ts) reads the same file, so both readers agree on every
 //! accepted frame and refuse every malformed one with the same code.
 use reverie_contracts::route_frames_v1::{
-    Body, Direction, Frame, HEADER_BYTES, Observation, ROUTES, VERSION, read_frame,
+    Body, Direction, Frame, HEADER_BYTES, Media, Observation, ROUTES, Reply, VERSION, read_frame,
 };
 use reverie_contracts::subscription_profiles_v1::Provider;
 use serde_json::Value;
@@ -65,6 +65,15 @@ fn expected(expect: &Value) -> Frame {
             observation: Observation::SubscriptionModes,
             json: hex(&text(expect, "json_hex")),
         },
+        "typed_response" => Body::TypedResponse {
+            media: match expect["media"].as_u64().expect("media") {
+                1 => Media::ApplicationJsonUtf8,
+                2 => Media::TextPlainUtf8,
+                other => panic!("unknown media {other}"),
+            },
+            status: expect["status"].as_u64().expect("status") as u16,
+            body: hex(&text(expect, "body_hex")),
+        },
         other => panic!("unknown kind {other}"),
     };
     // Decimal strings: a JSON number cannot carry every u64 through every reader.
@@ -117,6 +126,14 @@ fn boundary(kind: u8, spec: &Value) -> Vec<u8> {
             );
             payload
         }
+        7 => {
+            let mut payload = vec![1, 0, 200];
+            payload.resize(
+                3 + spec["body_len"].as_u64().expect("body_len") as usize,
+                b' ',
+            );
+            payload
+        }
         6 => {
             let mut payload = vec![1];
             payload.resize(
@@ -156,25 +173,41 @@ fn each_kind_maximum_is_accepted_and_one_more_byte_is_not() {
 #[test]
 fn the_route_table_is_the_shared_one() {
     let cases = cases();
-    let shared: Vec<(String, Vec<u64>, String)> = cases["routes"]
+    let shared: Vec<(String, Vec<u64>, Vec<String>)> = cases["routes"]
         .as_array()
         .expect("routes")
         .iter()
         .map(|route| {
             let statuses = route["statuses"].as_array().expect("statuses");
+            let types = match route.get("media") {
+                Some(media) => media
+                    .as_array()
+                    .expect("media")
+                    .iter()
+                    .map(|media| media.as_str().expect("media").to_string())
+                    .collect(),
+                None => vec![text(route, "content_type")],
+            };
             (
                 text(route, "key"),
                 statuses
                     .iter()
                     .map(|status| status.as_u64().expect("status"))
                     .collect(),
-                text(route, "content_type"),
+                types,
             )
         })
         .collect();
-    let table: Vec<(String, Vec<u64>, String)> = ROUTES
+    let table: Vec<(String, Vec<u64>, Vec<String>)> = ROUTES
         .iter()
         .map(|route| {
+            let types = match route.reply {
+                Reply::Fixed(content_type) => vec![content_type.to_string()],
+                Reply::Typed(media) => media
+                    .iter()
+                    .map(|media| media.content_type().to_string())
+                    .collect(),
+            };
             (
                 route.key.to_string(),
                 route
@@ -182,7 +215,7 @@ fn the_route_table_is_the_shared_one() {
                     .iter()
                     .map(|status| u64::from(*status))
                     .collect(),
-                route.content_type.to_string(),
+                types,
             )
         })
         .collect();
