@@ -1,5 +1,14 @@
 # Named compatibility codecs
 
+`operations_v1` preserves the closed resource-operation journal, compact sorted
+ASCII bytes and named request/observation/operation/scope fingerprints. It uses
+the existing private JSON/encoding owners, rejects duplicate fields, JSON floats,
+nonfinite constants, signed integer tokens (including `-0`), unsafe counters and
+noncanonical decimal-string uint64 values. Python byte encoding detection is
+retained. Ninety-one actual reference cases cover successful states, bounds,
+capacity arithmetic, exact bytes/hashes and refusal codes. These data and hashes
+confer neither owner approval nor native effect or settlement authority.
+
 `profiles_v1` implements the closed
 `reverie-employee-resource-profiles-v1` document and single-profile encoding used
 by `python/reverie/employee_resource_profiles.py` at the frozen migration base.
@@ -170,6 +179,10 @@ feature method reuses existing map/lease policy owners. Native source custody,
 remaining optional domains and full ordered validation remain open; see the
 [source-backed ownership audit](src/worker_schema/README.md).
 
+`rootless` ports the rootless option/profile/syscall, image-label and subordinate
+grant data rules, sharing mount and fixed perf owners. Its [compatibility audit](src/rootless/README.md)
+records parsing quirks, native observations and the remaining engine boundary.
+
 # Subscription profiles v1 JS codec
 
 `subscription_profiles_v1` is the forwarded request and the exact response bytes of the TS route
@@ -200,4 +213,3 @@ allowed statuses, so the handler sets no headers. An observation request names a
 handler needs after its own read, such as the CLI-registry modes, so TS keeps its original read order.
 Both readers decode the shared cases in `tests/fixtures/route-frames-v1/cases.json`, which were
 written independently of either encoder.
-

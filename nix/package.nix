@@ -9,6 +9,7 @@ let
   # Use the original snapshot for the selected files so read-only flake check
   # evaluation never has to materialize the intermediate filtered root first.
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
+  rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -149,7 +150,7 @@ let
       npm test -- test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
         test/rust-routes/settings-fixtures.test.ts
       npm test -- test/rust-front/adapter.test.ts test/rust-front/fd-inheritance.test.ts test/rust-front/server-front.test.ts \
-        test/rust-front/front-child.test.ts
+        test/rust-front/front-child.test.ts test/rust-front/receipts.test.ts
       npm test -- test/board-permissions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
@@ -424,6 +425,7 @@ let
       find "$out/lib/reverie/node_modules" \( -path '*/node-pty/build/Makefile' -o -path '*/node-pty/*.mk' \) -delete
       makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
         --prefix PATH : ${lib.getBin pkgs.util-linux}/bin \
+        --set-default REVERIE_RUST_ROUTE_HANDLER ${rustRouteHandler}/bin/reverie-route-handler \
         --add-flags "$out/lib/reverie/dist/index.js"
       runHook postInstall
     '';
@@ -600,4 +602,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest laptopTools rustRouteHandler; }

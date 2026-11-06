@@ -64,11 +64,7 @@ impl TaskPerfConfiguration {
         &self.policies
     }
     pub fn has_task_perf_marker(&self) -> bool {
-        object(&self.value)
-            .and_then(|fields| fields.get(&key(MARKER)))
-            .and_then(string)
-            .as_deref()
-            == Some(TaskPerfPolicy::TaskV1.name())
+        marker_matches(&self.value)
     }
     /// Apply only a selected current employee's fixed artifact data. The host
     /// brackets observation with real current-employee reads independently.
@@ -120,31 +116,62 @@ impl TaskPerfConfiguration {
         artifact: &TaskPerfArtifactData,
         profile: &TaskPerfProfile,
     ) -> Result<()> {
-        let fields = object(&self.value).ok_or(TaskPerfError::Marker)?;
-        if !self.has_task_perf_marker() {
-            return Err(TaskPerfError::Marker);
-        }
-        let docker = fields
-            .get(&key("rootlessDocker"))
-            .and_then(object)
-            .ok_or(TaskPerfError::Marker)?;
-        let fixed = artifact.manifest();
-        if docker
-            .get(&key("seccompProfile"))
+        recognize_value(&self.value, artifact, profile)
+    }
+}
+/// Recognize already captured effective data without revalidating unrelated
+/// employee policy maps. The original rootless enabled() has this exact scope.
+pub fn recognize_configuration(
+    config: &EffectiveWorkerConfig,
+    artifact: &TaskPerfArtifactData,
+    profile: &TaskPerfProfile,
+) -> Result<()> {
+    recognize_value(config.as_value(), artifact, profile)
+}
+fn recognize_value(
+    value: &Value,
+    artifact: &TaskPerfArtifactData,
+    profile: &TaskPerfProfile,
+) -> Result<()> {
+    let fields = object(value).ok_or(TaskPerfError::Marker)?;
+    if !marker_matches(value) {
+        return Err(TaskPerfError::Marker);
+    }
+    let docker = fields
+        .get(&key("rootlessDocker"))
+        .and_then(object)
+        .ok_or(TaskPerfError::Marker)?;
+    let fixed = artifact.manifest();
+    if docker
+        .get(&key("seccompProfile"))
+        .and_then(string)
+        .as_deref()
+        != Some(fixed.profile())
+        || docker
+            .get(&key("seccompSha256"))
             .and_then(string)
             .as_deref()
-            != Some(fixed.profile())
-            || docker
-                .get(&key("seccompSha256"))
-                .and_then(string)
-                .as_deref()
-                != Some(fixed.profile_sha256())
-            || !profile.equivalent(artifact.selected())
-        {
-            return Err(TaskPerfError::Derivative);
-        }
-        Ok(())
+            != Some(fixed.profile_sha256())
+        || !profile.equivalent(artifact.selected())
+    {
+        return Err(TaskPerfError::Derivative);
     }
+    Ok(())
+}
+/// Check captured selection marker data before observing a fixed artifact.
+pub fn validate_selection_marker(config: &EffectiveWorkerConfig) -> Result<()> {
+    if marker_matches(config.as_value()) {
+        Ok(())
+    } else {
+        Err(TaskPerfError::Marker)
+    }
+}
+fn marker_matches(value: &Value) -> bool {
+    object(value)
+        .and_then(|fields| fields.get(&key(MARKER)))
+        .and_then(string)
+        .as_deref()
+        == Some(TaskPerfPolicy::TaskV1.name())
 }
 fn policy_entries(value: Option<&Value>) -> Result<BTreeMap<ProfileEmployeeId, TaskPerfPolicy>> {
     let Some(value) = value else {

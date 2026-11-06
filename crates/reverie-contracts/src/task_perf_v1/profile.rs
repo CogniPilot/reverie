@@ -8,6 +8,11 @@ use sha2::{Digest, Sha256};
 /// It neither supplies kernel syscall permission nor validates all Docker rules.
 pub struct TaskPerfProfile(Value);
 impl TaskPerfProfile {
+    /// Already decoded normal seccomp data may use last-key-wins JSON. This
+    /// does not qualify a fixed artifact or relax its separate strict decoder.
+    pub(crate) fn from_rootless_value(value: Value) -> Self {
+        Self(value)
+    }
     pub fn decode(raw: &[u8]) -> Result<Self> {
         Ok(Self(bounded_json(raw)?))
     }
@@ -44,6 +49,9 @@ impl TaskPerfProfile {
         rules.push(rule);
         Ok(Self(derived))
     }
+}
+pub(crate) fn is_task_perf_rule(value: &Value) -> Result<bool> {
+    Ok(value.python_eq(&rule_value()?))
 }
 fn rule_value() -> Result<Value> {
     let rule = TaskPerfPolicy::TaskV1.rule();

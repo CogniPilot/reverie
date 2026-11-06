@@ -432,6 +432,7 @@ dependencies = [
  "libc",
  "reverie-contracts",
  "reverie-core",
+ "serde_json",
 ]
 
 [[package]]
