@@ -119,3 +119,10 @@ remain the responsibility of their respective consumers.
 cwd/terminal/account-namespace rules, derived worker/container references and
 ASCII employee hostname labels. The native client reuses the key owner without
 inheriting broker value/frame bounds. These values are data, never peer grants.
+
+`PythonText` and `PythonTextRef` share one checked Python-codepoint invariant
+for owned and borrowed data, including NUL and lone surrogates. Trimming uses
+the existing frozen Python whitespace facts; slicing counts codepoints. No OS
+encoding, replacement, normalization, serde or authority is implied. Existing
+metadata text wraps the owned value; named memory inputs may delegate to the
+borrowed view without duplicating text rules.
