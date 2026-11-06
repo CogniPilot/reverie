@@ -96,6 +96,14 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    #[cfg(test)]
+    pub(crate) fn same_source_for_test(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.origin, &other.origin)
+            && Arc::ptr_eq(&self.observer.source, &other.observer.source)
+    }
+    pub(crate) fn configuration(&self) -> &EffectiveWorkerConfig {
+        self.config.configuration()
+    }
     /// Only the installing broker's completed real reload uses this transition.
     /// Captured source, deadline and row origin remain exactly the same.
     pub(crate) fn with_applied_configuration(&self, config: EffectiveWorkerConfig) -> Self {

@@ -72,6 +72,14 @@ impl Inner {
             deadline: Mutex::new(end),
             policy_ack: Mutex::new(None),
         });
+        #[cfg(test)]
+        {
+            let pause = self.entry_capture_pause.lock().unwrap().take();
+            if let Some(pause) = pause {
+                let captured = active.context.lock().unwrap().with_inherited(end);
+                pause.wait(captured);
+            }
+        }
         let admission = entry.activate(active)?;
         let entered = (|| {
             self.guard(None)?;
@@ -221,6 +229,23 @@ impl Entry {
                         .is_some_and(|entry| Arc::ptr_eq(&entry.token, &self.token)),
                 "RESERVATION_ADMISSION_LOCK_REQUIRED",
             )?;
+            // A real image-only loader may publish while this entry is opening
+            // its already selected native lock. Synchronize only that exact
+            // Python-equality projection; never copy arbitrary newer policy.
+            let current = self.gate.installed.snapshot()?;
+            let mut context = active
+                .context
+                .lock()
+                .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+            need(
+                reverie_contracts::worker_config::image_only_equivalent(
+                    context.configuration(),
+                    current.configuration(),
+                ),
+                "WORKER_ENTRY_CONFIGURATION_CHANGED",
+            )?;
+            *context = context.with_applied_configuration(current.configuration().clone());
+            drop(context);
             state.entering = None;
             state.active = Some(active.clone());
             Ok(())
