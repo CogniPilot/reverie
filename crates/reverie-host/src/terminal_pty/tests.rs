@@ -1,5 +1,34 @@
 use super::*;
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+/// CLOEXEC does not prevent a different concurrently forking test from holding
+/// a slave until its exec. Open these hangup-oracle PTYs only after this exact
+/// single-test subprocess has exec'd, without weakening the EIO assertion.
+fn isolated_hangup_case(name: &str) -> bool {
+    const CASE: &str = "REVERIE_OWNED_PTY_TEST_CASE";
+    if std::env::var_os(CASE).as_deref() == Some(std::ffi::OsStr::new(name)) {
+        return false;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            &format!("terminal_pty::tests::{name}"),
+            "--test-threads=1",
+        ])
+        .env(CASE, name)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "isolated {name}: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed;"),
+        "exact owning test must execute once"
+    );
+    true
+}
 fn dimensions(cols: u16, rows: u16) -> TerminalSize {
     TerminalSize::try_new(cols, rows).unwrap()
 }
@@ -77,6 +106,11 @@ fn raw_binary_io_and_resizing_preserve_all_bytes_without_echo_or_translation() {
 }
 #[test]
 fn checked_slave_close_is_idempotent_and_master_reports_hangup_without_fabricating_bytes() {
+    if isolated_hangup_case(
+        "checked_slave_close_is_idempotent_and_master_reports_hangup_without_fabricating_bytes",
+    ) {
+        return;
+    }
     let mut pair = OwnedPty::open(dimensions(80, 24)).unwrap();
     pair.close_slave().unwrap();
     pair.close_slave().unwrap();
@@ -92,6 +126,9 @@ fn checked_slave_close_is_idempotent_and_master_reports_hangup_without_fabricati
 }
 #[test]
 fn actual_slave_close_failure_latches_uncertainty_and_is_never_retried() {
+    if isolated_hangup_case("actual_slave_close_failure_latches_uncertainty_and_is_never_retried") {
+        return;
+    }
     let mut pair = OwnedPty::open(dimensions(80, 24)).unwrap();
     let guard = test_hooks::faults(false, false, true);
     let failure = pair.close_slave().unwrap_err();
