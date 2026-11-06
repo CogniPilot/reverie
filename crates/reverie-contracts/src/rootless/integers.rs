@@ -52,6 +52,16 @@ pub(crate) fn parse_python_digits(
     let value = string_integer(points).ok()?;
     reverie_core::decimal::UnsignedInteger::parse(value.nonnegative()?.as_str())
 }
+/// Shared Python int(str) scan; each named caller keeps its own sign/bounds.
+pub(crate) fn parse_python_integer(
+    points: &[u32],
+) -> Option<(bool, reverie_core::decimal::UnsignedInteger)> {
+    let value = string_integer(points).ok()?;
+    Some((
+        value.negative,
+        reverie_core::decimal::UnsignedInteger::parse(value.magnitude.as_str())?,
+    ))
+}
 pub(super) fn is_digit(point: u32) -> bool {
     decimal(point).is_some()
         || [

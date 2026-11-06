@@ -31,6 +31,9 @@ impl ReservationGate {
     }
 }
 impl OrdinaryLaunchAdmission {
+    pub(crate) fn belongs_to(&self, gate: &ReservationGate) -> bool {
+        Arc::ptr_eq(&self.gate, &gate.inner)
+    }
     pub fn session(&self) -> &ProfileSessionId {
         &self.session
     }

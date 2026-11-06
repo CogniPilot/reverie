@@ -199,12 +199,20 @@ native guard; checked body failure preserves the primary and close failures.
 Closing this local scope does not prove global resource release or confer
 API, container, protected-start or lifecycle permission.
 
-This is the reservation-specific creation phase. The canonical broker must
-also complete the distinct running-peer/cgroup census, outside-pool ceiling,
-maximum-worker and candidate-swap checks before calling it; the legacy
-no-reservations pool/headroom branch remains separate. Real storage waiting,
-owned Nix/laptop/Office/viewer registration and final settlement remain required
-before selecting the complete worker service. The 10 actual Python method
-vectors use synthetic downstream capacity facts; the Rust controls additionally
-own real admission/journal locks and durable claims, and claim no live engine
-or installed-runtime qualification.
+`InstallingBroker::check_creation_budget` composes the distinct running-peer
+names/registry union, optional inspect, ownership/running/PID/cgroup checks,
+outside-pool ceilings, maximum workers and candidate swap before that explicit
+gate phase. The absent-control branch retains the original pool/headroom rule;
+present explicit control never falls back. `check_pool` retains the separate
+activation/task-headroom phase. Both use the actual installing snapshot and
+same runtime; neither registers a laptop or grants effects. Candidate swap is
+read from the existing finite memory projection: the worker loader rejects
+owner-authored `laptopMemoryPolicy` input.
+
+Fixtures cover 55 actual legacy budget, 23 pool, 12 swap and two paired native
+lookup-priority cases. These use synthetic engine results/owned files; separate
+controls exercise the real held gate and controlled supervised Rust clients.
+Actual storage waiting, owned Nix/laptop/Office/viewer registration, fresh
+canonical invocation points and final settlement remain required before
+selecting the complete worker service. No live company/engine or installed
+runtime qualification is inferred from these tests.

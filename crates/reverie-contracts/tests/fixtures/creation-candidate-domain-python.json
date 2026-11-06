@@ -1,0 +1,10 @@
+{
+  "scope": "Actual full worker.validate_config with owned synthetic filesystem: base accepted, owner-authored laptopMemoryPolicy rejected before features. Candidate arithmetic is therefore only generated finite policy data. No effect/engine/host-root qualification.",
+  "baseValidated": true,
+  "extraRejected": {
+    "type": "ValueError",
+    "message": "Unsupported worker configuration"
+  },
+  "configText": "{\"apiSocketRoot\": \"$ROOT/office\", \"budgetMode\": \"admission\", \"cgroupParent\": \"reverie-workers.slice\", \"companyFile\": \"$ROOT/company.json\", \"companyRoot\": \"$ROOT/company\", \"cpus\": 0, \"deployment\": \"test\", \"gid\": 100, \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"maintenanceSessions\": [], \"maxWorkers\": 4, \"memoryMiB\": 512, \"mounts\": [{\"destination\": \"/workspace\", \"readOnly\": false, \"source\": \"$ROOT/work\"}], \"pidsLimit\": 128, \"poolMemoryMiB\": 4096, \"poolTasksMax\": 1024, \"scratchRoot\": \"$ROOT/scratch\", \"serverContainer\": \"test-console\", \"socket\": \"/run/rwv-broker.sock\", \"stateRoot\": \"$ROOT/state\", \"uid\": 1000, \"version\": 1, \"employeeMemoryPolicies\": {\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\": {\"swapMiB\": 0}}, \"laptopSwapPoolMiB\": 1024, \"laptopMemoryPolicy\": {\"swapMiB\": NaN}}",
+  "sourceSha256": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7"
+}

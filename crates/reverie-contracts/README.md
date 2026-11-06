@@ -274,3 +274,14 @@ Python characters; actual SQL text encoding remains a separate binding step.
 The original document fields/order, arbitrary historical names and unknown
 initial-self extensions remain data. No generic JSON mutation API, raw SQL,
 ballot approval boolean or owner/execution permit is exposed.
+
+`creation_budget` owns the legacy creation-peer JSON, raw cgroup-prefix,
+pool-counter and first-MemTotal DATA phases. Normal engine JSON retains the
+shared last-wins/4300/nonfinite parser, while RAM/total checks occur at their
+original phases. Python bool/float numeric equality is preserved for the
+outside-pool total; the later swap declaration check remains strict. Pool
+activation and creation use distinct legacy rules, sharing the existing
+Python integer syntax/table owner without imposing reservation counter bounds.
+The memory-policy owner reads only its generated finite projected swap field;
+the full worker input's closed header forbids supplying that internal field.
+None of these readers constructs native identity, effects or authority.

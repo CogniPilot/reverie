@@ -287,3 +287,13 @@ UTF-8 text first, first matching session's vacation/desired-running intent, then
 strict 1 MiB plan metadata only for detached sessions. Current-row selection
 precedes UID lookup and fallback I/O; no storage/generation/owner check replaces
 that separate policy. These are current intent facts, never start permission.
+
+`creation_budget` supplies the original running-peer names and optional inspect
+queries on the same captured client, with 4 MiB/20 s policy and no public argv
+or engine recapture. Its kernel adapter reads only the fixed worker-pool and
+proc paths, deriving PID text from parsed positive observation data. Existing
+bounded read/checked-close primitives are shared; deadline checks bracket reads
+and do not promise that kernel I/O always completes within a wall-clock bound.
+The separate activation and creation-pool readers retain their different
+integer/positivity and read-order rules. These snapshots provide neither
+process/cgroup ownership nor authorization, a start permit or global release.

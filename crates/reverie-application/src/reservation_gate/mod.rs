@@ -134,6 +134,9 @@ impl ReservationGate {
     pub(crate) fn installed_snapshot(&self) -> Result<Arc<ValidatedWorkerSnapshot>> {
         self.inner.installed.snapshot()
     }
+    pub(crate) fn laptop_lifecycle(&self) -> Result<crate::installing_broker::LaptopLifecycle<'_>> {
+        self.inner.installed.lifecycle()
+    }
     /// Fixed readonly lookup with actual admission, canonical journal locking,
     /// checked store close and the admission's final native/image guard.
     pub fn inspect(&self, key: &JournalId) -> Result<Option<OperationView>> {

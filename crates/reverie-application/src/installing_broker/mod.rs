@@ -1,12 +1,14 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+mod creation;
 mod storage;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
     reservation_observer::NativeObserver,
     worker_validation::ValidatedWorkerSnapshot,
 };
+pub use creation::CreationBudgetError;
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
