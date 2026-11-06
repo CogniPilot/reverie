@@ -248,6 +248,7 @@ dependencies = [
  "reverie-store",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -287,6 +288,14 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "toml",
+]
+
+[[package]]
+name = "reverie-routes"
+version = "0.1.0"
+dependencies = [
+ "reverie-contracts",
+ "serde_json",
 ]
 
 [[package]]

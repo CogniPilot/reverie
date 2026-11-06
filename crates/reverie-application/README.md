@@ -59,3 +59,30 @@ validation; embedded captured configurations retain no file binding. The actual
 reader and recorded path share Python's lexical `Path` spelling, including
 relative and '..' components and the exact double-slash anchor. This is source
 data, not configuration custody or a permission grant.
+
+`tests/installed_policy.rs` is a separate, ignored qualification for all four
+selected features together: current-employee GPU, the real fixed perf
+derivative, memory and the immutable lease peer mount data. Its Python oracle
+used the actual existing identity and artifact verifiers without stubs. Only
+`worker_perf.__file__` was bound to the installed manifest's sibling location,
+matching the existing package convention. The portable fixture substitutes the
+owned root, UID and immutable artifact paths; exact output and policy bytes and
+both hashes must match. Artifact hashes and the qualified system remain explicit
+fixture requirements, so a different build needs its own reviewed oracle.
+
+The test is ignored by the ordinary gate because it requires separately built
+real artifacts. Both artifact paths are compile-time bindings; the peer binding
+exists only in this test. With `PERF_MANIFEST` and `PEER_BINARY` set to the
+qualified immutable outputs and `TMPDIR` set to a short, owned temporary path:
+
+```console
+nix develop --command env TMPDIR="$TMPDIR" \
+  REVERIE_FIXED_TASK_PERF_MANIFEST="$PERF_MANIFEST" \
+  REVERIE_QUALIFICATION_PEER_BINARY="$PEER_BINARY" \
+  cargo test --locked -p reverie-application --test installed_policy \
+  -- --ignored --exact selected_gpu_perf_memory_and_lease_match_actual_python_bytes_and_hashes
+```
+
+This only reads the immutable sources and owned synthetic company metadata.
+It never executes the peer, invokes an engine, creates a socket, mounts anything,
+changes a profile or qualifies an owner permission or live kernel effect.

@@ -7,6 +7,7 @@ members = [
     "crates/reverie-store",
     "crates/reverie-host",
     "crates/reverie-application",
+    "crates/reverie-routes",
     "crates/reverie-worker-client",
     "crates/xtask",
 ]

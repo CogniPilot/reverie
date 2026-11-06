@@ -145,3 +145,8 @@ fn metadata_hooks_do_not_change_existing_hash_data_or_default_byte_mode() {
         Some(Error::DuplicateKey)
     );
 }
+// The old general bytes purpose has no production consumer after fixed perf
+// readers adopt metadata hooks. Keep its isolation controls local to tests.
+fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode(&text::python_bytes(raw)?)
+}
