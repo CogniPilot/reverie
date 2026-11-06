@@ -1,0 +1,41 @@
+{
+  "schema": "reverie-rust-runtime-inventory-v1",
+  "sourceRevision": "e440ba4db600b9e982ad8b6323f65230d4813f1b",
+  "rows": 65,
+  "columns": [
+    "kind",
+    "method",
+    "path",
+    "source",
+    "lane",
+    "owner",
+    "note",
+    "gui_callers",
+    "implemented",
+    "reviewed",
+    "package_selected",
+    "end_to_end_accepted",
+    "evidence",
+    "coverage_unit"
+  ],
+  "meaning": {
+    "implemented": "Whole named entry point has Rust replacement, not just a prerequisite library.",
+    "reviewed": "Independent source review of that replacement is recorded.",
+    "package_selected": "Repository packaging selects the Rust replacement. This does not prove any live installation updated.",
+    "end_to_end_accepted": "Supported installation and relevant full owner/agent workflow accepted on exact release artifacts. Protocol/library tests alone do not fill this column."
+  },
+  "scope": [
+    "All16 declared Python console entry points.",
+    "Selected installed/generated broker, runtime/model, optional OPS/cleanup variants and extensionless autoenv entries audited directly in pinned Nix source.",
+    "Already merged Rust entry points, retaining a distinction between package selection and installed acceptance.",
+    "All eight top-level broker request kinds J/L/C/G/T/M/Y/Q are recorded separately from the native client implementation."
+  ],
+  "limits": [
+    "Starting runtime supplement to the application surface inventory, not an exhaustive transitive Python/runtime/build/owner-tool audit.",
+    "Duplicate external commands in distinct package variants retain one coverage_unit for deduplication. Protocol and command rows are different units; do not calculate a whole-port percentage by summing heterogeneous rows.",
+    "Declared console entries and optional packages need active/opt-in/retired caller disposition before obsolete code is ported or retired.",
+    "UNASSIGNED is an ownership gap, not a grant or a new assignment.",
+    "Mutable WIP is not marked implemented; readiness must bind exact reviewed artifacts.",
+    "Source lines belong to sourceRevision and must be revalidated when that revision changes."
+  ]
+}
