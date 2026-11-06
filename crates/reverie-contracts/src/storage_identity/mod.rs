@@ -58,20 +58,26 @@ type Result<T> = std::result::Result<T, IdentityDataError>;
 
 /// Python text, preserving Unicode codepoints and lone surrogates without loss.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct MetadataText(Text);
+pub struct MetadataText(reverie_core::PythonText);
 impl MetadataText {
-    pub(crate) fn from_text(value: Text) -> Self {
+    pub fn from_python_text(value: reverie_core::PythonText) -> Self {
         Self(value)
     }
+    pub(crate) fn from_text(value: Text) -> Self {
+        Self(
+            reverie_core::PythonText::try_new(value.0)
+                .expect("JSON parser produces Python codepoints"),
+        )
+    }
     pub fn from_scalar_text(value: &str) -> Self {
-        Self(Text(value.chars().map(u32::from).collect()))
+        Self(reverie_core::PythonText::from_scalar_text(value))
     }
     pub fn codepoints(&self) -> &[u32] {
-        &self.0.0
+        self.0.codepoints()
     }
     pub fn scalar_text(&self) -> Option<String> {
         self.0
-            .0
+            .codepoints()
             .iter()
             .map(|&value| char::from_u32(value))
             .collect()
@@ -118,7 +124,7 @@ fn field<'a>(value: &'a Object, key: &str) -> Option<&'a Value> {
 }
 fn text(value: Option<&Value>) -> Option<MetadataText> {
     if let Some(Value(Node::String(value))) = value {
-        Some(MetadataText(value.clone()))
+        Some(MetadataText::from_text(value.clone()))
     } else {
         None
     }
@@ -127,7 +133,7 @@ fn owner(value: Option<&Value>) -> Result<Option<MetadataText>> {
     match value {
         None | Some(Value(Node::Null)) => Ok(None),
         Some(Value(Node::String(value))) if value.0.len() <= 200 => {
-            Ok(Some(MetadataText(value.clone())))
+            Ok(Some(MetadataText::from_text(value.clone())))
         }
         _ => Err(IdentityDataError::Owner),
     }
@@ -135,9 +141,9 @@ fn owner(value: Option<&Value>) -> Result<Option<MetadataText>> {
 fn owner_matches(value: Option<&Value>, owner: &Option<MetadataText>) -> bool {
     match value {
         None | Some(Value(Node::Null)) => owner.is_none(),
-        Some(value) => owner
-            .as_ref()
-            .is_some_and(|expected| value.python_eq(&Value(Node::String(expected.0.clone())))),
+        Some(value) => owner.as_ref().is_some_and(|expected| {
+            value.python_eq(&Value(Node::String(Text(expected.codepoints().to_vec()))))
+        }),
     }
 }
 fn is_one(value: Option<&Value>) -> bool {

@@ -1,11 +1,17 @@
 //! Shared frozen Python text facts for scalar and lossless codepoint consumers.
 //! No host/HTTP dependencies, normalization, identity or authority is supplied.
+mod borrowed;
 mod decimal;
 mod lower_table;
+mod points;
 mod printable;
 mod tables;
+pub use borrowed::PythonTextRef;
+pub use points::{PythonText, PythonTextError};
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod value_tests;
 fn contains(ranges: &[(u32, u32)], value: char) -> bool {
     contains_point(ranges, u32::from(value))
 }

@@ -18,6 +18,7 @@ pub mod worker_launch;
 pub mod worker_options;
 pub mod worker_schema;
 
+pub use python_text::{PythonText, PythonTextError, PythonTextRef};
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
