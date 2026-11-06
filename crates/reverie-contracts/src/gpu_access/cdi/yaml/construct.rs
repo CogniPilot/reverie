@@ -72,6 +72,12 @@ fn enter(
             schedule(children, steps);
         }
         RawValue::Map { .. } => {
+            // This one SafeConstructor matches node.value itself (a mapping
+            // list), rather than its construct_scalar result, and therefore
+            // refuses a MappingNode even with the special '=' value child.
+            if kind == "timestamp" {
+                return Err(GpuDataError::CdiDocument);
+            }
             // SafeConstructor.construct_scalar accepts a MappingNode only via
             // its special '='-tagged value. Unselected children of that special
             // representation are not constructed by Python either.

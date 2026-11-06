@@ -41,3 +41,9 @@ Existing Python C dispatch/canonical J callsites and the standalone GPU prefligh
 CLI remain migration debt until the actual native broker selects this service.
 This cohort does not replace the separate full preflight CLI or claim retirement
 of the old broker, installed image tooling, live device qualification or launch.
+
+Actual admission precedes the purpose-private lifecycle mutex wait, matching the
+existing creation-budget caller. That wait retains the original operation end;
+it cannot release another thread's guard or renew the budget. Publication still
+holds lifecycle before Gate state/context/current/binding. The canonical cold
+caller must not hold lifecycle while waiting for admission.

@@ -1,5 +1,8 @@
 use super::*;
 pub(super) fn valid(value: &str) -> bool {
+    // Python re's final '$' also matches before ONE terminal LF. Two final
+    // linefeeds still refuse; the fixed expression remains otherwise exact.
+    let value = value.strip_suffix('\n').unwrap_or(value);
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     let expression=PATTERN.get_or_init(||Regex::new(r"\A([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:[Tt]|[ \t]+)([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]*)?(?:[ \t]*(Z|([-+])([0-9]{1,2})(?::([0-9]{2}))?))?)?\z").expect("fixed timestamp grammar"));
     let Some(fields) = expression.captures(value) else {

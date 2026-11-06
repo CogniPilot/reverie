@@ -55,7 +55,7 @@ impl<P: Platform> Service<'_, P> {
         retained: &mut Option<Arc<TransitionRecord>>,
     ) -> Result<()> {
         let admission = self.gate.inner.admit(Self::bounds(end))?;
-        let lifecycle = match self.gate.inner.installed.lifecycle() {
+        let lifecycle = match self.gate.inner.installed.gpu_lifecycle(end) {
             Ok(lifecycle) => lifecycle,
             Err(error) => return admission.conclude(Err(error)),
         };

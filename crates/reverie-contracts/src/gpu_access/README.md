@@ -22,3 +22,11 @@ remain distinct. No acceptance mode or second JSON tokenizer is added. Grammar,
 number/text/schema and side-effect compatibility do not promise dynamic CPython
 or PyYAML interpreter recursion/stack exhaustion. Captured graphs use flat nodes
 and iterative destruction rather than adding a hidden depth cap.
+
+The decoded UTF16 encoding BOM stays present until the one source-index-zero
+skip; a second U+FEFF remains literal data. Noninitial BOM markers are also
+refused in original-invalid tag/anchor/directive syntax, including unconstructed
+children. Reservations include expanded tag/directive text to avoid collisions.
+Explicit integer dispatch uses the original underscore-stripped spelling before
+Unicode conversion by the chosen int(base), and timestamp handling preserves the
+original mapping refusal and single-terminal-LF anchor behavior.

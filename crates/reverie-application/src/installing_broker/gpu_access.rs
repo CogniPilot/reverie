@@ -20,6 +20,36 @@ impl InstallingBroker {
     }
 }
 impl InstalledWorker {
+    /// GPU retains its already admitted original operation end. Ordinary
+    /// creation also takes admission before lifecycle; never reverse that
+    /// ordering or renew a budget while contending with its real owner.
+    pub(crate) fn gpu_lifecycle(
+        &self,
+        end: std::time::Instant,
+    ) -> Result<LaptopLifecycle<'_>, GateError> {
+        loop {
+            if std::time::Instant::now() >= end {
+                return Err(GateError::Refused("GPU_APPLY_DEADLINE"));
+            }
+            let guard = match self.laptops.try_lock() {
+                Ok(guard) => guard,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err(GateError::Refused("WORKER_BROKER_LIFECYCLE_UNAVAILABLE"));
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(
+                        end.saturating_duration_since(std::time::Instant::now())
+                            .min(std::time::Duration::from_millis(10)),
+                    );
+                    continue;
+                }
+            };
+            if std::time::Instant::now() >= end {
+                return Err(GateError::Refused("GPU_APPLY_DEADLINE"));
+            }
+            return Ok(LaptopLifecycle { owner: self, guard });
+        }
+    }
     pub(crate) fn publish_gpu(
         &self,
         proof: crate::reservation_gate::PublishedGpu,

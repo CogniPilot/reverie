@@ -429,3 +429,58 @@ fn post_info_replacement_is_refused_before_any_pending_or_configuration_publicat
     );
     assert!(setup.gate.inner.failed_gpu.lock().unwrap().is_empty());
 }
+#[test]
+fn original_operation_end_bounds_actual_lifecycle_contention_without_releasing_another_owner() {
+    crate::test_process::owning_case!(
+        original_operation_end_bounds_actual_lifecycle_contention_without_releasing_another_owner
+    );
+    let setup = Setup::new(false);
+    let row = setup.queued(true);
+    let installed = setup.gate.inner.installed.clone();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let guard = installed.lifecycle().unwrap();
+        entered_tx.send(()).unwrap();
+        let explicitly_released = release_rx.recv_timeout(Duration::from_secs(8)).is_ok();
+        drop(guard);
+        explicitly_released
+    });
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let started = Instant::now();
+    let original_end = started + Duration::from_secs(5);
+    let result = setup.service().apply(&employee(), &row, original_end);
+    let finished = Instant::now();
+    let _ = release_tx.send(());
+    let released = holder.join().unwrap();
+    assert!(
+        finished.duration_since(started) < Duration::from_secs(7),
+        "wait must use original five-second end, not wait for actual holder's eight-second control release"
+    );
+    assert!(
+        released,
+        "GPU cannot release another thread's real lifecycle guard"
+    );
+    assert_eq!(result.unwrap_err().code(), "GPU_APPLY_DEADLINE");
+    assert!(
+        setup
+            .fixture
+            .deadlines()
+            .iter()
+            .all(|end| *end == original_end)
+    );
+    assert_eq!(
+        fs::read(setup.tree.root.join("worker.json")).unwrap(),
+        setup.tree.raw
+    );
+    assert!(
+        !setup
+            .tree
+            .root
+            .join("state/resource-reservation-control.pending")
+            .exists()
+    );
+    assert!(setup.gate.inner.failed_gpu.lock().unwrap().is_empty());
+    assert!(setup.gate.inner.state.lock().unwrap().active.is_none());
+    setup.service().apply(&employee(), &row, end()).unwrap();
+}

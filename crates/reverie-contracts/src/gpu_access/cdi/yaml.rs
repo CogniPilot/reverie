@@ -28,7 +28,11 @@ pub(super) fn decode(raw: &[u8]) -> Result<CdiDocument> {
     for event in parser {
         match event.map_err(|_| GpuDataError::CdiDocument)?.data {
             EventData::Alias { .. } => return Err(GpuDataError::CdiDocument),
-            EventData::DocumentStart { .. } => {
+            EventData::DocumentStart { tag_directives, .. } => {
+                for tag in tag_directives {
+                    restore.syntax(Some(&tag.handle))?;
+                    restore.syntax(Some(&tag.prefix))?;
+                }
                 documents += 1;
                 if documents > 1 {
                     return Err(GpuDataError::CdiDocument);
@@ -41,6 +45,8 @@ pub(super) fn decode(raw: &[u8]) -> Result<CdiDocument> {
                 style,
                 ..
             } => {
+                restore.syntax(anchor.as_deref())?;
+                restore.syntax(tag.as_deref())?;
                 anchor_unique(anchor, &mut anchors)?;
                 append(
                     RawValue::Scalar { value, tag, style },
@@ -50,6 +56,8 @@ pub(super) fn decode(raw: &[u8]) -> Result<CdiDocument> {
                 )?;
             }
             EventData::SequenceStart { anchor, tag, .. } => {
+                restore.syntax(anchor.as_deref())?;
+                restore.syntax(tag.as_deref())?;
                 anchor_unique(anchor, &mut anchors)?;
                 let index = append(
                     RawValue::List {
@@ -63,6 +71,8 @@ pub(super) fn decode(raw: &[u8]) -> Result<CdiDocument> {
                 stack.push(index);
             }
             EventData::MappingStart { anchor, tag, .. } => {
+                restore.syntax(anchor.as_deref())?;
+                restore.syntax(tag.as_deref())?;
                 anchor_unique(anchor, &mut anchors)?;
                 let index = append(
                     RawValue::Map {

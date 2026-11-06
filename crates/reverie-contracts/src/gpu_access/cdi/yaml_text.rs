@@ -3,9 +3,11 @@
 //! or escapes; literal backslash spellings are restored separately from parsed
 //! escapes. No replacement-character normalization is performed.
 use super::*;
+mod bom;
 mod version;
 pub(super) struct Restoration {
     values: BTreeMap<u32, (String, u32)>,
+    bom: Option<u32>,
 }
 pub(super) fn input(raw: &[u8]) -> Result<(String, Restoration)> {
     let mut raw = decode(raw)?;
@@ -43,17 +45,34 @@ pub(super) fn input(raw: &[u8]) -> Result<(String, Restoration)> {
     let mut values = BTreeMap::new();
     let mut replacements = BTreeMap::new();
     for (spelling, point) in spellings {
-        while reserved.contains(&next) || matches!(next, 0xffffe | 0xfffff | 0x10fffe | 0x10ffff) {
-            next += 1;
-        }
-        if next > 0x10fffd {
-            return Err(GpuDataError::CdiDocument);
-        }
-        replacements.insert(spelling.clone(), next);
-        values.insert(next, (spelling, point));
-        next += 1;
+        let marker = marker(&mut next, &reserved)?;
+        replacements.insert(spelling.clone(), marker);
+        values.insert(marker, (spelling, point));
     }
-    Ok((transform(&raw, &replacements), Restoration { values }))
+    let bom = if bom::has_data(&raw) {
+        let marker = marker(&mut next, &reserved)?;
+        values.insert(marker, ("\u{feff}".to_owned(), 0xfeff));
+        Some(marker)
+    } else {
+        None
+    };
+    let text = transform(&raw, &replacements);
+    let text = bom.map_or_else(
+        || text.clone(),
+        |point| bom::mask(&text, char::from_u32(point).expect("checked marker")),
+    );
+    Ok((text, Restoration { values, bom }))
+}
+fn marker(next: &mut u32, reserved: &BTreeSet<u32>) -> Result<u32> {
+    while reserved.contains(next) || matches!(*next, 0xffffe | 0xfffff | 0x10fffe | 0x10ffff) {
+        *next += 1;
+    }
+    if *next > 0x10fffd {
+        return Err(GpuDataError::CdiDocument);
+    }
+    let marker = *next;
+    *next += 1;
+    Ok(marker)
 }
 enum ControlError {
     Grammar(libyaml_safer::Error),
@@ -68,6 +87,7 @@ fn reserve_control(
         raw,
         &spellings.keys().map(|key| (key.clone(), 65)).collect(),
     );
+    let control = bom::mask(&control, 'Q');
     let mut scanner = libyaml_safer::Scanner::new();
     scanner.set_input(control.as_bytes());
     for token in scanner {
@@ -79,13 +99,34 @@ fn reserve_control(
     let mut parser = libyaml_safer::Parser::new();
     parser.set_input(control.as_bytes());
     for event in parser {
-        if let libyaml_safer::EventData::Scalar { value, .. } =
-            event.map_err(ControlError::Grammar)?.data
-        {
-            reserve(&value, reserved);
-        }
+        reserve_event(event.map_err(ControlError::Grammar)?.data, reserved);
     }
     Ok(())
+}
+fn reserve_event(event: libyaml_safer::EventData, reserved: &mut BTreeSet<u32>) {
+    use libyaml_safer::EventData;
+    match event {
+        EventData::Scalar {
+            value, tag, anchor, ..
+        } => {
+            reserve(&value, reserved);
+            reserve_options(tag, anchor, reserved);
+        }
+        EventData::SequenceStart { tag, anchor, .. }
+        | EventData::MappingStart { tag, anchor, .. } => reserve_options(tag, anchor, reserved),
+        EventData::DocumentStart { tag_directives, .. } => {
+            for tag in tag_directives {
+                reserve(&tag.handle, reserved);
+                reserve(&tag.prefix, reserved);
+            }
+        }
+        _ => {}
+    }
+}
+fn reserve_options(tag: Option<String>, anchor: Option<String>, reserved: &mut BTreeSet<u32>) {
+    for value in [tag, anchor].into_iter().flatten() {
+        reserve(&value, reserved);
+    }
 }
 fn reserve(raw: &str, reserved: &mut BTreeSet<u32>) {
     reserved.extend(raw.chars().map(u32::from));
@@ -135,9 +176,12 @@ fn decode(raw: &[u8]) -> Result<String> {
                 u16::from_be_bytes([word[0], word[1]])
             }
         });
-        char::decode_utf16(words)
+        // PyYAML's explicit endian decoder keeps the encoding BOM as its
+        // initial U+FEFF. Its scanner skips exactly that one source character.
+        let decoded = char::decode_utf16(words)
             .collect::<std::result::Result<String, _>>()
-            .map_err(|_| GpuDataError::CdiDocument)
+            .map_err(|_| GpuDataError::CdiDocument)?;
+        Ok(format!("\u{feff}{decoded}"))
     } else {
         String::from_utf8(raw.to_vec()).map_err(|_| GpuDataError::CdiDocument)
     }
