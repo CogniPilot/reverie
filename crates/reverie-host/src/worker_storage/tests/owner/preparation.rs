@@ -129,6 +129,10 @@ fn consumed_unconfirmed_owner_refuses_every_fixed_preparation_without_new_effect
         "WORKER_STORAGE_CLOSE_UNCONFIRMED"
     );
     assert_eq!(
+        owner.write_scratch_label().unwrap_err().code(),
+        "WORKER_STORAGE_CLOSE_UNCONFIRMED"
+    );
+    assert_eq!(
         owner.validate_storage().unwrap_err().code(),
         "WORKER_STORAGE_CLOSE_UNCONFIRMED"
     );
@@ -136,4 +140,36 @@ fn consumed_unconfirmed_owner_refuses_every_fixed_preparation_without_new_effect
     super::super::compatibility::snapshot(&tree.0, &tree.0, &mut after).unwrap();
     assert_eq!(before, after);
     runtime.close(end()).unwrap();
+}
+
+#[test]
+fn held_employee_label_uses_actual_identity_and_refuses_lock_custody_drift_before_writing() {
+    let tree = Tree::new();
+    let runtime = runtime(&tree);
+    let source = selected(&tree);
+    let mut owner = runtime
+        .resolve_storage(&source, &session(A))
+        .unwrap()
+        .acquire()
+        .unwrap();
+    owner.prepare_storage().unwrap();
+    owner.prepare_temporary().unwrap();
+    let disposition = owner.write_scratch_label().unwrap();
+    let label = owner.paths().scratch().join(".reverie-drive.json");
+    let bytes = stdfs::read(&label).unwrap();
+    let value: Value = serde_json::from_slice(&bytes).unwrap();
+    let lock = lock_paths(&source, owner.paths()).unwrap();
+    stdfs::set_permissions(lock.lock(), stdfs::Permissions::from_mode(0o644)).unwrap();
+    stdfs::remove_file(&label).unwrap();
+    let refused = owner.write_scratch_label();
+    let unchanged = !label.exists();
+    stdfs::set_permissions(lock.lock(), stdfs::Permissions::from_mode(0o600)).unwrap();
+    owner.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    assert_eq!(disposition, LabelDisposition::Created);
+    assert_eq!(value["ownerEmployeeId"], E);
+    assert!(value.get("ownerSessionId").is_none());
+    assert!(value["createdAt"].as_f64().unwrap().is_finite());
+    assert!(refused.is_err());
+    assert!(unchanged);
 }

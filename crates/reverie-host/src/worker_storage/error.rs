@@ -23,6 +23,7 @@ pub enum StorageFault {
     TemporaryChanged,
     InstructionCustody,
     InstructionChanged,
+    ScratchLabelChanged,
 }
 #[derive(Debug)]
 pub enum StorageError {
@@ -32,6 +33,7 @@ pub enum StorageError {
     Data(IdentityDataError),
     Settings(ResourceConfigError),
     Instructions(reverie_contracts::worker_storage::InstructionDataError),
+    LabelClock(reverie_contracts::worker_storage::ScratchLabelClockError),
     Entropy(reverie_store::StoreError),
     PathText(reverie_contracts::reservation_engine::EngineDataError),
     Finalization {
@@ -66,6 +68,7 @@ impl std::error::Error for StorageError {
             Self::Data(error) => Some(error),
             Self::Settings(error) => Some(error),
             Self::Instructions(error) => Some(error),
+            Self::LabelClock(error) => Some(error),
             Self::Entropy(error) => Some(error),
             Self::PathText(error) => Some(error),
             Self::Finalization { primary, .. } | Self::PartialEffects(primary) => Some(primary),

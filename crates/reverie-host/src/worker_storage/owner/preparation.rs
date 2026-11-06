@@ -4,6 +4,17 @@ use super::*;
 use crate::worker_storage::{error::partial, temporary};
 
 impl LaunchStorage {
+    pub fn write_scratch_label(&mut self) -> OwnerResult<crate::worker_storage::LabelDisposition> {
+        if let Ownership::Held(lease) = &mut self.ownership {
+            return lease
+                .write_scratch_label()
+                .map_err(StorageOwnerError::Storage);
+        }
+        let config = self.legacy_configuration()?;
+        let mut effects = false;
+        let result = crate::worker_storage::label::write(&config, &self.paths, &mut effects);
+        partial(result, effects).map_err(StorageOwnerError::Storage)
+    }
     fn legacy_configuration(&self) -> OwnerResult<Configuration> {
         match &self.ownership {
             Ownership::UnleasedLegacy => {

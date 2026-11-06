@@ -1,9 +1,11 @@
 //! Storage publication and related-lineage DATA. No filesystem/lease authority.
 mod instructions;
+mod label;
 use crate::legacy_json::{Node, Number, Text, Value, truthy};
 use crate::storage_identity::{IdentityDataError, Metadata, MetadataText};
 use crate::worker_config::encode_data;
 pub use instructions::{InstructionDataError, storage_instruction_bytes};
+pub use label::{ScratchLabelClockError, scratch_label_bytes};
 use reverie_core::ids::{ProfileEmployeeId, ProfileSessionId};
 use std::collections::{BTreeMap, BTreeSet};
 

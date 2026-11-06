@@ -154,3 +154,20 @@ phase order and reuse short circuits: storage preparation first; prior laptop
 inspection/disposition; Nix guard and effective preparation; then temporary,
 alias and instruction writes only on the actual non-reuse path. These resource
 methods neither prove that disposition nor authorize a container/start effect.
+
+`write_scratch_label` writes only the fixed descriptive `.reverie-drive.json`
+through the actual storage owner and pinned scratch directory. Six actual Python
+AST vectors preserve the original owner field, purpose, field order, spaced
+JSON and floating timestamp bytes. This label remains descriptive DATA, never
+an ownership/authorization proof. Held leases recheck their lock custody; a
+consumed-unconfirmed owner refuses before filesystem effects.
+
+One approved compatibility correction protects occupied leaves: the old
+`Path.exists`/`write_text` sequence followed a dangling symlink and created its
+foreign target. The new writer preserves every pre-existing entry without
+following it and creates only an absent fixed leaf with exclusive nofollow
+open. A concurrent creator wins without being overwritten. Write, observed
+replacement and checked-close failures retain partial-effect evidence and never
+unlink by name, even after an earlier inode check. These checks do not establish
+exclusive guest writer custody. The separate launch record/runtime metadata
+writers are not changed by this correction.
