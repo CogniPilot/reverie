@@ -35,6 +35,7 @@ pub mod worker_laptop;
 pub mod worker_launch;
 pub mod worker_options;
 pub mod worker_schema;
+pub mod worker_wire;
 
 pub use python_text::{PythonText, PythonTextError, PythonTextRef};
 use std::fmt;
