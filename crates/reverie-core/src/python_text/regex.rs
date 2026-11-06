@@ -52,5 +52,18 @@ pub fn named_character(name: &str) -> Option<u32> {
             return None;
         }
     }
-    unicode_names2::character(name).map(u32::from)
+    let point = unicode_names2::character(name)?;
+    // The pinned lookup's canonical-name path compares every canonical
+    // fragment but omits its final empty-remainder check. Its alias path is
+    // an exact phf key lookup. Refuse only the erroneous canonical prefix
+    // plus extra input; exact canonical spellings and exact aliases survive.
+    if let Some(canonical) = unicode_names2::name(point) {
+        let canonical = canonical.to_string();
+        if bytes.len() > canonical.len()
+            && bytes[..canonical.len()].eq_ignore_ascii_case(canonical.as_bytes())
+        {
+            return None;
+        }
+    }
+    Some(u32::from(point))
 }

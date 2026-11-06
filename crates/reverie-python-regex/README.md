@@ -24,7 +24,9 @@ this change adds no new timeout or restricted syntax policy.
 Core owns all frozen Python 3.13 / Unicode 15.1 character classes, simple case
 maps, identifiers, regex case additions and name lookup. `unicode_names2` is
 pinned to 1.2.2 (its packaged Unicode 15.1 data), with the exact CPython CJK name
-lexical check. Its code generator is a build dependency, not an interpreter.
+lexical check and a canonical-name remainder guard closing the pinned lookup's
+suffix/hash-collision acceptance bug. Exact aliases retain their original
+lookup. Its code generator is a build dependency, not an interpreter.
 See [third-party fork provenance](../../vendor/README.md).
 
 Tests retain actual CPython source oracles for 425 original matcher cases,
@@ -34,6 +36,13 @@ cases and 18 deep-pattern witnesses. Core checks every codepoint against the
 frozen word/space/decimal/simple-case oracles. The broader qualification also
 compared 288,299 canonical/alias/case/name inputs against actual Python lookup
 and compilation; no live instance patterns or private data were inventoried.
+Independent review added 6,499 advanced grammar/matcher cases and 1,620
+nested/zero-width repeat siblings. These retain the original lazy-repeat
+infinite-loop witness and exercise the corrected active-repeat/last-position
+ownership through the opaque API. Sixteen actual canonical-name suffix/hash
+collisions retain their original invalid acceptance witnesses; the corrected
+product also matches all 800,000 invalid suffix controls alongside the complete
+288,299 canonical/alias/case corpus.
 
 This source library does not publish a memory context, authenticate a caller,
 select a runtime, migrate data or qualify the actual guest installation closure.

@@ -13,7 +13,7 @@ third-party review scope, not a blanket exemption for Reverie's compiler,
 Core facts or Host consumer; all first-party crates inherit workspace lints.
 The first-party compiler exposes only opaque checked compiled patterns.
 
-The matcher fork makes three purpose corrections:
+The matcher fork makes these purpose corrections:
 
 * Unicode classes/simple lower/upper call the one frozen Core owner, replacing
   newer upstream Unicode facts without copying tables into the matcher.
@@ -22,6 +22,11 @@ The matcher fork makes three purpose corrections:
   assertions and successful branches/greedy-one/lazy-one/generic-lazy repeats.
   Actual CPython cases demonstrate both false positives and false negatives
   before these changes; frame restoration on failure remains unchanged.
+* Lazy repeats select their actual active repeat context, including when an
+  inner repeat remains on the stack while its tail resumes the outer repeat.
+  Their body-return path restores the previous zero-width cursor guard as
+  CPython's `LAST_PTR_PUSH/POP` does. This closes a measured infinite loop when
+  an optional captured item backtracks; no pattern rejection or timeout is added.
 
 WTF8 encoding and iteration source is unchanged. Only its three unused Unicode
 trim APIs have an explicit `unicode-trim` feature gate. That feature is off in

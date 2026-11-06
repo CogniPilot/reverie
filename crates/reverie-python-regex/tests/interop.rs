@@ -111,3 +111,37 @@ fn valid_deep_grammar_is_iterative_beyond_python_interpreter_recursion_limit() {
         assert!(!pattern.is_match(PythonText::from_scalar_text("b").as_text_ref()));
     }
 }
+#[test]
+fn canonical_name_hash_collisions_never_accept_an_extra_suffix() {
+    let rows: Value =
+        serde_json::from_str(include_str!("fixtures/cpython313-name-suffix-r1.json")).unwrap();
+    for row in rows["rows"].as_array().unwrap() {
+        let name = row["name"].as_str().unwrap();
+        assert_eq!(
+            reverie_core::python_regex::named_character(name),
+            None,
+            "{name}"
+        );
+        let error = match CompiledPattern::compile(text(&row["pattern"]).as_text_ref()) {
+            Ok(_) => panic!("invalid name accepted: {name}"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.codepoints(),
+            text(&row["error"]).codepoints(),
+            "{name}"
+        );
+    }
+    assert_eq!(rows["rows"].as_array().unwrap().len(), 16);
+}
+#[test]
+fn nested_lazy_optional_zero_width_state_and_independent_advanced_cases() {
+    check(
+        include_str!("fixtures/cpython313-independent-advanced-r1.jsonl"),
+        6499,
+    );
+    check(
+        include_str!("fixtures/cpython313-zero-width-repeat-r1.jsonl"),
+        1620,
+    );
+}

@@ -27,6 +27,9 @@ characters. Existing lowercase/character tables remain the single owner.
 Additional uppercase and identifier facts were exhaustively qualified against
 the accepted Python runtime, including lone surrogates. The named-character
 dependency is pinned to Unicode 15.1 and its CJK lexical check follows CPython.
+Its adapter also rejects a canonical name followed by extra characters when the
+pinned dependency's hash lookup incorrectly returns the canonical character;
+exact canonical names and exact alias lookup remain unchanged.
 Core depends on no matcher or regex compiler, so this seam introduces no cycle.
 
 The private `python_text` owner shares those unchanged frozen tables across
