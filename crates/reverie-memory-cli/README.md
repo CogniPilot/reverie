@@ -31,8 +31,10 @@ actual Python differential fixtures, not an arbitrary regular-expression VM.
 Intentional corrections needing review before selection: request fields are
 closed (no path/model/private-store editor); read-only recall and journal saves
 do not trigger hidden ChatDaemon startup mutations; journal success requires the
-actual success/data envelope; lossless JSON responses escape surrogate codepoints
-instead of failing on stdout encoding. Existing Office journals remain distinct
+actual success/data envelope; ASCII-escaped JSON output can represent surrogate
+codepoints that failed legacy stdout encoding. JSON decoders may combine adjacent
+high/low surrogate escapes, so decoded codepoint identity is not guaranteed for
+those pairs. Existing Office journals remain distinct
 from the legacy employee/project memory tables and Handsroom data.
 
 The journal transport uses the common retained process owner. Its 60-second,
