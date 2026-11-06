@@ -12,10 +12,13 @@ struct State {
     swap: UnsignedInteger,
     tables: VecDeque<MountTable>,
     effective: VecDeque<EffectiveWorkerConfig>,
+    targets: Vec<[Vec<u32>; 3]>,
+    storage: Option<[[u64; 4]; 3]>,
+    after_storage: Option<Box<dyn FnOnce() -> std::io::Result<()> + Send>>,
 }
-struct Fixture(Mutex<State>);
+pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
-    fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(State {
             outputs: VecDeque::new(),
             events: Vec::new(),
@@ -24,15 +27,18 @@ impl Fixture {
             swap: UnsignedInteger::from_u64(2 << 30),
             tables: VecDeque::from([MountTable::parse(&[]).unwrap()]),
             effective: VecDeque::new(),
+            targets: Vec::new(),
+            storage: None,
+            after_storage: None,
         })))
     }
-    fn observer(self: &Arc<Self>) -> NativeObserver {
+    pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation: CancellationToken::new(),
         }
     }
-    fn inventory(&self, rows: &[Value]) {
+    pub(crate) fn inventory(&self, rows: &[Value]) {
         let mut state = self.0.lock().unwrap();
         state.outputs.push_back(
             rows.iter()
@@ -50,8 +56,20 @@ impl Fixture {
             );
         }
     }
-    fn events(&self) -> Vec<String> {
+    pub(crate) fn events(&self) -> Vec<String> {
         self.0.lock().unwrap().events.clone()
+    }
+    pub(crate) fn deadlines(&self) -> Vec<Instant> {
+        self.0.lock().unwrap().deadlines.clone()
+    }
+    pub(crate) fn storage_facts(&self, values: [[u64; 4]; 3]) {
+        self.0.lock().unwrap().storage = Some(values);
+    }
+    pub(crate) fn after_storage(
+        &self,
+        hook: impl FnOnce() -> std::io::Result<()> + Send + 'static,
+    ) {
+        self.0.lock().unwrap().after_storage = Some(Box::new(hook));
     }
 }
 impl Source for Arc<Fixture> {
@@ -113,11 +131,16 @@ impl Source for Arc<Fixture> {
     fn custody_scan(
         &self,
         _: &ReservationConfiguration,
+        targets: &reverie_host::reservation_kernel::CustodyPaths,
         _: &InventoryRows,
         _: &MountTable,
         _: Instant,
     ) -> Result<()> {
-        self.0.lock().unwrap().events.push("custody".to_owned());
+        let mut state = self.0.lock().unwrap();
+        state.events.push("custody".to_owned());
+        state
+            .targets
+            .push(targets.paths().map(|value| value.codepoints()));
         Ok(())
     }
     fn storage(
@@ -127,7 +150,22 @@ impl Source for Arc<Fixture> {
         _: &StoragePaths,
         _: Instant,
     ) -> Result<NativeStorageBinding> {
-        Err(ObserverError::Refused("FIXTURE_STORAGE_NOT_SELECTED"))
+        let (facts, hook) = {
+            let mut state = self.0.lock().unwrap();
+            state.events.push("storage".to_owned());
+            (state.storage, state.after_storage.take())
+        };
+        let facts = facts.ok_or(ObserverError::Refused("FIXTURE_STORAGE_NOT_SELECTED"))?;
+        if let Some(hook) = hook {
+            hook().map_err(|error| {
+                ObserverError::Kernel(
+                    reverie_host::reservation_kernel::ReservationKernelError::Observation(
+                        error.into(),
+                    ),
+                )
+            })?;
+        }
+        Ok(NativeStorageBinding::from_observed_data(facts))
     }
     fn swap_total(&self, _: Instant) -> Result<UnsignedInteger> {
         let mut state = self.0.lock().unwrap();
@@ -145,7 +183,7 @@ impl Source for Arc<Fixture> {
     }
 }
 fn configuration() -> EffectiveWorkerConfig {
-    worker_config::decode(br#"{"deployment":"office","serverContainer":"website","poolMemoryMiB":2048,"uid":1000,"resourceReservations":{"hostReserveMiB":512}}"#).unwrap()
+    worker_config::decode(br#"{"deployment":"office","serverContainer":"website","poolMemoryMiB":2048,"uid":1000,"stateRoot":"/owned/state","image":"old","resourceReservations":{"directory":"/owned/control","hostReserveMiB":512}}"#).unwrap()
 }
 fn row(id: u64, worker: bool) -> Value {
     json!({"Id":format!("{id:064x}"),"Name":if worker {"/agent"} else {"/website"},"Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":if worker {json!({"reverie.worker":"foreign"})} else {json!({})}},"State":{"Running":true,"Pid":123},"Mounts":[],"HostConfig":{"Memory":536870912,"MemorySwap":536870912,"PidsLimit":128,"NanoCpus":0}})
@@ -316,6 +354,54 @@ fn custody_rechecks_full_mount_shape_but_does_not_replace_first_census() {
         fixture.events(),
         [
             "table", "ps", "inspect", "custody", "table", "ps", "inspect"
+        ]
+    );
+}
+#[test]
+fn actual_image_target_uses_same_context_engine_deadline_and_complete_census() {
+    use std::os::unix::fs::PermissionsExt;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    struct Owned(std::path::PathBuf);
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    let root = Owned(std::env::temp_dir().join(format!(
+        "reverie-custody-image-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )));
+    std::fs::create_dir(&root.0).unwrap();
+    let path = root.0.join("owner.config.json");
+    std::fs::write(&path, b"{\"image\":\"old\"}").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let config = configuration();
+    let image = reverie_host::reservation_control::capture_current_image(&path, &config).unwrap();
+    let fixture = Fixture::new();
+    fixture.inventory(&[row(1, true)]);
+    fixture.inventory(&[row(1, true)]);
+    let observer = fixture.observer();
+    let end = Instant::now() + Duration::from_secs(3);
+    let context = observer.capture(config, Some(end));
+    let census = context.custody_current_image(&image, None).unwrap();
+    assert_eq!(census.rows().count(), 1);
+    let state = fixture.0.lock().unwrap();
+    assert_eq!(
+        state.events,
+        [
+            "table", "ps", "inspect", "custody", "table", "ps", "inspect"
+        ]
+    );
+    assert!(state.deadlines.iter().all(|value| *value == end));
+    assert_eq!(state.targets.len(), 1);
+    assert_eq!(
+        state.targets[0],
+        [
+            PosixPath::from_scalar_text("/owned/control").codepoints(),
+            PosixPath::from_scalar_text(path.to_str().unwrap()).codepoints(),
+            PosixPath::from_scalar_text(root.0.join("owner.config.pending").to_str().unwrap())
+                .codepoints()
         ]
     );
 }

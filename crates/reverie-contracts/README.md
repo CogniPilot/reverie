@@ -224,3 +224,10 @@ The request carries what only TS owns: its memoized CLI-registry modes, `os.home
 `process.platform`, `getDataDir()` and the three environment values the route reads. Bounds TS lacks
 (request, file and response size) are typed refusals that the forwarder answers with its curated 503.
 `reverie-routes` holds the read-only handler; its byte goldens are recorded from the TS route.
+
+`reservation_observation` owns original selected-employee data, finite compact
+source/pool hashes and read-side observation bytes. It retains raw employee
+fields/codepoints and nil profile-ID namespaces; the existing journal role
+decoder checks nonnil IDs only at its actual claim boundary. Resource CPU
+numeric equality remains distinct from kind-sensitive profile/hash identity.
+These data objects and digests cannot construct admission or native permits.

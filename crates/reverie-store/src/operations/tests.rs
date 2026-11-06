@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests_guard_errors.rs"]
+mod guard_error_cases;
 #[path = "tests_terminal.rs"]
 mod terminal_cases;
 

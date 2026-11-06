@@ -14,6 +14,18 @@ use std::fmt;
 
 pub const SCHEMA: &str = "reverie-employee-resource-profiles-v1";
 pub const MAX_BYTES: usize = 131_072;
+/// Python profile dictionary equality (including numeric CPU equality), distinct
+/// from byte/digest identity and the encoding-sensitive checked-core Eq.
+pub fn equivalent(
+    left: &reverie_core::profiles::ResourceProfile,
+    right: &reverie_core::profiles::ResourceProfile,
+) -> bool {
+    let value = |profile| {
+        let bytes = encode_profile(profile).expect("bounded closed ASCII profile");
+        crate::legacy_json::decode_utf8(&bytes).expect("profile encoder emits valid closed JSON")
+    };
+    value(left).python_eq(&value(right))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CodecError {

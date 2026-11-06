@@ -174,3 +174,10 @@ parse/close/image-comparison order and final named-file stamp. Ancestor aliases
 are permitted there while leaf aliases and multiply-linked files refuse; this
 does not relax the separate control, OPS or metadata traversal policies. The
 application still owns pending-transition, full census and terminal fences.
+
+The existing kernel custody scan also accepts `CustodyPaths` DATA from actual
+installed service owners. The application-private target selection currently
+supports canonical control metadata and the actual captured current-image file;
+it retains the original Source, complete before/after census, mount table,
+deadline and context origin. Declaration parsing is not a custody/effect grant,
+and unported preparation/transport/host-job owners are not fabricated as selectors.

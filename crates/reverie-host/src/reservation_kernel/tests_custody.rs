@@ -123,3 +123,44 @@ fn same_device_mount_coordinates_nested_roots_and_mount_location_mismatch_refuse
         "RESERVATION_NATIVE_MOUNT_BINDING"
     );
 }
+
+#[test]
+fn selected_real_control_binding_changes_only_the_targets_not_mount_policy() {
+    let fixture = Fixture::new();
+    let workspace = fixture.root.join("work");
+    fs::create_dir(&workspace).unwrap();
+    let rows = fixture.row();
+    let config = config(&fixture, &workspace);
+    let defaults = CustodyPaths::control(&config).unwrap();
+    custody::scan_targets(&fixture, &config, &defaults, &rows, &mount_table(""), end()).unwrap();
+    let selected = CustodyPaths::declared(
+        config.control_paths().unwrap().root().clone(),
+        PosixPath::try_new(&native::python_text(&workspace.join("owner.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        custody::scan_targets(&fixture, &config, &selected, &rows, &mount_table(""), end())
+            .unwrap_err()
+            .code(),
+        "RESERVATION_CONTROL_EXPOSED"
+    );
+    // Same-source native mount-location and alias policies still run for
+    // selected targets, including a not-yet-created pending sibling.
+    let safe = fixture.root.join("private/config.json");
+    let safe = CustodyPaths::declared(
+        config.control_paths().unwrap().root().clone(),
+        PosixPath::try_new(&native::python_text(&safe)).unwrap(),
+    )
+    .unwrap();
+    fixture.mount_locations.borrow_mut().push((
+        PosixPath::try_new(&native::python_text(&workspace)).unwrap(),
+        UnsignedInteger::from_u64(1),
+        MountDevice::from_native(9, 9),
+    ));
+    assert_eq!(
+        custody::scan_targets(&fixture, &config, &safe, &rows, &mount_table(""), end())
+            .unwrap_err()
+            .code(),
+        "RESERVATION_NATIVE_MOUNT_BINDING"
+    );
+}

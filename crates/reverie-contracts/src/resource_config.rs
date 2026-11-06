@@ -83,6 +83,28 @@ impl ResourceConfiguration {
             uid,
         })
     }
+    /// The existing six-field profile projection, reusing the same global-pool
+    /// presence rule as session/EID selection. No effective feature projection.
+    pub fn project_profile_policy(&self, policy: &ResourcePolicy) -> Result<ResourcePolicy> {
+        Ok(ResourceTemplate::from(policy).resolve(self.resources.reservation_pool())?)
+    }
+}
+/// Python numeric equality is intentional here: CPU0 and0.0 have equal resource
+/// ceilings even though their separate profile/policy digest bytes differ.
+pub fn same_non_memory_resources(
+    projected: &ResourcePolicy,
+    effective: &EffectiveWorkerConfig,
+) -> bool {
+    let fields = broker_resources::resource_fields(&ResourceTemplate::from(projected));
+    let current = root(effective);
+    fields
+        .iter()
+        .filter(|(name, _)| !name.equals_ascii("memoryMiB"))
+        .all(|(name, value)| {
+            current
+                .get(name)
+                .is_some_and(|current| value.python_eq(current))
+        })
 }
 /// Parse the already projected effective resource fields only when a consumer
 /// needs a checked ceiling. Unselected and swap-only policies need no such read.

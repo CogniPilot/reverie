@@ -1,7 +1,7 @@
 use super::*;
 use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
-use reverie_host::reservation_kernel::ReservationKernel;
+use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
     fn query(
         &self,
@@ -21,6 +21,7 @@ pub(super) trait Source: Send + Sync {
     fn custody_scan(
         &self,
         config: &ReservationConfiguration,
+        paths: &CustodyPaths,
         rows: &InventoryRows,
         table: &MountTable,
         end: Instant,
@@ -80,11 +81,12 @@ impl Source for Installed {
     fn custody_scan(
         &self,
         config: &ReservationConfiguration,
+        paths: &CustodyPaths,
         rows: &InventoryRows,
         table: &MountTable,
         end: Instant,
     ) -> Result<()> {
-        Ok(self.kernel.custody_scan(config, rows, table, end)?)
+        Ok(self.kernel.custody_paths(config, paths, rows, table, end)?)
     }
     fn storage(
         &self,

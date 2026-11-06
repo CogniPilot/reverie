@@ -1,5 +1,11 @@
 # Reverie core data and algorithms
 
+`posix_text` is the shared portable UTF-8/surrogateescape byte/codepoint owner.
+It performs no path normalization or filesystem lookup; native host/store
+adapters decide when to encode captured text and independently check custody.
+CPU nano-ceiling arithmetic and observation numeric validation stay in their
+existing checked resource/journal owners, separate from ID or effect authority.
+
 `memory` owns the existing `hashed-v1-N` lexical embedding algorithm, signed
 eight-byte BLAKE2b buckets, first-feature accumulation order, Python 3.13
 compensated summation, native float32 vector packing and retrieval scoring.

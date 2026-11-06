@@ -4,6 +4,7 @@ use reverie_core::posix_path::PosixPath;
 pub struct NativeLimitBinding {
     value: Value,
     memory: UnsignedInteger,
+    container: ContainerId,
 }
 impl NativeLimitBinding {
     pub fn from_observed_data(
@@ -43,10 +44,30 @@ impl NativeLimitBinding {
         Ok(Self {
             value: Value(Node::Object(fields)),
             memory: declared.memory().clone(),
+            container: row.id().clone(),
         })
     }
     pub fn memory(&self) -> &UnsignedInteger {
         &self.memory
+    }
+    pub fn container_id(&self) -> &ContainerId {
+        &self.container
+    }
+    pub(crate) fn data(&self) -> &Value {
+        &self.value
+    }
+    pub fn resource_ceiling_matches(
+        &self,
+        policy: &reverie_core::resources::ResourcePolicy,
+    ) -> Result<bool> {
+        let fields = object(&self.value)?;
+        Ok(
+            self.memory == UnsignedInteger::from_u64(u64::from(policy.memory_mib()) * 1_048_576)
+                && unsigned(field(fields, "tasks"))?
+                    == UnsignedInteger::from_u64(u64::from(policy.pids_limit()))
+                && unsigned(field(fields, "nanoCpus"))?
+                    == UnsignedInteger::from_u64(policy.cpus().nano_cpus()),
+        )
     }
     pub fn canonical_bytes(&self) -> Vec<u8> {
         crate::worker_config::compact_data(&self.value)
@@ -56,7 +77,7 @@ pub(super) fn integer_value(value: &UnsignedInteger) -> Value {
     Value(Node::Number(Number::Integer(value.as_str().to_owned())))
 }
 impl StoppedWebsite {
-    pub fn canonical_bytes(&self) -> Vec<u8> {
+    pub(crate) fn data(&self) -> Value {
         let fields = [
             (
                 key("containerId"),
@@ -67,7 +88,10 @@ impl StoppedWebsite {
         ]
         .into_iter()
         .collect();
-        crate::worker_config::compact_data(&Value(Node::Object(fields)))
+        Value(Node::Object(fields))
+    }
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        crate::worker_config::compact_data(&self.data())
     }
 }
 /// Exact NativeObserver.storage dictionary DATA, including all four tuple fields.
@@ -75,6 +99,9 @@ pub struct NativeStorageBinding {
     value: Value,
 }
 impl NativeStorageBinding {
+    pub(crate) fn data(&self) -> &Value {
+        &self.value
+    }
     pub fn from_observed_data(identities: [[u64; 4]; 3]) -> Self {
         let fields = ["/home/agent", "/nix", "/scratch"]
             .into_iter()

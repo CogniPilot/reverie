@@ -67,12 +67,15 @@ pub fn domain_digest(config: &EffectiveWorkerConfig) -> Result<ControlDomainDige
     ] {
         fields.remove(&key(name));
     }
-    if !value.is_finite() || !integer_strings_fit(&value) {
+    Ok(ControlDomainDigest(fingerprint(&value)?))
+}
+/// Private shared owner for the existing reservation journal's finite compact
+/// data hashes. This does not change any general worker or parser purpose.
+pub(crate) fn fingerprint(value: &Value) -> Result<[u8; 32]> {
+    if !value.is_finite() || !integer_strings_fit(value) {
         return Err(ControlDataError::Fingerprint);
     }
-    Ok(ControlDomainDigest(
-        Sha256::digest(crate::worker_config::compact_data(&value)).into(),
-    ))
+    Ok(Sha256::digest(crate::worker_config::compact_data(value)).into())
 }
 fn integer_strings_fit(value: &Value) -> bool {
     let mut pending = vec![value];

@@ -11,6 +11,7 @@ pub mod operations_v1;
 pub mod profiles_v1;
 pub mod reservation_control;
 pub mod reservation_engine;
+pub mod reservation_observation;
 pub mod resource_config;
 pub mod rootless;
 pub mod storage_identity;

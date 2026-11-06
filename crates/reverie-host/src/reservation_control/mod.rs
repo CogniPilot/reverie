@@ -43,7 +43,16 @@ impl fmt::Display for ControlHostError {
         out.write_str(self.code())
     }
 }
-impl std::error::Error for ControlHostError {}
+impl std::error::Error for ControlHostError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Native(error) => Some(error),
+            Self::Metadata(error) => Some(error),
+            Self::Configuration(error) => Some(error),
+            Self::Refused(_) => None,
+        }
+    }
+}
 impl From<ObservationError> for ControlHostError {
     fn from(value: ObservationError) -> Self {
         Self::Native(value)
@@ -96,6 +105,45 @@ impl AdmissionLock {
 }
 pub fn pending_present(config: &ReservationConfiguration) -> Result<bool> {
     present(config.control_paths()?.pending())
+}
+/// Native path DATA selected from this captured option, without opening the
+/// journal, acquiring admission or manufacturing a scope guard.
+pub fn operation_directory(config: &ReservationConfiguration) -> Result<std::path::PathBuf> {
+    store_directory(config, "operations")
+}
+pub fn profile_directory(config: &ReservationConfiguration) -> Result<std::path::PathBuf> {
+    store_directory(config, "profiles")
+}
+fn store_directory(config: &ReservationConfiguration, name: &str) -> Result<std::path::PathBuf> {
+    Ok(native::python_path(
+        &config
+            .control_paths()?
+            .root()
+            .join(&PosixPath::from_scalar_text(name))
+            .codepoints(),
+    )?)
+}
+/// The original observe() terminal inode-only lock-name fence. This opens no
+/// descriptor, creates no lock and adds no engine/kernel observation afterward.
+pub fn assert_store_lock_names(
+    config: &ReservationConfiguration,
+    binding: &ControlBinding,
+) -> Result<()> {
+    let root = config.control_paths()?;
+    for (name, expected) in [
+        ("profiles", binding.profile_lock()),
+        ("operations", binding.operation_lock()),
+    ] {
+        let path = root
+            .root()
+            .join(&PosixPath::from_scalar_text(&format!("{name}/{name}.lock")));
+        let info = fs::symlink_metadata(native::python_path(&path.codepoints())?)?;
+        need(
+            expected.matches_native(info.dev(), info.ino()),
+            "RESERVATION_PRIVATE_LOCK",
+        )?;
+    }
+    Ok(())
 }
 pub fn read_marker(config: &ReservationConfiguration) -> Result<OrderedMetadata> {
     let path = native::python_path(&config.control_paths()?.binding().codepoints())?;

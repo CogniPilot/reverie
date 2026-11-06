@@ -7,6 +7,7 @@ pub mod lease_policy;
 pub mod memory;
 pub mod operations;
 pub mod posix_path;
+pub mod posix_text;
 pub mod profiles;
 pub(crate) mod python_text;
 pub mod resource_projection;

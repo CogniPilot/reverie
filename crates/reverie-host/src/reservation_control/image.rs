@@ -41,7 +41,16 @@ impl fmt::Display for ImageHostError {
         out.write_str(self.code())
     }
 }
-impl std::error::Error for ImageHostError {}
+impl std::error::Error for ImageHostError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Native(error) => Some(error),
+            Self::Data(error) => Some(error),
+            Self::Finalization { primary, .. } => Some(&**primary),
+            Self::Custody | Self::Changed => None,
+        }
+    }
+}
 impl From<io::Error> for ImageHostError {
     fn from(error: io::Error) -> Self {
         Self::Native(error.into())
@@ -86,6 +95,9 @@ pub struct CurrentImageBinding {
     expected: ImageStamp,
 }
 impl CurrentImageBinding {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
     pub fn assert_current(&self) -> Result<()> {
         need(
             ImageStamp::of(&fs::symlink_metadata(&self.path)?) == self.expected,

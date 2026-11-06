@@ -29,7 +29,18 @@ impl fmt::Display for ObserverError {
         out.write_str(self.code())
     }
 }
-impl std::error::Error for ObserverError {}
+impl std::error::Error for ObserverError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Engine(error) => Some(error),
+            Self::Kernel(error) => Some(error),
+            Self::Data(error) => Some(error),
+            Self::Effective(error) => Some(error),
+            Self::Capacity(error) => Some(error),
+            Self::Refused(_) => None,
+        }
+    }
+}
 impl From<EngineError> for ObserverError {
     fn from(value: EngineError) -> Self {
         Self::Engine(value)

@@ -90,3 +90,9 @@ changes a profile or qualifies an owner permission or live kernel effect.
 `worker_launch` prepares checked request/create/tmux/account data with actual
 readonly account/hostname observations. See its [boundary and consumer
 inventory](src/worker_launch/README.md); plans are never admission/effect permits.
+
+`reservation_gate` now composes actual ordinary admission, canonical lookup and
+the complete read-side reservation observation over these same owners. Its
+[checkpoint audit](src/reservation_gate/README.md) records source phases, real
+lock/finalizer handling, compatible hashes and still-required claim/effect owners.
+It is inactive and does not select a broker or grant a launch/completion permit.

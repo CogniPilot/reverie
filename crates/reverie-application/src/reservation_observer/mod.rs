@@ -1,10 +1,11 @@
 //! Fixed broker read-side observations. Captured facts confer no admission,
 //! process effect, storage lease or journal completion authority.
 mod capacity;
+mod custody;
 mod error;
 mod source;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 pub use capacity::{CapacityFacts, WebsiteBinding};
 pub use error::ObserverError;
 use error::{Result, need};
@@ -95,6 +96,16 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    /// Internal operation bound update only: preserve the same captured worker
+    /// data, persistent source and opaque census origin across admission phases.
+    pub(crate) fn with_inherited(&self, inherited: Option<Instant>) -> Self {
+        Self {
+            observer: self.observer.clone(),
+            config: ReservationConfiguration::capture(self.config.configuration().clone()),
+            inherited,
+            origin: self.origin.clone(),
+        }
+    }
     fn check(&self, end: Instant) -> Result<()> {
         need(
             !self.observer.cancellation.is_cancelled(),
@@ -102,7 +113,7 @@ impl ObservationContext {
         )?;
         need(Instant::now() < end, "RESERVATION_OBSERVATION_DEADLINE")
     }
-    fn deadline(&self, supplied: Option<Instant>) -> Result<Instant> {
+    pub(crate) fn deadline(&self, supplied: Option<Instant>) -> Result<Instant> {
         let mut end = Instant::now() + Duration::from_secs(30);
         for bound in [self.inherited, supplied].into_iter().flatten() {
             end = end.min(bound);
@@ -162,22 +173,7 @@ impl ObservationContext {
         Ok(state)
     }
     pub fn custody(&self, supplied: Option<Instant>) -> Result<ObservedInventory> {
-        let end = self.deadline(supplied)?;
-        let source = &self.observer.source;
-        let table = source.mount_table(end)?;
-        let before = self.inventory_at(end)?;
-        source.custody_scan(&self.config, &before.rows, &table, end)?;
-        need(
-            source.mount_table(end)? == table,
-            "RESERVATION_MOUNT_TABLE_CHANGED",
-        )?;
-        let after = self.inventory_at(end)?;
-        need(
-            before.rows.mount_shape()? == after.rows.mount_shape()?,
-            "RESERVATION_MOUNT_INVENTORY_CHANGED",
-        )?;
-        self.check(end)?;
-        Ok(before)
+        self.custody_selected(custody::SelectedTargets::Control, supplied)
     }
     pub fn limits(&self, row: &ObservedRow<'_>) -> Result<NativeLimitBinding> {
         self.limits_at(self.checked_row(row)?, self.deadline(None)?)

@@ -203,6 +203,15 @@ leases, publishes a migration, creates a sidecar/endpoint or selects a new
 production consumer. The caller supplies trusted native paths and remains
 responsible for authorization and consistency across its complete workflow.
 
+`StorageIdentityConfig::capture_worker_settings` retains same-captured worker
+path text as DATA and delays encoding/canonical checks to their original read
+phases. Company and history reads precede later state/scratch canonical refusal;
+indexed lineage first uses Python's normalized Path spelling. Non-encodable
+index lookups remain absent only for that existence test, while later actual
+canonical/read operations still refuse them. The strict eager `try_new` contract
+is unchanged. Both paths reuse the same metadata custody and pure `posix_text`
+conversion owners; neither establishes a lease or usable-path proof.
+
 `read_ordered_metadata` shares the exact native metadata reader and its named
 parser, retaining Python insertion order only for consumers whose subsequent
 native observations depend on that order. It exposes no parser choice or editor.
@@ -214,3 +223,9 @@ its narrower held-admission check for this readonly phase. Ordinary snapshots
 and mutations retain their existing checks. The stamp cannot grant completion,
 capacity credit or effects; the caller must still perform its final native
 guards and then assert the original named stamp without reopening the journal.
+
+Fixed installed scope/capacity guards can retain their complete source failure
+through `JournalError::guard_failure`; stable codes still drive decisions.
+The boxed cause and outer secondary close errors remain available to trusted
+diagnostics. No callback, guard authority or completion proof is created by
+constructing an error value.

@@ -6,7 +6,23 @@ pub(super) fn scan(
     table: &MountTable,
     end: Instant,
 ) -> Result<()> {
-    let control = config.control_paths()?;
+    scan_targets(
+        source,
+        config,
+        &CustodyPaths::control(config)?,
+        rows,
+        table,
+        end,
+    )
+}
+pub(super) fn scan_targets(
+    source: &impl Source,
+    config: &ReservationConfiguration,
+    targets: &CustodyPaths,
+    rows: &InventoryRows,
+    table: &MountTable,
+    end: Instant,
+) -> Result<()> {
     let mut sources = config.configured_sources()?;
     for row in rows.rows() {
         sources.extend(row.mount_sources()?);
@@ -20,7 +36,7 @@ pub(super) fn scan(
             selected.is_absolute() && !selected.has_parent_component(),
             "RESERVATION_MOUNT_INVENTORY",
         )?;
-        for target in [control.root(), control.binding(), control.pending()] {
+        for target in targets.paths() {
             target_exposure(source, target, &selected, &real, table, end)?;
         }
     }

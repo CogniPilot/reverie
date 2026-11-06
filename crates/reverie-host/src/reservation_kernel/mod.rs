@@ -3,6 +3,8 @@
 mod custody;
 mod limits;
 mod storage;
+mod targets;
+pub use targets::CustodyPaths;
 #[cfg(test)]
 mod tests;
 use crate::{ObservationError, native};
@@ -48,7 +50,17 @@ impl fmt::Display for ReservationKernelError {
         out.write_str(self.code())
     }
 }
-impl std::error::Error for ReservationKernelError {}
+impl std::error::Error for ReservationKernelError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Observation(error) => Some(error),
+            Self::Data(error) => Some(error),
+            Self::Mounts(error) => Some(error),
+            Self::EngineData(error) => Some(error),
+            Self::Refused(_) => None,
+        }
+    }
+}
 impl From<ObservationError> for ReservationKernelError {
     fn from(value: ObservationError) -> Self {
         Self::Observation(value)
@@ -199,6 +211,18 @@ impl ReservationKernel {
         end: Instant,
     ) -> Result<()> {
         custody::scan(&Installed, config, rows, table, end)
+    }
+    /// Readonly scan of paths selected by an actual installing-service owner.
+    /// These path facts are not admission, native effect or mount authority.
+    pub fn custody_paths(
+        &self,
+        config: &ReservationConfiguration,
+        targets: &CustodyPaths,
+        rows: &InventoryRows,
+        table: &MountTable,
+        end: Instant,
+    ) -> Result<()> {
+        custody::scan_targets(&Installed, config, targets, rows, table, end)
     }
     pub fn storage(
         &self,
