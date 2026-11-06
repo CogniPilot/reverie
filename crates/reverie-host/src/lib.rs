@@ -1,4 +1,5 @@
-//! Linux host observations. Returned data never grants owner or effect authority.
+//! Linux host observations and owned resources. Neither grants owner or
+//! admission authority; installing services own their actual effect boundaries.
 mod captured_client;
 pub mod device_policy;
 pub mod embeddings;
@@ -14,6 +15,8 @@ pub mod reservation_control;
 pub mod reservation_kernel;
 pub mod rootless;
 pub mod task_perf;
+#[cfg(target_os = "linux")]
+pub mod terminal_pty;
 pub mod worker_child;
 pub mod worker_identity;
 pub mod worker_launch;
