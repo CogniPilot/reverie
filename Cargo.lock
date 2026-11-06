@@ -275,6 +275,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-routes"
+version = "0.1.0"
+dependencies = [
+ "reverie-contracts",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-soft-limit-helper"
 version = "0.1.0"
 dependencies = [
