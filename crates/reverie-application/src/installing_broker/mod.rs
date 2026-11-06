@@ -16,7 +16,10 @@ pub(crate) use image_refresh::LoadedLaunchImage;
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
-pub use storage::{StorageClaim, StorageReleaseFailure, StorageWorkflowError};
+pub use storage::{
+    NixStorageError, NixStoragePreparation, NixStorageReclaimFailure, NixStorageRetainFailure,
+    NixStorageReturned, StorageClaim, StorageReleaseFailure, StorageWorkflowError,
+};
 struct CurrentInstalled {
     snapshot: Arc<ValidatedWorkerSnapshot>,
     resources: Arc<ReservationConfiguration>,

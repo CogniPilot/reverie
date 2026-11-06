@@ -1,10 +1,16 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
 mod error;
+mod nix;
+mod preparation;
 #[cfg(test)]
 mod tests;
 use super::*;
 pub use error::{StorageReleaseFailure, StorageWorkflowError};
+pub use nix::{
+    NixStorageError, NixStoragePreparation, NixStorageReclaimFailure, NixStorageRetainFailure,
+    NixStorageReturned,
+};
 use reverie_host::{
     worker_runtime::WorkerRuntime,
     worker_storage::{LaunchStorage, StorageOwnerError},
@@ -17,8 +23,13 @@ use std::{
 
 struct Entry {
     identity: Arc<()>,
-    owner: LaunchStorage,
+    paths: StoragePaths,
+    owner: EntryOwner,
     writer_checked: bool,
+}
+enum EntryOwner {
+    Direct(Box<LaunchStorage>),
+    Nix(reverie_host::worker_nix::NixWorkflow),
 }
 pub(super) struct StorageRegistry {
     pub(super) runtime: WorkerRuntime,
@@ -68,20 +79,23 @@ impl StorageRegistry {
         let selected = self.runtime.resolve_storage(source, session)?;
         if selected.paths().kind() != StorageKind::Employee {
             return Ok(StorageClaim {
-                state: ClaimState::Legacy(Box::new(selected.into_legacy()?)),
+                state: ClaimState::Legacy {
+                    registry: self.clone(),
+                    owner: Box::new(selected.into_legacy()?),
+                },
             });
         }
         let mut entries = self.lock(None)?;
         if let Some(entry) = entries
             .iter()
-            .find(|entry| entry.owner.paths().session() == session)
+            .find(|entry| entry.paths.session() == session)
         {
-            if !entry.writer_checked {
+            if !entry.writer_checked || !matches!(entry.owner, EntryOwner::Direct(_)) {
                 return Err(StorageWorkflowError::refused(
                     "WORKER_STORAGE_CLEANUP_UNCONFIRMED",
                 ));
             }
-            if entry.owner.paths() != selected.paths() {
+            if &entry.paths != selected.paths() {
                 return Err(StorageWorkflowError::refused(
                     "WORKER_EMPLOYEE_BINDING_CHANGED",
                 ));
@@ -92,7 +106,7 @@ impl StorageRegistry {
         }
         if entries
             .iter()
-            .any(|entry| entry.owner.paths().key() == selected.paths().key())
+            .any(|entry| entry.paths.key() == selected.paths().key())
         {
             return Err(StorageWorkflowError::refused(
                 "WORKER_PREVIOUS_EMPLOYEE_STORAGE_BUSY",
@@ -112,7 +126,8 @@ impl StorageRegistry {
                     let (owner, cleanup) = failure.into_parts();
                     entries.push(Entry {
                         identity: Arc::new(()),
-                        owner,
+                        paths: owner.paths().clone(),
+                        owner: EntryOwner::Direct(Box::new(owner)),
                         writer_checked: false,
                     });
                     Err(StorageWorkflowError::with_cleanup(primary, cleanup))
@@ -121,7 +136,8 @@ impl StorageRegistry {
         }
         let entry = Entry {
             identity: Arc::new(()),
-            owner,
+            paths: owner.paths().clone(),
+            owner: EntryOwner::Direct(Box::new(owner)),
             writer_checked: true,
         };
         let result = self.handle(&entry, true);
@@ -133,7 +149,7 @@ impl StorageRegistry {
             state: ClaimState::Registered {
                 registry: self.clone(),
                 identity: entry.identity.clone(),
-                paths: entry.owner.paths().clone(),
+                paths: entry.paths.clone(),
                 newly_claimed,
             },
         }
@@ -150,15 +166,22 @@ impl StorageRegistry {
         else {
             return Ok(());
         };
+        if matches!(entries[index].owner, EntryOwner::Nix(_)) {
+            return Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"));
+        }
         let entry = entries.remove(index);
-        match entry.owner.close(end) {
+        let EntryOwner::Direct(owner) = entry.owner else {
+            unreachable!("checked direct owner")
+        };
+        match owner.close(end) {
             Ok(()) => Ok(()),
             Err(failure) => {
                 let (owner, cause) = failure.into_parts();
                 entries.insert(
                     index,
                     Entry {
-                        owner,
+                        owner: EntryOwner::Direct(Box::new(owner)),
+                        paths: entry.paths,
                         writer_checked: false,
                         identity: entry.identity,
                     },
@@ -169,7 +192,10 @@ impl StorageRegistry {
     }
 }
 enum ClaimState {
-    Legacy(Box<LaunchStorage>),
+    Legacy {
+        registry: Arc<StorageRegistry>,
+        owner: Box<LaunchStorage>,
+    },
     Registered {
         registry: Arc<StorageRegistry>,
         identity: Arc<()>,
@@ -185,7 +211,7 @@ pub struct StorageClaim {
 impl StorageClaim {
     pub fn paths(&self) -> &StoragePaths {
         match &self.state {
-            ClaimState::Legacy(owner) => owner.paths(),
+            ClaimState::Legacy { owner, .. } => owner.paths(),
             ClaimState::Registered { paths, .. } => paths,
         }
     }
@@ -206,11 +232,14 @@ impl StorageClaim {
     /// filesystem calls do not have a hard kernel/disk latency guarantee.
     pub fn release(self, deadline: Instant) -> Result<(), Box<StorageReleaseFailure>> {
         match self.state {
-            ClaimState::Legacy(owner) => owner.close(deadline).map_err(|failure| {
+            ClaimState::Legacy { registry, owner } => owner.close(deadline).map_err(|failure| {
                 let (owner, cause) = failure.into_parts();
                 Box::new(StorageReleaseFailure {
                     claim: StorageClaim {
-                        state: ClaimState::Legacy(Box::new(owner)),
+                        state: ClaimState::Legacy {
+                            registry,
+                            owner: Box::new(owner),
+                        },
                     },
                     cause: cause.into(),
                 })

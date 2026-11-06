@@ -241,3 +241,29 @@ the full Nix workflow or laptop launch. There is no file write, engine create,
 authorization, registration or global-release acknowledgement in this operation;
 no-reservations policy reload and the canonical launch/lifecycle consumer remain
 required before complete worker-service selection.
+
+`StorageClaim::retain_nix` now performs the actual storage-to-Nix transition.
+For an employee, the installing registry atomically replaces its direct owner
+with the same Runtime-owned `NixWorkflow` before the first client can run.
+For legacy session storage, the real owner moves into that Runtime record with
+no invented employee lease or employee registry entry. Both retain the exact
+service origin. Named preparation methods delegate to the existing held owner;
+no caller home/scratch/path or generic filesystem editor is accepted.
+
+`NixStoragePreparation::run` executes outside the registry mutex. Checked
+one-shot `reclaim` restores the exact direct storage and returns the actual Nix
+guard plus its result; a definitive retention failure returns the original
+claim/guard. Unknown helper/client/removal outcomes retain the workflow and
+refuse direct aliases, further preparation and release. Dropping a preparation
+handle does not acknowledge settlement or release its registry/Runtime owners.
+The application controller must retain these handles and settle them during
+real launch/recovery/stop; the public resource result is not API authorization,
+Gate admission, laptop ownership or global capacity-release proof. Ordinary
+release already waiting on an unbounded mutex when stop arrives remains an
+explicit whole-service shutdown obligation.
+
+Six owned controls exercise actual legacy and employee locks, definite rejection,
+image opt-out, a fixed supervised helper create/start/remove, a long helper with
+the registry mutex available, and unknown create/removal retaining guards through
+service stop. Helper effects are controlled Rust child processes and owned files,
+not a live engine, company or production activation.

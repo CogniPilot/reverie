@@ -37,6 +37,8 @@ fn end() -> Instant {
 }
 use crate::test_process::engine_program as program;
 use crate::test_process::isolate_case as isolate;
+#[path = "nix/tests.rs"]
+mod nix_cases;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
@@ -67,6 +69,13 @@ impl Tree {
         worker_config::decode(&serde_json::to_vec(&json!({"uid":fs::metadata(&self.0).unwrap().uid(),"gid":fs::metadata(&self.0).unwrap().gid(),"deployment":"fixture","serverContainer":"fixture-server","maxWorkers":4,"companyFile":self.0.join("company.json"),"stateRoot":self.0.join("state"),"scratchRoot":self.0.join("scratch"),"mounts":[],"image":format!("sha256:{}","a".repeat(64))})).unwrap()).unwrap()
     }
     fn registry(&self) -> Arc<StorageRegistry> {
+        self.registry_with(program(), BTreeMap::new())
+    }
+    fn registry_with(
+        &self,
+        executable: &std::path::Path,
+        environment: BTreeMap<std::ffi::OsString, std::ffi::OsString>,
+    ) -> Arc<StorageRegistry> {
         let uid = fs::metadata(&self.0).unwrap().uid();
         let gid = fs::metadata(&self.0).unwrap().gid();
         let base = WorkerBase::try_new(
@@ -87,7 +96,7 @@ impl Tree {
         )
         .unwrap();
         let bootstrap =
-            EngineBootstrap::from_service(program().as_os_str(), BTreeMap::new(), self.0.clone())
+            EngineBootstrap::from_service(executable.as_os_str(), environment, self.0.clone())
                 .unwrap();
         Arc::new(StorageRegistry::new(WorkerRuntime::new(
             InstalledWorkerEngine::new(bootstrap),
