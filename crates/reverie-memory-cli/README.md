@@ -22,6 +22,13 @@ unconfirmed save, never “nothing was saved,” and is not automatically retrie
 Native client cleanup finishes before response publication. Process uncertainty
 retains the same actual client rather than starting another one.
 
+Shutdown distinguishes completed close, pending native work, and consumed
+negative finalization. Constructors, unreaped children, held descriptors and
+unknown owner state remain pending. A consumed failure still keeps the library
+fenced and produces a negative standalone exit after remaining finalizers;
+polling an irreversible error cannot acknowledge cleanup. An unconfirmed API
+save remains unconfirmed in every shutdown state.
+
 Configured owner regex patterns remain a required compatibility dependency.
 This candidate refuses a nonempty rule set until a Python-compatible native
 adapter is independently qualified; it never silently omits rules or substitutes

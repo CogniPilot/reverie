@@ -21,6 +21,7 @@ pub mod resource_projection;
 pub mod resources;
 pub mod revision;
 pub mod rootless;
+pub mod shutdown;
 pub mod task_perf;
 pub mod worker_child;
 pub mod worker_launch;

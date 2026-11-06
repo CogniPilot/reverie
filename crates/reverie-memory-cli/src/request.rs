@@ -44,8 +44,7 @@ fn initialize(arguments: &Arguments) -> Result<MemoryReply> {
         .startup(&scope, &[])
         .map_err(Failure::display)
         .map(|_| MemoryReply::initialized());
-    close(&service)?;
-    result
+    Failure::finalized(result, close(&service))
 }
 fn recall(arguments: &Arguments, scope: &MemoryScope, query: &MetadataText) -> Result<MemoryReply> {
     let service = InstalledMemory::capture_instance(arguments.instance.as_deref())
@@ -56,15 +55,9 @@ fn recall(arguments: &Arguments, scope: &MemoryScope, query: &MetadataText) -> R
             EmbeddingText::from_codepoints(query.codepoints()).expect("checked request text"),
         )
         .map_err(Failure::display);
-    close(&service)?;
-    journal::recall(scope, query, result?)
+    let memories = Failure::finalized(result, close(&service))?;
+    journal::recall(scope, query, memories)
 }
 fn close(service: &InstalledMemory) -> Result<()> {
-    match service.close() {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            retain(|| service.close().is_ok(), &error.to_string());
-            Err(Failure::text("memory scope finalization was unconfirmed"))
-        }
-    }
+    settle(|| service.shutdown()).map_err(Failure::display)
 }

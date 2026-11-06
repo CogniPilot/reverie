@@ -111,3 +111,32 @@ fn watch(stop: &AtomicBool, cancellation: &CancellationToken) {
         std::thread::sleep(Duration::from_millis(5));
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn consumed_restore_refusal_has_no_watcher_to_poll_and_remains_negative() {
+        const CASE: &str = "REVERIE_OWNED_JOURNAL_SIGNAL_RESTORE";
+        if std::env::var_os(CASE).is_none() {
+            let output=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","memory_journal::signals::tests::consumed_restore_refusal_has_no_watcher_to_poll_and_remains_negative","--test-threads=1"]).env(CASE,"1").output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed;"));
+            return;
+        }
+        let mut signals = JournalSignals::install_for_standalone_process().unwrap();
+        child_signals::fail_restore_once();
+        assert!(signals.finish().unwrap_err().restoration_unconfirmed);
+        assert!(signals.guard.is_none());
+        assert!(signals.watcher.is_none());
+        assert!(signals.finish().unwrap_err().restoration_unconfirmed);
+        assert!(
+            JournalSignals::install_for_standalone_process().is_err(),
+            "persistent negative fence is not reset"
+        );
+    }
+}

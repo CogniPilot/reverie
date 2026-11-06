@@ -22,19 +22,38 @@ pub(super) struct Resources {
     database: Option<Database>,
     control: Option<MemoryOperationLock>,
 }
+pub(super) enum CloseFailure {
+    Pending(MemoryLifecycleError),
+    Consumed(MemoryLifecycleError),
+}
+impl CloseFailure {
+    pub(super) fn into_error(self) -> MemoryLifecycleError {
+        match self {
+            Self::Pending(error) | Self::Consumed(error) => error,
+        }
+    }
+}
 impl Resources {
-    pub(super) fn close(&mut self) -> Result<()> {
+    pub(super) fn close(&mut self) -> std::result::Result<(), CloseFailure> {
         if let Some(database) = &mut self.database {
-            match database {
-                Database::Started(held) => held.close()?,
-                Database::Project(held) => held.close()?,
-                Database::Profile(held) => held.close()?,
-                Database::Recall(held) => held.close()?,
-            }
+            let result = match database {
+                Database::Started(held) => held.close(),
+                Database::Project(held) => held.close(),
+                Database::Profile(held) => held.close(),
+                Database::Recall(held) => held.close(),
+            };
+            // SQLite returns its actual connection on failed close. Keep its
+            // scope lock and namespace until that owned connection settles.
+            result.map_err(|error| CloseFailure::Pending(error.into()))?;
             self.database = None;
         }
         if let Some(control) = &mut self.control {
-            control.close()?;
+            // This synchronous fixed-file owner attempts every held descriptor
+            // once before returning an error. Its sticky refusal is not work
+            // that another close invocation could finish.
+            control
+                .close()
+                .map_err(|error| CloseFailure::Consumed(error.into()))?;
             self.control = None;
         }
         Ok(())

@@ -10,6 +10,7 @@ use crate::{
 pub use error::MemoryLifecycleError;
 use reverie_contracts::memory::MemoryView;
 use reverie_core::memory::{EmbeddingText, MemoryScope};
+use reverie_core::shutdown::ShutdownStatus;
 use reverie_host::{
     embeddings::EmbeddingCandidates, memory_configuration::MemoryConfiguration,
     memory_namespace::MemoryNamespace,
@@ -77,14 +78,32 @@ impl InstalledMemory {
     /// Nonblocking busy refusal while a recall/startup owns inference or data.
     /// A failed SQLite close retains its actual scope lock until checked close.
     pub fn close(&self) -> Result<()> {
-        let mut state = self.lock()?;
+        self.shutdown().into_result()
+    }
+    /// A consumed negative finalizer stays refused; only actual pending owned
+    /// work keeps a standalone caller alive. Neither outcome grants a release.
+    pub fn shutdown(&self) -> ShutdownStatus<MemoryLifecycleError> {
+        let mut state = match self.lock() {
+            Ok(state) => state,
+            Err(error) => return ShutdownStatus::Pending(error),
+        };
         state.closed = true;
+        let mut result = Ok(());
         if let Some(pending) = &mut state.pending {
-            pending.close()?;
-            state.pending = None;
+            match pending.close() {
+                Ok(()) => state.pending = None,
+                Err(operation::CloseFailure::Pending(error)) => {
+                    return ShutdownStatus::Pending(error);
+                }
+                Err(operation::CloseFailure::Consumed(error)) => result = Err(error),
+            }
         }
-        state.namespace.close()?;
-        Ok(())
+        // A consumed control failure must not skip the remaining namespace
+        // finalizers. Keep both failures and the persistent service fence.
+        match error::finalized(result, state.namespace.close().map_err(Into::into)) {
+            Ok(()) => ShutdownStatus::Complete,
+            Err(error) => ShutdownStatus::Refused(error),
+        }
     }
     fn lock(&self) -> Result<MutexGuard<'_, State>> {
         self.state.try_lock().map_err(|error| match error {
@@ -111,6 +130,6 @@ impl State {
         if closed.is_err() {
             self.pending = Some(resources);
         }
-        error::finalized(checked, closed)
+        error::finalized(checked, closed.map_err(operation::CloseFailure::into_error))
     }
 }

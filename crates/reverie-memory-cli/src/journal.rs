@@ -28,8 +28,7 @@ pub(super) fn save(request: &JournalSaveRequest) -> Result<MemoryReply> {
         client.save(request, deadline(), signals.cancellation());
     let restored = finish(&client, &mut signals);
     let result = result.map(MemoryReply::saved).map_err(problem);
-    restored?;
-    result
+    Failure::finalized(result, restored)
 }
 pub(super) fn recall(
     scope: &MemoryScope,
@@ -72,32 +71,33 @@ fn copy_failure(message: &str, request: &JournalSaveRequest) -> Failure {
 }
 fn finish(client: &MemoryJournalClient, signals: &mut JournalSignals) -> Result<()> {
     let closed = close(client, Some(signals));
-    if let Err(error) = signals.finish() {
-        retain(|| signals.finish().is_ok(), &error.to_string());
-        return Err(Failure::text("journal signal restoration was unconfirmed"));
-    }
+    // Both watcher join and handler restoration have been attempted when
+    // finish returns. Preserve its sticky error without polling it forever.
+    let restored = signals.finish().map_err(Failure::display);
+    let finalized = Failure::finalized(closed, restored);
     if let Some(signal) = signals.termination_signal() {
-        return Err(Failure(
-            MetadataText::from_scalar_text(
-                "journal operation interrupted; inspect the journal before another save",
-            ),
-            (128 + signal) as u8,
-        ));
+        return Failure::finalized(
+            finalized,
+            Err(Failure(
+                MetadataText::from_scalar_text(
+                    "journal operation interrupted; inspect the journal before another save",
+                ),
+                (128 + signal) as u8,
+            )),
+        );
     }
-    closed
+    finalized
 }
 fn deadline() -> Instant {
     Instant::now() + Duration::from_secs(60)
 }
 fn close(client: &MemoryJournalClient, signals: Option<&JournalSignals>) -> Result<()> {
     let limit = signals.map_or_else(deadline, |signals| signals.cleanup_deadline(deadline()));
-    match client.close(limit) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            retain(|| client.close(Instant::now()).is_ok(), &error.to_string());
-            Err(Failure::text(
-                "journal client cleanup was unconfirmed; inspect the journal before another save",
-            ))
-        }
-    }
+    let mut deadline = limit;
+    settle(|| {
+        let outcome = client.shutdown(deadline);
+        deadline = Instant::now();
+        outcome
+    })
+    .map_err(Failure::display)
 }

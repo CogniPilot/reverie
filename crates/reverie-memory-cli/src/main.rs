@@ -35,6 +35,27 @@ impl Failure {
     fn display(error: impl std::fmt::Display) -> Self {
         Self::text(&error.to_string())
     }
+    fn finalized<T>(result: Result<T>, closed: Result<()>) -> Result<T> {
+        match (result, closed) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+            (Err(primary), Err(secondary)) => {
+                let mut text = primary.0.codepoints().to_vec();
+                text.extend("; finalization: ".chars().map(u32::from));
+                text.extend_from_slice(secondary.0.codepoints());
+                Err(Self(
+                    MetadataText::from_python_text(
+                        reverie_core::PythonText::try_new(text).expect("checked error text"),
+                    ),
+                    if secondary.1 >= 128 {
+                        secondary.1
+                    } else {
+                        primary.1
+                    },
+                ))
+            }
+        }
+    }
 }
 type Result<T> = std::result::Result<T, Failure>;
 fn main() -> ExitCode {
@@ -64,22 +85,28 @@ fn selected(mut arguments: Arguments) -> Result<Arguments> {
 fn run(arguments: Arguments) -> Result<MemoryReply> {
     let mut namespace = MemoryNamespace::capture_current().map_err(Failure::display)?;
     let result = request::run(&arguments);
-    if let Err(error) = namespace.close() {
-        retain(|| namespace.close().is_ok(), &error.to_string());
-        return Err(Failure::text(
-            "memory namespace finalization was unconfirmed",
-        ));
-    }
-    result
+    // Namespace close synchronously consumes every local descriptor once. A
+    // sticky negative outcome is not a constructor that could later finish.
+    Failure::finalized(result, namespace.close().map_err(Failure::display))
 }
-fn retain(mut settled: impl FnMut() -> bool, message: &str) {
-    let _ = reverie_diagnostics::stderr(
-        format!("Reverie memory cleanup pending: {message}\n").as_bytes(),
-    );
+fn settle<E: std::fmt::Display>(
+    mut shutdown: impl FnMut() -> reverie_core::shutdown::ShutdownStatus<E>,
+) -> std::result::Result<(), E> {
+    use reverie_core::shutdown::ShutdownStatus;
+    let mut reported = false;
     loop {
-        std::thread::sleep(Duration::from_millis(50));
-        if settled() {
-            break;
+        match shutdown() {
+            ShutdownStatus::Complete => return Ok(()),
+            ShutdownStatus::Refused(error) => return Err(error),
+            ShutdownStatus::Pending(error) => {
+                if !reported {
+                    let _ = reverie_diagnostics::stderr(
+                        format!("Reverie memory cleanup pending: {error}\n").as_bytes(),
+                    );
+                    reported = true;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
         }
     }
 }

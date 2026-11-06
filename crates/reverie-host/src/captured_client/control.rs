@@ -54,6 +54,43 @@ pub(crate) struct CapturedClient {
     closing: AtomicBool,
 }
 impl CapturedClient {
+    /// This does not clear a fence or turn a negative close into success. A
+    /// standalone owner may terminate negatively only after all known native
+    /// work is consumed; persistent services keep the same failed context.
+    pub(crate) fn shutdown(
+        &self,
+        deadline: Instant,
+    ) -> reverie_core::shutdown::ShutdownStatus<EngineError> {
+        use reverie_core::shutdown::ShutdownStatus;
+        match self.close(deadline) {
+            Ok(()) => ShutdownStatus::Complete,
+            Err(error) if self.has_pending_native_work() => ShutdownStatus::Pending(error),
+            Err(error) => ShutdownStatus::Refused(error),
+        }
+    }
+    fn has_pending_native_work(&self) -> bool {
+        // Failed admission sealing, mutex contention and poison are unknown,
+        // never evidence that another constructor cannot still be admitted.
+        if !self.closing.load(Ordering::Acquire) {
+            return true;
+        }
+        let Ok(active) = self.active.try_lock() else {
+            return true;
+        };
+        let Some(job) = &*active else {
+            return false;
+        };
+        // The accepted worker publishes this only after start/observe/catch
+        // and cleanup. All its native resources reside in this JobData; there
+        // is no separate unadopted constructor JoinHandle/result here.
+        if !job.finished.load(Ordering::Acquire) {
+            return true;
+        }
+        let Ok(data) = job.data.try_lock() else {
+            return true;
+        };
+        data.process.has_pending_native_work()
+    }
     pub(crate) fn new(bootstrap: InstalledCommand) -> Self {
         Self {
             bootstrap: Arc::new(bootstrap),

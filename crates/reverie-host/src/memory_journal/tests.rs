@@ -178,6 +178,7 @@ fn combined_pipe_bound_and_deadline_keep_real_owned_cleanup() {
 }
 #[test]
 fn actual_pipe_close_failure_remains_uncertain_and_fences_the_client() {
+    use reverie_core::shutdown::ShutdownStatus;
     let tree = Tree::new();
     let hooks = Hooks::default();
     hooks.close_failed.store(true, Ordering::SeqCst);
@@ -189,8 +190,98 @@ fn actual_pipe_close_failure_remains_uncertain_and_fences_the_client() {
     assert!(error.process_is_unconfirmed());
     assert!(error.save_is_unconfirmed());
     assert!(client.close(deadline()).is_err());
+    let ShutdownStatus::Refused(consumed) = client.shutdown(deadline()) else {
+        panic!("all known native work was consumed, not successful cleanup")
+    };
+    assert!(consumed.process_is_unconfirmed());
+    assert!(consumed.save_is_unconfirmed());
+    assert!(client.has_unconfirmed_save());
+    assert!(client.close(deadline()).is_err());
+    assert_eq!(
+        client
+            .save(&request(), deadline(), &CancellationToken::new())
+            .err()
+            .unwrap()
+            .fault(),
+        JournalClientFault::UnknownSave
+    );
     assert_eq!(
         fs::read_to_string(tree.root.join("trace")).unwrap(),
         "started\n"
     );
+}
+#[test]
+fn a_late_constructor_is_pending_until_its_actual_process_is_adopted_and_reaped() {
+    use crate::captured_client::test_hooks::Gate;
+    use reverie_core::shutdown::ShutdownStatus;
+    use std::sync::Arc;
+    let tree = Tree::new();
+    let gate = Arc::new(Gate::default());
+    let hooks = Hooks {
+        gate: Some(Arc::clone(&gate)),
+        ..Hooks::default()
+    };
+    let starts = Arc::clone(&hooks.starts);
+    let client = Arc::new(tree.client("success", hooks));
+    let other = Arc::clone(&client);
+    let worker = std::thread::spawn(move || {
+        other.save(
+            &request(),
+            Instant::now() + Duration::from_millis(80),
+            &CancellationToken::new(),
+        )
+    });
+    let limit = deadline();
+    while !gate.entered.load(Ordering::Acquire) {
+        assert!(Instant::now() < limit);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(worker.join().unwrap().is_err());
+    assert!(matches!(
+        client.shutdown(Instant::now()),
+        ShutdownStatus::Pending(_)
+    ));
+    gate.released.store(true, Ordering::Release);
+    assert!(matches!(
+        client.shutdown(deadline()),
+        ShutdownStatus::Complete
+    ));
+    assert!(client.has_unconfirmed_save());
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        client
+            .save(&request(), deadline(), &CancellationToken::new())
+            .err()
+            .unwrap()
+            .fault(),
+        JournalClientFault::UnknownSave
+    );
+}
+#[test]
+fn an_unchecked_actual_reap_remains_pending_after_the_capture_thread_finishes() {
+    use reverie_core::shutdown::ShutdownStatus;
+    let tree = Tree::new();
+    let hooks = Hooks::default();
+    hooks.reap_blocked.store(true, Ordering::SeqCst);
+    let reap = std::sync::Arc::clone(&hooks.reap_blocked);
+    let client = tree.client("success", hooks);
+    assert!(
+        client
+            .save(
+                &request(),
+                Instant::now() + Duration::from_millis(80),
+                &CancellationToken::new()
+            )
+            .is_err()
+    );
+    assert!(matches!(
+        client.shutdown(Instant::now()),
+        ShutdownStatus::Pending(_)
+    ));
+    reap.store(false, Ordering::SeqCst);
+    assert!(matches!(
+        client.shutdown(deadline()),
+        ShutdownStatus::Complete
+    ));
+    assert!(client.has_unconfirmed_save());
 }

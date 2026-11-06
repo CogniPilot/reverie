@@ -168,6 +168,21 @@ impl MemoryJournalClient {
             JournalClientError::capture(error, self.unknown_save.load(Ordering::Acquire))
         })
     }
+    /// Negative completion does not clear an unconfirmed API save or admit a
+    /// replacement client. Pending retains the same actual native context.
+    pub fn shutdown(
+        &self,
+        deadline: Instant,
+    ) -> reverie_core::shutdown::ShutdownStatus<JournalClientError> {
+        use reverie_core::shutdown::ShutdownStatus;
+        let error =
+            |error| JournalClientError::capture(error, self.unknown_save.load(Ordering::Acquire));
+        match self.client.shutdown(deadline) {
+            ShutdownStatus::Complete => ShutdownStatus::Complete,
+            ShutdownStatus::Pending(value) => ShutdownStatus::Pending(error(value)),
+            ShutdownStatus::Refused(value) => ShutdownStatus::Refused(error(value)),
+        }
+    }
     pub fn has_unconfirmed_save(&self) -> bool {
         self.unknown_save.load(Ordering::Acquire)
     }

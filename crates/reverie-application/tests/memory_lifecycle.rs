@@ -95,6 +95,22 @@ fn shutdown_busy_fence_is_real_and_does_not_close_an_active_scope() {
     worker.join().unwrap();
 }
 #[test]
+fn consumed_control_failure_closes_namespace_but_keeps_library_refusal_sticky() {
+    let tree = Tree::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let root = tree.0.clone();
+    let server = std::thread::spawn(move || blocking_server(listener, &root));
+    successful(
+        tree.command("refused")
+            .env("REVERIE_EMBED_URL", url)
+            .output()
+            .unwrap(),
+    );
+    server.join().unwrap();
+}
+#[test]
 fn service_child() {
     let Ok(case) = std::env::var("OWNED_INSTALLED_MEMORY") else {
         return;
@@ -116,6 +132,10 @@ fn service_child() {
         "private" => private(&service, &root),
         "project" => project_case(&service, &root, &project),
         "busy" => busy(&service),
+        "refused" => {
+            refused(&service, &root);
+            return;
+        }
         _ => panic!("unknown owned case"),
     }
     service.close().unwrap();
@@ -127,6 +147,45 @@ fn service_child() {
         Err(MemoryLifecycleError::Closed)
     ));
     service.close().unwrap();
+}
+fn refused(service: &Arc<InstalledMemory>, root: &std::path::Path) {
+    use reverie_core::shutdown::ShutdownStatus;
+    use std::os::unix::fs::PermissionsExt;
+    service.startup(&MemoryScope::Private, &[]).unwrap();
+    let before = std::fs::read_dir("/proc/self/fd").unwrap().count();
+    let other = Arc::clone(service);
+    let recall = std::thread::spawn(move || {
+        other.recall(
+            &MemoryScope::Private,
+            EmbeddingText::from_scalar_text("topic"),
+        )
+    });
+    wait_path(&root.join("query-held"));
+    let lock = root.join("state/.memory-lifecycle-v1.lock");
+    fs::rename(&lock, lock.with_extension("retired")).unwrap();
+    fs::write(&lock, b"").unwrap();
+    fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(root.join("release-query"), b"test-sync-only").unwrap();
+    assert!(recall.join().unwrap().is_err());
+    assert!(matches!(service.shutdown(), ShutdownStatus::Refused(_)));
+    assert_eq!(
+        std::fs::read_dir("/proc/self/fd").unwrap().count() + 5,
+        before,
+        "all five namespace descriptors must still be finalized after the consumed control error"
+    );
+    assert!(matches!(service.shutdown(), ShutdownStatus::Refused(_)));
+    assert!(service.close().is_err());
+    assert!(matches!(
+        service.startup(&MemoryScope::Private, &[]),
+        Err(MemoryLifecycleError::Closed)
+    ));
+    assert!(matches!(
+        service.recall(
+            &MemoryScope::Private,
+            EmbeddingText::from_scalar_text("topic")
+        ),
+        Err(MemoryLifecycleError::Closed)
+    ));
 }
 fn private(service: &InstalledMemory, root: &std::path::Path) {
     let first = service.startup(&MemoryScope::Private, &[]).unwrap();
