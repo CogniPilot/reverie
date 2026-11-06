@@ -1,5 +1,5 @@
 # Compile-time facts for the eventual native broker, never instance config.
-# Keep the existing producer's filtered identity until its separate required port.
+# The Rust producer projects only its actual crate/dependency inputs.
 { pkgs, src }:
 let
   baseProfile = import ./worker-docker-profile.nix { inherit pkgs; };

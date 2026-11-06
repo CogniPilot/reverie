@@ -65,6 +65,16 @@ function expected(expect: Expect): Frame {
       };
     case 'observed':
       return { ...identity, body: { kind: 'observed', observation: 'subscription_modes', json: hex('json_hex') } };
+    case 'typed_response':
+      return {
+        ...identity,
+        body: {
+          kind: 'typed_response',
+          media: expect.media as never,
+          status: Number(expect.status),
+          body: hex('body_hex'),
+        },
+      };
   }
   throw new Error(`unknown kind ${expect.kind}`);
 }
@@ -98,6 +108,8 @@ describe('route-frames-v1 TS reader', () => {
         ]);
       else if (spec.kind === 2)
         payload = Buffer.concat([Buffer.from([0, 200]), Buffer.alloc(spec.body_len ?? 0, 0x20)]);
+      else if (spec.kind === 7)
+        payload = Buffer.concat([Buffer.from([1, 0, 200]), Buffer.alloc(spec.body_len ?? 0, 0x20)]);
       else payload = Buffer.concat([Buffer.from([1]), Buffer.alloc(spec.json_len ?? 0, 0x20)]);
       const wire = Buffer.alloc(4 + 18 + payload.length);
       wire.writeUInt32BE(18 + payload.length, 0);

@@ -6,6 +6,7 @@ members = [
     "crates/reverie-contracts",
     "crates/reverie-store",
     "crates/reverie-host",
+    "crates/reverie-policy-artifacts",
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",

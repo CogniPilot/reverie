@@ -88,6 +88,7 @@
           codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
           codexObserverNativeCheck = self.packages.${system}.codexObserver.tests.native;
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
+          policyArtifacts = import ./nix/policy-artifacts.nix { inherit pkgs; src = source; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
           chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
           dockerImageWithChatLanguages = import ./nix/image.nix {

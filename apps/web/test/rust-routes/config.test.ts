@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ROUTE_STATUSES, rustRoutes } from '../../src/rust-routes/config.js';
+import { ROUTE_MEDIA, ROUTE_STATUSES, rustRoutes } from '../../src/rust-routes/config.js';
+import { MEDIA } from '../../src/rust-routes/frames.js';
 
 const copied = resolve(import.meta.dirname, '../fixtures/route-frames-v1');
 const source = resolve(import.meta.dirname, '../../../../crates/reverie-contracts/tests/fixtures/route-frames-v1');
@@ -43,10 +44,13 @@ describe('rust route configuration', () => {
       );
   });
 
-  it('serves the statuses of the shared route table', () => {
+  it('serves the statuses and media of the shared route table', () => {
     const { routes } = JSON.parse(readFileSync(join(fixtures, 'cases.json'), 'utf8')) as {
-      routes: { key: string; statuses: number[] }[];
+      routes: { key: string; statuses: number[]; media?: string[] }[];
     };
     expect(ROUTE_STATUSES).toEqual(Object.fromEntries(routes.map((route) => [route.key, route.statuses])));
+    expect(
+      Object.fromEntries(Object.entries(ROUTE_MEDIA).map(([key, media]) => [key, media.map((byte) => MEDIA[byte])]))
+    ).toEqual(Object.fromEntries(routes.filter((route) => route.media).map((route) => [route.key, route.media])));
   });
 });
