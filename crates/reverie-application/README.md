@@ -1,5 +1,12 @@
 # Reverie application services
 
+`worker_validation::{validate_captured,load_owner_config}` composes the complete
+ordered worker validator and its compatible owner-file loader. The returned
+snapshot retains original data and readonly observations; no native mount,
+start, owner or publication authority is created. Its
+[ownership/compatibility audit](src/worker_validation/README.md) inventories the
+still-Python runtime consumers and separate startup/effect obligations.
+
 This crate owns workflows across the core, contracts, store and native host
 adapters. HTTP/CLI transports should call these services after authenticating
 and admitting the operation; they should not reproduce workflow decisions.

@@ -3,3 +3,4 @@
 //! admission/effect custody. Returned candidates do not establish those powers.
 pub mod reservation_observer;
 pub mod resource_staging;
+pub mod worker_validation;

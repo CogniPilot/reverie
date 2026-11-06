@@ -50,6 +50,14 @@ pub(crate) fn decode_python_str(raw: &[u8]) -> Result<Value, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_last_wins(raw)
 }
+/// OPS private metadata uses strict json.loads(bytes), with the default integer
+/// cap. Keep its encoding detection and constant rules purpose-local.
+pub(crate) fn decode_ops_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_engine_stopped(&text::python_bytes(raw)?)
+}
+pub(crate) fn decode_ops_private_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
+    decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::StrictEngine)
+}
 pub(crate) fn decode_memory_str(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_ordered(raw, decode::Purpose::Rootless)

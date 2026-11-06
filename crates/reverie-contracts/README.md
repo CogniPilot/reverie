@@ -185,8 +185,9 @@ full worker schema validator or an authorization interface.
 
 `worker_schema::WorkerEnvelope` now checks the complete pure envelope/base and
 mount declaration unit while retaining the captured data exactly. Its separate
-feature method reuses existing map/lease policy owners. Native source custody,
-remaining optional domains and full ordered validation remain open; see the
+feature method reuses existing map/lease policy owners. Native source custody
+and full ordered validation remain outside that envelope. The complete ordered
+application service now composes those purpose owners; see the
 [source-backed ownership audit](src/worker_schema/README.md).
 
 `rootless` ports the rootless option/profile/syscall, image-label and subordinate

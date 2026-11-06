@@ -19,6 +19,20 @@ pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
     Ok(EffectiveWorkerConfig(value))
 }
 
+/// Path.read_text() followed by default json.loads(str), for the named owner
+/// loader only. Keep last-wins/4300-digit/nonfinite behavior separate from the
+/// duplicate-free captured hash codec and byte-encoding auto-detection readers.
+pub fn decode_owner_text(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
+    let text = std::str::from_utf8(raw).map_err(|_| WorkerConfigError::InvalidJson)?;
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let value = legacy_json::decode_python_str(text.as_bytes())
+        .map_err(|_| WorkerConfigError::InvalidJson)?;
+    if !matches!(value.0, Node::Object(_)) {
+        return Err(WorkerConfigError::ExpectedObject);
+    }
+    Ok(EffectiveWorkerConfig(value))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkerConfigError {
     InvalidJson,
