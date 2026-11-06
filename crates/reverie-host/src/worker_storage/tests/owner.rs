@@ -219,6 +219,89 @@ fn same_context_pending_constructor_keeps_actual_flock_owned_until_settled() {
     runtime.close(end()).unwrap();
 }
 
+#[test]
+fn constructor_crossing_physical_consumption_never_receives_a_release_acknowledgement() {
+    if crate::test_process::isolate_case(
+        "worker_storage::tests::owner::constructor_crossing_physical_consumption_never_receives_a_release_acknowledgement",
+    ) {
+        return;
+    }
+    assert!(matches!(
+        crossing_close(false),
+        StorageOwnerError::Engine(_)
+    ));
+}
+fn crossing_close(fail_physical_close: bool) -> StorageOwnerError {
+    let tree = Tree::new();
+    let mut bootstrap = bootstrap(&tree);
+    let gate = Arc::new(crate::captured_client::test_hooks::Gate::default());
+    bootstrap.hooks.gate = Some(gate.clone());
+    let runtime = WorkerRuntime::new(InstalledWorkerEngine::new(bootstrap), &base());
+    let source = selected(&tree);
+    let owner = runtime
+        .resolve_storage(&source, &session(A))
+        .unwrap()
+        .acquire()
+        .unwrap();
+    let reader = runtime.readonly();
+    let during = gate.clone();
+    super::super::owner::BEFORE_CONSUMPTION.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            let query = std::thread::spawn(move || {
+                reader.query(
+                    EngineQuery::InventoryIds,
+                    Instant::now() + Duration::from_millis(20),
+                    &CancellationToken::new(),
+                )
+            });
+            let limit = end();
+            while !during.entered.load(Ordering::Acquire) {
+                assert!(Instant::now() < limit);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(query.join().unwrap().unwrap_err().is_uncertain());
+            if fail_physical_close {
+                native::test_faults::set(None, true);
+            }
+        }))
+    });
+    let result = owner.close(Instant::now() + Duration::from_millis(50));
+    gate.released.store(true, Ordering::Release);
+    runtime.settle_owned(end()).unwrap();
+    runtime.close(end()).unwrap();
+    let failure = result
+        .expect_err("pre-close settlement must not acknowledge a crossing native constructor");
+    let (owner, cause) = failure.into_parts();
+    assert_eq!(
+        owner.ownership_kind(),
+        StorageOwnershipKind::ConsumedUnconfirmed
+    );
+    assert!(owner.check_resource_current().is_err());
+    assert_eq!(
+        owner.close(end()).unwrap_err().cause().code(),
+        "WORKER_STORAGE_CLOSE_UNCONFIRMED"
+    );
+    cause
+}
+#[test]
+fn physical_close_and_crossing_constructor_failures_preserve_both_typed_causes() {
+    if crate::test_process::isolate_case(
+        "worker_storage::tests::owner::physical_close_and_crossing_constructor_failures_preserve_both_typed_causes",
+    ) {
+        return;
+    }
+    let cause = crossing_close(true);
+    assert!(
+        matches!(&cause,StorageOwnerError::Finalized { primary,.. } if matches!(primary.as_ref(),StorageOwnerError::Storage(_)))
+    );
+    assert_eq!(cause.cleanup_errors().len(), 1);
+    assert!(matches!(
+        cause.cleanup_errors()[0],
+        StorageOwnerError::Engine(_)
+    ));
+    assert!(std::error::Error::source(&cause).is_some());
+}
+
 fn expected_writer_error(case: &Value) -> &str {
     match case["error"].as_str().unwrap() {
         "TypeError" | "AttributeError" | "KeyError" => "WORKER_STORAGE_WRITER_STRUCTURE",

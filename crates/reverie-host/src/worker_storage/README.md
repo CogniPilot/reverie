@@ -115,12 +115,18 @@ the exact nine-field comparison bytes, preserving accepted JSON encodings and
 normalizing only Python Path spelling before custody checks.
 
 Consuming `LaunchStorage::close` settles the SAME retained constructor/client/
-pipe context before closing lifetime descriptors. Unknown settlement returns
-the actual held owner; a failed consumed descriptor close returns a latched
+pipe context before closing lifetime descriptors and again after consumption,
+so a constructor crossing that interval cannot receive a successful resource
+release. Unknown initial settlement returns the actual held owner; unknown
+post-close settlement or a failed consumed descriptor close returns a latched
 unconfirmed owner and cannot retry the numeric FD or fabricate a live lease.
+If physical close and subsequent native settlement both fail, the original
+typed cause and secondary cleanup error remain inspectable together.
 Local checked close alone does not prove a global unlock while another process
 still holds an inherited open-file description. Callers must retain returned
-owners and uncertainty. The actual installing-broker registry/claim/release and
+owners and uncertainty and inventory ALL constructing process contexts before
+global release/capacity acknowledgement. These checks cover this captured
+client, not a global process-spawn fence. The actual installing-broker registry/claim/release and
 Nix/laptop effect consumers remain separate, unfinished integration here.
 
 Qualification includes 66 actual unmodified Python writer cases through a

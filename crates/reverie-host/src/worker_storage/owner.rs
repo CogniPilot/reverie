@@ -18,6 +18,10 @@ pub enum StorageOwnerError {
     Intent(reverie_contracts::worker_intent::IntentDataError),
     Path(std::io::Error),
     Refused(&'static str),
+    Finalized {
+        primary: Box<Self>,
+        secondary: Vec<Self>,
+    },
 }
 impl StorageOwnerError {
     pub fn code(&self) -> &'static str {
@@ -30,6 +34,13 @@ impl StorageOwnerError {
             Self::Intent(error) => error.code(),
             Self::Path(_) => "WORKER_STORAGE_NATIVE_PATH",
             Self::Refused(code) => code,
+            Self::Finalized { primary, .. } => primary.code(),
+        }
+    }
+    pub fn cleanup_errors(&self) -> &[Self] {
+        match self {
+            Self::Finalized { secondary, .. } => secondary,
+            _ => &[],
         }
     }
 }
@@ -49,10 +60,13 @@ impl std::error::Error for StorageOwnerError {
             Self::Intent(error) => Some(error),
             Self::Path(error) => Some(error),
             Self::Refused(_) => None,
+            Self::Finalized { primary, .. } => Some(primary.as_ref()),
         }
     }
 }
 type OwnerResult<T> = std::result::Result<T, StorageOwnerError>;
+#[cfg(test)]
+thread_local! {pub(super) static BEFORE_CONSUMPTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);}
 #[derive(Clone, Eq, PartialEq)]
 struct Namespace {
     company: MetadataText,
@@ -252,18 +266,35 @@ impl LaunchStorage {
                 cause: StorageOwnerError::Engine(error),
             }));
         }
+        #[cfg(test)]
+        BEFORE_CONSUMPTION.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
         let ownership = std::mem::replace(&mut self.ownership, Ownership::ConsumedUnconfirmed);
-        match ownership {
-            Ownership::Held(lease) => match lease.close() {
-                Ok(()) => Ok(()),
-                Err(error) => Err(Box::new(StorageCloseFailure {
-                    owner: self,
-                    cause: StorageOwnerError::Storage(error),
-                })),
-            },
+        let closed = match ownership {
+            Ownership::Held(lease) => lease.close().map_err(StorageOwnerError::Storage),
             Ownership::UnleasedLegacy => Ok(()),
             Ownership::ConsumedUnconfirmed => unreachable!("checked above"),
-        }
+        };
+        // A new query can be admitted after the first settlement. A constructor
+        // admitted before FD consumption must also settle before this owner
+        // acknowledges release. This inventories only this captured context;
+        // unrelated process producers remain the installing broker's duty.
+        let settled = self
+            .engine
+            .settle_owned(deadline)
+            .map_err(StorageOwnerError::Engine);
+        let result = match (closed, settled) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(primary), Err(secondary)) => Err(StorageOwnerError::Finalized {
+                primary: Box::new(primary),
+                secondary: vec![secondary],
+            }),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        };
+        result.map_err(|cause| Box::new(StorageCloseFailure { owner: self, cause }))
     }
 }
 pub struct StorageCloseFailure {
