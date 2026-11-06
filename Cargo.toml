@@ -1,5 +1,16 @@
 [workspace]
-members = ["crates/reverie-soft-limit-helper", "crates/reverie-laptop-tools", "crates/reverie-core", "crates/reverie-contracts", "crates/reverie-store", "crates/reverie-routes", "crates/reverie-worker-client", "crates/xtask"]
+members = [
+    "crates/reverie-soft-limit-helper",
+    "crates/reverie-laptop-tools",
+    "crates/reverie-core",
+    "crates/reverie-contracts",
+    "crates/reverie-store",
+    "crates/reverie-host",
+    "crates/reverie-application",
+    "crates/reverie-routes",
+    "crates/reverie-worker-client",
+    "crates/xtask",
+]
 resolver = "3"
 
 [workspace.package]
@@ -17,6 +28,7 @@ sha2 = "0.10"
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
+reverie-host = { path = "crates/reverie-host" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.
 # Every member must opt in with [lints] workspace = true.
