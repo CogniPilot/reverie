@@ -19,13 +19,14 @@ pub(crate) enum Error {
 pub(crate) fn decode_utf8(raw: &[u8]) -> Result<Value, Error> {
     decode::decode(raw)
 }
+#[cfg(test)]
 pub(crate) fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode(&text::python_bytes(raw)?)
 }
 pub(crate) fn decode_bytes_without_constants(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_without_constants(&text::python_bytes(raw)?)
 }
-/// worker_storage.read_metadata uses Python bytes decoding, ordinary signed
+/// Metadata and fixed perf readers use Python bytes decoding, ordinary signed
 /// integer conversion and close-time object_pairs_hook duplicate refusal.
 /// Unlike strict constant readers, literal NaN and infinities remain data.
 pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {

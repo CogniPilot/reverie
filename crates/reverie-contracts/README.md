@@ -92,6 +92,9 @@ bounded employee policy map and literal rootless enabled flag, then replaces
 only the selected fixed profile/hash and adds the task-v1 marker. Unknown worker
 configuration fields remain lossless. These are data transforms, not native
 artifact custody, owner permission, full Docker validation or a kernel grant.
+The fixed artifact reader shares the metadata parse-hook purpose: default
+4300-digit integer conversion, object-close duplicate refusal and Python byte
+encoding detection, while accepting literal nonfinite constants.
 The separate Linux host adapter supplies fixed package observation and current
 employee bracketing; current production Python consumers remain selected.
 
