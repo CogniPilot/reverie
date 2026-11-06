@@ -15,6 +15,8 @@ pub(crate) struct Hooks {
     pub reads: Arc<AtomicUsize>,
     pub preparation_failed: Arc<AtomicBool>,
     pub registration_close_failed: Arc<AtomicBool>,
+    pub result_gate: Option<Arc<Gate>>,
+    pub handoff_contended: Arc<AtomicBool>,
 }
 #[derive(Default)]
 pub(crate) struct Gate {
@@ -22,6 +24,14 @@ pub(crate) struct Gate {
     pub(crate) released: AtomicBool,
 }
 impl Hooks {
+    pub(crate) fn before_result(&self) {
+        if let Some(gate) = &self.result_gate {
+            gate.entered.store(true, Ordering::Release);
+            while !gate.released.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
     pub(crate) fn prepared(
         &self,
         result: std::result::Result<native::Handshake, native::PreparationError>,
