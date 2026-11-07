@@ -1,9 +1,11 @@
 //! Closed resource-purpose DATA. Only the actual native website/owner actor
 //! can authenticate a channel or authorize maintenance; these values cannot.
 mod facts;
+mod image_time;
 mod metadata;
 mod native_client;
 mod process;
+mod provenance;
 mod settings;
 #[cfg(test)]
 mod tests;
@@ -13,6 +15,9 @@ pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
 pub use metadata::{EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata};
 pub use native_client::NativeResourceClientManifest;
 pub use process::{ProcessStatData, require_peer_kernel_status};
+pub use provenance::{
+    InvocationKind, InvocationSelection, WebsiteImageProvenance, WebsiteProgramGraph,
+};
 use reverie_core::{PythonText, decimal::UnsignedInteger, operations::JournalDigest};
 pub use settings::ResourceActorSettings;
 use std::{collections::BTreeMap, fmt};
