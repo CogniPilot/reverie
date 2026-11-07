@@ -1,4 +1,4 @@
-{ pkgs, kokoro }:
+{ pkgs, kokoro, voiceVerifier }:
 let
   whisperModel = pkgs.fetchurl {
     url = "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt";
@@ -14,6 +14,7 @@ let
   };
 in pkgs.mkShell {
   packages = [
+    voiceVerifier
     (pkgs.python3.withPackages (ps: [ ps.openai-whisper ps.numpy kokoro.kokoro ]))
     pkgs.nodejs_22 pkgs.chromium pkgs.git pkgs.ffmpeg-headless pkgs.espeak-ng
     pkgs.coreutils pkgs.bash (pkgs.lib.getBin pkgs.util-linux)

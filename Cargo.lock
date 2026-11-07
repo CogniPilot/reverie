@@ -553,6 +553,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-voice-ci"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "reverie-worker-client"
 version = "0.1.0"
 dependencies = [
