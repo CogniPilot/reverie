@@ -487,3 +487,14 @@ the existing request codec retains only its typed JSON refusal.
 These consumers do not recover/register laptops, stop a source, create/start a
 container, mint API grants, or select a backend. Complete-create argv must still
 reach the actual collector immediately before the genuine create producer.
+
+`worker_source_stop::OriginalSourceStop` owns the actual original employee
+resource, same captured engine and original process baseline. Header inspection
+precedes the App's late policy resolution; distinct fixed `/proc` observations,
+immutable-CID stop/inspect/kill and exact metadata readback precede its terminal
+stopped phase. Wrong origin is refused before mutation. A failed or uncertain
+attempt cannot dispatch again or become stopped merely because its native call
+settled. Consuming the original resource is a separate one-shot phase, and the
+App must first close the actual Office/request owners and requalify its claim.
+Drop retains unknown actual resources in a process-lifetime quarantine; it is
+neither a durable fence nor global process/writer release acknowledgement.

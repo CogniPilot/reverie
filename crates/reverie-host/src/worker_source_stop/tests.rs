@@ -140,3 +140,134 @@ fn failed_original_start_validation_never_dispatches_stop_or_releases_lease() {
     fixture.assert_held();
     assert_eq!(fixture.trace().len(), 1);
 }
+
+#[test]
+fn late_policy_refusal_is_terminal_without_native_stop_or_resource_release() {
+    if isolated(
+        "worker_source_stop::tests::late_policy_refusal_is_terminal_without_native_stop_or_resource_release",
+    ) {
+        return;
+    }
+    let fixture = Fixture::new("never");
+    let mut owner = fixture.owner();
+    owner.inspect(&fixture.runtime).unwrap();
+    owner.refuse_policy(&fixture.runtime).unwrap();
+    assert!(owner.inspect(&fixture.runtime).is_err());
+    assert!(
+        owner
+            .stop_after_policy(
+                &fixture.runtime,
+                &worker_config::policy_digest(&fixture.config)
+            )
+            .is_err()
+    );
+    owner.settle_native(&fixture.runtime, end()).unwrap();
+    assert!(
+        owner
+            .close_stopped_resource(&fixture.runtime, end())
+            .is_err()
+    );
+    fixture.assert_held();
+    assert_eq!(fixture.trace().len(), 1);
+}
+
+#[test]
+fn policy_mismatch_retains_original_process_and_lease_without_stop() {
+    if isolated(
+        "worker_source_stop::tests::policy_mismatch_retains_original_process_and_lease_without_stop",
+    ) {
+        return;
+    }
+    let fixture = Fixture::new("never");
+    let mut changed = fixture.row.clone();
+    changed["Config"]["Labels"]["reverie.worker-policy"] = serde_json::json!("f".repeat(64));
+    fixture.write_rows("before.json", &changed);
+    let mut owner = fixture.owner();
+    owner.inspect(&fixture.runtime).unwrap();
+    assert!(
+        owner
+            .stop_after_policy(
+                &fixture.runtime,
+                &worker_config::policy_digest(&fixture.config)
+            )
+            .is_err()
+    );
+    owner.settle_native(&fixture.runtime, end()).unwrap();
+    assert!(
+        owner
+            .close_stopped_resource(&fixture.runtime, end())
+            .is_err()
+    );
+    fixture.assert_held();
+    assert_eq!(fixture.trace().len(), 1);
+}
+
+#[test]
+fn changed_metadata_after_real_stop_does_not_release_original_lease() {
+    if isolated(
+        "worker_source_stop::tests::changed_metadata_after_real_stop_does_not_release_original_lease",
+    ) {
+        return;
+    }
+    let fixture = Fixture::new("stop-requested");
+    let mut changed = fixture.row.clone();
+    changed["State"] = serde_json::json!({"Running":false,"Pid":0});
+    changed["Image"] = serde_json::json!(format!("sha256:{}", "b".repeat(64)));
+    assert_ne!(changed["Image"], fixture.row["Image"]);
+    fixture.write_rows("after.json", &changed);
+    let mut owner = fixture.owner();
+    owner.inspect(&fixture.runtime).unwrap();
+    assert!(
+        owner
+            .stop_after_policy(
+                &fixture.runtime,
+                &worker_config::policy_digest(&fixture.config)
+            )
+            .is_err()
+    );
+    assert!(fixture.root.join("source-reaped").exists());
+    owner.settle_native(&fixture.runtime, end()).unwrap();
+    assert!(
+        owner
+            .close_stopped_resource(&fixture.runtime, end())
+            .is_err()
+    );
+    fixture.assert_held();
+    assert_eq!(fixture.trace().len(), 3);
+}
+
+#[test]
+fn wrong_runtime_refusal_precedes_phase_change_and_keeps_original_owner_usable() {
+    if isolated(
+        "worker_source_stop::tests::wrong_runtime_refusal_precedes_phase_change_and_keeps_original_owner_usable",
+    ) {
+        return;
+    }
+    let fixture = Fixture::new("stop-requested");
+    let foreign = Fixture::new("never");
+    let mut owner = fixture.owner();
+    assert_eq!(
+        owner.inspect(&foreign.runtime).err().unwrap().code(),
+        "RESOURCE_SOURCE_STOP_RUNTIME_CHANGED"
+    );
+    assert!(fixture.trace().is_empty() && foreign.trace().is_empty());
+    owner.inspect(&fixture.runtime).unwrap();
+    owner
+        .stop_after_policy(
+            &fixture.runtime,
+            &worker_config::policy_digest(&fixture.config),
+        )
+        .unwrap();
+    assert_eq!(
+        owner
+            .close_stopped_resource(&foreign.runtime, end())
+            .err()
+            .unwrap()
+            .code(),
+        "RESOURCE_SOURCE_STOP_RUNTIME_CHANGED"
+    );
+    fixture.assert_held();
+    owner
+        .close_stopped_resource(&fixture.runtime, end())
+        .unwrap();
+}

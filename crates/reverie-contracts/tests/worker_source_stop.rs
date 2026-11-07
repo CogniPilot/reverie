@@ -71,7 +71,8 @@ fn exact_original_stop_json_and_metadata_equality_match_thirty_two_actual_python
             before.assert_policy(&policy)?;
             let state = before.state()?;
             let expected = &case["expectedProcess"];
-            if !expected.is_null() && state.pid().as_str() != expected["pid"].to_string() {
+            let expected_pid = expected["pid"].to_string();
+            if !expected.is_null() && state.pid().as_str() != expected_pid {
                 return Ok(false);
             }
             if !state.running() {

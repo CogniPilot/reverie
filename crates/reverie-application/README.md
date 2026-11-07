@@ -416,3 +416,20 @@ The source-holder tests use the unchanged genuine bootstrap/recovery path and
 same captured metadata engine; only kernel observations are controlled data.
 Protected source stop, physical lease release, create/start and global shutdown
 acknowledgement are not provided by this resource/durable-claim join.
+
+`RetainedPreparation::stop_original_source` now consumes its actual private
+STARTING intent together with that registered original source. It publishes the
+existing source-stop attempt, qualifies the same claim again before dispatch,
+resolves policy at the original late phase, and retains one move-only Host stop
+owner inside the same source record. Native uncertainty, policy/PID/metadata
+drift, failed phone close and failed resource close retain the owner and durable
+claim; local client settlement cannot promote them to a stopped result or retry.
+The actual recovered Office phone rejects and joins its tracked work before the
+original employee lease can close. Final source removal follows the final native
+admission check. Returned facts retain capacity and are not target-start authority.
+
+Owning controls cover actual controlled child stop/kill/reap and physical employee
+flocks, plus a genuine installed-Gate publication/CAS/STARTING join for an already
+stopped source with explicitly synthetic kernel facts. They do not qualify a live
+Docker source stop, ordinary legacy/network stop, the complete source-to-target
+launch consumer, every process producer, global shutdown, or backend selection.

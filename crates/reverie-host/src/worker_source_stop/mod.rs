@@ -55,7 +55,7 @@ pub struct SourceStopRetainFailure {
     error: SourceStopError,
 }
 impl SourceStopRetainFailure {
-    pub fn into_parts(self: Box<Self>) -> (Box<LaunchStorage>, SourceStopError) {
+    pub fn into_parts(self) -> (Box<LaunchStorage>, SourceStopError) {
         (self.storage, self.error)
     }
 }

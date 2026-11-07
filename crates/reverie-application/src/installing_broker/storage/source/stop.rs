@@ -159,26 +159,32 @@ impl StorageRegistry {
             .collect::<Vec<_>>();
         let mut result = Ok(());
         for record in records {
-            let next = match record.owner.try_lock() {
-                Ok(mut held) => {
-                    let settled = if let Some(SourceOwned::Stopping(native)) = held.as_mut() {
-                        native
-                            .settle_native(&self.runtime, end)
-                            .map_err(|error| GateError::OriginalSource(Box::new(error.into())))
-                    } else {
-                        Ok(())
-                    };
-                    // Even a Closed local owner has not finished the actual
-                    // final admission boundary until its Source entry is gone.
-                    crate::reservation_gate::finalized(
-                        settled,
-                        Err(GateError::Refused("RESOURCE_ORIGINAL_SOURCE_RETAINED")),
-                    )
-                }
-                Err(_) => Err(GateError::Refused("RESOURCE_ORIGINAL_SOURCE_RETAINED")),
-            };
+            let next = record.settle_original_native(&self.runtime, end);
             result = crate::reservation_gate::finalized(result, next);
         }
         result
+    }
+}
+impl SourceRecord {
+    fn settle_original_native(
+        &self,
+        runtime: &WorkerRuntime,
+        end: Instant,
+    ) -> Result<(), GateError> {
+        let Ok(mut held) = self.owner.try_lock() else {
+            return Err(GateError::Refused("RESOURCE_ORIGINAL_SOURCE_RETAINED"));
+        };
+        let settled = match held.as_mut() {
+            Some(SourceOwned::Stopping(native)) => native
+                .settle_native(runtime, end)
+                .map_err(|error| GateError::OriginalSource(Box::new(error.into()))),
+            _ => Ok(()),
+        };
+        // Even a Closed local owner has not finished the actual final
+        // admission boundary until its Source entry is gone.
+        crate::reservation_gate::finalized(
+            settled,
+            Err(GateError::Refused("RESOURCE_ORIGINAL_SOURCE_RETAINED")),
+        )
     }
 }

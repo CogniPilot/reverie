@@ -212,6 +212,12 @@ impl SourceStopMetadata {
         if !metadata(&row).python_eq(&self.0) {
             return Err(SourceStopDataError::Metadata);
         }
-        state(&row).map_err(|error| if error == SourceStopDataError::State { SourceStopDataError::ReleasedState } else { error })
+        state(&row).map_err(|error| {
+            if error == SourceStopDataError::State {
+                SourceStopDataError::ReleasedState
+            } else {
+                error
+            }
+        })
     }
 }
