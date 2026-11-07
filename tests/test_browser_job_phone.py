@@ -14,7 +14,7 @@ class BrowserPhone(unittest.TestCase):
     def call(self,body,callback=None,headers=None,path='/api/browser-jobs',method='POST'):
         tree=ast.parse(Path(worker.__file__).read_text());office=next(x for x in tree.body if isinstance(x,ast.ClassDef)and x.name=='OfficeAPI');constructor=next(x for x in office.body if isinstance(x,ast.FunctionDef)and x.name=='__init__');handler=next(x for x in constructor.body if isinstance(x,ast.ClassDef)and x.name=='Handler')
         api=SimpleNamespace(closing=threading.Event(),rate_lock=threading.Lock(),tokens=40.,updated=time.monotonic(),upstreams={},requests={})
-        namespace=dict(worker.__dict__);namespace.update(api=api,session_id=SID,browser_jobs=callback,ops=None,host_actions=None,command_telemetry=None)
+        namespace=dict(worker.__dict__);namespace.update(api=api,session_id=SID,browser_jobs=callback,ops=None,command_telemetry=None)
         exec(compile(ast.Module(body=[handler],type_ignores=[]),'<actual OfficeAPI Handler>','exec'),namespace)
         instance=object.__new__(namespace['Handler']);instance.command=method;instance.path=path;instance.connection=object();instance.rfile=io.BytesIO(body);instance.wfile=io.BytesIO();instance.headers=Message()
         for k,v in [('Content-Length',str(len(body))),('Content-Type','application/json'),*((headers or{}).items())]:instance.headers.add_header(k,v)

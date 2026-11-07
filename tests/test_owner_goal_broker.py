@@ -248,19 +248,17 @@ class OwnerGoalBrokerTests(unittest.TestCase):
             text = (Path(__file__).resolve().parents[1]/file).read_text()
             self.assertIn('TasksMax', text); self.assertNotIn('TasksMax=1024', text)
 
-    def test_recover_max_population_preserves_host_actions_and_never_requests_signer_or_generation(self):
+    def test_recover_max_population_passes_no_options_and_never_requests_signer_or_generation(self):
         ids = [f'{i:08x}-2222-3333-4444-555555555555' for i in range(16)]
         self.broker.run_engine = Mock(return_value=subprocess.CompletedProcess([], 0,
                                     '\n'.join('test-agent-'+s for s in ids), ''))
-        self.broker.host_actions = object()
         with patch('reverie.worker.OfficeAPI') as offices, \
                 patch.object(self.broker.goals, 'signer', side_effect=AssertionError('SIGNER_FORBIDDEN')), \
                 patch.object(self.broker.goals, 'persist_launch', side_effect=AssertionError('PIN_FORBIDDEN')):
             self.broker.recover()
             self.assertEqual(offices.call_count, 16)
             for call in offices.call_args_list:
-                self.assertEqual(set(call.kwargs), {'host_actions'})
-                self.assertIs(call.kwargs['host_actions'], self.broker.host_actions)
+                self.assertEqual(set(call.kwargs), set())
         self.assertEqual(self.broker.generation, 0)
         self.assertFalse(Path(self.config['stateRoot']).exists())
         self.assertEqual([c.args[0][0] for c in self.broker.run_engine.call_args_list], ['ps'])
