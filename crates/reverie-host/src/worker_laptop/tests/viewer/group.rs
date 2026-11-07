@@ -62,7 +62,7 @@ fn already_exited_leader_keeps_pin_until_its_actual_live_group_member_is_settled
         "container/storage ownership is independent"
     );
 }
-pub(super) fn classify_group_close(
+pub(in crate::worker_laptop::tests) fn classify_group_close(
     fixture: &Fixture,
     workflow: &LaptopWorkflow,
     result: Result<()>,

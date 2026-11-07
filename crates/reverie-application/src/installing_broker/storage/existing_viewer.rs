@@ -74,6 +74,16 @@ impl ExistingStoragePreparation {
             .runtime
             .close_existing_viewer(&self.viewer, end)?)
     }
+    pub(in crate::installing_broker) fn close_for_worker(
+        &self,
+    ) -> Result<(), ExistingStorageError> {
+        self.check()?;
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .close_existing_viewer_for_worker(&self.viewer)?)
+    }
     fn check(&self) -> Result<(), ExistingStorageError> {
         if let Destination::Registered {
             registry, identity, ..

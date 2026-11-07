@@ -2,6 +2,7 @@
 //! The application must still perform actual admission/canonical release first.
 //! Existing reuse uses its original storage/inspection record rather than a
 //! created-pane token. Actual App admission/release remains a separate join.
+pub(super) mod cleanup;
 mod job;
 pub(in crate::worker_laptop) mod receipt;
 mod terminal;
@@ -22,6 +23,14 @@ pub struct ViewerSession {
     job: Arc<job::Job>,
 }
 impl ViewerSession {
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn native_status_for_owned_test(&self) -> Result<Option<i32>> {
+        self.job.status()
+    }
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn native_counts_for_owned_test(&self) -> (usize, usize) {
+        self.job.native_counts()
+    }
     pub fn same_workflow(&self, other: &LaptopWorkflow) -> bool {
         matches!(&self.origin,SessionOrigin::Created(workflow) if workflow.same_workflow(other))
     }
@@ -116,24 +125,33 @@ impl Workflows {
         viewer: &'a ViewerSession,
         forward: bool,
     ) -> Result<ViewerGuard<'a>> {
+        self.viewer_cleanup(runtime, viewer, forward, None)
+    }
+    fn viewer_cleanup<'a>(
+        &self,
+        runtime: &WorkerRuntime,
+        viewer: &'a ViewerSession,
+        forward: bool,
+        cleanup: Option<cleanup::Cleanup>,
+    ) -> Result<ViewerGuard<'a>> {
         let guard = match &viewer.origin {
             SessionOrigin::Created(workflow) => {
                 self.bound(runtime, workflow)?;
-                ViewerGuard::Created(
-                    workflow
-                        .record
-                        .try_lock()
-                        .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?,
-                )
+                ViewerGuard::Created(cleanup::acquire(
+                    runtime,
+                    &workflow.record,
+                    cleanup,
+                    "WORKER_LAPTOP_RETAINED",
+                )?)
             }
             SessionOrigin::Existing(existing) => {
                 self.bound_existing(runtime, existing)?;
-                ViewerGuard::Existing(
-                    existing
-                        .record
-                        .try_lock()
-                        .map_err(|_| LaptopError::Refused("WORKER_EXISTING_VIEWER_RETAINED"))?,
-                )
+                ViewerGuard::Existing(cleanup::acquire(
+                    runtime,
+                    &existing.record,
+                    cleanup,
+                    "WORKER_EXISTING_VIEWER_RETAINED",
+                )?)
             }
         };
         if forward {
@@ -276,5 +294,12 @@ impl WorkerRuntime {
     pub fn close_laptop_viewer(&self, viewer: &ViewerSession, end: Instant) -> Result<()> {
         let _record = self.laptop_workflows().viewer(self, viewer, false)?;
         viewer.job.close(self, end)
+    }
+    pub fn close_laptop_viewer_for_worker(&self, viewer: &ViewerSession) -> Result<()> {
+        let cleanup = cleanup::Cleanup::worker(self);
+        let _record = self
+            .laptop_workflows()
+            .viewer_cleanup(self, viewer, false, Some(cleanup))?;
+        viewer.job.close_for_worker(self, cleanup.guard())
     }
 }

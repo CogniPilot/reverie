@@ -1,5 +1,5 @@
 use super::*;
-fn canonical_originals(fixture: &Fixture) -> Originals {
+pub(super) fn canonical_originals(fixture: &Fixture) -> Originals {
     let (storage, plan, request, _) = originals(fixture);
     let row = json!({"Id":"c".repeat(64),"Name":format!("/fixture-agent-{SID}"),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID}},"State":{"Running":true}});
     fs::write(
