@@ -24,6 +24,9 @@ enum CloseState {
     Unconfirmed,
 }
 impl NixOwnership {
+    pub(super) fn guard_close_confirmed(&self) -> bool {
+        matches!(self,Self::GuardConsumed(data) if data.close==CloseState::Confirmed && data.outcome.is_ok())
+    }
     pub(super) fn held(&self) -> Result<&NixReturned> {
         match self {
             Self::Held(nix) => Ok(nix),
@@ -34,6 +37,12 @@ impl NixOwnership {
         match self {
             Self::Held(nix) => nix.laptop_storage(),
             Self::GuardConsumed(data) => &data.storage,
+        }
+    }
+    pub(super) fn storage_mut(&mut self) -> &mut LaunchStorage {
+        match self {
+            Self::Held(nix) => nix.laptop_storage_mut(),
+            Self::GuardConsumed(data) => &mut data.storage,
         }
     }
     pub(super) fn prepared_path(&self) -> Option<&Path> {

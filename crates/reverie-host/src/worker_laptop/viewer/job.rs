@@ -28,6 +28,11 @@ struct ClosePlan {
     end: Instant,
     term: Instant,
     kill: Option<Instant>,
+    completion: CloseCompletion,
+}
+enum CloseCompletion {
+    Pending,
+    Confirmed,
 }
 pub(crate) struct Job {
     capture: Arc<InstalledCommand>,
@@ -413,17 +418,33 @@ impl Job {
             end: requested,
             term: (Instant::now() + Duration::from_secs(5)).min(requested),
             kill: None,
+            completion: CloseCompletion::Pending,
         });
         loop {
             let bound = plan.end.min(requested);
             let end = self.clamp_deadline(bound)?;
             let end = plan.kill.map_or(end, |kill| end.min(kill));
             if self.join()? && self.close_step(plan, end)? {
+                plan.completion = CloseCompletion::Confirmed;
                 return Ok(());
             }
             need(Instant::now() < end, "VIEWER_UNREAPED")?;
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+    /// Stamped only by the actual existing join/group/PTY/query close above.
+    /// A merely consumed or opaque native owner never creates this receipt.
+    pub(in crate::worker_laptop) fn require_closed(&self) -> Result<()> {
+        let plan = self
+            .close
+            .try_lock()
+            .map_err(|_| LaptopError::Refused("VIEWER_UNREAPED"))?;
+        need(
+            plan.as_ref()
+                .is_some_and(|plan| matches!(plan.completion, CloseCompletion::Confirmed))
+                && !self.has_pending_native_work(),
+            "VIEWER_UNREAPED",
+        )
     }
     fn close_step(&self, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
         let Ok(mut state) = self.state.try_lock() else {

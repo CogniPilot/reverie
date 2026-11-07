@@ -225,6 +225,11 @@ impl Publication {
     pub(super) fn confirmed(&self) -> bool {
         self.complete && !self.opaque
     }
+    pub(super) fn selected_exit(&self) -> Option<PathBuf> {
+        self.nonce
+            .as_ref()
+            .map(|nonce| self.root.join(format!("{}.exit", nonce.as_str())))
+    }
 }
 impl Workflows {
     fn publish(&self, runtime: &WorkerRuntime, created: &CreatedLaptop) -> Result<()> {

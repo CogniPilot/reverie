@@ -23,6 +23,18 @@ pub(super) struct Record {
     lifecycle: Mutex<super::retention::LifecycleHoldState>,
 }
 impl Record {
+    /// Actual predecessor completion, distinct from a closed socket whose
+    /// application resources still retain their logical hold.
+    pub(super) fn require_released_handler(&self) -> Result<()> {
+        let hold = self.try_mint_lock(&self.lifecycle)?;
+        if self.socket_closed_known()
+            && matches!(*hold, super::retention::LifecycleHoldState::Released(_))
+        {
+            Ok(())
+        } else {
+            Err(WorkerReportError::LifecycleRetained)
+        }
+    }
     pub(super) fn require_terminal_hold(&self) -> Result<()> {
         let hold = self.try_mint_lock(&self.lifecycle)?;
         if matches!(*hold, super::retention::LifecycleHoldState::Held(_)) {

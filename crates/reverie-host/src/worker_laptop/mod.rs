@@ -15,6 +15,10 @@ mod network;
 mod pane;
 mod publication;
 mod start;
+mod storage;
+pub use storage::StartedStorageBorrow;
+mod created_receipt;
+pub use created_receipt::CreatedReceiptObservation;
 #[cfg(test)]
 mod tests;
 mod viewer;
