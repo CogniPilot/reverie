@@ -4,6 +4,7 @@ mod capacity;
 mod custody;
 mod error;
 mod source;
+mod stop_budget;
 #[cfg(test)]
 pub(crate) mod tests;
 pub use capacity::{CapacityFacts, WebsiteBinding};
@@ -71,6 +72,7 @@ impl NativeObserver {
             config: ReservationConfiguration::capture(config),
             inherited,
             origin: Arc::new(()),
+            stop_budget: None,
         }
     }
 }
@@ -79,6 +81,7 @@ pub struct ObservationContext {
     config: ReservationConfiguration,
     inherited: Option<Instant>,
     origin: Arc<()>,
+    stop_budget: Option<reverie_host::worker_runtime::WorkerStopBudget>,
 }
 /// Only this context's actual engine census creates these handles. Public
 /// contract rows remain data and cannot be supplied as native observations.
@@ -173,6 +176,7 @@ impl ObservationContext {
             config: ReservationConfiguration::capture(config),
             inherited: self.inherited,
             origin: self.origin.clone(),
+            stop_budget: self.stop_budget.clone(),
         }
     }
     pub(crate) fn inspect_laptop(
@@ -196,6 +200,7 @@ impl ObservationContext {
             config: ReservationConfiguration::capture(self.config.configuration().clone()),
             inherited,
             origin: self.origin.clone(),
+            stop_budget: self.stop_budget.clone(),
         }
     }
     fn check(&self, end: Instant) -> Result<()> {
@@ -203,11 +208,15 @@ impl ObservationContext {
             !self.observer.cancellation.is_cancelled(),
             "RESERVATION_OBSERVATION_CANCELLED",
         )?;
+        let end = self.live_stop_deadline().map_or(end, |stop| stop.min(end));
         need(Instant::now() < end, "RESERVATION_OBSERVATION_DEADLINE")
     }
     pub(crate) fn deadline(&self, supplied: Option<Instant>) -> Result<Instant> {
         let mut end = Instant::now() + Duration::from_secs(30);
-        for bound in [self.inherited, supplied].into_iter().flatten() {
+        for bound in [self.inherited, supplied, self.live_stop_deadline()]
+            .into_iter()
+            .flatten()
+        {
             end = end.min(bound);
         }
         self.check(end)?;

@@ -609,6 +609,23 @@ construction or descriptor close retains the box and job. Actual reused-viewer
 App transfer, transport/replacement/drain and recovered-viewer producers remain
 required; no backend selection follows from this Host component.
 
+Broker handler construction now splits registration from the same initial
+reader. An opaque registered socket is counted before any real thread exists.
+Its nonclone construction owner publishes the actual JoinHandle; the child
+waits and compares its actual ThreadId before configuration/frame work. Joined
+handler, known socket close and logical Hold release remain distinct facts in
+the same record. An arbitrary supplied spawn error cannot prove no thread:
+known refusal additionally requires actual unread-token Drop on its recorded
+constructing thread. Abandoned/mismatched publication, panic or consumed-close
+uncertainty remain counted. The real listener/all-verbs dispatcher and complete
+startup/shutdown assembly are still required; this is no service-ready result.
+
+Actual worker socket/Hold finalizers use named `*_for_worker` methods with no
+independent aggregate before stopping. Every contended lock acquisition observes
+the same live first-stop deadline, including a stop published after waiting began.
+Explicit bounded component entrypoints remain available. Native handler collection
+reports only thread settlement; a held resource or opaque descriptor still counts.
+
 `OrdinaryLaptopStop` is the separate legacy/stopped-name cleanup owner. Its
 observed constructor consumes the same Box, plan and original sealed inspection;
 the unobserved constructor consumes the same Box/plan and requires an actual
@@ -635,6 +652,28 @@ query/viewer cleanup reaches Closed. Actual App admission/current-source/receipt
 and handler/lifecycle owners remain mandatory; no global release follows from
 the Host stop result. Recovered/stop-all owners and full caller adoption are
 separate required integration work.
+
+The named connection-bound relay factories derive the request from the original
+accepted J and retain its actual record identity before native construction.
+Created launches capture that identity before network/create and preserve it
+through guard consumption. Native-only component factories cannot acquire this
+identity afterward. Another same-SID J cannot start or relay that viewer.
+
+`begin_viewer_relay` serially implements I/R/O/X on that same socket and native
+job. It reuses the common framing/deadline owner, writes complete input through
+PTY backpressure, drains raw output before X, and retains exact resize-query
+constructors. Resize confirmation requires the full inventory, exact marker and
+size; an uncertain query blocks later confirmation even after local settlement.
+The fixed live resize report is bounded rather than Python's blocking flush;
+failed delivery propagates before a later receipt/X. Streaming completion reads
+preserve Python UTF-8/integer semantics without imposing a new file-byte cap.
+Detailed malformed JSON/receipt diagnostic text remains a compatibility limit.
+
+Transport termination neither reaps the native leader nor returns storage. A
+fresh same-record receipt observation remains available before cleanup, including
+Held/no-job failures. The actual App finalizer must classify it on every outcome,
+perform any required real stop before reap, and settle all other owners. No live
+Docker, recovered-viewer, service activation or global release claim follows.
 
 The genuine broker callers use `retain_ordinary_laptop_stop_for_worker`,
 `retain_unobserved_ordinary_laptop_stop_for_worker` and

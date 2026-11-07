@@ -35,7 +35,7 @@ pub(super) fn captured(
 ) -> Result<CapturedOutput> {
     capture(origin, end, pending, args, required, Admission::Immediate)
 }
-pub(super) fn captured_for_worker(
+pub(crate) fn captured_for_worker(
     origin: &InstalledWorkerEngine,
     end: Instant,
     pending: &mut Option<CapturedCall>,

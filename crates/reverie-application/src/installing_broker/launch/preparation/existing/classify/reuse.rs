@@ -5,6 +5,8 @@ use crate::installing_broker::storage::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
 use reverie_host::worker_laptop::{ExistingViewerStart, LaptopError, ViewerSession};
+mod finalizer;
+pub use finalizer::{ReuseFinalizationFailure, ReuseHandlerClosed};
 
 struct ReuseScope<'a> {
     preparing: PreparingWorkerLaunch<'a>,
@@ -12,6 +14,7 @@ struct ReuseScope<'a> {
     active: Option<ActiveLaunchToken<'a>>,
     current: Arc<ValidatedWorkerSnapshot>,
     resources: EffectiveWorkerConfig,
+    registration: Option<Arc<crate::installing_broker::recovered::RecoveredOffice>>,
 }
 struct RetainedReuse<'a> {
     scope: ReuseScope<'a>,
@@ -68,11 +71,14 @@ impl<'a> ReusableWorkerLaunch<'a> {
             current,
             plan,
         } = observed;
-        let request = claimed.preparing.admitted.request().clone();
+        let connection = claimed.preparing.admitted.request.connection.clone();
+        let registration = claimed
+            .lifecycle
+            .capture_reuse_registration(claimed.preparing.admitted.request().session());
         let storage = claimed.storage.take().expect("genuine classified storage");
         let previous = previous.expect("genuine classified running observation");
         let receipt = receipt.expect("genuine classified runtime receipt");
-        match storage.retain_existing_relay(plan, request, previous, receipt) {
+        match storage.retain_existing_relay_for_connection(plan, previous, receipt, &connection) {
             Ok(native) => {
                 let ClaimedWorkerLaunch {
                     preparing,
@@ -89,6 +95,7 @@ impl<'a> ReusableWorkerLaunch<'a> {
                             active,
                             current,
                             resources,
+                            registration,
                         },
                         native,
                     },
@@ -173,7 +180,10 @@ impl<'a> AllocationClosedReuse<'a> {
     /// Only a confirmed allocation close reaches this constructor. Any native
     /// uncertainty retains the same inventory record and original J/Hold.
     pub fn start(self, end: Instant) -> Result<ViewingReuse<'a>, Box<ReuseViewerFailure<'a>>> {
-        let cause = match self.retained.native.start(end) {
+        let cause = match self.retained.native.start(
+            &self.retained.scope.preparing.admitted.request.connection,
+            end,
+        ) {
             Ok(ExistingViewerStart::Started(session)) => {
                 return Ok(ViewingReuse {
                     owner: self,
@@ -196,6 +206,24 @@ impl<'a> AllocationClosedReuse<'a> {
     }
 }
 impl<'a> ViewingReuse<'a> {
+    pub(in crate::installing_broker::launch) fn broker(&self) -> &InstallingBroker {
+        self.owner.retained.scope.preparing.broker()
+    }
+    pub(in crate::installing_broker::launch) fn relay_connection(
+        &self,
+    ) -> &Arc<reverie_host::worker_reports::WorkerLaunchConnection> {
+        &self
+            .owner
+            .retained
+            .scope
+            .preparing
+            .admitted
+            .request
+            .connection
+    }
+    pub(in crate::installing_broker::launch) fn viewer_session(&self) -> &ViewerSession {
+        &self.session
+    }
     pub fn request(&self) -> &WorkerRequest {
         self.owner.retained.scope.preparing.admitted.request()
     }

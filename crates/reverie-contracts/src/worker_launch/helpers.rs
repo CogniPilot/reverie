@@ -92,6 +92,28 @@ pub(super) fn tmux_exec_environment(
     attach: bool,
     environment: &[MetadataText],
 ) -> Vec<MetadataText> {
+    tmux_exec_observed_environment(
+        &MetadataText::from_scalar_text(name.as_str()),
+        command,
+        attach,
+        environment,
+    )
+}
+pub(crate) fn dead_pane_recheck(target: &MetadataText) -> Vec<MetadataText> {
+    tmux_exec_observed_environment(
+        target,
+        &["display-message", "-p", "-t", "office", "#{pane_dead}"]
+            .map(MetadataText::from_scalar_text),
+        false,
+        &[],
+    )
+}
+fn tmux_exec_observed_environment(
+    target: &MetadataText,
+    command: &[MetadataText],
+    attach: bool,
+    environment: &[MetadataText],
+) -> Vec<MetadataText> {
     let mut args = vec![MetadataText::from_scalar_text("exec")];
     if attach {
         args.push(MetadataText::from_scalar_text("-it"));
@@ -113,7 +135,7 @@ pub(super) fn tmux_exec_environment(
         args.push(MetadataText::from_scalar_text("--env"));
         args.push(entry.clone());
     }
-    args.push(MetadataText::from_scalar_text(name.as_str()));
+    args.push(target.clone());
     args.extend(["/bin/tmux", "-u", "-L", "reverie-laptop"].map(MetadataText::from_scalar_text));
     args.extend_from_slice(command);
     args

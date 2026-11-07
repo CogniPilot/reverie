@@ -1,6 +1,6 @@
 use super::*;
 use crate::worker_storage::LaunchReceiptObservation;
-fn receipt(fixture: &Fixture, storage: &mut LaunchStorage) -> LaunchReceiptObservation {
+pub(super) fn receipt(fixture: &Fixture, storage: &mut LaunchStorage) -> LaunchReceiptObservation {
     storage.prepare_runtime_directory().unwrap();
     fs::write(
         fixture.root.join("state").join(SID).join("runtime.json"),

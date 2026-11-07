@@ -11,10 +11,11 @@ use std::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 pub(super) struct Record {
+    pub(super) handler: Mutex<Option<std::sync::Arc<super::handler::HandlerJob>>>,
     stream: Mutex<Option<UnixStream>>,
     control: Mutex<Option<UnixStream>>,
     finished: AtomicBool,
@@ -22,6 +23,21 @@ pub(super) struct Record {
     lifecycle: Mutex<super::retention::LifecycleHoldState>,
 }
 impl Record {
+    pub(super) fn require_terminal_hold(&self) -> Result<()> {
+        let hold = self.try_mint_lock(&self.lifecycle)?;
+        if matches!(*hold, super::retention::LifecycleHoldState::Held(_)) {
+            Ok(())
+        } else {
+            Err(WorkerReportError::LifecycleRetained)
+        }
+    }
+    pub(super) fn terminal_stream(&self) -> Result<MutexGuard<'_, Option<UnixStream>>> {
+        let stream = self.try_mint_lock(&self.stream)?;
+        if !self.can_progress() || stream.is_none() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(stream)
+    }
     pub(super) fn read_request(
         &self,
         service: &WorkerReportService,
@@ -63,9 +79,9 @@ impl Record {
     }
     /// Consume each actual socket descriptor once. Contention/poison/close
     /// refusal cannot turn the registered record into a completed connection.
-    pub(super) fn finish_launch(&self, end: Instant) -> Result<()> {
+    pub(super) fn finish_launch(&self, budget: &super::budget::CleanupBudget<'_>) -> Result<()> {
         let interrupted = self.interrupt();
-        let mut stream = match self.until(&self.stream, end) {
+        let mut stream = match self.until(&self.stream, budget) {
             Ok(stream) => stream,
             Err(error) => return finalized(interrupted, Err(error)),
         };
@@ -74,7 +90,7 @@ impl Record {
         if interrupted.is_err() || closed.is_err() {
             self.opaque.store(true, Ordering::Release);
         }
-        let mut control = match self.until(&self.control, end) {
+        let mut control = match self.until(&self.control, budget) {
             Ok(control) => control,
             Err(error) => return finalized(finalized(interrupted, closed), Err(error)),
         };
@@ -91,7 +107,11 @@ impl Record {
             result
         }
     }
-    fn until<'a, T>(&self, lock: &'a Mutex<T>, end: Instant) -> Result<MutexGuard<'a, T>> {
+    fn until<'a, T>(
+        &self,
+        lock: &'a Mutex<T>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<MutexGuard<'a, T>> {
         loop {
             match lock.try_lock() {
                 Ok(guard) => return Ok(guard),
@@ -101,18 +121,15 @@ impl Record {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => {}
             }
-            if Instant::now() >= end {
+            if budget.pause().is_err() {
                 self.opaque.store(true, Ordering::Release);
                 return Err(WorkerReportError::Unconfirmed);
             }
-            std::thread::sleep(
-                end.saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(1)),
-            );
         }
     }
     pub(super) fn new(stream: UnixStream) -> Self {
         Self {
+            handler: Mutex::new(None),
             stream: Mutex::new(Some(stream)),
             control: Mutex::new(None),
             finished: AtomicBool::new(false),
@@ -202,7 +219,7 @@ impl Record {
         result
     }
     pub(super) fn settled(&self) -> bool {
-        if !self.socket_closed_known() {
+        if !self.socket_closed_known() || !self.handler_settled() {
             return false;
         }
         match self.lifecycle.try_lock() {
@@ -213,6 +230,37 @@ impl Record {
                 false
             }
         }
+    }
+    pub(super) fn mark_opaque(&self) {
+        self.opaque.store(true, Ordering::Release);
+    }
+    fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
+        match self.handler.try_lock() {
+            Ok(job) => Ok(job.clone()),
+            Err(std::sync::TryLockError::WouldBlock) => Err(WorkerReportError::Unconfirmed),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                Err(WorkerReportError::Unconfirmed)
+            }
+        }
+    }
+    pub(super) fn handler_settled(&self) -> bool {
+        self.handler_job()
+            .is_ok_and(|job| job.is_none_or(|job| job.known_settled()))
+    }
+    pub(super) fn enter_handler(&self, service: &WorkerReportService) -> Result<()> {
+        self.handler_job()?.map_or(Ok(()), |job| job.enter(service))
+    }
+    pub(super) fn note_unread_drop(&self) {
+        if let Ok(Some(job)) = self.handler_job() {
+            job.unread_dropped();
+        }
+    }
+    pub(super) fn settle_handler(&self, end: Instant) -> Result<()> {
+        self.handler_job()?.map_or(Ok(()), |job| job.settle(end))
+    }
+    pub(super) fn collect_handler(&self) -> Result<bool> {
+        self.handler_job()?.map_or(Ok(true), |job| job.join_once())
     }
     pub(super) fn finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)
@@ -228,9 +276,9 @@ impl Record {
     }
     pub(super) fn lifecycle_until(
         &self,
-        end: Instant,
+        budget: &super::budget::CleanupBudget<'_>,
     ) -> Result<MutexGuard<'_, super::retention::LifecycleHoldState>> {
-        self.until(&self.lifecycle, end)
+        self.until(&self.lifecycle, budget)
     }
     /// Nonblocking mint: stream -> records -> hold. The still-owned stream
     /// fences physical close/retirement; admission retains this exact record.

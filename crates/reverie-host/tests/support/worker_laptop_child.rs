@@ -62,6 +62,7 @@ fn main() {
         return;
     }
     if args.first().map(String::as_str)==Some("exec") {
+        if Path::new("relay-query-control").is_file() && relay_query(&args) {return;}
         if args.get(1).map(String::as_str)==Some("-it") { viewer(&args,&mode); } else { pane(&args,&mode); } return;
     }
     if args.first().map(String::as_str)==Some("stop") {
@@ -75,6 +76,10 @@ fn main() {
         fs::write("killed-laptop",b"actual fixed kill effect").unwrap();return;
     }
     if args.first().map(String::as_str)==Some("inspect") {
+        if Path::new("existing-inspect.json").is_file() {
+            assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
+            std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
+        }
         if mode=="created-retained" {
             assert_eq!(args,["inspect",&"c".repeat(64)]);
             let count=fs::read_to_string("retained-inspect-count").ok().map(|v|v.parse::<usize>().unwrap()).unwrap_or(0)+1;
@@ -83,10 +88,6 @@ fn main() {
                 fs::rename("retained-inspect-next.json","retained-inspect.json").unwrap();
             }
             std::io::stdout().write_all(&fs::read("retained-inspect.json").unwrap()).unwrap();return;
-        }
-        if Path::new("existing-inspect.json").is_file() {
-            assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
-            std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
         }
         if mode.starts_with("created-memory") {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
@@ -142,6 +143,30 @@ fn existing_stop(args: &[String]) {
         ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
         _ => std::process::exit(95),
     }
+}
+fn relay_query(args:&[String])->bool {
+    let cid="c".repeat(64);
+    if args.get(1)==Some(&cid) && args.get(2).map(String::as_str)==Some("/bin/cat") {
+        assert_eq!(args,["exec",&cid,"/bin/cat","/proc/123/environ"]);
+        if Path::new("relay-unread-environ").is_file(){std::process::exit(9);}
+        let marker=fs::read_to_string("viewer-ready").unwrap();
+        let marker=if Path::new("relay-wrong-marker").is_file(){"foreign"}else{&marker};
+        write!(std::io::stdout(),"TERM=xterm-256color\0REVERIE_VIEWER={marker}\0").unwrap();return true;
+    }
+    if args.get(9)!=Some(&cid) {return false;}
+    assert_eq!(&args[..9],["exec","--env","LANG=C.UTF-8","--env","LC_ALL=C.UTF-8","--env","TERM=xterm-256color","--env","COLORTERM=truecolor"]);
+    assert_eq!(&args[10..14],["/bin/tmux","-u","-L","reverie-laptop"]);
+    if args.get(14).map(String::as_str)==Some("list-clients") {
+        assert_eq!(&args[14..],["list-clients","-F","#{client_pid} #{client_width} #{client_height}"]);
+        fs::write("relay-query-entered",b"actual fixed clients query").unwrap();
+        if Path::new("relay-hold-query").is_file() {
+            let end=Instant::now()+Duration::from_secs(10);
+            while !Path::new("relay-release-query").exists(){assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+        }
+        std::io::stdout().write_all(&fs::read("relay-clients.out").unwrap()).unwrap();return true;
+    }
+    assert_eq!(&args[14..],["display-message","-p","-t","office","#{pane_dead}"]);
+    std::io::stdout().write_all(&fs::read("relay-pane.out").unwrap()).unwrap();true
 }
 fn pane(args:&[String],mode:&str) {
     assert!(mode.starts_with("created-"));
@@ -214,6 +239,16 @@ fn viewer(args:&[String],mode:&str) {
     fs::write("viewer-ready",marker).unwrap();
     if mode=="created-viewer-early-group" {std::process::exit(7);}
     if mode=="created-viewer-exit" { std::io::stdout().write_all(b"LAST").unwrap();std::process::exit(7); }
+    if mode=="created-viewer-output-bulk" {
+        let bytes=(0..196608).map(|n|(n%256) as u8).collect::<Vec<_>>();
+        std::io::stdout().write_all(&bytes).unwrap();std::io::stdout().flush().unwrap();std::process::exit(7);
+    }
+    if mode=="created-viewer-input-bulk" {
+        let end=Instant::now()+Duration::from_secs(10);
+        while !Path::new("release-viewer-read").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+        let mut bytes=vec![0;262144];std::io::stdin().read_exact(&mut bytes).unwrap();
+        fs::write("viewer-input",bytes).unwrap();std::io::stdout().write_all(b"BULK").unwrap();std::io::stdout().flush().unwrap();std::process::exit(7);
+    }
     if mode=="created-viewer-group" {std::thread::sleep(Duration::from_secs(20));return;}
     loop {
         let mut byte=[0];if std::io::stdin().read(&mut byte).unwrap()==0 {return;}
