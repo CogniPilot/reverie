@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { ChatroomService } from '../src/chatroom-service.js';
 import { employeeProfileContext, employeeBriefContext } from '../src/company-types.js';
 import { buildBriefing, buildDeliveryLine, MAX_DELIVERY_CHARS, MAX_NOTICES_PER_SESSION, WAKE_LINE } from '../src/chatroom-delivery.js';
-import { TURN_SUMMARY_MAX_CHARS } from '../src/chatroom-turn-summary.js';
+import { renderTurnSummary, TURN_SUMMARY_MAX_CHARS } from '../src/chatroom-turn-summary.js';
+import { MAX_POLL_OPTIONS, MAX_POLL_QUESTION } from '../src/chatroom-store.js';
+import { QUOTE_CLOSE, QUOTE_REOPEN } from '../src/pane-quote.js';
 import { agentChatSummary, type AgentDeps } from '../src/cli-agent.js';
 import { generateTurnSummaryScript } from '../src/hooks-config.js';
 
@@ -315,6 +317,130 @@ describe('Reverie notices through the member hook', () => {
       expect(left).toBeLessThan(8);
       pending.mockReturnValue([]);
       expect(f.chat.hookTurnSummary(M).notices).toHaveLength(left);
+    } finally { await f.close(); }
+  });
+
+  /** One hook call through the CLI client, as a seat runs it: what it emits, and the summary it came from. */
+  async function hook(chat: ChatroomService, id: string) {
+    const out: string[] = [];
+    let summary: ReturnType<ChatroomService['hookTurnSummary']> | undefined;
+    const deps: AgentDeps = { ctx: { apiUrl: 'http://fixture', selfId: id }, json: false,
+      io: { out: (text) => out.push(text), err: () => {} },
+      request: async () => { summary = chat.hookTurnSummary(id); return { status: 200, text: '', json: { success: true, data: summary } }; } };
+    expect(await agentChatSummary(deps, 'UserPromptSubmit')).toBe(0);
+    const context = out.length ? (JSON.parse(out[0]!).hookSpecificOutput.additionalContext as string) : '';
+    expect(context.length).toBeLessThanOrEqual(TURN_SUMMARY_MAX_CHARS);
+    return { context, summary: summary! };
+  }
+  /** Quotes that are not escaped: a fragment that keeps user text quoted has an even number of them. */
+  const bareQuotes = (text: string) => { let n = 0; for (let i = 0; i < text.length; i++) { if (text[i] === '\\') i++; else if (text[i] === '"') n++; } return n; };
+  // Each label quotes to six characters per zero-width space, so the closed poll's notice is far longer than the whole payload.
+  const wideLabels = Array.from({ length: MAX_POLL_OPTIONS }, (_, i) => `${i}${'​"'.repeat(49)}`);
+
+  it('keeps a maximal escaped poll a whole entry within the cap, its options given way to the exact message read', async () => {
+    const f = await fixture();
+    try {
+      const asked = f.chat.createPoll(f.room.id, { kind: 'user', name: 'Owner' }, { question: '"'.repeat(MAX_POLL_QUESTION), options: wideLabels }, [M]);
+      const { context, summary } = await hook(f.chat, M);
+      const entry = summary.messages.find((m) => m.messageId === asked.id);
+      expect(entry).toBeDefined();
+      expect(entry!.poll).toBeUndefined();
+      expect(entry!.detail).toBe(`reverie agent chat read -r ${f.room.id} --message ${asked.id}`);
+      for (const line of context.split('\n').filter((l) => l.startsWith('{'))) expect(() => JSON.parse(line)).not.toThrow();
+      expect(context).toContain(`--message ${asked.id}`);
+    } finally { await f.close(); }
+  });
+
+  it('never leaves a dropped entry in the text: at the floor only the count remains', () => {
+    const entry = { roomId: 'r', room: 'General', messageId: 'm1', sender: 'Owner', role: 'owner', at: 1, excerpt: 'x', state: 'unread' as const,
+      priority: 6, poll: 'p'.repeat(5000) };
+    const fit = renderTurnSummary('ring', [{ ...entry }], undefined, undefined, 1, 1200);
+    expect(fit.text.length).toBeLessThanOrEqual(1200);
+    expect(fit.messages[0]?.detail).toBe('reverie agent chat read -r r --message m1');
+    const floor = renderTurnSummary('ring', [{ ...entry }], undefined, undefined, 1, 0);
+    expect(floor.messages).toEqual([]);
+    expect(floor.text).toMatch(/1 not shown \(agent chat pending lists them\)\.$/);
+    expect(floor.text).not.toContain('ppp');
+  });
+
+  it('delivers a notice longer than the whole payload in quoted parts under one identity, then the notice behind it', async () => {
+    const f = await fixture();
+    try {
+      const asked = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: '"'.repeat(MAX_POLL_QUESTION), options: wideLabels });
+      await f.chat.closePoll(f.room.id, asked.id, 'user');
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'rules', 'all');
+      await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, true);
+      const [long, next] = f.chat.delivery.pendingNotices(M);
+      expect(long.text.length).toBeGreaterThan(TURN_SUMMARY_MAX_CHARS);
+      expect(next.text).toContain('"rules"');
+      const parts: NonNullable<ReturnType<ChatroomService['hookTurnSummary']>['notices']> = [];
+      let after = false;
+      for (let turn = 0; turn < 12 && f.notices(M).length; turn++) {
+        const { context, summary } = await hook(f.chat, M);
+        for (const n of summary.notices ?? []) {
+          if (n.text.includes('"rules"')) { after = true; continue; }
+          expect(after).toBe(false); // nothing overtakes the notice still in parts
+          parts.push(n);
+          expect(context).toContain(n.text);
+          expect(bareQuotes(n.text) % 2).toBe(0);
+        }
+        // While parts are owed the notice keeps its one identity at the head of the queue.
+        if (parts.at(-1)?.more) expect(f.chat.delivery.pendingNotices(M)[0].id).toBe(long.id);
+      }
+      expect(parts.length).toBeGreaterThan(1);
+      expect(parts.slice(0, -1).every((n) => n.more)).toBe(true);
+      expect(parts.at(-1)!.more).toBeUndefined();
+      expect(parts.slice(1).every((n) => n.continued)).toBe(true);
+      let joined = '';
+      for (const n of parts) {
+        let text = n.text;
+        if (joined.endsWith(QUOTE_CLOSE) && text.startsWith(QUOTE_REOPEN)) { joined = joined.slice(0, -QUOTE_CLOSE.length); text = text.slice(QUOTE_REOPEN.length); }
+        joined += text;
+      }
+      expect(joined).toBe(long.text);
+      expect(after).toBe(true);
+      expect(f.notices(M)).toEqual([]);
+    } finally { await f.close(); }
+  });
+
+  it('reserves no more than a part of a long notice beside a long briefing, so neither slice goes negative', async () => {
+    const f = await fixture();
+    try {
+      const asked = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: '"'.repeat(MAX_POLL_QUESTION), options: wideLabels });
+      await f.chat.closePoll(f.room.id, asked.id, 'user');
+      vi.spyOn(f.chat.delivery, 'pendingBriefs').mockReturnValue([{ roomId: f.room.id, roomName: 'General', text: 'x'.repeat(5000) }]);
+      const { context, summary } = await hook(f.chat, M);
+      expect(context.startsWith('Reverie room briefing for General')).toBe(true);
+      expect(summary.briefings?.[0].text).toMatch(/^x+…$/);
+      expect(summary.notices).toHaveLength(1);
+      expect(summary.notices![0].more).toBe(true);
+      expect(context).toContain(' (continued in your next turn)');
+    } finally { await f.close(); }
+  });
+
+  it('withdraws hook fragments for a room the member can no longer see, and never shows a member another\'s notices', async () => {
+    const f = await fixture();
+    try {
+      f.chat.addMember(f.room.id, N, { goal: 'tests' });
+      expect(f.notices(L).some((t) => t.includes('joined the room'))).toBe(true);
+      expect(f.notices(M).some((t) => t.includes('joined the room'))).toBe(false);
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'rules', 'all');
+      await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, true);
+      expect(f.notices(M)).toHaveLength(1);
+      f.chat.archiveRoom(f.room.id, true);
+      const { context, summary } = await hook(f.chat, M);
+      expect(summary.notices).toBeUndefined();
+      expect(context).not.toContain('pinned by the owner');
+      expect(f.notices(M)).toEqual([]);
+      const other = f.chat.createRoom('Other', undefined);
+      f.chat.addMember(other.id, M, {});
+      await hook(f.chat, M); // its briefing
+      const there = f.chat.post(other.id, { kind: 'user', name: 'Owner' }, 'house', 'all');
+      await f.chat.pinMessage(other.id, there.id, { name: 'user', kind: 'user' }, true);
+      expect(f.notices(M)).toHaveLength(1);
+      f.chat.removeMember(other.id, M);
+      expect((await hook(f.chat, M)).summary.notices).toBeUndefined();
+      expect(f.notices(M)).toEqual([]);
     } finally { await f.close(); }
   });
 });

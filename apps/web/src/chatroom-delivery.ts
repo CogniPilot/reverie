@@ -20,7 +20,7 @@ import { isChatRaster } from './chat-image-paths.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
 import { randomUUID } from 'node:crypto';
 import type { PendingDeliveryStore } from './chatroom-pending-delivery.js';
-import { chatReadCommand, cutQuoted, quoteChatBody, quoteForPane } from './pane-quote.js';
+import { chatReadCommand, cutQuoted, quoteChatBody, quoteForPane, QUOTE_REOPEN } from './pane-quote.js';
 import type { ChatMember, ChatMessage, ChatRoom } from './chatroom-store.js';
 import { USER_RECIPIENT, isDm, textMentions } from './chatroom-store.js';
 import { getCli } from './config/cli-registry/registry.js';
@@ -132,6 +132,10 @@ interface Pending {
   notice?: boolean;
   /** A notice's own identity: it is cleared only when the hook payload included this exact notice. */
   noticeId?: string;
+  /** How much of a notice's text earlier hook payloads already carried (noticeContinued); the rest is still owed under the same identity. */
+  noticeShownChars?: number;
+  /** The last part was cut inside a quoted string, so the owed rest opens with QUOTE_REOPEN. */
+  noticeReopen?: boolean;
   /** A briefing or notice a wake already went in for: it waits for the member's turn summary without waking it again. */
   woken?: boolean;
   /** The chat message this fragment renders, so a deleted message can be withdrawn before it is typed. */
@@ -914,11 +918,31 @@ export class ChatroomDelivery {
     return queue.filter((p) => !(p.notice && extra-- > 0));
   }
 
-  /** The notices still waiting for this session, oldest first; they stay queued until noticesShown. */
-  pendingNotices(sessionId: string): Array<{ id: string; roomId: string; roomName: string; text: string }> {
+  /**
+   * The notices still waiting for this session, oldest first, each with the text still owed (after `lead`, the reopening of a
+   * quoted string the last part closed); they stay queued until noticesShown.
+   */
+  pendingNotices(sessionId: string): Array<{ id: string; roomId: string; roomName: string; text: string; continued: boolean; lead: number }> {
     return (this.queues.get(sessionId) ?? [])
       .filter((p) => p.notice)
-      .map((p) => ({ id: p.noticeId!, roomId: p.roomId, roomName: p.roomName, text: pendingText(p) }));
+      .map((p) => {
+        const from = p.noticeShownChars ?? 0;
+        const lead = p.noticeReopen ? QUOTE_REOPEN : '';
+        return { id: p.noticeId!, roomId: p.roomId, roomName: p.roomName, text: lead + pendingText(p).slice(from), continued: from > 0, lead: lead.length };
+      });
+  }
+
+  /**
+   * The hook payload carried the next `chars` of this notice's owed text, not all of it: the notice stays queued under the same
+   * identity with the rest owed, its text fixed as first rendered so the parts join up.
+   */
+  noticeContinued(sessionId: string, id: string, chars: number, reopen: boolean): void {
+    const p = this.queues.get(sessionId)?.find((q) => q.notice && q.noticeId === id);
+    if (!p) return;
+    this.noticeDrops.delete(sessionId);
+    p.text = pendingText(p);
+    p.noticeShownChars = Math.min(p.text.length, (p.noticeShownChars ?? 0) + chars);
+    p.noticeReopen = reopen;
   }
 
   /** How many older notices this session lost to MAX_NOTICES_PER_SESSION since its hook last showed notices. */

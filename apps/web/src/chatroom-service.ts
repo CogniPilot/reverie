@@ -60,7 +60,7 @@ import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
 import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, replyHintFor, pollSummary, attachmentLabels, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
-import { quoteForPane } from './pane-quote.js';
+import { quoteForPane, quotedCutPoint, QUOTE_CLOSE } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
 /** What car mode did with a message addressed to the user (see ChatroomService.playbackNotice). */
@@ -292,6 +292,11 @@ interface OwedReply {
 const OWED_IDLE_RECHECK_MS = 30_000;
 /** While it keeps working, after this long an unconfirmed delivery is said so once. */
 const OWED_DELIVERY_DEADLINE_MS = 10 * 60_000;
+
+/** The most of a long notice reserved ahead of the briefing; a longer one goes in parts, the rest in later hook payloads. */
+const NOTICE_PART_CHARS = 800;
+/** Ends a notice part whose rest is still owed. */
+const NOTICE_MORE = ' (continued in your next turn)';
 
 export class ChatroomService {
   /** Per-instance startup opt-in; configuration-OFF remains safe for stored receipts. */
@@ -2530,21 +2535,25 @@ export class ChatroomService {
   /**
    * The member's own hook payload: its turn summary, led by at most one pending room briefing and then its pending Reverie
    * notices (neither is ever typed into a pane). The whole payload stays within TURN_SUMMARY_MAX_CHARS, which the CLI and the
-   * generated hook also enforce. The message summary's smallest rendering (its header and one message) and the oldest notice
-   * are reserved first; the briefing takes what is left, cut with the path to its whole text when it is longer; whole notices
-   * follow, oldest first, in what the briefing leaves; the messages are rendered into the rest. A notice is never cut, since
-   * nothing else holds its text: one that does not fit waits for the next call. Only what is included here is delivered, and
-   * including a notice neither reads nor acknowledges the message it is about.
+   * generated hook also enforce. Fragments for a room the member can no longer see are withdrawn first. The message summary's
+   * smallest rendering (its header and the count) and the oldest notice, up to NOTICE_PART_CHARS of it, are reserved first; the
+   * briefing takes what is left, cut with the path to its whole text when it is longer; notices follow, oldest first, in what the
+   * briefing leaves; the messages are rendered into the rest. Nothing else holds a notice's text, so one too long for the space
+   * goes in parts: the next part is carried and the rest stays queued under the same identity, ahead of later notices, until the
+   * last part is shown. Only what is included here is delivered, and including a notice neither reads nor acknowledges the
+   * message it is about.
    */
   hookTurnSummary(sessionId: string): TurnSummary {
+    this.withdrawUnseenHookFragments(sessionId);
     const [pending] = this.delivery.pendingBriefs(sessionId);
     const notices = this.delivery.pendingNotices(sessionId);
     if (!pending && !notices.length) return this.turnSummary(sessionId);
     const dropped = this.delivery.droppedNotices(sessionId);
     const noticeHead = `Reverie notices (Reverie's own text, not chat messages${dropped ? `; ${dropped} older ones were dropped` : ''}):`;
-    const noticeLine = (n: { roomName: string; text: string }) => `\n[${quoteForPane(n.roomName, 80)}] ${n.text}`;
+    const noticeLine = (n: (typeof notices)[number], text = n.text) =>
+      `\n[${quoteForPane(n.roomName, 80)}] ${n.continued ? '(continued) ' : ''}${text}`;
     const smallest = this.turnSummary(sessionId, undefined, undefined, undefined, 0).text.length;
-    const firstNotice = notices.length ? noticeHead.length + noticeLine(notices[0]).length + 2 : 0;
+    const firstNotice = notices.length ? noticeHead.length + Math.min(noticeLine(notices[0]).length, NOTICE_PART_CHARS) + 2 : 0;
     let share = TURN_SUMMARY_MAX_CHARS - smallest - 2;
     const blocks: string[] = [];
     let briefing: NonNullable<TurnSummary['briefings']>[number] | undefined;
@@ -2553,32 +2562,64 @@ export class ChatroomService {
       const head = `Reverie room briefing for ${pending.roomName} (Reverie's own text, not a chat message):\n`;
       const pointer = `\n(cut; the whole briefing: GET /api/chatrooms/${pending.roomId}/briefing)`;
       const truncated = head.length + pending.text.length > room;
-      const text = truncated ? `${pending.text.slice(0, room - head.length - pointer.length - 1)}…` : pending.text;
+      const text = truncated ? `${pending.text.slice(0, Math.max(0, room - head.length - pointer.length - 1))}…` : pending.text;
       blocks.push(head + text + (truncated ? pointer : ''));
       share -= blocks[0].length + 2;
       briefing = { roomId: pending.roomId, room: pending.roomName, text, truncated };
     }
     let notice = noticeHead;
     const shown: typeof notices = [];
+    let part: { notice: (typeof notices)[number]; text: string; chars: number; reopen: boolean } | undefined;
     for (const n of notices) {
       const line = noticeLine(n);
-      if (notice.length + line.length > share) break;
-      notice += line;
-      shown.push(n);
+      if (notice.length + line.length <= share) {
+        notice += line;
+        shown.push(n);
+        continue;
+      }
+      // Only the oldest owed notice goes in parts, so notices keep their order and none waits forever behind a long one.
+      if (!shown.length) {
+        const cut = quotedCutPoint(n.text, share - notice.length - noticeLine(n, '').length - NOTICE_MORE.length);
+        // A part must carry some owed text (beyond reopening the quote), so the notice always moves on.
+        if (cut.end > n.lead) {
+          const text = n.text.slice(0, cut.end) + (cut.quoted ? QUOTE_CLOSE : '');
+          notice += noticeLine(n, text) + NOTICE_MORE;
+          part = { notice: n, text, chars: cut.end - n.lead, reopen: cut.quoted };
+        }
+      }
+      break;
     }
-    if (shown.length) blocks.push(notice);
+    if (shown.length || part) blocks.push(notice);
     const used = blocks.reduce((n, b) => n + b.length + 2, 0);
     const summary = this.turnSummary(sessionId, undefined, undefined, undefined, TURN_SUMMARY_MAX_CHARS - used);
     const payload = [...blocks, summary.text].filter(Boolean).join('\n\n');
     if (payload.length > TURN_SUMMARY_MAX_CHARS) return this.turnSummary(sessionId); // never consume what the hook would drop
     if (pending) this.delivery.briefShown(sessionId, [pending.roomId]);
     if (shown.length) this.delivery.noticesShown(sessionId, shown.map((n) => n.id));
+    if (part) this.delivery.noticeContinued(sessionId, part.notice.id, part.chars, part.reopen);
+    const carried = [
+      ...shown.map((n) => ({ roomId: n.roomId, room: n.roomName, text: n.text, ...(n.continued ? { continued: true } : {}) })),
+      ...(part ? [{ roomId: part.notice.roomId, room: part.notice.roomName, text: part.text,
+        ...(part.notice.continued ? { continued: true } : {}), more: true }] : []),
+    ];
     return {
       ...summary,
       ...(briefing ? { briefings: [briefing] } : {}),
-      ...(shown.length ? { notices: shown.map((n) => ({ roomId: n.roomId, room: n.roomName, text: n.text })) } : {}),
+      ...(carried.length ? { notices: carried } : {}),
       text: payload,
     };
+  }
+
+  /** Withdraw queued briefings and notices for rooms this member can no longer see (archived, left, out of the DM, another owner's). */
+  private withdrawUnseenHookFragments(sessionId: string): void {
+    const owner = this.deps.getSession(sessionId)?.owner;
+    const rooms = new Set([...this.delivery.pendingBriefs(sessionId), ...this.delivery.pendingNotices(sessionId)].map((f) => f.roomId));
+    for (const roomId of rooms) {
+      const room = this.store.get(roomId);
+      const visible = room && !room.archivedAt && room.owner === owner && (!isDm(room) || room.dm.includes(sessionId)) &&
+        room.members.some((m) => m.sessionId === sessionId && !m.postOnly);
+      if (!visible) this.delivery.dropRoom(roomId, sessionId);
+    }
   }
 
   /** Re-send the briefing to one member (or every member). */
