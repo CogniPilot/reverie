@@ -15,7 +15,7 @@ import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, t
 
 import { randomUUID, createHash } from 'node:crypto';
 import { displayTime, displayTimeZone } from './display-time.js';
-import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
+import { renderTurnSummary, TURN_SUMMARY_MAX_CHARS, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
 import { buildMentionFeed, type MentionCursor, type MentionFeed, type MentionRoomScan } from './chatroom-mentions.js';
 
 /** How old a notice must be before its recipient may set it aside as stale (the digest's owner window). */
@@ -59,7 +59,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, MAX_DELIVERY_CHARS, SPOKEN_TURN_HINT, answerLinkHint, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, SPOKEN_TURN_HINT, answerLinkHint, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -292,11 +292,6 @@ interface OwedReply {
 const OWED_IDLE_RECHECK_MS = 30_000;
 /** While it keeps working, after this long an unconfirmed delivery is said so once. */
 const OWED_DELIVERY_DEADLINE_MS = 10 * 60_000;
-
-/** At most this many pending room briefings ride in one hook payload; the rest wait for the next. */
-export const MAX_HOOK_BRIEFINGS = 2;
-/** A briefing longer than the unchanged delivery cap is cut in the hook payload, with the path to the whole text. */
-export const MAX_HOOK_BRIEFING_CHARS = MAX_DELIVERY_CHARS;
 
 export class ChatroomService {
   /** Per-instance startup opt-in; configuration-OFF remains safe for stored receipts. */
@@ -549,7 +544,7 @@ export class ChatroomService {
    * returned as sourceReferences (for an explicit bulk "handle before"); owner and other human messages are never selected.
    */
   turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string }; stale?: boolean },
-    select?: { roomId: string; before: number; humans?: boolean }, scan?: DigestScan): TurnSummary {
+    select?: { roomId: string; before: number; humans?: boolean }, scan?: DigestScan, maxChars?: number): TurnSummary {
     // Human senders are only ever selected to be set aside as stale, and only past the stale age.
     if (select?.humans && select.before > this.now() - STALE_MIN_AGE_MS)
       throw new ChatroomError('Human notices can be set aside only when older than 72 hours', 'INVALID_INPUT');
@@ -700,7 +695,7 @@ export class ChatroomService {
       }
     }
     if (scan) scan.candidates.push(...candidates);
-    const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now());
+    const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now(), maxChars);
     if (historyPage) summary.sourceReferences = candidates.map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
     // Only notices that still need attention: one handled but uncertain in delivery is not re-resolved.
     if (select) summary.sourceReferences = candidates.filter(m => m.attention?.disposition === 'pending')
@@ -2528,21 +2523,27 @@ export class ChatroomService {
   }
 
   /**
-   * The member's own hook payload: its turn summary, led by any pending room briefings, which are never typed into a pane.
+   * The member's own hook payload: its turn summary, led by at most one pending room briefing (briefings are never typed into
+   * a pane). The whole payload stays within TURN_SUMMARY_MAX_CHARS, which the CLI and the generated hook also enforce: the
+   * message summary keeps at least its smallest rendering (its header and one message), the briefing takes the rest, cut with
+   * the path to the whole text when it is longer, and the messages are rendered into what the briefing leaves.
    * Only a briefing included here counts as delivered; the rest stay pending for the next call.
    */
   hookTurnSummary(sessionId: string): TurnSummary {
-    const summary = this.turnSummary(sessionId);
-    const pending = this.delivery.pendingBriefs(sessionId).slice(0, MAX_HOOK_BRIEFINGS);
-    if (!pending.length) return summary;
-    const briefings = pending.map((b) => {
-      const truncated = b.text.length > MAX_HOOK_BRIEFING_CHARS;
-      return { roomId: b.roomId, room: b.roomName, text: truncated ? `${b.text.slice(0, MAX_HOOK_BRIEFING_CHARS)}…` : b.text, truncated };
-    });
-    const block = briefings.map((b) => `Reverie room briefing for ${b.room} (Reverie's own text, not a chat message):\n${b.text}` +
-      (b.truncated ? `\n(cut at ${MAX_HOOK_BRIEFING_CHARS} characters; the whole briefing: GET /api/chatrooms/${b.roomId}/briefing)` : '')).join('\n\n');
-    this.delivery.briefShown(sessionId, briefings.map((b) => b.roomId));
-    return { ...summary, briefings, text: `${block}\n\n${summary.text}` };
+    const [pending] = this.delivery.pendingBriefs(sessionId);
+    if (!pending) return this.turnSummary(sessionId);
+    const head = `Reverie room briefing for ${pending.roomName} (Reverie's own text, not a chat message):\n`;
+    const pointer = `\n(cut; the whole briefing: GET /api/chatrooms/${pending.roomId}/briefing)`;
+    const smallest = this.turnSummary(sessionId, undefined, undefined, undefined, 0).text.length;
+    const share = TURN_SUMMARY_MAX_CHARS - smallest - 2;
+    const truncated = head.length + pending.text.length > share;
+    const text = truncated ? `${pending.text.slice(0, share - head.length - pointer.length - 1)}…` : pending.text;
+    const block = head + text + (truncated ? pointer : '');
+    const summary = this.turnSummary(sessionId, undefined, undefined, undefined, TURN_SUMMARY_MAX_CHARS - block.length - 2);
+    const payload = summary.text ? `${block}\n\n${summary.text}` : block;
+    if (payload.length > TURN_SUMMARY_MAX_CHARS) return this.turnSummary(sessionId); // never consume what the hook would drop
+    this.delivery.briefShown(sessionId, [pending.roomId]);
+    return { ...summary, briefings: [{ roomId: pending.roomId, room: pending.roomName, text, truncated }], text: payload };
   }
 
   /** Re-send the briefing to one member (or every member). */

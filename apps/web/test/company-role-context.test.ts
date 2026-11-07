@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { ChatroomService } from '../src/chatroom-service.js';
 import { employeeProfileContext, employeeBriefContext } from '../src/company-types.js';
 import { buildBriefing, buildDeliveryLine, MAX_DELIVERY_CHARS, WAKE_LINE } from '../src/chatroom-delivery.js';
+import { TURN_SUMMARY_MAX_CHARS } from '../src/chatroom-turn-summary.js';
+import { agentChatSummary, type AgentDeps } from '../src/cli-agent.js';
+import { generateTurnSummaryScript } from '../src/hooks-config.js';
 
 describe('employee role context in ordinary room briefings', () => {
   it('explains stable employee storage and disposable private tmp without granting authority', () => {
@@ -83,8 +86,8 @@ describe('employee role context in ordinary room briefings', () => {
       const [briefing] = payload.briefings ?? [];
       expect(briefing?.roomId).toBe(room.id);
       expect(payload.text.startsWith(`Reverie room briefing for ${briefing!.room}`)).toBe(true);
-      expect(briefing!.text.length).toBeLessThanOrEqual(MAX_DELIVERY_CHARS + 1);
-      // The builder keeps a briefing within the unchanged delivery cap, so it arrives whole.
+      expect(payload.text.length).toBeLessThanOrEqual(TURN_SUMMARY_MAX_CHARS);
+      // With nothing else pending, the briefing takes the payload and arrives whole, within the cap.
       expect(briefing!.truncated).toBe(false);
       expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(false);
       expect(chat.hookTurnSummary(session.id).briefings).toBeUndefined();
@@ -114,16 +117,36 @@ describe('employee role context in ordinary room briefings', () => {
       expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(false);
     } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
   });
-  it('cuts an oversized briefing in the hook payload with the path to the whole text, and marks only that room shown', async () => {
-    const dir = await fs.mkdtemp(join(tmpdir(), 'employee-brief-cut-'));
-    const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: () => undefined, broadcast: () => {} });
+  it('keeps the whole hook payload within the client cap: a long briefing is cut, busy messages are compressed, and the hook emits it', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'employee-brief-cap-'));
+    const session = { id: 'employee-runtime', name: 'Alex', mode: 'claude', status: 'idle', pid: 123, isWorking: true,
+      writeViaMux: async () => true };
+    const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: id => id === session.id ? session as never : undefined, broadcast: () => {} });
     try {
+      const room = chat.createRoom('General', undefined);
+      chat.addMember(room.id, session.id, {});
+      for (let i = 0; i < 12; i++) chat.post(room.id, { kind: 'user', name: 'Owner' }, `request ${i} ${'detail '.repeat(30)}`, [session.id]);
       const shown = vi.spyOn(chat.delivery, 'briefShown');
-      vi.spyOn(chat.delivery, 'pendingBriefs').mockReturnValue([{ roomId: 'r1', roomName: 'General', text: 'x'.repeat(MAX_DELIVERY_CHARS + 500) }]);
-      const payload = chat.hookTurnSummary('member');
-      expect(payload.briefings).toEqual([{ roomId: 'r1', room: 'General', text: `${'x'.repeat(MAX_DELIVERY_CHARS)}…`, truncated: true }]);
-      expect(payload.text).toContain(`(cut at ${MAX_DELIVERY_CHARS} characters; the whole briefing: GET /api/chatrooms/r1/briefing)`);
-      expect(shown).toHaveBeenCalledWith('member', ['r1']);
+      const pending = vi.spyOn(chat.delivery, 'pendingBriefs').mockReturnValue([{ roomId: room.id, roomName: 'General', text: 'x'.repeat(5000) }]);
+      const payload = chat.hookTurnSummary(session.id);
+      expect(payload.text.length).toBeLessThanOrEqual(TURN_SUMMARY_MAX_CHARS);
+      expect(payload.briefings?.[0]).toMatchObject({ roomId: room.id, truncated: true });
+      expect(payload.text).toContain(`the whole briefing: GET /api/chatrooms/${room.id}/briefing`);
+      expect(payload.text).toContain('Reverie pending messages');
+      expect(shown).toHaveBeenCalledWith(session.id, [room.id]);
+      // Through the real CLI hook client: it emits the payload instead of refusing it as oversized.
+      pending.mockReturnValue([{ roomId: room.id, roomName: 'General', text: 'y'.repeat(5000) }]);
+      const out: string[] = [];
+      const deps: AgentDeps = { ctx: { apiUrl: 'http://fixture', selfId: session.id }, json: false,
+        io: { out: (text) => out.push(text), err: () => {} },
+        request: async () => ({ status: 200, text: '', json: { success: true, data: chat.hookTurnSummary(session.id) } }) };
+      expect(await agentChatSummary(deps, 'UserPromptSubmit')).toBe(0);
+      const context = JSON.parse(out[0]!).hookSpecificOutput.additionalContext as string;
+      expect(context.length).toBeLessThanOrEqual(TURN_SUMMARY_MAX_CHARS);
+      expect(context.startsWith('Reverie room briefing for General')).toBe(true);
+      expect(context).toContain('Reverie pending messages');
+      // The generated hook enforces the same cap.
+      expect(generateTurnSummaryScript('UserPromptSubmit')).toContain(`text.length > ${TURN_SUMMARY_MAX_CHARS}`);
     } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
   });
   it('keeps required rest and plan limits ahead of an oversized laptop profile within the unchanged delivery cap', () => {
