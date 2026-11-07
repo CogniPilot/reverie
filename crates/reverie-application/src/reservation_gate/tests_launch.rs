@@ -3,6 +3,8 @@ use reverie_core::{
     ids::ProfileSessionId,
     resources::{BudgetMode, CpuQuota, ResourcePolicy},
 };
+#[path = "tests_launch_pool_candidate.rs"]
+mod candidate_cases;
 
 fn policy(mode: BudgetMode, memory: u32, pool: u32) -> ResourcePolicy {
     ResourcePolicy::try_new(
