@@ -8,12 +8,10 @@ mod diagnostic;
 mod identity;
 mod receipt;
 mod resize;
-use crate::{
-    command_telemetry::CommandTelemetry,
-    worker_reports::{
-        ViewerRelay, ViewerRelayEnd, ViewerRelayEvent, WorkerLaunchConnection, WorkerLaunchHold,
-        WorkerReportService,
-    },
+mod worker;
+use crate::worker_reports::{
+    ViewerRelay, ViewerRelayEnd, ViewerRelayEvent, WorkerLaunchConnection, WorkerLaunchHold,
+    WorkerReportService,
 };
 use std::{
     io::{Read, Write},

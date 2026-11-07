@@ -118,6 +118,14 @@ impl CallFailure {
     }
 }
 impl CapturedClient {
+    #[cfg(test)]
+    pub(crate) fn hold_actual_slot_for_owned_test(&self, gate: &super::test_hooks::Gate) {
+        let _slot = self.active.lock().unwrap();
+        gate.entered.store(true, Ordering::Release);
+        while !gate.released.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
     /// Share the service capture; interactive PTY ownership stays separate from
     /// this client's bounded PIPE query slot and cannot block metadata queries.
     pub(crate) fn viewer_capture(&self) -> Arc<InstalledCommand> {
@@ -150,6 +158,19 @@ impl CapturedClient {
         job: &Arc<crate::worker_laptop::ViewerJob>,
         deadline: Instant,
     ) -> Result<()> {
+        self.handoff_viewer_budget(job, Some(deadline))
+    }
+    pub(crate) fn handoff_viewer_for_worker(
+        &self,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+    ) -> Result<()> {
+        self.handoff_viewer_budget(job, None)
+    }
+    fn handoff_viewer_budget(
+        &self,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+        deadline: Option<Instant>,
+    ) -> Result<()> {
         if !job.same_capture(&self.bootstrap) {
             return Err(EngineError::new(EngineFault::Identity));
         }
@@ -174,7 +195,7 @@ impl CapturedClient {
         }
         job.close_captured(deadline)
             .map_err(|_| EngineError::pending(EngineFault::Finalization, CleanupFault::Unreaped))?;
-        let mut active = self.viewer_slot(job, deadline)?;
+        let mut active = self.viewer_slot(job, Some(deadline))?;
         if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
         {
             *active = None;
@@ -184,11 +205,11 @@ impl CapturedClient {
     fn viewer_slot(
         &self,
         job: &crate::worker_laptop::ViewerJob,
-        deadline: Instant,
+        deadline: Option<Instant>,
     ) -> Result<std::sync::MutexGuard<'_, Option<Active>>> {
         loop {
             let end = viewer_deadline(job, deadline)?;
-            if Instant::now() >= end {
+            if end.is_some_and(|end| Instant::now() >= end) {
                 return Err(EngineError::pending(
                     EngineFault::Deadline,
                     CleanupFault::Supervisor,
@@ -202,7 +223,10 @@ impl CapturedClient {
                         CleanupFault::Supervisor,
                     ));
                 }
-                Err(TryLockError::WouldBlock) => tick(end),
+                Err(TryLockError::WouldBlock) => match end {
+                    Some(end) => tick(end),
+                    None => std::thread::sleep(Duration::from_millis(1)),
+                },
             }
         }
     }
@@ -527,8 +551,11 @@ impl CapturedClient {
         self.release(job, deadline)
     }
 }
-fn viewer_deadline(job: &crate::worker_laptop::ViewerJob, deadline: Instant) -> Result<Instant> {
-    job.clamp_deadline(deadline)
+fn viewer_deadline(
+    job: &crate::worker_laptop::ViewerJob,
+    deadline: Option<Instant>,
+) -> Result<Option<Instant>> {
+    job.constructor_deadline(deadline)
         .map_err(|_| EngineError::pending(EngineFault::Identity, CleanupFault::Identity))
 }
 impl Drop for CapturedClient {

@@ -239,12 +239,15 @@ impl Job {
             .stop_deadline()
             .map_or(requested, |stop| stop.min(requested)))
     }
-    pub(super) fn wait_started(&self, runtime: &WorkerRuntime, ceiling: Instant) -> Result<bool> {
+    pub(super) fn wait_started(
+        &self,
+        runtime: &WorkerRuntime,
+        ceiling: CallBudget,
+    ) -> Result<bool> {
         loop {
             if self.join()? {
                 need(
-                    Instant::now() < clipped(runtime, ceiling)
-                        && !runtime.cancellation().is_cancelled(),
+                    ceiling.check(runtime).is_ok() && !runtime.cancellation().is_cancelled(),
                     "VIEWER_START_PENDING",
                 )?;
                 let state = self
@@ -253,13 +256,23 @@ impl Job {
                     .map_err(|_| LaptopError::Refused("VIEWER_START_PENDING"))?;
                 return Ok(state.failure.is_none());
             }
-            let end = clipped(runtime, ceiling);
             need(
-                Instant::now() < end && !runtime.cancellation().is_cancelled(),
+                ceiling.check(runtime).is_ok() && !runtime.cancellation().is_cancelled(),
                 "VIEWER_START_PENDING",
             )?;
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+    pub(crate) fn constructor_deadline(&self, ceiling: Option<Instant>) -> Result<Option<Instant>> {
+        let origin = self
+            .origin
+            .upgrade()
+            .ok_or(LaptopError::Refused("VIEWER_ORIGIN_RETAINED"))?;
+        Ok(match (ceiling, origin.stop_deadline()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
+        })
     }
     pub(in crate::worker_laptop) fn failure(&self) -> Result<Option<Arc<LaptopError>>> {
         let state = self
@@ -523,9 +536,6 @@ fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
     }
     need(!state.opaque && state.process.settled(), "VIEWER_UNREAPED")?;
     Ok(true)
-}
-pub(in crate::worker_laptop) fn clipped(runtime: &WorkerRuntime, end: Instant) -> Instant {
-    runtime.stop_deadline().map_or(end, |stop| stop.min(end))
 }
 fn uncertain_terminal(error: &LaptopError) -> bool {
     match error {

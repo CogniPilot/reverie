@@ -7,9 +7,9 @@ pub(in crate::worker_laptop) mod receipt;
 mod terminal;
 #[cfg(test)]
 pub(super) mod test_hooks;
+use super::call_budget::CallBudget;
 use super::*;
 pub(crate) use job::Job as ViewerJob;
-pub(super) use job::clipped;
 use reverie_core::worker_launch::{ContainerReference, TerminalSize};
 enum SessionOrigin {
     Created(LaptopWorkflow),
@@ -51,7 +51,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         pane: &NixReleasedPane,
-        end: Instant,
+        end: CallBudget,
     ) -> Result<ViewerStart> {
         self.bound(runtime, &pane.workflow)?;
         let mut record = pane
@@ -74,7 +74,7 @@ impl Workflows {
             "WORKER_VIEWER_PHASE",
         )?;
         need(
-            !runtime.cancellation().is_cancelled() && Instant::now() < job::clipped(runtime, end),
+            !runtime.cancellation().is_cancelled() && end.check(runtime).is_ok(),
             "WORKER_VIEWER_STOPPED",
         )?;
         let mut marker = [0u8; 16];
@@ -180,7 +180,7 @@ impl ViewerGuard<'_> {
 pub(super) fn launch_constructor(
     runtime: &WorkerRuntime,
     job: &Arc<ViewerJob>,
-    end: Instant,
+    end: CallBudget,
 ) -> std::result::Result<(), Arc<LaptopError>> {
     if let Err(error) = admit_constructor(runtime, job, end) {
         let error = Arc::new(error);
@@ -189,12 +189,14 @@ pub(super) fn launch_constructor(
     }
     job.launch(runtime.cancellation());
     match job.wait_started(runtime, end).map_err(Arc::new)? {
-        true => runtime
-            .installed_engine()
-            .engine
-            .client
-            .handoff_viewer(job, end)
-            .map_err(|error| Arc::new(LaptopError::Engine(error.into()))),
+        true => {
+            let client = &runtime.installed_engine().engine.client;
+            match end.ceiling() {
+                Some(end) => client.handoff_viewer(job, end),
+                None => client.handoff_viewer_for_worker(job),
+            }
+            .map_err(|error| Arc::new(LaptopError::Engine(error.into())))
+        }
         false => Err(job
             .failure()
             .map_err(Arc::new)?
@@ -204,12 +206,11 @@ pub(super) fn launch_constructor(
 fn admit_constructor(
     runtime: &WorkerRuntime,
     job: &Arc<ViewerJob>,
-    ceiling: Instant,
+    ceiling: CallBudget,
 ) -> Result<()> {
     loop {
         need(
-            !runtime.cancellation().is_cancelled()
-                && Instant::now() < job::clipped(runtime, ceiling),
+            !runtime.cancellation().is_cancelled() && ceiling.check(runtime).is_ok(),
             "VIEWER_START_PENDING",
         )?;
         match runtime.installed_engine().engine.client.admit_viewer(job) {
@@ -235,7 +236,18 @@ impl WorkerRuntime {
         pane: &NixReleasedPane,
         end: Instant,
     ) -> Result<ViewerStart> {
-        self.laptop_workflows().start_viewer(self, pane, end)
+        self.laptop_workflows()
+            .start_viewer(self, pane, CallBudget::bounded(end))
+    }
+    pub fn start_laptop_viewer_session_for_worker(
+        &self,
+        pane: &NixReleasedPane,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ViewerStart> {
+        self.laptop_workflows()
+            .assert_worker_connection(self, &pane.workflow, connection)?;
+        self.laptop_workflows()
+            .start_viewer(self, pane, CallBudget::worker())
     }
     pub fn read_laptop_viewer(&self, viewer: &ViewerSession, bytes: &mut [u8]) -> Result<usize> {
         let _record = self.laptop_workflows().viewer(self, viewer, true)?;

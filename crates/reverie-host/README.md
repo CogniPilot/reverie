@@ -741,3 +741,13 @@ permits removal of its pinned matching inode. This is a startup availability
 correction, not a hard filesystem/kernel latency guarantee. As for Office,
 metadata comparison is not atomic against later same-UID namespace writers;
 the actual service lifecycle must exclude those competing writers.
+
+The actual created and existing worker viewer constructors accept the original
+accepted J connection and choose no aggregate construction deadline. Their
+shared admission, constructor wait and identity-checked slot handoff observe
+the same runtime's live first-stop deadline. Existing caller-bounded component
+constructors retain their supplied ceiling. A Busy query remains owned by its
+original captured call; waiting neither cancels nor replays it. A stopped or
+uncertain viewer constructor remains in the same laptop/native inventory with
+its real storage and job. This timing join does not establish App allocation
+release, complete handler cleanup, storage release or global shutdown.
