@@ -7,6 +7,7 @@ mod cold_prepare;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
 mod create;
 mod error;
+mod existing_viewer;
 mod guard;
 mod memory;
 mod network;
@@ -15,6 +16,7 @@ mod publication;
 mod start;
 #[cfg(test)]
 mod tests;
+mod viewer;
 use crate::{
     installed_worker_engine::InstalledWorkerEngine,
     office::OfficePhone,
@@ -27,6 +29,10 @@ pub use cold::{ColdCommit, ColdCommitted};
 pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
+pub use existing_viewer::{
+    ExistingRelayRetainFailure, ExistingRelayReturned, ExistingViewer, ExistingViewerRetainFailure,
+    ExistingViewerReturned, ExistingViewerStart,
+};
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{ConfiguredMemory, MemoryConfiguration};
 pub use pane::{PaneStart, StartedPane};
@@ -36,6 +42,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
+pub(crate) use viewer::ViewerJob;
+pub use viewer::{ViewerSession, ViewerStart};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LaptopNetworkProgress {
     Ready,
@@ -82,6 +90,7 @@ struct Record {
     settlement: Option<crate::engine_metadata::EngineError>,
     creation: Option<create::Creation>,
     cleanup: Option<cleanup::Cleanup>,
+    viewer: Option<Arc<viewer::ViewerJob>>,
 }
 impl Record {
     fn resources(&self) -> &Resources {
@@ -99,6 +108,19 @@ impl Record {
     }
 }
 type RecordOwner = Arc<Mutex<Record>>;
+#[derive(Clone)]
+enum RetainedRecord {
+    Created(RecordOwner),
+    Existing(existing_viewer::ExistingRecordOwner),
+}
+impl RetainedRecord {
+    fn is_created(&self, record: &RecordOwner) -> bool {
+        matches!(self,Self::Created(current) if Arc::ptr_eq(current,record))
+    }
+    fn is_existing(&self, record: &existing_viewer::ExistingRecordOwner) -> bool {
+        matches!(self,Self::Existing(current) if Arc::ptr_eq(current,record))
+    }
+}
 /// Same actual resource record; no DATA constructor or authority-bearing status.
 #[must_use = "retain actual laptop resource custody until checked reclamation"]
 #[derive(Clone)]
@@ -177,7 +199,7 @@ impl LaptopNetworkReturned {
 }
 pub(crate) struct Workflows {
     maximum: usize,
-    records: Mutex<Vec<RecordOwner>>,
+    records: Mutex<Vec<RetainedRecord>>,
 }
 impl Workflows {
     pub(crate) fn new(maximum: usize) -> Self {
@@ -245,8 +267,9 @@ impl Workflows {
             settlement: None,
             creation: None,
             cleanup: None,
+            viewer: None,
         }));
-        records.push(record.clone());
+        records.push(RetainedRecord::Created(record.clone()));
         Ok(LaptopWorkflow {
             origin: runtime.installed_engine().clone(),
             record,
@@ -262,7 +285,7 @@ impl Workflows {
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
         need(
-            records.iter().any(|r| Arc::ptr_eq(r, &workflow.record)),
+            records.iter().any(|r| r.is_created(&workflow.record)),
             "WORKER_LAPTOP_REPLAYED",
         )
     }
@@ -315,7 +338,7 @@ impl Workflows {
         let resources = record.resources.take().expect("unreclaimed owners");
         let outcome = record.outcome.take().expect("known native result");
         record.phase = Phase::Consumed;
-        records.retain(|r| !Arc::ptr_eq(r, &workflow.record));
+        records.retain(|r| !r.is_created(&workflow.record));
         let Resources {
             nix,
             plan,
@@ -343,7 +366,13 @@ impl Workflows {
             .clone();
         let mut result = Ok(());
         for record in records {
-            result = finalized(result, self.settle_record(runtime, &record, deadline));
+            let settled = match record {
+                RetainedRecord::Created(record) => self.settle_record(runtime, &record, deadline),
+                RetainedRecord::Existing(record) => {
+                    existing_viewer::settle_retained(runtime, &record, deadline)
+                }
+            };
+            result = finalized(result, settled);
         }
         result
     }
@@ -360,6 +389,15 @@ impl Workflows {
             record.outcome = Some(Err(Arc::new(LaptopError::Refused("WORKER_LAPTOP_STOPPED"))));
             record.phase = Phase::Known;
         }
+        let viewer = record.viewer.clone();
+        let viewer_result = viewer.map_or(Ok(()), |job| {
+            runtime
+                .installed_engine()
+                .engine
+                .client
+                .settle_viewer(&job, deadline)
+                .map_err(|error| LaptopError::Engine(error.into()))
+        });
         if let Some(call) = &record.pending {
             let deadline = runtime
                 .stop_deadline()
@@ -376,21 +414,24 @@ impl Workflows {
                 }
                 Err(error) => {
                     record.settlement = Some(error.clone().into());
-                    return Err(LaptopError::Engine(error.into()));
+                    return finalized(viewer_result, Err(LaptopError::Engine(error.into())));
                 }
             }
         }
         if !record.unknown && record.phase == Phase::Retained && record.outcome.is_some() {
             record.phase = Phase::Known;
         }
-        need(
-            !record.unknown
-                && record.phase != Phase::Running
-                && !record
-                    .creation
-                    .as_ref()
-                    .is_some_and(create::Creation::owns_created),
-            "WORKER_LAPTOP_RETAINED",
+        finalized(
+            viewer_result,
+            need(
+                !record.unknown
+                    && record.phase != Phase::Running
+                    && !record
+                        .creation
+                        .as_ref()
+                        .is_some_and(create::Creation::owns_created),
+                "WORKER_LAPTOP_RETAINED",
+            ),
         )
     }
 }
@@ -398,7 +439,7 @@ impl Workflows {
 // actual resources for this process lifetime rather than unlocking on handle loss.
 impl Drop for Workflows {
     fn drop(&mut self) {
-        static ABANDONED: OnceLock<Mutex<Vec<RecordOwner>>> = OnceLock::new();
+        static ABANDONED: OnceLock<Mutex<Vec<RetainedRecord>>> = OnceLock::new();
         let records = self
             .records
             .get_mut()

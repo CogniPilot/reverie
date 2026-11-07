@@ -163,3 +163,34 @@ fn original_handle_first_inspect_ast_phase_vectors_match_launch_view() {
         }
     }
 }
+
+#[test]
+fn original_process_pid_declaration_is_exact_positive_int_and_id_presence_stays_separate() {
+    use reverie_contracts::broker_laptop::LaunchLaptopInspection;
+    let sid = ProfileSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    for (raw, accepted) in [
+        ("null", false),
+        ("true", false),
+        ("false", false),
+        ("0", false),
+        ("-0", false),
+        ("-1", false),
+        ("1.0", false),
+        ("NaN", false),
+        ("\"1\"", false),
+        ("[]", false),
+        ("1", true),
+        ("184467440737095516160", true),
+    ] {
+        let row = format!(
+            r#"[{{"Config":{{"Labels":{{"reverie.worker":"test","reverie.session":"{}"}}}},"State":{{"Running":true,"Pid":{raw}}}}}]"#,
+            sid.as_str()
+        );
+        let inspected = LaunchLaptopInspection::decode_owned(row.as_bytes(), "test", &sid).unwrap();
+        assert_eq!(inspected.positive_process_id().is_ok(), accepted, "{raw}");
+        assert!(
+            inspected.require_id_field().is_err(),
+            "PID data never invents missing Id"
+        );
+    }
+}

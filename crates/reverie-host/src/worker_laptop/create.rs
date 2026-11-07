@@ -22,6 +22,8 @@ pub(super) enum CreateStage {
     PaneStarted,
     ReleasingNixGuard,
     NixGuardReleased,
+    StartingViewer,
+    Viewing,
 }
 pub(super) struct Creation {
     created: bool,

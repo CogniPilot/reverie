@@ -1,5 +1,6 @@
 use reverie_contracts::reservation_engine::{InventoryRows, StoppedState, inventory_ids};
 use serde::Deserialize;
+use std::collections::BTreeSet;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Inventory {
@@ -72,6 +73,34 @@ fn actual_python_fresh_stopped_metadata_joins_exact_ordinary_projection() {
                 "{}",
                 case.name
             );
+        }
+    }
+}
+
+#[test]
+fn original_stop_session_membership_refuses_unhashable_values_even_for_empty_history() {
+    use reverie_contracts::reservation_engine::EngineDataError;
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/reservation-engine/stop-membership-python.json"
+    ))
+    .unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 18);
+    let id = "a".repeat(64);
+    let ids = inventory_ids(&id).unwrap();
+    for case in cases {
+        let sessions = if case["active"].as_bool().unwrap() {
+            BTreeSet::from(["11111111-1111-4111-8111-111111111111"])
+        } else {
+            BTreeSet::new()
+        };
+        let raw = serde_json::json!({"Id":id,"Config":{"Labels":{"reverie.worker":"test","reverie.session":case["sessionLabel"]}},"Mounts":[]});
+        let rows = InventoryRows::decode(&ids, &[raw.to_string()]).unwrap();
+        let result = rows.rows()[0].reservation_stop_session_in(&sessions);
+        if case["result"] == "TypeError" {
+            assert!(matches!(result, Err(EngineDataError::Structure)), "{case}");
+        } else {
+            assert!(!result.unwrap(), "{case}");
         }
     }
 }

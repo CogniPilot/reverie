@@ -18,7 +18,7 @@ const EID: &str = "11111111-2222-4333-8444-555555555555";
 fn company(tree: &Tree, session: &str) {
     tree.write("company.json", &serde_json::to_vec(&serde_json::json!({"employees":[{"id":EID,"owner":null,"sessionId":session,"desiredRunning":true}]})).unwrap());
 }
-fn configured(tree: &Tree) -> InstallingBroker {
+pub(in crate::installing_broker) fn configured(tree: &Tree) -> InstallingBroker {
     tree.write("ids.out", b"");
     let snapshot = load_owner_config(&tree.root.join("worker.json")).unwrap();
     let bootstrap = EngineBootstrap::from_service(
@@ -104,6 +104,82 @@ fn actual_installed_gate_prefix_holds_common_flock_and_abort_closes_admission_wi
     assert!(
         broker.close_command_telemetry(end()).is_err(),
         "SAME original logical hold remains counted"
+    );
+    fixture_close(failure);
+}
+
+#[test]
+fn actual_installed_gate_whole_absent_classification_runs_budget_under_same_flock_and_resource_owners()
+ {
+    crate::test_process::owning_case!(actual_installed_gate_whole_absent_classification_runs_budget_under_same_flock_and_resource_owners);
+    let mut tree = Tree::new();
+    let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
+    raw["budgetMode"] = serde_json::json!("admission");
+    raw["memoryMiB"] = serde_json::json!(512);
+    tree.raw = serde_json::to_vec(&raw).unwrap();
+    tree.write("worker.json", &tree.raw);
+    tree.marker(&raw); // Same initial file/marker origin, never a snapshot swap.
+    company(&tree, OLD);
+    tree.write("names.out", b"");
+    tree.write("inspect.out", b"optional nonzero stdout is not JSON");
+    tree.write("inspect.out.status", b"7");
+    let mut broker = configured(&tree);
+    let kernel = crate::reservation_observer::tests::Fixture::new();
+    broker
+        .gate
+        .as_mut()
+        .unwrap()
+        .use_kernel_fixture_for_test(&kernel, &broker.storage.runtime);
+    let id = "a".repeat(64);
+    // Only kernel facts are controlled. ALL census/inspect calls still run
+    // through the SAME actual service client and fixed owned Rust child.
+    tree.write("ids.out", format!("{id}\n").as_bytes());
+    let site = serde_json::json!({"Id":id,"Name":"/test-console","Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":{}},"State":{"Running":true,"Pid":123},"Mounts":[],"HostConfig":{"Memory":536870912,"MemorySwap":536870912,"PidsLimit":128,"NanoCpus":0}});
+    tree.write("inventory.out", &serde_json::to_vec(&site).unwrap());
+    tree.write(
+        "writers.out",
+        &serde_json::to_vec(&serde_json::json!([site])).unwrap(),
+    );
+    let (_client, socket) = super::super::super::tests::incoming_as(&broker, b'J', OLD, false);
+    let WorkerConnectionDispatch::Launch(received) =
+        broker.accept_worker_connection(socket).unwrap()
+    else {
+        panic!("actual J");
+    };
+    let admitted = received.begin_ordinary().unwrap();
+    assert!(admitted.admission.is_some());
+    let inspected = admitted.prepare_prefix().unwrap();
+    assert!(inspected.previous().is_none());
+    let before = kernel.events().len();
+    let ClassifiedWorkerLaunch::Cold(cold) = inspected.classify_existing().unwrap() else {
+        panic!("actual cold");
+    };
+    assert!(matches!(cold.target(), ExistingColdTarget::Absent));
+    let events = kernel.events();
+    assert!(
+        events[before..].iter().any(|event| event == "host"),
+        "actual Gate capacity owner executed"
+    );
+    assert!(
+        events[before..]
+            .iter()
+            .any(|event| event == &format!("limits:{id}"))
+    );
+    assert!(
+        broker.installed.laptops.try_lock().is_err(),
+        "original lifecycle guard stayed held through actual budget"
+    );
+    assert!(common_busy(&data(&broker)));
+    assert!(lease_busy(&broker.configuration().unwrap(), OLD));
+    let failure = cold.abort();
+    let mut failure = failure;
+    assert!(failure.close_transport(end()).is_empty());
+    let mut common = AdmissionLock::acquire(&data(&broker)).unwrap();
+    common.close().unwrap();
+    assert!(lease_busy(&broker.configuration().unwrap(), OLD));
+    assert!(
+        broker.close_command_telemetry(end()).is_err(),
+        "same actual logical Hold remains counted"
     );
     fixture_close(failure);
 }

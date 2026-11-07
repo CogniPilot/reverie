@@ -50,6 +50,8 @@ impl std::error::Error for CreateTelemetryFailure {}
 pub enum LaptopError {
     Refused(&'static str),
     Plan(CreateObservationError),
+    ExistingObservation(crate::worker_launch::ExistingObservationError),
+    StorageOwner(crate::worker_storage::StorageOwnerError),
     Office(OfficeError),
     Network(NetworkDataError),
     Engine(EngineError),
@@ -60,6 +62,7 @@ pub enum LaptopError {
     CreatedState(reverie_contracts::worker_launch::CreatedStateError),
     Configuration(reverie_contracts::broker_resources::ResourceConfigError),
     Io(std::io::Error),
+    Terminal(crate::terminal_pty::PtyError),
     Publication(crate::worker_child::ChildError),
     Observation(crate::ObservationError),
     MemoryKernel(crate::reservation_kernel::ReservationKernelError),
@@ -86,6 +89,7 @@ impl LaptopError {
         match self {
             Self::MemoryEffectUnconfirmed(_) => true,
             Self::ColdStorage(error) => error.unconfirmed_native(),
+            Self::StorageOwner(error) => error.unconfirmed_native(),
             Self::Observation(_) => true,
             Self::Publication(error) => !error.cleanup_faults().is_empty(),
             Self::Finalization { primary, secondary } => {
@@ -99,6 +103,7 @@ impl LaptopError {
         match self {
             Self::Refused(code) => code,
             Self::Plan(_) => "WORKER_LAPTOP_PLAN",
+            Self::ExistingObservation(_) => "WORKER_EXISTING_VIEWER_OBSERVATION",
             Self::Office(_) => "WORKER_LAPTOP_OFFICE",
             Self::Network(_) => "WORKER_LAPTOP_NETWORK",
             Self::Engine(error) => error.code(),
@@ -109,6 +114,7 @@ impl LaptopError {
             Self::CreatedState(_) => "WORKER_LAPTOP_CREATED_STATE_UNCONFIRMED",
             Self::Configuration(_) => "WORKER_LAPTOP_CONFIGURATION",
             Self::Io(_) => "WORKER_LAPTOP_IO",
+            Self::Terminal(_) => "WORKER_VIEWER_TERMINAL",
             Self::Publication(_) => "WORKER_LAPTOP_LAUNCH_PUBLICATION",
             Self::Observation(_) => "WORKER_LAPTOP_NATIVE_FINALIZATION",
             Self::MemoryKernel(error) => error.code(),
@@ -117,6 +123,7 @@ impl LaptopError {
             Self::MemoryHelperSelection(_) => "LAPTOP_SOFT_LIMIT_HELPER_SELECTION",
             Self::ColdPolicy(_) => "WORKER_COLD_POLICY",
             Self::ColdStorage(error) => error.code(),
+            Self::StorageOwner(error) => error.code(),
             Self::MemoryHelperRefused(_) => "LAPTOP_SOFT_LIMIT_HELPER_REFUSED",
             Self::MemoryEffectUnconfirmed(_) => "LAPTOP_MEMORY_EFFECT_UNCONFIRMED",
             Self::Recorded(error) => error.code(),
@@ -129,6 +136,7 @@ impl std::error::Error for LaptopError {
         match self {
             Self::Refused(_) => None,
             Self::Plan(error) => Some(error),
+            Self::ExistingObservation(error) => Some(error),
             Self::Office(error) => Some(error),
             Self::Network(error) => Some(error),
             Self::Engine(error) => Some(error),
@@ -139,6 +147,7 @@ impl std::error::Error for LaptopError {
             Self::CreatedState(error) => Some(error),
             Self::Configuration(error) => Some(error),
             Self::Io(error) => Some(error),
+            Self::Terminal(error) => Some(error),
             Self::Publication(error) => Some(error),
             Self::Observation(error) => Some(error),
             Self::MemoryKernel(error) => Some(error),
@@ -147,6 +156,7 @@ impl std::error::Error for LaptopError {
             Self::MemoryHelperSelection(error) => Some(error),
             Self::ColdPolicy(error) => Some(error),
             Self::ColdStorage(error) => Some(error),
+            Self::StorageOwner(error) => Some(error),
             Self::MemoryHelperRefused(_) => None,
             Self::MemoryEffectUnconfirmed(error) => Some(error.as_ref()),
             Self::Recorded(error) => Some(error.as_ref()),

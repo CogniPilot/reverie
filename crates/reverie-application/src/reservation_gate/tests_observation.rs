@@ -10,6 +10,8 @@ mod launch_cases;
 mod preparation_cases;
 #[path = "tests_profile_selection.rs"]
 mod profile_selection_cases;
+#[path = "tests_stop.rs"]
+mod stop_cases;
 fn sha(raw: &[u8]) -> String {
     Sha256::digest(raw)
         .iter()

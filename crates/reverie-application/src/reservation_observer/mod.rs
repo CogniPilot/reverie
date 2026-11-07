@@ -35,6 +35,18 @@ pub struct NativeObserver {
     cancellation: CancellationToken,
 }
 impl NativeObserver {
+    /// Actual worker memory reads share its existing capture, cancellation and
+    /// first-stop ceiling. No caller token/deadline selector or new runner.
+    pub(crate) fn capture_worker(
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+        config: EffectiveWorkerConfig,
+    ) -> ObservationContext {
+        let observer = Self {
+            source: Arc::new(Installed::new(runtime.readonly())),
+            cancellation: runtime.cancellation(),
+        };
+        observer.capture(config, runtime.stop_deadline())
+    }
     pub fn new(engine: ReadonlyEngine) -> Self {
         Self {
             source: Arc::new(Installed::new(engine)),
@@ -279,6 +291,20 @@ impl ObservationContext {
         self.observer
             .source
             .verify_recovery_limits(row, policy.as_ref(), end)?;
+        self.check(end)
+    }
+    pub(crate) fn verify_launch_limits(
+        &self,
+        row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+    ) -> Result<()> {
+        let end = self.deadline(None)?;
+        let fields = row.fields_for_limits()?;
+        fields.running_header()?;
+        let policy = self.memory_policy_fields(&fields)?;
+        self.check(end)?;
+        self.observer
+            .source
+            .verify_launch_limits(row, policy.as_ref(), end)?;
         self.check(end)
     }
     fn memory_policy_fields(

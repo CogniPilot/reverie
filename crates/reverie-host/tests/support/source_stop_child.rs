@@ -32,13 +32,24 @@ fn main() {
     let cid = fs::read_to_string("cid").unwrap();
     let name = fs::read_to_string("name").unwrap();
     let path = match args.as_slice() {
-        [verb, target] if verb == "inspect" && target == &name => "before.json",
+        [verb, quiet, no_trunc] if verb == "ps" && quiet == "--quiet" && no_trunc == "--no-trunc" && Path::new("registry-empty-census").exists() => return,
+        [verb, target] if verb == "inspect" && target == &name => {
+            if Path::new("hold-inspect-reply").exists() {
+                fs::write("inspect-reply-held", b"owned query admitted").unwrap();
+                wait("release-inspect-reply");
+            }
+            "before.json"
+        }
         [verb, time, seconds, target]
             if verb == "stop" && time == "--time" && seconds == "2" && target == &cid =>
         {
             fs::write("stop-requested", b"stop").unwrap();
             if std::env::var("SOURCE_EXIT_ON").unwrap() == "stop-requested" {
                 wait("source-reaped");
+            }
+            if Path::new("hold-stop-reply").exists() {
+                fs::write("stop-reply-held", b"owned effect before reply").unwrap();
+                wait("release-stop-reply");
             }
             if std::env::var("SOURCE_STOP_OPTIONAL_ERROR").is_ok() {
                 std::process::exit(7);

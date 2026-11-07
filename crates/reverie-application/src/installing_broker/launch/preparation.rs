@@ -2,10 +2,14 @@
 //! Its same-record hold precedes every real claim, including failed attempts.
 use super::*;
 use crate::installing_broker::lifecycle::{ActiveLaunchToken, LaunchGeneration};
-use reverie_contracts::broker_laptop::LaunchLaptopInspection;
+use reverie_host::worker_launch::ExistingLaptopInspection;
 use reverie_host::worker_reports::WorkerLaunchHold;
 mod error;
 mod existing;
+pub use existing::{
+    AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
+    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
+};
 mod finalization;
 mod observe;
 mod wait;
@@ -34,7 +38,7 @@ struct ClaimedWorkerLaunch<'a> {
 #[must_use = "continue or abort the SAME preparation; path data cannot replace it"]
 pub struct InspectedWorkerLaunch<'a> {
     observed: observe::ObservedWorkerLaunch<'a>,
-    previous: Option<LaunchLaptopInspection>,
+    previous: Option<ExistingLaptopInspection>,
 }
 #[must_use = "resource acquisition can remain uncertain even when storage is None"]
 pub struct PreparationFailure<'a> {
@@ -60,8 +64,8 @@ impl<'a> AdmittedWorkerLaunch<'a> {
 }
 impl InspectedWorkerLaunch<'_> {
     /// DATA only; reuse still needs policy/memory/runtime/exit/pane phases.
-    pub fn previous(&self) -> Option<&LaunchLaptopInspection> {
-        self.previous.as_ref()
+    pub fn previous(&self) -> Option<&reverie_contracts::broker_laptop::LaunchLaptopInspection> {
+        self.previous.as_ref().map(ExistingLaptopInspection::data)
     }
     pub fn request(&self) -> &WorkerRequest {
         self.observed.claimed.preparing.admitted.request()

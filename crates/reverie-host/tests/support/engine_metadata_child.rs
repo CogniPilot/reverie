@@ -37,6 +37,23 @@ fn main() {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "storage-writer" && args.get(17).map(String::as_str) == Some("attach-session") {
+                let prefix = ["exec", "-it", "--env", "LANG=C.UTF-8", "--env", "LC_ALL=C.UTF-8", "--env", "TERM=xterm-256color", "--env", "COLORTERM=truecolor", "--env"];
+                assert_eq!(&args[..11], prefix);
+                let marker = args[11].strip_prefix("REVERIE_VIEWER=").unwrap();
+                assert_eq!(marker.len(), 32);
+                assert!(marker.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+                assert_eq!(&args[12..], ["test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "/bin/tmux", "-u", "-L", "reverie-laptop", "attach-session", "-d", "-t", "office"]);
+                fs::write("viewer-ready", b"actual fixed attach child entered").unwrap();
+                use std::io::Read;
+                let mut data = [0; 1024];
+                loop {
+                    let n = io::stdin().read(&mut data).unwrap();
+                    if n == 0 { return; }
+                    io::stdout().write_all(&data[..n]).unwrap();
+                    io::stdout().flush().unwrap();
+                }
+            }
             if mode == "image-refresh" && fs::remove_file("hold.next").is_ok() {
                 fs::write("query-started", b"actual owned child reached query").unwrap();
                 let ceiling = std::time::Instant::now() + Duration::from_secs(15);
@@ -45,10 +62,14 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(2));
                 }
             }
-            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",_=>std::process::exit(81)};
+            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
             let raw=fs::read(name).unwrap();
             if mode=="cold-admission" && name=="inspect.out" && std::path::Path::new("inspect.next").exists() {fs::rename("inspect.next","inspect.out").unwrap();}
             io::stdout().write_all(&raw).unwrap();
+            if name == "pane.out" && let Ok(next) = fs::read("pane.next") {
+                fs::write("pane.out", next).unwrap();
+                fs::remove_file("pane.next").unwrap();
+            }
             if let Ok(status)=fs::read_to_string(format!("{name}.status")){std::process::exit(status.parse().unwrap());}
         }
         "dual" | "dual-over" | "dual8" => {

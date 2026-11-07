@@ -397,6 +397,9 @@ The same lifecycle mutex spans paired active/name insertion, pending/fresh-home
 storage preparation, runtime-directory preparation, create-plan observation and
 the original first inspect. `InspectedWorkerLaunch` keeps all those owners
 private; its request, snapshot and previous-inspection getters return data.
+That previous inspection is sealed to the exact original plan and actual storage
+owner. Host process-incarnation capture consumes it without an extra inspect;
+readback alone does not enable ordinary replacement stop or release resources.
 
 `abort` returns the actual retained failure. Its one-shot `close_transport`
 attempts admission, own handler metadata and socket finalization, retaining
@@ -404,8 +407,16 @@ sibling errors and the logical hold/storage context. Even a failure with no
 direct StorageClaim can still have an uncertain owner in the real registry.
 Physical EOF and successful local metadata removal do not release that custody.
 
-Existing-laptop policy/memory/runtime/exit/pane/reuse classification, ordinary
-replacement stop, Nix/network and create/start completion, protected CLI receipt,
+`classify_existing` now continues the same accepted owner through original
+running-policy and optional memory verification, runtime/exit observation,
+pane/attach checks, process capture, pool policy and initial creation budget.
+Its closed result retains either actual reusable ownership or the original
+Absent/Stopped/DeadPane/RunningCompleted cold target. Runtime-bound memory
+observation keeps the actual cancellation token and first-stop deadline; runtime
+receipt reads preserve the existing finite-writer FIFO behavior. A whole
+configured-Gate control exercises the same held lifecycle and common flock.
+
+Ordinary replacement stop, Nix/network and create/start completion, protected CLI receipt,
 actual admission/canonical release, viewer and committed Started registration
 still require their genuine continuations. Protected L/source-stop dispatch and
 the real listener/global-stop producer also remain required. First inspect is
@@ -482,3 +493,35 @@ flocks, plus a genuine installed-Gate publication/CAS/STARTING join for an alrea
 stopped source with explicitly synthetic kernel facts. They do not qualify a live
 Docker source stop, ordinary legacy/network stop, the complete source-to-target
 launch consumer, every process producer, global shutdown, or backend selection.
+
+`StorageClaim::retain_replacement_stop` now moves the original box, observed
+create plan and sealed process incarnation into the reviewed ordinary stop owner.
+Registered storage changes to that exact native Arc in the existing registry;
+legacy storage creates no entry or employee lease. Native inspect/stop runs
+outside the registry mutex. Only known stopped readback can restore the same box,
+plan, process and claim generation, with no fallible gap after extraction.
+Uncertainty, dropped handles and local native settlement keep custody retained.
+This resource bridge does not provide the actual cold/J caller, its common
+admission stop fence, late policy resolver, dead-pane recheck, or legacy
+name/network cleanup. It never acknowledges lease, capacity or global release.
+
+Classified ordinary reuse can now move the actual selected storage box, observed
+plan, first inspection and bound receipt into the same bounded Host existing-viewer
+record. The original accepted J, logical Hold, active metadata, configuration and
+wait observation remain in the App continuation. It leaves the original lifecycle
+before closing its actual allocation admission, and only that confirmed close can
+reach the native viewer constructor. Registered restoration checks the same Arc
+and both actual Host guards before taking the box, then restores Direct without a
+fallible gap; genuine legacy storage adds no registry entry, lease, Nix or Office.
+
+Native component close/restoration returns a retained whole owner, never a stopped
+laptop, handler completion, canonical release or storage/global acknowledgement.
+The integrated handler must freshly re-stat its bound receipt for EVERY outcome,
+including peer EOF and errors. If completion requires stop, that actual stop must
+precede viewer reaping, metadata/Office removal and final storage-live checks.
+Those integrated finalizer joins remain open; the component API does not choose
+them from EOF, X, an earlier receipt or local client settlement. Last-owner Drop
+quarantines the existing resource and counted connection owners in this process.
+The new owning controls cover genuine legacy, physical employee storage, a real
+fixed PTY child, actual configured-Gate allocation close and negative dropped-owner
+retention. They do not select the native service or qualify live Docker cleanup.

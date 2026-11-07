@@ -42,6 +42,16 @@ impl OrdinaryLaunchAdmission {
     pub fn check_creation(&self, resources: &ResourcePolicy) -> Result<HeadroomFacts> {
         self.gate.check_ordinary_creation(&self.session, resources)
     }
+    /// Re-observe the native guard and canonical active operations before an
+    /// ordinary stop under this SAME actual admission. Both source and reserved
+    /// roles require protected reconciliation. Passing this fence grants no
+    /// process ownership, stop permission or resource/capacity release.
+    pub fn check_stop(
+        &self,
+        name: &reverie_core::worker_laptop::WorkerContainerName,
+    ) -> Result<()> {
+        self.gate.check_ordinary_stop(name.as_str())
+    }
     /// Source success/lease-wait exit: run the actual final native guard and
     /// consume owned admission. Other process constructors must still settle
     /// before any installing lifecycle interprets a local close as global ACK.

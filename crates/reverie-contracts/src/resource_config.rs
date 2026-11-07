@@ -35,6 +35,11 @@ impl ResourceConfiguration {
         let resources = broker_resources::projection(source.as_value())?;
         Ok(Self { source, resources })
     }
+    /// Original launch selects the effective pool only by key presence.
+    pub fn has_resource_maps(&self) -> bool {
+        let root = root(&self.source);
+        root.contains_key(&key("sessionResources")) || root.contains_key(&key("employeeResources"))
+    }
     pub fn source(&self) -> &EffectiveWorkerConfig {
         &self.source
     }
