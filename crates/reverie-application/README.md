@@ -146,6 +146,26 @@ new batch, avoiding the old duplicate insertion on repeated/whitespace seeds.
 These are intentional curated startup corrections, qualified separately from
 the retained legacy helper.
 
+Native startup first adopts the actual `MemoryStartupStore`, performs finite
+read-only preflight, and only then selects/probes its backend. The same retained
+source/connection owner performs writer-reserved admission and publishes the
+new closed native metadata namespace. Application workflow still owns
+`initializing` → `profile-pending` → `ready`, including pending fences before
+migration and profile effects. Project startup uses the same owner with its
+independent hashed backend. Generic historical state never becomes native
+ownership merely because strings match: old marker collisions, foreign or
+malformed native metadata require an explicit migration/refusal, with no
+force/skip/reset route. Unrelated rows, extensions and IDs remain; existing
+selected-model vectors are retained, while explicit model changes use the
+existing re-embedding workflow.
+The existing lifecycle mutex/flock encloses preflight through inference and
+checked resource closure; no SQLite connection survives between successful
+curated calls. Legacy/raw writers must remain quiesced during actual cutover.
+Standalone low-level callers must honor that same connection/lifecycle rule;
+metadata success supplies no caller authority. Failed SQLite close retains its
+actual owner and lock; consumed negative finalizers remain refused and still
+attempt remaining namespace finalizers.
+
 `memory_recall::MemoryRecall` receives the already selected model and opens only
 an existing READ_ONLY store. It never runs startup, probes/reselects a model,
 re-embeds, seeds, imports, initializes documents or refreshes a profile. Pending
@@ -154,6 +174,12 @@ typed refusals. Readiness is checked before/after recall. Closing its originatin
 StartedMemory fences attached recall handles; each reader still requires its
 own checked close. Readiness and local closed flags are functional state, never
 owner/admission/shutdown evidence.
+
+The lifecycle adopts `NativeMemoryRead` before SQL qualification and backend
+selection, retains the actual connection and source anchors together, and uses
+the shared pending/refused shutdown distinction. A SQLite close refusal keeps
+the database, scope lock and namespace fenced; a consumed source failure still
+attempts the remaining namespace finalizers and never becomes a release receipt.
 
 No request selects an employee ID, DB path, profile path or model. The real
 installed namespace lifecycle/caller integration remains a required successor:
@@ -416,3 +442,20 @@ The source-holder tests use the unchanged genuine bootstrap/recovery path and
 same captured metadata engine; only kernel observations are controlled data.
 Protected source stop, physical lease release, create/start and global shutdown
 acknowledgement are not provided by this resource/durable-claim join.
+
+`RetainedPreparation::stop_original_source` now consumes its actual private
+STARTING intent together with that registered original source. It publishes the
+existing source-stop attempt, qualifies the same claim again before dispatch,
+resolves policy at the original late phase, and retains one move-only Host stop
+owner inside the same source record. Native uncertainty, policy/PID/metadata
+drift, failed phone close and failed resource close retain the owner and durable
+claim; local client settlement cannot promote them to a stopped result or retry.
+The actual recovered Office phone rejects and joins its tracked work before the
+original employee lease can close. Final source removal follows the final native
+admission check. Returned facts retain capacity and are not target-start authority.
+
+Owning controls cover actual controlled child stop/kill/reap and physical employee
+flocks, plus a genuine installed-Gate publication/CAS/STARTING join for an already
+stopped source with explicitly synthetic kernel facts. They do not qualify a live
+Docker source stop, ordinary legacy/network stop, the complete source-to-target
+launch consumer, every process producer, global shutdown, or backend selection.

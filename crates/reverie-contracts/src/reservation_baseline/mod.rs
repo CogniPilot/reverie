@@ -11,7 +11,7 @@ use crate::{
 pub use accounts::{AccountDeclaration, AccountDeclarations, ObservedAccount};
 use reverie_core::{decimal::UnsignedInteger, posix_path::PosixPath};
 pub use start::StartDataError;
-pub use start_records::{StartIntentRecord, assert_prepared_for_start};
+pub use start_records::{SourceStopIntentRecord, StartIntentRecord, assert_prepared_for_start};
 use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

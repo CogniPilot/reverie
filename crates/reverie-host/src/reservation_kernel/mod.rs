@@ -212,6 +212,15 @@ impl Default for ReservationKernel {
     }
 }
 impl ReservationKernel {
+    /// Fixed /proc observation of an original baseline process. This is data,
+    /// not process ownership or permission to send any signal.
+    pub fn original_process_start(
+        &self,
+        native: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        end: Instant,
+    ) -> Result<String> {
+        pid_start(&Installed, &native.pid()?, end)
+    }
     /// Actual shared physical limits checks for memory-only recovery. The
     /// named inspection retains its legacy untyped Id; no CID is fabricated.
     pub fn verify_recovery_limits(

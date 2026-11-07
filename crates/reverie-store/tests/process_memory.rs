@@ -1,5 +1,7 @@
 //! Actual process contention and killed-writer recovery; synthetic paths only.
 use reverie_store::memory::{EpisodeInput, MemoryStore};
+#[path = "process_memory/readiness.rs"]
+mod readiness;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -90,6 +92,10 @@ fn memory_process_child() {
     let index = std::env::var("REVERIE_TEST_MEMORY_INDEX").unwrap();
     if mode == "constructors" {
         constructor_paths();
+        return;
+    }
+    if mode.starts_with("readiness-") {
+        readiness::writer(&root, &mode, &index);
         return;
     }
     let store = MemoryStore::open(root.join("memory.sqlite")).unwrap();

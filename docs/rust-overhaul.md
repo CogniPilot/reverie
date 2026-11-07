@@ -102,11 +102,13 @@ source and component tests do not establish an installed native broker.
 | Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
 | Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
 | Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
-| Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Listener dispatch, caller-owned handler joins and global stop acknowledgement |
-| Original launch resources | `InstallingBroker::retain_resource_draft` transfers the same storage and recovered Office owners into the existing source record before the durable claim | Protected old-source stop and the actual launch caller |
-| Storage, Nix and laptop effects | `reverie-host` retains the real Nix/storage/Office owners through network, complete-create telemetry, creation, checked metadata publication, start acknowledgement and immutable created-CID cleanup | Installing application caller, started-container memory, retained cold storage and native pane completion |
-| Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners | Actual started-container memory enforcement and owner GUI/API selection for remaining settings |
-| Memory tools | Native memory/MCP entry points, persistence, journal transport, startup services and an unselected fixed-purpose guest capsule | Real launch/image/context/grant join, collision-safe existing-data cutover and coordinated package selection |
+| Accepted worker connections | `accept_worker_connection` dispatches actual T/J sockets with peer UID checked before frame handling; `ReceivedWorkerLaunch::begin_ordinary` performs image refresh, queued GPU cold boundary and optional admission | Complete listener/handler lifecycle, launch preparation and remaining protocol verbs |
+| Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Caller-owned handler joins and global stop acknowledgement |
+| Original launch resources | `retain_resource_draft` transfers the same storage and recovered Office owners before the durable claim; `RetainedPreparation::stop_original_source` consumes the same protected intent, checks exact process identity, closes the phone before the original lease, and retains the claim after release | Protected launch dispatch, target creation and live container qualification |
+| Storage, Nix and laptop effects | `reverie-host` retains the real Nix/storage/Office owners through network, complete-create telemetry, creation, checked metadata publication, start acknowledgement and immutable created-CID cleanup | Installing application caller, retained cold storage and native pane completion |
+| Cold storage | `LaunchStorage::prepare_cold_launch_storage` fences existing pending markers, observes actual home absence, prepares storage and initializes leases only for an enabled policy and a genuinely fresh home | Complete clear and retain-and-replace transactions, including actual cold native admission and post-start commit |
+| Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners; `configure_started_laptop_memory` applies and reads back memory policy on the same actual started record | Installing caller sequence and owner GUI/API selection for remaining settings |
+| Memory tools | Native memory/MCP entry points, persistence, journal transport, staged startup/read owners and an unselected fixed-purpose guest capsule; existing-data and reverse-language compatibility controls | Actual prior-writer shutdown, real launch/image/context/grant join and coordinated package selection |
 
 Recovery entries contain actual Office and storage resources. Recovered names
 are membership data; they do not establish a canonical container/process identity
@@ -129,10 +131,22 @@ or acknowledge whole-service shutdown.
 The guest capsule preserves the qualified Console module tree and closes the
 selected Node/native-library dependency graph. Its synthetic namespace controls
 exercise nonempty legacy memory and read-only byte preservation; they establish
-no installed grant or image origin. Native startup still needs an explicit
-metadata ownership/migration boundary: historical state keys colliding with the
-new readiness keys must be preserved or refused before mutation. General
-existing-instance migration remains unqualified until that consumer is complete.
+no installed grant or image origin. Native startup now uses one versioned SQL
+metadata namespace. Historical generic readiness keys and foreign or malformed
+native metadata refuse before migration; ordinary legacy state APIs remain
+compatible. The staged reader and startup owners retain their actual SQLite
+connection and source descriptors when close is pending, and an uncertain
+consumed finalizer remains negative. A nonempty legacy fixture exercises
+reinitialization, original row IDs, documents, claims, history, extension tables
+and exact vector bytes, alongside actual Python-to-Rust and reverse writes.
+
+These memory controls require quiesced legacy writers. An independent control
+demonstrates that a same-process foreign SQLite handle can change shared-memory
+bytes without observable stat-generation drift. The installing lifecycle must
+stop and settle the actual prior workloads before a fresh native process adopts
+the namespace. Neither a metadata row, the cooperative scope lock nor successful
+source tests establish that production handoff. General existing-instance
+migration remains unqualified until this actual consumer is complete.
 
 Consult the owning [application](../crates/reverie-application/README.md) and
 [host](../crates/reverie-host/README.md) documentation for exact phase and cleanup

@@ -5,6 +5,8 @@ use crate::installing_broker::recovered::tests::Tree;
 use reverie_host::worker_storage::StorageLease;
 use std::{
     fs,
+    io::Write,
+    os::unix::net::UnixStream,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -13,6 +15,68 @@ const NEXT_SID: &str = "22222222-2222-3333-4444-555555555555";
 const EID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 fn operation() -> JournalId {
     JournalId::parse("33333333-2222-4333-8444-555555555555").unwrap()
+}
+#[test]
+fn actual_pending_phone_refuses_original_resource_close_before_consuming_employee_lease() {
+    crate::test_process::owning_case!(
+        actual_pending_phone_refuses_original_resource_close_before_consuming_employee_lease
+    );
+    let tree = employee_tree();
+    let config = tree.broker.configuration().unwrap();
+    let ordinary = tree.broker.claim_storage(&session()).unwrap();
+    let (reference, office) = reference(&tree);
+    let attached = reference
+        .attach(config.configuration(), operation(), office.clone())
+        .unwrap();
+    let source = attached.source.clone();
+    drop(attached);
+    fs::create_dir(tree.root.join("company")).unwrap();
+    fs::create_dir(tree.root.join("company/console")).unwrap();
+    fs::write(
+        tree.root.join("company/console/.env"),
+        "REVERIE_USERNAME=fixture\nREVERIE_PASSWORD=synthetic-only\n",
+    )
+    .unwrap();
+    fs::write(tree.root.join("server.out"), br#"[{"State":{"Running":true},"NetworkSettings":{"Networks":{"bridge":{"IPAddress":"127.0.0.1"}}}}]"#).unwrap();
+    fs::write(tree.root.join("server.hold"), "hold actual owned query").unwrap();
+    let mut connection =
+        UnixStream::connect(tree.root.join("office").join(SID).join("office.sock")).unwrap();
+    connection
+        .write_all(b"GET /api/instances HTTP/1.1\r\nHost: guest\r\nContent-Length: 0\r\n\r\n")
+        .unwrap();
+    let limit = end();
+    while !tree.root.join("server.started").exists() && Instant::now() < limit {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let entered = tree.root.join("server.started").exists();
+    let refused = source.release_original_resource(Instant::now() + Duration::from_millis(50));
+    let held = StorageLease::acquire_launch(config.configuration(), &session()).is_err();
+    let direct = matches!(
+        source.record.owner.lock().unwrap().as_ref(),
+        Some(SourceOwned::Direct(_))
+    );
+    drop(connection);
+    fs::write(tree.root.join("server.release"), "settle same actual query").unwrap();
+    office._office.close(end()).unwrap();
+    assert!(
+        entered,
+        "the actual query, not only HTTP submission, was held"
+    );
+    assert_eq!(
+        refused.err().unwrap().code(),
+        "RESOURCE_ORIGINAL_OFFICE_CLOSE_UNCONFIRMED"
+    );
+    assert!(
+        held && direct,
+        "phone uncertainty precedes any original lease consumption"
+    );
+    // Synthetic fixture only: no journal claim or source effect was created.
+    // All actual phone/native work is now closed before restoring its SAME box.
+    let registry = source.registry.upgrade().unwrap();
+    source
+        .restore_unclaimed(&mut registry.lock(None).unwrap())
+        .unwrap();
+    ordinary.release(end()).unwrap();
 }
 fn session() -> ProfileSessionId {
     ProfileSessionId::parse(SID).unwrap()

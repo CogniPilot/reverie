@@ -61,7 +61,7 @@ fn mkdir_parents(path: &Path, mode: u32, effects: &mut bool) -> Result<()> {
         Err(error) => Err(error.into()),
     }
 }
-fn private(file: &File, uid: u32) -> Result<()> {
+pub(super) fn private(file: &File, uid: u32) -> Result<()> {
     let info = file.metadata()?;
     need(
         info.is_dir() && info.uid() == uid && info.mode() & 0o077 == 0,

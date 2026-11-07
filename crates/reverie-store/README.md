@@ -275,6 +275,53 @@ scoring and ranking owners. Missing/partial boot data and a legacy assistant
 column refuse explicitly. Read-only SQLite may coordinate existing WAL/shared
 memory files; this does not promise a filesystem with no ancillary changes.
 
+`NativeMemoryRead` stages the actual read-only connection and its pinned source
+before schema qualification or model work. The application stores that owner
+first, then moves the same connection and anchors into the qualified profile
+and reader. Native reads recheck the held/named source around SQL; ordinary
+legacy readers retain their prior policy. SQLite closes before the anchors.
+An actual `SQLITE_BUSY` close keeps both resources pending, including in a typed
+pending-owner error from convenience constructors. A consumed anchor-close
+failure remains negative; closing cannot requalify the staged reader.
+
+`MemoryStartupStore` is the separate native startup owner. Its caller holds the
+actual exclusive installed lifecycle lock and has closed every other SQLite
+connection to this database in the process, including idle readers/writers.
+Legacy/raw writers must be quiesced at coordinated cutover. Neither sidecar
+absence nor a decoded metadata record establishes that condition. The curated
+application holds the lock until all actual database resources settle, closes
+its connections between operations, and fences admission after uncertainty.
+
+Preflight pins the selected database and existing sidecars before SQLite opens.
+Only when journal/WAL/shm are all absent does it choose a finite main-only
+immutable read; it checks the same main generation and all absences again.
+An existing sidecar is never hidden by immutable mode. Existing WAL/shm use
+read-only shared memory and disabled close checkpoints; unobservable recovery
+states refuse before writable fallback. Matching-owner root access may still
+update ctime in SQLite; generation changes conservatively refuse. Root sidecar
+owner/group mismatches or set-ID bits refuse before SQLite can change them.
+These observations do not promise all-root migration or metadata-inert access.
+Post-observation generation checks also run after SQL refusal to report
+observable stat-generation drift, including root ctime changes. They cannot
+detect arbitrary mmap changes to SHM bytes. An already mapped foreign RW node
+can bypass read-only-SHM behavior without changing stat timestamps; the actual
+paired control remains unadmitted and the quiesced raw-byte invariant is tested
+separately. Installed selection still requires the real producer to establish
+the closed legacy/native resource phase; a caller flag or matching row is no
+substitute for closing those actual resources.
+
+After checked read-only closure, the same owner opens the same held source for
+writing, checks its SQLite file identity and rechecks schema/metadata under
+`BEGIN IMMEDIATE` before the first schema or native write. The closed versioned
+`reverie_native_memory_v1` singleton stores phase and selected model separately
+from generic legacy `state`. Unknown schema/rows/types/versions refuse. Without
+this new owner, either historical `native_memory_*_v1` key refuses for every
+value, even matching `ready`/model strings; earlier unselected marker rows are
+not silently adopted or erased. A separately reviewed migration is required
+for those ambiguous records. Ordinary `MemoryStore` state APIs remain intact.
+Genuine native owners can repeat initialization and recover pending phases.
+The format is data, never authentication, a grant or an effect/shutdown receipt.
+
 `MemoryDocuments` implements the existing Reverie document/history/ballot tables
 on the same private connection. Revisions use real SQLite writer-reserved CAS;
 raw archived bodies, IDs, extra developer suffixes and tables survive. A
