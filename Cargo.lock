@@ -479,6 +479,7 @@ name = "reverie-host"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "nix",
  "reverie-contracts",
  "reverie-core",
  "reverie-store",

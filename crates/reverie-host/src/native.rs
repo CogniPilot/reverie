@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 mod lease;
 mod passwd;
 pub(crate) use lease::observe_with_ancestors;
+pub(crate) use lease::{open_at, open_at_mode};
 mod text;
 pub(crate) use text::{python_path, python_text};
 mod resolve;
@@ -142,7 +143,7 @@ fn read_snapshot(
         metadata: after,
     })
 }
-fn close(file: File) -> Result<()> {
+pub(crate) fn close(file: File) -> Result<()> {
     let fd = file.into_raw_fd();
     // SAFETY: sole descriptor ownership is consumed before this one close.
     let result = if unsafe { libc::close(fd) } == 0 {

@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 libc.workspace = true
+nix = { workspace = true, features = ["fs", "user"] }
 reverie-core.workspace = true
 reverie-contracts.workspace = true
 reverie-store.workspace = true

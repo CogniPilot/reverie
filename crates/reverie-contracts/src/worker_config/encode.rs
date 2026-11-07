@@ -143,3 +143,36 @@ pub(crate) fn float(value: f64) -> String {
     let exponent: i32 = exponent.parse().expect("finite Debug exponent");
     format!("{mantissa}e{exponent:+03}")
 }
+
+pub(super) fn quoted_text(text: &Text, ascii: bool) -> Text {
+    let mut result = vec![34];
+    for &codepoint in &text.0 {
+        let escaped = match codepoint {
+            8 => Some("\\b".to_owned()),
+            9 => Some("\\t".to_owned()),
+            10 => Some("\\n".to_owned()),
+            12 => Some("\\f".to_owned()),
+            13 => Some("\\r".to_owned()),
+            34 => Some("\\\"".to_owned()),
+            92 => Some("\\\\".to_owned()),
+            32..=126 => None,
+            127.. if !ascii => None,
+            0..=0xffff => Some(format!("\\u{codepoint:04x}")),
+            _ => {
+                let scalar = codepoint - 0x10000;
+                Some(format!(
+                    "\\u{:04x}\\u{:04x}",
+                    0xd800 + (scalar >> 10),
+                    0xdc00 + (scalar & 0x3ff)
+                ))
+            }
+        };
+        if let Some(escaped) = escaped {
+            result.extend(escaped.chars().map(u32::from));
+        } else {
+            result.push(codepoint);
+        }
+    }
+    result.push(34);
+    Text(result)
+}

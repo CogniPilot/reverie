@@ -5,6 +5,7 @@ pub mod device_policy;
 mod digest;
 pub mod js_json;
 pub mod lease_policy;
+pub mod lease_records;
 mod legacy_json;
 pub mod operations_v1;
 pub mod ops_command;
