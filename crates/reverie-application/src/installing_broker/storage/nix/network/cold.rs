@@ -6,15 +6,24 @@ use reverie_host::{
     command_telemetry::CommandTelemetry,
     worker_laptop::{
         ColdCommit, ColdCommitted, ColdPreparation, ConfiguredMemory, ContainerStart,
-        CreatedLaptop, LaptopCreation, MemoryConfiguration, NixGuardRelease, PaneStart,
-        StartedContainer, StartedMemoryPolicy, StartedMemoryReadback, StartedPane,
-        WorkerMemoryBegin, WorkerMemoryEffect,
+        CreatedLaptop, LaptopCreation, MemoryConfiguration, NixGuardRelease, NixReleasedPane,
+        PaneStart, StartedContainer, StartedMemoryPolicy, StartedMemoryReadback, StartedPane,
+        ViewerStart, WorkerMemoryBegin, WorkerMemoryEffect,
     },
     worker_reports::WorkerLaunchConnection,
     worker_runtime::WorkerRuntime,
 };
 type Result<T> = std::result::Result<T, NetworkStorageError>;
 impl NetworkStoragePreparation {
+    pub(in crate::installing_broker) fn start_viewer(
+        &self,
+        pane: &NixReleasedPane,
+        connection: &WorkerLaunchConnection,
+    ) -> Result<ViewerStart> {
+        self.cold_runtime()?
+            .start_laptop_viewer_session_for_worker(pane, connection)
+            .map_err(NetworkStorageError::Host)
+    }
     pub(in crate::installing_broker) fn phase_failure(&self) -> Result<Option<Arc<LaptopError>>> {
         self.workflow.failure().map_err(NetworkStorageError::Host)
     }

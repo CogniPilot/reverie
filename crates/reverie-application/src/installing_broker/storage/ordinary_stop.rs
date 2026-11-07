@@ -5,28 +5,28 @@ use reverie_host::{
     worker_launch::{ExistingLaptopInspection, ObservedCreatePlan},
     worker_source_stop::{OrdinaryLaptopStop, StoppedLaptopRemoval},
 };
-pub struct OrdinaryStopPreparation {
+pub(in crate::installing_broker) struct OrdinaryStopPreparation {
     destination: ClaimDestination,
     native: Arc<Mutex<OrdinaryLaptopStop>>,
 }
-pub struct OrdinaryStopReturned {
+pub(in crate::installing_broker) struct OrdinaryStopReturned {
     claim: StorageClaim,
     plan: ObservedCreatePlan,
     previous: Option<ExistingLaptopInspection>,
     removal: StoppedLaptopRemoval,
 }
-pub struct OrdinaryStopRetainFailure {
+pub(in crate::installing_broker) struct OrdinaryStopRetainFailure {
     claim: StorageClaim,
     plan: ObservedCreatePlan,
     previous: ExistingLaptopInspection,
     cause: StorageWorkflowError,
 }
-pub struct OrdinaryStopReclaimFailure {
+pub(in crate::installing_broker) struct OrdinaryStopReclaimFailure {
     preparation: OrdinaryStopPreparation,
     cause: StorageWorkflowError,
 }
 impl OrdinaryStopRetainFailure {
-    pub fn into_parts(
+    pub(in crate::installing_broker) fn into_parts(
         self: Box<Self>,
     ) -> (
         StorageClaim,
@@ -38,12 +38,14 @@ impl OrdinaryStopRetainFailure {
     }
 }
 impl OrdinaryStopReclaimFailure {
-    pub fn into_parts(self: Box<Self>) -> (OrdinaryStopPreparation, StorageWorkflowError) {
+    pub(in crate::installing_broker) fn into_parts(
+        self: Box<Self>,
+    ) -> (OrdinaryStopPreparation, StorageWorkflowError) {
         (self.preparation, self.cause)
     }
 }
 impl OrdinaryStopReturned {
-    pub fn into_cold_parts(
+    pub(in crate::installing_broker) fn into_cold_parts(
         self,
     ) -> (
         StorageClaim,
@@ -57,7 +59,9 @@ impl OrdinaryStopReturned {
     }
 }
 impl OrdinaryStopPreparation {
-    pub fn stop_after_admission(&self) -> Result<(), StorageWorkflowError> {
+    pub(in crate::installing_broker) fn stop_after_admission(
+        &self,
+    ) -> Result<(), StorageWorkflowError> {
         let registry = self.destination.registry();
         self.check_entry()?;
         self.native
@@ -77,7 +81,10 @@ impl OrdinaryStopPreparation {
         }
         Ok(())
     }
-    pub fn settle_native(&self, end: Instant) -> Result<(), StorageWorkflowError> {
+    pub(in crate::installing_broker) fn settle_native(
+        &self,
+        end: Instant,
+    ) -> Result<(), StorageWorkflowError> {
         self.check_entry()?;
         self.native
             .try_lock()
@@ -85,7 +92,7 @@ impl OrdinaryStopPreparation {
             .settle_native(&self.destination.registry().runtime, end)
             .map_err(Into::into)
     }
-    pub fn reclaim(
+    pub(in crate::installing_broker) fn reclaim(
         self,
         end: Instant,
     ) -> Result<OrdinaryStopReturned, Box<OrdinaryStopReclaimFailure>> {
@@ -125,7 +132,7 @@ impl OrdinaryStopPreparation {
     }
 }
 impl StorageClaim {
-    pub fn retain_ordinary_stop(
+    pub(in crate::installing_broker) fn retain_ordinary_stop(
         self,
         plan: ObservedCreatePlan,
         previous: ExistingLaptopInspection,

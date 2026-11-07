@@ -23,13 +23,22 @@ impl NixStoragePreparation {
         &self,
         plan: &ObservedCreatePlan,
         removal: &mut StoppedLaptopRemoval,
-    ) -> Result<(), NixStorageError> {
+    ) -> Result<reverie_host::worker_nix::RemovedStoppedLaptop, NixStorageError> {
         self.check_current_entry()?;
         self.destination
             .registry()
             .runtime
-            .remove_stopped_laptop_after_nix_for_worker(&self.workflow, plan, removal)?;
-        Ok(())
+            .remove_stopped_laptop_after_nix_for_worker(&self.workflow, plan, removal)
+            .map_err(Into::into)
+    }
+    pub(in crate::installing_broker) fn check_removed_laptop(
+        &self,
+        proof: &reverie_host::worker_nix::RemovedStoppedLaptop,
+    ) -> Result<(), NixStorageError> {
+        self.check_current_entry()?;
+        proof
+            .assert_workflow(&self.destination.registry().runtime, &self.workflow)
+            .map_err(Into::into)
     }
     pub(in crate::installing_broker) fn prepare_retained_temporary(
         &self,

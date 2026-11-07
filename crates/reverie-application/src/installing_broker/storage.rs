@@ -11,10 +11,7 @@ mod ordinary_stop;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
-pub use ordinary_stop::{
-    OrdinaryStopPreparation, OrdinaryStopReclaimFailure, OrdinaryStopRetainFailure,
-    OrdinaryStopReturned,
-};
+pub(in crate::installing_broker) use ordinary_stop::OrdinaryStopPreparation;
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;

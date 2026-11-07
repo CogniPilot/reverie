@@ -19,7 +19,9 @@ mod network;
 mod nix;
 mod start;
 mod stop;
+mod viewer;
 use error::ColdError;
+pub use viewer::{ColdViewerFailure, ViewingCold};
 
 struct ColdScope<'a> {
     preparing: PreparingWorkerLaunch<'a>,
@@ -47,7 +49,12 @@ struct CopyingNix {
     preparation: storage::NixStoragePreparation,
     plan: ObservedCreatePlan,
     prepared: EffectiveWorkerConfig,
-    removal: Option<StoppedLaptopRemoval>,
+    removal: CopiedRemoval,
+}
+enum CopiedRemoval {
+    Unobserved,
+    Pending(StoppedLaptopRemoval),
+    Removed(reverie_host::worker_nix::RemovedStoppedLaptop),
 }
 enum Resources {
     Direct(Direct),

@@ -4,6 +4,20 @@ use super::*;
 use reverie_host::worker_laptop::{ColdPreparation, LaptopNetworkProgress};
 impl ColdBody<'_> {
     pub(super) fn prepare_network(&mut self) -> Result<(), ColdError> {
+        // The removal proof belongs to the still-held successful Nix record.
+        // Validate it before Office construction or actual resource transfer.
+        let Resources::CopyingNix(input) =
+            self.resources.as_ref().expect("actual copied resources")
+        else {
+            unreachable!("network follows successful copy");
+        };
+        match &input.removal {
+            CopiedRemoval::Unobserved => {}
+            CopiedRemoval::Removed(proof) => input.preparation.check_removed_laptop(proof)?,
+            CopiedRemoval::Pending(_) => {
+                return Err(ColdError::Refused("WORKER_COLD_OLD_LAPTOP_NOT_REMOVED"));
+            }
+        }
         self.open_office()?;
         let office = self.office.as_ref().expect("actual completed Office");
         let phone = office._office.retain_phone(&office._phone)?;

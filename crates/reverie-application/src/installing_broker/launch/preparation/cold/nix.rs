@@ -41,8 +41,9 @@ impl ColdBody<'_> {
         let Resources::CopyingNix(input) = self.resources.as_mut().expect("same Nix slot") else {
             unreachable!()
         };
-        if let Some(removal) = &mut input.removal {
-            input.preparation.remove_old_laptop(&input.plan, removal)?;
+        if let CopiedRemoval::Pending(removal) = &mut input.removal {
+            let removed = input.preparation.remove_old_laptop(&input.plan, removal)?;
+            input.removal = CopiedRemoval::Removed(removed);
         }
         let policy = ColdConfiguration::capture(input.plan.source())
             .map_err(reverie_host::worker_storage::StorageOwnerError::ColdData)
@@ -98,7 +99,7 @@ impl ColdBody<'_> {
                     preparation,
                     plan,
                     prepared,
-                    removal,
+                    removal: removal.map_or(CopiedRemoval::Unobserved, CopiedRemoval::Pending),
                 }));
                 Ok(())
             }

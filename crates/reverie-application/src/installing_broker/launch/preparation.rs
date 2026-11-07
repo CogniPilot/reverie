@@ -7,7 +7,7 @@ use reverie_host::worker_reports::WorkerLaunchHold;
 mod cold;
 mod error;
 pub(in crate::installing_broker) use cold::StartedLaptop;
-pub use cold::{AllocationClosedCold, ColdLaunchFailure};
+pub use cold::{AllocationClosedCold, ColdLaunchFailure, ColdViewerFailure, ViewingCold};
 mod existing;
 pub use existing::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
