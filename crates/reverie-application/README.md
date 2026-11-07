@@ -377,3 +377,10 @@ lease. Structured stop must own the real container, settle all actual native
 constructors/processes and close resource owners before acknowledging release.
 That whole-service stop, protected source stop, create/start, authenticated
 dispatcher and production selection remain separate obligations.
+
+The installed-Gate recovery controls use the real configured broker, same captured
+Runtime, actual admission/journal files and fixed native custody/mount reads.
+They cover held admission, success/failure final guards, nil and malformed-journal
+refusal, and dual body/poisoned-owner cleanup errors with consumed-flock checks.
+The controlled engine's empty inventory/name replies remain synthetic membership
+DATA; these controls establish no real running-container or start qualification.
