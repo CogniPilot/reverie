@@ -211,12 +211,34 @@ fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
     Ok(table)
 }
 pub struct ReservationKernel;
+fn verify_launch(
+    source: &impl Source,
+    row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+    policy: Option<&ObservedMemoryPolicy>,
+    end: Instant,
+) -> Result<()> {
+    limits::verify_fields(source, &row.fields_for_limits()?, policy, end)?;
+    // Source indexes Id after all physical reads; presence is enough for this
+    // discarded limits result. Never manufacture a canonical CID here.
+    row.assert_native_result_data()?;
+    Ok(())
+}
 impl Default for ReservationKernel {
     fn default() -> Self {
         Self::new()
     }
 }
 impl ReservationKernel {
+    /// J's memory-only read over the exact parsed row. This uses the existing
+    /// physical algorithm and grants no container effect or CID ownership.
+    pub fn verify_launch_limits(
+        &self,
+        row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+        policy: Option<&ObservedMemoryPolicy>,
+        end: Instant,
+    ) -> Result<()> {
+        verify_launch(&Installed, row, policy, end)
+    }
     /// Fixed /proc observation of an original baseline process. This is data,
     /// not process ownership or permission to send any signal.
     pub fn original_process_start(

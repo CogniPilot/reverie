@@ -10,7 +10,10 @@ use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
 mod preparation;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
-pub use preparation::{InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure};
+pub use preparation::{
+    ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
+    PreparationFailure as LaunchPreparationFailure, ReusableWorkerLaunch,
+};
 #[cfg(test)]
 mod tests;
 

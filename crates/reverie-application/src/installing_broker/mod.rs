@@ -22,8 +22,9 @@ use crate::{
 pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
 pub use launch::{
-    AdmittedWorkerLaunch, InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure,
-    ReceivedWorkerLaunch, WorkerConnectionDispatch, WorkerDispatchError,
+    AdmittedWorkerLaunch, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
+    InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure, ReceivedWorkerLaunch,
+    ReusableWorkerLaunch, WorkerConnectionDispatch, WorkerDispatchError,
 };
 pub(crate) use lifecycle::LaptopLifecycle;
 use lifecycle::LaptopState;

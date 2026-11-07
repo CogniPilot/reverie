@@ -45,8 +45,12 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(2));
                 }
             }
-            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",_=>std::process::exit(81)};
+            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
             io::stdout().write_all(&fs::read(name).unwrap()).unwrap();
+            if name == "pane.out" && let Ok(next) = fs::read("pane.next") {
+                fs::write("pane.out", next).unwrap();
+                fs::remove_file("pane.next").unwrap();
+            }
             if let Ok(status)=fs::read_to_string(format!("{name}.status")){std::process::exit(status.parse().unwrap());}
         }
         "dual" | "dual-over" | "dual8" => {

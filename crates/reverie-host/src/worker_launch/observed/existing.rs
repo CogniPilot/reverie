@@ -47,7 +47,9 @@ pub struct ExistingLaptopInspection {
     observation: Arc<()>,
     data: LaunchLaptopInspection,
 }
+mod pane;
 mod process;
+pub use pane::ExistingPaneState;
 pub use process::{ExistingCaptureFailure, ExistingProcessIncarnation};
 impl ExistingLaptopInspection {
     pub fn data(&self) -> &LaunchLaptopInspection {
