@@ -7,6 +7,8 @@ use reverie_contracts::worker_cold_tmp::{
 };
 use reverie_core::ids::NativeOperationId;
 use std::io::Write;
+#[cfg(test)]
+mod tests;
 impl Bases {
     pub(in crate::worker_storage::cold_tmp) fn reserve_epoch(
         &mut self,
