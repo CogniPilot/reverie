@@ -111,7 +111,7 @@ impl std::fmt::Display for ColdFinalizationFailure<'_> {
         }
         match self.cleanup.resource() {
             Some(Resources::FinalStorageFailed { failure, .. }) => write!(out, "{}; ", failure.cause())?,
-            Some(Resources::CreatedReturnFailed(failure)) => write!(out, "{}; ", failure.cause())?,
+            Some(Resources::CreatedReturnFailed(failure)) => write!(out, "{failure:?}; ")?,
             Some(Resources::Finalized { plan, retained, .. }) => write!(
                 out, "storage disposition for {}: retained={retained}; ", plan.session(),
             )?,
@@ -123,11 +123,12 @@ impl std::fmt::Display for ColdFinalizationFailure<'_> {
 impl std::error::Error for ColdFinalizationFailure<'_> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         if let Owner::Preparation(owner) = &self.cleanup.owner { return Some(owner.as_ref().cause()); }
-        self.cleanup
-            .primary
-            .as_ref()
-            .or(self.cleanup.errors.first())
-            .map(|cause| cause as &dyn std::error::Error)
+        if let Some(primary) = &self.cleanup.primary { return Some(primary); }
+        match self.cleanup.resource() {
+            Some(Resources::CreatedReturnFailed(failure)) => Some(failure.cause()),
+            Some(Resources::FinalStorageFailed { failure, .. }) => Some(failure.cause()),
+            _ => self.cleanup.errors.first().map(|cause| cause as &dyn std::error::Error),
+        }
     }
 }
 impl<'a> Owner<'a> {
