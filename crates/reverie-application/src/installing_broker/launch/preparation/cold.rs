@@ -19,6 +19,8 @@ mod network;
 mod nix;
 mod start;
 mod stop;
+#[cfg(test)]
+mod tests;
 mod viewer;
 use error::ColdError;
 pub use viewer::{ColdViewerFailure, ViewingCold};
