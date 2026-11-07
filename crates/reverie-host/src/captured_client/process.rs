@@ -53,6 +53,9 @@ impl Process {
                 .map_err(|error| self.preparation_failed(error, CleanupFault::HandshakeClose))?,
         );
         let mut command = bootstrap.command(args);
+        if job.stdout_only {
+            command.stderr(std::process::Stdio::null());
+        }
         self.handshake
             .as_ref()
             .expect("prepared handshake")

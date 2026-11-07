@@ -1,11 +1,17 @@
 //! Closed Goal custody request and private configuration DATA. These codecs
 //! establish no private filesystem, mount, peer, program or signing authority.
 mod configuration;
+mod inventory;
 #[cfg(test)]
 mod tests;
+mod worker;
 use crate::legacy_json::{self, Node, Text, Value};
-pub use configuration::{GoalPathPair, GoalPrivateConfig, GoalPrivatePath};
+pub use configuration::{
+    GoalConfigurationRecord, GoalPathPair, GoalPrivateConfig, GoalPrivatePath,
+};
+pub use inventory::{GoalInventory, GoalMount, inventory_identifiers};
 use std::{collections::BTreeMap, fmt};
+pub use worker::GoalWorkerSettings;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GoalDataError {
@@ -15,6 +21,8 @@ pub enum GoalDataError {
     Path,
     Scope,
     Mode,
+    Worker,
+    Inventory,
 }
 impl fmt::Display for GoalDataError {
     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -25,6 +33,8 @@ impl fmt::Display for GoalDataError {
             Self::Path => "GOAL_PRIVATE_PATH",
             Self::Scope => "GOAL_PRIVATE_SCOPE",
             Self::Mode => "GOAL_OWNER_ONLY_REQUIRED",
+            Self::Worker => "GOAL_WORKER_CONFIGURATION",
+            Self::Inventory => "GOAL_ENGINE_INVENTORY",
         })
     }
 }
@@ -73,4 +83,25 @@ fn exact(fields: &Object, names: &[&str]) -> Result<()> {
     } else {
         Err(GoalDataError::Configuration)
     }
+}
+
+/// Fixed projection DATA; neither a digest nor metadata identities authorize
+/// key use, employee signing, a mount grant or a resource transition.
+pub fn encode_projection(
+    digest: &str,
+    identities: &BTreeMap<String, Option<[String; 5]>>,
+) -> Vec<u8> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Projection<'a> {
+        version: u8,
+        config_digest: &'a str,
+        identities: &'a BTreeMap<String, Option<[String; 5]>>,
+    }
+    serde_json::to_vec(&Projection {
+        version: 1,
+        config_digest: digest,
+        identities,
+    })
+    .expect("fixed string-only Goal projection has no nonfinite values")
 }

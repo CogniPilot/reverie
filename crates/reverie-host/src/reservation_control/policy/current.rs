@@ -2,11 +2,8 @@
 //! phases. Native work and full worker validation remain separated so the
 //! application can preserve the exact final stamp/owner-check ordering.
 use super::*;
+use crate::native::private_goal::{PathIdentity as Identity, identity};
 use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt};
-type Identity = (u64, u64, u32, u32);
-fn identity(value: &fs::Metadata) -> Identity {
-    (value.dev(), value.ino(), value.uid(), value.mode())
-}
 impl PolicyBinding {
     pub fn path(&self) -> &Path {
         &self.path
@@ -53,14 +50,8 @@ impl PolicyBinding {
     }
 }
 fn private_entry(path: &Path) -> Result<(PolicyFileStamp, Vec<u8>)> {
-    let text = native::python_text(path);
-    let lexical = PosixPath::try_new(&text).expect("native text codepoints");
     need(
-        lexical.is_absolute()
-            && lexical.codepoints() == text
-            && !lexical.has_parent_component()
-            && path != Path::new("/")
-            && !text.iter().any(|c| [0, 10, 13].contains(c)),
+        native::private_goal::path_available(path),
         "PRIVATE_GOAL_CONFIGURATION_UNAVAILABLE",
     )?;
     let root = OpenOptions::new()
@@ -90,7 +81,6 @@ fn observe_entry(
     descriptors: &mut Vec<File>,
     entries: &mut Vec<(PathBuf, Identity)>,
 ) -> Result<(PolicyFileStamp, Vec<u8>)> {
-    let uid = native::uid();
     let mut current = PathBuf::from("/");
     let parent = path.parent().expect("absolute leaf parent");
     for component in parent.components().skip(1) {
@@ -101,9 +91,8 @@ fn observe_entry(
         )?;
         descriptors.push(child);
         let info = descriptors.last().expect("owned child").metadata()?;
-        let sticky = info.uid() == 0 && info.mode() & libc::S_ISVTX != 0;
         need(
-            [0, uid].contains(&info.uid()) && (info.mode() & 0o022 == 0 || sticky),
+            native::private_goal::ancestry_available(&info),
             "PRIVATE_GOAL_ANCESTRY_UNAVAILABLE",
         )?;
         entries.push((current.clone(), identity(&info)));
@@ -111,7 +100,7 @@ fn observe_entry(
     let parent = descriptors.last().expect("owned parent");
     let info = parent.metadata()?;
     need(
-        info.uid() == uid && info.mode() & 0o077 == 0,
+        native::private_goal::parent_available(&info),
         "PRIVATE_GOAL_PARENT_UNAVAILABLE",
     )?;
     let file = native::open_policy_original(parent, path.file_name().expect("leaf"))?;
@@ -119,7 +108,7 @@ fn observe_entry(
     let file = descriptors.last_mut().expect("owned leaf");
     let info = file.metadata()?;
     need(
-        info.is_file() && info.uid() == uid && info.mode() & 0o077 == 0 && info.nlink() == 1,
+        native::private_goal::entry_available(&info, false),
         "PRIVATE_GOAL_ENTRY_UNAVAILABLE",
     )?;
     entries.push((path.to_owned(), identity(&info)));

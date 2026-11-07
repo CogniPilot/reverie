@@ -1,9 +1,7 @@
 from __future__ import annotations
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 
-import io
 import json
-import os
 from pathlib import Path
 import shlex
 import stat
@@ -12,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from reverie import journal_shim, memory_cli
+from reverie import journal_shim
 from reverie.chat import Brain
 from reverie.memory import MemoryStore
 from reverie.opencode import dispatch
@@ -86,25 +84,6 @@ class JournalShimTests(unittest.TestCase):
         self.assertEqual(runner.calls, [["reverie", "agent", "journal", "recall", "compiler; $(rm -rf /)", "--project", "rumoca", "--json"]])
         with self.assertRaises(ValueError):
             journal_shim.recall("  ", runner=runner)
-
-
-class ScreenTests(unittest.TestCase):
-    """The bridge's screen action applies the hard floors to text bound for the journal and writes nothing."""
-
-    def screen(self, text, env=None):
-        out = io.StringIO()
-        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, env or {}), \
-                patch("sys.stdin", io.StringIO(json.dumps({"action": "screen", "text": text}))), patch("sys.stdout", out):
-            code = memory_cli.main(["--instance", str(Path(root) / "missing.json")])
-            self.assertEqual(list(Path(root).iterdir()), [])  # no store, no instance read
-        return code, out.getvalue()
-
-    def test_screen_reports_the_floor_crossed_without_opening_any_store(self):
-        self.assertEqual(self.screen("Compiler parity passed"), (0, '{"floor": ""}\n'))
-        code, out = self.screen("the forbidden plan", {"REVERIE_OUTPUT_POLICY": json.dumps({"denied_patterns": ["forbidden"]})})
-        self.assertEqual((code, json.loads(out)), (0, {"floor": "configured output policy"}))
-        with patch("sys.stderr", io.StringIO()):
-            self.assertEqual(self.screen("   ")[0], 1)
 
 
 class DispatchThroughJournalTests(unittest.TestCase):

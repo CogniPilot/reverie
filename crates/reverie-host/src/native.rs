@@ -19,6 +19,7 @@ pub(crate) mod interrupted_test;
 mod lease;
 mod memory_namespace;
 mod memory_profile;
+pub(crate) mod metadata_socket;
 mod rename;
 pub(crate) mod socket_entry;
 pub(crate) mod worker_directory;
@@ -47,6 +48,7 @@ pub(crate) use control::{
     open_admission,
 };
 mod policy;
+pub(crate) mod private_goal;
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{

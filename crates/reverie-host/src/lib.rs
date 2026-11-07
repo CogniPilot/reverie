@@ -9,6 +9,7 @@ pub mod deployment_snapshot;
 pub mod device_policy;
 pub mod embeddings;
 pub mod engine_metadata;
+pub mod goal_custody;
 pub mod gpu_access;
 pub mod host_jobs;
 pub mod installed_worker_engine;
@@ -34,6 +35,7 @@ pub mod task_perf;
 pub mod terminal_pty;
 #[cfg(test)]
 mod test_process;
+pub mod website_facts;
 pub mod worker_child;
 pub mod worker_identity;
 pub mod worker_intent;

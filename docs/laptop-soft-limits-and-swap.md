@@ -77,6 +77,14 @@ host-action and terminal scopes.
 
 ### Root helper for soft thresholds
 
+For an existing installation with its own registered user broker, set
+`services.reverieWorkers.manageBrokerService = false` during ordinary NixOS
+owner activation. This installs the declared host slice, perf support and
+optional helper without creating a second system broker. The default remains
+`true` for installations whose system broker is managed by this module.
+This setting does not adopt, reload or restart the user broker, move containers
+into the slice, or establish that any laptop policy has been enforced.
+
 `services.reverieWorkers.softLimitHelper` installs a socket-activated root helper, one instance per
 connection. Set the broker's `softLimitHelperSocket` to `/run/reverie-soft-limit/soft-limit.sock`.
 The broker then sends only `{sessionId, containerId}`, and the helper applies the soft threshold

@@ -43,6 +43,9 @@ fn main() {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "storage-writer" && std::path::Path::new("goal-inventory-control").is_file() && goal_inventory(&args) {
+                return;
+            }
             if mode == "storage-writer" && std::path::Path::new("cold-launch-control").is_file() && cold_launch(&args) {
                 return;
             }
@@ -158,6 +161,21 @@ fn main() {
             print!("{}", args.join("\0"));
         }
     }
+}
+
+fn goal_inventory(args: &[String]) -> bool {
+    let name = if args == ["ps","--all","--no-trunc","--quiet"] { "goal-ids.out" }
+        else if args.first().map(String::as_str) == Some("inspect") {
+            let expected = std::fs::read_to_string("goal-ids.out").unwrap();
+            assert_eq!(&args[1..],expected.lines().collect::<Vec<_>>());
+            "goal-inventory.out"
+        } else { return false; };
+    if std::path::Path::new("goal-stall-read").is_file() {
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    io::stdout().write_all(&std::fs::read(name).unwrap()).unwrap();
+    if let Ok(raw) = std::fs::read("goal-ignored.stderr") { io::stderr().write_all(&raw).unwrap(); }
+    true
 }
 fn wait_file(name: &str) {
     let end = std::time::Instant::now() + Duration::from_secs(15);

@@ -6,6 +6,7 @@
  * can select another agent's store. The final installing runtime can supply a checked native bridge
  * binding; the existing portable Python adapter remains selected until that actual scope producer is
  * available. Requests go on stdin, never into a command line, and cannot select either executable.
+ * The hard floors a save must pass run in-process (memory-floors.ts).
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
  *
@@ -25,6 +26,7 @@ import { MemoryProjectSchema } from './memory-scope-identifiers.js';
 import type { InstalledMemoryScope } from './installed-memory-context.js';
 import type { InstalledMemoryAccess } from './installed-memory-access.js';
 import { runMemoryBridge } from './memory-bridge-process.js';
+import { screenMemoryText } from './memory-floors.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
 
@@ -186,7 +188,8 @@ export function createMemoryTools(
   config: MemoryToolsConfig,
   runner: BridgeRunner = runMemoryBridge,
   journal?: JournalPort,
-  access?: InstalledMemoryAccess
+  access?: InstalledMemoryAccess,
+  screen: (text: string, home: string) => string = screenMemoryText
 ) {
   const enabled = Boolean(config.instance || config.installed);
 
@@ -251,11 +254,10 @@ export function createMemoryTools(
     if (!field('quote') && !field('source')) missing.push('quote or source');
     if (missing.length)
       return refuse(`memory_remember needs ${missing.join(', ')} from the message you are acting on.`);
-    // The same hard floors the old store applied, checked by the bridge without writing anything; fail closed.
-    const screened = await bridge(JSON.stringify({ action: 'screen', text: field('text') }), signal);
-    let floor: unknown = 'unchecked';
+    // The same hard floors the old store applied, checked in-process without writing anything; fail closed.
+    let floor = 'unchecked';
     try {
-      floor = screened.code === 0 ? (JSON.parse(screened.stdout) as { floor?: unknown }).floor : 'unchecked';
+      floor = screen(field('text'), process.env.HOME ?? '/tmp');
     } catch {
       /* stays unchecked */
     }

@@ -64,14 +64,37 @@ pub struct GoalPrivateConfig {
     paths: Vec<(GoalPrivatePath, GoalPathPair)>,
     broker_socket: PosixPath,
 }
+/// Ordinary bytes-JSON object, before schema checks. The source latches its
+/// first native file identity at this exact boundary, including invalid schemas.
+pub struct GoalConfigurationRecord(legacy_json::ordered::OrderedValue);
+impl GoalConfigurationRecord {
+    pub fn decode(raw: &[u8]) -> Result<Self> {
+        let value =
+            legacy_json::decode_worker_request_bytes(raw).map_err(|_| GoalDataError::Json)?;
+        object(&value.value)?;
+        Ok(Self(value))
+    }
+    pub fn validate(
+        self,
+        selected: &MetadataText,
+        company: &MetadataText,
+    ) -> Result<GoalPrivateConfig> {
+        GoalPrivateConfig::validate_record(self.0, selected, company)
+    }
+}
 impl GoalPrivateConfig {
     /// Equivalent to GoalBrokerBootstrap.config's DATA checks. The caller
     /// separately captures the raw-byte digest and first private-file identity.
     pub fn decode(raw: &[u8], selected: &MetadataText, company: &MetadataText) -> Result<Self> {
         // Both named purposes use ordinary json.loads(bytes), including last
         // duplicate wins and encoding detection. Reuse its one shared codec.
-        let decoded =
-            legacy_json::decode_worker_request_bytes(raw).map_err(|_| GoalDataError::Json)?;
+        GoalConfigurationRecord::decode(raw)?.validate(selected, company)
+    }
+    fn validate_record(
+        decoded: legacy_json::ordered::OrderedValue,
+        selected: &MetadataText,
+        company: &MetadataText,
+    ) -> Result<Self> {
         let fields = object(&decoded.value)?;
         exact(
             fields,
@@ -197,7 +220,7 @@ fn validate_nonce(value: &Value) -> Result<()> {
     absolute(field(fields, "flockExecutable")?)?;
     Ok(())
 }
-fn integer(value: &Value) -> Result<u32> {
+pub(super) fn integer(value: &Value) -> Result<u32> {
     match &value.0 {
         Node::Number(Number::Integer(value)) => {
             value.parse().map_err(|_| GoalDataError::Configuration)
@@ -217,7 +240,7 @@ fn identifier(value: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn scalar(value: &Value) -> Result<String> {
+pub(super) fn scalar(value: &Value) -> Result<String> {
     text(value)?
         .0
         .iter()
@@ -225,7 +248,7 @@ fn scalar(value: &Value) -> Result<String> {
         .collect::<Option<_>>()
         .ok_or(GoalDataError::Configuration)
 }
-fn absolute(value: &Value) -> Result<PosixPath> {
+pub(super) fn absolute(value: &Value) -> Result<PosixPath> {
     let points = &text(value)?.0;
     let path = PosixPath::try_new(points).map_err(|_| GoalDataError::Path)?;
     if points.first() != Some(&47)

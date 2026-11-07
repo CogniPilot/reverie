@@ -11,6 +11,35 @@ use std::{
 };
 use test_hooks::{Gate, Hooks};
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+#[test]
+fn goal_stdout_only_uses_same_client_and_combined_mode_keeps_stderr_bound() {
+    let tree = Tree::new();
+    let program = tree.0.join("overflow");
+    fs::hard_link(crate::engine_metadata::tests::program(), &program).unwrap();
+    let client = CapturedClient::new(
+        InstalledCommand::from_service(program.as_os_str(), BTreeMap::new(), tree.0.clone())
+            .unwrap(),
+    );
+    let policy = Policy {
+        maximum: Duration::from_secs(3),
+        maximum_output: 64,
+        successful_exit: true,
+    };
+    let output = client
+        .run_goal_inventory(Vec::new(), end(), &CancellationToken::new(), policy)
+        .unwrap_or_else(|failure| panic!("actual stdout-only call: {:?}", failure.error));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty() && output.succeeded);
+    let failure = client
+        .run_scoped(Vec::new(), end(), &CancellationToken::new(), policy)
+        .err()
+        .unwrap();
+    assert_eq!(failure.error.fault, Fault::OutputBound);
+    let call = failure
+        .call
+        .expect("failed admitted Combined query retains its original ticket");
+    client.settle_call(&call, end()).unwrap();
+    client.close(end()).unwrap();
+}
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
