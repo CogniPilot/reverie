@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { Command } from 'commander';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sqlite } from '../src/chat-db.js';
 import { registerAgentCommands, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 import { agentJournalRecall, agentJournalSave, type JournalSaveOptions } from '../src/cli-agent-journal.js';
@@ -443,5 +443,43 @@ describe('the journal budget: one absolute deadline per journal command and a re
     await expect(transport(ctx, { method: 'GET', path: '/c' })).rejects.toThrow(/took longer than 1000 ms/);
     expect(calls.map((c) => c.bounds)).toEqual([{ maxBytes: JOURNAL_RESPONSE_MAX, deadlineMs: 1000 }, { maxBytes: 10, deadlineMs: 100 }]);
     expect(JOURNAL_BUDGET_MS).toBe(60_000);
+  });
+});
+
+describe('the journal budget clock', () => {
+  const ctx = { apiUrl: 'http://journal.invalid', selfId: 's' };
+  const ok = { status: 200, text: '' };
+
+  it('runs on a monotonic clock, so a wall-clock step neither stretches nor cuts it', async () => {
+    const calls: RequestOptions[] = [];
+    let wall = 1_000_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => wall);
+    try {
+      const transport = budgeted(async (_ctx, options) => {
+        calls.push(options);
+        return ok;
+      }, 100);
+      wall -= 1000; // the wall clock steps back a second
+      await transport(ctx, { method: 'GET', path: '/a' });
+      wall += 5000; // and forward five
+      await transport(ctx, { method: 'GET', path: '/b' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls.map((c) => c.bounds!.deadlineMs).every((ms) => ms > 0 && ms <= 100)).toBe(true);
+  });
+
+  it('refuses a response that arrives after the deadline, and accepts one within it', async () => {
+    let now = 0;
+    const answerAt = (at: number) => budgeted(async () => {
+      now = at;
+      return ok;
+    }, 100, () => now);
+    now = 0;
+    await expect(answerAt(101)(ctx, { method: 'GET', path: '/late' })).rejects.toThrow(/took longer than 100 ms/);
+    now = 0;
+    await expect(answerAt(100)(ctx, { method: 'GET', path: '/edge' })).resolves.toEqual(ok);
+    now = 0;
+    await expect(answerAt(50)(ctx, { method: 'GET', path: '/soon' })).resolves.toEqual(ok);
   });
 });

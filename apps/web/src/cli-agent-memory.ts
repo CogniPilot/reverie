@@ -207,16 +207,21 @@ export const JOURNAL_RESPONSE_MAX = 1024 * 1024;
  * A transport whose every request in one journal command shares one absolute deadline (room resolution included) and
  * the response cap. The transport destroys the request at its deadline or past the cap, so nothing is left running.
  */
-export function budgeted(request: ApiRequest, budgetMs: number, clock: () => number = Date.now): ApiRequest {
+export function budgeted(request: ApiRequest, budgetMs: number, clock: () => number = () => performance.now()): ApiRequest {
+  // A monotonic clock: a wall-clock step must neither stretch nor cut the budget.
   const deadline = clock() + budgetMs;
-  return (ctx, options) => {
+  const late = () => new Error(`the journal command took longer than ${budgetMs} ms`);
+  return async (ctx, options) => {
     const left = Math.floor(deadline - clock());
-    if (left <= 0) return Promise.reject(new Error(`the journal command took longer than ${budgetMs} ms`));
+    if (left <= 0) throw late();
     const own = options.bounds;
-    return request(ctx, { ...options, bounds: {
+    const response = await request(ctx, { ...options, bounds: {
       maxBytes: Math.min(own?.maxBytes ?? JOURNAL_RESPONSE_MAX, JOURNAL_RESPONSE_MAX),
       deadlineMs: Math.min(own?.deadlineMs ?? left, left),
     } });
+    // A response that arrives after the deadline (a timer that fired late) does not count as in time.
+    if (clock() > deadline) throw late();
+    return response;
   };
 }
 
