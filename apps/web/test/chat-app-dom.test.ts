@@ -4202,6 +4202,12 @@ describe('moving an agent to its new session, and retired sessions', () => {
 
 describe('the Board entry', () => {
   const entry = (h: { document: Document }, kind: string) => h.document.querySelector<HTMLButtonElement>(`.ca-item[data-key="page:${kind}"]`)!;
+  // jsdom runs Back and Forward as queued tasks; wait for the popstate the shell handles (its listener runs first), not a fixed delay.
+  const traverse = (h: { window: Window }, step: () => void) => {
+    const popped = new Promise((resolve) => h.window.addEventListener('popstate', resolve, { once: true }));
+    step();
+    return popped;
+  };
 
   it('leaves channel navigation free of duplicate management entries', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
@@ -4223,11 +4229,9 @@ describe('the Board entry', () => {
     expect(h.document.querySelector('.ca-item--room.is-active')).toBeNull();
     expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(true);
     expect(h.window.location.hash).toBe('#board');
-    h.window.history.back();
-    await settle(60);
+    await traverse(h, () => h.window.history.back());
     expect(h.shell.embed).toBeNull();
-    h.window.history.forward();
-    await settle(60);
+    await traverse(h, () => h.window.history.forward());
     expect(h.window.location.hash).toBe('#board');
     expect(frame.getAttribute('src')).toBe('/board');
   });
