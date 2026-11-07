@@ -138,6 +138,13 @@ pub fn check_report_bytes(path: &[u32], state: &str, why: &[u32]) -> Vec<u8> {
     ])
 }
 
+/// Python's `json.dumps(path)` for one `str`, used for `lease ls` paths:
+/// ASCII escapes, including `\udcXX` for surrogate-escaped host bytes.
+#[must_use]
+pub fn json_string_bytes(points: &[u32]) -> Vec<u8> {
+    string(points).encode()
+}
+
 /// `lease gc`'s line: `{"removed": [...], "keptNoPathRecord": [...]}`.
 #[must_use]
 pub fn gc_report_bytes(removed: &[Vec<u32>], kept_no_path_record: &[Vec<u32>]) -> Vec<u8> {

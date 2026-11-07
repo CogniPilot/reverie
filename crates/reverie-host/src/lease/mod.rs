@@ -28,7 +28,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use hold::{HeldLeases, hold, reserve, unreserve};
+pub use hold::{HeldLeases, hold, hold_cancellable, reserve, unreserve};
 pub use janitor::{Janitor, WalkBound, check, janitor};
 pub use maintenance::{GcReport, LeaseListing, Listing, gc, ls};
 pub use retirement::{DirectPaths, Retirement, RetirementPaths, RetirementSummary, retirement};
@@ -249,6 +249,17 @@ pub(crate) struct Barrier {
 /// file is never unlinked, so concurrent creators share one inode. A root
 /// janitor hands a file it creates to the lease directory's owner.
 pub(crate) fn barrier(base: &LeaseBase, exclusive: bool, wait: Duration) -> Result<Barrier> {
+    barrier_until(base, exclusive, wait, &|| false)
+}
+
+/// `barrier`, also refused between retries once `cancelled` holds. Nothing
+/// is held yet, so a cancelled acquisition leaves no partial lease.
+pub(crate) fn barrier_until(
+    base: &LeaseBase,
+    exclusive: bool,
+    wait: Duration,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Barrier> {
     let file = open(&base.join("barrier.lock"), libc::O_RDWR | libc::O_CREAT)?;
     if nix::unistd::geteuid().is_root() {
         let owner = std::fs::metadata(base.path())?;
@@ -274,6 +285,9 @@ pub(crate) fn barrier(base: &LeaseBase, exclusive: bool, wait: Duration) -> Resu
                 return Err(LeaseError::busy(
                     "lease barrier busy (a cleanup is deleting); try again",
                 ));
+            }
+            Err((_, nix::errno::Errno::EWOULDBLOCK)) if cancelled() => {
+                return Err(LeaseError::unknown("lease acquisition cancelled"));
             }
             Err((returned, nix::errno::Errno::EWOULDBLOCK)) => {
                 file = returned;

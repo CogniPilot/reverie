@@ -1,7 +1,7 @@
 //! Shared holders (`hold`) and reservations (`reserve`, `unreserve`).
 use super::{
-    LeaseBase, LeaseError, Result, abspath, barrier, ensure_path_record, key_of, now, open, text,
-    write_record,
+    LeaseBase, LeaseError, Result, abspath, barrier, barrier_until, ensure_path_record, key_of,
+    now, open, text, write_record,
 };
 use nix::fcntl::{Flock, FlockArg};
 use reverie_contracts::lease_records::{self, HolderRecord};
@@ -54,6 +54,18 @@ pub fn hold(
     argv0: &Path,
     wait: Duration,
 ) -> Result<HeldLeases> {
+    hold_cancellable(base, directories, argv0, wait, &|| false)
+}
+
+/// `hold`, whose busy-barrier wait ends once `cancelled` holds, before any
+/// lock or record exists. Later steps are bounded and run to completion.
+pub fn hold_cancellable(
+    base: &LeaseBase,
+    directories: &[PathBuf],
+    argv0: &Path,
+    wait: Duration,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<HeldLeases> {
     let mut keyed = Vec::with_capacity(directories.len());
     for directory in directories {
         let directory = abspath(directory)?;
@@ -70,7 +82,7 @@ pub fn hold(
         records: Vec::new(),
         locks: Vec::new(),
     };
-    let _barrier = barrier(base, false, wait)?;
+    let _barrier = barrier_until(base, false, wait, cancelled)?;
     for (key, directory) in &keyed {
         held.locks.push(shared_lock(base, key, directory)?);
         let current = match key_of(directory) {

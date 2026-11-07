@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-nix = { workspace = true, features = ["signal"] }
+nix = { workspace = true, features = ["fs", "signal"] }
 reverie-contracts.workspace = true
 reverie-core.workspace = true
 reverie-host.workspace = true

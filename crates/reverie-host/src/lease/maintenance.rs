@@ -23,7 +23,8 @@ pub struct LeaseListing {
     pub held: bool,
     pub reserved: bool,
     pub malformed_metadata: bool,
-    pub path: Option<String>,
+    /// The registered path as Python `str` code points (surrogate escapes kept).
+    pub path: Option<Vec<u32>>,
     /// Holder records that parse as JSON, as their raw bytes.
     pub holders: Vec<Vec<u8>>,
 }
@@ -141,12 +142,7 @@ pub fn ls(base: &LeaseBase) -> Result<Listing> {
             .filter_map(|path| std::fs::read(path).ok())
             .filter(|raw| reverie_contracts::lease_records::holder_record_parses(raw))
             .collect();
-        let path = registered(base, &key).ok().flatten().map(|points| {
-            points
-                .iter()
-                .filter_map(|point| char::from_u32(*point))
-                .collect()
-        });
+        let path = registered(base, &key).ok().flatten();
         out.push(LeaseListing {
             malformed_metadata: malformed_metadata(base, &key)?,
             key,

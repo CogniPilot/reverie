@@ -161,3 +161,195 @@ fn hold_reports_its_key_until_sigterm_and_ls_shows_it() {
     assert_eq!(tree.lease(&["check", path(&task)]).status.code(), Some(0));
     assert_eq!(text(&tree.lease(&["ls"])), "[]\n");
 }
+
+/// The barrier held exclusively, as a cleanup deleting would hold it.
+fn busy_barrier(tree: &Tree) -> nix::fcntl::Flock<fs::File> {
+    assert_eq!(
+        tree.lease(&["ls"]).status.code(),
+        Some(0),
+        "creates the lease dir"
+    );
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(tree.0.join("leases/barrier.lock"))
+        .unwrap();
+    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).unwrap()
+}
+
+fn signal(child: &std::process::Child, signal: nix::sys::signal::Signal) {
+    let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+    nix::sys::signal::kill(pid, signal).unwrap();
+}
+
+/// Bounded: a stop that is left pending fails here instead of hanging.
+fn ended(child: &mut std::process::Child) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("a pending stop did not end the command");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn holder_records(tree: &Tree) -> Vec<String> {
+    fs::read_dir(tree.0.join("leases"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.ends_with(".json")
+                && !name.ends_with(".path.json")
+                && !name.ends_with(".reserve.json")
+        })
+        .collect()
+}
+
+#[test]
+fn a_stop_at_a_busy_barrier_cancels_without_launching_or_leasing() {
+    use std::os::unix::process::ExitStatusExt;
+    let tree = Tree::new();
+    let task = tree.task();
+    let marker = tree.0.join("launched");
+    for (wait, stop, release_first) in [
+        ("inf", nix::sys::signal::Signal::SIGTERM, false),
+        ("nan", nix::sys::signal::Signal::SIGHUP, false),
+        // Released right after the stop: acquisition may now win the race,
+        // and the pending stop must still prevent the launch.
+        ("30", nix::sys::signal::Signal::SIGINT, true),
+    ] {
+        let barrier = busy_barrier(&tree);
+        let mut child = tree
+            .command(&[
+                "--wait",
+                wait,
+                "run",
+                path(&task),
+                "--",
+                "touch",
+                path(&marker),
+            ])
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "waiting at the barrier"
+        );
+        signal(&child, stop);
+        if release_first {
+            drop(barrier);
+            let status = ended(&mut child);
+            assert_eq!(status.signal(), Some(stop as i32), "{wait}: {status:?}");
+        } else {
+            let status = ended(&mut child);
+            assert_eq!(status.signal(), Some(stop as i32), "{wait}: {status:?}");
+            drop(barrier);
+        }
+        assert!(!marker.exists(), "{wait}: the command never starts");
+        assert!(holder_records(&tree).is_empty(), "{wait}: no holder record");
+        assert_eq!(tree.lease(&["check", path(&task)]).status.code(), Some(0));
+    }
+    // `hold` cancels the same way and never announces a lease.
+    let barrier = busy_barrier(&tree);
+    let mut child = tree
+        .command(&["--wait", "inf", "hold", path(&task)])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    signal(&child, nix::sys::signal::Signal::SIGTERM);
+    assert_eq!(ended(&mut child).signal(), Some(15));
+    drop(barrier);
+    let mut announced = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut announced).unwrap();
+    assert_eq!(announced, "");
+    assert!(holder_records(&tree).is_empty());
+}
+
+/// Stdout whose reader is already closed: every write fails with EPIPE.
+fn closed_stdout() -> Stdio {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    Stdio::from(writer)
+}
+
+#[test]
+fn an_unpublished_result_line_fails_without_undoing_the_operation() {
+    let tree = Tree::new();
+    let task = tree.task();
+    fs::create_dir(tree.0.join("leases")).unwrap();
+    let failed = |arguments: &[&str]| {
+        let output = tree
+            .command(arguments)
+            .stdout(closed_stdout())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(stderr.starts_with("lease: output failed: "), "{stderr}");
+    };
+    // A read: FREE is not reported as success when its line is lost.
+    failed(&["check", path(&task)]);
+    // An applied reservation stays applied, exactly once.
+    failed(&["reserve", path(&task), "--for", "90m"]);
+    let busy = tree.lease(&["check", path(&task)]);
+    assert_eq!(busy.status.code(), Some(1), "{busy:?}");
+    assert!(text(&busy).contains("\"why\": \"reserved: "));
+    let reservations = fs::read_dir(tree.0.join("leases"))
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".reserve.json")
+        })
+        .count();
+    assert_eq!(reservations, 1);
+    failed(&["renew", path(&task), "--for", "1h"]);
+    assert_eq!(tree.lease(&["check", path(&task)]).status.code(), Some(1));
+    assert_eq!(
+        tree.lease(&["unreserve", path(&task)]).status.code(),
+        Some(0)
+    );
+    // A lost `LEASED` acknowledgement releases the hold it could not announce.
+    failed(&["hold", path(&task)]);
+    assert!(holder_records(&tree).is_empty());
+    assert_eq!(tree.lease(&["check", path(&task)]).status.code(), Some(0));
+    failed(&["gc"]);
+    failed(&["ls"]);
+}
+
+#[test]
+fn ls_shows_a_surrogate_escaped_path_exactly() {
+    use std::os::unix::ffi::OsStrExt;
+    let tree = Tree::new();
+    // Not UTF-8: Python decodes it as the lone surrogate U+DCE9.
+    let odd = tree.0.join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
+    fs::create_dir(&odd).unwrap();
+    // `ls` walks lock files, so the lease must be held, not only reserved.
+    let mut holder = tree
+        .command(&[])
+        .args(["hold".as_ref(), odd.as_os_str()])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(holder.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    assert!(line.starts_with("LEASED "), "{line}");
+    let listed = text(&tree.lease(&["ls"]));
+    signal(&holder, nix::sys::signal::Signal::SIGTERM);
+    assert_eq!(ended(&mut holder).code(), Some(0));
+    // The path field is Python's json.dumps of the str; the holder record
+    // carries the same path but goes through the disclosed serde path.
+    assert!(listed.contains("\"path\": \""), "{listed}");
+    assert!(listed.contains("caf\\udce9\""), "{listed}");
+}
