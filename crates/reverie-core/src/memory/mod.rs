@@ -5,6 +5,7 @@ mod float_text;
 mod numeric;
 use crate::python_text as text;
 mod ranking;
+mod startup;
 pub use embedding::{
     Embedder, EmbeddingError, EmbeddingKind, HashedEmbedder, cosine, normalize, pack, tokenize,
     unpack,
@@ -13,6 +14,7 @@ pub use embedding_text::EmbeddingText;
 pub use float_text::parse_embedding_float_text;
 pub use numeric::{MemoryMathError, recency_score, score_memory};
 pub use ranking::{MemoryRank, MemoryRankError, memory_rank_order};
+pub use startup::{MemoryReadiness, MemoryReadinessError, MemoryStartupPhase};
 pub use text::{
     collapse_whitespace, normalize_utterance, normalize_utterance_text, quoted_memory_text,
     trim_text,

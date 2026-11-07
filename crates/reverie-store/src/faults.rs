@@ -17,6 +17,7 @@ pub(crate) enum Point {
     AfterRename,
     FileSync,
     DirectorySync,
+    MemoryStartupBeforeWriter,
 }
 pub(crate) type Hook = Box<dyn FnMut(Point, &Path) -> Result<()>>;
 #[derive(Default)]

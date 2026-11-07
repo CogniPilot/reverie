@@ -2,11 +2,9 @@
 //! independently selected settings; its authenticated lifecycle owner must
 //! serialize this operation against active recall/other startup contexts.
 //! Configuration, readiness text and employee titles are never that authority.
-use crate::{
-    memory_import::migrate_history_atomic,
-    memory_recall::{STARTUP_MODEL, STARTUP_READY, STARTUP_STATE},
-};
+use crate::memory_import::migrate_history_atomic;
 use reverie_contracts::{memory_documents::SelfModelDraft, storage_identity::MetadataText};
+use reverie_core::shutdown::ShutdownStatus;
 use reverie_core::{
     PythonText,
     memory::collapse_whitespace,
@@ -18,7 +16,7 @@ use reverie_host::{
     memory_configuration::{MemoryConfiguration, MemoryPath},
     memory_profile::{ProfileError, ProfileFile, ProfileOutcome},
 };
-use reverie_store::memory::{MemoryError, MemoryStore, MemoryTransaction};
+use reverie_store::memory::{MemoryError, MemoryStartupStore, MemoryStore, MemoryTransaction};
 use std::{
     collections::BTreeSet,
     fmt, io,
@@ -50,6 +48,11 @@ pub enum StartupError {
     Finalization {
         primary: Box<Self>,
         secondary: MemoryError,
+    },
+    Retained {
+        primary: Box<Self>,
+        secondary: MemoryError,
+        owner: Box<MemoryStartupStore>,
     },
 }
 impl fmt::Display for StartupError {
@@ -89,40 +92,55 @@ impl StartedMemory {
         seeds: &[MemorySeed],
     ) -> Result<Self, StartupError> {
         configuration.ensure_directories()?;
-        let selection = configuration.select_embeddings();
-        Self::initialize_selected(configuration, seeds, selection)
-    }
-    pub(crate) fn initialize_selected(
-        configuration: &MemoryConfiguration,
-        seeds: &[MemorySeed],
-        selection: reverie_host::embeddings::EmbeddingSelection,
-    ) -> Result<Self, StartupError> {
-        let store = MemoryStore::open_with(
-            configuration.native_path(MemoryPath::Database)?,
-            selection.embedder,
-            configuration.settings().float(FloatSetting::RecencyDecay),
-        )?;
-        match initialize(&store, configuration, seeds, selection.fallback) {
-            Ok(report) => {
-                let count = configuration
-                    .settings()
-                    .integer(IntegerSetting::RecallCount);
-                let count = slice_count(count);
-                Ok(Self {
-                    store,
-                    report,
-                    decay: configuration.settings().float(FloatSetting::RecencyDecay),
-                    count,
-                    closed: Arc::new(AtomicBool::new(false)),
-                })
+        let mut owner = MemoryStartupStore::open(configuration.native_path(MemoryPath::Database)?)?;
+        let prepared = (|| {
+            owner.preflight()?;
+            let selection = configuration.select_embeddings();
+            owner.admit(
+                selection.embedder,
+                configuration.settings().float(FloatSetting::RecencyDecay),
+            )?;
+            initialize_admitted(&mut owner, configuration, seeds, selection.fallback)
+        })();
+        let report = match prepared {
+            Ok(report) => report,
+            Err(primary) => {
+                return match owner.shutdown() {
+                    ShutdownStatus::Complete => Err(primary),
+                    ShutdownStatus::Pending(secondary) | ShutdownStatus::Refused(secondary) => {
+                        Err(StartupError::Retained {
+                            primary: Box::new(primary),
+                            secondary,
+                            owner: Box::new(owner),
+                        })
+                    }
+                };
             }
-            Err(primary) => match store.close() {
-                Ok(()) => Err(primary),
-                Err(secondary) => Err(StartupError::Finalization {
-                    primary: Box::new(primary),
-                    secondary,
-                }),
-            },
+        };
+        match owner.into_ready() {
+            Ok(store) => Ok(Self::from_ready(store, report, configuration)),
+            Err(owner) => Err(StartupError::Retained {
+                primary: Box::new(MemoryError::ReadinessUnconfirmed.into()),
+                secondary: MemoryError::ReadinessUnconfirmed,
+                owner,
+            }),
+        }
+    }
+    pub(crate) fn from_ready(
+        store: MemoryStore,
+        report: StartupReport,
+        configuration: &MemoryConfiguration,
+    ) -> Self {
+        Self {
+            store,
+            report,
+            decay: configuration.settings().float(FloatSetting::RecencyDecay),
+            count: slice_count(
+                configuration
+                    .settings()
+                    .integer(IntegerSetting::RecallCount),
+            ),
+            closed: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn store(&self) -> &MemoryStore {
@@ -134,8 +152,11 @@ impl StartedMemory {
     /// Close the writer and fence attached recalls. Each existing reader still
     /// owns its descriptor and must close before namespace shutdown is acked.
     pub fn close(&self) -> Result<(), MemoryError> {
+        self.shutdown().into_result()
+    }
+    pub fn shutdown(&self) -> ShutdownStatus<MemoryError> {
         self.closed.store(true, Ordering::Release);
-        self.store.close()
+        self.store.shutdown()
     }
     pub fn recall_service(&self) -> Result<crate::memory_recall::MemoryRecall, MemoryError> {
         if self.closed.load(Ordering::Acquire) {
@@ -168,15 +189,15 @@ fn slice_count(value: &reverie_core::memory_configuration::ConfigInteger) -> i64
         }
     })
 }
-fn initialize(
-    store: &MemoryStore,
+pub(crate) fn initialize_admitted(
+    owner: &mut MemoryStartupStore,
     configuration: &MemoryConfiguration,
     seeds: &[MemorySeed],
     fallback: Option<EmbeddingFallback>,
 ) -> Result<StartupReport, StartupError> {
     // Invalidate readiness before the first explicit migration effect. Recall
     // refuses pending initialization instead of labelling missing boot empty.
-    store.set_state(STARTUP_STATE, "initializing")?;
+    let store = owner.store()?;
     let reembedded = store.reembed_all()?;
     let initial = configuration
         .instance()
@@ -205,15 +226,9 @@ fn initialize(
             .settings()
             .float(FloatSetting::DefaultImportance),
     )?;
-    store.set_state(STARTUP_STATE, "profile-pending")?;
-    let profile = refresh_missing_profile(store, configuration)?;
-    let selected = store
-        .embedder_name()?
-        .scalar_text()
-        .ok_or(reverie_core::memory::EmbeddingError::InvalidText)
-        .map_err(MemoryError::from)?;
-    store.set_state(STARTUP_MODEL, &selected)?;
-    store.set_state(STARTUP_STATE, STARTUP_READY)?;
+    owner.profile_pending()?;
+    let profile = refresh_missing_profile(owner.store()?, configuration)?;
+    owner.ready()?;
     Ok(StartupReport {
         reembedded,
         imported,
