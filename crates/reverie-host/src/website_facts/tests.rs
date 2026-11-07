@@ -211,7 +211,7 @@ fn incomplete_and_oversized_bodies_cannot_become_engine_facts() {
     });
 }
 #[test]
-fn chunk_overhead_is_counted_in_actual_wire_bound() {
+fn header_overhead_is_counted_in_actual_wire_bound() {
     let fixture = Fixture::new();
     let mut observer = fixture.observer();
     let _ = transport::take_wire_bound_rejections();
@@ -219,11 +219,15 @@ fn chunk_overhead_is_counted_in_actual_wire_bound() {
         let server = scope.spawn(|| {
             let mut stream = accepted(&fixture.listener);
             head(&mut stream);
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n\"\r\n")
-                .unwrap();
-            let mut wire = b"1\r\nx\r\n".repeat(400_000);
-            wire.extend_from_slice(b"1\r\n\"\r\n0\r\n\r\n");
+            // Valid header lines/count isolate total-wire rejection without
+            // relying on throughput through 400,000 tiny body chunks.
+            let mut wire = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n".to_vec();
+            for index in 0..34 {
+                write!(&mut wire, "X-Wire-{index}: ").unwrap();
+                wire.resize(wire.len() + 65_000, b'x');
+                wire.extend_from_slice(b"\r\n");
+            }
+            wire.extend_from_slice(b"\r\n{}");
             let _ = stream.write_all(&wire);
         });
         let result = observer.observe(WebsiteMetadataRoute::Info, end());
@@ -231,7 +235,7 @@ fn chunk_overhead_is_counted_in_actual_wire_bound() {
         let rejections = transport::take_wire_bound_rejections();
         assert!(
             result.is_err(),
-            "small decoded JSON must not hide excessive chunk wire bytes"
+            "small decoded JSON must not hide excessive header wire bytes"
         );
         assert!(
             rejections > 0,
