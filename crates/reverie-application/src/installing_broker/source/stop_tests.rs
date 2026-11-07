@@ -4,6 +4,8 @@
 use super::*;
 use crate::reservation_gate::RetainedPreparation;
 use serde_json::{Value, json};
+#[path = "stop_tests/running.rs"]
+mod running;
 
 fn prepared(owned: &Owned) -> RetainedPreparation {
     owned.recover();
