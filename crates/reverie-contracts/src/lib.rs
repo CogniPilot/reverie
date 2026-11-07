@@ -45,6 +45,7 @@ pub mod storage_writers;
 pub mod subscription_profiles_v1;
 pub mod task_perf_v1;
 pub mod worker_child;
+pub mod worker_cold_tmp;
 pub mod worker_config;
 pub mod worker_intent;
 pub mod worker_launch;

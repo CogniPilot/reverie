@@ -1,0 +1,263 @@
+{
+  "source": "python/reverie/worker.py:Broker.admit_cold_temporary.projection",
+  "sourceSha256": "a112c936b4d0f406a4cd76b418d87861650fa687886fde6a1e6d75943d66f8e1",
+  "python": "3.13.15",
+  "cases": [
+    {
+      "label": "identical",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Running-True",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": 1, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Running-1.0",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": 1, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": 1.0, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Running-None",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": 1, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": null, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": false,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Paused-True",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": 1, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": true, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Paused-1.0",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": 1, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": 1.0, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Paused-None",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": 1, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": null, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": false,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Restarting-True",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": 1, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": true, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Restarting-1.0",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": 1, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": 1.0, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Restarting-None",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": 1, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": null, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": false,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Dead-True",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Dead\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Dead\": true}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Dead-1.0",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Dead\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Dead\": 1.0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Dead-None",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Dead\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Dead\": null}, \"Mounts\": []}]",
+      "equal": false,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Pid-True",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": true}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Pid-1.0",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 1.0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-Pid-None",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": null}, \"Mounts\": []}]",
+      "equal": false,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-StartedAt-True",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": true}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-StartedAt-1.0",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": 1.0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "selected-StartedAt-None",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": 1}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": null}, \"Mounts\": []}]",
+      "equal": false,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "ignored-top-level",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [], \"ignored\": \"not projected\"}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "ignored-state",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"Ignored\": [\"x\"]}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "order-independent",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}, {\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}, {\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "rightIds": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "mount-python-numeric-unknown",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"unknown\": true}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"unknown\": 1}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "mount-python-numeric-RW",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"RW\": true}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"RW\": 1}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "mount-python-numeric-Source",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": true}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": 1}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "mount-python-numeric-Destination",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Destination\": true}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Destination\": 1}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "sorted-mounts",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/a\"}, {\"Type\": \"bind\", \"Source\": \"/z\"}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/z\"}, {\"Type\": \"bind\", \"Source\": \"/a\"}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "nan-singleton-nested",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"nested\": [NaN, -0.0, Infinity]}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"nested\": [NaN, -0.0, Infinity]}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "nan-selected",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": NaN}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": NaN}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "surrogate-keys-order",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"\\ud800\": 1, \"\\ud800\\udc00\": 2}]}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": [{\"\\ud800\\udc00\": 2, \"\\ud800\": 1}]}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "duplicate-last-value",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 0}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 2, \"Pid\": 0}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "label": "large-integer-selected",
+      "left": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}, \"Mounts\": []}]",
+      "right": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/other\", \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}, \"Mounts\": []}]",
+      "equal": true,
+      "leftIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rightIds": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

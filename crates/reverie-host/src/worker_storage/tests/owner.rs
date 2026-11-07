@@ -1,5 +1,6 @@
 use super::*;
 mod cold;
+mod cold_admission;
 mod preparation;
 mod receipt;
 use crate::{

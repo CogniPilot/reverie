@@ -397,6 +397,9 @@ The same lifecycle mutex spans paired active/name insertion, pending/fresh-home
 storage preparation, runtime-directory preparation, create-plan observation and
 the original first inspect. `InspectedWorkerLaunch` keeps all those owners
 private; its request, snapshot and previous-inspection getters return data.
+That previous inspection is sealed to the exact original plan and actual storage
+owner. Host process-incarnation capture consumes it without an extra inspect;
+readback alone does not enable ordinary replacement stop or release resources.
 
 `abort` returns the actual retained failure. Its one-shot `close_transport`
 attempts admission, own handler metadata and socket finalization, retaining

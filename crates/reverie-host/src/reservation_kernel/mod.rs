@@ -1,6 +1,7 @@
 //! Fixed Linux reservation kernel/filesystem observations. These are snapshots,
 //! not retained native grants, leases, process effects or admission authority.
 mod baseline;
+mod cold;
 mod custody;
 mod limits;
 mod source_release;
@@ -196,10 +197,13 @@ pub(crate) fn existing_process_start(pid: &UnsignedInteger, end: Instant) -> Res
     pid_start(&Installed, pid, end)
 }
 fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
-    let stat = path("/proc/self/stat");
+    table_at(source, "self", end)
+}
+fn table_at(source: &impl Source, pid: &str, end: Instant) -> Result<MountTable> {
+    let stat = path(&format!("/proc/{pid}/stat"));
     let before = kernel_accounting::process_start(&text(source, &stat, 65536, false, end)?)?;
     check(end)?;
-    let raw = source.read(&path("/proc/self/mountinfo"), MAX_MOUNT_BYTES)?;
+    let raw = source.read(&path(&format!("/proc/{pid}/mountinfo")), MAX_MOUNT_BYTES)?;
     check(end)?;
     need(raw.len() <= MAX_MOUNT_BYTES, "RESERVATION_NATIVE_BOUND")?;
     let points = native::python_text(Path::new(std::ffi::OsStr::from_bytes(&raw)));

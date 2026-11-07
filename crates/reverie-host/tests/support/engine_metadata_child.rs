@@ -33,7 +33,7 @@ fn main() {
             assert!(owned.wait().unwrap().success());
         }
         "gpu-info"=>gpu_info(&args),
-        "storage-writer" | "image-refresh" | "command-telemetry" => {
+        "storage-writer" | "image-refresh" | "command-telemetry" | "cold-admission" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
@@ -46,7 +46,9 @@ fn main() {
                 }
             }
             let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
-            io::stdout().write_all(&fs::read(name).unwrap()).unwrap();
+            let raw=fs::read(name).unwrap();
+            if mode=="cold-admission" && name=="inspect.out" && std::path::Path::new("inspect.next").exists() {fs::rename("inspect.next","inspect.out").unwrap();}
+            io::stdout().write_all(&raw).unwrap();
             if name == "pane.out" && let Ok(next) = fs::read("pane.next") {
                 fs::write("pane.out", next).unwrap();
                 fs::remove_file("pane.next").unwrap();
