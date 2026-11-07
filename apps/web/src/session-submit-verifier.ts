@@ -176,6 +176,11 @@ export function composerBody(screen: string, glyph: string): string | undefined 
   return body.join('\n').trim();
 }
 
+/** The composer glyphs whose empty state composerIsEmpty is verified to read: Claude's ❯ and Codex's ›. */
+export function composerGlyphVerified(glyph: string): boolean {
+  return glyph === '❯' || glyph === '›';
+}
+
 export function composerIsEmpty(screen: string | null | undefined, glyph: string): boolean {
   return screen != null && composerBody(screen, glyph) === '';
 }

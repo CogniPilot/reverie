@@ -17,6 +17,8 @@ export interface TurnSummaryMessage {
   sourceDigest?: string;
   attention?: NoticeAttention;
   transport?: 'unread' | 'queued' | 'delivery-unconfirmed' | 'unknown';
+  /** Reverie's own reply instruction for this message (a verified spoken owner turn), outside the quoted excerpt. */
+  replyHint?: string;
 }
 export interface TurnSummary {
   phoneMode: AlertMode;
@@ -27,6 +29,8 @@ export interface TurnSummary {
   messages: TurnSummaryMessage[];
   text: string;
   historyCoverage?: NoticeHistoryCoverage;
+  /** Pending room briefings carried by the member's own hook payload (hookTurnSummary), ahead of the messages. */
+  briefings?: Array<{ roomId: string; room: string; text: string; truncated: boolean }>;
   /** Only the explicit history inspection endpoint; all eligible examined sources remain inspectable. */
   sourceReferences?: Array<{ roomId: string; messageId: string; at: number; sourceDigest: string }>;
 }

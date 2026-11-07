@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ChatroomService } from '../src/chatroom-service.js';
 import { employeeProfileContext, employeeBriefContext } from '../src/company-types.js';
-import { buildBriefing, buildDeliveryLine, MAX_DELIVERY_CHARS } from '../src/chatroom-delivery.js';
+import { buildBriefing, buildDeliveryLine, MAX_DELIVERY_CHARS, WAKE_LINE } from '../src/chatroom-delivery.js';
 
 describe('employee role context in ordinary room briefings', () => {
   it('explains stable employee storage and disposable private tmp without granting authority', () => {
@@ -37,7 +37,14 @@ describe('employee role context in ordinary room briefings', () => {
       const room = chat.createRoom('General', undefined);
       chat.addMember(room.id, session.id, { goal: 'Help the team' });
       await chat.delivery.flushAll();
-      const delivered = writes.join('\n');
+      // The pane gets only the constant wake; the briefing reaches the member in its own hook payload, once.
+      expect(writes).toEqual([`${WAKE_LINE}\r`]);
+      const payload = chat.hookTurnSummary(session.id);
+      expect(payload.briefings?.map((b) => b.roomId)).toEqual([room.id]);
+      expect(chat.hookTurnSummary(session.id).briefings).toBeUndefined();
+      expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(false);
+      expect(chat.briefingFor(session.id, room.id)).toContain('CoffeeMonger');
+      const delivered = payload.text;
       expect(delivered).toContain('GET /api/handbook');
       expect(delivered).toContain('reverie agent capabilities');
       expect(delivered).toContain('when asked what you can do');
@@ -50,6 +57,52 @@ describe('employee role context in ordinary room briefings', () => {
       expect(delivered).toContain('Dream (creative exploration) not permitted');
       expect(delivered).toContain('not instructions to sleep or dream now');
       expect(delivered).toContain('grant no hiring');
+    } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
+  });
+  it('keeps a briefing pending after its wake is typed and submitted, until the hook payload includes it, and never retypes it', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'employee-brief-hook-'));
+    const writes: string[] = [];
+    const session = { id: 'employee-runtime', name: 'Alex', mode: 'claude', status: 'idle', pid: 123, isWorking: false,
+      writeViaMux: async (text: string, options?: any) => { writes.push(text); options?.onOutcome?.('submitted'); return true; } };
+    const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: id => id === session.id ? session as never : undefined, broadcast: () => {} });
+    try {
+      const room = chat.createRoom('General', undefined);
+      chat.addMember(room.id, session.id, { goal: `Help the team ${'with a very long goal '.repeat(200)}` });
+      await chat.delivery.flushAll();
+      expect(writes).toEqual([`${WAKE_LINE}\r`]);
+      // A submitted wake is not the briefing reaching the member: it stays pending, and wakes nobody again.
+      expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(true);
+      expect(chat.delivery.pendingFor(session.id)).toBe(0);
+      (chat.delivery as unknown as { lastDelivered: Map<string, number> }).lastDelivered.clear();
+      await chat.delivery.flushAll();
+      expect(writes).toHaveLength(1);
+      // An internal summary (the digest's) does not consume it; only the member's own hook payload does.
+      expect(chat.turnSummary(session.id).briefings).toBeUndefined();
+      expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(true);
+      const payload = chat.hookTurnSummary(session.id);
+      const [briefing] = payload.briefings ?? [];
+      expect(briefing?.roomId).toBe(room.id);
+      expect(payload.text.startsWith(`Reverie room briefing for ${briefing!.room}`)).toBe(true);
+      expect(briefing!.text.length).toBeLessThanOrEqual(MAX_DELIVERY_CHARS + 1);
+      // The builder keeps a briefing within the unchanged delivery cap, so it arrives whole.
+      expect(briefing!.truncated).toBe(false);
+      expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(false);
+      expect(chat.hookTurnSummary(session.id).briefings).toBeUndefined();
+      // The read path always has the whole current briefing.
+      expect(chat.briefingFor(session.id, room.id)).toContain('Help the team');
+      expect(() => chat.briefingFor('someone-else', room.id)).toThrow('Not a member');
+    } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
+  });
+  it('cuts an oversized briefing in the hook payload with the path to the whole text, and marks only that room shown', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'employee-brief-cut-'));
+    const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: () => undefined, broadcast: () => {} });
+    try {
+      const shown = vi.spyOn(chat.delivery, 'briefShown');
+      vi.spyOn(chat.delivery, 'pendingBriefs').mockReturnValue([{ roomId: 'r1', roomName: 'General', text: 'x'.repeat(MAX_DELIVERY_CHARS + 500) }]);
+      const payload = chat.hookTurnSummary('member');
+      expect(payload.briefings).toEqual([{ roomId: 'r1', room: 'General', text: `${'x'.repeat(MAX_DELIVERY_CHARS)}…`, truncated: true }]);
+      expect(payload.text).toContain(`(cut at ${MAX_DELIVERY_CHARS} characters; the whole briefing: GET /api/chatrooms/r1/briefing)`);
+      expect(shown).toHaveBeenCalledWith('member', ['r1']);
     } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
   });
   it('keeps required rest and plan limits ahead of an oversized laptop profile within the unchanged delivery cap', () => {

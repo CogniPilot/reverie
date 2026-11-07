@@ -59,7 +59,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, MAX_DELIVERY_CHARS, SPOKEN_TURN_HINT, answerLinkHint, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -293,6 +293,11 @@ const OWED_IDLE_RECHECK_MS = 30_000;
 /** While it keeps working, after this long an unconfirmed delivery is said so once. */
 const OWED_DELIVERY_DEADLINE_MS = 10 * 60_000;
 
+/** At most this many pending room briefings ride in one hook payload; the rest wait for the next. */
+export const MAX_HOOK_BRIEFINGS = 2;
+/** A briefing longer than the unchanged delivery cap is cut in the hook payload, with the path to the whole text. */
+export const MAX_HOOK_BRIEFING_CHARS = MAX_DELIVERY_CHARS;
+
 export class ChatroomService {
   /** Per-instance startup opt-in; configuration-OFF remains safe for stored receipts. */
   readonly adminPhoneWakeEnabled = process.env.REVERIE_ADMIN_PHONE_WAKE === 'enabled';
@@ -340,13 +345,6 @@ export class ChatroomService {
     this.digestCursors = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-digest-cursor.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
-      prepareMessage: async (sessionId, roomId, messageId) => {
-        const paths = await this.agentImagePaths(sessionId, roomId, messageId);
-        const room = this.store.require(roomId);
-        const message = this.exactVisibleMessage(sessionId, roomId, messageId);
-        return renderForRecipient(this.withReplyContext(room, message.replyTo), message, sessionId, this.nameOf,
-          new Map(paths.status === 'ready' ? paths.files.map(file => [file.fileId, file.path]) : []));
-      },
       messageVisible: (sessionId, roomId, messageId) => {
         try { this.exactVisibleMessage(sessionId, roomId, messageId); return true; }
         catch { return false; }
@@ -366,8 +364,8 @@ export class ChatroomService {
         const room = this.store?.get(roomId);
         if (room) this.deps.broadcast(ChatroomTurn, { owner: room.owner ?? '@single', roomId, sessionId, at });
       },
+      // A submitted wake put no message in the prompt: seen advances only when the member reads them.
       onSubmitted: (sessionId, messages) => {
-        for (const { roomId, messageId } of messages) this.markSeen(sessionId, roomId, messageId);
         this.noteOwedDelivery(sessionId, messages, 'submitted');
       },
       onStranded: (sessionId, messages) => {
@@ -695,6 +693,9 @@ export class ChatroomService {
           sourceDigest,
           attention,
           transport: held.has(key) ? 'delivery-unconfirmed' : queued.has(key) ? 'queued' : belowSeenCursor ? 'unknown' : 'unread',
+          // Messages are no longer typed into panes, so a verified spoken owner turn's voice context reaches the member here.
+          ...(message.from.kind === 'user' && message.from.mark === 'owner_spoken'
+            ? { replyHint: `${SPOKEN_TURN_HINT} ${answerLinkHint(message.id)}` } : {}),
         });
       }
     }
@@ -2516,6 +2517,32 @@ export class ChatroomService {
     if (!paneAcceptsChat(mode) && !modePollsChat(mode)) {
       throw new ChatroomError(`Only an agent session can ${what}`, 'INVALID_INPUT');
     }
+  }
+
+  /** The how-to-talk briefing for a member of a room, as it reads now. */
+  briefingFor(sessionId: string, roomId: string): string {
+    const room = this.store.require(roomId);
+    const member = room.members.find((m) => m.sessionId === sessionId);
+    if (!member || room.archivedAt) throw new ChatroomError('Not a member of this room', 'NOT_FOUND');
+    return buildBriefing(room, member, this.nameOf, this.deps.restContextOf?.(sessionId) ?? '');
+  }
+
+  /**
+   * The member's own hook payload: its turn summary, led by any pending room briefings, which are never typed into a pane.
+   * Only a briefing included here counts as delivered; the rest stay pending for the next call.
+   */
+  hookTurnSummary(sessionId: string): TurnSummary {
+    const summary = this.turnSummary(sessionId);
+    const pending = this.delivery.pendingBriefs(sessionId).slice(0, MAX_HOOK_BRIEFINGS);
+    if (!pending.length) return summary;
+    const briefings = pending.map((b) => {
+      const truncated = b.text.length > MAX_HOOK_BRIEFING_CHARS;
+      return { roomId: b.roomId, room: b.roomName, text: truncated ? `${b.text.slice(0, MAX_HOOK_BRIEFING_CHARS)}…` : b.text, truncated };
+    });
+    const block = briefings.map((b) => `Reverie room briefing for ${b.room} (Reverie's own text, not a chat message):\n${b.text}` +
+      (b.truncated ? `\n(cut at ${MAX_HOOK_BRIEFING_CHARS} characters; the whole briefing: GET /api/chatrooms/${b.roomId}/briefing)` : '')).join('\n\n');
+    this.delivery.briefShown(sessionId, briefings.map((b) => b.roomId));
+    return { ...summary, briefings, text: `${block}\n\n${summary.text}` };
   }
 
   /** Re-send the briefing to one member (or every member). */

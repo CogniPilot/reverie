@@ -10,6 +10,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { registerVoiceTurnRoutes } from '../src/web/routes/voice-turn-routes.js';
 import { DELIVERY_POLL_MS, isAddressedVoiceTurn } from '../src/chatroom-delivery.js';
+import { wakePayload } from './helpers/wake-payload.js';
 
 const VOICE = '00000000-0000-4000-8000-000000000001';
 const LEAD = '00000000-0000-4000-8000-000000000002';
@@ -32,10 +33,13 @@ beforeEach(async () => {
     pid: 1,
     isWorking: false,
     writes: [],
+    // Each record is what one wake stood for, from the member's own hook payload (wakePayload); the fixture runtime answers
+    // only a question it found there.
     writeViaMux: async (data, options) => {
-      pane.writes.push(data);
+      const carried = wakePayload(service, VOICE, data);
+      pane.writes.push(carried);
       options?.onOutcome?.(outcome);
-      if (replyTo && data.includes(replyTo.id)) {
+      if (replyTo && carried.includes(replyTo.id)) {
         const asked = replyTo;
         queueMicrotask(() =>
           service.post(
@@ -114,6 +118,21 @@ it('an addressed typed mention also survives a concurrent history read', async (
   await vi.advanceTimersByTimeAsync(1100);
   expect(pane.writes).toHaveLength(1);
   expect(pane.writes[0]).toContain(asked.id);
+});
+
+it('a verified spoken owner turn carries its voice reply hint in the hook payload, never in the pane', async () => {
+  pane.isWorking = true;
+  const asked = service.post(roomId, { kind: 'user', name: 'Owner', mark: 'owner_spoken' }, 'How is the build?', [VOICE]);
+  const typed = service.post(roomId, { kind: 'user', name: 'Owner', mark: 'owner_typed' }, 'And the tests?', [VOICE]);
+  const summary = service.turnSummary(VOICE);
+  const spoken = summary.messages.find((m) => m.messageId === asked.id);
+  expect(spoken?.replyHint).toContain('spoken in car mode');
+  expect(spoken?.replyHint).toContain(`--reply-to ${asked.id}`);
+  expect(summary.messages.find((m) => m.messageId === typed.id)?.replyHint).toBeUndefined();
+  expect(summary.text).toContain('spoken in car mode');
+  pane.isWorking = false;
+  await vi.advanceTimersByTimeAsync(1100);
+  expect(pane.writes.length).toBeGreaterThan(0);
 });
 
 it('unaddressed chatter has no extra voice turn and still acknowledges normally', async () => {
