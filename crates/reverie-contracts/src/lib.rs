@@ -46,6 +46,7 @@ pub mod resource_reload;
 pub mod rootless;
 pub mod route_frames_v1;
 pub mod route_frames_v2;
+mod session_resources_v2;
 pub mod settings_v1;
 pub mod storage_identity;
 pub mod storage_writers;

@@ -32,6 +32,7 @@ impl ReservationConfiguration {
     }
     pub fn memory_policies_enabled(&self) -> bool {
         legacy_json::truthy(field(self.root(), "employeeMemoryPolicies"))
+            || crate::session_resources_v2::configured(&self.config)
     }
     pub fn pool_bytes(&self) -> Result<UnsignedInteger> {
         Ok(unsigned(field(self.root(), "poolMemoryMiB"))?.times(1_048_576))
