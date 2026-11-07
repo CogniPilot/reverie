@@ -17,6 +17,7 @@ members = [
     "crates/reverie-ops-cli",
     "crates/reverie-mcp-cli",
     "crates/reverie-python-regex",
+    "crates/reverie-memory-capsule",
     "crates/reverie-diagnostics",
     "crates/xtask",
 ]
