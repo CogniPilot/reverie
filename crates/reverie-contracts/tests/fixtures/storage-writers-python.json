@@ -1,0 +1,1203 @@
+{
+  "source": "actual Broker.check_storage_writers with controlled engine reply DATA and owned filesystem paths; no engine invocation",
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "moduleSha256": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7",
+  "session": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "employee": "11111111-2222-4333-8444-555555555555",
+  "cases": [
+    {
+      "name": "unrelated",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "own-exact",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {\"reverie.worker\": \"fixture\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"reverie.employee\": \"11111111-2222-4333-8444-555555555555\"}}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate-inspect-rows",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}, {\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "nil-container-id",
+      "listed": "0000000000000000000000000000000000000000000000000000000000000000",
+      "inspect": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "0000000000000000000000000000000000000000000000000000000000000000"
+        ]
+      ]
+    },
+    {
+      "name": "empty",
+      "listed": "",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate-ids",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Cannot establish employee storage writer inventory",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ]
+      ]
+    },
+    {
+      "name": "129-ids",
+      "listed": "0000000000000000000000000000000000000000000000000000000000000000 0000000000000000000000000000000000000000000000000000000000000001 0000000000000000000000000000000000000000000000000000000000000002 0000000000000000000000000000000000000000000000000000000000000003 0000000000000000000000000000000000000000000000000000000000000004 0000000000000000000000000000000000000000000000000000000000000005 0000000000000000000000000000000000000000000000000000000000000006 0000000000000000000000000000000000000000000000000000000000000007 0000000000000000000000000000000000000000000000000000000000000008 0000000000000000000000000000000000000000000000000000000000000009 000000000000000000000000000000000000000000000000000000000000000a 000000000000000000000000000000000000000000000000000000000000000b 000000000000000000000000000000000000000000000000000000000000000c 000000000000000000000000000000000000000000000000000000000000000d 000000000000000000000000000000000000000000000000000000000000000e 000000000000000000000000000000000000000000000000000000000000000f 0000000000000000000000000000000000000000000000000000000000000010 0000000000000000000000000000000000000000000000000000000000000011 0000000000000000000000000000000000000000000000000000000000000012 0000000000000000000000000000000000000000000000000000000000000013 0000000000000000000000000000000000000000000000000000000000000014 0000000000000000000000000000000000000000000000000000000000000015 0000000000000000000000000000000000000000000000000000000000000016 0000000000000000000000000000000000000000000000000000000000000017 0000000000000000000000000000000000000000000000000000000000000018 0000000000000000000000000000000000000000000000000000000000000019 000000000000000000000000000000000000000000000000000000000000001a 000000000000000000000000000000000000000000000000000000000000001b 000000000000000000000000000000000000000000000000000000000000001c 000000000000000000000000000000000000000000000000000000000000001d 000000000000000000000000000000000000000000000000000000000000001e 000000000000000000000000000000000000000000000000000000000000001f 0000000000000000000000000000000000000000000000000000000000000020 0000000000000000000000000000000000000000000000000000000000000021 0000000000000000000000000000000000000000000000000000000000000022 0000000000000000000000000000000000000000000000000000000000000023 0000000000000000000000000000000000000000000000000000000000000024 0000000000000000000000000000000000000000000000000000000000000025 0000000000000000000000000000000000000000000000000000000000000026 0000000000000000000000000000000000000000000000000000000000000027 0000000000000000000000000000000000000000000000000000000000000028 0000000000000000000000000000000000000000000000000000000000000029 000000000000000000000000000000000000000000000000000000000000002a 000000000000000000000000000000000000000000000000000000000000002b 000000000000000000000000000000000000000000000000000000000000002c 000000000000000000000000000000000000000000000000000000000000002d 000000000000000000000000000000000000000000000000000000000000002e 000000000000000000000000000000000000000000000000000000000000002f 0000000000000000000000000000000000000000000000000000000000000030 0000000000000000000000000000000000000000000000000000000000000031 0000000000000000000000000000000000000000000000000000000000000032 0000000000000000000000000000000000000000000000000000000000000033 0000000000000000000000000000000000000000000000000000000000000034 0000000000000000000000000000000000000000000000000000000000000035 0000000000000000000000000000000000000000000000000000000000000036 0000000000000000000000000000000000000000000000000000000000000037 0000000000000000000000000000000000000000000000000000000000000038 0000000000000000000000000000000000000000000000000000000000000039 000000000000000000000000000000000000000000000000000000000000003a 000000000000000000000000000000000000000000000000000000000000003b 000000000000000000000000000000000000000000000000000000000000003c 000000000000000000000000000000000000000000000000000000000000003d 000000000000000000000000000000000000000000000000000000000000003e 000000000000000000000000000000000000000000000000000000000000003f 0000000000000000000000000000000000000000000000000000000000000040 0000000000000000000000000000000000000000000000000000000000000041 0000000000000000000000000000000000000000000000000000000000000042 0000000000000000000000000000000000000000000000000000000000000043 0000000000000000000000000000000000000000000000000000000000000044 0000000000000000000000000000000000000000000000000000000000000045 0000000000000000000000000000000000000000000000000000000000000046 0000000000000000000000000000000000000000000000000000000000000047 0000000000000000000000000000000000000000000000000000000000000048 0000000000000000000000000000000000000000000000000000000000000049 000000000000000000000000000000000000000000000000000000000000004a 000000000000000000000000000000000000000000000000000000000000004b 000000000000000000000000000000000000000000000000000000000000004c 000000000000000000000000000000000000000000000000000000000000004d 000000000000000000000000000000000000000000000000000000000000004e 000000000000000000000000000000000000000000000000000000000000004f 0000000000000000000000000000000000000000000000000000000000000050 0000000000000000000000000000000000000000000000000000000000000051 0000000000000000000000000000000000000000000000000000000000000052 0000000000000000000000000000000000000000000000000000000000000053 0000000000000000000000000000000000000000000000000000000000000054 0000000000000000000000000000000000000000000000000000000000000055 0000000000000000000000000000000000000000000000000000000000000056 0000000000000000000000000000000000000000000000000000000000000057 0000000000000000000000000000000000000000000000000000000000000058 0000000000000000000000000000000000000000000000000000000000000059 000000000000000000000000000000000000000000000000000000000000005a 000000000000000000000000000000000000000000000000000000000000005b 000000000000000000000000000000000000000000000000000000000000005c 000000000000000000000000000000000000000000000000000000000000005d 000000000000000000000000000000000000000000000000000000000000005e 000000000000000000000000000000000000000000000000000000000000005f 0000000000000000000000000000000000000000000000000000000000000060 0000000000000000000000000000000000000000000000000000000000000061 0000000000000000000000000000000000000000000000000000000000000062 0000000000000000000000000000000000000000000000000000000000000063 0000000000000000000000000000000000000000000000000000000000000064 0000000000000000000000000000000000000000000000000000000000000065 0000000000000000000000000000000000000000000000000000000000000066 0000000000000000000000000000000000000000000000000000000000000067 0000000000000000000000000000000000000000000000000000000000000068 0000000000000000000000000000000000000000000000000000000000000069 000000000000000000000000000000000000000000000000000000000000006a 000000000000000000000000000000000000000000000000000000000000006b 000000000000000000000000000000000000000000000000000000000000006c 000000000000000000000000000000000000000000000000000000000000006d 000000000000000000000000000000000000000000000000000000000000006e 000000000000000000000000000000000000000000000000000000000000006f 0000000000000000000000000000000000000000000000000000000000000070 0000000000000000000000000000000000000000000000000000000000000071 0000000000000000000000000000000000000000000000000000000000000072 0000000000000000000000000000000000000000000000000000000000000073 0000000000000000000000000000000000000000000000000000000000000074 0000000000000000000000000000000000000000000000000000000000000075 0000000000000000000000000000000000000000000000000000000000000076 0000000000000000000000000000000000000000000000000000000000000077 0000000000000000000000000000000000000000000000000000000000000078 0000000000000000000000000000000000000000000000000000000000000079 000000000000000000000000000000000000000000000000000000000000007a 000000000000000000000000000000000000000000000000000000000000007b 000000000000000000000000000000000000000000000000000000000000007c 000000000000000000000000000000000000000000000000000000000000007d 000000000000000000000000000000000000000000000000000000000000007e 000000000000000000000000000000000000000000000000000000000000007f 0000000000000000000000000000000000000000000000000000000000000080",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Cannot establish employee storage writer inventory",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ]
+      ]
+    },
+    {
+      "name": "upper-id",
+      "listed": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Cannot establish employee storage writer inventory",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ]
+      ]
+    },
+    {
+      "name": "short-id",
+      "listed": "a",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Cannot establish employee storage writer inventory",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ]
+      ]
+    },
+    {
+      "name": "python-control-space",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u001cbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}, {\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      ]
+    },
+    {
+      "name": "unicode-space",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0085bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}, {\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      ]
+    },
+    {
+      "name": "not-list",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "{}",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer inventory changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "nonobject-row",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[null]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'NoneType' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "wrong-id",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer inventory changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "missing-id",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer inventory changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unhashable-id",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": []}]",
+      "accepted": false,
+      "error": "TypeError",
+      "message": "unhashable type: 'list'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "extra-id",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}, {\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer inventory changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "State-None",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": null, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'NoneType' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "State-[]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": [], \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'list' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "State-{}",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "Config-None",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": null, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'NoneType' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "Config-[]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": [], \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'list' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "Mounts-None",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": null}]",
+      "accepted": false,
+      "error": "TypeError",
+      "message": "'NoneType' object is not iterable",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "Mounts-[None]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [null]}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'NoneType' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "Mounts-[{}]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{}]}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-False",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": false}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-0",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": 0}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-1",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": 1}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-1.0",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": 1.0}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-None",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": null}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-[]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": []}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-{}",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": {}}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "running-'true'",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": \"true\"}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee storage writer state changed",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-None",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": null}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-None",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": null}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-False",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": false}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-False",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": false}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-0",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": 0}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-0",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": 0}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-[]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": []}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-[]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": []}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-{}",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-{}",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-[1]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": [1]}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-[1]",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": [1]}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'list' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unnamed-labels-'text'",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": \"text\"}, \"Name\": \"/unrelated\", \"Mounts\": []}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "named-labels-'text'",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": \"text\"}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "AttributeError",
+      "message": "'str' object has no attribute 'get'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "volume-ignored",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"volume\", \"RW\": true, \"Source\": {}}]}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "rw-int-ignored",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": 1, \"Source\": {}}]}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "missing-source",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Destination\": \"/other\"}]}]",
+      "accepted": false,
+      "error": "KeyError",
+      "message": "'Source'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unhashable-source",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": {}, \"Destination\": \"/other\"}]}]",
+      "accepted": false,
+      "error": "TypeError",
+      "message": "unhashable type: 'dict'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unhashable-destination",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@OUT@\", \"Destination\": []}]}]",
+      "accepted": false,
+      "error": "TypeError",
+      "message": "unhashable type: 'list'",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "foreign-home-writer",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/foreign\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Another running container owns employee home or Nix data",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "foreign-parent-writer",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@PARENT@\", \"Destination\": \"/foreign\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Another running container owns employee home or Nix data",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "foreign-child-writer",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@/sub/tail\", \"Destination\": \"/foreign\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Another running container owns employee home or Nix data",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "foreign-nix-helper",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/target/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Another running container owns employee home or Nix data",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "outside-writer",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@OUT@/missing\", \"Destination\": \"/foreign\"}]}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "alias-home-writer",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@ALIAS@\", \"Destination\": \"/foreign\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Another running container owns employee home or Nix data",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "own-noncanonical-raw-source",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {\"reverie.worker\": \"fixture\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"reverie.employee\": \"11111111-2222-4333-8444-555555555555\"}}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@/.\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "own-nonexact-destination",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {\"reverie.worker\": \"fixture\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"reverie.employee\": \"11111111-2222-4333-8444-555555555555\"}}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent/\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "own-employee-mismatch",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {\"reverie.worker\": \"fixture\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"reverie.employee\": \"other\"}}, \"Name\": \"/fixture-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Mounts\": [{\"Type\": \"bind\", \"RW\": true, \"Source\": \"@HOME@\", \"Destination\": \"/home/agent\"}, {\"Type\": \"bind\", \"RW\": true, \"Source\": \"@NIX@\", \"Destination\": \"/nix\"}]}]",
+      "accepted": false,
+      "error": "RuntimeError",
+      "message": "Employee laptop requires explicit canonical-storage recreation",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "unknown-nan",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"State\": {\"Running\": true}, \"Config\": {\"Labels\": {}}, \"Name\": \"/unrelated\", \"Mounts\": [], \"extra\": NaN}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "ignored-int4300",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"State\":{\"Running\":true},\"Mounts\":[],\"extra\":1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "ignored-int4301",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"State\":{\"Running\":true},\"Mounts\":[],\"extra\":11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}]",
+      "accepted": false,
+      "error": "ValueError",
+      "message": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "malformed-json",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "{",
+      "accepted": false,
+      "error": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate-last-wins",
+      "listed": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inspect": "[{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"State\":null,\"State\":{\"Running\":true}}]",
+      "accepted": true,
+      "calls": [
+        [
+          "ps",
+          "--quiet",
+          "--no-trunc"
+        ],
+        [
+          "inspect",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    }
+  ]
+}

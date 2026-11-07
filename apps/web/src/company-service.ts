@@ -1,4 +1,4 @@
-import {viewerHealth,type ProviderHealth} from './worker-provider-health.js';
+import { viewerHealth, type ProviderHealth } from './worker-provider-health.js';
 import { displayTime } from './display-time.js';
 import { RuntimeRecipeSchema, type RuntimeRecipe } from './expert-runtime-recipe.js';
 import { randomInt, randomUUID } from 'node:crypto';
@@ -51,8 +51,11 @@ function persistedEmployee(employee: Readonly<CompanyEmployee>): CompanyEmployee
 }
 
 function validateEffectiveCore(company: readonly string[] = [], personal: readonly string[] = []): void {
-  try { effectiveCoreBeliefs(company, personal); }
-  catch { throw new CompanyError('Combined company and personal core beliefs exceed the context bounds', 400); }
+  try {
+    effectiveCoreBeliefs(company, personal);
+  } catch {
+    throw new CompanyError('Combined company and personal core beliefs exceed the context bounds', 400);
+  }
 }
 
 /** An owner runtime transaction, scoped to one unchanged employee/session binding. */
@@ -102,6 +105,8 @@ export interface CompanyServiceDeps {
   goalAuthentication?: GoalAuthentication;
   /** The ONE deployment-configured service purpose registry (service-auth.json); defaults to RESUME/LEASE only. */
   servicePurposes?: ServicePurposes;
+  /** Trusted configured selection data only; owner service grants remain canonical. */
+  memoryScopes?: import('./memory-scope-config.js').MemoryScopeCatalog;
   getSession(id: string): CompanySession | undefined;
   providerHealth?(employee: CompanyEmployee): ProviderHealth | undefined;
   /** Fixed server worker transport configuration, never caller authority. */
@@ -165,19 +170,34 @@ export class CompanyService {
     readonly store: CompanyStore,
     private readonly deps: CompanyServiceDeps
   ) {
-    this.goals = new GoalLifecycle(store, () => this.now(), deps.goalAuthentication, deps.servicePurposes);
+    this.goals = new GoalLifecycle(
+      store,
+      () => this.now(),
+      deps.goalAuthentication,
+      deps.servicePurposes,
+      deps.memoryScopes
+    );
   }
   private now(): number {
     return (this.deps.now ?? Date.now)();
   }
 
-  async saveRuntimeRecipe(sessionId: string, recipe: RuntimeRecipe, stillCurrent: () => boolean = () => true): Promise<void> {
+  async saveRuntimeRecipe(
+    sessionId: string,
+    recipe: RuntimeRecipe,
+    stillCurrent: () => boolean = () => true
+  ): Promise<void> {
     const safe = RuntimeRecipeSchema.parse(recipe);
-    await this.store.update((state) => {
-      const employee = state.employees.find((e) => e.sessionId === sessionId);
-      if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication',409);
-      if (employee) employee.runtimeRecipe = safe;
-    }, () => { if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication',409); });
+    await this.store.update(
+      (state) => {
+        const employee = state.employees.find((e) => e.sessionId === sessionId);
+        if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication', 409);
+        if (employee) employee.runtimeRecipe = safe;
+      },
+      () => {
+        if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication', 409);
+      }
+    );
   }
 
   registeredEmployees() {
@@ -191,55 +211,111 @@ export class CompanyService {
   /** A route-selected actor, not a caller-supplied identity or title. Every effect rechecks this closure. */
   officeAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
     const initial = this.store.snapshot();
-    const target = initial.employees.find(e => e.id === employeeId && sameOwner(e.owner, owner));
+    const target = initial.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
     if (!target) throw new CompanyError('Unknown company employee', 404);
-    const actor = callerSessionId === undefined ? undefined : initial.employees.find(e =>
-      e.sessionId === callerSessionId && sameOwner(e.owner, owner));
+    const actor =
+      callerSessionId === undefined
+        ? undefined
+        : initial.employees.find((e) => e.sessionId === callerSessionId && sameOwner(e.owner, owner));
     const liveActor = actor ? this.deps.getSession(actor.sessionId) : undefined;
-    const actorMatches = (state: CompanyState) => callerSessionId === undefined || (!!actor && !!liveActor &&
-      this.deps.getSession(actor.sessionId) === liveActor && sameOwner(liveActor.owner, owner) &&
-      state.employees.some(e => e.id === actor.id && sameOwner(e.owner, owner) &&
-        e.sessionId === actor.sessionId && e.sessionGeneration === actor.sessionGeneration &&
-        !e.bindingMigration && !e.onVacation && e.desiredRunning !== false && e.permissions.manageOffice === true));
+    const actorMatches = (state: CompanyState) =>
+      callerSessionId === undefined ||
+      (!!actor &&
+        !!liveActor &&
+        this.deps.getSession(actor.sessionId) === liveActor &&
+        sameOwner(liveActor.owner, owner) &&
+        state.employees.some(
+          (e) =>
+            e.id === actor.id &&
+            sameOwner(e.owner, owner) &&
+            e.sessionId === actor.sessionId &&
+            e.sessionGeneration === actor.sessionGeneration &&
+            !e.bindingMigration &&
+            !e.onVacation &&
+            e.desiredRunning !== false &&
+            e.permissions.manageOffice === true
+        ));
     if (!actorMatches(initial)) throw new CompanyError('Office management permission is required', 403);
     const recipe = JSON.stringify(target.runtimeRecipe);
-    const current = (state = this.store.snapshot()) => actorMatches(state) && state.employees.some(e =>
-      e.id === target.id && sameOwner(e.owner, owner) && e.sessionId === target.sessionId &&
-      e.sessionGeneration === target.sessionGeneration && !e.bindingMigration && JSON.stringify(e.runtimeRecipe) === recipe);
-    return { current, require: (state?: CompanyState) => {
-      if (!current(state)) throw new CompanyError('Office permission or employee binding changed', 409);
-    } };
+    const current = (state = this.store.snapshot()) =>
+      actorMatches(state) &&
+      state.employees.some(
+        (e) =>
+          e.id === target.id &&
+          sameOwner(e.owner, owner) &&
+          e.sessionId === target.sessionId &&
+          e.sessionGeneration === target.sessionGeneration &&
+          !e.bindingMigration &&
+          JSON.stringify(e.runtimeRecipe) === recipe
+      );
+    return {
+      current,
+      require: (state?: CompanyState) => {
+        if (!current(state)) throw new CompanyError('Office permission or employee binding changed', 409);
+      },
+    };
   }
 
   /** Only the verified-owner runtime route calls this; ordinary wake never changes stopped intent. */
-  prepareRuntimeRestart(sessionId: string, owner: string | undefined, authorized: (state?: CompanyState) => boolean = () => true): RuntimeRestartIntent | undefined {
+  prepareRuntimeRestart(
+    sessionId: string,
+    owner: string | undefined,
+    authorized: (state?: CompanyState) => boolean = () => true
+  ): RuntimeRestartIntent | undefined {
     if (!authorized()) throw new CompanyError('Office permission or employee binding changed', 409);
-    const original = this.store.snapshot().employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
+    const original = this.store
+      .snapshot()
+      .employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
     if (!original) return undefined;
-    if (original.onVacation || original.bindingMigration || this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId))
+    if (
+      original.onVacation ||
+      original.bindingMigration ||
+      this.runtimeRestarts.has(sessionId) ||
+      this.wakeFlights.has(sessionId)
+    )
       throw new CompanyError('This expert changed or is already restarting', 409);
     const transaction = { cancelled: false, closed: false };
     this.runtimeRestarts.set(sessionId, transaction);
     let claimed = false;
-    const matches = (employee: CompanyEmployee | undefined): employee is CompanyEmployee => !!employee && employee.id === original.id &&
-      employee.sessionId === sessionId && employee.sessionGeneration === original.sessionGeneration &&
-      sameOwner(employee.owner, owner) && !employee.onVacation && !employee.bindingMigration;
-    const current = () => !transaction.cancelled && !transaction.closed &&
-      this.runtimeRestarts.get(sessionId) === transaction;
+    const matches = (employee: CompanyEmployee | undefined): employee is CompanyEmployee =>
+      !!employee &&
+      employee.id === original.id &&
+      employee.sessionId === sessionId &&
+      employee.sessionGeneration === original.sessionGeneration &&
+      sameOwner(employee.owner, owner) &&
+      !employee.onVacation &&
+      !employee.bindingMigration;
+    const current = () =>
+      !transaction.cancelled && !transaction.closed && this.runtimeRestarts.get(sessionId) === transaction;
     return {
       originallyStopped: original.desiredRunning === false,
       token: transaction,
       current: () => {
         const employee = this.store.snapshot().employees.find((e) => e.id === original.id);
-        return authorized() && current() && matches(employee) && employee.desiredRunning === (claimed ? true : original.desiredRunning);
+        return (
+          authorized() &&
+          current() &&
+          matches(employee) &&
+          employee.desiredRunning === (claimed ? true : original.desiredRunning)
+        );
       },
       claim: async () => {
-        await this.store.update((state) => {
-          const employee = state.employees.find((e) => e.id === original.id);
-          if (!authorized(state) || !current() || !matches(employee) || employee.desiredRunning !== original.desiredRunning)
-            throw new CompanyError('This expert changed or stopped while runtime settings were being validated', 409);
-          employee.desiredRunning = true;
-        }, () => { if (!authorized()) throw new CompanyError('Office permission or employee binding changed',409); });
+        await this.store.update(
+          (state) => {
+            const employee = state.employees.find((e) => e.id === original.id);
+            if (
+              !authorized(state) ||
+              !current() ||
+              !matches(employee) ||
+              employee.desiredRunning !== original.desiredRunning
+            )
+              throw new CompanyError('This expert changed or stopped while runtime settings were being validated', 409);
+            employee.desiredRunning = true;
+          },
+          () => {
+            if (!authorized()) throw new CompanyError('Office permission or employee binding changed', 409);
+          }
+        );
         claimed = true;
       },
       rollback: async () => {
@@ -259,16 +335,28 @@ export class CompanyService {
 
   /** Shared with owner restart: the lease covers recovery claim, launch and registration. */
   prepareWake(employeeId: string, sessionId: string) {
-    const employee = this.store.snapshot().employees.find(e => e.id === employeeId && e.sessionId === sessionId);
-    if (!employee || employee.onVacation || employee.desiredRunning === false ||
-        this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId)) return undefined;
+    const employee = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
+    if (
+      !employee ||
+      employee.onVacation ||
+      employee.desiredRunning === false ||
+      this.runtimeRestarts.has(sessionId) ||
+      this.wakeFlights.has(sessionId)
+    )
+      return undefined;
     const flight = { cancelled: false };
     this.wakeFlights.set(sessionId, flight);
     return {
       current: () => {
-        const current = this.store.snapshot().employees.find(e => e.id === employeeId && e.sessionId === sessionId);
-        return this.wakeFlights.get(sessionId) === flight && !flight.cancelled && !!current &&
-          sameOwner(current.owner, employee.owner) && !current.onVacation && current.desiredRunning !== false;
+        const current = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
+        return (
+          this.wakeFlights.get(sessionId) === flight &&
+          !flight.cancelled &&
+          !!current &&
+          sameOwner(current.owner, employee.owner) &&
+          !current.onVacation &&
+          current.desiredRunning !== false
+        );
       },
       finish: () => {
         if (this.wakeFlights.get(sessionId) === flight) this.wakeFlights.delete(sessionId);
@@ -286,9 +374,15 @@ export class CompanyService {
     return {
       employees: employees.map((e) => {
         const session = this.deps.getSession(e.sessionId);
-        return { ...e, available: !!session, runtimeHealth: session?.runtimeHealth ?? 'unknown',
-          runtimeHealthScope: session?.runtimeHealthScope ?? (this.deps.workerViewers ? 'terminal' : 'provider'), workerViewerReconnect: session?.workerViewerReconnect === true,
-          providerHealth: sessionCounts.get(e.sessionId) === 1 ? this.deps.providerHealth?.(e) : undefined, viewerHealth: viewerHealth(session, this.deps.workerViewers) };
+        return {
+          ...e,
+          available: !!session,
+          runtimeHealth: session?.runtimeHealth ?? 'unknown',
+          runtimeHealthScope: session?.runtimeHealthScope ?? (this.deps.workerViewers ? 'terminal' : 'provider'),
+          workerViewerReconnect: session?.workerViewerReconnect === true,
+          providerHealth: sessionCounts.get(e.sessionId) === 1 ? this.deps.providerHealth?.(e) : undefined,
+          viewerHealth: viewerHealth(session, this.deps.workerViewers),
+        };
       }),
       settings: state.settings.find((s) => sameOwner(s.owner, owner)) ?? CompanySettingsSchema.parse({ owner }),
       cycles: state.cycles.filter((c) => sameOwner(c.owner, owner)),
@@ -308,7 +402,12 @@ export class CompanyService {
   ): Promise<void> {
     const restart = this.runtimeRestarts.get(sessionId);
     const wake = this.wakeFlights.get(sessionId);
-    if (!restart && !wake && !this.store.snapshot().employees.some((e) => e.sessionId === sessionId && e.desiredRunning !== running)) return;
+    if (
+      !restart &&
+      !wake &&
+      !this.store.snapshot().employees.some((e) => e.sessionId === sessionId && e.desiredRunning !== running)
+    )
+      return;
     await this.store.update((state) => {
       // Persistence and onRuntimeSaved may finish after an owner stop. Neither may revive it.
       if (!stillCurrent() || (running && restart && (restart.cancelled || restart.closed))) return;
@@ -327,7 +426,14 @@ export class CompanyService {
     if (!observed || observed.desiredRunning !== undefined || observed.onVacation || observed.bindingMigration) return;
     await this.store.update((state) => {
       const employee = state.employees.find((entry) => entry.sessionId === sessionId);
-      if (!employee || employee.desiredRunning === false || employee.onVacation || employee.bindingMigration || !stillCurrent()) return;
+      if (
+        !employee ||
+        employee.desiredRunning === false ||
+        employee.onVacation ||
+        employee.bindingMigration ||
+        !stillCurrent()
+      )
+        return;
       employee.desiredRunning = true;
     });
   }
@@ -336,7 +442,8 @@ export class CompanyService {
   async claimWake(employeeId: string, sessionId: string, now: number, automatic = true): Promise<boolean> {
     return this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
-      if (!employee || employee.onVacation || employee.desiredRunning === false || this.runtimeRestarts.has(sessionId)) return false;
+      if (!employee || employee.onVacation || employee.desiredRunning === false || this.runtimeRestarts.has(sessionId))
+        return false;
       const settings = state.settings.find((s) => s.owner === employee.owner);
       if (automatic && settings?.autoWakeEnabled === false) return false;
       const attempts = employee.wakeAttempts.filter((at) => at > now - 15 * 60_000);
@@ -347,30 +454,56 @@ export class CompanyService {
     });
   }
 
-  async setVacation(employeeId: string, owner: string | undefined, enabled: boolean, guard?: (state?: CompanyState) => void): Promise<CompanyEmployee> {
-    const before = this.store.snapshot().employees.find(e => e.id === employeeId && sameOwner(e.owner, owner));
-    const employee = await this.store.update((state) => {
-      const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
-      if (!employee) throw new CompanyError('Unknown employee', 404);
-      guard?.(state);
-      if (guard && (!before || employee.sessionId !== before.sessionId || employee.sessionGeneration !== before.sessionGeneration ||
-          employee.desiredRunning !== before.desiredRunning || employee.onVacation !== before.onVacation))
-        throw new CompanyError('Employee office intent changed', 409);
-      if (enabled && this.deps.getSession(employee.sessionId) && !this.deps.stopSession)
-        throw new CompanyError('Session stopping is not ready', 503);
-      const restart = this.runtimeRestarts.get(employee.sessionId);
-      if (restart) restart.cancelled = true;
-      const wake = this.wakeFlights.get(employee.sessionId); if (wake) wake.cancelled = true;
-      employee.onVacation = enabled;
-      employee.desiredRunning = !enabled;
-      if (!enabled) employee.wakeAttempts = [];
-      return employee;
-    }, () => guard?.());
+  async setVacation(
+    employeeId: string,
+    owner: string | undefined,
+    enabled: boolean,
+    guard?: (state?: CompanyState) => void
+  ): Promise<CompanyEmployee> {
+    const before = this.store.snapshot().employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+    const employee = await this.store.update(
+      (state) => {
+        const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+        if (!employee) throw new CompanyError('Unknown employee', 404);
+        guard?.(state);
+        if (
+          guard &&
+          (!before ||
+            employee.sessionId !== before.sessionId ||
+            employee.sessionGeneration !== before.sessionGeneration ||
+            employee.desiredRunning !== before.desiredRunning ||
+            employee.onVacation !== before.onVacation)
+        )
+          throw new CompanyError('Employee office intent changed', 409);
+        if (enabled && this.deps.getSession(employee.sessionId) && !this.deps.stopSession)
+          throw new CompanyError('Session stopping is not ready', 503);
+        const restart = this.runtimeRestarts.get(employee.sessionId);
+        if (restart) restart.cancelled = true;
+        const wake = this.wakeFlights.get(employee.sessionId);
+        if (wake) wake.cancelled = true;
+        employee.onVacation = enabled;
+        employee.desiredRunning = !enabled;
+        if (!enabled) employee.wakeAttempts = [];
+        return employee;
+      },
+      () => guard?.()
+    );
     const currentIntent = () => {
       guard?.();
-      if (guard && !this.store.snapshot().employees.some(e=>e.id===employee.id && e.sessionId===employee.sessionId &&
-          e.sessionGeneration===employee.sessionGeneration && e.onVacation===enabled && e.desiredRunning===!enabled))
-        throw new CompanyError('Employee office intent changed',409);
+      if (
+        guard &&
+        !this.store
+          .snapshot()
+          .employees.some(
+            (e) =>
+              e.id === employee.id &&
+              e.sessionId === employee.sessionId &&
+              e.sessionGeneration === employee.sessionGeneration &&
+              e.onVacation === enabled &&
+              e.desiredRunning === !enabled
+          )
+      )
+        throw new CompanyError('Employee office intent changed', 409);
     };
     currentIntent();
     if (enabled) {
@@ -455,7 +588,10 @@ export class CompanyService {
         throw new CompanyError('Session already bound', 409);
       if (state.employees.some((e) => sameOwner(e.owner, owner) && employeeNamesConflict(e.name, record.name)))
         throw new CompanyError(`"${record.name}" is an existing employee; rename one of them first`, 409);
-      validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, owner))?.coreBeliefs, record.coreBeliefs);
+      validateEffectiveCore(
+        state.settings.find((settings) => sameOwner(settings.owner, owner))?.coreBeliefs,
+        record.coreBeliefs
+      );
       state.retired.splice(index, 1);
       state.employees.push(record);
       validateReportingLine(state, record);
@@ -477,17 +613,16 @@ export class CompanyService {
       throw new CompanyError('Bind an existing session owned by this company');
     const hired = await this.store.update((state) => {
       if (
-        state.employees.some(
-          (e) =>
-            sameOwner(e.owner, employee.owner) &&
-            employeeNamesConflict(e.name, employee.name)
-        )
+        state.employees.some((e) => sameOwner(e.owner, employee.owner) && employeeNamesConflict(e.name, employee.name))
       )
         throw new CompanyError('That name is already used in this company. Choose a distinct name.', 409);
       if (state.employees.some((e) => e.sessionId === employee.sessionId))
         throw new CompanyError('This session already has a permanent identity', 409);
       if (state.employees.length >= 200) throw new CompanyError('Company employee limit reached', 409);
-      validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, employee.owner))?.coreBeliefs, employee.coreBeliefs);
+      validateEffectiveCore(
+        state.settings.find((settings) => sameOwner(settings.owner, employee.owner))?.coreBeliefs,
+        employee.coreBeliefs
+      );
       state.employees.push(employee);
       validateReportingLine(state, employee);
       return employee;
@@ -501,12 +636,13 @@ export class CompanyService {
     const { ownerAvatar: _ignored, ...rest } = input;
     void _ignored;
     return this.store.update((state) => {
-      const previous = state.settings.find(value => sameOwner(value.owner, owner));
+      const previous = state.settings.find((value) => sameOwner(value.owner, owner));
       const parsed = CompanySettingsSchema.safeParse({ ...previous, ...rest, owner });
       if (!parsed.success) throw new CompanyError('Invalid company settings', 400);
       const settings = parsed.data;
-      if (settings.nightHour >= settings.morningHour) throw new CompanyError('Night hour must precede the morning hour');
-      for (const employee of state.employees.filter(row => sameOwner(row.owner, owner)))
+      if (settings.nightHour >= settings.morningHour)
+        throw new CompanyError('Night hour must precede the morning hour');
+      for (const employee of state.employees.filter((row) => sameOwner(row.owner, owner)))
         validateEffectiveCore(settings.coreBeliefs, employee.coreBeliefs);
       if (
         settings.coordinatorEmployeeId &&
@@ -612,9 +748,12 @@ export class CompanyService {
     const persistedRecipe = (value: unknown) => RuntimeRecipeSchema.parse(JSON.parse(JSON.stringify(value)));
     const expectedRecipe = expected ? persistedRecipe(expected.targetRecipe) : undefined;
     const validateCandidate = () => {
-      if (expected && (this.deps.getSession(sessionId) !== session ||
-          !sameOwner(session.owner, owner) || !isDeepStrictEqual(
-            persistedRecipe(this.deps.runtimeRecipeOf?.(sessionId)), expectedRecipe)))
+      if (
+        expected &&
+        (this.deps.getSession(sessionId) !== session ||
+          !sameOwner(session.owner, owner) ||
+          !isDeepStrictEqual(persistedRecipe(this.deps.runtimeRecipeOf?.(sessionId)), expectedRecipe))
+      )
         throw new CompanyError('Approved replacement session or recipe changed', 409);
     };
     if (expected && (!nextRecipe || !isDeepStrictEqual(persistedRecipe(nextRecipe), expectedRecipe)))
@@ -636,7 +775,8 @@ export class CompanyService {
       previous = employee.sessionId;
       const restart = this.runtimeRestarts.get(previous);
       if (restart && restart !== keep) restart.cancelled = true;
-      const wake = this.wakeFlights.get(previous); if (wake) wake.cancelled = true;
+      const wake = this.wakeFlights.get(previous);
+      if (wake) wake.cancelled = true;
       previousThread = employee.threadId;
       previousRecipe = employee.runtimeRecipe;
       if (employee.sessionId !== sessionId) {
@@ -787,31 +927,37 @@ export class CompanyService {
       .partial()
       .strict()
       .parse(change);
-    const result = await this.store.update((state) => {
-      const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
-      if (!employee) throw new CompanyError('Unknown employee', 404);
-      const before = structuredClone(employee);
-      validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, owner))?.coreBeliefs,
-        parsed.coreBeliefs ?? employee.coreBeliefs);
-      if (parsed.position !== undefined) employee.position = parsed.position;
-      if (parsed.permissions !== undefined) employee.permissions = { ...employee.permissions, ...parsed.permissions };
-      if (parsed.sleepEnabled !== undefined) employee.sleepEnabled = parsed.sleepEnabled;
-      if (parsed.dreamEnabled !== undefined) employee.dreamEnabled = parsed.dreamEnabled;
-      if (parsed.expertise !== undefined) employee.expertise = parsed.expertise;
-      if (parsed.responsibilities !== undefined) employee.responsibilities = parsed.responsibilities;
-      if (parsed.personality !== undefined) employee.personality = parsed.personality;
-      if (parsed.coreBeliefs !== undefined) employee.coreBeliefs = parsed.coreBeliefs;
-      if (parsed.icon !== undefined) employee.icon = parsed.icon;
-      if (parsed.avatarBackground === null) delete employee.avatarBackground;
-      else if (parsed.avatarBackground !== undefined) employee.avatarBackground = parsed.avatarBackground;
-      if (parsed.reportsTo !== undefined) employee.reportsTo = parsed.reportsTo;
-      if (parsed.pronouns === null) delete employee.pronouns;
-      else if (parsed.pronouns !== undefined) employee.pronouns = parsed.pronouns;
-      if (parsed.voice === null) delete employee.voice;
-      else if (parsed.voice !== undefined) employee.voice = parsed.voice;
-      validateReportingLine(state, employee);
-      return { before, employee };
-    }, undefined, audit ? ({ before, employee }) => audit(before, employee) : undefined);
+    const result = await this.store.update(
+      (state) => {
+        const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+        if (!employee) throw new CompanyError('Unknown employee', 404);
+        const before = structuredClone(employee);
+        validateEffectiveCore(
+          state.settings.find((settings) => sameOwner(settings.owner, owner))?.coreBeliefs,
+          parsed.coreBeliefs ?? employee.coreBeliefs
+        );
+        if (parsed.position !== undefined) employee.position = parsed.position;
+        if (parsed.permissions !== undefined) employee.permissions = { ...employee.permissions, ...parsed.permissions };
+        if (parsed.sleepEnabled !== undefined) employee.sleepEnabled = parsed.sleepEnabled;
+        if (parsed.dreamEnabled !== undefined) employee.dreamEnabled = parsed.dreamEnabled;
+        if (parsed.expertise !== undefined) employee.expertise = parsed.expertise;
+        if (parsed.responsibilities !== undefined) employee.responsibilities = parsed.responsibilities;
+        if (parsed.personality !== undefined) employee.personality = parsed.personality;
+        if (parsed.coreBeliefs !== undefined) employee.coreBeliefs = parsed.coreBeliefs;
+        if (parsed.icon !== undefined) employee.icon = parsed.icon;
+        if (parsed.avatarBackground === null) delete employee.avatarBackground;
+        else if (parsed.avatarBackground !== undefined) employee.avatarBackground = parsed.avatarBackground;
+        if (parsed.reportsTo !== undefined) employee.reportsTo = parsed.reportsTo;
+        if (parsed.pronouns === null) delete employee.pronouns;
+        else if (parsed.pronouns !== undefined) employee.pronouns = parsed.pronouns;
+        if (parsed.voice === null) delete employee.voice;
+        else if (parsed.voice !== undefined) employee.voice = parsed.voice;
+        validateReportingLine(state, employee);
+        return { before, employee };
+      },
+      undefined,
+      audit ? ({ before, employee }) => audit(before, employee) : undefined
+    );
     this.deps.bindIdentity?.(result.employee);
     return result.employee;
   }
@@ -824,19 +970,25 @@ export class CompanyService {
     enabled: boolean,
     audit: (before: CompanyEmployee, after: CompanyEmployee) => Promise<void>
   ): Promise<CompanyEmployee> {
-    if (!z.object({ tokenId: z.string().uuid(), enabled: z.boolean() }).strict().safeParse({ tokenId, enabled }).success)
+    if (
+      !z.object({ tokenId: z.string().uuid(), enabled: z.boolean() }).strict().safeParse({ tokenId, enabled }).success
+    )
       throw new CompanyError('Choose a valid PAT identifier and grant value', 400);
-    const result = await this.store.update(state => {
-      const employee = state.employees.find(item => item.id === employeeId && sameOwner(item.owner, owner));
-      if (!employee) throw new CompanyError('Unknown employee', 404);
-      const before = structuredClone(employee);
-      const current = employee.permissions.publicationTokenIds ?? [];
-      const next = enabled ? [...new Set([...current, tokenId])] : current.filter(id => id !== tokenId);
-      const checked = EmployeePermissionsSchema.shape.publicationTokenIds.safeParse(next);
-      if (!checked.success) throw new CompanyError('At most 64 named PAT grants are allowed per expert', 400);
-      employee.permissions.publicationTokenIds = checked.data;
-      return { before, employee };
-    }, undefined, ({ before, employee }) => audit(before, employee));
+    const result = await this.store.update(
+      (state) => {
+        const employee = state.employees.find((item) => item.id === employeeId && sameOwner(item.owner, owner));
+        if (!employee) throw new CompanyError('Unknown employee', 404);
+        const before = structuredClone(employee);
+        const current = employee.permissions.publicationTokenIds ?? [];
+        const next = enabled ? [...new Set([...current, tokenId])] : current.filter((id) => id !== tokenId);
+        const checked = EmployeePermissionsSchema.shape.publicationTokenIds.safeParse(next);
+        if (!checked.success) throw new CompanyError('At most 64 named PAT grants are allowed per expert', 400);
+        employee.permissions.publicationTokenIds = checked.data;
+        return { before, employee };
+      },
+      undefined,
+      ({ before, employee }) => audit(before, employee)
+    );
     return result.employee;
   }
 
@@ -886,9 +1038,16 @@ export class CompanyService {
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Unknown agent session', 403);
     const result = await this.store.update((state) => {
       const employee = state.employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
-      if (change.name !== undefined && state.employees.some(e =>
-        e.id !== employee?.id && sameOwner(e.owner, owner) && employeeNamesConflict(e.name, change.name!)))
-        throw new CompanyError('That name or case folder is already used in this company. Choose a distinct name.', 409);
+      if (
+        change.name !== undefined &&
+        state.employees.some(
+          (e) => e.id !== employee?.id && sameOwner(e.owner, owner) && employeeNamesConflict(e.name, change.name!)
+        )
+      )
+        throw new CompanyError(
+          'That name or case folder is already used in this company. Choose a distinct name.',
+          409
+        );
       let target: { name: string; icon: string } | undefined =
         employee ?? state.temporaryAgents.find((a) => a.sessionId === sessionId && sameOwner(a.owner, owner));
       if (!target && change.icon !== undefined) {
@@ -1053,8 +1212,11 @@ export class CompanyService {
     await this.store.update((state) => {
       if (full(state.temporaryAgents))
         throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
-      if (state.employees.some(e => sameOwner(e.owner, this.deps.getSession(sessionId)?.owner) &&
-        employeeNamesConflict(e.name, plan.name)))
+      if (
+        state.employees.some(
+          (e) => sameOwner(e.owner, this.deps.getSession(sessionId)?.owner) && employeeNamesConflict(e.name, plan.name)
+        )
+      )
         throw new CompanyError('That name is an existing employee. Choose a distinct name.', 409);
       // Recheck the name under the company transaction before creating a room seat.
       // A refused join must not leave a temporary-worker record behind.

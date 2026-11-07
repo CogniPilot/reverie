@@ -1,5 +1,5 @@
 //! Named read-side laptop registry/lineage facts. No authorization or write API.
-mod lineage;
+pub(crate) mod lineage;
 mod registry;
 
 use crate::legacy_json::{self, Node, Number, Text, Value, truthy};
@@ -58,20 +58,29 @@ type Result<T> = std::result::Result<T, IdentityDataError>;
 
 /// Python text, preserving Unicode codepoints and lone surrogates without loss.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct MetadataText(Text);
+pub struct MetadataText(reverie_core::PythonText);
 impl MetadataText {
-    pub(crate) fn from_text(value: Text) -> Self {
+    pub fn from_python_text(value: reverie_core::PythonText) -> Self {
         Self(value)
     }
+    pub(crate) fn from_text(value: Text) -> Self {
+        Self(
+            reverie_core::PythonText::try_new(value.0)
+                .expect("JSON parser produces Python codepoints"),
+        )
+    }
     pub fn from_scalar_text(value: &str) -> Self {
-        Self(Text(value.chars().map(u32::from).collect()))
+        Self(reverie_core::PythonText::from_scalar_text(value))
     }
     pub fn codepoints(&self) -> &[u32] {
-        &self.0.0
+        self.0.codepoints()
+    }
+    pub fn as_python_text_ref(&self) -> reverie_core::PythonTextRef<'_> {
+        self.0.as_text_ref()
     }
     pub fn scalar_text(&self) -> Option<String> {
         self.0
-            .0
+            .codepoints()
             .iter()
             .map(|&value| char::from_u32(value))
             .collect()
@@ -92,13 +101,51 @@ impl EmployeeGeneration {
 /// Duplicate-free json.loads(bytes) data. Named views validate their own shapes;
 /// successful decoding alone is neither a registry nor a host-effect capability.
 pub struct Metadata(Value);
+/// Metadata data retaining actual object order where a named native workflow
+/// must preserve its filesystem observation order. No editing API is exposed.
+pub struct OrderedMetadata(legacy_json::ordered::OrderedValue);
+impl OrderedMetadata {
+    pub(crate) fn ordered(&self) -> &legacy_json::ordered::OrderedValue {
+        &self.0
+    }
+    pub(crate) fn as_value(&self) -> &Value {
+        &self.0.value
+    }
+    pub(crate) fn object_field_order(&self, name: &str) -> Option<Vec<Text>> {
+        let name = Text(name.chars().map(u32::from).collect());
+        let index = self.0.root_child_index(&name)?;
+        let legacy_json::ordered::OrderNode::Object(order) = self.0.graph.nodes.get(index)? else {
+            return None;
+        };
+        Some(order.iter().map(|(name, _)| name.clone()).collect())
+    }
+}
+pub fn decode_ordered_metadata(raw: &[u8]) -> Result<OrderedMetadata> {
+    legacy_json::decode_ordered_metadata_bytes(raw)
+        .map(OrderedMetadata)
+        .map_err(decode_error)
+}
+
+impl Metadata {
+    /// Python equality of complete metadata DATA, retaining codepoints and
+    /// number semantics. This is not a current-file or identity permission.
+    pub fn equivalent(&self, other: &Self) -> bool {
+        self.0.python_eq(&other.0)
+    }
+    pub(crate) fn as_value(&self) -> &Value {
+        &self.0
+    }
+}
 pub fn decode_metadata(raw: &[u8]) -> Result<Metadata> {
     legacy_json::decode_metadata_bytes(raw)
         .map(Metadata)
-        .map_err(|error| match error {
-            legacy_json::Error::InvalidJson => IdentityDataError::InvalidJson,
-            legacy_json::Error::DuplicateKey => IdentityDataError::DuplicateKey,
-        })
+        .map_err(decode_error)
+}
+fn decode_error(error: legacy_json::Error) -> IdentityDataError {
+    match error {
+        legacy_json::Error::InvalidJson => IdentityDataError::InvalidJson,
+        legacy_json::Error::DuplicateKey => IdentityDataError::DuplicateKey,
+    }
 }
 type Object = BTreeMap<Text, Value>;
 fn object(value: &Value) -> Option<&Object> {
@@ -113,7 +160,7 @@ fn field<'a>(value: &'a Object, key: &str) -> Option<&'a Value> {
 }
 fn text(value: Option<&Value>) -> Option<MetadataText> {
     if let Some(Value(Node::String(value))) = value {
-        Some(MetadataText(value.clone()))
+        Some(MetadataText::from_text(value.clone()))
     } else {
         None
     }
@@ -122,7 +169,7 @@ fn owner(value: Option<&Value>) -> Result<Option<MetadataText>> {
     match value {
         None | Some(Value(Node::Null)) => Ok(None),
         Some(Value(Node::String(value))) if value.0.len() <= 200 => {
-            Ok(Some(MetadataText(value.clone())))
+            Ok(Some(MetadataText::from_text(value.clone())))
         }
         _ => Err(IdentityDataError::Owner),
     }
@@ -130,9 +177,9 @@ fn owner(value: Option<&Value>) -> Result<Option<MetadataText>> {
 fn owner_matches(value: Option<&Value>, owner: &Option<MetadataText>) -> bool {
     match value {
         None | Some(Value(Node::Null)) => owner.is_none(),
-        Some(value) => owner
-            .as_ref()
-            .is_some_and(|expected| value.python_eq(&Value(Node::String(expected.0.clone())))),
+        Some(value) => owner.as_ref().is_some_and(|expected| {
+            value.python_eq(&Value(Node::String(Text(expected.codepoints().to_vec()))))
+        }),
     }
 }
 fn is_one(value: Option<&Value>) -> bool {

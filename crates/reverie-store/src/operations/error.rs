@@ -4,6 +4,13 @@ use std::fmt;
 #[derive(Debug)]
 pub enum JournalError {
     Refused(OperationError),
+    /// A failure from the fixed installing-service guard. Retain its complete
+    /// typed error (including secondary finalizers) without changing the
+    /// stable decision code or requiring consumers to inspect/downcast it.
+    ScopeGuard {
+        code: &'static str,
+        cause: Box<dyn std::error::Error + Send + Sync>,
+    },
     Filesystem(StoreError),
     Finalization {
         primary: Box<Self>,
@@ -14,6 +21,15 @@ pub enum JournalError {
     },
 }
 impl JournalError {
+    pub fn guard_failure(
+        code: &'static str,
+        cause: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::ScopeGuard {
+            code,
+            cause: Box::new(cause),
+        }
+    }
     pub fn refusal(code: &'static str) -> Self {
         Self::Refused(OperationError::new(code))
     }
@@ -23,6 +39,7 @@ impl JournalError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(error) => error.code(),
+            Self::ScopeGuard { code, .. } => code,
             Self::Filesystem(error) => filesystem_code(error),
             Self::Finalization { primary, .. } => primary.code(),
             Self::CommitUncertain { .. } => "COMMIT_OR_RESPONSE_UNCERTAIN_KEEP_ALL_CLAIMS",
@@ -71,6 +88,7 @@ impl std::error::Error for JournalError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Refused(e) => Some(e),
+            Self::ScopeGuard { cause, .. } => Some(&**cause),
             Self::Filesystem(e) => Some(e),
             Self::Finalization { primary, .. } | Self::CommitUncertain { cause: primary } => {
                 Some(primary)

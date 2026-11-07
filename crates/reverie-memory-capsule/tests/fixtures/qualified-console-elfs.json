@@ -1,0 +1,868 @@
+{
+  "source": "Actual qualified ad38 Console complete 66-ELF inventory; no assets deleted",
+  "console": "/nix/store/v4a9sfmsny7wlgbxwcws95fz9x3cfbxy-reverie-console-1.41.1/lib/reverie",
+  "consoleIndexSha256": "a504edd39abee175fe78eb85009c9325811b9084d5e5876cf544bf9cc66528b5",
+  "runtimeImportReceiptSha256": "a089f3f80396ed0ba8e3985a72740afa8e49af72638d888979f169328091262f",
+  "cases": [
+    {
+      "path": "node_modules/tsx/node_modules/esbuild/bin/esbuild",
+      "machine": 62,
+      "package": "esbuild",
+      "version": "0.28.0",
+      "packageJsonSha256": "4316bc9a54bbf659d5760f299910d1824045178557e0aea6a1e3c64148fe8a50",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/tsx/node_modules/@esbuild/linux-x64/bin/esbuild",
+      "machine": 62,
+      "package": "@esbuild/linux-x64",
+      "version": "0.28.0",
+      "packageJsonSha256": "583586f8944441da96938a7e23796408f25d5e708677389a45c54eded7aff959",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/node-pty/build/Release/pty.node",
+      "machine": 62,
+      "package": "node-pty",
+      "version": "1.1.0",
+      "packageJsonSha256": "f8b6a14f7022c14f1cd5d109486f5dacd32bffb63a9a63e38eced37dacb47439",
+      "role": "relocated-required-node-addon",
+      "reason": "Root production dependency; actual journal CLI sharedObjects contains this addon",
+      "lockFacts": {
+        "dev": false,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/lightningcss-linux-x64-musl/lightningcss.linux-x64-musl.node",
+      "machine": 62,
+      "package": "lightningcss-linux-x64-musl",
+      "version": "1.32.0",
+      "packageJsonSha256": "6d7a4bcc5fef739dae30dbf9852578f2d31b69a174f7b9333eb0dbdf03a959c9",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/lightningcss-linux-x64-gnu/lightningcss.linux-x64-gnu.node",
+      "machine": 62,
+      "package": "lightningcss-linux-x64-gnu",
+      "version": "1.32.0",
+      "packageJsonSha256": "38c8b40149b0492fbfcc06b4b8fab20314d9b9d0e648c7da8c5c0634b6a90412",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/esbuild/bin/esbuild",
+      "machine": 62,
+      "package": "esbuild",
+      "version": "0.27.7",
+      "packageJsonSha256": "9ce21c976ffbbb95001f460e9e8af7c6d719f748eb70441e617a14dd0b68a5b8",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-url/prebuilds/linux-x64/bare-url.bare",
+      "machine": 62,
+      "package": "bare-url",
+      "version": "2.4.5",
+      "packageJsonSha256": "1431c355f5b16f95268fa56d29b2c4b20824389a24aa49b6366636b31e9f6cd2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-url/prebuilds/linux-arm64/bare-url.bare",
+      "machine": 183,
+      "package": "bare-url",
+      "version": "2.4.5",
+      "packageJsonSha256": "1431c355f5b16f95268fa56d29b2c4b20824389a24aa49b6366636b31e9f6cd2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-url/prebuilds/android-x64/bare-url.bare",
+      "machine": 62,
+      "package": "bare-url",
+      "version": "2.4.5",
+      "packageJsonSha256": "1431c355f5b16f95268fa56d29b2c4b20824389a24aa49b6366636b31e9f6cd2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-url/prebuilds/android-ia32/bare-url.bare",
+      "machine": 3,
+      "package": "bare-url",
+      "version": "2.4.5",
+      "packageJsonSha256": "1431c355f5b16f95268fa56d29b2c4b20824389a24aa49b6366636b31e9f6cd2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-url/prebuilds/android-arm64/bare-url.bare",
+      "machine": 183,
+      "package": "bare-url",
+      "version": "2.4.5",
+      "packageJsonSha256": "1431c355f5b16f95268fa56d29b2c4b20824389a24aa49b6366636b31e9f6cd2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-url/prebuilds/android-arm/bare-url.bare",
+      "machine": 40,
+      "package": "bare-url",
+      "version": "2.4.5",
+      "packageJsonSha256": "1431c355f5b16f95268fa56d29b2c4b20824389a24aa49b6366636b31e9f6cd2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-os/prebuilds/linux-x64/bare-os.bare",
+      "machine": 62,
+      "package": "bare-os",
+      "version": "3.9.1",
+      "packageJsonSha256": "0987b6cec0310dfba6ee203314085ba4b276b9d4b81c377170e623bff3dafba9",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-os/prebuilds/linux-arm64/bare-os.bare",
+      "machine": 183,
+      "package": "bare-os",
+      "version": "3.9.1",
+      "packageJsonSha256": "0987b6cec0310dfba6ee203314085ba4b276b9d4b81c377170e623bff3dafba9",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-os/prebuilds/android-x64/bare-os.bare",
+      "machine": 62,
+      "package": "bare-os",
+      "version": "3.9.1",
+      "packageJsonSha256": "0987b6cec0310dfba6ee203314085ba4b276b9d4b81c377170e623bff3dafba9",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-os/prebuilds/android-ia32/bare-os.bare",
+      "machine": 3,
+      "package": "bare-os",
+      "version": "3.9.1",
+      "packageJsonSha256": "0987b6cec0310dfba6ee203314085ba4b276b9d4b81c377170e623bff3dafba9",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-os/prebuilds/android-arm64/bare-os.bare",
+      "machine": 183,
+      "package": "bare-os",
+      "version": "3.9.1",
+      "packageJsonSha256": "0987b6cec0310dfba6ee203314085ba4b276b9d4b81c377170e623bff3dafba9",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-os/prebuilds/android-arm/bare-os.bare",
+      "machine": 40,
+      "package": "bare-os",
+      "version": "3.9.1",
+      "packageJsonSha256": "0987b6cec0310dfba6ee203314085ba4b276b9d4b81c377170e623bff3dafba9",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-fs/prebuilds/linux-x64/bare-fs.bare",
+      "machine": 62,
+      "package": "bare-fs",
+      "version": "4.7.2",
+      "packageJsonSha256": "cc4d590dd66650497a596313b27d07fe4235c6b23aa3588f3c85149725fc9811",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-fs/prebuilds/linux-arm64/bare-fs.bare",
+      "machine": 183,
+      "package": "bare-fs",
+      "version": "4.7.2",
+      "packageJsonSha256": "cc4d590dd66650497a596313b27d07fe4235c6b23aa3588f3c85149725fc9811",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-fs/prebuilds/android-x64/bare-fs.bare",
+      "machine": 62,
+      "package": "bare-fs",
+      "version": "4.7.2",
+      "packageJsonSha256": "cc4d590dd66650497a596313b27d07fe4235c6b23aa3588f3c85149725fc9811",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-fs/prebuilds/android-ia32/bare-fs.bare",
+      "machine": 3,
+      "package": "bare-fs",
+      "version": "4.7.2",
+      "packageJsonSha256": "cc4d590dd66650497a596313b27d07fe4235c6b23aa3588f3c85149725fc9811",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-fs/prebuilds/android-arm64/bare-fs.bare",
+      "machine": 183,
+      "package": "bare-fs",
+      "version": "4.7.2",
+      "packageJsonSha256": "cc4d590dd66650497a596313b27d07fe4235c6b23aa3588f3c85149725fc9811",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/bare-fs/prebuilds/android-arm/bare-fs.bare",
+      "machine": 40,
+      "package": "bare-fs",
+      "version": "4.7.2",
+      "packageJsonSha256": "cc4d590dd66650497a596313b27d07fe4235c6b23aa3588f3c85149725fc9811",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/agent-browser/bin/agent-browser-linux-arm64",
+      "machine": 183,
+      "package": "agent-browser",
+      "version": "0.6.0",
+      "packageJsonSha256": "49e876b86c7f611c781ce91c1764d97de8b6750ee677fb925f6d024b0f2118f2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/agent-browser/bin/agent-browser-linux-x64",
+      "machine": 62,
+      "package": "agent-browser",
+      "version": "0.6.0",
+      "packageJsonSha256": "49e876b86c7f611c781ce91c1764d97de8b6750ee677fb925f6d024b0f2118f2",
+      "role": "preserved-unselected-development-browser-or-bare-elf",
+      "reason": "Root agent-browser and locked Bare packages are development dependencies; no supported entry imports these bindings; MCP uses the existing HTTP API",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/@rspack/binding-linux-x64-musl/rspack.linux-x64-musl.node",
+      "machine": 62,
+      "package": "@rspack/binding-linux-x64-musl",
+      "version": "1.7.6",
+      "packageJsonSha256": "25735ccb373246dec55012eeca75384ac6e6636af3dc6992e0d129b9d97454e6",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@rspack/binding-linux-x64-gnu/rspack.linux-x64-gnu.node",
+      "machine": 62,
+      "package": "@rspack/binding-linux-x64-gnu",
+      "version": "1.7.11",
+      "packageJsonSha256": "f640204caa40aa966bfbeb13a63dd30db21c60e974ebe6c11c5fbb7341f96ff6",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@rspack/binding/node_modules/@rspack/binding-linux-x64-gnu/rspack.linux-x64-gnu.node",
+      "machine": 62,
+      "package": "@rspack/binding-linux-x64-gnu",
+      "version": "1.7.6",
+      "packageJsonSha256": "cde7dc31df714c048a7199236faae4afb5f802218948b2c5028a62c9a4be4ba0",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@rollup/rollup-linux-x64-musl/rollup.linux-x64-musl.node",
+      "machine": 62,
+      "package": "@rollup/rollup-linux-x64-musl",
+      "version": "4.61.1",
+      "packageJsonSha256": "a6641a6e30f26f0a70bdb49ec0dba6930eb268d9d813dbf57d9aac378f5481a0",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@rollup/rollup-linux-x64-gnu/rollup.linux-x64-gnu.node",
+      "machine": 62,
+      "package": "@rollup/rollup-linux-x64-gnu",
+      "version": "4.61.1",
+      "packageJsonSha256": "4bb2756f357cd672dc0d595b0814b4a2697af9e1909e66a765f6754b1558bd00",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@rolldown/binding-linux-x64-musl/rolldown-binding.linux-x64-musl.node",
+      "machine": 62,
+      "package": "@rolldown/binding-linux-x64-musl",
+      "version": "1.0.3",
+      "packageJsonSha256": "6de9e3c3b29509916025d69c77240818d7ea8bb733d1f118f9f3b3da704ba095",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@rolldown/binding-linux-x64-gnu/rolldown-binding.linux-x64-gnu.node",
+      "machine": 62,
+      "package": "@rolldown/binding-linux-x64-gnu",
+      "version": "1.0.3",
+      "packageJsonSha256": "6cbf6a95d8a45ffba620958e556d3942878586bec19570f60cd743f36c2dd66f",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/ffmpeg",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/ffprobe",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libavcodec.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libavdevice.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libavfilter.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libavformat.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libavutil.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libswresample.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/libswscale.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/renderer/node_modules/@remotion/compositor-linux-x64-gnu/remotion",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.473",
+      "packageJsonSha256": "6212d65872456b0ab52fe451213a2462446cecd05dd3b4354e313e788cf1d9dc",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/ffmpeg",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/ffprobe",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libavcodec.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libavdevice.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libavfilter.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libavformat.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libavutil.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libswresample.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/libswscale.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-musl/remotion",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-musl",
+      "version": "4.0.473",
+      "packageJsonSha256": "4592c30c6d26c29c5ccb4420c892edbe3262dd589b8e02aded02c16ce353cefb",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/ffmpeg",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/ffprobe",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libavcodec.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libavdevice.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libavfilter.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libavformat.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libavutil.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libswresample.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/libswscale.so",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/compositor-linux-x64-gnu/remotion",
+      "machine": 62,
+      "package": "@remotion/compositor-linux-x64-gnu",
+      "version": "4.0.474",
+      "packageJsonSha256": "c1738605c134b5adf6b5b11f1a4644c8d9de14ddbcc8eb859f149d82a9cc6b77",
+      "role": "preserved-unselected-development-rendering-elf",
+      "reason": "Only development scripts/remotion source consumes Remotion; no apps/web/src import; bootstrap/CLI load no renderer",
+      "lockFacts": {
+        "dev": false,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@remotion/bundler/node_modules/esbuild/bin/esbuild",
+      "machine": 62,
+      "package": "esbuild",
+      "version": "0.28.0",
+      "packageJsonSha256": "4316bc9a54bbf659d5760f299910d1824045178557e0aea6a1e3c64148fe8a50",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": false
+      }
+    },
+    {
+      "path": "node_modules/@remotion/bundler/node_modules/@esbuild/linux-x64/bin/esbuild",
+      "machine": 62,
+      "package": "@esbuild/linux-x64",
+      "version": "0.28.0",
+      "packageJsonSha256": "583586f8944441da96938a7e23796408f25d5e708677389a45c54eded7aff959",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    },
+    {
+      "path": "node_modules/@esbuild/linux-x64/bin/esbuild",
+      "machine": 62,
+      "package": "@esbuild/linux-x64",
+      "version": "0.27.7",
+      "packageJsonSha256": "6b9abce611e097bff4eabc91090ecd5943af7ca00cdc56686453efe987d23585",
+      "role": "preserved-unselected-development-build-elf",
+      "reason": "Build/bundler dependency or optional binding; compiled memory/MCP/fixed journal perform no source compilation; actual imports load no build binding",
+      "lockFacts": {
+        "dev": true,
+        "optional": true
+      }
+    }
+  ],
+  "sourcePackageJsonSha256": "2fc66dc7f4d4731207662ea6824266b23fdee58e4ac44164287d7b9131a9370c",
+  "sourcePackageLockSha256": "972a95c9f3a29fa6d0a58512d6a9401e3eeb58e078144d4d70f1870018817503"
+}

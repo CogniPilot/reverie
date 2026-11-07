@@ -1,0 +1,1382 @@
+[
+  {
+    "case": "valid",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": true,
+    "sourceError": null
+  },
+  {
+    "case": "wrong-id",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP container identity is unavailable"
+  },
+  {
+    "case": "wrong-name",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/foreign\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-image",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-worker",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"foreign\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-session",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-employee",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"other\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-user",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"other\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-entrypoint",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/bash\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "wrong-cmd",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\", \"other\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "not-running",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": false, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "running-int",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": 1, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "paused",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": true, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "paused-int",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": 0, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "restarting",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": true, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "pid-bool",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": true, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "pid-float",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 1.0, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "pid-zero",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 0, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "pid-negative",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": -1, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP canonical container binding differs"
+  },
+  {
+    "case": "readonly",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": false}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP startup mount differs"
+  },
+  {
+    "case": "rw-int",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": 1}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP startup mount differs"
+  },
+  {
+    "case": "not-bind",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"volume\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP startup mount differs"
+  },
+  {
+    "case": "wrong-destination",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/other\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP startup mount differs"
+  },
+  {
+    "case": "null-mounts",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": null}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP mount inventory is unavailable"
+  },
+  {
+    "case": "nonobject-labels",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": [1]}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "AttributeError: 'list' object has no attribute 'get'"
+  },
+  {
+    "case": "duplicate-tmp",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}, {\"Destination\": \"/tmp\", \"Type\": \"volume\"}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP startup mount differs"
+  },
+  {
+    "case": "nonobject-extra-mount",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}, 1]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "AttributeError: 'int' object has no attribute 'get'"
+  },
+  {
+    "case": "raw-source-spelling",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp/\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": false,
+    "sourceError": "RuntimeError: Retained TMP startup mount differs"
+  },
+  {
+    "case": "stable-nan-extension",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\"}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true, \"unknown\": {\"x\": NaN}}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": true,
+    "sourceError": null
+  },
+  {
+    "case": "ignored-dead-field",
+    "source": {
+      "version": 1,
+      "deployment": "test",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverContainer": "test-console",
+      "socket": "/owned-retained-confirmation/control/broker.sock",
+      "stateRoot": "/owned-retained-confirmation/workers",
+      "companyFile": "/owned-retained-confirmation/company.json",
+      "companyRoot": "/owned-retained-confirmation/company",
+      "scratchRoot": "/owned-retained-confirmation/scratch",
+      "apiSocketRoot": "/owned-retained-confirmation/office",
+      "budgetMode": "admission",
+      "uid": 1000,
+      "gid": 100,
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024,
+      "cgroupParent": "reverie-workers.slice",
+      "pidsLimit": 128,
+      "cpus": 0,
+      "maxWorkers": 4,
+      "maintenanceSessions": [],
+      "mounts": [
+        {
+          "source": "/owned-retained-confirmation/work",
+          "destination": "/workspace",
+          "readOnly": false
+        }
+      ],
+      "coldTemporaryCleanup": {
+        "version": 1,
+        "enabled": true,
+        "hostLeaseDirectories": [],
+        "strategy": "retain-and-replace"
+      }
+    },
+    "raw": "[{\"Id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"User\": \"1000:100\", \"Entrypoint\": [\"/bin/sleep\"], \"Cmd\": [\"infinity\"], \"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.employee\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true, \"Paused\": false, \"Restarting\": false, \"Pid\": 3898397, \"StartedAt\": \"owned-source-fixture\", \"Dead\": true}, \"Mounts\": [{\"Type\": \"bind\", \"Source\": \"/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp\", \"Destination\": \"/tmp\", \"RW\": true}]}]",
+    "cid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session": "11111111-2222-3333-4444-555555555555",
+    "employee": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target": "/owned-retained-confirmation/scratch/employees/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/tmp",
+    "accepted": true,
+    "sourceError": null
+  }
+]

@@ -7,6 +7,14 @@ pub enum ObservationFault {
     ArtifactBound,
     Changed,
     System,
+    ReservationBound,
+    ReservationStorageDirectory,
+    ControlPath,
+    ControlAncestor,
+    ControlDirectory,
+    AdmissionBusy,
+    AdmissionRebound,
+    AdmissionRequired,
 }
 impl ObservationFault {
     pub fn code(self) -> &'static str {
@@ -16,6 +24,14 @@ impl ObservationFault {
             Self::ArtifactBound => "HOST_ARTIFACT_BOUND",
             Self::Changed => "HOST_ARTIFACT_CHANGED",
             Self::System => "HOST_ARTIFACT_SYSTEM",
+            Self::ReservationBound => "RESERVATION_NATIVE_BOUND",
+            Self::ReservationStorageDirectory => "RESERVATION_NATIVE_STORAGE_DIRECTORY",
+            Self::ControlPath => "RESERVATION_CONTROL_PATH",
+            Self::ControlAncestor => "RESERVATION_CONTROL_ANCESTOR",
+            Self::ControlDirectory => "RESERVATION_CONTROL_DIRECTORY",
+            Self::AdmissionBusy => "RESERVATION_ADMISSION_LOCK_BUSY",
+            Self::AdmissionRebound => "RESERVATION_ADMISSION_LOCK_REBOUND",
+            Self::AdmissionRequired => "RESERVATION_ADMISSION_LOCK_REQUIRED",
         }
     }
 }

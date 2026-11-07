@@ -34,7 +34,7 @@ impl Value {
                 }
                 Node::Array(values) => pending.extend(values),
                 Node::Object(values) => pending.extend(values.values()),
-                _ => (),
+                _ => {}
             }
         }
         true

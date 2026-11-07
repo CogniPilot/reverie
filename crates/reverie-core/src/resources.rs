@@ -35,6 +35,15 @@ impl CpuQuota {
     pub fn representation(self) -> CpuRepresentation {
         self.0
     }
+    /// Existing Python int(cpus * 1_000_000_000), after this bounded finite
+    /// quota check. Integral quota multiplication is exact in this range.
+    pub fn nano_cpus(self) -> u64 {
+        let value = match self.0 {
+            CpuRepresentation::Integer(value) => f64::from(value),
+            CpuRepresentation::Float(value) => value,
+        };
+        (value * 1_000_000_000.0) as u64
+    }
 }
 impl PartialEq for CpuQuota {
     fn eq(&self, other: &Self) -> bool {

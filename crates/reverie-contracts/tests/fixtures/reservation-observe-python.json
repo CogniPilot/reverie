@@ -1,0 +1,35 @@
+{
+  "note": "Actual old ReservationGate.observe with real owned private control/profile/company files and explicit fake kernel/engine DATA; no native readiness or effect qualification.",
+  "employee": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "sessionId": "22222222-2222-4333-8444-555555555555",
+    "owner": null,
+    "sessionGeneration": 1,
+    "desiredRunning": true
+  },
+  "profile": {
+    "version": 1,
+    "resources": {
+      "budgetMode": "admission",
+      "memoryMiB": 1024,
+      "pidsLimit": 128,
+      "cpus": 0,
+      "poolMemoryMiB": 4096,
+      "poolTasksMax": 1024
+    },
+    "binding": {
+      "employee_id": "11111111-2222-4333-8444-555555555555",
+      "current_sid": "22222222-2222-4333-8444-555555555555",
+      "target_sid": "33333333-2222-4333-8444-555555555555",
+      "current_generation": 1,
+      "target_generation": 2
+    }
+  },
+  "company": "44444444-2222-4333-8444-555555555555",
+  "pool": "55555555-2222-4333-8444-555555555555",
+  "ownerScopeDigest": "29e902a7563e29f717acdab5ca514ac1180f46cef759286943296634891e2b7d",
+  "sourceTemplate": "{\"employee\":{\"desiredRunning\":true,\"id\":\"11111111-2222-4333-8444-555555555555\",\"owner\":null,\"sessionGeneration\":1,\"sessionId\":\"22222222-2222-4333-8444-555555555555\"},\"native\":{\"cgroup\":\"owned\",\"containerId\":\"0000000000000000000000000000000000000000000000000000000000000002\",\"image\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"memory\":536870912,\"nanoCpus\":0,\"pid\":123,\"start\":\"77\",\"tasks\":128},\"profile\":{\"binding\":{\"current_generation\":1,\"current_sid\":\"22222222-2222-4333-8444-555555555555\",\"employee_id\":\"11111111-2222-4333-8444-555555555555\",\"target_generation\":2,\"target_sid\":\"33333333-2222-4333-8444-555555555555\"},\"resources\":{\"budgetMode\":\"admission\",\"cpus\":0,\"memoryMiB\":1024,\"pidsLimit\":128,\"poolMemoryMiB\":4096,\"poolTasksMax\":1024},\"version\":1},\"storage\":{\"/home/agent\":[@STAT0_0@,@STAT0_1@,@STAT0_2@,@STAT0_3@],\"/nix\":[@STAT1_0@,@STAT1_1@,@STAT1_2@,@STAT1_3@],\"/scratch\":[@STAT2_0@,@STAT2_1@,@STAT2_2@,@STAT2_3@]}}",
+  "poolCanonical": "{\"budget\":4294967296,\"commitments\":[{\"cgroup\":\"owned\",\"containerId\":\"0000000000000000000000000000000000000000000000000000000000000002\",\"image\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"memory\":536870912,\"nanoCpus\":0,\"pid\":123,\"start\":\"77\",\"tasks\":128}],\"pool\":\"55555555-2222-4333-8444-555555555555\",\"reserve\":64,\"site\":{\"cgroup\":\"owned\",\"containerId\":\"0000000000000000000000000000000000000000000000000000000000000001\",\"image\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"memory\":536870912,\"nanoCpus\":0,\"pid\":123,\"start\":\"77\",\"tasks\":128}}",
+  "poolDigest": "974b8000c505102a5e6c48ade2042b3f43ce4a7e7e62b611325c392790a95f6a",
+  "observationTemplate": "{\"budget_bytes\":\"4294967296\",\"committed_bytes\":\"536870912\",\"current_memory_bytes\":\"536870912\",\"current_sid\":\"22222222-2222-4333-8444-555555555555\",\"employee_id\":\"11111111-2222-4333-8444-555555555555\",\"generation\":\"1\",\"pool_id\":\"55555555-2222-4333-8444-555555555555\",\"pool_revision_digest\":\"974b8000c505102a5e6c48ade2042b3f43ce4a7e7e62b611325c392790a95f6a\",\"profile_version\":\"1\",\"source_binding_digest\":\"@SOURCE_DIGEST@\"}"
+}

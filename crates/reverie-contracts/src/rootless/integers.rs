@@ -41,7 +41,28 @@ fn decimal(point: u32) -> Option<u8> {
         .find(|&&zero| point >= zero && point < zero + 10)
         .map(|zero| (point - zero) as u8)
 }
-pub(super) fn is_digit(point: u32) -> bool {
+/// Reuse the frozen Python isdigit/int tables for native mount metadata. This
+/// returns integer DATA; callers retain their own domain and byte/count bounds.
+pub(crate) fn parse_python_digits(
+    points: &[u32],
+) -> Option<reverie_core::decimal::UnsignedInteger> {
+    if points.is_empty() || !points.iter().all(|&point| is_digit(point)) {
+        return None;
+    }
+    let value = string_integer(points).ok()?;
+    reverie_core::decimal::UnsignedInteger::parse(value.nonnegative()?.as_str())
+}
+/// Shared Python int(str) scan; each named caller keeps its own sign/bounds.
+pub(crate) fn parse_python_integer(
+    points: &[u32],
+) -> Option<(bool, reverie_core::decimal::UnsignedInteger)> {
+    let value = string_integer(points).ok()?;
+    Some((
+        value.negative,
+        reverie_core::decimal::UnsignedInteger::parse(value.magnitude.as_str())?,
+    ))
+}
+pub(crate) fn is_digit(point: u32) -> bool {
     decimal(point).is_some()
         || [
             (178, 179),

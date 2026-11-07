@@ -11,6 +11,15 @@ fn main() -> ExitCode {
         .open(std::env::var_os("XTASK_FIXTURE_TRACE").expect("owned trace path"))
         .expect("owned trace");
     writeln!(trace, "{}", arguments.join(" ")).expect("write owned trace");
+    if let Some(path) = std::env::var_os("XTASK_FIXTURE_CWD_TRACE") {
+        let mut cwd_trace = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("owned working-directory trace");
+        writeln!(cwd_trace, "{}", std::env::current_dir().unwrap().display())
+            .expect("write owned working-directory trace");
+    }
     if arguments.first() != std::env::var("XTASK_FIXTURE_FAIL").ok().as_ref() {
         return ExitCode::SUCCESS;
     }

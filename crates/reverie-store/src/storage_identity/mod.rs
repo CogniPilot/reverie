@@ -1,15 +1,16 @@
 //! Read-side employee storage resolution. Returned facts are not leases, owner
 //! grants, execution eligibility overrides or a storage publication capability.
+mod input_path;
 mod metadata;
 mod resolver;
 #[cfg(test)]
 mod tests;
 
 use crate::StoreError;
-pub use metadata::{DEFAULT_METADATA_LIMIT, canonical, read_metadata};
+pub use metadata::{DEFAULT_METADATA_LIMIT, canonical, read_metadata, read_ordered_metadata};
 pub use resolver::{
     StorageIdentityConfig, StorageKind, StoragePaths, company_records, current_employee,
-    storage_paths, storage_start_allowed,
+    read_company_metadata, storage_paths, storage_start_allowed,
 };
 use reverie_contracts::storage_identity::IdentityDataError;
 use std::{fmt, io};
@@ -62,7 +63,17 @@ impl fmt::Display for IdentityError {
         output.write_str(self.code())
     }
 }
-impl std::error::Error for IdentityError {}
+impl std::error::Error for IdentityError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Data(error) => Some(error),
+            Self::Custody(error) => Some(error),
+            Self::Finalization { primary, .. } => Some(&**primary),
+            Self::Refused(_) => None,
+        }
+    }
+}
 impl From<io::Error> for IdentityError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)

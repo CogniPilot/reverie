@@ -1,0 +1,11 @@
+Native grammar/compiler source is derived from CPython 3.13.15 re/_parser.py,
+re/_compiler.py, re/_constants.py and re/_casefix.py, rather than executing them.
+
+Secret Labs' Regular Expression Engine
+Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved.
+Copyright (c) 1995-2001 by Fredrik Lundh. All rights reserved.
+
+See CPYTHON-LICENSE for the applicable Python/PSF/CNRI licensing history and terms.
+The safe Rust arena/parser/compiler and the documented deep-grammar robustness
+correction are Reverie modifications. The standalone matcher and WTF8 notices
+are retained separately under vendor/.
