@@ -4,7 +4,7 @@ use std::{
     fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
-    sync::atomic::AtomicUsize,
+    sync::{OnceLock, atomic::AtomicUsize},
 };
 
 #[derive(Default)]
@@ -15,6 +15,11 @@ struct Fake {
     hang_launch: AtomicBool,
     reports: AtomicUsize,
     office_close_fails: bool,
+    first_stop: OnceLock<Instant>,
+    block_watchdog: AtomicBool,
+    block_lease: AtomicBool,
+    lease_closes: AtomicUsize,
+    watchdog_exits: AtomicUsize,
 }
 impl Fake {
     fn me() -> u32 {
@@ -47,9 +52,10 @@ impl BrokerCore for Fake {
     }
     fn watchdog(&self, closed: &AtomicBool) {
         self.note("watchdog");
-        while !closed.load(Ordering::Acquire) {
+        while !closed.load(Ordering::Acquire) || self.block_watchdog.load(Ordering::Acquire) {
             std::thread::sleep(Duration::from_millis(5));
         }
+        self.watchdog_exits.fetch_add(1, Ordering::SeqCst);
     }
     fn report(&self, mut stream: UnixStream) {
         // The owner reads its own frame, proving it arrived unread.
@@ -72,10 +78,15 @@ impl BrokerCore for Fake {
             ("success", BrokerReply::boolean(true)),
         ]))
     }
+    // The real first-stop contract: repeated calls never extend the budget.
     fn request_stop(&self) -> Instant {
-        Instant::now() + self.budget.unwrap_or(Duration::from_secs(5))
+        *self.first_stop.get_or_init(Instant::now) + self.budget.unwrap_or(Duration::from_secs(5))
     }
     fn close_lease_peer(&self) -> bool {
+        self.lease_closes.fetch_add(1, Ordering::SeqCst);
+        while self.block_lease.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         true
     }
     fn request_office_close(&self) -> bool {
@@ -335,4 +346,117 @@ fn office_close_failure_is_its_legacy_code() {
         handle.join().unwrap(),
         Err(ServiceError::Unconfirmed(vec!["OFFICE_CLOSE_FAILED"]))
     );
+}
+
+// F1: a watchdog past the budget stays owned; a later settle joins that same
+// attempt, with no second lease close and no new budget.
+#[test]
+fn a_late_watchdog_is_retained_and_settled_later() {
+    let core = Arc::new(Fake {
+        budget: Some(Duration::from_millis(150)),
+        ..Fake::default()
+    });
+    core.block_watchdog.store(true, Ordering::Release);
+    let socket = scratch("late-watchdog");
+    let (service, handle) = running(core.clone(), all_owners(), &socket);
+    service.request_close();
+    assert_eq!(
+        handle.join().unwrap(),
+        Err(ServiceError::Unconfirmed(vec![
+            "DEADLINE_EXHAUSTED",
+            "SUPERVISOR_ACTIVE"
+        ]))
+    );
+    let first = *core.first_stop.get().unwrap();
+    assert_eq!(
+        service.settle_retained(),
+        Err(ServiceError::Unconfirmed(vec!["SUPERVISOR_ACTIVE"]))
+    );
+    core.block_watchdog.store(false, Ordering::Release);
+    while core.watchdog_exits.load(Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(service.settle_retained(), Ok(()));
+    assert_eq!(core.watchdog_exits.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        core.lease_closes.load(Ordering::SeqCst),
+        1,
+        "no second lease close"
+    );
+    assert_eq!(*core.first_stop.get().unwrap(), first, "no renewed budget");
+}
+
+#[test]
+fn a_late_lease_close_is_retained_and_settled_later() {
+    let core = Arc::new(Fake {
+        budget: Some(Duration::from_millis(150)),
+        ..Fake::default()
+    });
+    core.block_lease.store(true, Ordering::Release);
+    let socket = scratch("late-lease");
+    let (service, handle) = running(core.clone(), all_owners(), &socket);
+    service.request_close();
+    assert_eq!(
+        handle.join().unwrap(),
+        Err(ServiceError::Unconfirmed(vec![
+            "DEADLINE_EXHAUSTED",
+            "LEASE_PEER_ACTIVE"
+        ]))
+    );
+    core.block_lease.store(false, Ordering::Release);
+    let start = Instant::now();
+    while service.settle_retained().is_err() {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "lease never settled"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(core.lease_closes.load(Ordering::SeqCst), 1);
+}
+
+// F1: a poisoned records lock is recovered, so a new handler is still owned
+// and joined at close.
+#[test]
+fn a_poisoned_records_lock_keeps_the_handler_owned() {
+    let core = Arc::new(Fake::default());
+    let socket = scratch("poison");
+    let (service, handle) = running(core.clone(), all_owners(), &socket);
+    let records = service.records.clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = records.lock().unwrap();
+        panic!("poison the records lock");
+    })
+    .join();
+    assert!(service.records.is_poisoned());
+    let (kind, _) = ask(&socket, b'C', br#"{"action": "status"}"#);
+    assert_eq!(kind, b'J');
+    service.request_close();
+    assert_eq!(handle.join().unwrap(), Ok(()));
+    assert!(
+        service.records().is_empty(),
+        "the handler was joined, not dropped"
+    );
+}
+
+// F2: a bind failure after the watchdog and lease started returns its cause
+// together with the cleanup outcome.
+#[test]
+fn bind_failure_returns_cause_and_cleanup_together() {
+    let core = Arc::new(Fake {
+        office_close_fails: true,
+        ..Fake::default()
+    });
+    // A socket path longer than sun_path passes every check before bind.
+    let socket = scratch("bind").with_file_name("s".repeat(120));
+    let service = BrokerService::new(core.clone(), all_owners(), socket);
+    match service.serve() {
+        Err(ServiceError::Startup { cause, cleanup }) => {
+            assert!(!cause.is_empty());
+            assert_eq!(cleanup, vec!["OFFICE_CLOSE_FAILED"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(core.lease_closes.load(Ordering::SeqCst), 1);
+    assert_eq!(core.watchdog_exits.load(Ordering::SeqCst), 1);
 }

@@ -130,8 +130,12 @@ pub trait BrokerCore: Send + Sync {
 pub enum ServiceError {
     /// Startup refused before any effect: the missing injected kinds.
     Incomplete(Vec<InjectedKind>),
-    /// A startup step refused; the service did not start.
-    Startup(String),
+    /// A startup step refused. `cleanup` holds the legacy codes of any close
+    /// that ran for effects already started; empty means it was confirmed.
+    Startup {
+        cause: String,
+        cleanup: Vec<&'static str>,
+    },
     /// Close was not confirmed: exactly the recorded legacy codes.
     Unconfirmed(Vec<&'static str>),
 }
@@ -143,6 +147,18 @@ struct Record {
     stream: UnixStream,
     handle: JoinHandle<()>,
 }
+/// The close attempts this service owns until they are observed settled: the
+/// one first-stop deadline, the one lease-close attempt and the watchdog.
+/// A failed join stays recorded; a missing handle never means settled.
+#[derive(Default)]
+struct Retained {
+    deadline: Option<Instant>,
+    watchdog: Option<JoinHandle<()>>,
+    watchdog_failed: bool,
+    lease_started: bool,
+    lease: Option<JoinHandle<bool>>,
+    lease_failed: bool,
+}
 pub struct BrokerService {
     core: Arc<dyn BrokerCore>,
     owners: Owners,
@@ -150,6 +166,7 @@ pub struct BrokerService {
     closing: Arc<AtomicBool>,
     records: Arc<Mutex<Vec<Record>>>,
     admitted: Arc<Mutex<usize>>,
+    retained: Mutex<Retained>,
 }
 impl BrokerService {
     pub fn new(core: Arc<dyn BrokerCore>, owners: Owners, socket: PathBuf) -> Self {
@@ -160,6 +177,7 @@ impl BrokerService {
             closing: Arc::new(AtomicBool::new(false)),
             records: Arc::new(Mutex::new(Vec::new())),
             admitted: Arc::new(Mutex::new(0)),
+            retained: Mutex::new(Retained::default()),
         }
     }
     /// The signal path: ask a running `serve` to stop accepting and close.
@@ -184,33 +202,53 @@ impl BrokerService {
     /// Start in the legacy order, accept until `request_close`, then close.
     pub fn serve(&self) -> Result<(), ServiceError> {
         self.preflight()?;
-        let startup = |error: Refusal| ServiceError::Startup(refusal_text(&error));
-        self.core.check_pool().map_err(startup)?;
+        // Before recovery nothing needs cleanup, as in the legacy serve().
+        let early = |cause: String| ServiceError::Startup {
+            cause,
+            cleanup: Vec::new(),
+        };
+        self.core
+            .check_pool()
+            .map_err(|error| early(refusal_text(&error)))?;
         broker_listener::prepare_directory(&self.socket)
-            .map_err(|error| ServiceError::Startup(error.message().into()))?;
+            .map_err(|error| early(error.message().into()))?;
         broker_listener::clear_stale(&self.socket)
-            .map_err(|error| ServiceError::Startup(error.message().into()))?;
-        self.core.recover().map_err(startup)?;
+            .map_err(|error| early(error.message().into()))?;
+        self.core
+            .recover()
+            .map_err(|error| early(refusal_text(&error)))?;
+        // From here the legacy try/finally owns cleanup on every exit.
         if self.closing.load(Ordering::Acquire) {
-            return Ok(());
+            return self.close(None);
         }
         self.core.start_lease_peer();
         let watchdog = {
             let core = self.core.clone();
             let closing = self.closing.clone();
-            std::thread::spawn(move || core.watchdog(&closing))
+            std::thread::Builder::new().spawn(move || core.watchdog(&closing))
         };
-        let bound = BoundSocket::bind(&self.socket);
-        let mut bound = match bound {
-            Ok(bound) => Some(bound),
+        match watchdog {
+            Ok(handle) => self.retain().watchdog = Some(handle),
+            Err(_) => self.retain().watchdog_failed = true,
+        }
+        let mut bound = match BoundSocket::bind(&self.socket) {
+            Ok(bound) => bound,
             Err(error) => {
-                self.closing.store(true, Ordering::Release);
-                let _ = self.close(None, Some(watchdog));
-                return Err(ServiceError::Startup(error.message().into()));
+                let cleanup = match self.close(None) {
+                    Ok(()) => Vec::new(),
+                    Err(ServiceError::Unconfirmed(codes)) => codes,
+                    Err(_) => vec!["CLEANUP_UNCONFIRMED"],
+                };
+                return Err(ServiceError::Startup {
+                    cause: error.message().into(),
+                    cleanup,
+                });
             }
         };
-        self.accept(bound.as_ref().expect("bound above"));
-        self.close(bound.take(), Some(watchdog))
+        self.accept(&bound);
+        let result = self.close(Some(&mut bound));
+        drop(bound);
+        result
     }
     fn accept(&self, bound: &BoundSocket) {
         let Ok(listener) = bound.listener() else {
@@ -268,15 +306,25 @@ impl BrokerService {
             release(&admitted);
         });
         match spawned {
-            Ok(handle) => match self.records.lock() {
-                Ok(mut records) => records.push(Record {
-                    stream: shutdown_handle,
-                    handle,
-                }),
-                Err(_) => drop(handle),
-            },
+            // A poisoned lock is recovered so the handler's owner is kept.
+            Ok(handle) => self.records().push(Record {
+                stream: shutdown_handle,
+                handle,
+            }),
             Err(_) => release(&self.admitted),
         }
+    }
+}
+impl BrokerService {
+    fn records(&self) -> std::sync::MutexGuard<'_, Vec<Record>> {
+        self.records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn retain(&self) -> std::sync::MutexGuard<'_, Retained> {
+        self.retained
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 pub(crate) fn refusal_text(refusal: &Refusal) -> String {
