@@ -937,6 +937,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bytes",
+ "getrandom",
  "http",
  "http-body-util",
  "hyper",

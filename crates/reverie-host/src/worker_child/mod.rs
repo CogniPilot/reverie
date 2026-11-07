@@ -1,6 +1,7 @@
 //! Fixed in-worker record/environment/exec lifecycle. No host engine endpoint,
 //! owner permission, resource admission or generic host-command interface.
 mod directory;
+pub(crate) use directory::Directory as LaunchDirectory;
 mod error;
 mod process;
 mod receipt;

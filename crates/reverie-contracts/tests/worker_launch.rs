@@ -130,24 +130,7 @@ fn actual_python_complete_create_argv_and_hash_vectors() {
         serde_json::from_str(include_str!("fixtures/worker_launch/create.json")).unwrap();
     assert_eq!(corpus.cases.len(), 9);
     for case in corpus.cases {
-        let config = worker_config::decode(case.configuration.as_bytes()).unwrap();
-        let session = ProfileSessionId::parse(&case.session).unwrap();
-        let security = texts(&case.security);
-        let runtime = texts(&case.runtime);
-        let scratch = case.scratch.as_deref().map(MetadataText::from_scalar_text);
-        let result = worker_launch::create_arguments(
-            &config,
-            &session,
-            &MetadataText::from_scalar_text(&case.home),
-            scratch.as_ref(),
-            CreateObservations {
-                security: &security,
-                runtime: &runtime,
-                gpu: &case.gpu,
-                employee: None,
-            },
-        )
-        .unwrap();
+        let result = render(&case);
         assert_eq!(result.name(), case.result_name, "{}", case.name);
         assert_eq!(
             result.config_digest().to_hex(),
@@ -166,4 +149,101 @@ fn actual_python_complete_create_argv_and_hash_vectors() {
             case.name
         );
     }
+}
+
+fn render(case: &CreateCase) -> worker_launch::CreateArguments {
+    let config = worker_config::decode(case.configuration.as_bytes()).unwrap();
+    let session = ProfileSessionId::parse(&case.session).unwrap();
+    let security = texts(&case.security);
+    let runtime = texts(&case.runtime);
+    let scratch = case.scratch.as_deref().map(MetadataText::from_scalar_text);
+    worker_launch::create_arguments(
+        &config,
+        &session,
+        &MetadataText::from_scalar_text(&case.home),
+        scratch.as_ref(),
+        CreateObservations {
+            security: &security,
+            runtime: &runtime,
+            gpu: &case.gpu,
+            employee: None,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn actual_python_late_mount_insertions_preserve_order_and_surrogate_codepoints() {
+    let corpus: Corpus<CreateCase> =
+        serde_json::from_str(include_str!("fixtures/worker_launch/create.json")).unwrap();
+    let base = render(&corpus.cases[0]);
+    let cases: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/worker_launch/late-mounts.json")).unwrap();
+    let text = |value: &serde_json::Value| {
+        MetadataText::from_python_text(
+            reverie_core::PythonText::try_new(serde_json::from_value(value.clone()).unwrap())
+                .unwrap(),
+        )
+    };
+    for case in cases["cases"].as_array().unwrap() {
+        let nix = (!case["nix"].is_null()).then(|| text(&case["nix"]));
+        let accounts = case["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(text)
+            .collect::<Vec<_>>();
+        let expected: Vec<Vec<u32>> = serde_json::from_value(case["expected"].clone()).unwrap();
+        assert_eq!(
+            base.with_late_mounts(nix.as_ref(), &accounts)
+                .iter()
+                .map(|arg| arg.codepoints().to_vec())
+                .collect::<Vec<_>>(),
+            expected,
+            "{}",
+            case["name"]
+        );
+    }
+}
+#[test]
+fn created_state_is_data_and_requires_exact_cid_and_known_stopped_fields() {
+    use worker_launch::CreatedState;
+    let cid = reverie_core::ids::ContainerId::parse(&"c".repeat(64)).unwrap();
+    let base = format!(
+        r#"[{{"Id":"{}","State":{{"Running":false,"Pid":0,"Paused":false,"Restarting":false,"Dead":false}},"opaque":NaN}}]"#,
+        cid.as_str()
+    );
+    assert!(
+        CreatedState::decode(base.as_bytes(), &cid)
+            .unwrap()
+            .stopped()
+    );
+    assert!(
+        CreatedState::decode(base.replace("\"Pid\":0", "\"Pid\":-0").as_bytes(), &cid)
+            .unwrap()
+            .stopped()
+    );
+    for (old, new) in [
+        ("\"Pid\":0", "\"Pid\":0.0"),
+        ("\"Pid\":0", "\"Pid\":false"),
+        ("\"Pid\":0", "\"Pid\":4"),
+    ] {
+        assert!(CreatedState::decode(base.replace(old, new).as_bytes(), &cid).is_err());
+    }
+    assert!(
+        !CreatedState::decode(
+            base.replace("\"Paused\":false", "\"Paused\":true")
+                .as_bytes(),
+            &cid
+        )
+        .unwrap()
+        .stopped()
+    );
+    assert!(
+        CreatedState::decode(
+            base.replace(&"c".repeat(64), &"f".repeat(64)).as_bytes(),
+            &cid
+        )
+        .is_err()
+    );
 }
