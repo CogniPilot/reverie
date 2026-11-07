@@ -1,7 +1,135 @@
 //! An actual successful Cold-finally LIVE epoch feeds the genuine later J;
 //! no record fields, lifecycle entries, snapshots or permission flags are set.
 use super::*;
+use crate::installing_broker::launch::preparation::tests::incoming;
 use std::io::Read;
+#[test]
+fn actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_success() {
+    crate::test_process::owning_case!(
+        actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_success
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let (_first_client, cold) = classified(&broker);
+    let first = cold.prepare_cold().unwrap();
+    let original = first.started.clone();
+    assert!(first.finalize_for_worker().unwrap().storage_retained());
+    tree.write("pane.out", b"0\n");
+    let foreign_tree = Tree::new();
+    let foreign = super::broker(&foreign_tree);
+    let (_other_client, admitted) = incoming(&foreign, SID);
+    let mut other = PreparingWorkerLaunch::enter(admitted).unwrap();
+    // Both genuine negative-purpose J owners are admitted before the positive
+    // prefix holds its lifecycle. No same-thread recursive lock is attempted.
+    let (_intruder_client, admitted) = incoming(&broker, SID);
+    let mut intruder = PreparingWorkerLaunch::enter(admitted).unwrap();
+    let (_client, admitted) = incoming(&broker, SID);
+    let inspected = admitted.prepare_prefix().unwrap();
+    let ClassifiedWorkerLaunch::Reuse(reuse) = inspected.classify_existing().unwrap() else {
+        panic!("actual reuse");
+    };
+    let ReusableWorkerLaunch {
+        receipt,
+        inspected,
+        resources,
+    } = reuse;
+    let InspectedWorkerLaunch { observed, previous } = inspected;
+    let observe::ObservedWorkerLaunch {
+        mut claimed,
+        current,
+        plan,
+    } = observed;
+    let failure = broker
+        .storage
+        .runtime
+        .transfer_started_laptop_relay(
+            &original.created,
+            plan,
+            previous.unwrap(),
+            receipt.unwrap(),
+            &other.admitted.request.connection,
+        )
+        .err()
+        .unwrap();
+    let (plan, previous, receipt, cause) = failure.into_parts();
+    assert_eq!(cause.to_string(), "VIEWER_CONNECTION_RUNTIME_CHANGED");
+    previous
+        .assert_plan(&broker.storage.runtime, &plan)
+        .unwrap();
+    assert_eq!(plan.storage(), claimed.storage.as_ref().unwrap().paths());
+    assert!(!receipt.exists() && lease_held(&broker));
+    let borrowed = broker
+        .storage
+        .runtime
+        .borrow_started_laptop_storage(
+            &original.created,
+            &claimed.preparing.admitted.request.connection,
+        )
+        .unwrap();
+    assert_eq!(borrowed.paths(), plan.storage());
+    drop(borrowed);
+    other
+        .admitted
+        .request
+        .connection
+        .close_socket_for_worker()
+        .unwrap();
+    other.hold.as_mut().unwrap().release_for_worker().unwrap();
+    foreign
+        .close_command_telemetry(super::super::super::tests::end())
+        .unwrap();
+    let refusal = claimed
+        .storage
+        .take()
+        .unwrap()
+        .retain_existing_relay_for_connection(
+            plan,
+            previous,
+            receipt,
+            &intruder.admitted.request.connection,
+        )
+        .err()
+        .unwrap();
+    let (storage, plan, _derived_request_data, previous, receipt, cause) = refusal.into_parts();
+    assert_eq!(cause.to_string(), "WORKER_STARTED_CONNECTION_CHANGED");
+    claimed.storage = Some(storage);
+    intruder
+        .admitted
+        .request
+        .connection
+        .close_socket_for_worker()
+        .unwrap();
+    intruder
+        .hold
+        .as_mut()
+        .unwrap()
+        .release_for_worker()
+        .unwrap();
+    let reuse = ReusableWorkerLaunch {
+        receipt: Some(receipt),
+        inspected: InspectedWorkerLaunch {
+            observed: observe::ObservedWorkerLaunch {
+                claimed,
+                current,
+                plan,
+            },
+            previous: Some(previous),
+        },
+        resources,
+    };
+    let result = reuse
+        .prepare_viewer()
+        .unwrap()
+        .close_allocation()
+        .unwrap()
+        .finalize_for_worker()
+        .unwrap();
+    assert!(result.storage_retained() && !result.completed() && lease_held(&broker));
+    original
+        .office
+        .close_for_stopped_source(super::super::super::tests::end())
+        .unwrap();
+}
 
 #[test]
 fn actual_live_cold_finalize_then_new_j_reuses_same_resource_and_preserves_original_office() {
