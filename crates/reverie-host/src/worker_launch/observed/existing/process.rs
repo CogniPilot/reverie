@@ -15,6 +15,13 @@ pub struct ExistingProcessIncarnation {
     start: String,
 }
 impl ExistingProcessIncarnation {
+    pub(crate) fn assert_plan(
+        &self,
+        runtime: &WorkerRuntime,
+        plan: &ObservedCreatePlan,
+    ) -> std::result::Result<(), ExistingObservationError> {
+        self.observed.assert_plan(runtime, plan)
+    }
     pub fn data(&self) -> &LaunchLaptopInspection {
         self.observed.data()
     }

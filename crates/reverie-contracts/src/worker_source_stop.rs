@@ -124,17 +124,28 @@ impl SourceStopInspection {
         expected: &ContainerId,
         deployment: &str,
     ) -> Result<Self> {
+        Self::identity_for_worker(raw, name.name(), name.session(), expected, deployment)
+    }
+    /// Shared exact identity decoder for protected and ordinary observations.
+    /// Checked names and decoded metadata are DATA, never a stop capability.
+    pub fn identity_for_worker(
+        raw: &[u8],
+        name: &WorkerContainerName,
+        session: &ProfileSessionId,
+        expected: &ContainerId,
+        deployment: &str,
+    ) -> Result<Self> {
         let row = row(raw)?;
         let labels = field(&row, "Config").and_then(|value| field(value, "Labels"));
         if !matches(field(&row, "Id"), expected.as_str())
-            || !matches(field(&row, "Name"), &format!("/{}", name.name.as_str()))
+            || !matches(field(&row, "Name"), &format!("/{}", name.as_str()))
             || !matches(
                 labels.and_then(|value| field(value, "reverie.worker")),
                 deployment,
             )
             || !matches(
                 labels.and_then(|value| field(value, "reverie.session")),
-                name.session.as_str(),
+                session.as_str(),
             )
         {
             return Err(SourceStopDataError::Identity);
