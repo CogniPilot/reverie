@@ -5,6 +5,7 @@ use crate::installing_broker::launch::preparation::finalization::CleanupBudget;
 use reverie_host::worker_laptop::{CreatedCleanup, StoppedCreatedLaptop};
 mod direct;
 mod entry;
+mod created;
 mod original;
 mod prefix;
 mod registration;
@@ -30,6 +31,8 @@ struct Finalizer<'a> {
     completed: Option<bool>,
     stopped: Option<StoppedCreatedLaptop>,
     target: Option<WorkerContainerName>,
+    original_remainder: Option<FinalStorageRemainder>,
+    returned: Option<Resources>,
 }
 #[must_use = "retains the original resource phases and counted handler hold"]
 pub struct ColdFinalizationFailure<'a> {
@@ -68,7 +71,7 @@ impl<'a> ColdFinalizationFailure<'a> {
             cleanup: Finalizer {
                 owner: Owner::Preparation(owner), primary: None, body_causes: Vec::new(),
                 errors: vec![ColdError::Refused("WORKER_PREPARATION_RESOURCE_RETAINED")],
-                completed: None, stopped: None, target: None,
+                completed: None, stopped: None, target: None, original_remainder: None, returned: None,
             },
         })
     }
@@ -105,8 +108,9 @@ impl std::fmt::Display for ColdFinalizationFailure<'_> {
         for error in self.cleanup.body_causes.iter().chain(&self.cleanup.errors) {
             write!(out, "{error}; ")?;
         }
-        match self.cleanup.owner.resource() {
+        match self.cleanup.resource() {
             Some(Resources::FinalStorageFailed { failure, .. }) => write!(out, "{}; ", failure.cause())?,
+            Some(Resources::CreatedReturnFailed(failure)) => write!(out, "{}; ", failure.cause())?,
             Some(Resources::Finalized { plan, retained, .. }) => write!(
                 out, "storage disposition for {}: retained={retained}; ", plan.session(),
             )?,
@@ -218,6 +222,8 @@ fn finish<'a>(
         completed: None,
         stopped: None,
         target: None,
+        original_remainder: None,
+        returned: None,
     };
     // The actual original allocation finally precedes outstanding Nix close.
     cleanup.close_allocation();
@@ -226,18 +232,17 @@ fn finish<'a>(
     cleanup.observe_receipt();
     cleanup.stop_created();
     cleanup.stop_classified_original(budget);
+    cleanup.stop_returned_original(budget);
     cleanup.close_viewer(budget);
     cleanup.metadata(budget);
-    let observation = cleanup.observe_direct_storage();
+    let observation = cleanup.observe_storage();
     if let Some(observation) = &observation {
         cleanup.close_direct_offices(observation.is_live(), budget);
     }
     let mut storage_retained = false;
     if cleanup.errors.is_empty() {
         if let Some(observation) = observation {
-            storage_retained = cleanup
-                .finish_direct_storage(&observation, budget.phase(20_000))
-                .unwrap_or(false);
+            storage_retained = cleanup.finish_storage(observation, budget).unwrap_or(false);
         } else {
             cleanup
                 .errors
@@ -266,6 +271,9 @@ fn finish<'a>(
     }
 }
 impl Finalizer<'_> {
+    fn resource(&self) -> Option<&Resources> {
+        self.returned.as_ref().or_else(|| self.owner.resource())
+    }
     fn capture_target(&mut self) {
         let plan = match self.owner.resource() {
             Some(Resources::OriginalCleanup { plan, .. }) => Some(plan),

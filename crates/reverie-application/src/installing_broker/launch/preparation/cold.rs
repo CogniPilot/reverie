@@ -99,6 +99,9 @@ enum Resources {
         retained: bool,
         _remainder: FinalStorageRemainder,
     },
+    CreatedReturned(storage::CreatedStorageReturned),
+    CreatedReturnFailed(Box<storage::CreatedStorageFinishFailure>),
+    CreatedClosed,
 }
 struct FinalStorage {
     native: storage::DirectStoragePreparation,

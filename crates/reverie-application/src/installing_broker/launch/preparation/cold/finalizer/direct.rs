@@ -5,7 +5,7 @@ use reverie_host::worker_laptop::DirectStorageObservation;
 
 impl Finalizer<'_> {
     pub(super) fn observe_direct_storage(&mut self) -> Option<DirectStorageObservation> {
-        let slot = self.owner.resource_slot()?;
+        let slot = if self.returned.is_some() { &mut self.returned } else { self.owner.resource_slot()? };
         let Some(resources) = slot.take() else {
             return None;
         };
@@ -64,7 +64,17 @@ impl Finalizer<'_> {
         observation: &DirectStorageObservation,
         end: Instant,
     ) -> Option<bool> {
-        let slot = self.owner.resource_slot()?;
+        let broker = self.owner.scope().preparing.broker();
+        let session = self.owner.scope().preparing.admitted.request().session().clone();
+        let slot = if self.returned.is_some() { &mut self.returned } else { self.owner.resource_slot()? };
+        if let Some(Resources::FinalStorage(FinalStorage {
+            remainder: FinalStorageRemainder::Returned(Some(phone)), ..
+        })) = slot.as_ref()
+            && let Err(cause) = phone.require_closed_for_resource(&broker.storage.runtime, &session)
+        {
+            self.errors.push(cause.into());
+            return None;
+        }
         let Some(Resources::FinalStorage(input)) = slot.take() else {
             unreachable!("same actual observation requires its retained preparation");
         };
@@ -92,7 +102,7 @@ impl Finalizer<'_> {
 }
 
 impl FinalStorageRemainder {
-    fn restore(self, storage: StorageClaim, plan: ObservedCreatePlan) -> Resources {
+    pub(super) fn restore(self, storage: StorageClaim, plan: ObservedCreatePlan) -> Resources {
         match self {
             Self::Original(inspection) => Resources::OriginalCleanup {
                 storage,

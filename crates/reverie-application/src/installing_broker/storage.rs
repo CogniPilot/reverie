@@ -30,6 +30,7 @@ pub use nix::{
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
 };
+pub(in crate::installing_broker) use nix::{CreatedStorageReturned, CreatedStorageFinishFailure};
 pub use replacement_stop::{
     ReplacementStopPreparation, ReplacementStopReclaimFailure, ReplacementStopRetainFailure,
     ReplacementStopReturned,

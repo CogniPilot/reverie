@@ -20,7 +20,7 @@ pub use preparation::{
     ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed, ReuseViewerFailure,
     ViewingCold, ViewingReuse,
 };
-pub use viewer::{ReuseRelayError, ReuseRelayReturned};
+pub use viewer::{ColdRelayReturned, ReuseRelayError, ReuseRelayReturned, WorkerViewerRelayError};
 #[cfg(test)]
 mod tests;
 
