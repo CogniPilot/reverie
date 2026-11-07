@@ -86,16 +86,23 @@ impl Inner {
     ) -> Result<HeadroomFacts> {
         self.require_host_job_idle()?;
         self.check_ordinary_launch(session)?;
+        let config = self.config()?;
         need(
-            resources.budget_mode() == BudgetMode::Admission
+            (resources.budget_mode() == BudgetMode::Admission
+                || (resources.budget_mode() == BudgetMode::Pool
+                    && config.memory_policies_enabled()))
                 && reverie_core::decimal::UnsignedInteger::from_u64(
                     u64::from(resources.pool_memory_mib()) * 1_048_576,
-                ) == self.config()?.pool_bytes()?,
+                ) == config.pool_bytes()?,
             "RESERVATION_ADMISSION_POLICY_REQUIRED",
         )?;
         let rows = self.guard(None)?;
         let native = self.native_context()?;
-        let capacity = native.capacity(&rows)?;
+        let capacity = if resources.budget_mode() == BudgetMode::Pool {
+            native.pool_creation_capacity(&rows)?
+        } else {
+            native.capacity(&rows)?
+        };
         let retained = self.retained_delta(&self.document()?)?;
         let budget = CapacityCounter::from_integer(capacity.budget())?;
         let committed = CapacityCounter::from_integer(capacity.total())?;
