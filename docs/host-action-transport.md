@@ -1,5 +1,11 @@
 # Private host-action transport
 
+> **Design record.** The Python implementation of this queue and its transport
+> (`host_actions.py`, `host_action_rpc.py`, `host_action_http.py`) was never wired
+> into a running broker and has been removed. The broker answers
+> `/api/host-actions` with 503. The native owner-host executor is to implement
+> this design.
+
 This slice adds an authenticated, bounded Unix HTTP adapter for the owner-approved
 queue. It is disabled by default: the worker broker accepts an optional injected
 host-action callback, but its normal configuration does not create that callback.

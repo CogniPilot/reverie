@@ -1,6 +1,8 @@
 //! Legacy effective-worker JSON bytes, with Python's default spaces and ASCII.
 //! Inputs are projected data, never evidence of validation, readiness or authority.
 mod encode;
+/// Python `repr(float)` for a finite value (shared by named byte encoders).
+pub(crate) use encode::float as python_float_repr;
 
 use crate::legacy_json::{self, Node, Text, Value};
 use sha2::{Digest, Sha256};

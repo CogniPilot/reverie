@@ -1,8 +1,10 @@
 # Host action signing-key custody
 
-The optional `host_action_custody.load_key` primitive reads a single raw
-32-byte signing key. It is not wired to a daemon, worker configuration or web
-server. The host service must provide an authoritative inventory of every
+This is the design record for host signing-key custody. The earlier Python
+`load_key` primitive was never wired to a daemon, worker configuration or web
+server, and it has been removed; the native owner-host executor is to implement
+these requirements. Loading reads a single raw 32-byte signing key. The host
+service must provide an authoritative inventory of every
 laptop bind source, including engine-inspected running and stopped containers,
 configured shared mounts, homes, scratch and provider account mounts. Read-only
 mounts expose credentials too. Missing inventory refuses; supplying an incomplete

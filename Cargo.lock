@@ -885,6 +885,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-commit-policy"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
@@ -1038,6 +1047,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-namegate"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "unicode-normalization",
+ "unicode-properties",
+]
+
+[[package]]
 name = "reverie-nix-store-prepare"
 version = "0.1.0"
 dependencies = [
@@ -1045,6 +1065,18 @@ dependencies = [
  "reverie-core",
  "reverie-diagnostics",
  "reverie-host",
+]
+
+[[package]]
+name = "reverie-observations"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "nix",
+ "reverie-contracts",
+ "reverie-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -1112,6 +1144,19 @@ dependencies = [
  "reverie-core",
  "rusqlite",
  "serde_json",
+]
+
+[[package]]
+name = "reverie-voice-ci"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1638,12 +1683,18 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "unicode-normalization"
-version = "0.1.25"
+version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
 dependencies = [
  "tinyvec",
 ]
+
+[[package]]
+name = "unicode-properties"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "993ad287eb20e8ba755312801cfe1413e0f25d604075863acaddca10b04c1833"
 
 [[package]]
 name = "unicode-width"

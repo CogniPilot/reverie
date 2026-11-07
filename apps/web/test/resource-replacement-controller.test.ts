@@ -488,7 +488,10 @@ it('the real profile keeps a lost Apply reply fenced and discovers its server re
     const fresh = await open(); // no copied localStorage: real owner discovery
     await until(async () => {await fresh.flush(); return fresh.document.querySelector<HTMLButtonElement>('[aria-label="Check laptop memory change for Worker"]')?.hidden;}, value => value === false);
     expect(button(fresh, 'Preview laptop memory for Worker').disabled).toBe(true);
-    button(fresh, 'Check laptop memory change for Worker').click(); await fresh.flush();
+    button(fresh, 'Check laptop memory change for Worker').click();
+    // The check reads the server record asynchronously; one fixed flush can finish before it renders.
+    await until(async () => {await fresh.flush(); return fresh.document.querySelector('.ca-profile-memory')!.textContent ?? '';},
+      text => text.includes('needs recovery'));
     expect(fresh.document.querySelector('.ca-profile-memory')!.textContent).toContain('needs recovery');
     expect(verbs.filter(verb => verb === 'claim')).toHaveLength(1);
     expect(verbs.filter(verb => verb === 'source-stop')).toHaveLength(1);
