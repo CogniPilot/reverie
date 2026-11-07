@@ -23,7 +23,7 @@ impl ViewerRelay<'_> {
             let (header, payload) = stream.receive()?;
             match decode_terminal_frame(header.kind(), &payload).map_err(ViewerRelayError::Data)? {
                 TerminalFrame::Input(bytes) => self.input(&stream, bytes)?,
-                TerminalFrame::Resize(size) => self.request_resize(size)?,
+                TerminalFrame::Resize(size) => self.resize_in_flight(size)?,
             }
         }
         if ready.master && self.master_open {
@@ -87,6 +87,8 @@ impl ViewerRelay<'_> {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                     ) =>
                 {
+                    #[cfg(test)]
+                    super::test_hooks::write_wait(&error);
                     stream.ready(
                         self.runtime,
                         self.viewer,
@@ -94,9 +96,40 @@ impl ViewerRelay<'_> {
                         TerminalWait::Input,
                     )?;
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    // The frame has already been consumed. Keep THIS exact
+                    // unwritten suffix; returning Progress would discard it.
+                    self.retry_busy(error)?;
+                }
             }
         }
+        Ok(())
+    }
+    fn retry_busy(&self, error: crate::worker_laptop::LaptopError) -> RelayResult<()> {
+        let error = ViewerRelayError::from(error);
+        if !error.busy() {
+            return Err(error);
+        }
+        self.wait_pending_operation()
+    }
+    fn resize_in_flight(
+        &mut self,
+        size: reverie_core::worker_launch::TerminalSize,
+    ) -> RelayResult<()> {
+        loop {
+            match self.request_resize(size) {
+                Err(error) if error.busy() => self.wait_pending_operation()?,
+                result => return result,
+            }
+        }
+    }
+    fn wait_pending_operation(&self) -> RelayResult<()> {
+        #[cfg(test)]
+        super::test_hooks::saw_busy();
+        if self.runtime.cancellation().is_cancelled() || !self.identity.can_progress() {
+            return Err(ViewerRelayError::Phase);
+        }
+        std::thread::sleep(Duration::from_millis(1));
         Ok(())
     }
     fn output(&mut self, stream: &mut socket::Socket<'_>) -> RelayResult<()> {

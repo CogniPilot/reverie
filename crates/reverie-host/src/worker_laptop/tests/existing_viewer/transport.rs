@@ -1,10 +1,13 @@
 //! Actual kernel-peer J records, actual employee Box/first-inspect, and the
 //! fixed native PTY child. No App admission/stop/global-finalizer completion.
 use super::*;
+mod bulk;
+mod contention;
+mod created;
 mod diagnostic;
 mod identity;
-mod contention;
 mod receipt;
+mod resize;
 use crate::{
     command_telemetry::CommandTelemetry,
     worker_reports::{

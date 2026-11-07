@@ -35,21 +35,19 @@ impl<'a> ViewingReuse<'a> {
             .map_err(ReuseRelayError::Transport)?;
         loop {
             let event = relay.step().map_err(ReuseRelayError::Transport)?;
-            match event {
-                ViewerRelayEvent::Progress => {}
-                ViewerRelayEvent::Ended(reason) => return Ok(reason),
-                ViewerRelayEvent::CheckCurrentIntent => {
-                    let current = self
-                        .broker()
-                        .configuration()
-                        .map_err(ReuseRelayError::Configuration)?;
-                    if let ViewerRelayEvent::Ended(reason) = relay
-                        .check_current_intent(current.configuration())
-                        .map_err(ReuseRelayError::Transport)?
-                    {
-                        return Ok(reason);
-                    }
-                }
+            let event = if matches!(event, ViewerRelayEvent::CheckCurrentIntent) {
+                let current = self
+                    .broker()
+                    .configuration()
+                    .map_err(ReuseRelayError::Configuration)?;
+                relay
+                    .check_current_intent(current.configuration())
+                    .map_err(ReuseRelayError::Transport)?
+            } else {
+                event
+            };
+            if let ViewerRelayEvent::Ended(reason) = event {
+                return Ok(reason);
             }
         }
     }

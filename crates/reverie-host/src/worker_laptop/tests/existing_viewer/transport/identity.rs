@@ -73,3 +73,61 @@ fn released_connection_and_lost_service_keep_real_box_without_retrofit_or_constr
         .into_parts();
     storage.close(end()).unwrap();
 }
+#[test]
+fn original_j_close_during_selected_constructor_retains_late_child_and_same_box_until_checked_close()
+ {
+    if isolated(
+        "original_j_close_during_selected_constructor_retains_late_child_and_same_box_until_checked_close",
+    ) {
+        return;
+    }
+    let fixture = Fixture::employee("created-viewer-echo");
+    let service = Arc::new(WorkerReportService::from_runtime(fixture.runtime()));
+    let (client, connection, mut hold) = accepted(&fixture, &service, "opencode");
+    let existing = Arc::new(retained(&fixture, &connection));
+    let connection = Arc::new(connection);
+    let gate = Arc::new(crate::captured_client::test_hooks::Gate::default());
+    struct Release(Arc<crate::captured_client::test_hooks::Gate>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.released.store(true, Ordering::Release);
+        }
+    }
+    let release = Release(gate.clone());
+    let runtime = fixture.runtime().clone();
+    let original = connection.clone();
+    let selected = existing.clone();
+    let pause = gate.clone();
+    let constructor = std::thread::spawn(move || {
+        crate::worker_laptop::viewer::test_hooks::next_constructor(pause);
+        runtime.start_existing_viewer_for_connection(&selected, &original, end())
+    });
+    wait(|| gate.entered.load(Ordering::Acquire));
+    connection.close_socket(end()).unwrap();
+    drop(client);
+    gate.released.store(true, Ordering::Release);
+    assert!(matches!(
+        constructor.join().unwrap().unwrap(),
+        ExistingViewerStart::Retained
+    ));
+    wait(|| fixture.root.join("viewer-ready").is_file());
+    assert!(fixture.runtime().reclaim_existing_relay(&existing).is_err());
+    assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
+    fixture
+        .runtime()
+        .close_existing_viewer(&existing, end())
+        .unwrap();
+    let (storage, _, _, _, _, failure) = fixture
+        .runtime()
+        .reclaim_existing_relay(&existing)
+        .unwrap()
+        .into_parts();
+    assert!(
+        failure.is_some(),
+        "original failed handoff remains distinct from native cleanup"
+    );
+    hold.release(end()).unwrap();
+    service.close(end()).unwrap();
+    storage.close(end()).unwrap();
+    drop(release);
+}

@@ -8,6 +8,11 @@ struct Request {
     observed: Option<(u16, u16)>,
 }
 #[derive(Default)]
+struct ClientObservation {
+    ours: Vec<(u16, u16)>,
+    unread: bool,
+}
+#[derive(Default)]
 pub(super) struct Resize {
     pending: Option<Request>,
     blocked: Option<&'static str>,
@@ -47,35 +52,57 @@ impl ViewerRelay<'_> {
         let Some(rows) = self.resize_query(&identity, None)? else {
             return Ok(());
         };
-        let mut ours = Vec::new();
-        let mut unread = false;
-        if let Some(clients) = viewer_clients(&rows) {
-            let marker = self.runtime.terminal_viewer_marker(self.viewer)?;
-            for client in clients {
-                let environment = self.resize_query(&identity, Some(client))?;
-                if !self.same_resize(&identity) {
-                    return Ok(());
-                }
-                if let Some(environment) = environment {
-                    if environment.split('\0').any(|entry| entry == marker) {
-                        ours.push(client.dimensions());
-                    }
-                } else {
-                    unread = true;
-                }
-            }
-        }
-        if ours.len() == 1 && !unread {
-            let request = self.resize.pending.as_mut().expect("same actual request");
-            request.observed = Some(ours[0]);
-            if ours[0] == (request.size.cols(), request.size.rows()) {
-                if self.current_resize(&identity)? {
-                    self.resize.pending = None;
-                }
-                return Ok(());
-            }
+        let Some(observation) = self.matching_clients(&identity, &rows)? else {
+            return Ok(());
+        };
+        if self.acknowledge_resize(&identity, observation)? {
+            return Ok(());
         }
         self.signal_resize(&identity)
+    }
+    fn matching_clients(
+        &mut self,
+        identity: &Arc<()>,
+        rows: &str,
+    ) -> RelayResult<Option<ClientObservation>> {
+        let mut observation = ClientObservation::default();
+        let Some(clients) = viewer_clients(rows) else {
+            return Ok(Some(observation));
+        };
+        let marker = self.runtime.terminal_viewer_marker(self.viewer)?;
+        for client in clients {
+            let environment = self.resize_query(identity, Some(client))?;
+            if !self.same_resize(identity) {
+                return Ok(None);
+            }
+            match environment {
+                Some(environment) if environment.split('\0').any(|entry| entry == marker) => {
+                    observation.ours.push(client.dimensions())
+                }
+                None => observation.unread = true,
+                Some(_) => {}
+            }
+        }
+        Ok(Some(observation))
+    }
+    fn acknowledge_resize(
+        &mut self,
+        identity: &Arc<()>,
+        observation: ClientObservation,
+    ) -> RelayResult<bool> {
+        if observation.ours.len() != 1 || observation.unread {
+            return Ok(false);
+        }
+        let observed = observation.ours[0];
+        let request = self.resize.pending.as_mut().expect("same actual request");
+        request.observed = Some(observed);
+        if observed != (request.size.cols(), request.size.rows()) {
+            return Ok(false);
+        }
+        if self.current_resize(identity)? {
+            self.resize.pending = None;
+        }
+        Ok(true)
     }
     fn resize_query(
         &mut self,

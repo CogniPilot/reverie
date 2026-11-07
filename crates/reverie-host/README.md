@@ -581,3 +581,25 @@ restoration step. Dropping that guard leaves the box in the record. Unknown
 construction or descriptor close retains the box and job. Actual reused-viewer
 App transfer, transport/replacement/drain and recovered-viewer producers remain
 required; no backend selection follows from this Host component.
+
+The named connection-bound relay factories derive the request from the original
+accepted J and retain its actual record identity before native construction.
+Created launches capture that identity before network/create and preserve it
+through guard consumption. Native-only component factories cannot acquire this
+identity afterward. Another same-SID J cannot start or relay that viewer.
+
+`begin_viewer_relay` serially implements I/R/O/X on that same socket and native
+job. It reuses the common framing/deadline owner, writes complete input through
+PTY backpressure, drains raw output before X, and retains exact resize-query
+constructors. Resize confirmation requires the full inventory, exact marker and
+size; an uncertain query blocks later confirmation even after local settlement.
+The fixed live resize report is bounded rather than Python's blocking flush;
+failed delivery propagates before a later receipt/X. Streaming completion reads
+preserve Python UTF-8/integer semantics without imposing a new file-byte cap.
+Detailed malformed JSON/receipt diagnostic text remains a compatibility limit.
+
+Transport termination neither reaps the native leader nor returns storage. A
+fresh same-record receipt observation remains available before cleanup, including
+Held/no-job failures. The actual App finalizer must classify it on every outcome,
+perform any required real stop before reap, and settle all other owners. No live
+Docker, recovered-viewer, service activation or global release claim follows.

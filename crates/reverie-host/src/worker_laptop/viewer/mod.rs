@@ -87,7 +87,7 @@ impl Workflows {
             resources.plan.arguments().worker_name().clone(),
             size,
             marker,
-            None,
+            resources.connection.clone(),
         );
         // Real constructor ownership is installed BEFORE thread creation/open/
         // spawn. Same bounded record is inventoried even if this caller times out.

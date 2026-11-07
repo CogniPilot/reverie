@@ -525,3 +525,12 @@ quarantines the existing resource and counted connection owners in this process.
 The new owning controls cover genuine legacy, physical employee storage, a real
 fixed PTY child, actual configured-Gate allocation close and negative dropped-owner
 retention. They do not select the native service or qualify live Docker cleanup.
+
+The actual reuse continuation now threads its original accepted connection into
+Host retention and construction, rather than pairing request data with a later
+same-SID socket. `ViewingReuse::relay` drives the same framed native viewer and
+reads the real broker snapshot at each current-intent check. Its typed result
+returns the whole `ViewingReuse` for receipt, child exit, EOF, stop, intent change
+and failure. It performs no automatic close/restore or handler completion. The
+original finally ordering and final storage-live/resource release remain separate
+required consumers; no relay outcome is a release permission.

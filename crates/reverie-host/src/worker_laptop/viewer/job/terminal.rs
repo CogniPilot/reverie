@@ -286,9 +286,9 @@ fn poll(
         if remaining.is_zero() {
             return Ok(TerminalReady::default());
         }
-        let millis = remaining
-            .as_millis()
-            .saturating_add(u128::from(remaining.subsec_nanos() % 1_000_000 != 0));
+        let millis = remaining.as_millis().saturating_add(u128::from(
+            !remaining.subsec_nanos().is_multiple_of(1_000_000),
+        ));
         let timeout =
             PollTimeout::try_from(millis).map_err(|_| LaptopError::Refused("VIEWER_POLL_BOUND"))?;
         let polled = match wait {

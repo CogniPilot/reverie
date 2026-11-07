@@ -3,6 +3,7 @@
 mod cleanup;
 mod cold;
 mod cold_prepare;
+mod connection;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
 mod create;
 mod error;
@@ -66,6 +67,7 @@ struct Resources {
     plan: ObservedCreatePlan,
     request: WorkerRequest,
     office: OfficePhone,
+    connection: Option<crate::worker_reports::terminal::RelayIdentity>,
 }
 impl Resources {
     fn held_nix(&self) -> Result<&NixReturned> {
@@ -213,11 +215,18 @@ impl Workflows {
         runtime: &WorkerRuntime,
         nix: &NixWorkflow,
         inputs: Inputs,
+        connection: Option<crate::worker_reports::terminal::RelayIdentity>,
     ) -> std::result::Result<LaptopWorkflow, Box<LaptopRetainFailure>> {
         let result = (|| {
             need(
                 !runtime.cancellation().is_cancelled(),
                 "WORKER_LAPTOP_STOPPED",
+            )?;
+            need(
+                connection
+                    .as_ref()
+                    .is_none_or(|source| source.can_progress()),
+                "VIEWER_CONNECTION_CLOSED",
             )?;
             runtime
                 .nix_workflows()
@@ -256,6 +265,7 @@ impl Workflows {
             plan: inputs.plan,
             request: inputs.request,
             office: inputs.office,
+            connection,
         };
         let record = Arc::new(Mutex::new(Record {
             cold: Default::default(),
@@ -344,6 +354,7 @@ impl Workflows {
             plan,
             request,
             office,
+            connection: _,
         } = resources;
         let guard::NixOwnership::Held(nix) = nix else {
             unreachable!("actual Held guard checked under this same record mutex")
@@ -469,6 +480,7 @@ impl WorkerRuntime {
                 request,
                 office,
             },
+            None,
         )
     }
     pub fn run_laptop_network(
