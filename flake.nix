@@ -344,6 +344,13 @@
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
           workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
+          workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
+            in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
+              pkgs.runCommand "reverie-worker-perf-tool-check" { } ''
+                ${perf}/bin/perf version --build-options > "$out"
+                grep -Ei 'python:.*\[ *off *\]' "$out"
+                test ! -e ${perf}/libexec/perf-core/scripts/python
+              '';
           codexObserverSource = packages.codexObserver.tests.source;
           codexObserverVendor = packages.codexObserver.tests.vendor;
           collectService = pkgs.runCommand "reverie-collect-service-evaluation" {

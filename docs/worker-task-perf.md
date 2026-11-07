@@ -1,5 +1,58 @@
 # Optional per-task Linux perf policy
 
+The shared Nix worker base includes Linux `perf` for ordinary, browser and
+rootless worker image factories. Install tools through that image configuration;
+do not install packages separately in employee containers. Rebuild and use the
+normal preserving recreation workflow to update old images.
+The supported Nix `withPython = false` override disables embedded Python and
+upstream perf's runtime Python scripts. Upstream's Python build generators remain
+third-party build tooling; no first-party Python implementation is added.
+
+On NixOS, `services.reverieWorkers` declares
+`boot.kernel.sysctl."kernel.perf_event_paranoid" = lib.mkDefault 2` when
+`taskPerf.enable` is true (the default). This permits per-task user-space
+measurements; normal host-owner overrides remain effective and can make the
+acceptance test fail. No container changes host policy. An optional shared
+`allowedCPUs = [ 0 1 2 3 4 5 6 7 ];` assigns processes actually attached to
+`reverie-workers.slice` to those CPUs through normal NixOS activation.
+Its default is `null`, which inherits placement rather than assuming eight CPUs
+on every host. Confirm each seat's actual cgroup parent and effective CPU mask
+after activation. An inactive slice or a configured parent string does not prove
+attachment; Docker's empty `CpusetCpus` alone proves neither pinning nor its absence.
+
+## Real container acceptance
+
+```sh
+nix build .#workerImage --out-link /tmp/reverie-perf-image
+nix build .#workerTaskPerfPolicy --out-link /tmp/reverie-perf-policy
+docker load --input /tmp/reverie-perf-image
+nix develop --command cargo xtask verify-worker-perf --image reverie-worker:latest \
+  --policy-manifest /tmp/reverie-perf-policy/share/reverie/worker-perf-profile.json
+# Check all currently running laptops in one deployment, without recreation,
+# installation, policy changes or host sysctl writes:
+nix develop --command cargo xtask verify-worker-perf --deployment DEPLOYMENT
+```
+
+The test performs real `perf stat`, `perf record` and `perf report` with positive
+`task-clock:u` counts and actual samples from a fixed, short user-space workload.
+It uses a nonroot process, no effective/permitted capabilities, active seccomp
+and no-new-privileges. The image fixture drops all capabilities and uses the
+hash-verified generated task-v1 derivative, read-only root and private scratch.
+It grants neither CAP_PERFMON nor SYS_ADMIN and uses no privileged/unconfined
+fallback. Private profiling files are removed after the test. A missing tool,
+denied event, missing kernel support, zero samples or changing inventory fails.
+The local mode checks immutable container IDs before/after and checks every
+running laptop; zero laptops do not constitute success. Existing old-image or
+old-filter failures remain failures until normal preserving recreation.
+
+The image CI job builds the Nix worker image and policy, prepares only its
+declared disposable Ubuntu GitHub-hosted VM via `cargo xtask prepare-ci-perf`,
+then runs the strict real test. That preparation command refuses local and
+self-hosted use and never belongs to ordinary verification or product startup.
+NixOS deployments use the declarative module instead. An image test proves
+container compatibility; it does not claim that every existing employee was
+migrated or that hardware PMU events are available.
+
 The default broker policy does not open `perf_event_open`. An owner may select
 `employeePerfPolicies: {"<stable employee UUID>": "task-v1"}` in private broker
 configuration. Empty or absent maps preserve existing launch arguments and
