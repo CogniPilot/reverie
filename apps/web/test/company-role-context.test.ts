@@ -418,6 +418,44 @@ describe('Reverie notices through the member hook', () => {
     } finally { await f.close(); }
   });
 
+  it('moves a long notice forward on every turn while a long briefing and busy messages share each payload', async () => {
+    const f = await fixture();
+    try {
+      for (let i = 0; i < 12; i++) f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, `request ${i} ${'detail '.repeat(30)}`, [M]);
+      const asked = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: '"'.repeat(MAX_POLL_QUESTION), options: wideLabels });
+      await f.chat.closePoll(f.room.id, asked.id, 'user');
+      // The worst case: a briefing is pending on every turn, so the notice only ever gets its reserved share.
+      vi.spyOn(f.chat.delivery, 'pendingBriefs').mockReturnValue([{ roomId: f.room.id, roomName: 'General', text: 'x'.repeat(5000) }]);
+      let owed = f.chat.delivery.pendingNotices(M)[0].text.length;
+      let turns = 0;
+      for (; turns < 20 && f.notices(M).length; turns++) {
+        const { context, summary } = await hook(f.chat, M);
+        expect(context).toContain('Reverie pending messages');
+        expect(summary.notices).toHaveLength(1);
+        const left = f.chat.delivery.pendingNotices(M)[0]?.text.length ?? 0;
+        expect(left).toBeLessThan(owed);
+        owed = left;
+      }
+      expect(turns).toBeGreaterThan(1);
+      expect(f.notices(M)).toEqual([]);
+    } finally { await f.close(); }
+  });
+
+  it('withdraws the rest of a notice still in parts when its room is archived', async () => {
+    const f = await fixture();
+    try {
+      const asked = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: '"'.repeat(MAX_POLL_QUESTION), options: wideLabels });
+      await f.chat.closePoll(f.room.id, asked.id, 'user');
+      expect((await hook(f.chat, M)).summary.notices?.[0].more).toBe(true);
+      expect(f.notices(M)).toHaveLength(1);
+      f.chat.archiveRoom(f.room.id, true);
+      const { context, summary } = await hook(f.chat, M);
+      expect(summary.notices).toBeUndefined();
+      expect(context).not.toContain('(continued)');
+      expect(f.notices(M)).toEqual([]);
+    } finally { await f.close(); }
+  });
+
   it('withdraws hook fragments for a room the member can no longer see, and never shows a member another\'s notices', async () => {
     const f = await fixture();
     try {
