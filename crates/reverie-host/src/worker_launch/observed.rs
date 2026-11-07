@@ -15,6 +15,11 @@ use reverie_contracts::{
 };
 use reverie_core::ids::ProfileSessionId;
 use std::sync::Arc;
+mod existing;
+pub use existing::{
+    ExistingCaptureFailure, ExistingLaptopInspection, ExistingObservationError,
+    ExistingProcessIncarnation,
+};
 #[cfg(test)]
 mod tests;
 #[derive(Debug)]
@@ -92,6 +97,7 @@ type Result<T> = std::result::Result<T, CreateObservationError>;
 /// Same-origin provenance is NOT owner authorization or permission to start.
 pub struct ObservedCreatePlan {
     origin: Arc<InstalledWorkerEngine>,
+    observation: Arc<()>,
     storage_owner: Arc<()>,
     source: EffectiveWorkerConfig,
     effective: EffectiveWorkerConfig,
@@ -150,6 +156,7 @@ impl WorkerRuntime {
         let arguments = observe_create_arguments(&effective, session, storage.paths())?;
         Ok(ObservedCreatePlan {
             origin: self.installed_engine().clone(),
+            observation: Arc::new(()),
             storage_owner: storage.owner_identity().clone(),
             source,
             effective,

@@ -8,6 +8,7 @@ pub(super) enum PreparationError {
     Validation(crate::worker_validation::WorkerValidationError),
     Engine(reverie_host::engine_metadata::EngineError),
     Existing(reverie_contracts::broker_laptop::LaptopReadError),
+    ExistingHost(reverie_host::worker_launch::ExistingObservationError),
     Refused(&'static str),
 }
 impl std::fmt::Display for PreparationError {
@@ -20,6 +21,7 @@ impl std::fmt::Display for PreparationError {
             Self::Validation(e) => e.fmt(out),
             Self::Engine(e) => e.fmt(out),
             Self::Existing(e) => e.fmt(out),
+            Self::ExistingHost(e) => e.fmt(out),
             Self::Refused(code) => out.write_str(code),
         }
     }
@@ -34,6 +36,7 @@ impl std::error::Error for PreparationError {
             Self::Validation(e) => Some(e),
             Self::Engine(e) => Some(e),
             Self::Existing(e) => Some(e),
+            Self::ExistingHost(e) => Some(e),
             Self::Refused(_) => None,
         }
     }

@@ -80,8 +80,8 @@ fn stopped_owned_first_inspect_accepts_missing_id_and_defers_running_policy() {
         .inspect(end())
         .unwrap_or_else(|e| panic!("{}", e.cause));
     let previous = inspected.previous.as_ref().unwrap();
-    assert!(!previous.running().unwrap());
-    assert!(previous.canonical_id().is_none());
+    assert!(!previous.data().running().unwrap());
+    assert!(previous.data().canonical_id().is_none());
     finish_claimed(inspected.observed.claimed);
     broker.close_command_telemetry(end()).unwrap();
 }

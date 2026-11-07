@@ -2,7 +2,11 @@
 //! runtime provenance is retained without granting API or start permission.
 mod observed;
 use crate::{native, rootless};
-pub use observed::{CreateObservationError, ObservedCreatePlan, observe_create_arguments};
+pub use observed::{
+    CreateObservationError, ExistingCaptureFailure, ExistingLaptopInspection,
+    ExistingObservationError, ExistingProcessIncarnation, ObservedCreatePlan,
+    observe_create_arguments,
+};
 use reverie_contracts::{
     rootless::RootlessConfig,
     storage_identity::MetadataText,

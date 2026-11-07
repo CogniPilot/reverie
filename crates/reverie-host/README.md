@@ -307,6 +307,16 @@ the bootstrap identity. This observation still grants no API/admission/start
 permission; real moved resource owners and supervised lifecycle results remain
 necessary. The compatibility argument API delegates the same observation owner.
 
+`ObservedCreatePlan::inspect_existing` seals the original optional first inspect
+to that exact plan observation, engine and storage owner. Its consuming dead-pane
+and running-replacement capture methods preserve their distinct ID-check order
+before the shared fixed `/proc` process-start reader. The resulting
+`ExistingProcessIncarnation` retains the real observation and process readback;
+another plan or a new storage acquisition at the same paths cannot recreate it.
+Its getters and binding check remain data/provenance, not freshness or stop
+permission. An ordinary stop still needs the actual application admission,
+resource custody, repeated pane checks and fresh native/policy observations.
+
 Each actual `LaunchStorage` also has a private per-acquisition identity, minted
 only after successful lease acquisition or genuine service legacy resolution.
 The observed plan retains that identity across moves and Nix preparation; a
