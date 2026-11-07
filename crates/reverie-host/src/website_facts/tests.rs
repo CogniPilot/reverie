@@ -214,6 +214,7 @@ fn incomplete_and_oversized_bodies_cannot_become_engine_facts() {
 fn chunk_overhead_is_counted_in_actual_wire_bound() {
     let fixture = Fixture::new();
     let mut observer = fixture.observer();
+    let _ = transport::take_wire_bound_rejections();
     thread::scope(|scope| {
         let server = scope.spawn(|| {
             let mut stream = accepted(&fixture.listener);
@@ -227,9 +228,14 @@ fn chunk_overhead_is_counted_in_actual_wire_bound() {
         });
         let result = observer.observe(WebsiteMetadataRoute::Info, end());
         server.join().unwrap();
+        let rejections = transport::take_wire_bound_rejections();
         assert!(
             result.is_err(),
             "small decoded JSON must not hide excessive chunk wire bytes"
+        );
+        assert!(
+            rejections > 0,
+            "the actual wire-bound branch must reject, rather than a deadline or parser error"
         );
     });
 }

@@ -19,6 +19,15 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, unix::AsyncFd};
 
+#[cfg(test)]
+thread_local! {
+    static WIRE_BOUND_REJECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(super) fn take_wire_bound_rejections() -> u64 {
+    WIRE_BOUND_REJECTIONS.with(|count| count.replace(0))
+}
+
 struct BorrowedIo<'a> {
     socket: AsyncFd<crate::native::metadata_socket::MetadataSocket<'a>>,
     received: usize,
@@ -27,6 +36,8 @@ impl BorrowedIo<'_> {
     fn account(&mut self, count: usize) -> io::Result<()> {
         self.received = self.received.saturating_add(count);
         if self.received > MAX_WIRE {
+            #[cfg(test)]
+            WIRE_BOUND_REJECTIONS.with(|count| count.set(count.get().saturating_add(1)));
             return Err(io::Error::other("ENGINE_METADATA_WIRE_BOUND"));
         }
         Ok(())
