@@ -138,6 +138,14 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn verify_launch_limits(
+        &self,
+        _: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+        _: Option<&ObservedMemoryPolicy>,
+        _: Instant,
+    ) -> Result<()> {
+        Err(ObserverError::Refused("FIXTURE_LAUNCH_LIMITS_NOT_SELECTED"))
+    }
     fn verify_recovery_limits(
         &self,
         _: &reverie_contracts::worker_recovery::RecoveryInspection,

@@ -272,3 +272,40 @@ fn qualified_installed_host_root_is_read_from_fixed_proc_and_cgroup_paths() {
         facts.available().as_str()
     );
 }
+
+#[test]
+fn launch_memory_verifies_shared_native_limits_before_late_id_and_keeps_id_as_data() {
+    use reverie_contracts::broker_laptop::LaunchLaptopInspection;
+    use reverie_core::ids::ProfileSessionId;
+    let fixture = Fixture::new();
+    let sid = ProfileSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let mut row = json!({"Id":null,"Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":{"reverie.worker":"office","reverie.session":sid.as_str()}},"State":{"Running":true,"Pid":123},"HostConfig":{"Memory":2147483648u64,"MemorySwap":2147483648u64,"PidsLimit":128,"NanoCpus":0}});
+    let read = |row: &serde_json::Value| {
+        LaunchLaptopInspection::decode_owned(
+            &serde_json::to_vec(&json!([row])).unwrap(),
+            "office",
+            &sid,
+        )
+        .unwrap()
+    };
+    verify_launch(&fixture, &read(&row), None, end()).unwrap();
+    row.as_object_mut().unwrap().remove("Id");
+    fixture.write("/sys/fs/cgroup/worker/memory.max", b"1073741824\n");
+    assert_eq!(
+        verify_launch(&fixture, &read(&row), None, end())
+            .unwrap_err()
+            .code(),
+        "RESERVATION_EFFECTIVE_LIMIT_CONFLICT"
+    );
+    fixture.write("/sys/fs/cgroup/worker/memory.max", b"2147483648\n");
+    assert!(matches!(
+        verify_launch(&fixture, &read(&row), None, end()),
+        Err(ReservationKernelError::EngineData(_))
+    ));
+    row["Id"] = json!("not-a-canonical-CID");
+    verify_launch(&fixture, &read(&row), None, end()).unwrap();
+    assert!(
+        read(&row).canonical_id().is_none(),
+        "read-side native verification is no CID custody"
+    );
+}

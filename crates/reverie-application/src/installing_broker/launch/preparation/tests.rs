@@ -20,6 +20,9 @@ pub(super) fn end() -> Instant {
 pub(super) fn broker(tree: &Tree) -> InstallingBroker {
     let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
     raw.as_object_mut().unwrap().remove("resourceReservations");
+    broker_configuration(tree, &raw)
+}
+pub(super) fn broker_configuration(tree: &Tree, raw: &serde_json::Value) -> InstallingBroker {
     tree.write("worker.json", &serde_json::to_vec(&raw).unwrap());
     fs::remove_file(tree.root.join("state/resource-reservation-control.json")).unwrap();
     tree.write("ps.out", b"");

@@ -3,13 +3,15 @@
 use super::*;
 use reverie_host::worker_launch::ObservedCreatePlan;
 
-struct ObservedWorkerLaunch<'a> {
-    claimed: ClaimedWorkerLaunch<'a>,
-    current: Arc<ValidatedWorkerSnapshot>,
-    plan: ObservedCreatePlan,
+pub(super) struct ObservedWorkerLaunch<'a> {
+    pub(super) claimed: ClaimedWorkerLaunch<'a>,
+    pub(super) current: Arc<ValidatedWorkerSnapshot>,
+    pub(super) plan: ObservedCreatePlan,
 }
 impl<'a> ClaimedWorkerLaunch<'a> {
-    fn observe(mut self) -> Result<ObservedWorkerLaunch<'a>, Box<PreparationFailure<'a>>> {
+    pub(super) fn observe(
+        mut self,
+    ) -> Result<ObservedWorkerLaunch<'a>, Box<PreparationFailure<'a>>> {
         let current = match self.preparing.broker().configuration() {
             Ok(current) => current,
             Err(cause) => return Err(self.into_failure(cause.into(), None)),
@@ -31,7 +33,7 @@ impl<'a> ClaimedWorkerLaunch<'a> {
             Err(cause) => Err(self.into_failure(cause, Some(current))),
         }
     }
-    fn into_failure(
+    pub(super) fn into_failure(
         self,
         cause: PreparationError,
         current: Option<Arc<ValidatedWorkerSnapshot>>,

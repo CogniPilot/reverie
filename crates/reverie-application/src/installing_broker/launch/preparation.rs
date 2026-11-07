@@ -4,6 +4,7 @@ use super::*;
 use crate::installing_broker::lifecycle::{ActiveLaunchToken, LaunchGeneration};
 use reverie_host::worker_reports::WorkerLaunchHold;
 mod error;
+mod existing;
 mod observe;
 mod wait;
 use error::PreparationError;
