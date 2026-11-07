@@ -20,12 +20,11 @@ fn send(socket: RawFd, descriptors: &[RawFd], payload: &[u8]) {
         message.msg_iov = &mut iov;
         message.msg_iovlen = 1;
         message.msg_control = control.as_mut_ptr().cast();
-        message.msg_controllen =
-            libc::CMSG_SPACE(std::mem::size_of_val(descriptors) as u32) as usize;
+        message.msg_controllen = libc::CMSG_SPACE(std::mem::size_of_val(descriptors) as u32) as _;
         let header = libc::CMSG_FIRSTHDR(&message);
         (*header).cmsg_level = libc::SOL_SOCKET;
         (*header).cmsg_type = libc::SCM_RIGHTS;
-        (*header).cmsg_len = libc::CMSG_LEN(std::mem::size_of_val(descriptors) as u32) as usize;
+        (*header).cmsg_len = libc::CMSG_LEN(std::mem::size_of_val(descriptors) as u32) as _;
         std::ptr::copy_nonoverlapping(
             descriptors.as_ptr(),
             libc::CMSG_DATA(header).cast::<RawFd>(),

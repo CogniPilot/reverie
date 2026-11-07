@@ -44,7 +44,9 @@ pub(crate) fn publish(directory: &File, temporary: &OsStr, target: &OsStr) -> io
     // SAFETY: two terminated relative leaf names and one owned/live directory.
     // Never overwrite an existing receipt or retry an uncertain publication.
     if unsafe {
-        libc::renameat2(
+        // The Linux syscall is available with both glibc and static musl.
+        libc::syscall(
+            libc::SYS_renameat2,
             directory.as_raw_fd(),
             temporary.as_ptr(),
             directory.as_raw_fd(),

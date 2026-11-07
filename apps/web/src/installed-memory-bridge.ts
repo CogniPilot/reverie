@@ -2,6 +2,7 @@
  * session/employee/project grant. Only the final runtime bootstrap supplies it;
  * environment and MCP tool arguments cannot select an executable. */
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { memoryOrigin } from './installed-memory-origin.js';
 
 const SETTINGS = [
   'HOME',
@@ -41,7 +42,7 @@ export class InstalledMemoryBridge {
   static capture(executable: string, installation: NodeJS.ProcessEnv = process.env): InstalledMemoryBridge {
     if (
       process.platform !== 'linux' ||
-      !/^\/nix\/store\/[a-z0-9]{32}-[^/]+\/bin\/reverie-memory$/.test(executable) ||
+      !memoryOrigin(executable) ||
       realpathSync(executable) !== executable
     )
       throw new Error('Native memory package is unavailable');

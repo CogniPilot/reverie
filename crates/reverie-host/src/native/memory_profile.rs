@@ -56,7 +56,10 @@ pub(crate) fn publish(parent: &File, temporary: &OsStr) -> io::Result<()> {
     // NOREPLACE atomically refuses an existing owner profile. No numeric fd,
     // caller-selected destination or overwrite authority is exposed publicly.
     let result = unsafe {
-        libc::renameat2(
+        // musl has no renameat2 libc wrapper. Use the identical Linux syscall
+        // on both libc targets; names, flags and publication semantics match.
+        libc::syscall(
+            libc::SYS_renameat2,
             parent.as_raw_fd(),
             temporary.as_ptr(),
             parent.as_raw_fd(),

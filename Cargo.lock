@@ -995,6 +995,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-memory-capsule"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-memory-cli"
 version = "0.1.0"
 dependencies = [

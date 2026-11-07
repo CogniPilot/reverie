@@ -105,7 +105,7 @@ source and component tests do not establish an installed native broker.
 | Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Listener dispatch, caller-owned handler joins and global stop acknowledgement |
 | Storage, Nix and network | `reverie-host` storage/Nix/laptop workflows and `InstallingBroker` storage registry retain the actual resource records | Contiguous create/start, protected old-source stop, new-created cleanup and retained cold storage |
 | Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners | Actual started-container memory enforcement and owner GUI/API selection for remaining settings |
-| Memory tools | Native memory/MCP entry points, persistence, journal transport and startup services | Guest image/context/grant join, existing-data cutover and coordinated package selection |
+| Memory tools | Native memory/MCP entry points, persistence, journal transport, startup services and an unselected fixed-purpose guest capsule | Real launch/image/context/grant join, collision-safe existing-data cutover and coordinated package selection |
 
 Recovery entries contain actual Office and storage resources. Recovered names
 are membership data; they do not establish a canonical container/process identity
@@ -119,6 +119,14 @@ start, memory enforcement, cold-storage commit and worker-child launch. A
 successful create with noncanonical output still owns a container by its derived
 name; a lost reply cannot establish absence. Do not manufacture a replacement
 effect handle from status data or introduce another configuration source.
+
+The guest capsule preserves the qualified Console module tree and closes the
+selected Node/native-library dependency graph. Its synthetic namespace controls
+exercise nonempty legacy memory and read-only byte preservation; they establish
+no installed grant or image origin. Native startup still needs an explicit
+metadata ownership/migration boundary: historical state keys colliding with the
+new readiness keys must be preserved or refused before mutation. General
+existing-instance migration remains unqualified until that consumer is complete.
 
 Consult the owning [application](../crates/reverie-application/README.md) and
 [host](../crates/reverie-host/README.md) documentation for exact phase and cleanup
