@@ -509,6 +509,7 @@ let
   # The selected reverie-ops client (laptop runtime, console and opsCore).
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
+  routinesNative = import ./routines.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -601,6 +602,8 @@ let
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
+    # The host routines tick (docs/routines.md) is native; the owner links it from this package.
+    ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \
@@ -608,4 +611,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest opsNativeCli laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest opsNativeCli routinesNative laptopTools rustRouteHandler; }
