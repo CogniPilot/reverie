@@ -103,8 +103,26 @@ fn create_marker(path: &[u32], marker: &[u32]) -> Result<(), StateError> {
 /// `prepare(value)` for an administrator whose files belong to one of
 /// `owners` (only root on a host). Returns `str(Path(value))`.
 pub fn prepare(value: &[u32], owners: &[u32]) -> Result<Vec<u32>, StateError> {
+    prepare_within(&[], value, owners)
+}
+
+/// Whether `parent` is `anchor` or below it; every directory is within the
+/// empty anchor.
+fn within(anchor: &[u32], parent: &[u32]) -> bool {
+    anchor.is_empty()
+        || parent == anchor
+        || (parent.starts_with(anchor) && parent.get(anchor.len()) == Some(&u32::from('/')))
+}
+
+/// `prepare`, checking `anchor` and every directory below it; the empty
+/// anchor checks the whole ancestry. Only tests set an anchor, so that their
+/// result does not depend on the build tree above their own directory.
+fn prepare_within(anchor: &[u32], value: &[u32], owners: &[u32]) -> Result<Vec<u32>, StateError> {
     let path = dedicated_state_path(value).map_err(StateError::Refused)?;
-    for parent in ancestry(&path) {
+    for parent in ancestry(&path)
+        .into_iter()
+        .filter(|parent| within(anchor, parent))
+    {
         let name = host(&parent);
         let symlink = std::fs::symlink_metadata(&name).is_ok_and(|meta| meta.is_symlink());
         if std::fs::metadata(&name).is_err() && !symlink {
@@ -135,3 +153,6 @@ pub fn prepare(value: &[u32], owners: &[u32]) -> Result<Vec<u32>, StateError> {
     }
     Ok(path)
 }
+
+#[cfg(test)]
+mod tests;
