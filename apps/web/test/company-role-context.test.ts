@@ -93,6 +93,27 @@ describe('employee role context in ordinary room briefings', () => {
       expect(() => chat.briefingFor('someone-else', room.id)).toThrow('Not a member');
     } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
   });
+  it('an OpenCode member (no verified composer glyph) gets nothing typed but still gets its briefing through the hook', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'employee-brief-opencode-'));
+    const writes: string[] = [];
+    const session = { id: 'employee-runtime', name: 'Alex', mode: 'opencode', status: 'idle', pid: 123, isWorking: false,
+      writeViaMux: async (text: string, options?: any) => { writes.push(text); options?.onOutcome?.('submitted'); return true; } };
+    const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: id => id === session.id ? session as never : undefined, broadcast: () => {} });
+    try {
+      const room = chat.createRoom('General', undefined);
+      chat.addMember(room.id, session.id, { goal: 'Help the team' });
+      chat.post(room.id, { kind: 'user', name: 'Owner' }, 'welcome aboard', [session.id]);
+      await chat.delivery.flushAll();
+      expect(writes).toEqual([]);
+      // The message is dropped from the pane queue (it stays in the room history); the briefing waits for the hook.
+      expect(chat.delivery.pendingFor(session.id)).toBe(0);
+      expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(true);
+      const payload = chat.hookTurnSummary(session.id);
+      expect(payload.briefings?.map((b) => b.roomId)).toEqual([room.id]);
+      expect(payload.text).toContain('Help the team');
+      expect(chat.delivery.hasPendingBrief(session.id, room.id)).toBe(false);
+    } finally { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); }
+  });
   it('cuts an oversized briefing in the hook payload with the path to the whole text, and marks only that room shown', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'employee-brief-cut-'));
     const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: () => undefined, broadcast: () => {} });

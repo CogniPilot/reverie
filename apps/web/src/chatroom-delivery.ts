@@ -986,9 +986,13 @@ export class ChatroomDelivery {
     }
     if (!paneWakes(session.mode)) {
       // No empty composer can be proven for this CLI, so nothing is typed at all. Its member gets the messages through the
-      // harness hooks on its next turn; the queue is dropped, and the messages stay in the room history.
-      this.discard(queue);
-      this.queues.delete(sessionId);
+      // harness hooks on its next turn: messages stay in the room history and their queue is dropped, but a briefing exists
+      // only here, so it stays queued for the turn summary (as if woken: it neither wakes the member nor counts as stalled).
+      const briefs = queue.filter((p) => p.brief);
+      this.discard(queue.filter((p) => !p.brief));
+      for (const b of briefs) b.woken = true;
+      if (briefs.length) this.queues.set(sessionId, briefs);
+      else this.queues.delete(sessionId);
       return false;
     }
     const paneWait = this.paneWait(session);
