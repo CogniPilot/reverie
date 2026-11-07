@@ -23,6 +23,11 @@ fn main() {
         ["ps", "--quiet", "--no-trunc"] => "ids.out",
         ["inspect", "test-console"] => "server.out",
         ["inspect", name] if name.starts_with("test-agent-") => "inspect.out",
+        ["inspect", "--format", format, ids @ ..]
+            if format.starts_with("{\"Id\":{{json .Id}}")
+                && !ids.is_empty()
+                && ids.iter().all(|id| id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())) => "inventory.out",
+        ["inspect", ..] if args.iter().skip(1).all(|id| id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())) => "writers.out",
         _ => std::process::exit(83),
     };
     let mut trace = fs::OpenOptions::new()

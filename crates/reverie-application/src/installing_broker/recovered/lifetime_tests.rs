@@ -3,6 +3,20 @@
 use super::*;
 use std::{io::Write, os::unix::net::UnixStream};
 
+fn controlled_query(root: &Path) {
+    fs::create_dir_all(root.join("company/console")).unwrap();
+    fs::write(
+        root.join("company/console/.env"),
+        "REVERIE_USERNAME=fixture\nREVERIE_PASSWORD=synthetic-only\n",
+    )
+    .unwrap();
+    fs::write(root.join("company/console/hook-secret"), "synthetic-hook\n").unwrap();
+    // Even failed test setup cannot forward to a host service: the held actual
+    // query completes with a known parse refusal, never a usable address.
+    fs::write(root.join("server.out"), "controlled invalid server JSON").unwrap();
+    fs::write(root.join("server.hold"), "same actual fixed child").unwrap();
+}
+
 #[test]
 fn dropped_broker_keeps_actual_employee_lease_phone_and_native_job_together() {
     crate::test_process::owning_case!(
@@ -17,17 +31,7 @@ fn dropped_broker_keeps_actual_employee_lease_phone_and_native_job_together() {
     prior.record_storage_binding().unwrap();
     prior.close().unwrap();
     broker.recover_laptops().unwrap();
-    fs::create_dir_all(root.join("company/console")).unwrap();
-    fs::write(
-        root.join("company/console/.env"),
-        "REVERIE_USERNAME=fixture\nREVERIE_PASSWORD=synthetic-only\n",
-    )
-    .unwrap();
-    fs::write(root.join("company/console/hook-secret"), "synthetic-hook\n").unwrap();
-    // Even failed test setup cannot forward to a host service: the held actual
-    // query completes with a known parse refusal, never a usable address.
-    fs::write(root.join("server.out"), "controlled invalid server JSON").unwrap();
-    fs::write(root.join("server.hold"), "same actual fixed child").unwrap();
+    controlled_query(&root);
     let mut request =
         UnixStream::connect(root.join("office").join(FIRST).join("office.sock")).unwrap();
     request
@@ -51,9 +55,10 @@ fn dropped_broker_keeps_actual_employee_lease_phone_and_native_job_together() {
         let LaptopOwner::Recovered(owner) = &life.guard[0].owner else {
             panic!("genuine recovered owner")
         };
-        owner
-            ._office
-            .close_phone(&owner._phone, Instant::now() + Duration::from_millis(50))
+        owner.office._office.close_phone(
+            &owner.office._phone,
+            Instant::now() + Duration::from_millis(50),
+        )
     };
     drop(request);
     drop(broker);

@@ -174,8 +174,10 @@ impl Attempt {
             session: sid,
             name,
             owner: LaptopOwner::Recovered(Box::new(RecoveredLaptop {
-                _phone: self.phones.remove(at).1,
-                _office: self.office.as_ref().expect("actual Office service").clone(),
+                office: Arc::new(RecoveredOffice {
+                    _phone: self.phones.remove(at).1,
+                    _office: self.office.as_ref().expect("actual Office service").clone(),
+                }),
                 storage: storage.expect("every new member has its selected storage claim"),
             })),
         });

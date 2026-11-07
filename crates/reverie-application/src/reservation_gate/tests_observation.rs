@@ -16,14 +16,14 @@ fn sha(raw: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
-struct Setup {
-    tree: Tree,
-    oracle: Value,
-    rows: Vec<Value>,
-    stats: [[u64; 4]; 3],
+pub(crate) struct Setup {
+    pub(crate) tree: Tree,
+    pub(crate) oracle: Value,
+    pub(crate) rows: Vec<Value>,
+    pub(crate) stats: [[u64; 4]; 3],
 }
 impl Setup {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut tree = Tree::new();
         let oracle: Value = serde_json::from_str(include_str!(
             "../../../reverie-contracts/tests/fixtures/reservation-observe-python.json"

@@ -17,7 +17,7 @@ use attempt::Attempt;
 mod error;
 mod lifetime;
 #[cfg(test)]
-mod tests;
+pub(in crate::installing_broker) mod tests;
 pub use error::RecoveryError;
 type Result<T> = std::result::Result<T, RecoveryError>;
 
@@ -62,11 +62,14 @@ impl RecoveryOwners {
             .push(claim);
     }
 }
-pub(super) struct RecoveredLaptop {
+pub(super) struct RecoveredOffice {
     // Retained resources, including after last-broker Drop. Actual structured
     // stop/Office close consumers remain separate from recovery membership.
     pub(super) _phone: OfficePhone,
     pub(super) _office: Arc<OfficeService>,
+}
+pub(super) struct RecoveredLaptop {
+    pub(super) office: Arc<RecoveredOffice>,
     pub(super) storage: StorageClaim,
 }
 pub(super) enum LaptopOwner {
