@@ -3,9 +3,9 @@
  *
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
- * can select another agent's store. Each call runs the reverie's existing portable memory bridge
+ * can select another agent's store. Legacy recall runs the reverie's existing portable memory bridge
  * (`python -m reverie.memory_cli`) with the request on stdin, never interpolated into a command line, so the
- * bridge's own scope rules and hard floors apply unchanged.
+ * bridge's own scope rules apply unchanged. The hard floors a save must pass run in-process (memory-floors.ts).
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
  *
@@ -21,6 +21,7 @@ import type { AgentDeps } from './cli-agent.js';
 import { agentJournalRecall, agentJournalSave } from './cli-agent-journal.js';
 import type { ToolDefinition, ToolResult } from './mcp-server.js';
 import { environmentEntry, envValue } from './config/reverie-env.js';
+import { screenMemoryText } from './memory-floors.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
 
@@ -136,7 +137,12 @@ export function journalSaveCommand(args: Record<string, unknown>): string {
   return parts.map(quote).join(' ');
 }
 
-export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunner = defaultRunner, journal?: JournalPort) {
+export function createMemoryTools(
+  config: MemoryToolsConfig,
+  runner: BridgeRunner = defaultRunner,
+  journal?: JournalPort,
+  screen: (text: string, home: string) => string = screenMemoryText,
+) {
   const enabled = Boolean(config.instance);
 
   /** Only what the bridge needs: never forward this process's room or session credentials to it. */
@@ -174,11 +180,9 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
     if (!(JOURNAL_TAGS as readonly string[]).includes(field('tag'))) missing.push('tag');
     if (!field('quote') && !field('source')) missing.push('quote or source');
     if (missing.length) return refuse(`memory_remember needs ${missing.join(', ')} from the message you are acting on.`);
-    // The same hard floors the old store applied, checked by the bridge without writing anything; fail closed.
-    const screened = await runner(config.python, ['-m', 'reverie.memory_cli'], {
-      env: bridgeEnv(), input: JSON.stringify({ action: 'screen', text: field('text') }), timeoutMs: BRIDGE_TIMEOUT_MS });
-    let floor: unknown = 'unchecked';
-    try { floor = screened.code === 0 ? (JSON.parse(screened.stdout) as { floor?: unknown }).floor : 'unchecked'; } catch { /* stays unchecked */ }
+    // The same hard floors the old store applied, checked in-process without writing anything; fail closed.
+    let floor = 'unchecked';
+    try { floor = screen(field('text'), process.env.HOME ?? '/tmp'); } catch { /* stays unchecked */ }
     if (floor !== '') return failure(floor === 'unchecked' ? 'Memory save failed: the hard-floor check did not run; nothing was saved.'
       : 'Memory save failed: memory is empty or crossed a hard floor');
     try {
