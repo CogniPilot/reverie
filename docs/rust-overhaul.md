@@ -102,7 +102,8 @@ source and component tests do not establish an installed native broker.
 | Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
 | Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
 | Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
-| Accepted worker connections | `accept_worker_connection` dispatches actual T/J sockets with peer UID checked before frame handling; `ReceivedWorkerLaunch::begin_ordinary` performs image refresh, queued GPU cold boundary and optional admission | Complete listener/handler lifecycle, launch preparation and remaining protocol verbs |
+| Accepted worker connections | `accept_worker_connection` dispatches actual T/J sockets with peer UID checked before frame handling; `ReceivedWorkerLaunch::begin_ordinary` performs image refresh, queued GPU cold boundary and optional admission | Complete listener/handler lifecycle and remaining protocol verbs |
+| Ordinary launch preparation | `AdmittedWorkerLaunch::prepare_prefix` retains the same J, counted hold, storage, active registration and lifecycle guard through the original wait/storage/runtime/create-plan/first-inspect sequence; negative finalization preserves actual uncertain resources | Genuine existing/reuse classification and ordinary stop, whole cold/Nix/body continuation, actual admission release, registration and viewer |
 | Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Caller-owned handler joins and global stop acknowledgement |
 | Original launch resources | `retain_resource_draft` transfers the same storage and recovered Office owners before the durable claim; `RetainedPreparation::stop_original_source` consumes the same protected intent, checks exact process identity, closes the phone before the original lease, and retains the claim after release | Protected launch dispatch, target creation and live container qualification |
 | Storage, Nix and laptop effects | `reverie-host` retains the real Nix/storage/Office owners through network, complete-create telemetry, creation, checked metadata publication, start acknowledgement, native pane startup, original Nix guard finalization and immutable created-CID cleanup | Installing application caller, retained cold storage, actual admission/canonical release, and viewer handoff |
@@ -163,8 +164,8 @@ The November 7, 2026 hybrid cutover selected the qualified Rust network front
 with the existing TypeScript application. Rust owns public listeners, transport
 buffers, backpressure and child supervision; HTTP application routes,
 authentication and company stores remain in TypeScript/Node. Rust worker command
-clients are also running. The existing Python worker broker and other legacy
-helpers remain active. Other Rust backend crates are not thereby selected as
+clients are also running. The existing Python worker broker, Kokoro speech
+service and other legacy helpers remain active. Other Rust backend crates are not thereby selected as
 production services, and this is not the full native-backend migration.
 
 The owner-directed fix-forward cutover retained the original stopped container,

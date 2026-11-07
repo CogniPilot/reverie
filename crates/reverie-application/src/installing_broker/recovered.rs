@@ -129,6 +129,12 @@ impl InstallingBroker {
         // Existing source serve performs recovery before publishing its broker
         // listener. This lifecycle owner also excludes a competing publication.
         let mut lifecycle = self.installed.lifecycle()?;
+        // This is the actual startup recovery boundary. Hold THIS guard through
+        // publication, so no pending J can appear after a separate early check.
+        // A tracked pending name is never a recovered storage/Office owner.
+        if lifecycle.guard.has_pending() {
+            return Err(RecoveryError::Refused("WORKER_RECOVERY_LAUNCH_IN_PROGRESS"));
+        }
         #[cfg(test)]
         if lifecycle
             .guard

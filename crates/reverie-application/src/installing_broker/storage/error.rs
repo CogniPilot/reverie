@@ -14,6 +14,18 @@ pub struct StorageWorkflowError {
     cleanup: Vec<StorageOwnerError>,
 }
 impl StorageWorkflowError {
+    /// Original claim_storage's BlockingIOError branch only. A cleanup failure
+    /// is not a waitable refusal, even when its primary fault was a busy lease.
+    pub(in crate::installing_broker) fn wait_busy(&self) -> bool {
+        if !self.cleanup.is_empty() {
+            return false;
+        }
+        match &self.primary {
+            Cause::Refused("WORKER_PREVIOUS_EMPLOYEE_STORAGE_BUSY") => true,
+            Cause::Owner(StorageOwnerError::Storage(error)) => storage_busy(error),
+            _ => false,
+        }
+    }
     pub(super) fn refused(code: &'static str) -> Self {
         Self {
             primary: Cause::Refused(code),
@@ -49,6 +61,14 @@ impl StorageWorkflowError {
             Cause::Gate(error) => Some(error),
             _ => None,
         }
+    }
+}
+fn storage_busy(error: &reverie_host::worker_storage::StorageError) -> bool {
+    use reverie_host::worker_storage::{StorageError, StorageFault};
+    match error {
+        StorageError::Refused(StorageFault::LeaseBusy) => true,
+        StorageError::PartialEffects(primary) => storage_busy(primary),
+        _ => false,
     }
 }
 impl From<reverie_host::office::OfficeError> for StorageWorkflowError {
