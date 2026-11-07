@@ -8,6 +8,12 @@ use std::{
 };
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args == ["__reuse_provider_target"] {
+        std::fs::write("provider-ready", b"owned provider entered").unwrap();
+        wait_file("release-provider");
+        std::fs::write("provider-exited", b"owned provider leaving").unwrap();
+        return;
+    }
     if args.first().map(String::as_str) == Some("__telemetry_pipe_owner") {
         std::fs::write("pipe-owner-ready", b"actual inherited stdout owner").unwrap();
         wait_file("release-pipe-owner");
@@ -37,6 +43,10 @@ fn main() {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "storage-writer" && args == ["ps", "--filter", "label=reverie.worker=test", "--format", "{{.Names}}"] && std::path::Path::new("recovery-names.out").is_file() {
+                io::stdout().write_all(&fs::read("recovery-names.out").unwrap()).unwrap();
+                return;
+            }
             if mode == "storage-writer" && args.get(17).map(String::as_str) == Some("attach-session") {
                 let prefix = ["exec", "-it", "--env", "LANG=C.UTF-8", "--env", "LC_ALL=C.UTF-8", "--env", "TERM=xterm-256color", "--env", "COLORTERM=truecolor", "--env"];
                 assert_eq!(&args[..11], prefix);
@@ -45,6 +55,7 @@ fn main() {
                 assert!(marker.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
                 assert_eq!(&args[12..], ["test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "/bin/tmux", "-u", "-L", "reverie-laptop", "attach-session", "-d", "-t", "office"]);
                 fs::write("viewer-ready", b"actual fixed attach child entered").unwrap();
+                fs::write("viewer-pid", std::process::id().to_string()).unwrap();
                 use std::io::Read;
                 let mut data = [0; 1024];
                 loop {
@@ -53,6 +64,9 @@ fn main() {
                     io::stdout().write_all(&data[..n]).unwrap();
                     io::stdout().flush().unwrap();
                 }
+            }
+            if mode == "storage-writer" && std::path::Path::new("reuse-finalizer-control").is_file() {
+                reuse_finalizer(&args);return;
             }
             if mode == "image-refresh" && fs::remove_file("hold.next").is_ok() {
                 fs::write("query-started", b"actual owned child reached query").unwrap();
@@ -160,4 +174,39 @@ fn gpu_info(args:&[String]){
         fs::copy("replacement-spec.json","cdi/device.json").unwrap();
     }
     io::stdout().write_all(&fs::read("info.json").unwrap()).unwrap();
+}
+fn reuse_finalizer(args: &[String]) {
+    use std::{fs, path::Path};
+    let id="a".repeat(64);
+    let name="test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["inspect","test-console"] => {
+            fs::write("server.started", b"actual Office query entered").unwrap();
+            if Path::new("server.hold").is_file() { wait_file("server.release"); }
+            // Never return a usable address or forward to an installed server.
+            io::stdout().write_all(b"controlled invalid server JSON").unwrap();
+        }
+        ["inspect",target] if *target==name || *target==id => {
+            if Path::new("finalizer-inspect-error").exists(){std::process::exit(7);}
+            let leaf=if Path::new("stopped-provider").exists(){"finalizer-stopped.json"}else{"finalizer-live.json"};
+            io::stdout().write_all(&fs::read(leaf).unwrap()).unwrap();
+        }
+        ["stop","--time","2",target] if *target==id => {
+            if Path::new("finalizer-stop-error").is_file() { std::process::exit(7); }
+            if let Ok(pid)=fs::read_to_string("viewer-pid") {
+                let status=fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+                assert_ne!(status.rsplit_once(')').unwrap().1.split_whitespace().next(),Some("Z"));
+                fs::write("stop-before-viewer-reap",b"actual live owned viewer observed").unwrap();
+            }
+            fs::write("release-provider",b"actual fixed stop effect").unwrap();
+            wait_file("provider-exited");
+            fs::write("stopped-provider",target).unwrap();
+        }
+        ["ps","--all","--no-trunc","--format","{{.ID}} {{.Names}}"] => {
+            io::stdout().write_all(&fs::read("finalizer-census.out").unwrap()).unwrap();
+        }
+        ["network","inspect",_] => std::process::exit(7),
+        ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
+        _ => std::process::exit(83),
+    }
 }

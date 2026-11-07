@@ -3,6 +3,7 @@
 use super::*;
 mod relay;
 mod stop;
+mod transport;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchStorage, StorageLease},
@@ -18,6 +19,9 @@ fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!("worker_laptop::tests::existing_viewer::{name}"))
 }
 fn originals(fixture: &Fixture) -> Originals {
+    originals_with_id(fixture, "existing-fixture")
+}
+fn originals_with_id(fixture: &Fixture, id: &str) -> Originals {
     let selection = fixture
         .runtime()
         .resolve_storage(&fixture.source, &sid())
@@ -37,7 +41,7 @@ fn originals(fixture: &Fixture) -> Originals {
     // The controlled engine answers the actual fixed derived-name inspect.
     // This file does not mint the sealed Host observation.
     fs::write(fixture.root.join("started-laptop"), SID).unwrap();
-    fs::write(fixture.root.join("existing-inspect.json"),serde_json::to_vec(&json!([{"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID}},"State":{"Running":true},"Id":"existing-fixture"}])).unwrap()).unwrap();
+    fs::write(fixture.root.join("existing-inspect.json"),serde_json::to_vec(&json!([{"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID}},"State":{"Running":true},"Id":id}])).unwrap()).unwrap();
     let inspected = plan
         .inspect_existing(fixture.runtime(), end())
         .unwrap()

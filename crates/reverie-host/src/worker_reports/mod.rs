@@ -1,10 +1,15 @@
 //! Fixed T/J dispatch on an owned accepted UnixStream. Both purposes share
 //! actual admission, runtime origin, socket custody and checked finalizers.
 //! No listener, owner grant or successful create/start endpoint is created.
+mod budget;
 mod error;
+mod handler;
 mod launch;
 mod record;
+mod registered;
 mod retention;
+pub(crate) mod terminal;
+pub use terminal::{ViewerRelay, ViewerRelayEnd, ViewerRelayError, ViewerRelayEvent};
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -15,8 +20,10 @@ use crate::{
 };
 pub use error::WorkerReportError;
 use error::{Result, finalized};
+pub use handler::WorkerHandlerConstruction;
 pub use launch::{AcceptedWorkerConnection, WorkerLaunchConnection};
 use record::Record;
+pub use registered::{RegisteredWorkerConnection, WorkerHandlersProgress};
 pub use retention::{WorkerLaunchClose, WorkerLaunchHold};
 use std::{
     os::unix::net::UnixStream,
@@ -102,7 +109,7 @@ impl WorkerReportService {
     }
     /// Seal THIS admission, interrupt every owned socket, then wait for actual
     /// operation records and checked finalizers. This service owns no caller
-    /// thread JoinHandle/listener; their eventual dispatcher must join them.
+    /// thread JoinHandle/listener except actual published same-record handlers.
     /// No other service/client is sealed here.
     pub fn close(&self, deadline: Instant) -> Result<()> {
         self.closed.store(true, Ordering::Release);
@@ -114,6 +121,9 @@ impl WorkerReportService {
         let mut result = Ok(());
         for record in &records {
             result = finalized(result, record.interrupt());
+        }
+        for record in &records {
+            result = finalized(result, record.settle_handler(end));
         }
         loop {
             if records.iter().all(|record| record.finished()) {
@@ -138,6 +148,12 @@ impl WorkerReportService {
         result
     }
     fn lock_until(&self, end: Instant) -> Result<std::sync::MutexGuard<'_, Vec<Arc<Record>>>> {
+        self.lock_budget(&budget::CleanupBudget::bounded(self, end))
+    }
+    fn lock_budget(
+        &self,
+        budget: &budget::CleanupBudget<'_>,
+    ) -> Result<std::sync::MutexGuard<'_, Vec<Arc<Record>>>> {
         loop {
             match self.records.try_lock() {
                 Ok(guard) => return Ok(guard),
@@ -147,13 +163,7 @@ impl WorkerReportService {
                 }
                 Err(TryLockError::WouldBlock) => {}
             }
-            if Instant::now() >= end {
-                return Err(WorkerReportError::Unconfirmed);
-            }
-            std::thread::sleep(
-                end.saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(5)),
-            );
+            budget.pause()?;
         }
     }
 }

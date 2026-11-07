@@ -148,14 +148,36 @@ impl NixStoragePreparation {
         request: WorkerRequest,
         office: OfficePhone,
     ) -> Result<NetworkStoragePreparation, Box<NetworkStorageRetainFailure>> {
-        match transfer(
-            &self,
+        self.retain_network_inputs(
             Inputs {
                 plan,
                 request,
                 office,
             },
-        ) {
+            None,
+        )
+    }
+    pub fn retain_network_for_connection(
+        self,
+        plan: ObservedCreatePlan,
+        office: OfficePhone,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
+    ) -> Result<NetworkStoragePreparation, Box<NetworkStorageRetainFailure>> {
+        self.retain_network_inputs(
+            Inputs {
+                plan,
+                request: connection.request().clone(),
+                office,
+            },
+            Some(connection),
+        )
+    }
+    fn retain_network_inputs(
+        self,
+        inputs: Inputs,
+        connection: Option<&reverie_host::worker_reports::WorkerLaunchConnection>,
+    ) -> Result<NetworkStoragePreparation, Box<NetworkStorageRetainFailure>> {
+        match transfer(&self, inputs, connection) {
             Ok(workflow) => Ok(NetworkStoragePreparation {
                 destination: self.destination,
                 paths: self.paths,
@@ -175,6 +197,7 @@ impl NixStoragePreparation {
 fn transfer(
     preparation: &NixStoragePreparation,
     inputs: Inputs,
+    connection: Option<&reverie_host::worker_reports::WorkerLaunchConnection>,
 ) -> Result<LaptopWorkflow, Box<(Inputs, NetworkStorageError)>> {
     let ReturnTo::Registered {
         registry, identity, ..
@@ -184,6 +207,7 @@ fn transfer(
             preparation.destination.registry(),
             &preparation.workflow,
             inputs,
+            connection,
         );
     };
     let mut entries = match registry.lock(registry.runtime.stop_deadline()) {
@@ -196,7 +220,7 @@ fn transfer(
         Ok(index) => index,
         Err(error) => return Err(Box::new((inputs, NetworkStorageError::Nix(error)))),
     };
-    let workflow = retain_native(registry, &preparation.workflow, inputs)?;
+    let workflow = retain_native(registry, &preparation.workflow, inputs, connection)?;
     entries[index].owner = EntryOwner::Laptop(workflow.clone());
     Ok(workflow)
 }
@@ -204,21 +228,32 @@ fn retain_native(
     registry: &StorageRegistry,
     nix: &NixWorkflow,
     inputs: Inputs,
+    connection: Option<&reverie_host::worker_reports::WorkerLaunchConnection>,
 ) -> Result<LaptopWorkflow, Box<(Inputs, NetworkStorageError)>> {
-    registry
-        .runtime
-        .retain_laptop_network(nix, inputs.plan, inputs.request, inputs.office)
-        .map_err(|failure| {
-            let (plan, request, office, error) = failure.into_parts();
-            Box::new((
-                Inputs {
-                    plan,
-                    request,
-                    office,
-                },
-                NetworkStorageError::Host(error),
-            ))
-        })
+    let result = match connection {
+        Some(connection) => registry.runtime.retain_laptop_network_for_connection(
+            nix,
+            inputs.plan,
+            inputs.office,
+            connection,
+        ),
+        None => {
+            registry
+                .runtime
+                .retain_laptop_network(nix, inputs.plan, inputs.request, inputs.office)
+        }
+    };
+    result.map_err(|failure| {
+        let (plan, request, office, error) = failure.into_parts();
+        Box::new((
+            Inputs {
+                plan,
+                request,
+                office,
+            },
+            NetworkStorageError::Host(error),
+        ))
+    })
 }
 fn reclaim_native(
     registry: &StorageRegistry,

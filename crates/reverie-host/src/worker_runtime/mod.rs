@@ -19,6 +19,21 @@ pub struct WorkerRuntime {
     nix: Workflows,
     laptop: crate::worker_laptop::Workflows,
 }
+/// Read-only view of the SAME installed first-stop producer. This contains no
+/// setter, engine command, alternate clock, or resource/effect permission.
+#[derive(Clone)]
+pub struct WorkerStopBudget(Arc<InstalledWorkerEngine>);
+impl WorkerStopBudget {
+    pub fn deadline(&self) -> Option<Instant> {
+        self.0.stop_deadline()
+    }
+    pub fn same_origin(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+    pub fn same_runtime(&self, runtime: &WorkerRuntime) -> bool {
+        Arc::ptr_eq(&self.0, &runtime.engine)
+    }
+}
 #[derive(Debug)]
 pub enum RuntimeError {
     Engine(EngineError),
@@ -71,6 +86,9 @@ impl WorkerRuntime {
     }
     pub fn stop_deadline(&self) -> Option<Instant> {
         self.installed_engine().stop_deadline()
+    }
+    pub fn stop_budget(&self) -> WorkerStopBudget {
+        WorkerStopBudget(self.engine.clone())
     }
     pub fn connection_limit(&self) -> usize {
         self.worker_identity().connection_limit()

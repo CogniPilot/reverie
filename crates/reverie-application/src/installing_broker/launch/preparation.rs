@@ -8,7 +8,8 @@ mod error;
 mod existing;
 pub use existing::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
-    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
+    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure,
+    ReuseHandlerClosed, ReuseViewerFailure, ViewingReuse,
 };
 mod finalization;
 mod observe;
@@ -17,6 +18,8 @@ use error::PreparationError;
 use wait::WaitObservation;
 #[cfg(test)]
 mod prefix_tests;
+#[cfg(test)]
+mod stop_scope_tests;
 #[cfg(test)]
 mod tests;
 
