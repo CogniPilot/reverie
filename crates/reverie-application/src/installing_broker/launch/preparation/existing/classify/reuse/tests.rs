@@ -40,10 +40,6 @@ fn actual_worker_constructor_keeps_whole_reuse_and_original_connection_until_che
         .unwrap();
     assert!(Arc::ptr_eq(viewing.relay_connection(), &connection));
     assert!(viewing.owner.retained.scope.active.is_some());
-    assert!(
-        broker.close_command_telemetry(end()).is_err(),
-        "actual native construction does not release the same counted handler Hold"
-    );
     let restored = viewing.close_native_component(end()).unwrap();
     assert!(restored.scope.active.is_some());
     assert!(Arc::ptr_eq(
@@ -51,6 +47,10 @@ fn actual_worker_constructor_keeps_whole_reuse_and_original_connection_until_che
         &connection
     ));
     assert!(connection.assert_open(&broker.storage.runtime).is_ok());
+    assert!(
+        broker.close_command_telemetry(end()).is_err(),
+        "native cleanup/restoration retains the same counted handler Hold"
+    );
     finish(restored);
     broker.close_command_telemetry(end()).unwrap();
 }

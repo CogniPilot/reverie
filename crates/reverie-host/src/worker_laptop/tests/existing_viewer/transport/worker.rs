@@ -290,6 +290,10 @@ fn worker_admission_wait_observes_original_first_stop_without_a_fresh_budget_or_
     let service = Arc::new(WorkerReportService::from_runtime(fixture.runtime()));
     let (_client, connection, _hold) = accepted(&fixture, &service, "worker-original-stop");
     let existing = retained(&fixture, &connection);
+    // Existing reuse constructs no Office phone. Prove the real idle service
+    // closed before stop, rather than imposing an expired-budget failure on an
+    // already confirmed empty owner.
+    fixture.office.close(end()).unwrap();
     gate.entered.store(false, Ordering::Release);
     gate.released.store(false, Ordering::Release);
     let client = fixture.runtime().installed_engine().engine.client.clone();
@@ -352,5 +356,10 @@ fn worker_admission_wait_observes_original_first_stop_without_a_fresh_budget_or_
     });
     assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
     assert!(service.close(Instant::now()).is_err());
-    fixture.retain_after_expired_stop();
+    fixture.office.close(end()).unwrap();
+    assert!(fixture.runtime().close(end()).is_err());
+    assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
+    // Only this isolated fixture is retained; confirmed idle Office close is
+    // not Runtime/storage/counted-handler completion.
+    std::mem::forget(fixture);
 }
