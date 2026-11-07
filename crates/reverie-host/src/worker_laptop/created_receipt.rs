@@ -15,6 +15,32 @@ impl CreatedReceiptObservation {
     }
 }
 impl WorkerRuntime {
+    /// Checked target DATA for App's real fresh stop admission. This performs
+    /// no inspection/effect and cannot select another container or resource.
+    pub fn created_laptop_stop_target(
+        &self,
+        created: &CreatedLaptop,
+    ) -> Result<reverie_core::worker_laptop::WorkerContainerName> {
+        self.laptop_workflows().bound(self, &created.workflow)?;
+        let record = created
+            .workflow
+            .record
+            .try_lock()
+            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+        let resources = record
+            .resources
+            .as_ref()
+            .ok_or(LaptopError::Refused("WORKER_LAPTOP_REPLAYED"))?;
+        resources
+            .plan
+            .assert_storage_owner(self, resources.storage())
+            .map_err(LaptopError::Plan)?;
+        Ok(
+            reverie_core::worker_laptop::WorkerContainerName::from_launch_name_data(
+                resources.plan.arguments().worker_name(),
+            ),
+        )
+    }
     /// Valid during Held/retained construction too. There is deliberately no
     /// forward J/socket requirement: source observes completion before cleanup.
     pub fn observe_created_laptop_receipt(

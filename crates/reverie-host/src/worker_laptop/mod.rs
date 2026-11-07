@@ -17,6 +17,7 @@ mod pane;
 mod publication;
 mod start;
 mod storage;
+mod storage_cleanup;
 pub use storage::StartedStorageBorrow;
 mod created_receipt;
 pub use created_receipt::CreatedReceiptObservation;

@@ -16,6 +16,7 @@ pub(super) struct GuardConsumed {
     outcome: std::result::Result<NixDisposition, NixError>,
     prepared: Option<PathBuf>,
     close: CloseState,
+    failure: Option<Arc<LaptopError>>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum CloseState {
@@ -26,6 +27,20 @@ enum CloseState {
 impl NixOwnership {
     pub(super) fn guard_close_confirmed(&self) -> bool {
         matches!(self,Self::GuardConsumed(data) if data.close==CloseState::Confirmed && data.outcome.is_ok())
+    }
+    pub(super) fn require_guard_close(&self) -> Result<()> {
+        match self {
+            Self::GuardConsumed(data)
+                if data.close == CloseState::Confirmed && data.outcome.is_ok() =>
+            {
+                Ok(())
+            }
+            Self::GuardConsumed(data) => Err(data.failure.as_ref().map_or(
+                LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_RETAINED"),
+                |error| LaptopError::Recorded(error.clone()),
+            )),
+            Self::Held(_) => Err(LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_HELD")),
+        }
     }
     pub(super) fn held(&self) -> Result<&NixReturned> {
         match self {
@@ -54,7 +69,7 @@ impl NixOwnership {
             Self::GuardConsumed(_) => None,
         }
     }
-    fn finish_close(&mut self, result: std::result::Result<(), NixError>) -> Result<()> {
+    pub(super) fn finish_close(&mut self, result: std::result::Result<(), NixError>) -> Result<()> {
         let Self::GuardConsumed(data) = self else {
             unreachable!("actual remainder retained before guard close")
         };
@@ -65,7 +80,9 @@ impl NixOwnership {
             }
             Err(error) => {
                 data.close = CloseState::Unconfirmed;
-                Err(LaptopError::Nix(error))
+                let error = Arc::new(LaptopError::Nix(error));
+                data.failure = Some(error.clone());
+                Err(LaptopError::Recorded(error))
             }
         }
     }
@@ -154,7 +171,7 @@ fn run(runtime: &WorkerRuntime, record: &mut Record, requested: Instant) -> Resu
         .finish_close(result)?;
     need(Instant::now() < end, "WORKER_LAPTOP_NIX_GUARD_DEADLINE")
 }
-fn consume(record: &mut Record) -> NixStoreGuard {
+pub(super) fn consume(record: &mut Record) -> NixStoreGuard {
     // This is an infallible move under the same mutex, with no external call,
     // before guard.close can observe/refuse/consume either descriptor. No
     // guard-consumed variant can ever be returned as a NixReturned owner.
@@ -175,6 +192,7 @@ fn consume(record: &mut Record) -> NixStoreGuard {
             outcome,
             prepared,
             close: CloseState::Closing,
+            failure: None,
         })),
         plan,
         request,

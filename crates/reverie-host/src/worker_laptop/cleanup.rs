@@ -4,12 +4,12 @@ use super::*;
 use reverie_contracts::worker_launch::CreatedState;
 use reverie_core::ids::ContainerId;
 pub(super) struct Cleanup {
-    end: Instant,
+    budget: call_budget::CallBudget,
     error: Option<Arc<LaptopError>>,
 }
 #[must_use = "local stopped phase retains real Office/storage/request owners"]
 pub struct StoppedCreatedLaptop {
-    workflow: LaptopWorkflow,
+    pub(super) workflow: LaptopWorkflow,
 }
 impl StoppedCreatedLaptop {
     pub fn same_workflow(&self, other: &LaptopWorkflow) -> bool {
@@ -26,7 +26,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         created: &CreatedLaptop,
-        deadline: Instant,
+        budget: call_budget::CallBudget,
     ) -> Result<CreatedCleanup> {
         self.bound(runtime, &created.workflow)?;
         let mut record = created
@@ -50,14 +50,14 @@ impl Workflows {
                 CreatedCleanup::Retained
             });
         }
-        let end = runtime
-            .stop_deadline()
-            .map_or(deadline, |stop| stop.min(deadline));
         // Terminal lifecycle transition under this SAME record mutex, before
         // any constructor settlement or cleanup effect. All forward methods
         // require their original Known/Held state and cannot restart it.
         record.phase = Phase::Cleaning;
-        record.cleanup = Some(Cleanup { end, error: None });
+        record.cleanup = Some(Cleanup {
+            budget,
+            error: None,
+        });
         let Some(cid) = record.creation.as_ref().expect("created").container.clone() else {
             let error = Arc::new(LaptopError::Refused(
                 "WORKER_LAPTOP_CREATED_CID_RECONCILIATION_REQUIRED",
@@ -84,7 +84,7 @@ impl Workflows {
     }
 }
 fn run(runtime: &WorkerRuntime, record: &mut Record, cid: &ContainerId) -> Result<()> {
-    let end = record.cleanup.as_ref().expect("cleanup owner").end;
+    let budget = record.cleanup.as_ref().expect("cleanup owner").budget;
     let resources = record.resources();
     resources
         .storage()
@@ -95,11 +95,11 @@ fn run(runtime: &WorkerRuntime, record: &mut Record, cid: &ContainerId) -> Resul
             .installed_engine()
             .engine
             .client
-            .settle_call(call, end)
+            .settle_call(call, budget.settlement_end(runtime))
             .map_err(|error| LaptopError::Engine(error.into()))?;
         record.pending = None;
     }
-    let _optional_stop = network::call(
+    let _optional_stop = network::call_with_budget(
         runtime,
         record,
         vec![
@@ -109,20 +109,20 @@ fn run(runtime: &WorkerRuntime, record: &mut Record, cid: &ContainerId) -> Resul
             cid.as_str().into(),
         ],
         network::CallPurpose::Cleanup,
-        end,
+        budget,
     )?;
-    let state = inspect(runtime, record, cid, end)?;
+    let state = inspect(runtime, record, cid, budget)?;
     if state.running() {
-        let result = network::call(
+        let result = network::call_with_budget(
             runtime,
             record,
             vec!["kill".into(), cid.as_str().into()],
             network::CallPurpose::Cleanup,
-            end,
+            budget,
         )?;
         need(result.succeeded, "WORKER_LAPTOP_CREATED_KILL_UNCONFIRMED")?;
         need(
-            inspect(runtime, record, cid, end)?.stopped(),
+            inspect(runtime, record, cid, budget)?.stopped(),
             "WORKER_LAPTOP_CREATED_STOP_UNCONFIRMED",
         )?;
     } else {
@@ -134,14 +134,14 @@ fn inspect(
     runtime: &WorkerRuntime,
     record: &mut Record,
     cid: &ContainerId,
-    end: Instant,
+    budget: call_budget::CallBudget,
 ) -> Result<CreatedState> {
-    let output = network::call(
+    let output = network::call_with_budget(
         runtime,
         record,
         vec!["inspect".into(), cid.as_str().into()],
         network::CallPurpose::Observe,
-        end,
+        budget,
     )?;
     need(
         output.succeeded,
@@ -157,8 +157,26 @@ impl WorkerRuntime {
         created: &CreatedLaptop,
         deadline: Instant,
     ) -> Result<CreatedCleanup> {
+        self.laptop_workflows().cleanup_created(
+            self,
+            created,
+            call_budget::CallBudget::bounded(deadline),
+        )
+    }
+    /// Same original actual J, even after its socket closes. No aggregate
+    /// worker stop cap or forward-can_progress requirement is introduced.
+    pub fn stop_created_laptop_for_worker(
+        &self,
+        created: &CreatedLaptop,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<CreatedCleanup> {
+        self.laptop_workflows().assert_worker_cleanup_connection(
+            self,
+            &created.workflow,
+            connection,
+        )?;
         self.laptop_workflows()
-            .cleanup_created(self, created, deadline)
+            .cleanup_created(self, created, call_budget::CallBudget::worker())
     }
 }
 

@@ -6,6 +6,10 @@ fn main() {
     if args==["--viewer-descendant"] { viewer_descendant();return; }
     if args==["--viewer-early-group-control"] { viewer_early_group_control();return; }
     let mode=env::var("LAPTOP_FIXTURE_MODE").unwrap();
+    if Path::new("created-cleanup-query-delay").is_file()
+        && matches!(args.first().map(String::as_str),Some("stop"|"kill"|"inspect")) {
+        std::thread::sleep(Duration::from_millis(80));
+    }
     let mut trace=OpenOptions::new().append(true).create(true).open("trace").unwrap();
     writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
     if Path::new("existing-stop-control").is_file() && args.first().map(String::as_str)!=Some("exec") {

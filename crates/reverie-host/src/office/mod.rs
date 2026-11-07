@@ -353,6 +353,25 @@ impl OfficeService {
     }
 }
 impl OfficePhone {
+    /// Read only the actual close/join result of this retained phone. An idle
+    /// still-listening producer, closing request, or consumed failure is not a
+    /// future-request fence for physical storage return.
+    pub(crate) fn require_closed_for_resource(&self,runtime:&WorkerRuntime,session:&ProfileSessionId)->Result<()> {
+        if !Arc::ptr_eq(&self.origin,runtime.installed_engine())||&self.session!=session {
+            return Err(OfficeError::Refused);
+        }
+        let thread=self.owned.thread.try_lock().map_err(|_|OfficeError::Unconfirmed)?;
+        let joined=self.owned.joined.try_lock().map_err(|_|OfficeError::Unconfirmed)?;
+        if !self.owned.closing.load(Ordering::Acquire)||thread.is_some()
+            ||self.owned.live_requests.load(Ordering::Acquire)!=0 {
+            return Err(OfficeError::Unconfirmed);
+        }
+        match joined.as_ref() {
+            Some(Ok(()))=>Ok(()),
+            Some(Err(error))=>Err(OfficeError::Server(error.clone())),
+            None=>Err(OfficeError::Unconfirmed),
+        }
+    }
     pub(crate) fn assert_runtime_session(
         &self,
         runtime: &WorkerRuntime,

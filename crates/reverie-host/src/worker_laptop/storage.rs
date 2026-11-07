@@ -105,6 +105,10 @@ impl WorkerRuntime {
             .connection
             .as_ref()
             .ok_or(LaptopError::Refused("WORKER_STARTED_CONNECTION_REQUIRED"))?;
+        need(
+            !original.same(&next) || record.phase == Phase::Known,
+            "WORKER_STARTED_FORWARD_CLOSED",
+        )?;
         if !original.same(&next) {
             original
                 .require_released_predecessor(&next)
@@ -162,7 +166,7 @@ impl Workflows {
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
         need(
-            record.phase == Phase::Known
+            matches!(record.phase, Phase::Known | Phase::Cleaning)
                 && record.pending.is_none()
                 && !record.unknown
                 && record.cleanup.is_none()
@@ -173,12 +177,7 @@ impl Workflows {
                 && record.creation.as_ref().is_some_and(|creation| {
                     matches!(
                         creation.stage,
-                        create::CreateStage::Started
-                            | create::CreateStage::MemoryConfigured
-                            | create::CreateStage::ColdCommitted
-                            | create::CreateStage::PaneStarted
-                            | create::CreateStage::NixGuardReleased
-                            | create::CreateStage::Viewing
+                        create::CreateStage::NixGuardReleased | create::CreateStage::Viewing
                     )
                 }),
             "WORKER_STARTED_STORAGE_PHASE",
