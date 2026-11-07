@@ -67,7 +67,7 @@ impl WorkerRuntime {
         current: &EffectiveWorkerConfig,
         deadline: Option<Instant>,
     ) -> std::result::Result<OriginalSourceStop, Box<SourceStopRetainFailure>> {
-        if let Err(error) = storage.assert_binding(self, current, storage.paths().session()) {
+        if let Err(error) = storage.assert_binding(self, current, name.session()) {
             return Err(Box::new(SourceStopRetainFailure {
                 storage,
                 error: SourceStopError::Resource(error),
