@@ -324,6 +324,15 @@ default-JSON/first-row/label rules. Network create is never replayed after admis
 Unknown replies/native cleanup retain the exact owners; original errors and
 additional settlement failures remain data, not fabricated completion.
 
+`WorkerLaunchHold` retains the original counted J record through application
+resource acquisition and uncertain cleanup. Only that actual connection can
+mint it once. `close_socket` distinguishes known physical close with lifecycle
+still held from complete retirement; neither outcome acknowledges laptop or
+storage release. Dropping a hold leaves the same record counted, and an opaque
+descriptor close cannot be forgiven by logical release. Negative handler
+bookkeeping uses pure same-record identity after close; forward progression
+still requires the separate live-connection/held-resource checks.
+
 The network phase has checked one-shot return of the same resources, without
 closing them or acknowledging writer/capacity release. Last runtime/handle loss
 quarantines unreclaimed records for process lifetime instead of dropping their

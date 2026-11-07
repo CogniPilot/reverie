@@ -28,11 +28,12 @@ impl RecoveryOwners {
                 .try_lock()
                 .is_ok_and(|claims| claims.is_empty())
             && installed.laptops.try_lock().is_ok_and(|laptops| {
-                laptops.iter().all(|entry| match &entry.owner {
-                    LaptopOwner::Recovered(_) => false,
-                    #[cfg(test)]
-                    LaptopOwner::Modeled => true,
-                })
+                laptops.transients_empty()
+                    && laptops.iter().all(|entry| match &entry.owner {
+                        LaptopOwner::Recovered(_) => false,
+                        #[cfg(test)]
+                        LaptopOwner::Modeled => true,
+                    })
             })
     }
 }

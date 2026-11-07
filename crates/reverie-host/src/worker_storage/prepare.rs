@@ -7,6 +7,25 @@ use reverie_contracts::worker_storage::{ready_storage_bytes, storage_binding_byt
 use reverie_store::storage_identity::{self, StoragePaths};
 use std::{collections::BTreeSet, ffi::OsStr, path::Path};
 
+/// Original canonical handler phase: private stateRoot/SID FIRST, then the
+/// selected home's non-alias check. Missing/non-directory home tails retain
+/// the existing Python resolve(strict=False) disposition; no path is supplied.
+pub(super) fn runtime_directory(
+    config: &Configuration,
+    paths: &StoragePaths,
+    effects: &mut bool,
+) -> Result<()> {
+    Directory::ensure(
+        &config.state()?.join(paths.session().as_str()),
+        config.uid(),
+        effects,
+    )?
+    .close()?;
+    storage_identity::canonical(paths.home())
+        .map(|_| ())
+        .map_err(Into::into)
+}
+
 pub(super) fn prepare(
     config: &Configuration,
     paths: &StoragePaths,

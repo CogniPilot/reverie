@@ -1,4 +1,5 @@
 use super::*;
+mod lifecycle;
 use reverie_contracts::worker_config;
 use reverie_core::{
     resources::{BudgetMode, CpuQuota, ResourcePolicy},
