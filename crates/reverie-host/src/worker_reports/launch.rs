@@ -76,6 +76,11 @@ impl WorkerLaunchConnection {
     pub(super) fn terminal_identity(&self) -> super::terminal::RelayIdentity {
         super::terminal::RelayIdentity::new(&self.service, self.record.clone())
     }
+    /// Exact retained record identity only. Cleanup uses this after stop/close;
+    /// it neither creates a brand nor establishes forward progress or release.
+    pub(crate) fn has_viewer_identity(&self, identity: &super::terminal::RelayIdentity) -> bool {
+        identity.same(&self.terminal_identity())
+    }
     pub(crate) fn viewer_constructor_identity(
         &self,
         runtime: &WorkerRuntime,

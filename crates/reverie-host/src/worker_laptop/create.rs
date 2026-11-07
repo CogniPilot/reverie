@@ -1,8 +1,8 @@
 //! Actual fixed create, derived only from the same retained resource record.
 //! Successful noncanonical stdout still owns the created-by-name outcome.
+use super::call_budget::CallBudget;
 use super::*;
 use crate::command_telemetry::CommandTelemetry;
-use super::call_budget::CallBudget;
 use reverie_contracts::{resource_config::ResourceIdentitySettings, worker_launch};
 use reverie_core::{PythonTextRef, ids::ContainerId};
 use reverie_store::storage_identity::{self, StorageIdentityConfig, StorageKind};
@@ -31,6 +31,7 @@ pub(super) struct Creation {
     pub(super) container: Option<ContainerId>,
     pub(super) stage: CreateStage,
     pub(super) publication: Option<super::publication::Publication>,
+    pub(super) worker_memory: Option<super::memory::Pending>,
 }
 impl Creation {
     pub(super) fn owns_created(&self) -> bool {
@@ -86,6 +87,7 @@ impl Workflows {
             container: None,
             stage: CreateStage::Preparing,
             publication: None,
+            worker_memory: None,
         });
         record.phase = Phase::Running;
         let result = run(runtime, &mut record, telemetry, deadline);
@@ -214,7 +216,9 @@ impl WorkerRuntime {
         telemetry: &CommandTelemetry,
         connection: &crate::worker_reports::WorkerLaunchConnection,
     ) -> Result<LaptopCreation> {
-        self.laptop_workflows().assert_worker_connection(self, workflow, connection)?;
-        self.laptop_workflows().create(self, workflow, telemetry, CallBudget::worker())
+        self.laptop_workflows()
+            .assert_worker_connection(self, workflow, connection)?;
+        self.laptop_workflows()
+            .create(self, workflow, telemetry, CallBudget::worker())
     }
 }

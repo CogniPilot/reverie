@@ -66,7 +66,8 @@ impl Workflows {
             record.phase = Phase::CleanupRetained;
             return Err(LaptopError::Recorded(error));
         };
-        let result = run(runtime, &mut record, &cid);
+        let memory = memory::close_abandoned(&mut record);
+        let result = finalized(memory, run(runtime, &mut record, &cid));
         let result =
             result.and_then(|()| need(!record.unknown, "WORKER_LAPTOP_PRIOR_EFFECT_UNCONFIRMED"));
         if let Err(error) = result {

@@ -1,7 +1,7 @@
 //! Fixed laptop effects retain actual Nix/storage/Office owners before the
 //! first native client. InstallingBroker still owns admission and authorization.
-mod cleanup;
 mod call_budget;
+mod cleanup;
 mod cold;
 pub(crate) mod cold_confirm;
 mod cold_prepare;
@@ -37,7 +37,10 @@ pub use existing_viewer::{
     ExistingViewerStart,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
-pub use memory::{ConfiguredMemory, MemoryConfiguration};
+pub use memory::{
+    ConfiguredMemory, MemoryConfiguration, StartedMemoryPolicy, StartedMemoryReadback,
+    WorkerMemoryBegin, WorkerMemoryEffect,
+};
 pub use pane::{PaneStart, StartedPane};
 use reverie_contracts::worker_launch::WorkerRequest;
 pub use start::{ContainerStart, StartedContainer};
@@ -403,14 +406,22 @@ impl Workflows {
             record.phase = Phase::Known;
         }
         let viewer = record.viewer.clone();
-        let viewer_result = viewer.map_or(Ok(()), |job| {
-            runtime
-                .installed_engine()
-                .engine
-                .client
-                .settle_viewer(&job, deadline)
-                .map_err(|error| LaptopError::Engine(error.into()))
-        });
+        let memory_result = if runtime.cancellation().is_cancelled() || record.cleanup.is_some() {
+            memory::close_abandoned(&mut record)
+        } else {
+            Ok(())
+        };
+        let viewer_result = finalized(
+            memory_result,
+            viewer.map_or(Ok(()), |job| {
+                runtime
+                    .installed_engine()
+                    .engine
+                    .client
+                    .settle_viewer(&job, deadline)
+                    .map_err(|error| LaptopError::Engine(error.into()))
+            }),
+        );
         if let Some(call) = &record.pending {
             let deadline = runtime
                 .stop_deadline()
@@ -490,8 +501,11 @@ impl WorkerRuntime {
         workflow: &LaptopWorkflow,
         deadline: Instant,
     ) -> Result<LaptopNetworkProgress> {
-        self.laptop_workflows()
-            .run_network(self, workflow, call_budget::CallBudget::bounded(deadline))
+        self.laptop_workflows().run_network(
+            self,
+            workflow,
+            call_budget::CallBudget::bounded(deadline),
+        )
     }
     pub fn reclaim_laptop_network(
         &self,

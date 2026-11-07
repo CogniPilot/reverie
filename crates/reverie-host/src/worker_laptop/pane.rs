@@ -1,7 +1,7 @@
 //! Fixed native tmux pane phase after the same record's memory and cold commit.
 //! Two native acknowledgements are not admission release or broker registration.
-use super::*;
 use super::call_budget::CallBudget;
+use super::*;
 use reverie_contracts::worker_launch::{pane_start_arguments, pane_status_arguments};
 use reverie_core::worker_launch::ContainerReference;
 
@@ -123,14 +123,17 @@ impl WorkerRuntime {
     /// only after a genuine same-record cold commit. No shell wrapper is used:
     /// the existing worker child owns the fixed --pane-exit receipt lifecycle.
     pub fn start_laptop_pane(&self, cold: &ColdCommitted, deadline: Instant) -> Result<PaneStart> {
-        self.laptop_workflows().start_pane(self, cold, CallBudget::bounded(deadline))
+        self.laptop_workflows()
+            .start_pane(self, cold, CallBudget::bounded(deadline))
     }
     pub fn start_laptop_pane_for_connection(
         &self,
         cold: &ColdCommitted,
         connection: &crate::worker_reports::WorkerLaunchConnection,
     ) -> Result<PaneStart> {
-        self.laptop_workflows().assert_worker_connection(self, &cold.workflow, connection)?;
-        self.laptop_workflows().start_pane(self, cold, CallBudget::worker())
+        self.laptop_workflows()
+            .assert_worker_connection(self, &cold.workflow, connection)?;
+        self.laptop_workflows()
+            .start_pane(self, cold, CallBudget::worker())
     }
 }

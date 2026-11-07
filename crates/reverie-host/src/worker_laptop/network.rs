@@ -17,7 +17,11 @@ pub(super) fn encode_arguments(
         .collect::<std::io::Result<Vec<_>>>()
         .map_err(LaptopError::Io)
 }
-pub(super) fn run(runtime: &WorkerRuntime, record: &mut Record, ceiling: super::call_budget::CallBudget) -> Result<()> {
+pub(super) fn run(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    ceiling: super::call_budget::CallBudget,
+) -> Result<()> {
     let name = format!("{}-lan", record.resources().plan.arguments().name());
     let state = call_with_budget(
         runtime,
@@ -61,7 +65,13 @@ pub(super) fn call(
     purpose: CallPurpose,
     ceiling: Instant,
 ) -> Result<CapturedOutput> {
-    call_with_budget(runtime, record, args, purpose, super::call_budget::CallBudget::bounded(ceiling))
+    call_with_budget(
+        runtime,
+        record,
+        args,
+        purpose,
+        super::call_budget::CallBudget::bounded(ceiling),
+    )
 }
 pub(super) fn call_with_budget(
     runtime: &WorkerRuntime,

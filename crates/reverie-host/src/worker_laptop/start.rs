@@ -1,7 +1,7 @@
 //! Actual start acknowledgement only. Memory/retained tmp/native pane readiness
 //! remain later required phases; this type cannot register CLI readiness.
-use super::*;
 use super::call_budget::CallBudget;
+use super::*;
 use reverie_core::ids::ContainerId;
 #[must_use = "retain actual started container resources until checked stop"]
 pub struct StartedContainer {
@@ -97,14 +97,17 @@ impl WorkerRuntime {
         created: &CreatedLaptop,
         deadline: Instant,
     ) -> Result<ContainerStart> {
-        self.laptop_workflows().start(self, created, CallBudget::bounded(deadline))
+        self.laptop_workflows()
+            .start(self, created, CallBudget::bounded(deadline))
     }
     pub fn start_laptop_container_for_connection(
         &self,
         created: &CreatedLaptop,
         connection: &crate::worker_reports::WorkerLaunchConnection,
     ) -> Result<ContainerStart> {
-        self.laptop_workflows().assert_worker_connection(self, &created.workflow, connection)?;
-        self.laptop_workflows().start(self, created, CallBudget::worker())
+        self.laptop_workflows()
+            .assert_worker_connection(self, &created.workflow, connection)?;
+        self.laptop_workflows()
+            .start(self, created, CallBudget::worker())
     }
 }
