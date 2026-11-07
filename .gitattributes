@@ -3,3 +3,6 @@ nix/codex-observer/observer-r5.patch -whitespace
 
 # This frozen oracle is hashed as repository bytes on every platform.
 crates/reverie-contracts/tests/fixtures/valid-cpu-floats.json -text
+
+# The managed storage instructions are a byte-exact cross-language payload.
+crates/reverie-contracts/src/worker_storage/instructions.txt -text
