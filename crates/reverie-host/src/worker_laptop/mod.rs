@@ -18,7 +18,11 @@ mod guard;
 mod memory;
 mod network;
 mod pane;
+mod protected;
 mod publication;
+pub use protected::{
+    ProtectedCliObservation, ProtectedCreatedObservation, ProtectedMemoryObservation,
+};
 mod request_cleanup;
 mod start;
 mod started_finalization;

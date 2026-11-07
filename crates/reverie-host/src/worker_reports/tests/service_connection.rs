@@ -1,6 +1,7 @@
 //! Actual owned sockets/kernel peers and the same admission/finalizers. No
 //! purpose payload here is executed or treated as resource/start permission.
 use super::*;
+mod protected;
 
 fn accept(
     fixture: &Fixture,

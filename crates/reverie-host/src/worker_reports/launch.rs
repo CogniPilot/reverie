@@ -8,6 +8,11 @@ pub struct WorkerLaunchConnection {
     service: Arc<WorkerReportService>,
     record: Arc<Record>,
     request: WorkerRequest,
+    pub(super) origin: LaunchOrigin,
+}
+pub(super) enum LaunchOrigin {
+    Ordinary,
+    Protected(Box<super::WorkerServiceConnection>),
 }
 /// A completed report or an actual still-owned J socket. No decoded request
 /// can manufacture either branch or transfer ownership from a different run.
@@ -97,6 +102,37 @@ impl WorkerReportService {
     }
 }
 impl WorkerLaunchConnection {
+    pub fn assert_ordinary_origin(&self) -> Result<()> {
+        if matches!(self.origin, LaunchOrigin::Ordinary) {
+            Ok(())
+        } else {
+            Err(WorkerReportError::LaunchKind)
+        }
+    }
+    pub fn assert_protected_origin(&self) -> Result<()> {
+        match &self.origin {
+            LaunchOrigin::Protected(source)
+                if source.purpose() == super::WorkerServicePurpose::ProtectedLaunch
+                    && Arc::ptr_eq(&source.service, &self.service)
+                    && Arc::ptr_eq(&source.record, &self.record) =>
+            {
+                Ok(())
+            }
+            _ => Err(WorkerReportError::LaunchKind),
+        }
+    }
+    pub(super) fn from_protected(
+        source: super::WorkerServiceConnection,
+        request: WorkerRequest,
+    ) -> Self {
+        Self {
+            service: source.service.clone(),
+            record: source.record.clone(),
+            request,
+            origin: LaunchOrigin::Protected(Box::new(source)),
+        }
+    }
+
     /// The fixed outer handler attempts its original E frame before resource
     /// finalization. This borrows the same registered socket; it creates no
     /// request, native command, lifecycle hold or cleanup acknowledgement.
@@ -113,6 +149,7 @@ impl WorkerLaunchConnection {
             service,
             record,
             request,
+            origin: LaunchOrigin::Ordinary,
         }
     }
     pub(super) fn require_terminal_hold(&self) -> Result<()> {
