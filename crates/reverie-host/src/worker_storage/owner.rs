@@ -1,4 +1,5 @@
 //! Actual service-produced storage resources. These are not API/start grants.
+mod cold;
 mod preparation;
 use super::*;
 use crate::{
@@ -17,6 +18,7 @@ pub enum StorageOwnerError {
     Data(WriterDataError),
     Settings(reverie_contracts::broker_resources::ResourceConfigError),
     Intent(reverie_contracts::worker_intent::IntentDataError),
+    Cold(crate::worker_validation::WorkerValidationHostError),
     Path(std::io::Error),
     Refused(&'static str),
     Finalized {
@@ -33,6 +35,7 @@ impl StorageOwnerError {
             Self::Data(error) => error.code(),
             Self::Settings(_) => "WORKER_STORAGE_SETTINGS",
             Self::Intent(error) => error.code(),
+            Self::Cold(_) => "WORKER_COLD_POLICY",
             Self::Path(_) => "WORKER_STORAGE_NATIVE_PATH",
             Self::Refused(code) => code,
             Self::Finalized { primary, .. } => primary.code(),
@@ -59,6 +62,7 @@ impl std::error::Error for StorageOwnerError {
             Self::Data(error) => Some(error),
             Self::Settings(error) => Some(error),
             Self::Intent(error) => Some(error),
+            Self::Cold(error) => Some(error),
             Self::Path(error) => Some(error),
             Self::Refused(_) => None,
             Self::Finalized { primary, .. } => Some(primary.as_ref()),
