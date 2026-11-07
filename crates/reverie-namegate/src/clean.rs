@@ -153,11 +153,13 @@ fn drop_hex(text: &str) -> String {
     out
 }
 
-/// Not part of the reference gate: hex digits that only look like letters. The digits of a `\\u`
-/// escape with exactly 4 hex digits, `\\U` with 8 and `\\x` with 2 become spaces, as does a letter
+/// Not part of the reference gate: hex digits that only look like letters. The digits of a `\u`
+/// escape with exactly 4 hex digits, `\U` with 8 and `\x` with 2 become spaces, as does a letter
 /// run with a decimal digit on both sides inside a hex word of 8 to 15 characters (bounded like
-/// `drop_hex`) that holds a decimal digit. Each is replaced one for one, so nothing else moves, and
-/// such digits never join a neighbouring letter or form a token of their own.
+/// `drop_hex`) that holds a decimal digit. Hex digits are `0-9`, `a-f` and `A-F` in both rules.
+/// Each is replaced one for one, so nothing else moves, and such digits never join a neighbouring
+/// letter or form a token of their own. The only names this can hide are names spelled entirely
+/// with the letters a to f, and only in those positions.
 fn blank_code_hex(text: &str) -> String {
     let mut chars: Vec<char> = text.chars().collect();
     blank_escape_digits(&mut chars);

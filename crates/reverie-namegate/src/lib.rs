@@ -5,10 +5,12 @@
 //! empty. Findings carry a category and a list index, never the matched text, so a gate that
 //! fires in a public log does not republish what it blocks.
 //!
-//! Semantics follow the reviewed reference gate exactly: NFKC normalisation, dropping format
-//! characters, exempting genuine PEM/DER bodies and allowlisted strings, stripping long hex runs
-//! and re-scanning base64-like blobs, then comparing whole tokens split at non-letters and
-//! lower-to-upper case changes, with Python `re` Unicode and case-folding rules.
+//! Semantics follow the reviewed reference gate: NFKC normalisation, dropping format characters,
+//! exempting genuine PEM/DER bodies and allowlisted strings, stripping long hex runs and
+//! re-scanning base64-like blobs, then comparing whole tokens split at non-letters and
+//! lower-to-upper case changes, with Python `re` Unicode and case-folding rules. One step is not in
+//! the reference: the hex digits of code escapes and of short hex words are blanked before tokens
+//! are taken (see `clean`). No reference parity case changes outcome.
 
 mod classes;
 mod clean;

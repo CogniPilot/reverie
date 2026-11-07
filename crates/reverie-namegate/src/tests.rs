@@ -375,6 +375,8 @@ fn hex_digits_of_escapes_and_short_hex_words_are_not_name_tokens() {
         "\"input\": \"\\u0bead\"",
         "\"input\": \"\\U00000bead\"",
         "s = \"\\x0bead\"",
+        "\"48\": \"17BEAD4C\"",
+        "\"input\": \"\\u0BEAD\"",
     ] {
         assert_eq!(team_findings(&lists, text), 0, "{text:?} holds no name");
     }
@@ -395,6 +397,11 @@ fn a_name_beside_hex_or_escapes_is_still_found() {
         "\"\\u00e9 bead\"",
         "\"\\u12 bead\"",
         "\"\\x0 bead\"",
+        "\"\\u00E9BEAD\"",
+        "id 17BEAD4CZ here",
+        "id 17alder4c here",
+        "x = 17alder45;",
+        "BEAD",
     ] {
         assert_eq!(
             team_findings(&lists, text),
