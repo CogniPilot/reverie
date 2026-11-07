@@ -103,7 +103,8 @@ source and component tests do not establish an installed native broker.
 | Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
 | Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
 | Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Listener dispatch, caller-owned handler joins and global stop acknowledgement |
-| Storage, Nix and network | `reverie-host` storage/Nix/laptop workflows and `InstallingBroker` storage registry retain the actual resource records | Contiguous create/start, protected old-source stop, new-created cleanup and retained cold storage |
+| Original launch resources | `InstallingBroker::retain_resource_draft` transfers the same storage and recovered Office owners into the existing source record before the durable claim | Protected old-source stop and the actual launch caller |
+| Storage, Nix and laptop effects | `reverie-host` retains the real Nix/storage/Office owners through network, complete-create telemetry, creation, checked metadata publication, start acknowledgement and immutable created-CID cleanup | Installing application caller, started-container memory, retained cold storage and native pane completion |
 | Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners | Actual started-container memory enforcement and owner GUI/API selection for remaining settings |
 | Memory tools | Native memory/MCP entry points, persistence, journal transport, startup services and an unselected fixed-purpose guest capsule | Real launch/image/context/grant join, collision-safe existing-data cutover and coordinated package selection |
 
@@ -119,6 +120,11 @@ start, memory enforcement, cold-storage commit and worker-child launch. A
 successful create with noncanonical output still owns a container by its derived
 name; a lost reply cannot establish absence. Do not manufacture a replacement
 effect handle from status data or introduce another configuration source.
+Created-container cleanup enters a terminal state on that same resource record
+before settlement or engine effects. Publication and start cannot follow it,
+even without a global stop. Local client settlement cannot turn a prior unknown
+daemon effect into stopped proof, and a stopped result does not release resources
+or acknowledge whole-service shutdown.
 
 The guest capsule preserves the qualified Console module tree and closes the
 selected Node/native-library dependency graph. Its synthetic namespace controls
