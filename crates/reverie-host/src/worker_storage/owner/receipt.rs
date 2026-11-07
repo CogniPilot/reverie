@@ -59,7 +59,7 @@ fn read_text(path: &Path) -> OwnerResult<Vec<u8>> {
     // explicitly even on a read error. This is not a hard kernel-I/O deadline.
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .custom_flags(libc::O_CLOEXEC)
         .open(path)
         .map_err(StorageOwnerError::Path)?;
     let mut raw = Vec::new();
