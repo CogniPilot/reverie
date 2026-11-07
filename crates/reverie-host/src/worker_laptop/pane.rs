@@ -1,6 +1,7 @@
 //! Fixed native tmux pane phase after the same record's memory and cold commit.
 //! Two native acknowledgements are not admission release or broker registration.
 use super::*;
+use super::call_budget::CallBudget;
 use reverie_contracts::worker_launch::{pane_start_arguments, pane_status_arguments};
 use reverie_core::worker_launch::ContainerReference;
 
@@ -27,7 +28,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         cold: &ColdCommitted,
-        deadline: Instant,
+        deadline: CallBudget,
     ) -> Result<PaneStart> {
         self.bound(runtime, &cold.workflow)?;
         let mut record = cold
@@ -74,7 +75,7 @@ impl Workflows {
         }))
     }
 }
-fn run(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Result<()> {
+fn run(runtime: &WorkerRuntime, record: &mut Record, deadline: CallBudget) -> Result<()> {
     // Derive BOTH commands before the first client; every input belongs to
     // the same successful publication and request, with no caller argv/path.
     let resources = record.resources();
@@ -101,10 +102,10 @@ fn call(
     runtime: &WorkerRuntime,
     record: &mut Record,
     arguments: Vec<reverie_contracts::storage_identity::MetadataText>,
-    deadline: Instant,
+    deadline: CallBudget,
 ) -> Result<()> {
     let argv = network::encode_arguments(&arguments)?;
-    let output = network::call(
+    let output = network::call_with_budget(
         runtime,
         record,
         argv,
@@ -122,6 +123,14 @@ impl WorkerRuntime {
     /// only after a genuine same-record cold commit. No shell wrapper is used:
     /// the existing worker child owns the fixed --pane-exit receipt lifecycle.
     pub fn start_laptop_pane(&self, cold: &ColdCommitted, deadline: Instant) -> Result<PaneStart> {
-        self.laptop_workflows().start_pane(self, cold, deadline)
+        self.laptop_workflows().start_pane(self, cold, CallBudget::bounded(deadline))
+    }
+    pub fn start_laptop_pane_for_connection(
+        &self,
+        cold: &ColdCommitted,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<PaneStart> {
+        self.laptop_workflows().assert_worker_connection(self, &cold.workflow, connection)?;
+        self.laptop_workflows().start_pane(self, cold, CallBudget::worker())
     }
 }

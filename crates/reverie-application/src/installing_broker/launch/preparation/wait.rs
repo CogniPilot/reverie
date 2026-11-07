@@ -40,7 +40,7 @@ impl WaitObservation {
         }
         Ok(())
     }
-    fn check(
+    pub(super) fn check(
         &self,
         owner: &PreparingWorkerLaunch<'_>,
         lifecycle: &LaptopLifecycle<'_>,

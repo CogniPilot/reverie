@@ -2,6 +2,7 @@
 //! Successful noncanonical stdout still owns the created-by-name outcome.
 use super::*;
 use crate::command_telemetry::CommandTelemetry;
+use super::call_budget::CallBudget;
 use reverie_contracts::{resource_config::ResourceIdentitySettings, worker_launch};
 use reverie_core::{PythonTextRef, ids::ContainerId};
 use reverie_store::storage_identity::{self, StorageIdentityConfig, StorageKind};
@@ -63,7 +64,7 @@ impl Workflows {
         runtime: &WorkerRuntime,
         workflow: &LaptopWorkflow,
         telemetry: &CommandTelemetry,
-        deadline: Instant,
+        deadline: CallBudget,
     ) -> Result<LaptopCreation> {
         self.bound(runtime, workflow)?;
         let mut record = workflow
@@ -117,7 +118,7 @@ fn run(
     runtime: &WorkerRuntime,
     record: &mut Record,
     telemetry: &CommandTelemetry,
-    deadline: Instant,
+    deadline: CallBudget,
 ) -> Result<()> {
     telemetry
         .assert_runtime(runtime)
@@ -157,7 +158,7 @@ fn run(
         .check_create_args(runtime, &args)
         .map_err(|error| LaptopError::Telemetry(CreateTelemetryFailure::new(error)))?;
     let argv = network::encode_arguments(&args)?;
-    let output = network::call(
+    let output = network::call_with_budget(
         runtime,
         record,
         argv,
@@ -205,6 +206,15 @@ impl WorkerRuntime {
         deadline: Instant,
     ) -> Result<LaptopCreation> {
         self.laptop_workflows()
-            .create(self, workflow, telemetry, deadline)
+            .create(self, workflow, telemetry, CallBudget::bounded(deadline))
+    }
+    pub fn create_laptop_for_connection(
+        &self,
+        workflow: &LaptopWorkflow,
+        telemetry: &CommandTelemetry,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<LaptopCreation> {
+        self.laptop_workflows().assert_worker_connection(self, workflow, connection)?;
+        self.laptop_workflows().create(self, workflow, telemetry, CallBudget::worker())
     }
 }

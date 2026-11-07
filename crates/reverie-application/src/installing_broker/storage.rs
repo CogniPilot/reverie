@@ -10,6 +10,8 @@ mod observed;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
+mod ordinary_stop;
+pub use ordinary_stop::{OrdinaryStopPreparation, OrdinaryStopReturned, OrdinaryStopRetainFailure, OrdinaryStopReclaimFailure};
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
@@ -49,6 +51,7 @@ enum EntryOwner {
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
+    OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
 /// The original claim destination, shared by named resource transitions.

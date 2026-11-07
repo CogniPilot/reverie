@@ -1,6 +1,7 @@
 //! Fixed laptop effects retain actual Nix/storage/Office owners before the
 //! first native client. InstallingBroker still owns admission and authorization.
 mod cleanup;
+mod call_budget;
 mod cold;
 pub(crate) mod cold_confirm;
 mod cold_prepare;
@@ -293,7 +294,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         workflow: &LaptopWorkflow,
-        deadline: Instant,
+        deadline: call_budget::CallBudget,
     ) -> Result<LaptopNetworkProgress> {
         self.bound(runtime, workflow)?;
         let mut record = workflow
@@ -477,7 +478,7 @@ impl WorkerRuntime {
         deadline: Instant,
     ) -> Result<LaptopNetworkProgress> {
         self.laptop_workflows()
-            .run_network(self, workflow, deadline)
+            .run_network(self, workflow, call_budget::CallBudget::bounded(deadline))
     }
     pub fn reclaim_laptop_network(
         &self,

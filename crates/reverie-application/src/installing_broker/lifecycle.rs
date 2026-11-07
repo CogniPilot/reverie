@@ -241,6 +241,30 @@ impl<'a> LaptopLifecycle<'a> {
             .retain(|entry| !Arc::ptr_eq(&entry.identity, &token.identity));
         Ok(())
     }
+    /// The actual Nix copy released this mutex, never its J, hold or resource.
+    /// Rejoin only the original paired entries; missing metadata is not repair.
+    pub(super) fn reenter_active(
+        &self,
+        token: &ActiveLaunchToken<'_>,
+        context: &launch::AdmittedWorkerLaunch<'_>,
+    ) -> Result<(), GateError> {
+        if !self.belongs_to(token.owner) {
+            return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN"));
+        }
+        let connection = context.lifecycle_connection(self)?;
+        connection.assert_same_lifecycle_record(&token.hold)
+            .map_err(|_| GateError::Refused("WORKER_BROKER_PREPARATION_HOLD_CHANGED"))?;
+        if !Arc::ptr_eq(&connection, &token.connection)
+            || context.request().session() != &token.session
+            || self.guard.active.iter().filter(|entry| entry.session == token.session
+                && Arc::ptr_eq(&entry.identity, &token.identity)
+                && Arc::ptr_eq(&entry.connection, &connection)).count() != 1
+            || self.guard.pending.iter().filter(|entry| entry.session == token.session
+                && Arc::ptr_eq(&entry.identity, &token.identity)).count() != 1 {
+            return Err(GateError::Refused("WORKER_BROKER_ACTIVE_CHANGED"));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

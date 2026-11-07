@@ -1,6 +1,7 @@
 //! Actual start acknowledgement only. Memory/retained tmp/native pane readiness
 //! remain later required phases; this type cannot register CLI readiness.
 use super::*;
+use super::call_budget::CallBudget;
 use reverie_core::ids::ContainerId;
 #[must_use = "retain actual started container resources until checked stop"]
 pub struct StartedContainer {
@@ -26,7 +27,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         created: &CreatedLaptop,
-        deadline: Instant,
+        deadline: CallBudget,
     ) -> Result<ContainerStart> {
         self.bound(runtime, &created.workflow)?;
         let mut record = created
@@ -69,13 +70,13 @@ impl Workflows {
         }))
     }
 }
-fn run(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Result<()> {
+fn run(runtime: &WorkerRuntime, record: &mut Record, deadline: CallBudget) -> Result<()> {
     need(
         create::start_allowed(record)?,
         "Current employee running intent changed before startup",
     )?;
     let name = record.resources().plan.arguments().name().to_owned();
-    let output = network::call(
+    let output = network::call_with_budget(
         runtime,
         record,
         vec!["start".into(), name.into()],
@@ -96,6 +97,14 @@ impl WorkerRuntime {
         created: &CreatedLaptop,
         deadline: Instant,
     ) -> Result<ContainerStart> {
-        self.laptop_workflows().start(self, created, deadline)
+        self.laptop_workflows().start(self, created, CallBudget::bounded(deadline))
+    }
+    pub fn start_laptop_container_for_connection(
+        &self,
+        created: &CreatedLaptop,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ContainerStart> {
+        self.laptop_workflows().assert_worker_connection(self, &created.workflow, connection)?;
+        self.laptop_workflows().start(self, created, CallBudget::worker())
     }
 }

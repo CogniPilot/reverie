@@ -17,9 +17,9 @@ pub(super) fn encode_arguments(
         .collect::<std::io::Result<Vec<_>>>()
         .map_err(LaptopError::Io)
 }
-pub(super) fn run(runtime: &WorkerRuntime, record: &mut Record, ceiling: Instant) -> Result<()> {
+pub(super) fn run(runtime: &WorkerRuntime, record: &mut Record, ceiling: super::call_budget::CallBudget) -> Result<()> {
     let name = format!("{}-lan", record.resources().plan.arguments().name());
-    let state = call(
+    let state = call_with_budget(
         runtime,
         record,
         vec!["network".into(), "inspect".into(), name.clone().into()],
@@ -47,7 +47,7 @@ pub(super) fn run(runtime: &WorkerRuntime, record: &mut Record, ceiling: Instant
         "com.docker.network.bridge.enable_icc=false".into(),
         name.into(),
     ];
-    let result = call(runtime, record, args, CallPurpose::Launch, ceiling)?;
+    let result = call_with_budget(runtime, record, args, CallPurpose::Launch, ceiling)?;
     if !result.succeeded {
         record.unknown = true;
         return Err(LaptopError::Refused("WORKER_LAPTOP_NETWORK_CREATE_FAILED"));
@@ -61,7 +61,16 @@ pub(super) fn call(
     purpose: CallPurpose,
     ceiling: Instant,
 ) -> Result<CapturedOutput> {
-    let original = (Instant::now() + Duration::from_secs(20)).min(ceiling);
+    call_with_budget(runtime, record, args, purpose, super::call_budget::CallBudget::bounded(ceiling))
+}
+pub(super) fn call_with_budget(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    args: Vec<OsString>,
+    purpose: CallPurpose,
+    ceiling: super::call_budget::CallBudget,
+) -> Result<CapturedOutput> {
+    let original = ceiling.end(runtime, 20);
     loop {
         if matches!(purpose, CallPurpose::Launch) && runtime.cancellation().is_cancelled() {
             return Err(LaptopError::Refused("WORKER_LAPTOP_STOPPED"));

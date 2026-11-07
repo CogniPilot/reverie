@@ -5,6 +5,7 @@ mod cold;
 mod drive;
 mod image;
 mod log;
+mod post_copy;
 #[cfg(test)]
 mod tests;
 use super::*;
