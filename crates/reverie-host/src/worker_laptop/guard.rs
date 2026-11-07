@@ -1,5 +1,6 @@
 //! Consume only the original session Nix guard after the actual pane phase.
 //! Storage remains in the SAME record, including after uncertain FD close.
+use super::call_budget::CallBudget;
 use super::*;
 use crate::{
     worker_nix::{NixDisposition, NixError, NixStoreGuard},
@@ -144,7 +145,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         pane: &StartedPane,
-        deadline: Instant,
+        deadline: CallBudget,
     ) -> Result<NixGuardRelease> {
         self.bound(runtime, &pane.workflow)?;
         let mut record = pane
@@ -192,11 +193,8 @@ impl Workflows {
         }))
     }
 }
-fn run(runtime: &WorkerRuntime, record: &mut Record, requested: Instant) -> Result<()> {
-    let end = runtime
-        .stop_deadline()
-        .map_or(requested, |stop| requested.min(stop));
-    need(Instant::now() < end, "WORKER_LAPTOP_NIX_GUARD_DEADLINE")?;
+fn run(runtime: &WorkerRuntime, record: &mut Record, budget: CallBudget) -> Result<()> {
+    guard_budget(runtime, budget)?;
     // Guard finalization is cleanup, not a new launch: cancellation does not
     // invent a fresh grace or prevent cleanup inside the original stop budget.
     let guard = consume(record);
@@ -207,7 +205,12 @@ fn run(runtime: &WorkerRuntime, record: &mut Record, requested: Instant) -> Resu
         .expect("retained storage")
         .nix
         .finish_close(result)?;
-    need(Instant::now() < end, "WORKER_LAPTOP_NIX_GUARD_DEADLINE")
+    guard_budget(runtime, budget)
+}
+fn guard_budget(runtime: &WorkerRuntime, budget: CallBudget) -> Result<()> {
+    budget
+        .check(runtime)
+        .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_DEADLINE"))
 }
 pub(super) fn consume(record: &mut Record) -> NixStoreGuard {
     // This is an infallible move under the same mutex, with no external call,
@@ -248,6 +251,22 @@ impl WorkerRuntime {
         pane: &StartedPane,
         deadline: Instant,
     ) -> Result<NixGuardRelease> {
-        self.laptop_workflows().release_guard(self, pane, deadline)
+        self.laptop_workflows()
+            .release_guard(self, pane, CallBudget::bounded(deadline))
+    }
+    /// Actual ordinary cleanup keeps the original connection identity even
+    /// after socket closure; it observes only the SAME live first-stop ceiling.
+    pub fn release_laptop_nix_guard_for_connection(
+        &self,
+        pane: &StartedPane,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<NixGuardRelease> {
+        self.laptop_workflows().assert_worker_cleanup_connection(
+            self,
+            &pane.workflow,
+            connection,
+        )?;
+        self.laptop_workflows()
+            .release_guard(self, pane, CallBudget::worker())
     }
 }

@@ -1,6 +1,10 @@
 //! Actual atomic Nix-to-laptop resource ownership. No native query runs while
 //! the registry lock is held; no status/path creates a replacement resource.
 use super::*;
+mod abort_held;
+mod cold;
+mod created_return;
+pub(in crate::installing_broker) use created_return::{CreatedStorageReturned, CreatedStorageFinishFailure};
 use reverie_contracts::worker_launch::WorkerRequest;
 use reverie_host::{
     office::OfficePhone,

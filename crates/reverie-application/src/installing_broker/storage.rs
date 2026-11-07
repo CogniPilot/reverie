@@ -1,15 +1,22 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
+mod direct_finalization;
 mod error;
+mod finalization;
+pub(in crate::installing_broker) use direct_finalization::{
+    DirectStorageFinishFailure, DirectStoragePreparation,
+};
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
 mod nix;
 mod observed;
+mod ordinary_stop;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
+pub(in crate::installing_broker) use ordinary_stop::OrdinaryStopPreparation;
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
@@ -23,6 +30,7 @@ pub use nix::{
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
 };
+pub(in crate::installing_broker) use nix::{CreatedStorageReturned, CreatedStorageFinishFailure};
 pub use replacement_stop::{
     ReplacementStopPreparation, ReplacementStopReclaimFailure, ReplacementStopRetainFailure,
     ReplacementStopReturned,
@@ -50,11 +58,22 @@ enum EntryOwner {
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
+    OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
-struct FinalizingStorage {
-    owner: Box<LaunchStorage>,
-    brand: Arc<()>,
+enum FinalizingStorage {
+    Ready {
+        owner: Box<LaunchStorage>,
+        brand: Arc<()>,
+    },
+    Direct {
+        owner: Arc<Mutex<reverie_host::worker_laptop::DirectStorageFinalizer>>,
+        brand: Arc<()>,
+    },
+}
+struct FinalStorageDecision {
+    live: bool,
+    brand: Option<Arc<()>>,
 }
 /// The original claim destination, shared by named resource transitions.
 /// These private fields describe where to restore custody, never permission.

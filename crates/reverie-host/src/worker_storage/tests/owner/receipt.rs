@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn fresh_receipt_file_check_uses_original_path_and_runtime_without_rereading_metadata() {
+    let tree = Tree::new();
+    let runtime = runtime(&tree);
+    let other = super::runtime(&tree);
+    let mut owner = runtime
+        .resolve_storage(&selected(&tree), &session(B))
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    owner.prepare_storage().unwrap();
+    owner.prepare_runtime_directory().unwrap();
+    let launch = owner.paths().home().join(".reverie-launch");
+    tree.mkdir(&launch);
+    let metadata = tree.state().join(B).join("runtime.json");
+    tree.write(&metadata, br#"{"exit":"original.exit"}"#);
+    let observed = owner.observe_launch_receipt().unwrap();
+    assert!(!observed.exists());
+    tree.write(&metadata, br#"{"exit":"malicious-later.exit"}"#);
+    tree.write(&launch.join("malicious-later.exit"), b"0");
+    assert!(!observed.recheck_is_file(&runtime).unwrap());
+    tree.write(&launch.join("original.exit"), b"0");
+    assert!(observed.recheck_is_file(&runtime).unwrap());
+    assert_eq!(
+        observed.recheck_is_file(&other).unwrap_err().code(),
+        "WORKER_RECEIPT_OWNER_CHANGED"
+    );
+    stdfs::remove_file(launch.join("original.exit")).unwrap();
+    tree.mkdir(&launch.join("original.exit"));
+    assert!(!observed.recheck_is_file(&runtime).unwrap());
+    stdfs::remove_dir(launch.join("original.exit")).unwrap();
+    symlink(
+        launch.join("malicious-later.exit"),
+        launch.join("original.exit"),
+    )
+    .unwrap();
+    assert!(observed.recheck_is_file(&runtime).unwrap());
+    stdfs::remove_file(launch.join("malicious-later.exit")).unwrap();
+    assert!(!observed.recheck_is_file(&runtime).unwrap());
+    // The old observation remains DATA after resource close. Neither this
+    // predicate nor its retained identity tag claims current Box custody.
+    owner.close(end()).unwrap();
+    assert!(!observed.recheck_is_file(&runtime).unwrap());
+    runtime.close(end()).unwrap();
+    other.close(end()).unwrap();
+}
+
+#[test]
 fn receipt_observation_binds_original_runtime_and_resource_generation_across_moves() {
     let tree = Tree::new();
     let runtime = runtime(&tree);

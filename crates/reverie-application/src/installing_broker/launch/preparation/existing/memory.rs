@@ -19,10 +19,7 @@ impl<'a> InspectedWorkerLaunch<'a> {
                 existing: self,
                 running,
             }),
-            Err(cause) => Err(self
-                .observed
-                .claimed
-                .into_failure(cause, Some(self.observed.current))),
+            Err(cause) => Err(self.into_failure(cause, None)),
         }
     }
     fn verify_running_current(&self) -> Result<bool, PreparationError> {

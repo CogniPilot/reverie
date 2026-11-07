@@ -789,6 +789,7 @@ SourceStopName can move that owner into the existing protected stop primitive;
 codec success or the attachment itself grants no stop authority. These Host
 components still require the real App registry/lifecycle consumers and do not
 establish whole-service or installed-worker selection.
+
 ### Worker viewer cleanup
 
 Worker viewer cleanup keeps distinct guard, TERM and KILL phases. Without an

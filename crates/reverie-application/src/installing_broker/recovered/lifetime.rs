@@ -30,7 +30,7 @@ impl RecoveryOwners {
             && installed.laptops.try_lock().is_ok_and(|laptops| {
                 laptops.transients_empty()
                     && laptops.iter().all(|entry| match &entry.owner {
-                        LaptopOwner::Recovered(_) => false,
+                        LaptopOwner::Recovered(_) | LaptopOwner::Started(_) => false,
                         #[cfg(test)]
                         LaptopOwner::Modeled => true,
                     })

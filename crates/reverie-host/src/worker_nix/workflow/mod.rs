@@ -5,6 +5,7 @@ mod cold;
 mod drive;
 mod image;
 mod log;
+mod post_copy;
 mod stopped_remove;
 pub use stopped_remove::RemovedStoppedLaptop;
 #[cfg(test)]

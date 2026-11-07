@@ -42,6 +42,7 @@ impl LaptopLifecycle<'_> {
         let entry = self.guard.iter().find(|entry| &entry.session == session)?;
         match &entry.owner {
             LaptopOwner::Recovered(owner) => Some(owner.office.clone()),
+            LaptopOwner::Started(owner) => Some(owner.office.clone()),
             #[cfg(test)]
             LaptopOwner::Modeled => None,
         }
@@ -94,6 +95,16 @@ impl LaptopLifecycle<'_> {
                 // Source's default Office grace starts only at this actual
                 // phase, after admission, lifecycle acquisition and identity.
                 // The Office owner still clips it to the live first-stop end.
+                let end =
+                    ceiling.unwrap_or_else(|| Instant::now() + std::time::Duration::from_secs(2));
+                owner.office.close_for_stopped_source(end)?;
+            }
+            LaptopOwner::Started(owner) => {
+                if !original.is_some_and(|original| Arc::ptr_eq(original, &owner.office)) {
+                    return Err(GateError::Refused("WORKER_REUSE_REGISTRATION_CHANGED").into());
+                }
+                // Match the recovered owner: start the worker phone grace
+                // only after the same registration and lifecycle checks.
                 let end =
                     ceiling.unwrap_or_else(|| Instant::now() + std::time::Duration::from_secs(2));
                 owner.office.close_for_stopped_source(end)?;
