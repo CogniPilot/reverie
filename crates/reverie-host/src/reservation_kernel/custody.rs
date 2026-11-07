@@ -90,7 +90,7 @@ fn coordinates(
         ))?;
     Ok((device, root.join(&suffix)))
 }
-fn location(
+pub(super) fn location(
     source: &impl Source,
     path: &PosixPath,
     table: &MountTable,

@@ -388,6 +388,29 @@ identity and check the held target close. Only that result constructs
 application readiness. The installing application and later lifecycle joins
 remain required. Owned fixture controls do not establish installed enforcement.
 
+`prepare_laptop_cold_temporary` advances the same known network record before
+creation. Opt-in `clear` requires its real employee storage lease, complete fixed
+engine census, canonical mount/process observations and all configured kernel
+lease barriers. Its iterative metadata walk retains the original 4096-entry,
+2-GiB and nominal 10-second limits. Preservation markers, hardlinks, mounts,
+changed custody and unknown same-UID references refuse. Pending evidence is
+durable before deletion; completion and every checked finalizer precede the last
+pending unlink. Partial/error outcomes retain the same resource record and never
+mint preparation or cold-commit success. Creation and post-memory cold commit
+require the actual same-source report carried by that storage owner.
+
+Clear's legacy regular metadata symlinks, uncapped text JSON, last-key-wins and
+loose reservation/holder grammar remain supported. FIFO/device/socket metadata
+now refuses before payload open: the original could block beyond its nominal
+deadline. Deadline checks do not bound an individual kernel filesystem syscall
+or codec call. Iteration avoids interpreter recursion exhaustion; it adds no
+new depth cap. These observations still rely on the original trusted host and
+serialized lifecycle boundary, not immunity to privileged/same-UID rename races.
+Absent policy remains non-destructive and independently fenced.
+`retain-and-replace` still refuses until its full pre-Office preparation and
+post-memory confirmation are implemented. This checkpoint supplies no installed
+selection, data migration, context/grant publisher or complete cold-feature claim.
+
 `release_laptop_nix_guard` consumes only the original guard after the same
 record's acknowledged pane startup. It moves the actual storage, original Nix
 outcome and prepared path into that record before attempting checked descriptor

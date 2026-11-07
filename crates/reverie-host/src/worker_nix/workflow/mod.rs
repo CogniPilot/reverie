@@ -1,6 +1,7 @@
 //! Real bounded resource custody. InstallingBroker supplies its admitted
 //! sequence; handles/data here never mint owner, admission or start authority.
 mod cleanup;
+mod cold;
 mod drive;
 mod image;
 mod log;

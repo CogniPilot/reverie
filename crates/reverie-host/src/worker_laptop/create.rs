@@ -125,6 +125,9 @@ fn run(
         .held_nix()?
         .assert_create_plan(runtime, &resources.plan)
         .map_err(LaptopError::Plan)?;
+    resources
+        .held_nix()?
+        .require_cold_prepared(resources.plan.source())?;
     let accounts = crate::worker_launch::account_mounts(
         resources.plan.source(),
         resources.request.environment(),
