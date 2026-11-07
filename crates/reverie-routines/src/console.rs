@@ -134,6 +134,76 @@ fn dechunk(mut data: &[u8]) -> Result<Vec<u8>, ConsoleError> {
     }
 }
 
+/// A header value http.client would send unchanged: printable ASCII and tab. Python refused CR and LF (except folded
+/// continuations) and could not encode non-latin-1 text; this refuses every other byte too, before any connection.
+fn valid_header_value(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|b| b == b'\t' || (b' '..=b'~').contains(&b))
+}
+
+/// The JSON text of a reply, decoded as python's `json.loads(bytes)` decodes it: the encoding detected from a BOM or
+/// from the zero bytes of its first characters (`json.detect_encoding`). Lone surrogates, which python passed through,
+/// refuse here.
+pub fn decode_json_bytes(raw: &[u8]) -> Result<String, ConsoleError> {
+    let refuse = || ConsoleError::Other("console reply is not valid text".into());
+    let utf16 = |b: &[u8], big: bool| -> Result<String, ConsoleError> {
+        if !b.len().is_multiple_of(2) {
+            return Err(refuse());
+        }
+        let units = b.chunks_exact(2).map(|c| {
+            if big {
+                u16::from_be_bytes([c[0], c[1]])
+            } else {
+                u16::from_le_bytes([c[0], c[1]])
+            }
+        });
+        char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .map_err(|_| refuse())
+    };
+    let utf32 = |b: &[u8], big: bool| -> Result<String, ConsoleError> {
+        if !b.len().is_multiple_of(4) {
+            return Err(refuse());
+        }
+        b.chunks_exact(4)
+            .map(|c| {
+                let n = if big {
+                    u32::from_be_bytes([c[0], c[1], c[2], c[3]])
+                } else {
+                    u32::from_le_bytes([c[0], c[1], c[2], c[3]])
+                };
+                char::from_u32(n).ok_or_else(refuse)
+            })
+            .collect()
+    };
+    let utf8 = |b: &[u8]| String::from_utf8(b.to_vec()).map_err(|_| refuse());
+    match raw {
+        [0, 0, 0xFE, 0xFF, rest @ ..] => utf32(rest, true),
+        [0xFF, 0xFE, 0, 0, rest @ ..] => utf32(rest, false),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, true),
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, false),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => utf8(rest),
+        [0, b1, ..] if raw.len() >= 4 => {
+            if *b1 != 0 {
+                utf16(raw, true)
+            } else {
+                utf32(raw, true)
+            }
+        }
+        [_, 0, b2, b3, ..] => {
+            if *b2 != 0 || *b3 != 0 {
+                utf16(raw, false)
+            } else {
+                utf32(raw, false)
+            }
+        }
+        [0, _] => utf16(raw, true),
+        [_, 0] => utf16(raw, false),
+        _ => utf8(raw),
+    }
+}
+
 impl Console {
     pub fn new(url: &str, token: Option<String>) -> Option<Console> {
         let (host, port) = parse_url(url)?;
@@ -147,6 +217,10 @@ impl Console {
         path: &str,
         body: Option<&Json>,
     ) -> Result<Json, ConsoleError> {
+        let token = self.token.as_deref().filter(|t| !t.is_empty());
+        if token.is_some_and(|t| !valid_header_value(t)) {
+            return other("invalid service token");
+        }
         let address = (self.host.as_str(), self.port)
             .to_socket_addrs()
             .map_err(|e| ConsoleError::Other(e.to_string()))?
@@ -178,7 +252,7 @@ impl Console {
                 p.len()
             ));
         }
-        if let Some(token) = &self.token {
+        if let Some(token) = token {
             request.push_str(&format!("X-Reverie-Service-Token: {token}\r\n"));
         }
         request.push_str("\r\n");
@@ -198,8 +272,7 @@ impl Console {
         let value = if raw.is_empty() {
             Json::Obj(Vec::new())
         } else {
-            let text = String::from_utf8(raw)
-                .map_err(|_| ConsoleError::Other("console reply is not UTF-8".into()))?;
+            let text = decode_json_bytes(&raw)?;
             json::parse(&text).map_err(|e| ConsoleError::Other(e.to_string()))?
         };
         if value.get("success") == Some(&Json::Bool(false)) {

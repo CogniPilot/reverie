@@ -1,7 +1,7 @@
 //! The checks of python's tests/test_routines.py that are not a whole tick: fixed texts, the console client's refusals,
 //! policy rules, and python's float and JSON behaviour.
 
-use reverie_routines::console::Console;
+use reverie_routines::console::{Console, decode_json_bytes};
 use reverie_routines::json::{self, Json, py_float};
 use reverie_routines::policy::load_zone;
 use reverie_routines::tick::template;
@@ -185,4 +185,155 @@ fn zone_keys_follow_python_rules() {
     ] {
         assert!(load_zone(key).is_none(), "{key}");
     }
+}
+
+/// Serves one reply with `body` on 127.0.0.1 and hands back the request it received.
+fn one_reply(body: Vec<u8>) -> (String, std::sync::mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!(
+        "http://127.0.0.1:{}",
+        listener.local_addr().expect("addr").port()
+    );
+    let (sent, received) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        if let Some(mut stream) = listener.incoming().flatten().next() {
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let _ = sent.send(String::from_utf8_lossy(&buf[..n]).to_string());
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&body);
+        }
+    });
+    (url, received)
+}
+
+#[test]
+fn a_token_that_is_not_a_plain_header_value_is_refused_before_connecting() {
+    // Python's http.client raised ValueError for CR or LF and sent nothing; no other header may ever be injected.
+    for token in [
+        "t\r\nX-Injected: 1",
+        "t\nX-Injected: 1",
+        "t\r",
+        "t\u{0}",
+        "t\u{7f}",
+        "t\u{e9}",
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let url = format!(
+            "http://127.0.0.1:{}",
+            listener.local_addr().expect("addr").port()
+        );
+        let console = Console::new(&url, Some(token.into())).expect("console");
+        assert!(console.sessions().is_err(), "{token:?}");
+        assert_eq!(
+            listener.accept().map(|_| ()).map_err(|e| e.kind()),
+            Err(std::io::ErrorKind::WouldBlock),
+            "{token:?} connected"
+        );
+    }
+    // A plain token is sent once, as the only header of its kind; an empty one is not sent, as python skipped it.
+    let (url, request) = one_reply(br#"{"data": []}"#.to_vec());
+    assert_eq!(
+        Console::new(&url, Some("abc-123 x".into()))
+            .expect("console")
+            .sessions()
+            .expect("sessions"),
+        Json::List(vec![])
+    );
+    let head = request.recv().expect("request");
+    assert_eq!(
+        head.matches("X-Reverie-Service-Token: abc-123 x\r\n")
+            .count(),
+        1
+    );
+    assert!(!head.contains("X-Injected"));
+    let (url, request) = one_reply(br#"{"data": []}"#.to_vec());
+    Console::new(&url, Some(String::new()))
+        .expect("console")
+        .sessions()
+        .expect("sessions");
+    assert!(
+        !request
+            .recv()
+            .expect("request")
+            .contains("X-Reverie-Service-Token")
+    );
+}
+
+#[test]
+fn replies_decode_as_json_loads_detects_their_encoding() {
+    // Python 3.13 json.loads decoded each of these to the same object, and refused the last two (BOM-REFERENCE.txt).
+    let p = "{\"data\": {\"s\": \"\u{e9}\u{1F600}\", \"n\": 1}}";
+    let le16 = |s: &str| {
+        s.encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>()
+    };
+    let be16 = |s: &str| {
+        s.encode_utf16()
+            .flat_map(u16::to_be_bytes)
+            .collect::<Vec<u8>>()
+    };
+    let le32 = |s: &str| {
+        s.chars()
+            .flat_map(|c| (c as u32).to_le_bytes())
+            .collect::<Vec<u8>>()
+    };
+    let be32 = |s: &str| {
+        s.chars()
+            .flat_map(|c| (c as u32).to_be_bytes())
+            .collect::<Vec<u8>>()
+    };
+    let with = |bom: &[u8], rest: Vec<u8>| [bom.to_vec(), rest].concat();
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("utf-8", p.as_bytes().to_vec()),
+        (
+            "utf-8-bom",
+            with(&[0xEF, 0xBB, 0xBF], p.as_bytes().to_vec()),
+        ),
+        ("utf-16-le-bom", with(&[0xFF, 0xFE], le16(p))),
+        ("utf-16-be-bom", with(&[0xFE, 0xFF], be16(p))),
+        ("utf-32-le-bom", with(&[0xFF, 0xFE, 0, 0], le32(p))),
+        ("utf-32-be-bom", with(&[0, 0, 0xFE, 0xFF], be32(p))),
+        ("utf-16-le", le16(p)),
+        ("utf-16-be", be16(p)),
+        ("utf-32-le", le32(p)),
+        ("utf-32-be", be32(p)),
+    ];
+    for (name, bytes) in &cases {
+        assert_eq!(decode_json_bytes(bytes).ok().as_deref(), Some(p), "{name}");
+    }
+    assert_eq!(decode_json_bytes(&be16("1")).ok().as_deref(), Some("1"));
+    assert_eq!(decode_json_bytes(&le16("1")).ok().as_deref(), Some("1"));
+    assert!(decode_json_bytes(&[le16(p), b"x".to_vec()].concat()).is_err());
+    assert!(decode_json_bytes(b"{\"s\": \"\xff\"}").is_err());
+    // Through the client: a UTF-16 reply with a BOM reads as its UTF-8 twin does.
+    let (url, _request) = one_reply(with(&[0xFF, 0xFE], le16(p)));
+    let got = Console::new(&url, None)
+        .expect("console")
+        .sessions()
+        .expect("sessions");
+    assert_eq!(Some(&got), json::parse(p).expect("parse").get("data"));
+}
+
+#[test]
+fn a_lone_surrogate_escape_reads_as_the_replacement_character() {
+    // Python kept the lone surrogate in the string; Rust strings cannot hold one, so it reads as U+FFFD (named difference).
+    assert_eq!(
+        json::parse("\"a\\ud800b\"").expect("parse"),
+        Json::Str("a\u{FFFD}b".into())
+    );
+    assert_eq!(
+        json::parse("\"\\udc00\"").expect("parse"),
+        Json::Str("\u{FFFD}".into())
+    );
+    assert_eq!(
+        json::parse("\"\\ud83d\\ude00\"").expect("parse"),
+        Json::Str("\u{1F600}".into())
+    );
 }
