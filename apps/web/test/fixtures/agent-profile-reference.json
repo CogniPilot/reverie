@@ -1,0 +1,719 @@
+{
+ "reference": "python/reverie/runtime.py Runtime.profile at 1e76e14c47dbc83cabf52fe9fd4ece60833545f8",
+ "inputs": {
+  "files": {
+   "policy.json": {
+    "state_file": "state/runtime.json",
+    "fallback": "local",
+    "instances_dir": "instances",
+    "api_url": "http://127.0.0.1:9",
+    "backends": {
+     "local": {
+      "mode": "opencode",
+      "model": "m/local",
+      "enabled": true
+     },
+     "cloud": {
+      "mode": "claude",
+      "model": "c-1"
+     }
+    },
+    "agent_instances": {
+     "sess-map": "instances/beta.json",
+     "sess-outside": "outside/gamma.json",
+     "sess-missing": "instances/none.json",
+     "sess-bad": "instances/bad.json"
+    }
+   },
+   "state/runtime.json": {
+    "current": "sess-cur",
+    "backend": "local",
+    "phase": "running"
+   },
+   "instances/alpha.json": {
+    "id": "alpha",
+    "agent_name": "Alpha",
+    "owner_name": "Owner",
+    "data_dir": "../state/alpha",
+    "persona": "Steady and exact.",
+    "role": "Engineer",
+    "kind": "expert"
+   },
+   "instances/beta.json": {
+    "id": "beta",
+    "agent_name": "Beta",
+    "owner_name": "Owner",
+    "data_dir": "/var/lib/beta",
+    "persona": "Long persona text that is cut at two thousand characters by the report. PAD"
+   },
+   "instances/bad.json": {
+    "id": "bad",
+    "agent_name": "Bad",
+    "owner_name": "Owner",
+    "data_dir": ".",
+    "persona": "x"
+   },
+   "outside/gamma.json": {
+    "id": "gamma",
+    "agent_name": "Gamma",
+    "owner_name": "Owner",
+    "data_dir": "/var/lib/gamma",
+    "persona": "Outside."
+   },
+   "work/cur/.reverie-instance": {
+    "instance": "../../instances/alpha.json"
+   },
+   "cli/projects/p1/0123abcd-0000-4000-8000-00000000abcd.jsonl": "{\"effort\":\"low\"}\n{\"effort\":\"high\",\"timestamp\":\"2026-11-07T10:00:00Z\"}\n{\"effort\":\"nope\"}\nnot json",
+   "cli/projects/p2/0123abcd-0000-4000-8000-00000000abcd.jsonl": "{\"effort\":\"max\",\"timestamp\":\"older\"}",
+   "cli/projects/p1/9999abcd-0000-4000-8000-00000000abcd.jsonl": "{\"effort\":\"medium\",\"timestamp\":\"0123456789012345678901234567890123456789012345678901234567890123456789\"}"
+  },
+  "pad_persona": {
+   "path": "instances/beta.json",
+   "repeat": 2100
+  },
+  "mtimes": {
+   "cli/projects/p1/0123abcd-0000-4000-8000-00000000abcd.jsonl": 1794000000,
+   "cli/projects/p2/0123abcd-0000-4000-8000-00000000abcd.jsonl": 1793000000,
+   "cli/projects/p1/9999abcd-0000-4000-8000-00000000abcd.jsonl": 1794000000
+  },
+  "sessions": {
+   "sess-cur": {
+    "id": "sess-cur",
+    "name": "current",
+    "status": "busy",
+    "pid": 41,
+    "mode": "claude",
+    "model": "",
+    "displayModel": {
+     "model": "model-x"
+    },
+    "effort": "high",
+    "claudeSessionChain": [
+     "older",
+     "0123abcd-0000-4000-8000-00000000abcd"
+    ],
+    "tokens": {
+     "input": 5,
+     "total": 9
+    },
+    "outputTokens": 4,
+    "totalCost": 0.25,
+    "messageCount": 3,
+    "workingDir": "<ROOT>/work/cur",
+    "pinned": true,
+    "createdAt": 1793990000,
+    "lastActivityAt": 1794000000
+   },
+   "sess-map": {
+    "id": "sess-map",
+    "name": "mapped",
+    "status": "idle",
+    "pid": null,
+    "mode": "opencode",
+    "model": "m/local",
+    "displayModel": "Local",
+    "inputTokens": 11,
+    "outputTokens": 12,
+    "paneExit": null
+   },
+   "sess-outside": {
+    "id": "sess-outside",
+    "mode": "claude",
+    "claudeSessionId": "9999abcd-0000-4000-8000-00000000abcd",
+    "pid": 0,
+    "paneExit": {
+     "code": 1
+    },
+    "workingDir": "<ROOT>/work/cur"
+   },
+   "sess-missing": {
+    "id": "sess-missing",
+    "mode": "opencode",
+    "pinned": 0,
+    "tokens": {
+     "output": 2
+    }
+   },
+   "sess-bad": {
+    "id": "sess-bad",
+    "name": null,
+    "tokens": "not an object"
+   },
+   "sess-plain": {}
+  },
+  "company": {
+   "employees": [
+    {
+     "id": "e1",
+     "name": "Alpha",
+     "icon": "a.png",
+     "position": "Engineer",
+     "expertise": [
+      "rust",
+      "nix"
+     ],
+     "sessionId": "sess-cur",
+     "extra": "ignored"
+    },
+    {
+     "id": "e2",
+     "name": "Beta",
+     "sessionId": "sess-map"
+    }
+   ]
+  },
+  "rooms": [
+   {
+    "id": "r1",
+    "name": "general",
+    "members": [
+     {
+      "sessionId": "sess-cur",
+      "role": "coordinator"
+     },
+     {
+      "sessionId": "sess-map"
+     }
+    ]
+   },
+   {
+    "id": "r2",
+    "name": "direct",
+    "kind": "dm",
+    "members": [
+     {
+      "sessionId": "sess-cur"
+     },
+     {
+      "sessionId": "sess-map",
+      "role": "member"
+     }
+    ]
+   },
+   {
+    "id": "r3",
+    "name": "quiet",
+    "members": [
+     {
+      "sessionId": "sess-outside"
+     }
+    ]
+   }
+  ],
+  "cases": [
+   [
+    "sess-cur",
+    true
+   ],
+   [
+    "sess-cur",
+    false
+   ],
+   [
+    "sess-map",
+    true
+   ],
+   [
+    "sess-map",
+    false
+   ],
+   [
+    "sess-outside",
+    true
+   ],
+   [
+    "sess-missing",
+    true
+   ],
+   [
+    "sess-bad",
+    true
+   ],
+   [
+    "sess-plain",
+    true
+   ]
+  ]
+ },
+ "outputs": [
+  {
+   "session": {
+    "id": "sess-cur",
+    "name": "current",
+    "status": "busy",
+    "alive": true,
+    "pinned": true,
+    "created_at": 1793990000,
+    "last_activity_at": 1794000000,
+    "working_dir": "<ROOT>/work/cur"
+   },
+   "backend": {
+    "mode": "claude",
+    "model": "model-x",
+    "display_model": "model-x"
+   },
+   "effort": {
+    "configured": "high",
+    "observed": {
+     "level": "high",
+     "at": "2026-11-07T10:00:00Z"
+    }
+   },
+   "usage": {
+    "input_tokens": 5,
+    "output_tokens": 4,
+    "total_tokens": 9,
+    "cost": 0.25,
+    "messages": 3,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": {
+    "id": "e1",
+    "name": "Alpha",
+    "icon": "a.png",
+    "position": "Engineer",
+    "expertise": [
+     "rust",
+     "nix"
+    ]
+   },
+   "rooms": [
+    {
+     "id": "r1",
+     "name": "general",
+     "role": "coordinator"
+    },
+    {
+     "id": "r2",
+     "name": "direct",
+     "role": null
+    }
+   ],
+   "runtime": {
+    "supervised": true,
+    "backend": "local",
+    "phase": "running",
+    "backends": [
+     {
+      "name": "local",
+      "mode": "opencode",
+      "model": "m/local",
+      "enabled": true
+     },
+     {
+      "name": "cloud",
+      "mode": "claude",
+      "model": "c-1",
+      "enabled": false
+     }
+    ],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": {
+    "agent_name": "Alpha",
+    "role": "Engineer",
+    "kind": "expert",
+    "persona": "Steady and exact.",
+    "source": "<ROOT>/instances/alpha.json"
+   },
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-cur",
+    "name": "current",
+    "status": "busy",
+    "alive": true,
+    "pinned": true,
+    "created_at": 1793990000,
+    "last_activity_at": 1794000000,
+    "working_dir": "<ROOT>/work/cur"
+   },
+   "backend": {
+    "mode": "claude",
+    "model": "model-x",
+    "display_model": "model-x"
+   },
+   "effort": {
+    "configured": "high",
+    "observed": {
+     "level": "high",
+     "at": "2026-11-07T10:00:00Z"
+    }
+   },
+   "usage": {
+    "input_tokens": 5,
+    "output_tokens": 4,
+    "total_tokens": 9,
+    "cost": 0.25,
+    "messages": 3,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": {
+    "id": "e1",
+    "name": "Alpha",
+    "icon": "a.png",
+    "position": "Engineer",
+    "expertise": [
+     "rust",
+     "nix"
+    ]
+   },
+   "rooms": [
+    {
+     "id": "r1",
+     "name": "general",
+     "role": "coordinator"
+    }
+   ],
+   "runtime": {
+    "supervised": true,
+    "backend": "local",
+    "phase": "running",
+    "backends": [
+     {
+      "name": "local",
+      "mode": "opencode",
+      "model": "m/local",
+      "enabled": true
+     },
+     {
+      "name": "cloud",
+      "mode": "claude",
+      "model": "c-1",
+      "enabled": false
+     }
+    ],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": {
+    "agent_name": "Alpha",
+    "role": "Engineer",
+    "kind": "expert",
+    "persona": "Steady and exact.",
+    "source": "<ROOT>/instances/alpha.json"
+   },
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-map",
+    "name": "mapped",
+    "status": "idle",
+    "alive": false,
+    "pinned": false,
+    "created_at": null,
+    "last_activity_at": null,
+    "working_dir": null
+   },
+   "backend": {
+    "mode": "opencode",
+    "model": "m/local",
+    "display_model": "Local"
+   },
+   "effort": {
+    "configured": null,
+    "observed": null
+   },
+   "usage": {
+    "input_tokens": 11,
+    "output_tokens": 12,
+    "total_tokens": null,
+    "cost": null,
+    "messages": null,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": {
+    "id": "e2",
+    "name": "Beta",
+    "icon": null,
+    "position": null,
+    "expertise": null
+   },
+   "rooms": [
+    {
+     "id": "r1",
+     "name": "general",
+     "role": null
+    },
+    {
+     "id": "r2",
+     "name": "direct",
+     "role": "member"
+    }
+   ],
+   "runtime": {
+    "supervised": false,
+    "backend": null,
+    "phase": null,
+    "backends": [],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": {
+    "agent_name": "Beta",
+    "role": "Expert",
+    "kind": "agent",
+    "persona": "Long persona text that is cut at two thousand characters by the report. PADyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "source": "<ROOT>/instances/beta.json"
+   },
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-map",
+    "name": "mapped",
+    "status": "idle",
+    "alive": false,
+    "pinned": false,
+    "created_at": null,
+    "last_activity_at": null,
+    "working_dir": null
+   },
+   "backend": {
+    "mode": "opencode",
+    "model": "m/local",
+    "display_model": "Local"
+   },
+   "effort": {
+    "configured": null,
+    "observed": null
+   },
+   "usage": {
+    "input_tokens": 11,
+    "output_tokens": 12,
+    "total_tokens": null,
+    "cost": null,
+    "messages": null,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": {
+    "id": "e2",
+    "name": "Beta",
+    "icon": null,
+    "position": null,
+    "expertise": null
+   },
+   "rooms": [
+    {
+     "id": "r1",
+     "name": "general",
+     "role": null
+    }
+   ],
+   "runtime": {
+    "supervised": false,
+    "backend": null,
+    "phase": null,
+    "backends": [],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": {
+    "agent_name": "Beta",
+    "role": "Expert",
+    "kind": "agent",
+    "persona": "Long persona text that is cut at two thousand characters by the report. PADyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "source": "<ROOT>/instances/beta.json"
+   },
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-outside",
+    "name": null,
+    "status": null,
+    "alive": false,
+    "pinned": false,
+    "created_at": null,
+    "last_activity_at": null,
+    "working_dir": "<ROOT>/work/cur"
+   },
+   "backend": {
+    "mode": "claude",
+    "model": null,
+    "display_model": null
+   },
+   "effort": {
+    "configured": null,
+    "observed": {
+     "level": "medium",
+     "at": null
+    }
+   },
+   "usage": {
+    "input_tokens": null,
+    "output_tokens": null,
+    "total_tokens": null,
+    "cost": null,
+    "messages": null,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": null,
+   "rooms": [
+    {
+     "id": "r3",
+     "name": "quiet",
+     "role": null
+    }
+   ],
+   "runtime": {
+    "supervised": false,
+    "backend": null,
+    "phase": null,
+    "backends": [],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": null,
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-missing",
+    "name": null,
+    "status": null,
+    "alive": false,
+    "pinned": false,
+    "created_at": null,
+    "last_activity_at": null,
+    "working_dir": null
+   },
+   "backend": {
+    "mode": "opencode",
+    "model": null,
+    "display_model": null
+   },
+   "effort": {
+    "configured": null,
+    "observed": null
+   },
+   "usage": {
+    "input_tokens": null,
+    "output_tokens": 2,
+    "total_tokens": null,
+    "cost": null,
+    "messages": null,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": null,
+   "rooms": [],
+   "runtime": {
+    "supervised": false,
+    "backend": null,
+    "phase": null,
+    "backends": [],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": {
+    "error": "instance config unreadable",
+    "source": "<ROOT>/instances/none.json"
+   },
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-bad",
+    "name": null,
+    "status": null,
+    "alive": false,
+    "pinned": false,
+    "created_at": null,
+    "last_activity_at": null,
+    "working_dir": null
+   },
+   "backend": {
+    "mode": null,
+    "model": null,
+    "display_model": null
+   },
+   "effort": {
+    "configured": null,
+    "observed": null
+   },
+   "usage": {
+    "input_tokens": null,
+    "output_tokens": null,
+    "total_tokens": null,
+    "cost": null,
+    "messages": null,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": null,
+   "rooms": [],
+   "runtime": {
+    "supervised": false,
+    "backend": null,
+    "phase": null,
+    "backends": [],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": {
+    "error": "instance config unreadable",
+    "source": "<ROOT>/instances/bad.json"
+   },
+   "note": "read-only profile; nothing was changed"
+  },
+  {
+   "session": {
+    "id": "sess-plain",
+    "name": null,
+    "status": null,
+    "alive": false,
+    "pinned": false,
+    "created_at": null,
+    "last_activity_at": null,
+    "working_dir": null
+   },
+   "backend": {
+    "mode": null,
+    "model": null,
+    "display_model": null
+   },
+   "effort": {
+    "configured": null,
+    "observed": null
+   },
+   "usage": {
+    "input_tokens": null,
+    "output_tokens": null,
+    "total_tokens": null,
+    "cost": null,
+    "messages": null,
+    "scope": "console counters for this session since created_at; no per-day history is recorded yet"
+   },
+   "employee": null,
+   "rooms": [],
+   "runtime": {
+    "supervised": false,
+    "backend": null,
+    "phase": null,
+    "backends": [],
+    "switch": {
+     "available": false,
+     "reason": "switching a backend is an owner action; it waits for owner authentication"
+    }
+   },
+   "persona": null,
+   "note": "read-only profile; nothing was changed"
+  }
+ ]
+}
