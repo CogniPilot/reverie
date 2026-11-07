@@ -1,6 +1,8 @@
-//! Fixed protected T operation on an owned UnixStream. This is no listener,
-//! generic dispatcher, owner grant or successful create/start endpoint.
+//! Fixed T/J dispatch on an owned accepted UnixStream. Both purposes share
+//! actual admission, runtime origin, socket custody and checked finalizers.
+//! No listener, owner grant or successful create/start endpoint is created.
 mod error;
+mod launch;
 mod record;
 #[cfg(test)]
 mod tests;
@@ -12,6 +14,7 @@ use crate::{
 };
 pub use error::WorkerReportError;
 use error::{Result, finalized};
+pub use launch::{AcceptedWorkerConnection, WorkerLaunchConnection};
 use record::Record;
 use std::{
     os::unix::net::UnixStream,

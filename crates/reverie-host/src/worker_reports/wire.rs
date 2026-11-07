@@ -15,6 +15,28 @@ pub(super) fn operate(
     stream: &mut UnixStream,
     collector: &CommandTelemetry,
 ) -> Result<()> {
+    authenticate(service, stream)?;
+    // No frame or collector observation precedes actual kernel peer UID.
+    collector.assert_engine(&service.engine)?;
+    let (header, payload) = receive(service, stream)?;
+    if header.kind() != b'T' {
+        return Err(WorkerReportError::Refused);
+    }
+    report(service, stream, collector, &payload)
+}
+pub(super) fn report(
+    service: &WorkerReportService,
+    stream: &mut UnixStream,
+    collector: &CommandTelemetry,
+    payload: &[u8],
+) -> Result<()> {
+    // Preserve source common256KiB receive THEN purpose4096-byte refusal.
+    let request = reverie_contracts::command_telemetry::decode_report_request(payload)
+        .map_err(|_| WorkerReportError::Refused)?;
+    let result = collector.command_failure_report(&request)?;
+    send(service, stream, b'J', &result)
+}
+pub(super) fn authenticate(service: &WorkerReportService, stream: &UnixStream) -> Result<()> {
     if service.stopping() {
         return Err(WorkerReportError::Stopping);
     }
@@ -25,8 +47,12 @@ pub(super) fn operate(
     if credentials.uid() != service.uid {
         return Err(WorkerReportError::Peer);
     }
-    // No frame or collector observation precedes actual kernel peer UID.
-    collector.assert_engine(&service.engine)?;
+    Ok(())
+}
+pub(super) fn receive(
+    service: &WorkerReportService,
+    stream: &mut UnixStream,
+) -> Result<(WorkerFrameHeader, Vec<u8>)> {
     let mut header = [0u8; HEADER_BYTES];
     read(service, stream, &mut header)?;
     let header = WorkerFrameHeader::decode(header);
@@ -36,14 +62,7 @@ pub(super) fn operate(
     }
     let mut payload = vec![0; size];
     read(service, stream, &mut payload)?;
-    if header.kind() != b'T' {
-        return Err(WorkerReportError::Refused);
-    }
-    // Preserve source common256KiB receive THEN purpose4096-byte refusal.
-    let request = reverie_contracts::command_telemetry::decode_report_request(&payload)
-        .map_err(|_| WorkerReportError::Refused)?;
-    let result = collector.command_failure_report(&request)?;
-    send(service, stream, b'J', &result)
+    Ok((header, payload))
 }
 fn timeouts(service: &WorkerReportService, stream: &UnixStream) -> Result<()> {
     let timeout = service

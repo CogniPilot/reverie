@@ -36,7 +36,7 @@ impl InstallingBroker {
     ) -> Result<(), WorkerReportError> {
         self.reports.handle(connection, self.command_telemetry())
     }
-    /// Publish the actual first stop, close all T handlers under that same
+    /// Publish the actual first stop, close shared T/J handlers under that same
     /// deadline, and independently inspect retained SQLite owners. This does
     /// not seal the shared engine, join caller-owned dispatcher threads, or
     /// replace the broker's remaining cleanup.

@@ -339,7 +339,7 @@ Office construction remains in its later recovery/new-laptop phase.
 fixed same-runtime T service and mandatory collector. It supplies no listener,
 wire dispatch completion, browser owner authorization or company-selected path.
 `close_command_telemetry` publishes the original first stop, seals/settles its actual
-T connection records and checks pending Store state. The listener/dispatcher must
+shared T/J connection records and checks pending Store state. The listener/dispatcher must
 still join its actual caller-owned handler threads. This component result does not close
 other Office/laptop/resource constructors or acknowledge global shutdown.
 
@@ -347,6 +347,20 @@ The original complete-create check remains mandatory after current running inten
 and all Nix/account mounts, immediately before actual create. This bounded cohort
 adds no data-to-start constructor; the actual protected/unreserved create and
 whole lifecycle producers must consume this retained collector when they land.
+
+`accept_worker_connection` is the actual fixed T/J caller over this same service,
+current snapshot, and mandatory collector. A J result retains its real socket
+and borrows its original broker; no request/configuration constructor exists.
+`begin_ordinary` consumes it through actual image refresh, non-attach GPU cold
+boundary, and real captured optional Gate admission. Entry failure retains that
+exact connection; successful prefix close consumes the actual allocation scope
+and socket without acknowledging storage, laptop, or global release.
+
+This prefix does not yet join storage wait/reuse, lifecycle active/generation
+state, Nix/network preparation, created publication/start, memory/cold completion,
+pane supervision, or committed Started registration. Protected L/source-stop
+joins and the real listener/global-stop producer also remain required. No wire
+selection or data-to-start permission follows from this bounded prefix.
 
 # Actual running-laptop recovery ownership
 
