@@ -58,21 +58,6 @@ pub(super) fn run(
     }
     Ok(())
 }
-pub(super) fn call(
-    runtime: &WorkerRuntime,
-    record: &mut Record,
-    args: Vec<OsString>,
-    purpose: CallPurpose,
-    ceiling: Instant,
-) -> Result<CapturedOutput> {
-    call_with_budget(
-        runtime,
-        record,
-        args,
-        purpose,
-        super::call_budget::CallBudget::bounded(ceiling),
-    )
-}
 pub(super) fn call_with_budget(
     runtime: &WorkerRuntime,
     record: &mut Record,
