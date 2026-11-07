@@ -2,7 +2,7 @@
 //! source receipt predicate. Unknown records keep their counted resource owner.
 use super::*;
 impl Finalizer<'_> {
-    fn close_guard(&mut self) {
+    pub(super) fn close_guard(&mut self) {
         if let Some(network) = self.owner.network() {
             if self.owner.created().is_some() {
                 if let Err(error) = network
