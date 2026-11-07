@@ -51,25 +51,5 @@ pub(crate) fn remove(parent: &File, name: &OsStr) -> io::Result<()> {
 }
 pub(crate) fn publish(parent: &File, temporary: &OsStr) -> io::Result<()> {
     let temporary = leaf(temporary)?;
-    // SAFETY: the borrowed parent descriptor stays live, both names are
-    // terminated single leaves, and the destination is the fixed profile name.
-    // NOREPLACE atomically refuses an existing owner profile. No numeric fd,
-    // caller-selected destination or overwrite authority is exposed publicly.
-    let result = unsafe {
-        // musl has no renameat2 libc wrapper. Use the identical Linux syscall
-        // on both libc targets; names, flags and publication semantics match.
-        libc::syscall(
-            libc::SYS_renameat2,
-            parent.as_raw_fd(),
-            temporary.as_ptr(),
-            parent.as_raw_fd(),
-            c"profile.md".as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    super::rename::noreplace(parent, &temporary, parent, c"profile.md")
 }

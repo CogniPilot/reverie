@@ -2,6 +2,16 @@
 //! original Python path spelling as well as held/named identity/type/UID/mode.
 use super::*;
 use std::{ffi::OsStr, io::Write};
+#[derive(Clone, Copy)]
+enum Privacy {
+    Private,
+    ExactPrivate,
+}
+#[derive(Clone, Copy)]
+enum Creation {
+    Reuse,
+    Exclusive,
+}
 pub(super) struct Directory {
     pub(super) file: File,
     pub(super) text: PosixPath,
@@ -20,10 +30,24 @@ impl Directory {
             path.as_os_str(),
             libc::O_RDONLY | libc::O_DIRECTORY,
         )?;
+        Self::adopt(text, path, file, uid, Privacy::Private)
+    }
+    fn adopt(
+        text: PosixPath,
+        path: PathBuf,
+        file: File,
+        uid: u32,
+        privacy: Privacy,
+    ) -> Result<Self> {
         let result = (|| {
             let stamp = Stamp::capture(&file.metadata()?);
             need(
-                stamp.directory() && stamp.uid == uid && stamp.mode & 0o077 == 0,
+                stamp.directory()
+                    && stamp.uid == uid
+                    && match privacy {
+                        Privacy::Private => stamp.mode & 0o077 == 0,
+                        Privacy::ExactPrivate => stamp.mode & 0o7777 == 0o700,
+                    },
                 StorageFault::PrivateDirectory,
             )?;
             Ok(stamp)
@@ -42,6 +66,62 @@ impl Directory {
             Ok(()) => Ok(directory),
             Err(error) => finalized(Err(error), directory.close()),
         }
+    }
+    pub(super) fn child(&self, name: &OsStr, uid: u32) -> Result<Self> {
+        self.child_with(name, uid, Creation::Reuse)
+    }
+    pub(super) fn create_child(&self, name: &OsStr, uid: u32) -> Result<Self> {
+        self.child_with(name, uid, Creation::Exclusive)
+    }
+    fn child_with(&self, name: &OsStr, uid: u32, creation: Creation) -> Result<Self> {
+        self.check()?;
+        need(
+            Path::new(name).file_name() == Some(name),
+            StorageFault::CanonicalPath,
+        )?;
+        let leaf = PosixPath::try_new(&native::python_text(Path::new(name)))
+            .expect("filesystem codepoints");
+        need(
+            !leaf.is_absolute() && leaf.components().len() == 1 && !leaf.has_parent_component(),
+            StorageFault::CanonicalPath,
+        )?;
+        match nix::sys::stat::mkdirat(&self.file, name, nix::sys::stat::Mode::S_IRWXU) {
+            Ok(()) => self.file.sync_all()?,
+            Err(nix::errno::Errno::EEXIST) if matches!(creation, Creation::Reuse) => {}
+            Err(error) => return Err(std::io::Error::from(error).into()),
+        }
+        let file = native::open_at(
+            self.file.as_raw_fd(),
+            name,
+            libc::O_RDONLY | libc::O_DIRECTORY,
+        )?;
+        let child = Self::adopt(
+            self.text.join(&leaf),
+            self.path.join(name),
+            file,
+            uid,
+            Privacy::ExactPrivate,
+        )?;
+        match self.check() {
+            Ok(()) => Ok(child),
+            Err(error) => finalized(Err(error), child.close()),
+        }
+    }
+    /// The transaction already acknowledged its fixed no-replace rename. Move
+    /// the SAME fd owner to that known name; failure closes it exactly once.
+    pub(super) fn relocated(mut self, text: PosixPath) -> Result<Self> {
+        let result = (|| {
+            self.path = native::python_path(&text.codepoints())?;
+            self.text = text;
+            self.check()
+        })();
+        match result {
+            Ok(()) => Ok(self),
+            Err(error) => finalized(Err(error), self.close()),
+        }
+    }
+    pub(super) fn stamp(&self) -> &Stamp {
+        &self.stamp
     }
     pub(super) fn check(&self) -> Result<()> {
         let held = Stamp::capture(&self.file.metadata()?);

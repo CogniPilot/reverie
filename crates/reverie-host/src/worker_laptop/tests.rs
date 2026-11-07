@@ -128,6 +128,21 @@ impl Fixture {
         session: &ProfileSessionId,
         effective: EffectiveWorkerConfig,
     ) -> (NixWorkflow, ObservedCreatePlan, WorkerRequest, OfficePhone) {
+        let (nix, plan, request) = self.resources_before_office(session, effective);
+        let phone = self
+            .office
+            .bind(
+                self.root.join("api").join(session.as_str()),
+                session.clone(),
+            )
+            .unwrap();
+        (nix, plan, request, phone)
+    }
+    fn resources_before_office(
+        &self,
+        session: &ProfileSessionId,
+        effective: EffectiveWorkerConfig,
+    ) -> (NixWorkflow, ObservedCreatePlan, WorkerRequest) {
         let selection = self
             .runtime()
             .resolve_storage(&self.source, session)
@@ -161,14 +176,7 @@ impl Fixture {
             NixProgress::NoHelper
         );
         let request=WorkerRequest::decode(&serde_json::to_vec(&json!({"sessionId":session.as_str(),"cwd":"/workspace","command":"opencode","env":{},"cols":80,"rows":24})).unwrap(),&self.source).unwrap();
-        let phone = self
-            .office
-            .bind(
-                self.root.join("api").join(session.as_str()),
-                session.clone(),
-            )
-            .unwrap();
-        (nix, plan, request, phone)
+        (nix, plan, request)
     }
     fn retain(&self) -> LaptopWorkflow {
         let (nix, plan, request, phone) = self.resources();

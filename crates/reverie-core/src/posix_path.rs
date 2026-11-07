@@ -47,6 +47,11 @@ impl PosixPath {
     pub fn has_parent_component(&self) -> bool {
         self.parts.iter().any(|part| part == &[46, 46])
     }
+    /// Normalized non-anchor components, retaining literal '..' and Python
+    /// codepoints. This lexical view makes no filesystem/custody assertion.
+    pub fn components(&self) -> impl ExactSizeIterator<Item = &[u32]> + DoubleEndedIterator {
+        self.parts.iter().map(Vec::as_slice)
+    }
     pub fn is_single_rooted(&self) -> bool {
         self.anchor == 1
     }
