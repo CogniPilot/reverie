@@ -1,3 +1,4 @@
+mod accepted;
 mod cleanup;
 mod cold_prepare;
 mod create;
@@ -69,7 +70,7 @@ pub(super) struct Fixture {
     pub(super) source: EffectiveWorkerConfig,
 }
 impl Fixture {
-    fn employee(mode: &str) -> Self {
+    pub(super) fn employee(mode: &str) -> Self {
         Self::employee_with_hooks(mode, crate::captured_client::test_hooks::Hooks::default())
     }
     fn employee_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {

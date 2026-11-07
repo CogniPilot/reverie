@@ -46,6 +46,23 @@ impl LaptopLifecycle<'_> {
         original: Option<&Arc<recovered::RecoveredOffice>>,
         end: Instant,
     ) -> Result<(), storage::StorageWorkflowError> {
+        self.close_reuse_registration_with_budget(token, name, original, Some(end))
+    }
+    pub(in crate::installing_broker) fn close_reuse_registration_for_worker(
+        &mut self,
+        token: &ActiveLaunchToken<'_>,
+        name: &WorkerContainerName,
+        original: Option<&Arc<recovered::RecoveredOffice>>,
+    ) -> Result<(), storage::StorageWorkflowError> {
+        self.close_reuse_registration_with_budget(token, name, original, None)
+    }
+    fn close_reuse_registration_with_budget(
+        &mut self,
+        token: &ActiveLaunchToken<'_>,
+        name: &WorkerContainerName,
+        original: Option<&Arc<recovered::RecoveredOffice>>,
+        ceiling: Option<Instant>,
+    ) -> Result<(), storage::StorageWorkflowError> {
         if !self.belongs_to(token.owner) {
             return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN").into());
         }
@@ -64,6 +81,11 @@ impl LaptopLifecycle<'_> {
                 if !original.is_some_and(|original| Arc::ptr_eq(original, &owner.office)) {
                     return Err(GateError::Refused("WORKER_REUSE_REGISTRATION_CHANGED").into());
                 }
+                // Source's default Office grace starts only at this actual
+                // phase, after admission, lifecycle acquisition and identity.
+                // The Office owner still clips it to the live first-stop end.
+                let end =
+                    ceiling.unwrap_or_else(|| Instant::now() + std::time::Duration::from_secs(2));
                 owner.office.close_for_stopped_source(end)?;
             }
             #[cfg(test)]

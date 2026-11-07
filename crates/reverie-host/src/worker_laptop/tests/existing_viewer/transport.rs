@@ -12,8 +12,8 @@ mod resize;
 use crate::{
     command_telemetry::CommandTelemetry,
     worker_reports::{
-        AcceptedWorkerConnection, ViewerRelay, ViewerRelayEnd, ViewerRelayEvent,
-        WorkerLaunchConnection, WorkerLaunchHold, WorkerReportService,
+        ViewerRelay, ViewerRelayEnd, ViewerRelayEvent, WorkerLaunchConnection, WorkerLaunchHold,
+        WorkerReportService,
     },
 };
 use std::{
@@ -44,22 +44,7 @@ fn accepted(
     service: &Arc<WorkerReportService>,
     command: &str,
 ) -> (UnixStream, WorkerLaunchConnection, WorkerLaunchHold) {
-    let collector = CommandTelemetry::capture(fixture.runtime(), &fixture.source).unwrap();
-    let (mut client, server) = UnixStream::pair().unwrap();
-    client
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .unwrap();
-    client
-        .set_write_timeout(Some(Duration::from_secs(3)))
-        .unwrap();
-    send(&mut client,b'J',&serde_json::to_vec(&json!({"sessionId":SID,"cwd":"/workspace","command":command,"env":{},"cols":80,"rows":24})).unwrap());
-    let AcceptedWorkerConnection::Launch(connection) =
-        service.accept(server, &collector, &fixture.source).unwrap()
-    else {
-        panic!("actual J")
-    };
-    let hold = connection.retain_lifecycle().unwrap();
-    (client, connection, hold)
+    fixture.accepted(service, command)
 }
 fn retained(fixture: &Fixture, connection: &WorkerLaunchConnection) -> ExistingViewer {
     retained_with_path(fixture, connection).0

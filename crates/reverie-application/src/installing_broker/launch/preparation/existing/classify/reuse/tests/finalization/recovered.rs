@@ -213,3 +213,54 @@ fn stopped_without_receipt_requires_fresh_scope_before_shared_office_or_storage_
     assert!(!lease_is_free(&source));
     assert!(broker.close_command_telemetry(end()).is_err());
 }
+
+#[test]
+fn worker_phone_grace_starts_after_scope_wait_with_live_phone_connection() {
+    crate::test_process::owning_case!(
+        worker_phone_grace_starts_after_scope_wait_with_live_phone_connection
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let office = recover(&tree, &broker);
+    let provider = Provider::new(&tree);
+    let reuse = reusable(&tree, &broker);
+    let exit = receipt(&reuse);
+    let source = reuse.inspected.observed.current.configuration().clone();
+    let owner = reuse.prepare_viewer().unwrap().close_allocation().unwrap();
+    enable(&tree, provider.child.id());
+    fs::create_dir_all(exit.parent().unwrap()).unwrap();
+    fs::write(exit, b"0").unwrap();
+    let (pause, reached, resume) = crate::test_process::pause_point();
+    super::super::super::finalizer::REGISTRATION_PAUSE
+        .with(|slot| *slot.borrow_mut() = Some(pause));
+    let (result, request) = std::thread::scope(|scope| {
+        let fixture = &tree;
+        let query = scope.spawn(move || {
+            reached.recv_timeout(Duration::from_secs(5)).unwrap();
+            // Exhaust an incorrectly early two-second phone budget while the
+            // actual finalizer is still before lifecycle/phone acquisition.
+            std::thread::sleep(Duration::from_millis(2_100));
+            let mut request =
+                UnixStream::connect(fixture.root.join("office").join(SID).join("office.sock"))
+                    .unwrap();
+            // A real incomplete request keeps the phone connection alive but
+            // cannot start an upstream native job. Such a job must separately
+            // retain its seat and would correctly make phone close unknown.
+            request
+                .write_all(b"GET /api/instances HTTP/1.1\r\nHost: fixture\r\n")
+                .unwrap();
+            resume.send(()).unwrap();
+            request
+        });
+        let result = owner.finalize_for_worker();
+        (result, query.join().unwrap())
+    });
+    drop(request);
+    close_office(&office);
+    let closed = result.expect("worker phone grace starts at its actual close phase");
+    assert!(closed.completed());
+    assert!(!closed.storage_retained());
+    assert!(broker.installed.lifecycle().unwrap().guard.is_empty());
+    assert!(lease_is_free(&source));
+    broker.close_command_telemetry(end()).unwrap();
+}

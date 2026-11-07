@@ -4,7 +4,7 @@
 use std::{
     io, mem,
     sync::{
-        OnceLock,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -50,31 +50,75 @@ pub(crate) fn signal() -> Option<i32> {
     }
 }
 pub(crate) fn clamp(deadline: Instant) -> Instant {
+    stop_deadline().map_or(deadline, |stop| stop.min(deadline))
+}
+fn stop_deadline() -> Option<Instant> {
     let stop = DEADLINE.load(Ordering::Acquire);
     if stop == u64::MAX {
-        return deadline;
+        return None;
     }
     let Some(&(instant, clock)) = ANCHOR.get() else {
-        return Instant::now().min(deadline);
+        return Some(Instant::now());
     };
-    instant
-        .checked_add(Duration::from_nanos(stop.saturating_sub(clock)))
-        .unwrap_or(instant)
-        .min(deadline)
+    Some(
+        instant
+            .checked_add(Duration::from_nanos(stop.saturating_sub(clock)))
+            .unwrap_or(instant),
+    )
+}
+/// This observation is minted only by a genuine native handler installation.
+/// The owning guard stays live until checked service cleanup, or is retained
+/// on abandonment. Freezing before restoration prevents another installation
+/// from changing a prior runtime's observed source.
+pub(crate) struct SignalView {
+    frozen: OnceLock<SignalObservation>,
+}
+struct SignalObservation {
+    deadline: Option<Instant>,
+    signal: Option<i32>,
+}
+impl SignalView {
+    fn new() -> Self {
+        Self {
+            frozen: OnceLock::new(),
+        }
+    }
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.frozen
+            .get()
+            .map_or_else(stop_deadline, |value| value.deadline)
+    }
+    pub(crate) fn signal(&self) -> Option<i32> {
+        self.frozen.get().map_or_else(signal, |value| value.signal)
+    }
+    fn freeze(&self) {
+        self.frozen.get_or_init(|| SignalObservation {
+            deadline: stop_deadline(),
+            signal: signal(),
+        });
+    }
 }
 pub(crate) struct SignalGuard {
     previous: [libc::sigaction; 2],
     armed: bool,
+    view: Arc<SignalView>,
 }
 pub(crate) struct SignalError {
     pub(crate) cause: io::Error,
     pub(crate) restoration_failed: bool,
+    retained_view: Option<Arc<SignalView>>,
+}
+impl SignalError {
+    pub(crate) fn retained_view(&self) -> Option<Arc<SignalView>> {
+        self.retained_view.clone()
+    }
 }
 impl From<io::Error> for SignalError {
     fn from(cause: io::Error) -> Self {
         Self {
             cause,
             restoration_failed: false,
+            retained_view: None,
         }
     }
 }
@@ -92,6 +136,7 @@ impl SignalGuard {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
         let instant = Instant::now();
+        let view = Arc::new(SignalView::new());
         let Some(now) = clock() else {
             ACTIVE.store(false, Ordering::Release);
             return Err(io::Error::last_os_error().into());
@@ -109,13 +154,17 @@ impl SignalGuard {
         let mut previous: [libc::sigaction; 2] = unsafe { mem::zeroed() };
         for (index, signal) in [libc::SIGINT, libc::SIGTERM].into_iter().enumerate() {
             if unsafe { libc::sigaction(signal, &action, &mut previous[index]) } != 0 {
-                return Err(installation_error(index, &previous));
+                return Err(installation_error(index, &previous, view));
             }
         }
         Ok(Self {
             previous,
             armed: true,
+            view,
         })
+    }
+    pub(crate) fn view(&self) -> Arc<SignalView> {
+        self.view.clone()
     }
     pub(crate) fn finish(mut self) -> io::Result<()> {
         let result = self.restore();
@@ -123,6 +172,7 @@ impl SignalGuard {
         result
     }
     fn restore(&self) -> io::Result<()> {
+        self.view.freeze();
         let mut failed = false;
         for (index, signal) in [libc::SIGINT, libc::SIGTERM].into_iter().enumerate() {
             // SAFETY: restore initialized prior actions; no Rust callback or
@@ -148,6 +198,22 @@ pub(crate) fn fail_restore_once() {
     FAIL_RESTORE.store(true, Ordering::Release);
 }
 #[cfg(test)]
+pub(crate) enum OwnedBrokerSignal {
+    Interrupt,
+    Terminate,
+}
+#[cfg(test)]
+pub(crate) fn raise_for_owned_broker_test(signal: OwnedBrokerSignal) {
+    let signal = match signal {
+        OwnedBrokerSignal::Interrupt => libc::SIGINT,
+        OwnedBrokerSignal::Terminate => libc::SIGTERM,
+    };
+    // SAFETY: callers are exact-one owning tests in their own subprocess,
+    // after actual guard installation. raise targets only this calling thread;
+    // no arbitrary PID/signal selector or host process group is exposed.
+    assert_eq!(unsafe { libc::raise(signal) }, 0);
+}
+#[cfg(test)]
 pub(crate) fn exercise_first_stop_and_errno() {
     // SAFETY: called only in the separately owned installed guest test process.
     // Test the same C handler's errno preservation and one real installed signal.
@@ -163,7 +229,11 @@ pub(crate) fn exercise_first_stop_and_errno() {
     assert_eq!(signal(), Some(libc::SIGTERM));
     assert_eq!(clamp(future), first);
 }
-fn installation_error(index: usize, previous: &[libc::sigaction; 2]) -> SignalError {
+fn installation_error(
+    index: usize,
+    previous: &[libc::sigaction; 2],
+    view: Arc<SignalView>,
+) -> SignalError {
     let cause = io::Error::last_os_error();
     // SAFETY: index1 means SIGINT was installed and its prior initialized
     // action must be restored. No other action was changed on index0 failure.
@@ -175,6 +245,7 @@ fn installation_error(index: usize, previous: &[libc::sigaction; 2]) -> SignalEr
     SignalError {
         cause,
         restoration_failed,
+        retained_view: restoration_failed.then_some(view),
     }
 }
 impl Drop for SignalGuard {
