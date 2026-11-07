@@ -13,6 +13,7 @@
 //! `reverie_contracts::lease_records`.
 mod hold;
 mod janitor;
+mod maintenance;
 mod retirement;
 #[cfg(test)]
 mod tests;
@@ -29,6 +30,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub use hold::{HeldLeases, hold, reserve, unreserve};
 pub use janitor::{Janitor, WalkBound, check, janitor};
+pub use maintenance::{GcReport, LeaseListing, Listing, gc, ls};
 pub use retirement::{DirectPaths, Retirement, RetirementPaths, RetirementSummary, retirement};
 pub use reverie_contracts::lease_records::ReservationState;
 
@@ -169,6 +171,14 @@ pub fn key_of(directory: &Path) -> Result<Option<String>> {
     }
 }
 
+/// Start `command` as the leader of a new session with no blocked signals
+/// (`lease run`'s `Popen(start_new_session=True)`).
+pub fn spawn_new_session(
+    command: &mut std::process::Command,
+) -> std::io::Result<std::process::Child> {
+    native::spawn_new_session(command)
+}
+
 /// `_reservation_state(base, key)`: absent is FREE, unreadable is UNKNOWN.
 #[must_use]
 pub fn reservation_state(base: &LeaseBase, key: &str) -> ReservationState {
@@ -252,12 +262,15 @@ pub(crate) fn barrier(base: &LeaseBase, exclusive: bool, wait: Duration) -> Resu
     } else {
         FlockArg::LockSharedNonblock
     };
-    let deadline = Instant::now() + wait;
+    // An unrepresentable deadline (Python `inf`/`nan` waits) never expires.
+    let deadline = Instant::now().checked_add(wait);
     let mut file = file;
     loop {
         match Flock::lock(file, mode) {
             Ok(lock) => return Ok(Barrier { _lock: lock }),
-            Err((_, nix::errno::Errno::EWOULDBLOCK)) if Instant::now() >= deadline => {
+            Err((_, nix::errno::Errno::EWOULDBLOCK))
+                if deadline.is_some_and(|deadline| Instant::now() >= deadline) =>
+            {
                 return Err(LeaseError::busy(
                     "lease barrier busy (a cleanup is deleting); try again",
                 ));

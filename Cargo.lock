@@ -507,6 +507,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-lease-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-host",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-namegate"
 version = "0.1.0"
 dependencies = [

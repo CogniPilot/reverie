@@ -5,6 +5,7 @@ use super::{Node, Text, Value};
 use std::collections::BTreeMap;
 pub(crate) enum OrderNode {
     Leaf,
+    Array(Vec<usize>),
     Object(Vec<(Text, usize)>),
 }
 pub(crate) struct OrderGraph {
@@ -45,6 +46,22 @@ impl OrderedValue {
             graph: OrderGraph { nodes, root },
         }
     }
+    pub(crate) fn array(children: Vec<Self>) -> Self {
+        let mut nodes = Vec::new();
+        let mut values = Vec::new();
+        let mut order = Vec::new();
+        for child in children {
+            let (value, index) = graft(&mut nodes, child);
+            values.push(value);
+            order.push(index);
+        }
+        let root = nodes.len();
+        nodes.push(OrderNode::Array(order));
+        Self {
+            value: Value(Node::Array(values)),
+            graph: OrderGraph { nodes, root },
+        }
+    }
     pub(crate) fn encode(&self) -> Vec<u8> {
         encode(self)
             .0
@@ -58,6 +75,9 @@ fn graft(target: &mut Vec<OrderNode>, child: OrderedValue) -> (Value, usize) {
     for node in child.graph.nodes {
         target.push(match node {
             OrderNode::Leaf => OrderNode::Leaf,
+            OrderNode::Array(order) => {
+                OrderNode::Array(order.into_iter().map(|i| i + offset).collect())
+            }
             OrderNode::Object(order) => OrderNode::Object(
                 order
                     .into_iter()
@@ -81,6 +101,9 @@ fn encode(source: &OrderedValue) -> Text {
             Piece::Raw(raw) => output.extend(raw.iter().copied().map(u32::from)),
             Piece::Text(text) => emit_text(text, &mut output),
             Piece::Value(value, index) => match (&value.0, &source.graph.nodes[index]) {
+                (Node::Array(values), OrderNode::Array(order)) => {
+                    push_array(values, order, &mut pending, &mut output);
+                }
                 (Node::Object(values), OrderNode::Object(order)) => {
                     push_object(values, order, &mut pending, &mut output);
                 }
@@ -91,6 +114,22 @@ fn encode(source: &OrderedValue) -> Text {
         }
     }
     Text(output)
+}
+fn push_array<'a>(
+    values: &'a [Value],
+    order: &[usize],
+    pending: &mut Vec<Piece<'a>>,
+    output: &mut Vec<u32>,
+) {
+    assert_eq!(values.len(), order.len(), "private array order");
+    output.push(91);
+    pending.push(Piece::Raw(b"]"));
+    for (at, (value, &index)) in values.iter().zip(order).enumerate().rev() {
+        pending.push(Piece::Value(value, index));
+        if at > 0 {
+            pending.push(Piece::Raw(b", "));
+        }
+    }
 }
 fn push_object<'a>(
     values: &'a BTreeMap<Text, Value>,

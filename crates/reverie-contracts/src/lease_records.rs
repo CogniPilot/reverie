@@ -121,6 +121,32 @@ pub fn holder_record_bytes(holder: &HolderRecord<'_>) -> Vec<u8> {
     ])
 }
 
+fn strings(items: &[Vec<u32>]) -> OrderedValue {
+    OrderedValue::array(items.iter().map(|item| string(item)).collect())
+}
+
+/// `lease check`'s line: `{"path": ..., "state": ..., "why": ...}`.
+#[must_use]
+pub fn check_report_bytes(path: &[u32], state: &str, why: &[u32]) -> Vec<u8> {
+    record(vec![
+        ("path", string(path)),
+        (
+            "state",
+            string(&state.chars().map(u32::from).collect::<Vec<_>>()),
+        ),
+        ("why", string(why)),
+    ])
+}
+
+/// `lease gc`'s line: `{"removed": [...], "keptNoPathRecord": [...]}`.
+#[must_use]
+pub fn gc_report_bytes(removed: &[Vec<u32>], kept_no_path_record: &[Vec<u32>]) -> Vec<u8> {
+    record(vec![
+        ("removed", strings(removed)),
+        ("keptNoPathRecord", strings(kept_no_path_record)),
+    ])
+}
+
 /// `_parse_duration`: `<digits><s|m|h|d>`, more than 0 and at most 24 h.
 #[must_use]
 pub fn reservation_seconds(text: &str) -> Option<u32> {
