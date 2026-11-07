@@ -71,7 +71,8 @@ impl StorageClaim {
                     brand,
                     newly_claimed,
                 },
-                Err((plan, cause)) => {
+                Err(failure) => {
+                    let (plan, cause) = *failure;
                     return Err(Box::new(DirectStorageRetainFailure {
                         claim: StorageClaim {
                             state: ClaimState::Registered {
@@ -100,20 +101,20 @@ fn retain_registered(
     registry: &Arc<StorageRegistry>,
     identity: &Arc<()>,
     plan: ObservedCreatePlan,
-) -> Result<Arc<()>, (ObservedCreatePlan, StorageWorkflowError)> {
+) -> Result<Arc<()>, Box<(ObservedCreatePlan, StorageWorkflowError)>> {
     let mut entries = match registry.lock(registry.runtime.stop_deadline()) {
         Ok(entries) => entries,
-        Err(cause) => return Err((plan, cause)),
+        Err(cause) => return Err(Box::new((plan, cause))),
     };
     let index = match index(&entries, identity) {
         Ok(index) => index,
-        Err(cause) => return Err((plan, cause)),
+        Err(cause) => return Err(Box::new((plan, cause))),
     };
     if !entries[index].writer_checked || !matches!(entries[index].owner, EntryOwner::Direct(_)) {
-        return Err((
+        return Err(Box::new((
             plan,
             StorageWorkflowError::refused("WORKER_DIRECT_STORAGE_RETAINED"),
-        ));
+        )));
     }
     let mut entry = entries.remove(index);
     let EntryOwner::Direct(owner) = entry.owner else {
@@ -133,7 +134,7 @@ fn retain_registered(
             let (owner, plan, cause) = failure.into_parts();
             entry.owner = EntryOwner::Direct(owner);
             entries.insert(index, entry);
-            Err((plan, cause.into()))
+            Err(Box::new((plan, cause.into())))
         }
     }
 }
@@ -149,23 +150,7 @@ impl DirectStoragePreparation {
                 brand,
                 ..
             } => {
-                let owner = {
-                    let entries = registry.lock(registry.runtime.stop_deadline())?;
-                    let selected = index(&entries, identity)?;
-                    let EntryOwner::Finalizing(FinalizingStorage::Direct {
-                        owner,
-                        brand: actual,
-                    }) = &entries[selected].owner
-                    else {
-                        return Err(StorageWorkflowError::refused(
-                            "WORKER_DIRECT_STORAGE_CHANGED",
-                        ));
-                    };
-                    if !Arc::ptr_eq(actual, brand) {
-                        return Err(StorageWorkflowError::refused("WORKER_DIRECT_STORAGE_BRAND"));
-                    }
-                    owner.clone()
-                };
+                let owner = registered_owner(registry, identity, brand)?;
                 let result = owner
                     .try_lock()
                     .map_err(|_| StorageWorkflowError::refused("WORKER_DIRECT_STORAGE_IN_USE"))?
@@ -235,6 +220,29 @@ impl DirectStoragePreparation {
             }
         }
     }
+}
+/// Clone only the actual counted record under a short registry guard. Native
+/// observation stays outside that global guard; this creates no new owner.
+fn registered_owner(
+    registry: &StorageRegistry,
+    identity: &Arc<()>,
+    brand: &Arc<()>,
+) -> Result<Arc<Mutex<DirectStorageFinalizer>>, StorageWorkflowError> {
+    let entries = registry.lock(registry.runtime.stop_deadline())?;
+    let selected = index(&entries, identity)?;
+    let EntryOwner::Finalizing(FinalizingStorage::Direct {
+        owner,
+        brand: actual,
+    }) = &entries[selected].owner
+    else {
+        return Err(StorageWorkflowError::refused(
+            "WORKER_DIRECT_STORAGE_CHANGED",
+        ));
+    };
+    if !Arc::ptr_eq(actual, brand) {
+        return Err(StorageWorkflowError::refused("WORKER_DIRECT_STORAGE_BRAND"));
+    }
+    Ok(owner.clone())
 }
 fn reclaim_registered(
     registry: &Arc<StorageRegistry>,

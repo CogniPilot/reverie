@@ -195,6 +195,7 @@ impl<'a> ColdBody<'a> {
             target,
             receipt,
         } = classified;
+        let target = *target;
         let InspectedWorkerLaunch {
             observed,
             previous: _,
