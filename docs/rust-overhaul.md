@@ -194,6 +194,21 @@ while legacy implementations are being retired. The portable gate exercises
 core/contracts/routes, shared HTTP, the OPS CLI and xtask on Linux, macOS and Windows; native host adapters have their
 separate Linux gate. Neither gate proves unported runtime paths are portable.
 
+The native Ubuntu24.04 GitHub-hosted job explicitly runs `cargo xtask
+prepare-ci-userns` before verification. Ubuntu's AppArmor restriction can remove
+namespace capabilities and deny the memory fixture's UID map. The task loads a
+fixed `userns` profile attached only to the exact root-owned, readonly Nix
+util-linux `unshare` selected by the declared development environment. It uses
+fixed noninteractive sudo/AppArmor argv and bounded profile stdin; it changes no
+sysctl or global AppArmor switch and writes no policy file. The profile lasts
+only for the disposable runner lifetime. Environment checks prevent accidental
+local/self-hosted invocation; they are declarations, and ordinary sudo remains
+the administrative permission boundary. This task is never automatic in local
+verification or product startup. The actual root UID, raw SQLite/sidecar bytes,
+and set-ID refusal checks remain required and unchanged; a local pass does not
+qualify the hosted AppArmor setup. See Ubuntu's [restriction description](https://discourse.ubuntu.com/t/understanding-apparmor-user-namespace-restriction/58007)
+and the [Ubuntu24.04 profile syntax](https://manpages.ubuntu.com/manpages/noble/man5/apparmor.d.5.html).
+
 Independent adversarial review is required for changed authorization and native
 effects. Cover malformed requests, revoked/stale authority, process/path swaps,
 partial writes, loss of reply, service death/restart and retained fences. Port

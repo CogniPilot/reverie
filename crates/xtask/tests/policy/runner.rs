@@ -99,6 +99,21 @@ fn unknown_arguments_or_missing_tools_fail() {
 }
 
 #[test]
+fn ci_namespace_setup_refuses_ordinary_local_invocation_before_system_tools() {
+    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .arg("prepare-ci-userns")
+        .env("GITHUB_ACTIONS", "false")
+        .env("REVERIE_CI_RUNNER_ENVIRONMENT", "self-hosted")
+        .output()
+        .expect("actual local refusal; no sudo/AppArmor invocation");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requires a declared disposable Ubuntu24")
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn portable_verification_selects_only_portable_components() {
     let root = TestDir::new();
     let executable = fixture(&root);
