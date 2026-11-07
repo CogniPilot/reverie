@@ -15,6 +15,19 @@ pub(crate) enum Number {
     PositiveInfinity,
     NegativeInfinity,
 }
+impl Number {
+    pub(super) fn nonfinite_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Nan => Some("nan"),
+            Self::PositiveInfinity => Some("inf"),
+            Self::NegativeInfinity => Some("-inf"),
+            Self::Float(value) if value.is_nan() => Some("nan"),
+            Self::Float(value) if *value == f64::INFINITY => Some("inf"),
+            Self::Float(value) if *value == f64::NEG_INFINITY => Some("-inf"),
+            _ => None,
+        }
+    }
+}
 pub(crate) enum Node {
     Null,
     Bool(bool),
@@ -26,18 +39,22 @@ pub(crate) enum Node {
 pub(crate) struct Value(pub(crate) Node);
 impl Value {
     pub(crate) fn is_finite(&self) -> bool {
+        self.first_nonfinite().is_none()
+    }
+    /// First refusal for the existing Python sort_keys=True encoder.
+    pub(crate) fn first_nonfinite(&self) -> Option<&'static str> {
         let mut pending = vec![self];
         while let Some(value) = pending.pop() {
             match &value.0 {
-                Node::Number(Number::Nan | Number::PositiveInfinity | Number::NegativeInfinity) => {
-                    return false;
+                Node::Number(number) if number.nonfinite_name().is_some() => {
+                    return number.nonfinite_name();
                 }
-                Node::Array(values) => pending.extend(values),
-                Node::Object(values) => pending.extend(values.values()),
+                Node::Array(values) => pending.extend(values.iter().rev()),
+                Node::Object(values) => pending.extend(values.values().rev()),
                 _ => {}
             }
         }
-        true
+        None
     }
 }
 pub(crate) fn truthy(value: Option<&Value>) -> bool {
