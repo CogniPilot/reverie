@@ -4,6 +4,8 @@
 mod call;
 mod error;
 mod stop;
+#[cfg(test)]
+mod tests;
 use crate::{
     captured_client::CapturedCall, installed_worker_engine::InstalledWorkerEngine,
     worker_runtime::WorkerRuntime, worker_storage::LaunchStorage,

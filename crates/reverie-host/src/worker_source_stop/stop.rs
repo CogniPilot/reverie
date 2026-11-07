@@ -127,7 +127,9 @@ impl OriginalSourceStop {
         Ok(start)
     }
     fn observed_process_start(&self) -> Result<String> {
-        ReservationKernel::new().original_process_start(self.name.native(), self.read_end()).map_err(SourceStopError::Kernel)
+        ReservationKernel::new()
+            .original_process_start(self.name.native(), self.read_end())
+            .map_err(SourceStopError::Kernel)
     }
     fn observe(
         &mut self,

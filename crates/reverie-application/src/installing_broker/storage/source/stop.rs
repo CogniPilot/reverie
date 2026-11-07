@@ -81,6 +81,10 @@ impl RegisteredSource {
         end: Instant,
     ) -> Result<(), StorageWorkflowError> {
         let registry = self.registry()?;
+        // The caller has freshly qualified this source as stopped. Its actual
+        // phone must reject/join future request jobs BEFORE any lease FD close;
+        // merely settling the shared engine would leave a constructor gap.
+        self.record._office.close_for_stopped_source(end)?;
         let mut held =
             self.record.owner.lock().map_err(|_| {
                 StorageWorkflowError::refused("RESOURCE_ORIGINAL_SOURCE_UNCONFIRMED")
