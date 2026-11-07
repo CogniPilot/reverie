@@ -83,6 +83,15 @@ fn reply(stream: &mut UnixStream, body: &[u8]) {
     .unwrap();
     stream.write_all(body).unwrap();
 }
+fn progressing_header(stream: &mut UnixStream) {
+    stream.write_all(b"HTTP/1.1 200 OK\r\nX-Slow: ").unwrap();
+    for _ in 0..30 {
+        if stream.write_all(b"x").is_err() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
 #[test]
 fn actual_fixed_routes_and_same_kernel_are_metadata_only() {
     let fixture = Fixture::new();
@@ -132,13 +141,7 @@ fn progressing_headers_obey_one_deadline_and_close_before_next_request() {
         let server = scope.spawn(|| {
             let mut stream = accepted(&fixture.listener);
             head(&mut stream);
-            stream.write_all(b"HTTP/1.1 200 OK\r\nX-Slow: ").unwrap();
-            for _ in 0..30 {
-                if stream.write_all(b"x").is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(20));
-            }
+            progressing_header(&mut stream);
             let mut byte = [0];
             assert_eq!(
                 stream.read(&mut byte).unwrap(),

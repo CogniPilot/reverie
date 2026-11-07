@@ -23,6 +23,15 @@ struct BorrowedIo<'a> {
     socket: AsyncFd<crate::native::metadata_socket::MetadataSocket<'a>>,
     received: usize,
 }
+impl BorrowedIo<'_> {
+    fn account(&mut self, count: usize) -> io::Result<()> {
+        self.received = self.received.saturating_add(count);
+        if self.received > MAX_WIRE {
+            return Err(io::Error::other("ENGINE_METADATA_WIRE_BOUND"));
+        }
+        Ok(())
+    }
+}
 impl AsyncRead for BorrowedIo<'_> {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -38,10 +47,7 @@ impl AsyncRead for BorrowedIo<'_> {
             });
             match result {
                 Ok(Ok(count)) => {
-                    this.received = this.received.saturating_add(count);
-                    if this.received > MAX_WIRE {
-                        return Poll::Ready(Err(io::Error::other("ENGINE_METADATA_WIRE_BOUND")));
-                    }
+                    this.account(count)?;
                     buffer.advance(count);
                     return Poll::Ready(Ok(()));
                 }
