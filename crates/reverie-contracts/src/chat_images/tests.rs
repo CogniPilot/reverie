@@ -1,6 +1,7 @@
 use super::*;
 use reverie_core::{chat_images::ImageFileName, decimal::UnsignedInteger};
 use serde_json::{Value as Json, json};
+mod inspection;
 const SID: &str = "11111111-1111-4111-8111-111111111111";
 const RID: &str = "33333333-3333-4333-8333-333333333333";
 const MID: &str = "44444444-4444-4444-8444-444444444444";

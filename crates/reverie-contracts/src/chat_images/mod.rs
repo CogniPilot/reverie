@@ -2,7 +2,12 @@
 use crate::legacy_json::{self, Node, Number, Text, Value};
 use reverie_core::chat_images::{ImageDigest, ImageScope, Raster};
 use std::{collections::BTreeMap, fmt};
+mod inspection;
 mod ledger;
+pub use inspection::{
+    ImageInspection, ImageMount, ImageNamespaceProjection, ImageStorageProjection,
+    decode_inspection,
+};
 mod message;
 mod request;
 mod response;

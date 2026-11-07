@@ -49,6 +49,11 @@ pub struct ImageCacheOpenFailure {
     pub retained: Option<Box<ImageCache>>,
 }
 impl ImageCache {
+    pub fn prepare_root(temporary: &Path) -> Result<std::path::PathBuf> {
+        let parent = crate::private_fs::Directory::open(temporary)?;
+        let result = parent.prepare_image_child().map_err(Into::into);
+        error::finalized(result, parent.close().map_err(Into::into))
+    }
     pub fn open(state: &Path, root: &Path) -> std::result::Result<Self, ImageCacheOpenFailure> {
         let mut cache = Self {
             custody: custody::Custody::empty(),

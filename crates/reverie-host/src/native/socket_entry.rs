@@ -50,6 +50,11 @@ enum State {
     Unconfirmed,
 }
 impl SocketEntry {
+    /// Read-only origin DATA for a purpose holding this actual listener owner.
+    /// The observation neither opens a socket nor supplies unlink authority.
+    pub(crate) fn observation(&self) -> (PathBuf, Option<[u64; 2]>) {
+        (self.path.clone(), self.identity)
+    }
     pub(crate) fn created(path: PathBuf) -> Self {
         Self {
             path,

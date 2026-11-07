@@ -195,6 +195,24 @@ impl Directory {
     pub(crate) fn identity(&self) -> [u64; 2] {
         [self.identity.dev, self.identity.ino]
     }
+    /// Fixed M cache child below the held parent, without path-walking again
+    /// during mkdir. Subsequent opens still validate the original named parent.
+    pub(crate) fn prepare_image_child(&self) -> Result<std::path::PathBuf> {
+        use std::os::unix::fs::DirBuilderExt;
+        self.check()?;
+        let selected = format!(
+            "/proc/self/fd/{}/{}",
+            self.file.as_raw_fd(),
+            reverie_core::chat_images::CACHE_NAME
+        );
+        match std::fs::DirBuilder::new().mode(0o700).create(selected) {
+            Ok(()) => (),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
+            Err(error) => return Err(StoreError::io(error)),
+        }
+        self.check()?;
+        Ok(self.path.join(reverie_core::chat_images::CACHE_NAME))
+    }
     pub(crate) fn image_names(&self) -> Result<Vec<Vec<u8>>> {
         let file = open_at(
             self.file.as_raw_fd(),
