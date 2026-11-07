@@ -3,6 +3,7 @@
 //! authorization, live-pane proof, admission release or source-stop permit.
 use super::*;
 mod relay;
+mod stop;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchReceiptObservation, LaunchStorage},
@@ -32,6 +33,7 @@ pub(super) struct ExistingRecord {
     stage: Stage,
     job: Option<Arc<ViewerJob>>,
     failure: Option<Arc<LaptopError>>,
+    stop: stop::ExistingStop,
 }
 pub(super) type ExistingRecordOwner = Arc<Mutex<ExistingRecord>>;
 #[derive(Clone)]
@@ -155,7 +157,8 @@ impl ExistingRecord {
             return Ok(());
         }
         self.stage = Stage::Closing;
-        let result = self.job.as_ref().map_or(Ok(()), |job| {
+        let stopped_call = self.stop.settle(runtime, end);
+        let viewer = self.job.as_ref().map_or(Ok(()), |job| {
             runtime
                 .installed_engine()
                 .engine
@@ -163,6 +166,7 @@ impl ExistingRecord {
                 .settle_viewer(job, end)
                 .map_err(|error| LaptopError::Engine(error.into()))
         });
+        let result = finalized(stopped_call, viewer);
         match result {
             Ok(()) => {
                 self.stage = Stage::Closed;
@@ -243,6 +247,7 @@ impl Workflows {
             stage: Stage::Held,
             job: None,
             failure: None,
+            stop: stop::ExistingStop::default(),
         }));
         inventory.push(RetainedRecord::Existing(record.clone()));
         Ok(ExistingViewer {
@@ -288,6 +293,7 @@ impl Workflows {
             record.stage == Stage::Held && record.job.is_none(),
             "WORKER_EXISTING_VIEWER_PHASE",
         )?;
+        record.stop.require_startable()?;
         need(
             !runtime.cancellation().is_cancelled()
                 && Instant::now() < viewer::clipped(runtime, end),
@@ -371,6 +377,7 @@ impl Workflows {
             matches!(record.stage, Stage::Held | Stage::Closed) && record.inputs.is_some(),
             "WORKER_EXISTING_VIEWER_RETAINED",
         )?;
+        record.stop.require_reclaimable()?;
         need(
             record
                 .inputs
