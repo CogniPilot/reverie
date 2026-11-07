@@ -143,7 +143,7 @@ impl WorkerRuntime {
         })
     }
 }
-fn require_local_closed(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
+pub(super) fn require_local_closed(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
     need(
         record.resources().nix.guard_close_confirmed(),
         "WORKER_STARTED_NIX_GUARD_RETAINED",

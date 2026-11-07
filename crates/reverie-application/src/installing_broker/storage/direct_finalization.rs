@@ -6,10 +6,12 @@ use reverie_host::{
     worker_launch::ObservedCreatePlan,
 };
 mod error;
+mod started;
 pub(in crate::installing_broker) use error::{
     DirectStorageFinishFailure, DirectStorageRetainFailure,
 };
 enum Destination {
+    Started(Box<started::Finalization>),
     Legacy {
         registry: Arc<StorageRegistry>,
         owner: DirectStorageFinalizer,
@@ -44,15 +46,7 @@ impl StorageClaim {
         plan: ObservedCreatePlan,
     ) -> Result<DirectStoragePreparation, Box<DirectStorageRetainFailure>> {
         let destination = match self.state {
-            ClaimState::Started(owner) => {
-                return Err(Box::new(DirectStorageRetainFailure {
-                    claim: StorageClaim {
-                        state: ClaimState::Started(owner),
-                    },
-                    plan,
-                    cause: StorageWorkflowError::refused("WORKER_STARTED_FINAL_STORAGE_RETAINED"),
-                }));
-            }
+            ClaimState::Started(owner) => Destination::Started(started::retain(owner, plan)?),
             ClaimState::Legacy { registry, owner } => {
                 match registry.runtime.retain_direct_final_storage(owner, plan) {
                     Ok(owner) => Destination::Legacy { registry, owner },
@@ -152,6 +146,7 @@ impl DirectStoragePreparation {
         &mut self,
     ) -> Result<DirectStorageObservation, StorageWorkflowError> {
         match &mut self.destination {
+            Destination::Started(owner) => owner.observe(),
             Destination::Legacy { registry, owner } => Ok(owner.observe(&registry.runtime)?),
             Destination::Registered {
                 registry,
@@ -171,10 +166,22 @@ impl DirectStoragePreparation {
     /// Invoke only after the whole real handler's native/Office cleanup. This
     /// consumes the same observation; an error retains the original phase.
     pub(in crate::installing_broker) fn finish(
-        self,
+        mut self,
         observation: &DirectStorageObservation,
         end: Instant,
     ) -> Result<DirectStorageFinished, Box<DirectStorageFinishFailure>> {
+        if let Destination::Started(owner) = &mut self.destination {
+            return match owner.finish_live(observation) {
+                Ok(plan) => Ok(DirectStorageFinished {
+                    plan,
+                    retained: true,
+                }),
+                Err(cause) => Err(Box::new(DirectStorageFinishFailure {
+                    owner: error::Owner::Preparing(Box::new(self)),
+                    cause,
+                })),
+            };
+        }
         let returned = self.reclaim(observation).map_err(|(owner, cause)| {
             Box::new(DirectStorageFinishFailure {
                 owner: error::Owner::Preparing(Box::new(owner)),
@@ -188,6 +195,12 @@ impl DirectStoragePreparation {
         observation: &DirectStorageObservation,
     ) -> Result<Returned, (Self, StorageWorkflowError)> {
         match self.destination {
+            Destination::Started(owner) => Err((
+                Self {
+                    destination: Destination::Started(owner),
+                },
+                StorageWorkflowError::refused("WORKER_STARTED_FINAL_STORAGE_RETAINED"),
+            )),
             Destination::Legacy {
                 registry,
                 mut owner,

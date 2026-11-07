@@ -21,7 +21,9 @@ mod pane;
 mod publication;
 mod request_cleanup;
 mod start;
+mod started_finalization;
 mod started_transfer;
+pub use started_finalization::StartedStorageFinalizer;
 mod storage;
 mod storage_cleanup;
 pub use started_transfer::{
@@ -88,6 +90,7 @@ enum Phase {
     Known,
     Retained,
     Cleaning,
+    FinalizingStarted,
     Stopped,
     CleanupRetained,
     Consumed,
