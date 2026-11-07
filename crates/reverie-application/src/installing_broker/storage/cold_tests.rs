@@ -2,6 +2,54 @@
 use super::*;
 
 #[test]
+fn actual_runtime_directory_precedes_home_alias_check_without_overwriting_occupied_entries() {
+    crate::test_process::owning_case!(
+        actual_runtime_directory_precedes_home_alias_check_without_overwriting_occupied_entries
+    );
+    for occupied in [false, true] {
+        let tree = Tree::new();
+        let registry = tree.registry();
+        let source = tree.source();
+        let mut claim = registry.claim(&source, &sid(SID)).unwrap();
+        claim.prepare_cold_launch_storage().unwrap();
+        let paths = claim.paths().clone();
+        let original = paths.home().with_file_name("home-preserved");
+        fs::write(paths.home().join("AGENTS.md"), "owner authored text").unwrap();
+        fs::rename(paths.home(), &original).unwrap();
+        std::os::unix::fs::symlink(&original, paths.home()).unwrap();
+        let runtime = tree.0.join("state").join(SID);
+        if occupied {
+            fs::write(&runtime, "owner occupied runtime leaf").unwrap();
+        }
+        let error = claim.prepare_runtime_directory().err().unwrap();
+        if occupied {
+            assert!(
+                matches!(error.owner_error(),Some(StorageOwnerError::Storage(reverie_host::worker_storage::StorageError::Io(cause))) if cause.kind()==std::io::ErrorKind::NotADirectory)
+            );
+            assert_eq!(
+                fs::read_to_string(&runtime).unwrap(),
+                "owner occupied runtime leaf"
+            );
+        } else {
+            assert!(
+                runtime.is_dir(),
+                "private runtime directory was created BEFORE canonical home refusal"
+            );
+            assert!(
+                matches!(error.owner_error(),Some(StorageOwnerError::Storage(cause)) if cause.may_have_effects())
+            );
+        }
+        assert_eq!(fs::read_link(paths.home()).unwrap(), original);
+        assert_eq!(
+            fs::read_to_string(original.join("AGENTS.md")).unwrap(),
+            "owner authored text"
+        );
+        claim.release(end()).unwrap();
+        registry.runtime.close(end()).unwrap();
+    }
+}
+
+#[test]
 fn actual_cold_prerequisite_uses_same_registered_and_legacy_owner_and_retains_pending_refusal() {
     crate::test_process::owning_case!(
         actual_cold_prerequisite_uses_same_registered_and_legacy_owner_and_retains_pending_refusal
