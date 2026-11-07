@@ -1,0 +1,538 @@
+{
+  "reference": "actual Python memory.py/embeddings.py at a6988fad",
+  "embedder": "hashed-v1-64",
+  "beliefs": [
+    {
+      "id": 1,
+      "text": "root belief",
+      "weight": 9.0,
+      "parent_id": null,
+      "protected": true,
+      "created_at": 1700.0
+    },
+    {
+      "id": 2,
+      "text": "child belief",
+      "weight": 3.0,
+      "parent_id": 1,
+      "protected": false,
+      "created_at": 1800.0
+    }
+  ],
+  "idle": [
+    true,
+    false,
+    false,
+    false
+  ],
+  "recall": [
+    "User: \u212aelvin Rust compiler\nAssistant: Borrow checker facts.",
+    "a verified compiler fact",
+    "{'x': \"can't\", 'y': '\\ud800'}",
+    "User: turn\nAssistant: answer"
+  ],
+  "sqlite": {
+    "tables": {
+      "memories": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 0,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "user_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "assistant_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "text",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "importance",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "importance_source",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "'default'",
+          "pk": 0
+        },
+        {
+          "name": "embed_model",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "embedding",
+          "type": "BLOB",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_ids",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "'[]'",
+          "pk": 0
+        },
+        {
+          "name": "section",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "meta",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": "'{}'",
+          "pk": 0
+        },
+        {
+          "name": "last_accessed",
+          "type": "REAL",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "sqlite_sequence": [
+        {
+          "name": "name",
+          "type": "",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "seq",
+          "type": "",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "state": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "notnull": 0,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "answered": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notnull": 0,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "at",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "external_episodes": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notnull": 0,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "memory_id",
+          "type": "INTEGER",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "voice_claims": [
+        {
+          "name": "norm",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "at",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "beliefs": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 0,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "text",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "weight",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parent_id",
+          "type": "INTEGER",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "protected",
+          "type": "INTEGER",
+          "notnull": 1,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "reverie_documents": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notnull": 0,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "REAL",
+          "notnull": 0,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "reverie_document_history": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notnull": 1,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "archived_at",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "reverie_ballots": [
+        {
+          "name": "category",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "week",
+          "type": "INTEGER",
+          "notnull": 1,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "proposal_hash",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "proposal",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "at",
+          "type": "REAL",
+          "notnull": 1,
+          "default": null,
+          "pk": 0
+        }
+      ]
+    },
+    "rows": {
+      "memories": [
+        [
+          1,
+          "episode",
+          1000.0,
+          " \u212aelvin Rust compiler ",
+          " Borrow checker facts. ",
+          "User: \u212aelvin Rust compiler\nAssistant: Borrow checker facts.",
+          5.0,
+          "default",
+          "hashed-v1-64",
+          {
+            "blob": "00000000a53284be0000000000000000a53284bea53284bea532843e0000000000000000000000000000000000000000a53284be00000000000000000000000000000000a53284be00000000a53284be000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a532843e000000000000000000000000a53284be00000000000000000000000000000000000000000000000000000000a53284be0000000000000000000000000000000000000000a53284be0000000000000000a532843e00000000a532843e00000000a532843e00000000a53284be00000000"
+          },
+          "[]",
+          "",
+          "{\"z\": 1, \"a\": \"\\ud800\", \"idle\": true}",
+          2000.0
+        ],
+        [
+          2,
+          "reflection",
+          1200.0,
+          "",
+          "",
+          "a verified compiler fact",
+          7.0,
+          "model",
+          "hashed-v1-64",
+          {
+            "blob": "000000000000000000000000000000002ef9e4be00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002ef9e4be00000000000000000000000000000000000000002ef9e4be0000000000000000000000000000000000000000000000000000000000000000000000002ef9e43e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002ef9e4be00000000000000000000000000000000"
+          },
+          "[18446744073709551615, -1, 0, true, 1.5, NaN]",
+          "shared",
+          "{\"source\": \"synthetic receipt\", \"visibility\": \"project\"}",
+          2000.0
+        ],
+        [
+          3,
+          "dream",
+          1300.0,
+          "",
+          "",
+          "\ud83c\udf19 waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summar",
+          2.0,
+          "fixed",
+          "hashed-v1-64",
+          {
+            "blob": "0000000000000000000000000000000000000000000000000869fabec7c4fe3e0000000000000000241007be00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002410073e0000000000000000000000000000000000000000000000000000000000000000000000000869fabe000000000869fa3e0000000000000000"
+          },
+          "[1, 2]",
+          "",
+          "{\"z\": 1, \"a\": {\"nested\": [true, null, 1.0, -0.0]}, \"z\": 3, \"recall\": {\"x\": \"can't\", \"y\": \"\\ud800\"}}",
+          2000.0
+        ],
+        [
+          4,
+          "episode",
+          1400.0,
+          "turn",
+          "answer",
+          "User: turn\nAssistant: answer",
+          3.0,
+          "default",
+          "hashed-v1-64",
+          {
+            "blob": "0000000000000000000000008f84c13e000000008f84c13e8f84c13e000000008f84c1be000000000000000000000000000000000000000000000000000000008f84c13e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008f84c1be0000000000000000000000008f84c13e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "[]",
+          "",
+          "{\"external_source\": \"synthetic:external\", \"visibility\": \"private\"}",
+          2000.0
+        ]
+      ],
+      "sqlite_sequence": [
+        [
+          "memories",
+          4
+        ],
+        [
+          "beliefs",
+          2
+        ]
+      ],
+      "state": [
+        [
+          "retained",
+          "existing"
+        ],
+        [
+          "empty",
+          ""
+        ]
+      ],
+      "answered": [
+        [
+          "synthetic:answered",
+          1500.0
+        ]
+      ],
+      "external_episodes": [
+        [
+          "synthetic:external",
+          4
+        ]
+      ],
+      "voice_claims": [
+        [
+          "kelvin i\u0307stanbul a\u03c2!",
+          1600.0
+        ]
+      ],
+      "beliefs": [
+        [
+          1,
+          "root belief",
+          9.0,
+          null,
+          1,
+          1700.0
+        ],
+        [
+          2,
+          "child belief",
+          3.0,
+          1,
+          0,
+          1800.0
+        ]
+      ],
+      "reverie_documents": [
+        [
+          "synthetic-private-document",
+          13,
+          "{\"preserved\": true, \"second\": \"synthetic revision\"}",
+          1950.0
+        ]
+      ],
+      "reverie_document_history": [
+        [
+          "synthetic-private-document",
+          12,
+          "{\"preserved\":true}",
+          1950.0
+        ]
+      ],
+      "reverie_ballots": [
+        [
+          "synthetic",
+          2,
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "{\"synthetic\":true}",
+          "synthetic reason",
+          1960.0
+        ]
+      ]
+    },
+    "userVersion": 1
+  },
+  "databaseSHA256": "b5c654594e467672ea726cf0e9a19184a02f7c8c805290c786bf9a07f4116d7f",
+  "viewsJson": [
+    "{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1000.0, \"user_text\": \" \\u212aelvin Rust compiler \", \"assistant_text\": \" Borrow checker facts. \", \"text\": \"User: \\u212aelvin Rust compiler\\nAssistant: Borrow checker facts.\", \"importance\": 5.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [], \"section\": \"\", \"meta\": {\"z\": 1, \"a\": \"\\ud800\", \"idle\": true}, \"last_accessed\": 2000.0, \"score\": 0.0}",
+    "{\"id\": 2, \"kind\": \"reflection\", \"created_at\": 1200.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"a verified compiler fact\", \"importance\": 7.0, \"importance_source\": \"model\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [18446744073709551615, -1, 0, true, 1.5, NaN], \"section\": \"shared\", \"meta\": {\"source\": \"synthetic receipt\", \"visibility\": \"project\"}, \"last_accessed\": 2000.0, \"score\": 0.0}",
+    "{\"id\": 3, \"kind\": \"dream\", \"created_at\": 1300.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"\\ud83c\\udf19 waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summar\", \"importance\": 2.0, \"importance_source\": \"fixed\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [1, 2], \"section\": \"\", \"meta\": {\"z\": 3, \"a\": {\"nested\": [true, null, 1.0, -0.0]}, \"recall\": {\"x\": \"can't\", \"y\": \"\\ud800\"}}, \"last_accessed\": 2000.0, \"score\": 0.0}",
+    "{\"id\": 4, \"kind\": \"episode\", \"created_at\": 1400.0, \"user_text\": \"turn\", \"assistant_text\": \"answer\", \"text\": \"User: turn\\nAssistant: answer\", \"importance\": 3.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [], \"section\": \"\", \"meta\": {\"external_source\": \"synthetic:external\", \"visibility\": \"private\"}, \"last_accessed\": 2000.0, \"score\": 0.0}"
+  ],
+  "retrievedJson": [
+    "{\"id\": 2, \"kind\": \"reflection\", \"created_at\": 1200.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"a verified compiler fact\", \"importance\": 7.0, \"importance_source\": \"model\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [18446744073709551615, -1, 0, true, 1.5, NaN], \"section\": \"shared\", \"meta\": {\"source\": \"synthetic receipt\", \"visibility\": \"project\"}, \"last_accessed\": 2000.0, \"score\": 0.6523618695422753}",
+    "{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1000.0, \"user_text\": \" \\u212aelvin Rust compiler \", \"assistant_text\": \" Borrow checker facts. \", \"text\": \"User: \\u212aelvin Rust compiler\\nAssistant: Borrow checker facts.\", \"importance\": 5.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [], \"section\": \"\", \"meta\": {\"z\": 1, \"a\": \"\\ud800\", \"idle\": true}, \"last_accessed\": 2000.0, \"score\": 0.5989169967089875}",
+    "{\"id\": 4, \"kind\": \"episode\", \"created_at\": 1400.0, \"user_text\": \"turn\", \"assistant_text\": \"answer\", \"text\": \"User: turn\\nAssistant: answer\", \"importance\": 3.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [], \"section\": \"\", \"meta\": {\"external_source\": \"synthetic:external\", \"visibility\": \"private\"}, \"last_accessed\": 2000.0, \"score\": 0.43305497507730384}",
+    "{\"id\": 3, \"kind\": \"dream\", \"created_at\": 1300.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"\\ud83c\\udf19 waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summary waking summar\", \"importance\": 2.0, \"importance_source\": \"fixed\", \"embed_model\": \"hashed-v1-64\", \"source_ids\": [1, 2], \"section\": \"\", \"meta\": {\"z\": 3, \"a\": {\"nested\": [true, null, 1.0, -0.0]}, \"recall\": {\"x\": \"can't\", \"y\": \"\\ud800\"}}, \"last_accessed\": 2000.0, \"score\": 0.39967527130584446}"
+  ]
+}

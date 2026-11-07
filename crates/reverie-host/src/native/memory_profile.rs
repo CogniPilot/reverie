@@ -1,0 +1,75 @@
+//! One fixed derived-profile publication within its held installed directory.
+#![allow(unsafe_code)]
+use std::{
+    ffi::{CString, OsStr},
+    fs::File,
+    io,
+    os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::ffi::OsStrExt,
+    },
+    path::Path,
+};
+fn leaf(name: &OsStr) -> io::Result<CString> {
+    if Path::new(name).file_name() != Some(name) {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    CString::new(name.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput.into())
+}
+pub(crate) fn create(parent: &File, name: &OsStr) -> io::Result<File> {
+    let name = leaf(name)?;
+    // SAFETY: held directory and terminated single leaf remain live. Creation
+    // is exclusive and no-follow, with atomically close-on-exec ownership.
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful exclusive open transferred one newly owned fd.
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+pub(crate) fn entry(parent: &File, name: &OsStr) -> io::Result<File> {
+    let _ = leaf(name)?;
+    super::lease::open_at(parent.as_raw_fd(), name, libc::O_PATH)
+}
+pub(crate) fn remove(parent: &File, name: &OsStr) -> io::Result<()> {
+    let name = leaf(name)?;
+    // SAFETY: this borrowed parent remains held and the name cannot traverse;
+    // the purpose wrapper verifies its pinned temporary before this one unlink.
+    let result = unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+pub(crate) fn publish(parent: &File, temporary: &OsStr) -> io::Result<()> {
+    let temporary = leaf(temporary)?;
+    // SAFETY: the borrowed parent descriptor stays live, both names are
+    // terminated single leaves, and the destination is the fixed profile name.
+    // NOREPLACE atomically refuses an existing owner profile. No numeric fd,
+    // caller-selected destination or overwrite authority is exposed publicly.
+    let result = unsafe {
+        // musl has no renameat2 libc wrapper. Use the identical Linux syscall
+        // on both libc targets; names, flags and publication semantics match.
+        libc::syscall(
+            libc::SYS_renameat2,
+            parent.as_raw_fd(),
+            temporary.as_ptr(),
+            parent.as_raw_fd(),
+            c"profile.md".as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}

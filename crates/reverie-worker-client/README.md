@@ -5,6 +5,9 @@ protocol. It neither starts a broker nor executes commands on the host. The
 broker retains authorization, resource-reference admission, stop fencing and
 effect ownership. A command, role, socket path or reference creates no grant.
 
+Environment key filtering shares the Core worker-launch vocabulary. Client
+transport/value encoding rules remain separate from broker request bounds.
+
 Clap help groups terminal, office-control and private-metadata operations, with
 examples and troubleshooting. Existing worker-exec flags remain direct options;
 there is no broker/child subcommand, custom deployment script or Python fallback.

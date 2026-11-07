@@ -1,0 +1,63 @@
+{
+  "source": "actual worker_tmp.prepare_temporary, owned paths, canonical nil SID layout",
+  "cases": [
+    {
+      "recipe": "fresh",
+      "requiresUnprivileged": false,
+      "accepted": true,
+      "tmpMode": 448,
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "existing-owner-data",
+      "requiresUnprivileged": false,
+      "accepted": true,
+      "tmpMode": 448,
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "root-mode755",
+      "requiresUnprivileged": false,
+      "accepted": false,
+      "error": "ValueError",
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "scratch-symlink",
+      "requiresUnprivileged": false,
+      "accepted": false,
+      "error": "NotADirectoryError",
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "tmp-symlink",
+      "requiresUnprivileged": false,
+      "accepted": false,
+      "error": "NotADirectoryError",
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "tmp-file",
+      "requiresUnprivileged": false,
+      "accepted": false,
+      "error": "NotADirectoryError",
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "root-mode500",
+      "requiresUnprivileged": true,
+      "accepted": false,
+      "error": "PermissionError",
+      "unrelatedOwnerPreserved": true
+    },
+    {
+      "recipe": "root-mode100",
+      "requiresUnprivileged": true,
+      "accepted": false,
+      "error": "PermissionError",
+      "unrelatedOwnerPreserved": true
+    }
+  ],
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "moduleSha256": "d9892df549af84a08fd40a7d7d58bd7f7099617a59a89c8437d28d9da89bb44f"
+}

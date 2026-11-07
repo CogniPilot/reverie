@@ -33,7 +33,12 @@ import type { Socket } from 'node:net';
 import { ApiErrorCode, createErrorResponse } from '../types.js';
 import type { SessionPort } from '../web/ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../web/route-helpers.js';
-import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate, delegatedSessionStartCaller } from './delegated-session-create.js';
+import {
+  claimDelegatedSessionCreate,
+  consumeDelegatedSessionCreate,
+  hasDelegatedSessionCreate,
+  delegatedSessionStartCaller,
+} from './delegated-session-create.js';
 import type { OwnerAuthService } from './service.js';
 import type { Relations } from './relations.js';
 import { goalRouteAction, type GoalAction } from '../goal-route-policy.js';
@@ -51,12 +56,23 @@ export interface Caller {
 }
 
 /** Handlers enforce current employee grants; services never become headerless owners. */
-const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'PATCH /api/board/decisions/:id', 'POST /api/board/decisions/:id/clear', 'PUT /api/board/polls/:roomId/:messageId/note']);
+const BOARD_DECISION_ROUTES = new Set([
+  'POST /api/board/decisions',
+  'PATCH /api/board/decisions/:id',
+  'POST /api/board/decisions/:id/clear',
+  'PUT /api/board/polls/:roomId/:messageId/note',
+]);
 const BOARD_WRITE_ROUTES = new Set([
-  'POST /api/board/issues', 'PATCH /api/board/issues/:id', 'POST /api/board/wins',
-  'POST /api/board/milestones', 'PATCH /api/board/milestones/:id',
-  'POST /api/board/blockers', 'POST /api/board/blockers/:id/clear',
-  'PUT /api/board/agents/:memberId', 'PUT /api/board/marks', 'POST /api/board/import',
+  'POST /api/board/issues',
+  'PATCH /api/board/issues/:id',
+  'POST /api/board/wins',
+  'POST /api/board/milestones',
+  'PATCH /api/board/milestones/:id',
+  'POST /api/board/blockers',
+  'POST /api/board/blockers/:id/clear',
+  'PUT /api/board/agents/:memberId',
+  'PUT /api/board/marks',
+  'POST /api/board/import',
   ...BOARD_DECISION_ROUTES,
 ]);
 
@@ -140,6 +156,7 @@ const AGENT_ROUTES = new Set([
   'GET /api/agent/journal/source',
   'GET /api/agent/journal/receipt/:turnId',
   'GET /api/agent/memory-brief', // the calling agent's own session-start brief; the handler resolves the exact session
+  'POST /api/agent/memory-scope', // fixed configured IDs; actual current employee and owner grant checked by handler
   ...BOARD_WRITE_ROUTES,
 ]);
 /**
@@ -273,7 +290,8 @@ export interface PolicyDeps {
 
 export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' | 'ctx'>): Caller {
   const session = deps.service.session(req.cookies?.[OWNER_COOKIE]);
-  if (session) return { kind: session.role === 'limited' ? 'limited' : session.restricted ? 'restricted-owner' : 'owner' };
+  if (session)
+    return { kind: session.role === 'limited' ? 'limited' : session.restricted ? 'restricted-owner' : 'owner' };
   const token = req.headers[SERVICE_HEADER];
   if (typeof token === 'string' && deps.service.service(token)) return { kind: 'service' };
   if (req.headers['x-reverie-parent-session'] !== undefined) {
@@ -330,7 +348,14 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       return;
     }
     if (consumeDelegatedSessionCreate(req) === false)
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated session authorization changed or the session request did not match'));
+      return reply
+        .code(403)
+        .send(
+          createErrorResponse(
+            ApiErrorCode.FORBIDDEN,
+            'The delegated session authorization changed or the session request did not match'
+          )
+        );
     const policy = deps.service.policy();
     const caller = callers.get(req);
     if (policy === 'off' || caller?.kind !== 'agent') return;
@@ -361,14 +386,20 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     // Limited accounts remain limited even when an operator changes the owner policy to off/log.
     const signedIn = deps.service.session(req.cookies?.[OWNER_COOKIE]);
     if (signedIn?.role === 'limited') {
-      const route = req.routeOptions?.url, path = decodedPath(req.url ?? '');
+      const route = req.routeOptions?.url,
+        path = decodedPath(req.url ?? '');
       const key = `${req.method} ${route}`;
       if (req.headers['x-reverie-parent-session'] !== undefined || req.headers[SERVICE_HEADER] !== undefined)
         return refuse(reply, 403, 'A human login cannot act as an agent or service');
       if ((!SAFE_METHODS.has(req.method) || req.headers.upgrade) && !sameOrigin(req))
         return refuse(reply, 403, 'Requests must come from this console');
-      if (path === '/' || path === '/index.html') return reply.redirect(`${deps.basePath ?? ''}${signedIn.restricted ? '/owner/account' : '/office'}`);
-      if (signedIn.restricted && !RESTRICTED_ROUTES.has(key) && !['/owner/account', '/owner/owner.js'].includes(path ?? ''))
+      if (path === '/' || path === '/index.html')
+        return reply.redirect(`${deps.basePath ?? ''}${signedIn.restricted ? '/owner/account' : '/office'}`);
+      if (
+        signedIn.restricted &&
+        !RESTRICTED_ROUTES.has(key) &&
+        !['/owner/account', '/owner/owner.js'].includes(path ?? '')
+      )
         return refuse(reply, 403, 'Change the one-time password first', ApiErrorCode.PASSWORD_CHANGE_REQUIRED);
       if (LIMITED_ROUTES.has(key) || (path && limitedAsset(req.method, path))) return;
       return refuse(reply, 403, 'This login has limited channel access');

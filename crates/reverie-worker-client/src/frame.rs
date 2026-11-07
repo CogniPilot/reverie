@@ -4,7 +4,8 @@ use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
 use std::time::Instant;
 
-pub(crate) const MAX_FRAME: usize = 262_144;
+pub(crate) use reverie_core::worker_wire::MAX_FRAME;
+use reverie_core::worker_wire::{HEADER_BYTES, WorkerFrameHeader};
 pub(crate) struct Frame {
     pub(crate) kind: u8,
     pub(crate) payload: Vec<u8>,
@@ -48,12 +49,10 @@ impl Connection {
         }
     }
     pub(crate) fn send(&mut self, kind: u8, bytes: &[u8]) -> Result<()> {
-        if bytes.len() > MAX_FRAME {
-            return Err(Error("Worker frame is too large"));
-        }
-        let mut wire = Vec::with_capacity(bytes.len() + 5);
-        wire.push(kind);
-        wire.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+        let header = WorkerFrameHeader::for_payload(kind, bytes.len())
+            .ok_or(Error("Worker frame is too large"))?;
+        let mut wire = Vec::with_capacity(bytes.len() + HEADER_BYTES);
+        wire.extend_from_slice(&header.encode());
         wire.extend_from_slice(bytes);
         let mut remaining = wire.as_slice();
         while !remaining.is_empty() {
@@ -101,7 +100,7 @@ impl Decoder {
     pub(crate) fn new(limit: usize) -> Self {
         Self {
             bytes: Vec::new(),
-            target: 5,
+            target: HEADER_BYTES,
             limit,
         }
     }
@@ -126,22 +125,24 @@ impl Decoder {
         if self.bytes.len() != self.target {
             return Ok(None);
         }
-        if self.target == 5 {
-            let size =
-                u32::from_be_bytes(self.bytes[1..5].try_into().expect("fixed header")) as usize;
+        if self.target == HEADER_BYTES {
+            let header =
+                WorkerFrameHeader::decode(self.bytes.as_slice().try_into().expect("fixed header"));
+            let size = usize::try_from(header.payload_length())
+                .map_err(|_| Error("Worker frame is too large"))?;
             if size > self.limit {
                 return Err(Error("Worker frame is too large"));
             }
-            self.target = 5 + size;
+            self.target = HEADER_BYTES + size;
             if size != 0 {
                 return Ok(None);
             }
         }
         let bytes = std::mem::take(&mut self.bytes);
-        self.target = 5;
+        self.target = HEADER_BYTES;
         Ok(Some(Frame {
             kind: bytes[0],
-            payload: bytes[5..].to_vec(),
+            payload: bytes[HEADER_BYTES..].to_vec(),
         }))
     }
 }

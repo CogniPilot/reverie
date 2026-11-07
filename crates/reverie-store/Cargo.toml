@@ -9,6 +9,7 @@ publish.workspace = true
 libc.workspace = true
 reverie-core.workspace = true
 reverie-contracts.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

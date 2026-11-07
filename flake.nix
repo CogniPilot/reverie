@@ -59,6 +59,7 @@
           default = packages.reverie;
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
+          deployment = import ./nix/deployment.nix { inherit pkgs; src = source; };
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
@@ -467,7 +468,7 @@
         let pkgs = pkgsFor system; in {
           voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
           default = pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt ];
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt pkgs.gnutar pkgs.attr pkgs.acl ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

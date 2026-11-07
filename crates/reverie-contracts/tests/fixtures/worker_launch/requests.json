@@ -1,0 +1,4048 @@
+{
+  "source": "actual unpatched worker.validate_request and MAX_FRAME on Python3.13; request text is default json.loads(bytes)",
+  "cases": [
+    {
+      "name": "base-nil-alias",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cwd-'/reverie_workspace'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/reverie_workspace\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eab925495378630c69f58df2316dc91b6a10fb4c0c7bb7517fa2daaf6d30476",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          114,
+          101,
+          118,
+          101,
+          114,
+          105,
+          101,
+          95,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cwd-'/reverie_workspace/a/.//b/'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/reverie_workspace/a/.//b/\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "4d288d85c887c0db3ca9d0d3b0b0893df3e3391e4dd4fb2aa240d919879d32ba",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          114,
+          101,
+          118,
+          101,
+          114,
+          105,
+          101,
+          95,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          97,
+          47,
+          46,
+          47,
+          47,
+          98,
+          47
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cwd-'//reverie_workspace/a'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"//reverie_workspace/a\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "b6d01d0c0ee82f95d2d77ebfcd5d2e27d0e0095affc2e6e74546021b826f7ea1",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-'/workspace/../outside'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/../outside\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "cf0ca0dd7697c3640e42fa543ae1f3c1327838429e949a75b1044dd668787940",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-'relative'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"relative\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "9f5060e6f03ec2c80194f39e632fe1ecba77d171670b419ef2b54b5d6edfa633",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-'/outside'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/outside\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "f88af11fe982b6c9e179500ef65532a04af9e843da7ede1a4842d466bc21f28e",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-'/workspace\\x00x'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace\\u0000x\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "08ead17f5ff68d460ccd0e8a6d8bf4fc67768341b07fa3a2ca8a8d5f7c07e2ae",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-'/workspace/...'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/...\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "20c5fd647dfecc33d04d45ffaf13edff63669d08bab6f1caff3ce5557875312c",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          46,
+          46,
+          46
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cwd-'/workspace/\\xe9'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/\\u00e9\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "9c84828f72dbf1c60d729a673620b2e0ff915299307aec486e43a959a9ce2a3d",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          233
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cwd-'/workspace/\\udc80'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/\\udc80\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "96a3cfb6902a70cbf2a4add177a260f07724a8aa895480106ba56aaf8b8008c0",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          56448
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cwd-'///workspace/a'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"///workspace/a\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "468d3292a99028037cb697de38ab41bc936944e161be229c430068852e88383c",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          47,
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          97
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "readonly-False",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "readonly-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": true}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "occupied-/workspace",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}, {\"source\": \"/owned/other\", \"destination\": \"/workspace\", \"readOnly\": true}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "occupied-/workspace/project",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}, {\"source\": \"/owned/other\", \"destination\": \"/workspace/project\", \"readOnly\": true}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "occupied-/workspace-other",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}, {\"source\": \"/owned/other\", \"destination\": \"/workspace-other\", \"readOnly\": true}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "occupied-/reverie_workspace/.",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}, {\"source\": \"/owned/other\", \"destination\": \"/reverie_workspace/.\", \"readOnly\": true}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0eafd066696e3bcc61b1f3618b3914ebc45c3b1e7d732d75080d9f645ceb1d59",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "sessionId-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":null,\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "5a03dc8a6ce50fed27a92ccecc82c8c6f4630989157c9322315713fa5ee2e8c7",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "sessionId-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":true,\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "3cb347086fbc92a88fa76671c2a7da09dc47b358f963439eafb30c7d515d0489",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "sessionId-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":1,\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "1ed9bd9f0fae644b1b2712d89f1fbb84ba0976718452b497553d0d9ca946f26b",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "sessionId-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":1.0,\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "79cb3cd214f47fb907b22d5440281460d0c42fbb48d8d6a4a55080426c6cbd80",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "sessionId-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":[],\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "224e1cf6f21f3a50fe54d764d0ab2a46bd8296471e470a8a8a44cce2c00e7133",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "sessionId-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":{},\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "22bdba013b9d834e6dbde3a0df690f06d5d6938cc835ccd83a2956efa885a2dd",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "sessionId-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "d0bbd98be451e4058e64e4015f25120544c74b037df2467deae3daf3d5d7d485",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":null,\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "fc173e755a2aa42ee3814c666a2f8955c9c678db2b5f21fa6c67115e92439e91",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":true,\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "c0ba4d69b518faa046d27187969e9db0fc7426492499c9d60413db082c171078",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":1,\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "31f1d16b10dc69eacd31b992d1f9bd1bb5453ab24f31e18be882764dccfee6d6",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":1.0,\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "88abbd59cca975654541e27e559c113ef7321d3e505fd188a92a2b6f1ae81c2b",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":[],\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "97c6188e24362114256a25d5eb74120a1c0d5ee3070be2f497f41123f9d38765",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":{},\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "53ce65e340f22893a3a244bbe2eb26a21c62af6ba60ab960ebc64d419bbcce2e",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cwd-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "8066e20fd0fe3039993c7cea3910ccd5c7015577dda74cb941423601e0877584",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":null,\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "97ddcdf320ef42fe87b1d2e1ed1376fb9d7d935f641cf132bed747dc8ed6955e",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":true,\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "1b4bf00ae3036dc031d5f717bb62b0f6cf2a0dd8b683941b9891f086254cf0ad",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":1,\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "a66ef7440c667bd880636c75e29a7719ec09a6fcd5eb1edf89a1e043dcfc3fa3",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":1.0,\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "eed74994ac8bb9f6a308147f931ca51629d01141c5d4080416be1ae5c928e1c5",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":[],\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "409188a626a4f5d97916ac05eaff3c1ca651fa846277663a2a120153ee326a88",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":{},\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "5400e5873a0e528810cdd34e80804d9bf58fc95e6e79491c8e04109cd049e1db",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "7dcd03c04642e4b41ac8cfee8ca5363feccbb22318a08ec387defafabedab415",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":null,\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "3d52c4b4a3ff9cc9b1419b0838a8485af5a4e9319b01f1ddcaee51a2d73f8b39",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":true,\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "de064d0c213b378b076ca4719a2c3767dd96c1dc9a02916d0f2d761283b47483",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":1,\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "ce8d614381882232d536a2dae92b0b2d4006d93d2f3df3826e6c122773440235",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":1.0,\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "8c77a6134419d24c2ec0de8acab7c5ba68a1e697dea638679fffa029f608b86e",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":[],\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "a6aabf99b120b35b146d7dc63191831b52e274f0c82047507f06dee8e7a986bb",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "b7ba69f8f1c91d420ad3d97075bdb0ea1fe933035ac8f5a0710d26556c5841f9",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":\"\",\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "61a0aaa358e0815b8e9db93f78ac347565e74dadb0554dc470133428e34b43cb",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":null,\"rows\":24}",
+      "repeat": null,
+      "sha256": "8c17bdadeb99b3465911a6154fd09e9819964d438a819ce7fb4e87ebb58dac86",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":true,\"rows\":24}",
+      "repeat": null,
+      "sha256": "cae08615166c2781d14fcb74dccd12cd39a3748b8c9a24c871b1d23fc6cf9854",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":1,\"rows\":24}",
+      "repeat": null,
+      "sha256": "e3041316a5975284761d857106eda295bcb91e4b3cf48802d9f34f82e4b6c4e3",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cols-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":1.0,\"rows\":24}",
+      "repeat": null,
+      "sha256": "259304f2e9bd24e20337ffd2a1e0e09e65cc8eb2b78d9e16d265d29b7c4c1755",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":[],\"rows\":24}",
+      "repeat": null,
+      "sha256": "e97b82f47c464cbc4c801c5ea15f033bdd0f1934373a897ca88aab1703ec3f2f",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":{},\"rows\":24}",
+      "repeat": null,
+      "sha256": "e1729e967ff565d9f62d1a8568c152b9203e30deb2230caa473c728917f4ff33",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":\"\",\"rows\":24}",
+      "repeat": null,
+      "sha256": "f6a2f27e08a8dc22a77e2441a13d3f71a30dee9e3f16e600440addd111324f74",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":null}",
+      "repeat": null,
+      "sha256": "949f5c11423dae327b83b3bbae313216756878e998aa78f4f132c65bd828214c",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":true}",
+      "repeat": null,
+      "sha256": "88a76466c67dae9536f4b44f00f817b9d5f6bf758a839bb43f6b1a340d0da7cd",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":1}",
+      "repeat": null,
+      "sha256": "b7506fdda84601e963915dfb71a9f5f37f71999fe38cd2bec14d6127521be77c",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "rows-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":1.0}",
+      "repeat": null,
+      "sha256": "5513c5d0c8c4aa2f795e161ee1f3e3a87dbc2eeb7ce9c334ad3fd67a3bdf6913",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":[]}",
+      "repeat": null,
+      "sha256": "4b698295bd25edc4eb533e36bbb9321609272b826311a5427bc61dfbc8eb526a",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":{}}",
+      "repeat": null,
+      "sha256": "767d3b24b8efd823b72e870acad24ec88697bf63a1bbecbc94949e7eec503340",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":\"\"}",
+      "repeat": null,
+      "sha256": "8be25dd589ffd1f40fde0a322819be935a3d11156d337a9a9b133dd797db7d44",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "attachOnly-None",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":null}",
+      "repeat": null,
+      "sha256": "e610ac3a8ad3cd4d2d2f0a26623f39d2bedd4ac5f3a6726c37b22ae6864d1654",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "attachOnly-True",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":true}",
+      "repeat": null,
+      "sha256": "bc8ce1bf03fe540254adeec84bc288a6d219007812a7cc1df61a10b9c7fa6473",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": true,
+        "hasAttach": true
+      }
+    },
+    {
+      "name": "attachOnly-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":1}",
+      "repeat": null,
+      "sha256": "fabc06bdc7a6c64f990add98d261aa42bba6e75e38c792669b3eaaa73b8dd2d1",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "attachOnly-1.0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":1.0}",
+      "repeat": null,
+      "sha256": "c4557ecb889404ced72512f34854dcee984352828131a8dbbc6602ffbd22b9ce",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "attachOnly-[]",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":[]}",
+      "repeat": null,
+      "sha256": "e1a62b5be832f546a7d771aebcab40181e4ddf891e098b1c62f06567200cc2df",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "attachOnly-{}",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":{}}",
+      "repeat": null,
+      "sha256": "785774b931449bb94db965724c5d295df8ef642010c655330387385404d3ed10",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "attachOnly-''",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24,\"attachOnly\":\"\"}",
+      "repeat": null,
+      "sha256": "13aea3ce530f4f17885edf86ef1dcb2ce38adddec5d0e4912c55071d70a26be5",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":1,\"rows\":24}",
+      "repeat": null,
+      "sha256": "e3041316a5975284761d857106eda295bcb91e4b3cf48802d9f34f82e4b6c4e3",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "rows-1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":1}",
+      "repeat": null,
+      "sha256": "b7506fdda84601e963915dfb71a9f5f37f71999fe38cd2bec14d6127521be77c",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cols-1000",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":1000,\"rows\":24}",
+      "repeat": null,
+      "sha256": "526bcedac12421aba2b2af157c7ab5f5dda28464d7b5a460810eef489d7bef8a",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "rows-1000",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":1000}",
+      "repeat": null,
+      "sha256": "18fdee875ff5a85fe9bb58f87a1f92e35918adee0f0ba800d5c2ab59539e8d9b",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "cols-0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":0,\"rows\":24}",
+      "repeat": null,
+      "sha256": "40fcee10b4ddeae4b417494fbab85a9bbd08dec7dd567cb0ee346612aff56d76",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-0",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":0}",
+      "repeat": null,
+      "sha256": "1d8721e7eeff4c3cf8fed0e308d7e7581b1e34d2c095f3e509f49e17d2c029a1",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-1001",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":1001,\"rows\":24}",
+      "repeat": null,
+      "sha256": "f9e0839a0de275a19cccc4da75bdbaea17202a9fbbd6febfa0a631fe31b4246f",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-1001",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":1001}",
+      "repeat": null,
+      "sha256": "b6118d84df7526831f63fc13636594994f1a54d3b872730c23513ece93bf7000",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols--1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":-1,\"rows\":24}",
+      "repeat": null,
+      "sha256": "9f9048f8ab1fc67d6b2f00374b8966d1e8f07267cc8ea84ca6c3621fab316622",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows--1",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":-1}",
+      "repeat": null,
+      "sha256": "0ad06025356c5c8dda75ef0c1894e9fd3f5bd2c5a0eecd3e6ebeddb99419a099",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "cols-1208925819614629174706176",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":1208925819614629174706176,\"rows\":24}",
+      "repeat": null,
+      "sha256": "727a5a728874cc2b601bd87011d9d64bea662d36337365a8216ab85543234c66",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "rows-1208925819614629174706176",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":1208925819614629174706176}",
+      "repeat": null,
+      "sha256": "55c174f4e78b2ed0736c239ca55a5f6040e099d6f9ec96ffda74cab2e7a5b7cd",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'CLAUDE_CONFIG_DIR'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"CLAUDE_CONFIG_DIR\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "03bbc501fdbf7d8bf954eb8c6d6caa7cf8cf3c1b8fe3b7ea80153d805dc8dc93",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "CLAUDE_CONFIG_DIR",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "envkey-'CODEX_HOME'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"CODEX_HOME\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "3f3853d25c2487d288bce6742f9e749989a44dc244a519d9c348448a9ebbe77f",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "CODEX_HOME",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "envkey-'XDG_DATA_HOME'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"XDG_DATA_HOME\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "5864a263f519bd93787d02a1246790097e3c12b2bd6f4ec917468f6a2fcb3a9a",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "XDG_DATA_HOME",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "envkey-'REVERIE_STATUSLINE_X'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"REVERIE_STATUSLINE_X\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "7d0bf5bd42e72ac31d5134ae09a5f9896979cde151c8dea7de6f799de69b318c",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "REVERIE_STATUSLINE_X",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "envkey-'REVERIE_HANDS_A1_'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"REVERIE_HANDS_A1_\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "392965a1698c4be54119eee251a40b9ad7e8d9d07d8a84f0138db842d76aecb0",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "REVERIE_HANDS_A1_",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "envkey-'GOOGLE_X'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"GOOGLE_X\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "3a0d2a26700bd720126b5d9bfc48a31001fdad0937fc80f46f7f887a966fd038",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "GOOGLE_X",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "envkey-'OPENAI_'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"OPENAI_\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "8dba6862ce22a58b2340d81f5adbb865554f24e2b336563d732230f3f6d8e976",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'OPENAI_a'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"OPENAI_a\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "a6a14418f1030780b8a0afc8e572dbbad2378120d239268404df60889a745968",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'PATH'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"PATH\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "44e393b39dea7230ab9d489c103c85c9c4d55e5c76f861dc07f48b4d8aa06a97",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'LC_CTYPE'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LC_CTYPE\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "efa3fb975de46854639d3f6f6468da5d599bc94aae7689b1c4d71d737ea73ec4",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'REVERIE_FOO'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"REVERIE_FOO\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "d6fd4b848d5a46215e49308d0abb9752e0ac81ac466b2ab32cee7682221d325d",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'LANG\\n'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\\n\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "72d72afeaab310877b39742df2466c854e7286a28200b989769bd4ec436de266",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'\\xc9'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"\\u00c9\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "3e3247bfcd6a34962092970a50875a427f28b8de0e13a68c3f37b6509914dac9",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'REVERIE_STATUSLINE_'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"REVERIE_STATUSLINE_\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "2e36c6de8c36aca1ba03868f8dca9b201dd51fee49bb6685b7f41ec52ba008c8",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "envkey-'XDG_RUNTIME_DIR'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"XDG_RUNTIME_DIR\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "6c1d3b3c58b6f026ff7aa0326fb25b80f89bd0ce0b6375e7bc56fbc1cdeaf4f0",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-boundary-131072",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"$REPEAT\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 97,
+        "count": 131072
+      },
+      "sha256": "8545450ead9fe9a207da17f1c22e71f89618ef8fc67706b6c87cbf36b42bb950",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": null,
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "command-boundary-131073",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"$REPEAT\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 97,
+        "count": 131073
+      },
+      "sha256": "62987f5f51db06003607b5454eb9800cabb5750f66c3993ae6532ac68d1c372b",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-boundary-65536",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"$REPEAT\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 233,
+        "count": 65536
+      },
+      "sha256": "dceb2048031d3f884f908e2d2fd0a6494f40110e78e4cb1ed7aca30c0c83dfa5",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-boundary-65537",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"$REPEAT\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 233,
+        "count": 65537
+      },
+      "sha256": "8b7e2ba3733abb277e51c11596e49b3f20624395bfc40078a5fa50c35d7540b7",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-point-'\\x00'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"\\u0000\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "e5c7dc86b3dc44a6c1126444b93926683348e71a196540bc785275553b24ec68",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-point-'\\x00'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"\\u0000\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "cf2a19cbb55894ca2459ccf07272cb30fd11ddd6f4cf34a462979011daf0ebfb",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "command-point-'\\ud800'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"\\ud800\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "d08b72fda934b8889e7b73a5919d9b1ac6ec4062221f4d05c1c4c03727fea0ae",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          55296
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-point-'\\ud800'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"\\ud800\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "2cb7a9977ede1b1c2a9e530ee31c6f61fdd75f82ade9a2304c63d7f0dc81b857",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "LANG",
+            [
+              55296
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "command-point-'\\udc80'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"\\udc80\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "c1c30f7dab519cc587efd3ef79b907d2d16b43e4cea43815df341a0d8b2683e7",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          56448
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-point-'\\udc80'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"\\udc80\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "409d74bef41daaf2e7efd9ed036036056194a046701189b76535b7e7dbf94d79",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "LANG",
+            [
+              56448
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "command-point-'\\U0001f642'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"\\ud83d\\ude42\",\"env\":{\"TERM\":\"xterm\",\"LANG\":\"C.UTF-8\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "22751eb06ae425c6cf763995a4a49c372f16e5f2646b51e09a31778b53a73c30",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          128578
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-point-'\\U0001f642'",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"\\ud83d\\ude42\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "0597d475b69a08e72216c7ed859f19ef6eae309e1456ae4488d7c14e56db47e5",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "LANG",
+            [
+              128578
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-count-128",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"OPENAI_0\":\"\",\"OPENAI_1\":\"\",\"OPENAI_2\":\"\",\"OPENAI_3\":\"\",\"OPENAI_4\":\"\",\"OPENAI_5\":\"\",\"OPENAI_6\":\"\",\"OPENAI_7\":\"\",\"OPENAI_8\":\"\",\"OPENAI_9\":\"\",\"OPENAI_10\":\"\",\"OPENAI_11\":\"\",\"OPENAI_12\":\"\",\"OPENAI_13\":\"\",\"OPENAI_14\":\"\",\"OPENAI_15\":\"\",\"OPENAI_16\":\"\",\"OPENAI_17\":\"\",\"OPENAI_18\":\"\",\"OPENAI_19\":\"\",\"OPENAI_20\":\"\",\"OPENAI_21\":\"\",\"OPENAI_22\":\"\",\"OPENAI_23\":\"\",\"OPENAI_24\":\"\",\"OPENAI_25\":\"\",\"OPENAI_26\":\"\",\"OPENAI_27\":\"\",\"OPENAI_28\":\"\",\"OPENAI_29\":\"\",\"OPENAI_30\":\"\",\"OPENAI_31\":\"\",\"OPENAI_32\":\"\",\"OPENAI_33\":\"\",\"OPENAI_34\":\"\",\"OPENAI_35\":\"\",\"OPENAI_36\":\"\",\"OPENAI_37\":\"\",\"OPENAI_38\":\"\",\"OPENAI_39\":\"\",\"OPENAI_40\":\"\",\"OPENAI_41\":\"\",\"OPENAI_42\":\"\",\"OPENAI_43\":\"\",\"OPENAI_44\":\"\",\"OPENAI_45\":\"\",\"OPENAI_46\":\"\",\"OPENAI_47\":\"\",\"OPENAI_48\":\"\",\"OPENAI_49\":\"\",\"OPENAI_50\":\"\",\"OPENAI_51\":\"\",\"OPENAI_52\":\"\",\"OPENAI_53\":\"\",\"OPENAI_54\":\"\",\"OPENAI_55\":\"\",\"OPENAI_56\":\"\",\"OPENAI_57\":\"\",\"OPENAI_58\":\"\",\"OPENAI_59\":\"\",\"OPENAI_60\":\"\",\"OPENAI_61\":\"\",\"OPENAI_62\":\"\",\"OPENAI_63\":\"\",\"OPENAI_64\":\"\",\"OPENAI_65\":\"\",\"OPENAI_66\":\"\",\"OPENAI_67\":\"\",\"OPENAI_68\":\"\",\"OPENAI_69\":\"\",\"OPENAI_70\":\"\",\"OPENAI_71\":\"\",\"OPENAI_72\":\"\",\"OPENAI_73\":\"\",\"OPENAI_74\":\"\",\"OPENAI_75\":\"\",\"OPENAI_76\":\"\",\"OPENAI_77\":\"\",\"OPENAI_78\":\"\",\"OPENAI_79\":\"\",\"OPENAI_80\":\"\",\"OPENAI_81\":\"\",\"OPENAI_82\":\"\",\"OPENAI_83\":\"\",\"OPENAI_84\":\"\",\"OPENAI_85\":\"\",\"OPENAI_86\":\"\",\"OPENAI_87\":\"\",\"OPENAI_88\":\"\",\"OPENAI_89\":\"\",\"OPENAI_90\":\"\",\"OPENAI_91\":\"\",\"OPENAI_92\":\"\",\"OPENAI_93\":\"\",\"OPENAI_94\":\"\",\"OPENAI_95\":\"\",\"OPENAI_96\":\"\",\"OPENAI_97\":\"\",\"OPENAI_98\":\"\",\"OPENAI_99\":\"\",\"OPENAI_100\":\"\",\"OPENAI_101\":\"\",\"OPENAI_102\":\"\",\"OPENAI_103\":\"\",\"OPENAI_104\":\"\",\"OPENAI_105\":\"\",\"OPENAI_106\":\"\",\"OPENAI_107\":\"\",\"OPENAI_108\":\"\",\"OPENAI_109\":\"\",\"OPENAI_110\":\"\",\"OPENAI_111\":\"\",\"OPENAI_112\":\"\",\"OPENAI_113\":\"\",\"OPENAI_114\":\"\",\"OPENAI_115\":\"\",\"OPENAI_116\":\"\",\"OPENAI_117\":\"\",\"OPENAI_118\":\"\",\"OPENAI_119\":\"\",\"OPENAI_120\":\"\",\"OPENAI_121\":\"\",\"OPENAI_122\":\"\",\"OPENAI_123\":\"\",\"OPENAI_124\":\"\",\"OPENAI_125\":\"\",\"OPENAI_126\":\"\",\"OPENAI_127\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "329e78df267950721681cd02acefb849e7db97ebdc9deacadf851c7e9978ceaa",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "OPENAI_0",
+            []
+          ],
+          [
+            "OPENAI_1",
+            []
+          ],
+          [
+            "OPENAI_2",
+            []
+          ],
+          [
+            "OPENAI_3",
+            []
+          ],
+          [
+            "OPENAI_4",
+            []
+          ],
+          [
+            "OPENAI_5",
+            []
+          ],
+          [
+            "OPENAI_6",
+            []
+          ],
+          [
+            "OPENAI_7",
+            []
+          ],
+          [
+            "OPENAI_8",
+            []
+          ],
+          [
+            "OPENAI_9",
+            []
+          ],
+          [
+            "OPENAI_10",
+            []
+          ],
+          [
+            "OPENAI_11",
+            []
+          ],
+          [
+            "OPENAI_12",
+            []
+          ],
+          [
+            "OPENAI_13",
+            []
+          ],
+          [
+            "OPENAI_14",
+            []
+          ],
+          [
+            "OPENAI_15",
+            []
+          ],
+          [
+            "OPENAI_16",
+            []
+          ],
+          [
+            "OPENAI_17",
+            []
+          ],
+          [
+            "OPENAI_18",
+            []
+          ],
+          [
+            "OPENAI_19",
+            []
+          ],
+          [
+            "OPENAI_20",
+            []
+          ],
+          [
+            "OPENAI_21",
+            []
+          ],
+          [
+            "OPENAI_22",
+            []
+          ],
+          [
+            "OPENAI_23",
+            []
+          ],
+          [
+            "OPENAI_24",
+            []
+          ],
+          [
+            "OPENAI_25",
+            []
+          ],
+          [
+            "OPENAI_26",
+            []
+          ],
+          [
+            "OPENAI_27",
+            []
+          ],
+          [
+            "OPENAI_28",
+            []
+          ],
+          [
+            "OPENAI_29",
+            []
+          ],
+          [
+            "OPENAI_30",
+            []
+          ],
+          [
+            "OPENAI_31",
+            []
+          ],
+          [
+            "OPENAI_32",
+            []
+          ],
+          [
+            "OPENAI_33",
+            []
+          ],
+          [
+            "OPENAI_34",
+            []
+          ],
+          [
+            "OPENAI_35",
+            []
+          ],
+          [
+            "OPENAI_36",
+            []
+          ],
+          [
+            "OPENAI_37",
+            []
+          ],
+          [
+            "OPENAI_38",
+            []
+          ],
+          [
+            "OPENAI_39",
+            []
+          ],
+          [
+            "OPENAI_40",
+            []
+          ],
+          [
+            "OPENAI_41",
+            []
+          ],
+          [
+            "OPENAI_42",
+            []
+          ],
+          [
+            "OPENAI_43",
+            []
+          ],
+          [
+            "OPENAI_44",
+            []
+          ],
+          [
+            "OPENAI_45",
+            []
+          ],
+          [
+            "OPENAI_46",
+            []
+          ],
+          [
+            "OPENAI_47",
+            []
+          ],
+          [
+            "OPENAI_48",
+            []
+          ],
+          [
+            "OPENAI_49",
+            []
+          ],
+          [
+            "OPENAI_50",
+            []
+          ],
+          [
+            "OPENAI_51",
+            []
+          ],
+          [
+            "OPENAI_52",
+            []
+          ],
+          [
+            "OPENAI_53",
+            []
+          ],
+          [
+            "OPENAI_54",
+            []
+          ],
+          [
+            "OPENAI_55",
+            []
+          ],
+          [
+            "OPENAI_56",
+            []
+          ],
+          [
+            "OPENAI_57",
+            []
+          ],
+          [
+            "OPENAI_58",
+            []
+          ],
+          [
+            "OPENAI_59",
+            []
+          ],
+          [
+            "OPENAI_60",
+            []
+          ],
+          [
+            "OPENAI_61",
+            []
+          ],
+          [
+            "OPENAI_62",
+            []
+          ],
+          [
+            "OPENAI_63",
+            []
+          ],
+          [
+            "OPENAI_64",
+            []
+          ],
+          [
+            "OPENAI_65",
+            []
+          ],
+          [
+            "OPENAI_66",
+            []
+          ],
+          [
+            "OPENAI_67",
+            []
+          ],
+          [
+            "OPENAI_68",
+            []
+          ],
+          [
+            "OPENAI_69",
+            []
+          ],
+          [
+            "OPENAI_70",
+            []
+          ],
+          [
+            "OPENAI_71",
+            []
+          ],
+          [
+            "OPENAI_72",
+            []
+          ],
+          [
+            "OPENAI_73",
+            []
+          ],
+          [
+            "OPENAI_74",
+            []
+          ],
+          [
+            "OPENAI_75",
+            []
+          ],
+          [
+            "OPENAI_76",
+            []
+          ],
+          [
+            "OPENAI_77",
+            []
+          ],
+          [
+            "OPENAI_78",
+            []
+          ],
+          [
+            "OPENAI_79",
+            []
+          ],
+          [
+            "OPENAI_80",
+            []
+          ],
+          [
+            "OPENAI_81",
+            []
+          ],
+          [
+            "OPENAI_82",
+            []
+          ],
+          [
+            "OPENAI_83",
+            []
+          ],
+          [
+            "OPENAI_84",
+            []
+          ],
+          [
+            "OPENAI_85",
+            []
+          ],
+          [
+            "OPENAI_86",
+            []
+          ],
+          [
+            "OPENAI_87",
+            []
+          ],
+          [
+            "OPENAI_88",
+            []
+          ],
+          [
+            "OPENAI_89",
+            []
+          ],
+          [
+            "OPENAI_90",
+            []
+          ],
+          [
+            "OPENAI_91",
+            []
+          ],
+          [
+            "OPENAI_92",
+            []
+          ],
+          [
+            "OPENAI_93",
+            []
+          ],
+          [
+            "OPENAI_94",
+            []
+          ],
+          [
+            "OPENAI_95",
+            []
+          ],
+          [
+            "OPENAI_96",
+            []
+          ],
+          [
+            "OPENAI_97",
+            []
+          ],
+          [
+            "OPENAI_98",
+            []
+          ],
+          [
+            "OPENAI_99",
+            []
+          ],
+          [
+            "OPENAI_100",
+            []
+          ],
+          [
+            "OPENAI_101",
+            []
+          ],
+          [
+            "OPENAI_102",
+            []
+          ],
+          [
+            "OPENAI_103",
+            []
+          ],
+          [
+            "OPENAI_104",
+            []
+          ],
+          [
+            "OPENAI_105",
+            []
+          ],
+          [
+            "OPENAI_106",
+            []
+          ],
+          [
+            "OPENAI_107",
+            []
+          ],
+          [
+            "OPENAI_108",
+            []
+          ],
+          [
+            "OPENAI_109",
+            []
+          ],
+          [
+            "OPENAI_110",
+            []
+          ],
+          [
+            "OPENAI_111",
+            []
+          ],
+          [
+            "OPENAI_112",
+            []
+          ],
+          [
+            "OPENAI_113",
+            []
+          ],
+          [
+            "OPENAI_114",
+            []
+          ],
+          [
+            "OPENAI_115",
+            []
+          ],
+          [
+            "OPENAI_116",
+            []
+          ],
+          [
+            "OPENAI_117",
+            []
+          ],
+          [
+            "OPENAI_118",
+            []
+          ],
+          [
+            "OPENAI_119",
+            []
+          ],
+          [
+            "OPENAI_120",
+            []
+          ],
+          [
+            "OPENAI_121",
+            []
+          ],
+          [
+            "OPENAI_122",
+            []
+          ],
+          [
+            "OPENAI_123",
+            []
+          ],
+          [
+            "OPENAI_124",
+            []
+          ],
+          [
+            "OPENAI_125",
+            []
+          ],
+          [
+            "OPENAI_126",
+            []
+          ],
+          [
+            "OPENAI_127",
+            []
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-count-129",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"OPENAI_0\":\"\",\"OPENAI_1\":\"\",\"OPENAI_2\":\"\",\"OPENAI_3\":\"\",\"OPENAI_4\":\"\",\"OPENAI_5\":\"\",\"OPENAI_6\":\"\",\"OPENAI_7\":\"\",\"OPENAI_8\":\"\",\"OPENAI_9\":\"\",\"OPENAI_10\":\"\",\"OPENAI_11\":\"\",\"OPENAI_12\":\"\",\"OPENAI_13\":\"\",\"OPENAI_14\":\"\",\"OPENAI_15\":\"\",\"OPENAI_16\":\"\",\"OPENAI_17\":\"\",\"OPENAI_18\":\"\",\"OPENAI_19\":\"\",\"OPENAI_20\":\"\",\"OPENAI_21\":\"\",\"OPENAI_22\":\"\",\"OPENAI_23\":\"\",\"OPENAI_24\":\"\",\"OPENAI_25\":\"\",\"OPENAI_26\":\"\",\"OPENAI_27\":\"\",\"OPENAI_28\":\"\",\"OPENAI_29\":\"\",\"OPENAI_30\":\"\",\"OPENAI_31\":\"\",\"OPENAI_32\":\"\",\"OPENAI_33\":\"\",\"OPENAI_34\":\"\",\"OPENAI_35\":\"\",\"OPENAI_36\":\"\",\"OPENAI_37\":\"\",\"OPENAI_38\":\"\",\"OPENAI_39\":\"\",\"OPENAI_40\":\"\",\"OPENAI_41\":\"\",\"OPENAI_42\":\"\",\"OPENAI_43\":\"\",\"OPENAI_44\":\"\",\"OPENAI_45\":\"\",\"OPENAI_46\":\"\",\"OPENAI_47\":\"\",\"OPENAI_48\":\"\",\"OPENAI_49\":\"\",\"OPENAI_50\":\"\",\"OPENAI_51\":\"\",\"OPENAI_52\":\"\",\"OPENAI_53\":\"\",\"OPENAI_54\":\"\",\"OPENAI_55\":\"\",\"OPENAI_56\":\"\",\"OPENAI_57\":\"\",\"OPENAI_58\":\"\",\"OPENAI_59\":\"\",\"OPENAI_60\":\"\",\"OPENAI_61\":\"\",\"OPENAI_62\":\"\",\"OPENAI_63\":\"\",\"OPENAI_64\":\"\",\"OPENAI_65\":\"\",\"OPENAI_66\":\"\",\"OPENAI_67\":\"\",\"OPENAI_68\":\"\",\"OPENAI_69\":\"\",\"OPENAI_70\":\"\",\"OPENAI_71\":\"\",\"OPENAI_72\":\"\",\"OPENAI_73\":\"\",\"OPENAI_74\":\"\",\"OPENAI_75\":\"\",\"OPENAI_76\":\"\",\"OPENAI_77\":\"\",\"OPENAI_78\":\"\",\"OPENAI_79\":\"\",\"OPENAI_80\":\"\",\"OPENAI_81\":\"\",\"OPENAI_82\":\"\",\"OPENAI_83\":\"\",\"OPENAI_84\":\"\",\"OPENAI_85\":\"\",\"OPENAI_86\":\"\",\"OPENAI_87\":\"\",\"OPENAI_88\":\"\",\"OPENAI_89\":\"\",\"OPENAI_90\":\"\",\"OPENAI_91\":\"\",\"OPENAI_92\":\"\",\"OPENAI_93\":\"\",\"OPENAI_94\":\"\",\"OPENAI_95\":\"\",\"OPENAI_96\":\"\",\"OPENAI_97\":\"\",\"OPENAI_98\":\"\",\"OPENAI_99\":\"\",\"OPENAI_100\":\"\",\"OPENAI_101\":\"\",\"OPENAI_102\":\"\",\"OPENAI_103\":\"\",\"OPENAI_104\":\"\",\"OPENAI_105\":\"\",\"OPENAI_106\":\"\",\"OPENAI_107\":\"\",\"OPENAI_108\":\"\",\"OPENAI_109\":\"\",\"OPENAI_110\":\"\",\"OPENAI_111\":\"\",\"OPENAI_112\":\"\",\"OPENAI_113\":\"\",\"OPENAI_114\":\"\",\"OPENAI_115\":\"\",\"OPENAI_116\":\"\",\"OPENAI_117\":\"\",\"OPENAI_118\":\"\",\"OPENAI_119\":\"\",\"OPENAI_120\":\"\",\"OPENAI_121\":\"\",\"OPENAI_122\":\"\",\"OPENAI_123\":\"\",\"OPENAI_124\":\"\",\"OPENAI_125\":\"\",\"OPENAI_126\":\"\",\"OPENAI_127\":\"\",\"OPENAI_128\":\"\"},\"cols\":80,\"rows\":24}",
+      "repeat": null,
+      "sha256": "ab9a199510172836bd4020ca13bd48ee69371a5d6febf03b504cc79c0d19064c",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "duplicate-command",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"cwd\": \"/workspace/project\", \"command\": \"printf hi\", \"env\": {\"TERM\": \"xterm\", \"LANG\": \"C.UTF-8\"}, \"cols\": 80, \"rows\": 24,\"command\":\"last\"}",
+      "repeat": null,
+      "sha256": "f10cbd03dd3d6aca376d18c0c4e04f216528b859c21fae885e93617f37240a4e",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          108,
+          97,
+          115,
+          116
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "duplicate-env",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"cwd\": \"/workspace/project\", \"command\": \"printf hi\", \"env\": {\"LANG\":\"first\",\"TERM\":\"xterm\",\"LANG\":\"last\"}, \"cols\": 80, \"rows\": 24}",
+      "repeat": null,
+      "sha256": "06460fd648b1bda172c6b914c2a0906d32ee7a33a19677d17c4be63783cf432e",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "LANG",
+            [
+              108,
+              97,
+              115,
+              116
+            ]
+          ],
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "extra-field",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"cwd\": \"/workspace/project\", \"command\": \"printf hi\", \"env\": {\"TERM\": \"xterm\", \"LANG\": \"C.UTF-8\"}, \"cols\": 80, \"rows\": 24,\"other\":false}",
+      "repeat": null,
+      "sha256": "2da6a967b1826e10342bdab042e40d160f09febf815f7c41dc514f1877b9417d",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "missing-command",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"cwd\": \"/workspace/project\", \"env\": {\"TERM\": \"xterm\", \"LANG\": \"C.UTF-8\"}, \"cols\": 80, \"rows\": 24}",
+      "repeat": null,
+      "sha256": "c1cb1272aab809d6384c19b67088d25083a6613afeb64d7b8ea0e1b5d15fa7ec",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "array",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "[]",
+      "repeat": null,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "constant",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "NaN",
+      "repeat": null,
+      "sha256": "d5b592c05dc25b5032553f1b27f4139be95e881f73db33b02b05ab20c3f9981e",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "trailing",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\": \"00000000-0000-0000-0000-000000000000\", \"cwd\": \"/workspace/project\", \"command\": \"printf hi\", \"env\": {\"TERM\": \"xterm\", \"LANG\": \"C.UTF-8\"}, \"cols\": 80, \"rows\": 24}x",
+      "repeat": null,
+      "sha256": "d916e69460a4688c4be365888a5a7acdc6e275c68483c9c679ca1e8f71d391a3",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "wire-encoding-utf-8-sig",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "efbbbf7b2273657373696f6e4964223a2230303030303030302d303030302d303030302d303030302d303030303030303030303030222c22637764223a222f776f726b73706163652f70726f6a656374222c22636f6d6d616e64223a227072696e7466206869222c22656e76223a7b225445524d223a22787465726d222c224c414e47223a22432e5554462d38227d2c22636f6c73223a38302c22726f7773223a32347d",
+      "repeat": null,
+      "sha256": "1a8b339e358817553ff983def62f45bfff9256c0090ca052e90599295deeb5d3",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "wire-encoding-utf-16",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "fffe7b002200730065007300730069006f006e004900640022003a002200300030003000300030003000300030002d0030003000300030002d0030003000300030002d0030003000300030002d0030003000300030003000300030003000300030003000300022002c00220063007700640022003a0022002f0077006f0072006b00730070006100630065002f00700072006f006a0065006300740022002c00220063006f006d006d0061006e00640022003a0022007000720069006e007400660020006800690022002c00220065006e00760022003a007b0022005400450052004d0022003a00220078007400650072006d0022002c0022004c0041004e00470022003a00220043002e005500540046002d00380022007d002c00220063006f006c00730022003a00380030002c00220072006f007700730022003a00320034007d00",
+      "repeat": null,
+      "sha256": "4b7b66824d428bebd755da1774bef969fda87829d504cd5297a849ee23ae085a",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "wire-encoding-utf-16-le",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b002200730065007300730069006f006e004900640022003a002200300030003000300030003000300030002d0030003000300030002d0030003000300030002d0030003000300030002d0030003000300030003000300030003000300030003000300022002c00220063007700640022003a0022002f0077006f0072006b00730070006100630065002f00700072006f006a0065006300740022002c00220063006f006d006d0061006e00640022003a0022007000720069006e007400660020006800690022002c00220065006e00760022003a007b0022005400450052004d0022003a00220078007400650072006d0022002c0022004c0041004e00470022003a00220043002e005500540046002d00380022007d002c00220063006f006c00730022003a00380030002c00220072006f007700730022003a00320034007d00",
+      "repeat": null,
+      "sha256": "41d4d95ae04d81175db0f677acb2e7d91cb9282f00619eafa7d6b325da624967",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "wire-encoding-utf-16-be",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "007b002200730065007300730069006f006e004900640022003a002200300030003000300030003000300030002d0030003000300030002d0030003000300030002d0030003000300030002d0030003000300030003000300030003000300030003000300022002c00220063007700640022003a0022002f0077006f0072006b00730070006100630065002f00700072006f006a0065006300740022002c00220063006f006d006d0061006e00640022003a0022007000720069006e007400660020006800690022002c00220065006e00760022003a007b0022005400450052004d0022003a00220078007400650072006d0022002c0022004c0041004e00470022003a00220043002e005500540046002d00380022007d002c00220063006f006c00730022003a00380030002c00220072006f007700730022003a00320034007d",
+      "repeat": null,
+      "sha256": "25cc9d0f23392ef903fa0f429ff772c3df462ccee29900818f43e24961d34367",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "wire-encoding-utf-32",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "fffe00007b0000002200000073000000650000007300000073000000690000006f0000006e0000004900000064000000220000003a0000002200000030000000300000003000000030000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000003000000030000000300000003000000030000000300000003000000030000000220000002c00000022000000630000007700000064000000220000003a000000220000002f000000770000006f000000720000006b00000073000000700000006100000063000000650000002f00000070000000720000006f0000006a000000650000006300000074000000220000002c00000022000000630000006f0000006d0000006d000000610000006e00000064000000220000003a000000220000007000000072000000690000006e0000007400000066000000200000006800000069000000220000002c00000022000000650000006e00000076000000220000003a0000007b000000220000005400000045000000520000004d000000220000003a00000022000000780000007400000065000000720000006d000000220000002c000000220000004c000000410000004e00000047000000220000003a00000022000000430000002e0000005500000054000000460000002d00000038000000220000007d0000002c00000022000000630000006f0000006c00000073000000220000003a00000038000000300000002c00000022000000720000006f0000007700000073000000220000003a00000032000000340000007d000000",
+      "repeat": null,
+      "sha256": "ebce0008c431d9fc766119a80dcffe0f8508c863831bb32fd4f7b397499706dc",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "wire-encoding-utf-32-le",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b0000002200000073000000650000007300000073000000690000006f0000006e0000004900000064000000220000003a0000002200000030000000300000003000000030000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000003000000030000000300000003000000030000000300000003000000030000000220000002c00000022000000630000007700000064000000220000003a000000220000002f000000770000006f000000720000006b00000073000000700000006100000063000000650000002f00000070000000720000006f0000006a000000650000006300000074000000220000002c00000022000000630000006f0000006d0000006d000000610000006e00000064000000220000003a000000220000007000000072000000690000006e0000007400000066000000200000006800000069000000220000002c00000022000000650000006e00000076000000220000003a0000007b000000220000005400000045000000520000004d000000220000003a00000022000000780000007400000065000000720000006d000000220000002c000000220000004c000000410000004e00000047000000220000003a00000022000000430000002e0000005500000054000000460000002d00000038000000220000007d0000002c00000022000000630000006f0000006c00000073000000220000003a00000038000000300000002c00000022000000720000006f0000007700000073000000220000003a00000032000000340000007d000000",
+      "repeat": null,
+      "sha256": "f420ea65e2259573e1918fe630fe3b26c7045f974c84fee30e3958ace6b236d3",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "wire-encoding-utf-32-be",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "0000007b0000002200000073000000650000007300000073000000690000006f0000006e0000004900000064000000220000003a0000002200000030000000300000003000000030000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000002d000000300000003000000030000000300000003000000030000000300000003000000030000000300000003000000030000000220000002c00000022000000630000007700000064000000220000003a000000220000002f000000770000006f000000720000006b00000073000000700000006100000063000000650000002f00000070000000720000006f0000006a000000650000006300000074000000220000002c00000022000000630000006f0000006d0000006d000000610000006e00000064000000220000003a000000220000007000000072000000690000006e0000007400000066000000200000006800000069000000220000002c00000022000000650000006e00000076000000220000003a0000007b000000220000005400000045000000520000004d000000220000003a00000022000000780000007400000065000000720000006d000000220000002c000000220000004c000000410000004e00000047000000220000003a00000022000000430000002e0000005500000054000000460000002d00000038000000220000007d0000002c00000022000000630000006f0000006c00000073000000220000003a00000038000000300000002c00000022000000720000006f0000007700000073000000220000003a00000032000000340000007d",
+      "repeat": null,
+      "sha256": "a467a62095ba46f2f51baa10d857b3c44548e922832b1cc184481b9d261b22b5",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "raw-wtf8-command",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b2273657373696f6e4964223a2230303030303030302d303030302d303030302d303030302d303030303030303030303030222c22637764223a222f776f726b73706163652f70726f6a656374222c22636f6d6d616e64223a22eda080edb080222c22656e76223a7b225445524d223a22787465726d222c224c414e47223a22432e5554462d38227d2c22636f6c73223a38302c22726f7773223a32347d",
+      "repeat": null,
+      "sha256": "bd039a2e2b5f6a317e58779e4bee73a133897f74e1fb788c2cb4d3711a115aed",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          55296,
+          56320
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "invalid-utf8-command",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b2273657373696f6e4964223a2230303030303030302d303030302d303030302d303030302d303030303030303030303030222c22637764223a222f776f726b73706163652f70726f6a656374222c22636f6d6d616e64223a22ff222c22656e76223a7b225445524d223a22787465726d222c224c414e47223a22432e5554462d38227d2c22636f6c73223a38302c22726f7773223a32347d",
+      "repeat": null,
+      "sha256": "c2f42601b4eab70ba50143d6aabe73a68b691a81f1465754eb701a82313cc0ea",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "ignored-duplicate-integer-4300",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b2273657373696f6e4964223a2230303030303030302d303030302d303030302d303030302d303030303030303030303030222c22637764223a222f776f726b73706163652f70726f6a656374222c22636f6d6d616e64223a227072696e7466206869222c22656e76223a7b225445524d223a22787465726d222c224c414e47223a22432e5554462d38227d2c22636f6c73223a38302c22726f7773223a32342c22636f6c73223a313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131312c22636f6c73223a38307d",
+      "repeat": null,
+      "sha256": "22d6145e736f84698271ed9ad001f0a9e91c2fce81c86136b391560ad7dfd6f9",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "TERM",
+            [
+              120,
+              116,
+              101,
+              114,
+              109
+            ]
+          ],
+          [
+            "LANG",
+            [
+              67,
+              46,
+              85,
+              84,
+              70,
+              45,
+              56
+            ]
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "ignored-duplicate-integer-4301",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b2273657373696f6e4964223a2230303030303030302d303030302d303030302d303030302d303030303030303030303030222c22637764223a222f776f726b73706163652f70726f6a656374222c22636f6d6d616e64223a227072696e7466206869222c22656e76223a7b225445524d223a22787465726d222c224c414e47223a22432e5554462d38227d2c22636f6c73223a38302c22726f7773223a32342c22636f6c73223a31313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131312c22636f6c73223a38307d",
+      "repeat": null,
+      "sha256": "097cee4438a8404d73da49bbd1bade9fd2df6518a50ef95e7441b8e5bd5118ac",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "negative-zero-cols",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "",
+      "rawHex": "7b2273657373696f6e4964223a2230303030303030302d303030302d303030302d303030302d303030303030303030303030222c22637764223a222f776f726b73706163652f70726f6a656374222c22636f6d6d616e64223a227072696e7466206869222c22656e76223a7b225445524d223a22787465726d222c224c414e47223a22432e5554462d38227d2c22636f6c73223a2d302c22726f7773223a32347d",
+      "repeat": null,
+      "sha256": "7bf995ac6c9ce58f5419897133d099d989c9ae7153e53e04847f2945b8c04fd9",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-raw-codepoint-boundary-97-65536",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"$REPEAT\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 97,
+        "count": 65536,
+        "rawUnicode": true
+      },
+      "sha256": "e7841c82c2e2235e141717e33cc1991cb559ba8491d83a99c0c9adc6060b4549",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "LANG",
+            null
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-raw-codepoint-boundary-97-65537",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"$REPEAT\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 97,
+        "count": 65537,
+        "rawUnicode": true
+      },
+      "sha256": "945d1feb45211213dc082241aa40924c51f446b61fe6ae9500e4cf8af2741f3e",
+      "accepted": false,
+      "expected": null
+    },
+    {
+      "name": "env-raw-codepoint-boundary-233-65536",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"$REPEAT\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 233,
+        "count": 65536,
+        "rawUnicode": true
+      },
+      "sha256": "836180a0851a854e5937883c17fd0d8be4b3429f56641438b1396b4cbd207933",
+      "accepted": true,
+      "expected": {
+        "cwd": [
+          47,
+          119,
+          111,
+          114,
+          107,
+          115,
+          112,
+          97,
+          99,
+          101,
+          47,
+          112,
+          114,
+          111,
+          106,
+          101,
+          99,
+          116
+        ],
+        "command": [
+          112,
+          114,
+          105,
+          110,
+          116,
+          102,
+          32,
+          104,
+          105
+        ],
+        "env": [
+          [
+            "LANG",
+            null
+          ]
+        ],
+        "attach": null,
+        "hasAttach": false
+      }
+    },
+    {
+      "name": "env-raw-codepoint-boundary-233-65537",
+      "configuration": "{\"mounts\": [{\"source\": \"/owned/work\", \"destination\": \"/reverie_workspace\", \"readOnly\": false}]}",
+      "raw": "{\"sessionId\":\"00000000-0000-0000-0000-000000000000\",\"cwd\":\"/workspace/project\",\"command\":\"printf hi\",\"env\":{\"LANG\":\"$REPEAT\"},\"cols\":80,\"rows\":24}",
+      "repeat": {
+        "point": 233,
+        "count": 65537,
+        "rawUnicode": true
+      },
+      "sha256": "ba9da2241eb12a8594a25900291fccfe0555fc7ef1a8aead1df78225d81018c6",
+      "accepted": false,
+      "expected": null
+    }
+  ]
+}

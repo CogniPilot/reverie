@@ -1,6 +1,5 @@
 use crate::legacy_json::{Node, Number, Text, Value};
 use std::collections::BTreeMap;
-use std::fmt::Write;
 
 enum Part<'a> {
     Value(&'a Value),
@@ -104,33 +103,44 @@ fn array<'a>(
     }
 }
 fn string(text: &Text, result: &mut String) {
-    result.push('"');
+    result.extend(
+        quoted_text(text, true)
+            .0
+            .into_iter()
+            .map(|cp| char::from_u32(cp).expect("ASCII JSON string")),
+    );
+}
+pub(super) fn quoted_text(text: &Text, ascii: bool) -> Text {
+    let mut result = vec![34];
     for &codepoint in &text.0 {
-        match codepoint {
-            8 => result.push_str("\\b"),
-            9 => result.push_str("\\t"),
-            10 => result.push_str("\\n"),
-            12 => result.push_str("\\f"),
-            13 => result.push_str("\\r"),
-            34 => result.push_str("\\\""),
-            92 => result.push_str("\\\\"),
-            32..=126 => result.push(char::from_u32(codepoint).expect("ASCII")),
-            0..=0xffff => {
-                write!(result, "\\u{codepoint:04x}").expect("String write");
-            }
+        let escaped = match codepoint {
+            8 => Some("\\b".to_owned()),
+            9 => Some("\\t".to_owned()),
+            10 => Some("\\n".to_owned()),
+            12 => Some("\\f".to_owned()),
+            13 => Some("\\r".to_owned()),
+            34 => Some("\\\"".to_owned()),
+            92 => Some("\\\\".to_owned()),
+            32..=126 => None,
+            127.. if !ascii => None,
+            0..=0xffff => Some(format!("\\u{codepoint:04x}")),
             _ => {
                 let scalar = codepoint - 0x10000;
-                write!(
-                    result,
+                Some(format!(
                     "\\u{:04x}\\u{:04x}",
                     0xd800 + (scalar >> 10),
                     0xdc00 + (scalar & 0x3ff)
-                )
-                .expect("String write");
+                ))
             }
+        };
+        if let Some(escaped) = escaped {
+            result.extend(escaped.chars().map(u32::from));
+        } else {
+            result.push(codepoint);
         }
     }
-    result.push('"');
+    result.push(34);
+    Text(result)
 }
 // Rust Debug provides shortest round-trip digits, including integral floats and
 // signed zero. Python uses a signed, at-least-two-digit exponent at the same
