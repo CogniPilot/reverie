@@ -1,10 +1,12 @@
 //! Read-only same-kernel website observations. Neither installer-selected DATA
 //! nor successful metadata requests authenticate a website or authorize work.
+mod code;
 mod engine;
 #[cfg(test)]
 mod tests;
 mod transport;
 use crate::native;
+pub use code::{ImmutableCodeObserver, ObservedCodeFile};
 use reverie_contracts::resource_actor::{EngineMetadata, EngineSelection};
 use reverie_core::operations::JournalDigest;
 use std::{fmt, io, path::PathBuf};
