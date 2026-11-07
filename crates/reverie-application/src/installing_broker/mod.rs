@@ -9,6 +9,7 @@ mod creation;
 mod gpu_access;
 mod image_refresh;
 mod launch;
+mod lifecycle;
 mod recovered;
 pub(crate) mod source;
 mod storage;
@@ -24,6 +25,8 @@ pub use launch::{
     AdmittedWorkerLaunch, LaunchAdmissionFailure, ReceivedWorkerLaunch, WorkerConnectionDispatch,
     WorkerDispatchError,
 };
+pub(crate) use lifecycle::LaptopLifecycle;
+use lifecycle::LaptopState;
 use recovered::{LaptopOwner, RecoveryOwners};
 pub use recovered::{RecoveryError, RecoverySummary};
 use reverie_contracts::reservation_engine::ReservationConfiguration;
@@ -56,28 +59,9 @@ struct LaptopRegistration {
     name: WorkerContainerName,
     owner: LaptopOwner,
 }
-/// Ordered real installing lifecycle state. No raw registry setter or public
-/// registration constructor exists; the actual recovery producer owns retained
-/// Office/storage entries. Native launch ownership remains a separate producer.
-pub(crate) struct LaptopLifecycle<'a> {
-    owner: &'a InstalledWorker,
-    guard: MutexGuard<'a, Vec<LaptopRegistration>>,
-}
-impl LaptopLifecycle<'_> {
-    pub(crate) fn belongs_to(&self, owner: &InstalledWorker) -> bool {
-        std::ptr::eq(self.owner, owner)
-    }
-    pub(crate) fn entries(
-        &self,
-    ) -> impl Iterator<Item = (&ProfileSessionId, &WorkerContainerName)> {
-        self.guard
-            .iter()
-            .map(|laptop| (&laptop.session, &laptop.name))
-    }
-}
 pub(crate) struct InstalledWorker {
     current: RwLock<CurrentInstalled>,
-    laptops: Mutex<Vec<LaptopRegistration>>,
+    laptops: Mutex<LaptopState>,
     #[cfg(test)]
     image_loaded_pause:
         Mutex<Option<crate::test_process::PausePoint<Arc<ValidatedWorkerSnapshot>>>>,
@@ -118,7 +102,7 @@ impl InstalledWorker {
     pub(crate) fn capture(snapshot: ValidatedWorkerSnapshot) -> Arc<Self> {
         Arc::new(Self {
             current: RwLock::new(CurrentInstalled::capture(Arc::new(snapshot))),
-            laptops: Mutex::new(Vec::new()),
+            laptops: Mutex::new(LaptopState::new()),
             #[cfg(test)]
             image_loaded_pause: Mutex::new(None),
         })
