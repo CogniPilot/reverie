@@ -5,7 +5,7 @@ use super::{
 use std::{
     ffi::OsString,
     sync::{
-        Arc, Mutex, TryLockError,
+        Arc, Mutex, OnceLock, TryLockError,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -14,16 +14,30 @@ use std::{
 mod tests;
 
 #[derive(Clone, Default)]
-pub struct CancellationToken(Arc<AtomicBool>);
+pub struct CancellationToken(Arc<CancellationState>);
+#[derive(Default)]
+struct CancellationState {
+    cancelled: AtomicBool,
+    signals: OnceLock<Arc<crate::native::child_signals::SignalView>>,
+}
 impl CancellationToken {
     pub fn new() -> Self {
         Self::default()
     }
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        self.0.cancelled.store(true, Ordering::Release);
     }
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.cancelled.load(Ordering::Acquire) || self.worker_signal_deadline().is_some()
+    }
+    pub(crate) fn bind_worker_signals(
+        &self,
+        view: Arc<crate::native::child_signals::SignalView>,
+    ) -> bool {
+        self.0.signals.set(view).is_ok()
+    }
+    pub(crate) fn worker_signal_deadline(&self) -> Option<Instant> {
+        self.0.signals.get().and_then(|view| view.deadline())
     }
 }
 #[derive(Default)]

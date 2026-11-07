@@ -605,9 +605,9 @@ it does not release storage or acknowledge global completion. A reclaim guard
 keeps the same box counted until `into_parts` moves it once under both retained
 mutex guards. The App must validate/hold its registry before this infallible
 restoration step. Dropping that guard leaves the box in the record. Unknown
-construction or descriptor close retains the box and job. Actual reused-viewer
-App transfer, transport/replacement/drain and recovered-viewer producers remain
-required; no backend selection follows from this Host component.
+construction or descriptor close retains the box and job. The App owns actual
+reuse transfer and finalization. Cold/Started reuse and whole-service drain still
+need integration; no backend selection follows from this Host component.
 
 Broker handler construction now splits registration from the same initial
 reader. An opaque registered socket is counted before any real thread exists.
@@ -671,9 +671,11 @@ Detailed malformed JSON/receipt diagnostic text remains a compatibility limit.
 
 Transport termination neither reaps the native leader nor returns storage. A
 fresh same-record receipt observation remains available before cleanup, including
-Held/no-job failures. The actual App finalizer must classify it on every outcome,
-perform any required real stop before reap, and settle all other owners. No live
-Docker, recovered-viewer, service activation or global release claim follows.
+Held/no-job failures. The App's reuse finalizer classifies it on every outcome,
+performs any required real stop before reap, then checks final liveness and the
+exact captured Office owner under fresh admission. Direct-prefix and Cold/Started
+cleanup consumers remain required. No live Docker, service activation or global
+release claim follows from the component controls.
 
 The genuine broker callers use `retain_ordinary_laptop_stop_for_worker`,
 `retain_unobserved_ordinary_laptop_stop_for_worker` and
@@ -688,3 +690,37 @@ This uses the same original per-query end, rechecks the live first-stop bound,
 and dispatches no command while waiting. Admitted tickets and every other error
 remain failed without replay. Exact-source and bounded component admission
 behavior is unchanged.
+
+The standalone broker's `install_broker_signals` owns the actual fixed native
+SIGINT/SIGTERM guard on the same runtime. Its existing cancellation-token clones
+observe that installed source directly; no watcher grants a later 34-second
+budget. Native first-signal and manual first-stop deadlines take their minimum.
+Unrelated/default tokens do not acquire a signal source. Before restoration the
+source freezes, so a later standalone installation cannot alter an older engine.
+Restoration requires an actually closed captured client; this local observation
+does not certify all App/Office/storage cleanup. Unknown Drop or restoration
+retains the actual guard/origin and refuses replacement. The actual listener,
+all command producers, supervisor and complete service close remain required
+before replacing the Python broker entry point.
+
+Known exact and legacy stop returns additionally expose `into_cold_parts` with
+a move-only `StoppedLaptopRemoval`; existing tuple APIs remain available. The
+token binds the actual original storage owner, installed Runtime, session and
+immutable old target. It cannot be reconstructed from inspected data. Actual
+Cold callers carry it separately while that same storage moves into Nix. The
+named post-Nix removal requires the same successful Nix record and current guard
+and original plan, after the caller's real lifecycle/current-policy/writer/budget
+rechecks. It does not rerun create arguments or require a new observation brand.
+
+Removal uses fresh strict stopped metadata followed by required non-force
+`rm CID` and a complete successful absence census. Exact-origin metadata keeps
+its existing projection; legacy-origin checks only its original identity and
+worker/session binding. An absent old target cannot authorize removing a new
+target which later takes its name. This deliberately corrects original post-Nix
+`rm name` retargeting. Each worker call retains its original 20-second bound and
+live first-stop clipping without an aggregate body cap. A failed, restarted or
+uncertain outcome stays in the same counted Nix record with its actual pending
+call, storage and guard; native settlement permits neither retry nor success.
+Only checked success mints `RemovedStoppedLaptop`, bound to that same record.
+These components do not implement the outer Cold/J continuation or select a
+native backend, and they grant no storage release or global shutdown receipt.
