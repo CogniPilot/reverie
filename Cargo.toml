@@ -17,6 +17,7 @@ members = [
     "crates/reverie-namegate",
     "crates/reverie-observations",
     "crates/reverie-voice-ci",
+    "crates/reverie-commit-policy",
     "crates/xtask",
 ]
 resolver = "3"

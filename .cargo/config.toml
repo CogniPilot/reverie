@@ -3,3 +3,5 @@
 xtask = "run --locked --package xtask --bin xtask --"
 # The name gate is its own binary so xtask stays dependency-free (see the xtask manifest policy).
 namegate = "run --locked --package reverie-namegate --bin reverie-namegate --"
+# Standing-policy checks (formerly the reverie-governance Python command).
+commit-policy = "run --locked --package reverie-commit-policy --bin reverie-commit-policy --"
