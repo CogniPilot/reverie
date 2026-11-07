@@ -2,6 +2,8 @@
 //! first native client. InstallingBroker still owns admission and authorization.
 mod cleanup;
 mod cold;
+mod cold_prepare;
+pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
 mod create;
 mod error;
 mod guard;
@@ -73,6 +75,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
+    cold: cold_prepare::Stage,
     resources: Option<Resources>,
     phase: Phase,
     outcome: Option<std::result::Result<(), Arc<LaptopError>>>,
@@ -236,6 +239,7 @@ impl Workflows {
             office: inputs.office,
         };
         let record = Arc::new(Mutex::new(Record {
+            cold: Default::default(),
             resources: Some(resources),
             phase: Phase::Held,
             outcome: None,

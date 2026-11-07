@@ -17,6 +17,12 @@ fn main() {
         return;
     }
     if args==["ps","--quiet","--no-trunc"] || args==["ps","--all","--filter","label=reverie.worker","--format","{{.ID}}"] {return;}
+    if args==["ps","--all","--quiet","--no-trunc"] {
+        let count=fs::read_to_string("cold-ps.count").ok().map(|v|v.parse::<usize>().unwrap()).unwrap_or(0)+1;
+        fs::write("cold-ps.count",count.to_string()).unwrap();
+        if fs::read_to_string("cold-fail-ps-at").ok().is_some_and(|value|value.parse::<usize>().unwrap()==count){std::process::exit(9);}
+        if let Ok(raw)=fs::read("cold-ps.out"){std::io::stdout().write_all(&raw).unwrap();}return;
+    }
     if args.first().map(String::as_str)==Some("create") {
         assert!(mode.starts_with("created-"));
         assert_eq!(args[1],"--name");

@@ -19,6 +19,9 @@ pub enum StorageOwnerError {
     Settings(reverie_contracts::broker_resources::ResourceConfigError),
     Intent(reverie_contracts::worker_intent::IntentDataError),
     Cold(crate::worker_validation::WorkerValidationHostError),
+    ColdData(reverie_contracts::worker_cold_tmp::ColdDataError),
+    ColdKernel(crate::reservation_kernel::ReservationKernelError),
+    ColdUnconfirmed(Box<Self>),
     Path(std::io::Error),
     Refused(&'static str),
     Finalized {
@@ -36,6 +39,9 @@ impl StorageOwnerError {
             Self::Settings(_) => "WORKER_STORAGE_SETTINGS",
             Self::Intent(error) => error.code(),
             Self::Cold(_) => "WORKER_COLD_POLICY",
+            Self::ColdData(_) => "WORKER_COLD_DATA",
+            Self::ColdKernel(error) => error.code(),
+            Self::ColdUnconfirmed(_) => "WORKER_COLD_EFFECT_UNCONFIRMED",
             Self::Path(_) => "WORKER_STORAGE_NATIVE_PATH",
             Self::Refused(code) => code,
             Self::Finalized { primary, .. } => primary.code(),
@@ -44,7 +50,18 @@ impl StorageOwnerError {
     pub fn cleanup_errors(&self) -> &[Self] {
         match self {
             Self::Finalized { secondary, .. } => secondary,
+            Self::ColdUnconfirmed(primary) => primary.cleanup_errors(),
             _ => &[],
+        }
+    }
+    pub(crate) fn unconfirmed_native(&self) -> bool {
+        match self {
+            Self::ColdUnconfirmed(_) => true,
+            Self::Engine(error) => error.is_uncertain(),
+            Self::Finalized { primary, secondary } => {
+                primary.unconfirmed_native() || secondary.iter().any(Self::unconfirmed_native)
+            }
+            _ => false,
         }
     }
 }
@@ -63,6 +80,9 @@ impl std::error::Error for StorageOwnerError {
             Self::Settings(error) => Some(error),
             Self::Intent(error) => Some(error),
             Self::Cold(error) => Some(error),
+            Self::ColdData(error) => Some(error),
+            Self::ColdKernel(error) => Some(error),
+            Self::ColdUnconfirmed(error) => Some(error.as_ref()),
             Self::Path(error) => Some(error),
             Self::Refused(_) => None,
             Self::Finalized { primary, .. } => Some(primary.as_ref()),
@@ -127,6 +147,7 @@ impl StorageSelection {
             namespace: self.namespace,
             paths: self.paths,
             ownership: Ownership::UnleasedLegacy,
+            cold: Default::default(),
         })
     }
     /// Source guard acquisition performs its OWN fresh resolution. Do not
@@ -146,6 +167,7 @@ impl StorageSelection {
                 source: self.source,
                 namespace: self.namespace,
                 ownership: Ownership::Held(Box::new(lease)),
+                cold: Default::default(),
             }),
             Err(error) => Err(Box::new(StorageAcquireFailure {
                 selection: self,
@@ -206,8 +228,26 @@ pub struct LaunchStorage {
     namespace: Namespace,
     paths: StoragePaths,
     ownership: Ownership,
+    cold: super::cold_tmp::Lifecycle,
 }
 impl LaunchStorage {
+    pub(crate) fn clear_cold_temporary(
+        &mut self,
+        runtime: &WorkerRuntime,
+        plan: &crate::worker_launch::ObservedCreatePlan,
+        end: Instant,
+    ) -> OwnerResult<()> {
+        plan.assert_storage_owner(runtime, self)
+            .map_err(|_| StorageOwnerError::Refused("WORKER_COLD_STORAGE_OWNER_CHANGED"))?;
+        let mut cold = std::mem::take(&mut self.cold);
+        let result = cold.clear(runtime, self, plan, end);
+        // Restore the SAME admission ticket/proof even on refusal/uncertainty.
+        self.cold = cold;
+        result
+    }
+    pub(crate) fn require_cold_prepared(&self, source: &EffectiveWorkerConfig) -> OwnerResult<()> {
+        self.cold.require_prepared(source, self)
+    }
     pub(crate) fn owner_identity(&self) -> &Arc<()> {
         &self.identity
     }
@@ -278,6 +318,9 @@ impl LaunchStorage {
                 owner: self,
                 cause: StorageOwnerError::Engine(error),
             }));
+        }
+        if let Err(cause) = self.cold.settle(&self.engine, deadline) {
+            return Err(Box::new(StorageCloseFailure { owner: self, cause }));
         }
         #[cfg(test)]
         BEFORE_CONSUMPTION.with(|slot| {

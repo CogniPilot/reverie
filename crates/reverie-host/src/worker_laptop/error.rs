@@ -68,6 +68,7 @@ pub enum LaptopError {
     MemoryIdentity(reverie_contracts::worker_recovery::RecoveryDataError),
     MemoryHelperSelection(reverie_contracts::worker_validation::WorkerValidationError),
     ColdPolicy(reverie_contracts::worker_validation::WorkerValidationError),
+    ColdStorage(crate::worker_storage::StorageOwnerError),
     MemoryHelperRefused(String),
     MemoryEffectUnconfirmed(Box<Self>),
     Recorded(std::sync::Arc<Self>),
@@ -85,6 +86,7 @@ impl LaptopError {
     pub(super) fn unconfirmed_native(&self) -> bool {
         match self {
             Self::MemoryEffectUnconfirmed(_) => true,
+            Self::ColdStorage(error) => error.unconfirmed_native(),
             Self::Observation(_) => true,
             Self::Publication(error) => !error.cleanup_faults().is_empty(),
             Self::Finalization { primary, secondary } => {
@@ -116,6 +118,7 @@ impl LaptopError {
             Self::MemoryIdentity(error) => error.code(),
             Self::MemoryHelperSelection(_) => "LAPTOP_SOFT_LIMIT_HELPER_SELECTION",
             Self::ColdPolicy(_) => "WORKER_COLD_POLICY",
+            Self::ColdStorage(error) => error.code(),
             Self::MemoryHelperRefused(_) => "LAPTOP_SOFT_LIMIT_HELPER_REFUSED",
             Self::MemoryEffectUnconfirmed(_) => "LAPTOP_MEMORY_EFFECT_UNCONFIRMED",
             Self::Recorded(error) => error.code(),
@@ -146,6 +149,7 @@ impl std::error::Error for LaptopError {
             Self::MemoryIdentity(error) => Some(error),
             Self::MemoryHelperSelection(error) => Some(error),
             Self::ColdPolicy(error) => Some(error),
+            Self::ColdStorage(error) => Some(error),
             Self::MemoryHelperRefused(_) => None,
             Self::MemoryEffectUnconfirmed(error) => Some(error.as_ref()),
             Self::Recorded(error) => Some(error.as_ref()),

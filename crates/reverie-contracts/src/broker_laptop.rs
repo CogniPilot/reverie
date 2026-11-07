@@ -16,6 +16,7 @@ pub enum LaptopReadError {
     Structure,
     Policy,
     Ownership,
+    Process,
 }
 impl LaptopReadError {
     pub fn code(self) -> &'static str {
@@ -24,6 +25,7 @@ impl LaptopReadError {
             Self::Structure => "WORKER_LAPTOP_INSPECTION_STRUCTURE",
             Self::Policy => "WORKER_LAPTOP_LIVE_POLICY_CHANGED",
             Self::Ownership => "WORKER_LAPTOP_FOREIGN_DEPLOYMENT",
+            Self::Process => "WORKER_LAPTOP_PROCESS_UNAVAILABLE",
         }
     }
 }

@@ -307,6 +307,16 @@ the bootstrap identity. This observation still grants no API/admission/start
 permission; real moved resource owners and supervised lifecycle results remain
 necessary. The compatibility argument API delegates the same observation owner.
 
+`ObservedCreatePlan::inspect_existing` seals the original optional first inspect
+to that exact plan observation, engine and storage owner. Its consuming dead-pane
+and running-replacement capture methods preserve their distinct ID-check order
+before the shared fixed `/proc` process-start reader. The resulting
+`ExistingProcessIncarnation` retains the real observation and process readback;
+another plan or a new storage acquisition at the same paths cannot recreate it.
+Its getters and binding check remain data/provenance, not freshness or stop
+permission. An ordinary stop still needs the actual application admission,
+resource custody, repeated pane checks and fresh native/policy observations.
+
 Each actual `LaunchStorage` also has a private per-acquisition identity, minted
 only after successful lease acquisition or genuine service legacy resolution.
 The observed plan retains that identity across moves and Nix preparation; a
@@ -387,6 +397,29 @@ identity and check the held target close. Only that result constructs
 `ConfiguredMemory`; it does not complete cold storage, launch a child or publish
 application readiness. The installing application and later lifecycle joins
 remain required. Owned fixture controls do not establish installed enforcement.
+
+`prepare_laptop_cold_temporary` advances the same known network record before
+creation. Opt-in `clear` requires its real employee storage lease, complete fixed
+engine census, canonical mount/process observations and all configured kernel
+lease barriers. Its iterative metadata walk retains the original 4096-entry,
+2-GiB and nominal 10-second limits. Preservation markers, hardlinks, mounts,
+changed custody and unknown same-UID references refuse. Pending evidence is
+durable before deletion; completion and every checked finalizer precede the last
+pending unlink. Partial/error outcomes retain the same resource record and never
+mint preparation or cold-commit success. Creation and post-memory cold commit
+require the actual same-source report carried by that storage owner.
+
+Clear's legacy regular metadata symlinks, uncapped text JSON, last-key-wins and
+loose reservation/holder grammar remain supported. FIFO/device/socket metadata
+now refuses before payload open: the original could block beyond its nominal
+deadline. Deadline checks do not bound an individual kernel filesystem syscall
+or codec call. Iteration avoids interpreter recursion exhaustion; it adds no
+new depth cap. These observations still rely on the original trusted host and
+serialized lifecycle boundary, not immunity to privileged/same-UID rename races.
+Absent policy remains non-destructive and independently fenced.
+`retain-and-replace` still refuses until its full pre-Office preparation and
+post-memory confirmation are implemented. This checkpoint supplies no installed
+selection, data migration, context/grant publisher or complete cold-feature claim.
 
 `release_laptop_nix_guard` consumes only the original guard after the same
 record's acknowledged pane startup. It moves the actual storage, original Nix

@@ -129,19 +129,35 @@ fn enabled_strategies_cannot_obtain_cold_token_without_their_real_transaction() 
         raw["coldTemporaryCleanup"] =
             json!({"version":1,"enabled":true,"hostLeaseDirectories":[],"strategy":strategy});
         fixture.source = worker_config::decode(&serde_json::to_vec(&raw).unwrap()).unwrap();
-        let (_, configured) = configured(&fixture);
+        let (nix, plan, request, phone) = fixture.resources_with_effective(
+            &ProfileSessionId::parse(SID).unwrap(),
+            fixture.source.clone(),
+        );
+        let workflow = fixture
+            .runtime()
+            .retain_laptop_network(&nix, plan, request, phone)
+            .unwrap_or_else(|_| panic!("actual network retain"));
+        fixture
+            .runtime()
+            .run_laptop_network(&workflow, end())
+            .unwrap();
+        let telemetry = CommandTelemetry::capture(fixture.runtime(), &fixture.source).unwrap();
         let trace = fs::read(fixture.root.join("trace")).unwrap();
         assert!(matches!(
             fixture
                 .runtime()
-                .commit_started_laptop_cold(&configured, end())
+                .create_laptop(&workflow, &telemetry, end())
                 .unwrap(),
-            ColdCommit::Rejected
+            LaptopCreation::Rejected
         ));
         assert!(matches!(
-            configured.workflow.failure().unwrap().unwrap().as_ref(),
-            LaptopError::Refused("WORKER_COLD_TRANSACTION_REQUIRED")
+            workflow.failure().unwrap().unwrap().as_ref(),
+            LaptopError::ColdStorage(_)
         ));
+        assert!(
+            !fixture.root.join("created-laptop").exists(),
+            "no Started/ConfiguredMemory/ColdCommitted token can precede actual enabled preparation"
+        );
         assert_eq!(fs::read(fixture.root.join("trace")).unwrap(), trace);
     }
 }

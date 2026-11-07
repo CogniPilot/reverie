@@ -1,6 +1,8 @@
 //! Reviewed Linux syscall boundary for existing private store custody.
 //! Unsafe is confined here; safe callers hold owned files and typed close roles.
 #![allow(unsafe_code)]
+mod cold;
+pub(crate) use cold::cold_directory_names;
 
 use crate::error::{Result, StoreError, StoreFault, finalized, need};
 use std::ffi::{CStr, CString, OsStr};

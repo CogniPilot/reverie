@@ -1,5 +1,6 @@
 use super::*;
 mod cold;
+mod cold_admission;
 mod preparation;
 use crate::{
     engine_metadata::{CancellationToken, EngineBootstrap, EngineQuery},

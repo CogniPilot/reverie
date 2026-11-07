@@ -1,4 +1,5 @@
 mod cleanup;
+mod cold_prepare;
 mod create;
 mod guard;
 mod pane;
@@ -136,7 +137,14 @@ impl Fixture {
             } else {
                 selection.acquire().unwrap()
             };
-        storage.prepare_storage().unwrap();
+        if reverie_contracts::worker_cold_tmp::ColdConfiguration::capture(&self.source)
+            .unwrap()
+            .is_some()
+        {
+            storage.prepare_cold_launch_storage().unwrap();
+        } else {
+            storage.prepare_storage().unwrap();
+        }
         storage.record_storage_binding().unwrap();
         let plan = self
             .runtime()
