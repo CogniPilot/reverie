@@ -218,17 +218,22 @@ impl Directory {
         }
     }
     pub(super) fn remove_owned(&self, name: &str, owned: &Stamp) {
-        let Ok(Some(current)) = self.stamp(name) else {
-            return;
+        let _ = self.remove_owned_checked(name, owned);
+    }
+    pub(super) fn remove_owned_checked(&self, name: &str, owned: &Stamp) -> io::Result<()> {
+        let Some(current) = self.stamp(name)? else {
+            return Ok(());
         };
         if !owned.same_inode(&current) {
-            return;
+            return Ok(());
         }
-        let Ok(name) = cstring(OsStr::new(name)) else {
-            return;
-        };
+        let name = cstring(OsStr::new(name))?;
         // SAFETY: unlinkat removes only this verified owned temporary leaf, never a tree.
-        let _ = unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), 0) };
+        if unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), 0) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
     }
     pub(super) fn sync(&self) -> io::Result<()> {
         self.0.sync_all()

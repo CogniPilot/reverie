@@ -1,0 +1,14 @@
+[package]
+name = "rustpython-sre_engine"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[dependencies]
+reverie-core = { path = "../../crates/reverie-core" }
+rustpython-wtf8 = { path = "../rustpython-wtf8" }
+num_enum = { version = "0.7", default-features = false }
+bitflags = "2"
+optional = "0.5"

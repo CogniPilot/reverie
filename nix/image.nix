@@ -1,4 +1,4 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null }:
+{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
@@ -45,6 +45,7 @@ let
     && ownerWebArgs == webArgs ++ [ "--service-auth-config"
       ((import ./service-auth-config.nix { inherit (pkgs) lib; }) (builtins.elemAt ownerWebArgs 6)) ];
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
+assert memoryGuestCapsule == null || worker;
 assert ownerTerminalWebsite == null || (!worker && !resourceReplacement &&
   (builtins.elem ownerWebArgs [ webArgs (webArgs ++ [ "--resource-replacement" ]) ] || serviceAuthWebArgs));
 assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
@@ -64,6 +65,12 @@ pkgs.dockerTools.buildLayeredImage {
     ++ pkgs.lib.optional (ownerTerminalWebsite != null) ownerTerminalWebsite;
   extraCommands = ''
     mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace reverie_workspace scratch/tmp instances tmp
+    ${pkgs.lib.optionalString (memoryGuestCapsule != null) ''
+      # Candidate-only real files outside the employee's writable /nix mount.
+      # No context, service grant, default command or launcher is selected here.
+      cp -r ${memoryGuestCapsule}/opt/reverie/memory opt/reverie/memory
+      test ! -e opt/rvmem
+    ''}
     unlink bin/reverie
     ln -s ${reverie}/bin/reverie bin/reverie
     ln -s ${reverie}/bin/reverie-request-update bin/reverie-request-update
@@ -133,15 +140,12 @@ pkgs.dockerTools.buildLayeredImage {
       cp ${humanToolkit}/opt/reverie/human/bin/{reverie-human-shell,bash} opt/reverie/human/bin/
       chmod 555 opt/reverie/human/bin/{reverie-human-shell,bash}
       mkdir -p opt/reverie/autoenv/bin opt/reverie/autoenv/lib
-      cp ${src}/scripts/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
-      cp ${src}/scripts/reverie-autoenv bin/reverie-autoenv
-      for command in reverie-cargo-defaults reverie-build-jobs; do
+      cp ${laptopTools}/bin/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
+      for command in reverie-autoenv reverie-cargo-defaults reverie-build-jobs; do
         test -L "bin/$command"
         unlink "bin/$command"
         cp ${laptopTools}/bin/"$command" "bin/$command"
       done
-      sed -i '1c#!${memory}/bin/python3' bin/reverie-autoenv
-      sed -i '1c#!${pkgs.bash}/bin/bash' opt/reverie/autoenv/lib/shim
       chmod 755 bin/reverie-autoenv bin/reverie-cargo-defaults bin/reverie-build-jobs opt/reverie/autoenv/lib/shim
       for tool in cargo rustc rustdoc pkg-config; do
         ln -s /opt/reverie/autoenv/lib/shim opt/reverie/autoenv/bin/$tool
@@ -166,6 +170,10 @@ pkgs.dockerTools.buildLayeredImage {
     REGISTRY
   '';
   fakeRootCommands = ''
+    ${pkgs.lib.optionalString (memoryGuestCapsule != null) ''
+      chown -R 0:0 opt/reverie/memory
+      chmod -R a-w opt/reverie/memory
+    ''}
     mkdir -p instances/default
     chown -R ${toString uid}:${toString gid} home/agent workspace reverie_workspace scratch instances
     # Keep the shared mount parent protected when a deployment selects another

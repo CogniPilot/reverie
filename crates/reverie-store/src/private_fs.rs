@@ -322,7 +322,10 @@ impl Directory {
         let flags = if absent { libc::RENAME_NOREPLACE } else { 0 };
         // SAFETY: both names are terminated leaves in this held private directory.
         if unsafe {
-            libc::renameat2(
+            // Keep the same atomic syscall under glibc and static musl,
+            // whose libc does not export a renameat2 wrapper.
+            libc::syscall(
+                libc::SYS_renameat2,
                 self.file.as_raw_fd(),
                 source.as_ptr(),
                 self.file.as_raw_fd(),
@@ -430,21 +433,11 @@ pub(crate) fn random_name(prefix: &str) -> Result<String> {
     ))
 }
 pub(crate) fn random_uuid() -> Result<String> {
-    let mut bytes = random_bytes()?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex = bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &hex[..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..]
-    ))
+    Ok(
+        reverie_core::ids::NativeOperationId::from_random_bytes(random_bytes()?)
+            .as_str()
+            .to_owned(),
+    )
 }
 pub(crate) fn random_bytes() -> Result<[u8; 16]> {
     let mut bytes = [0u8; 16];

@@ -21,7 +21,11 @@ impl std::fmt::Display for TelemetryCloseError {
         f.write_str("WORKER_TELEMETRY_CLOSE_UNCONFIRMED")
     }
 }
-impl std::error::Error for TelemetryCloseError {}
+impl std::error::Error for TelemetryCloseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.transport.as_ref().map(|error| error as _)
+    }
+}
 impl InstallingBroker {
     /// Fixed protected T operation on an actual accepted connection. Kernel UID
     /// is checked before frames/collector access. The listener/common dispatcher

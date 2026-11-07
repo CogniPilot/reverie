@@ -1,6 +1,6 @@
 //! The memory bridge's existing screening policy. Empty owner rules use the
-//! qualified fixed privacy grammar. Configured regex selection is explicitly
-//! unavailable until its compatible adapter is qualified; it is never skipped.
+//! qualified fixed privacy grammar. Owner patterns use the native Python 3.13
+//! str grammar and compile together before any search or protected-name read.
 use crate::{ObservationError, native};
 use reverie_contracts::{
     memory_cli::{OutputPolicy, OutputPolicyError},
@@ -10,6 +10,7 @@ use reverie_core::{
     PythonText, PythonTextRef,
     privacy_floor::{protected_name_lines, targets_private_person},
 };
+use reverie_python_regex::{CompiledOutputPolicy, RegexError};
 use std::{
     fs::File,
     io::{self, Read},
@@ -19,7 +20,7 @@ use std::{
 #[derive(Debug)]
 pub enum ScreenError {
     Policy(OutputPolicyError),
-    RegexCompatibilityRequired,
+    Regex(RegexError),
     Io(io::Error),
     Utf8(std::string::FromUtf8Error),
     Native(ObservationError),
@@ -32,16 +33,14 @@ impl std::fmt::Display for ScreenError {
     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         output.write_str(match self {
             Self::Policy(_) => "memory output policy refused",
-            Self::RegexCompatibilityRequired => {
-                "memory output policy requires a compatible native adapter"
-            }
+            Self::Regex(_) => "memory output policy regular expression refused",
             _ => "memory screening could not be completed",
         })
     }
 }
 impl std::error::Error for ScreenError {}
 pub struct MemoryScreen {
-    policy: OutputPolicy,
+    policy: CompiledOutputPolicy,
     names: PathBuf,
 }
 impl MemoryScreen {
@@ -81,14 +80,21 @@ impl MemoryScreen {
         )
     }
     fn from_parts(policy: PythonTextRef<'_>, names: PathBuf) -> Result<Self, ScreenError> {
+        let policy = OutputPolicy::decode(policy).map_err(ScreenError::Policy)?;
         Ok(Self {
-            policy: OutputPolicy::decode(policy).map_err(ScreenError::Policy)?,
+            policy: CompiledOutputPolicy::compile(
+                policy
+                    .patterns()
+                    .iter()
+                    .map(MetadataText::as_python_text_ref),
+            )
+            .map_err(ScreenError::Regex)?,
             names,
         })
     }
     pub fn check(&self, text: &MetadataText) -> Result<&'static str, ScreenError> {
-        if !self.policy.patterns().is_empty() {
-            return Err(ScreenError::RegexCompatibilityRequired);
+        if self.policy.is_match(text.as_python_text_ref()) {
+            return Ok("configured output policy");
         }
         let names = read_names(&self.names)?;
         Ok(

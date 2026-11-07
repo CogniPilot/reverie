@@ -49,7 +49,11 @@ fn finalized<T>(result: Result<T>, closed: Result<()>) -> Result<T> {
 fn fixed(value: Option<&str>, elf: bool) -> Result<PathBuf> {
     let path = Path::new(value.ok_or(McpLaunchError::Unavailable)?);
     if !path.is_absolute()
-        || !path.starts_with("/nix/store")
+        || !(if crate::memory_artifacts::guest() {
+            crate::memory_artifacts::guest_path(path)
+        } else {
+            path.starts_with("/nix/store")
+        })
         || fs::canonicalize(path).ok().as_deref() != Some(path)
     {
         return Err(McpLaunchError::Unavailable);
@@ -58,7 +62,8 @@ fn fixed(value: Option<&str>, elf: bool) -> Result<PathBuf> {
         let metadata = fs::symlink_metadata(parent).map_err(McpLaunchError::Io)?;
         if !metadata.is_dir()
             || metadata.uid() != 0
-            || metadata.mode() & 0o022 != 0 && metadata.mode() & 0o1000 == 0
+            || metadata.mode() & 0o022 != 0
+                && (crate::memory_artifacts::guest() || metadata.mode() & 0o1000 == 0)
         {
             return Err(McpLaunchError::Unavailable);
         }
@@ -129,18 +134,14 @@ fn prepare(options: &McpOptions, context: Option<&InstalledContext>) -> Result<C
     let text = std::str::from_utf8(&bytes).map_err(|_| McpLaunchError::Unavailable)?;
     let parts = chunks(text);
     let mut command = Command::new(node);
+    if crate::memory_artifacts::guest() {
+        command.arg("--no-global-search-paths");
+    }
     command.arg(entry).arg(parts.len().to_string()).args(parts);
     // Avoid inherited loader/Node autoload hooks. This is not attestation of a
     // separately launched process, and no executable origin grants access.
     for (key, _) in std::env::vars_os() {
-        if key.to_str().is_some_and(|key| {
-            key.starts_with("LD_")
-                || key.starts_with("DYLD_")
-                || matches!(
-                    key,
-                    "NODE_OPTIONS" | "NODE_PATH" | "NODE_REPL_EXTERNAL_MODULE"
-                )
-        }) {
+        if crate::memory_artifacts::code_loading_environment(&key) {
             command.env_remove(key);
         }
     }

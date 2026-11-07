@@ -1,5 +1,13 @@
 # Upstream credit
 
+The optional Rust front uses Tokio 1.54.1 (MIT) and command-fds 0.3.3
+(Apache-2.0, copyright 2021 The Android Open Source Project). Their upstream
+sources are https://github.com/tokio-rs/tokio and
+https://github.com/google/command-fds/. Cargo.lock pins the source checksums.
+The front uses command-fds' single owned fd mapping to fd 3; its reviewed
+pre-exec syscall boundary stays in that dependency. The front's packaging gate
+must retain the upstream licenses and any notices alongside the executable.
+
 Chat code highlighting includes highlight.js 11.12.0 (BSD-3-Clause), copyright
 2006 Ivan Sagalaev. Its license is retained at
 `apps/web/src/web/public/vendor/highlight-LICENSE.txt`; pinned inputs and hashes
@@ -54,3 +62,28 @@ copyright 2017-2021 Ingy döt Net and 2006-2016 Kirill Simonov. The upstream not
 is retained at `crates/reverie-contracts/src/gpu_access/cdi/PYYAML_LICENSE.txt`.
 The underlying safe Rust grammar parser is the pinned `libyaml-safer` dependency;
 no Python interpreter is used by the native CDI reader.
+
+The native memory output-policy compiler uses the standalone RustPython SRE
+matcher and lossless WTF8 utility pinned to
+`d02d81e740e67496a70579282c848358e461d0d0` (MIT). Exact source changes, licensing,
+dependency scope and the non-default Unicode trim feature are recorded in
+[vendor/README.md](vendor/README.md). No RustPython interpreter or Python
+parser/compiler is included. The native compiler follows CPython 3.13.15 grammar
+and emission rules; its PSF/CNRI licenses and original SRE notices are retained
+in `crates/reverie-python-regex/`. Core's additional frozen text facts use the
+same CPython/Unicode provenance as its existing text facts. Maintained
+`unicode_names2` 1.2.2 supplies Unicode 15.1 names/aliases (MIT/Apache-2.0), with
+the exact CPython algorithmic-name lexical check in Core. Its source-data-driven
+Rust code generator is build-time tooling, distinct from runtime name lookup.
+
+## Rust front TLS dependencies
+
+The Rust TLS adapter uses rustls (Apache-2.0 OR ISC OR MIT), tokio-rustls
+(MIT OR Apache-2.0), rustls-pki-types (MIT OR Apache-2.0), rustls-webpki
+(ISC), and ring (ISC with its upstream third-party notices). Their sources and
+license texts are retained through Cargo/Nix source dependencies. ring's
+code sourced from BoringSSL uses Apache-2.0 or ISC as stated in each file;
+its once_cell-derived code uses Apache-2.0/MIT notices. See ring's LICENSE,
+LICENSE-BoringSSL, LICENSE-other-bits and src/polyfill/once_cell license files;
+these upstream notices remain applicable. The front
+selects ring explicitly and does not include a second TLS implementation.

@@ -41,6 +41,14 @@ impl PythonText {
     pub fn as_text_ref(&self) -> super::PythonTextRef<'_> {
         super::PythonTextRef::from_owned(self)
     }
+    /// Python str.split() without an explicit separator, using the same frozen
+    /// whitespace owner as trimming and regex classes. Slices remain checked.
+    pub fn split_whitespace(&self) -> impl Iterator<Item = super::PythonTextRef<'_>> {
+        self.0
+            .split(|&point| super::space_point(point))
+            .filter(|part| !part.is_empty())
+            .map(|part| super::PythonTextRef::from_codepoints(part).expect("checked text slice"))
+    }
     /// The same frozen Python str.lower owner used by scalar and memory text.
     pub fn lowercase(&self) -> Self {
         Self(super::lower_codepoints(&self.0))

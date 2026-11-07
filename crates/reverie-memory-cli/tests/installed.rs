@@ -143,9 +143,9 @@ fn configured_rules_are_never_skipped_and_fixed_floors_precede_journal() {
         "REVERIE_OUTPUT_POLICY",
         r#"{"denied_patterns":["(?=forbidden)forbidden"]}"#,
     );
-    assert!(
-        failure(run(command, &json!({"action":"screen","text":"forbidden"})))
-            .contains("compatible native adapter")
+    assert_eq!(
+        success(run(command, &json!({"action":"screen","text":"FORBIDDEN"}))),
+        json!({"floor":"configured output policy"})
     );
     let mut request = save_request();
     request["text"] = json!("Contact Fictional Person at person@example.org");

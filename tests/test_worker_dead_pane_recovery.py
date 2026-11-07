@@ -1,5 +1,6 @@
 """Canonical J with real private storage; closed native ports, no engine effects."""
-import json,os,socket,subprocess,unittest,pty,shutil,signal,threading,time,sys
+import io,json,os,re,socket,subprocess,unittest,pty,shutil,signal,threading,time,sys
+import fcntl,struct,termios
 from pathlib import Path
 from unittest.mock import patch
 from tests import test_worker as F
@@ -186,3 +187,53 @@ class AttachedInnerDeath(unittest.TestCase):
    self.client.settimeout(max(.001,end-time.monotonic()));kind,body=receive_frame(self.client)
    if kind in(b'E',b'X'):outcome=(kind,body);break
   self.assertTrue(written);self.assertEqual(receipt.read_text(),'0');self.assertEqual(outcome,(b'X',b'0'))
+
+
+class ResizeThroughRealViewer(unittest.TestCase):
+ """A real tmux client behind a TypeScript engine CLI (tests/fixtures/worker-resize-engine.ts) that ignores a
+ SIGWINCH sent before its handler is installed, so only a later delivered signal can resize the client."""
+ save=DeadPaneRecovery.save;query=AttachedInnerDeath.query;close_viewer=AttachedInnerDeath.close_viewer
+ attach=AttachedInnerDeath.attach
+ def setUp(self,install_delay='1.0'):
+  AttachedInnerDeath.setUp(self)
+  node=shutil.which('node');self.assertIsNotNone(node,'Declared flake Node is required')
+  source=Path(__file__).with_name('fixtures')/'worker-resize-engine.ts'
+  self.engine=self.root/'resize-engine.ts';self.engine.write_text('#!'+node+'\n'+source.read_text());self.engine.chmod(0o700)
+  self.broker.engine=str(self.engine)
+  self.enterContext(patch.dict(os.environ,FAKE_TMUX=self.tmux,FAKE_TMUX_SOCKET=str(self.tmux_socket),FAKE_INSTALL_DELAY=install_delay))
+  inspect=self.broker.run_engine
+  def engine(args,optional=False,*,deadline=None):
+   if args[0]=='exec':return Broker.run_engine(self.broker,args,optional,deadline=deadline)
+   return inspect(args,optional,deadline=deadline)
+  self.broker.run_engine=engine;self.stderr=self.enterContext(patch('sys.stderr',new_callable=io.StringIO))
+ def clients(self):
+  return subprocess.check_output([self.tmux,'-S',str(self.tmux_socket),'list-clients','-F','#{client_width} #{client_height}'],text=True,timeout=2).split('\n')[:-1]
+ def resize(self,cols,rows):send_frame(self.client,b'R',json.dumps([cols,rows]).encode())
+ def wait(self,check,seconds):
+  end=time.monotonic()+seconds
+  while time.monotonic()<end and not check():time.sleep(.02)
+  return check()
+ def test_a_resize_dropped_before_the_client_listens_is_signalled_again_and_reaches_the_client(self):
+  self.attach();self.assertEqual(self.clients(),['80 24']);self.resize(100,35)
+  # The engine installs its handler a second after start: only a later signal can resize the client.
+  self.assertTrue(self.wait(lambda:self.clients()==['100 35'],4),self.clients())
+  self.assertNotIn('unconfirmed',self.stderr.getvalue());self.close_viewer()
+ def test_split_panes_and_a_status_line_do_not_hide_the_client_acknowledgement(self):
+  self.setUp(install_delay='0');self.attach()
+  for command in (['split-window','-h','-t','office','exec sleep 120'],['set-option','-g','status','on']):
+   subprocess.run([self.tmux,'-S',str(self.tmux_socket),*command],check=True,capture_output=True)
+  self.resize(100,35);self.assertTrue(self.wait(lambda:self.clients()==['100 35'],4),self.clients())
+  self.assertNotEqual(self.query('#{pane_width}'),'100');time.sleep(6)
+  self.assertNotIn('unconfirmed',self.stderr.getvalue());self.close_viewer()
+ def test_another_client_already_at_the_requested_size_does_not_acknowledge_this_viewer(self):
+  self.setUp(install_delay='60');self.attach()
+  master,slave=os.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',35,100,0,0))
+  other=subprocess.Popen([self.tmux,'-u','-S',str(self.tmux_socket),'attach-session','-t','office'],stdin=slave,stdout=slave,stderr=slave,
+   start_new_session=True,close_fds=True,env={**os.environ,'TERM':'xterm-256color'})
+  os.close(slave);self.addCleanup(lambda:(other.terminate(),other.wait(5),os.close(master)))
+  self.assertTrue(self.wait(lambda:sorted(self.clients())==['100 35','80 24'],4),self.clients());self.resize(100,35)
+  # Never acknowledged by the other client's size: unconfirmed at its deadline, or sooner if a late query is left
+  # unreaped under load, which also refuses rather than acknowledges.
+  reported=re.compile(r'terminal resize to 100x35 unconfirmed \((EXPIRED|CLEANUP_UNCONFIRMED)\)')
+  self.assertTrue(self.wait(lambda:reported.search(self.stderr.getvalue()),7),self.stderr.getvalue())
+  self.assertEqual(sorted(self.clients()),['100 35','80 24']);self.close_viewer()

@@ -126,6 +126,14 @@ fn accepted_socket_uses_kernel_uid_and_closed_t_report_with_fragmented_header() 
     let fixture = Fixture::new();
     let service = WorkerReportService::from_runtime(&fixture.runtime);
     let (mut client, server) = fixture.sockets();
+    // This collector deliberately refuses overlapping report readers. Build
+    // the expected bytes before the real service can take its report lock.
+    let expected = fixture
+        .collector
+        .command_failure_report(
+            &reverie_contracts::command_telemetry::decode_report_request(REQUEST).unwrap(),
+        )
+        .unwrap();
     std::thread::scope(|scope| {
         let task = scope.spawn(|| service.handle(server, &fixture.collector));
         for byte in WorkerFrameHeader::for_payload(b'T', REQUEST.len())
@@ -135,12 +143,6 @@ fn accepted_socket_uses_kernel_uid_and_closed_t_report_with_fragmented_header() 
             client.write_all(&[byte]).unwrap();
         }
         client.write_all(REQUEST).unwrap();
-        let expected = fixture
-            .collector
-            .command_failure_report(
-                &reverie_contracts::command_telemetry::decode_report_request(REQUEST).unwrap(),
-            )
-            .unwrap();
         assert_eq!(reply(&mut client), (b'J', expected));
         task.join().unwrap().unwrap();
     });

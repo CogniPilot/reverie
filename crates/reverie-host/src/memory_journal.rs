@@ -34,7 +34,12 @@ pub struct MemoryJournalClient {
 }
 impl MemoryJournalClient {
     pub fn capture() -> Result<Option<Self>> {
-        let environment = std::env::vars_os().collect::<Vec<_>>();
+        let environment = std::env::vars_os()
+            .filter(|(key, _)| {
+                !crate::memory_artifacts::guest()
+                    || !crate::memory_artifacts::code_loading_environment(key)
+            })
+            .collect::<Vec<_>>();
         if !environment
             .iter()
             .any(|(key, value)| key == OsStr::new("REVERIE_SESSION_ID") && !value.is_empty())
@@ -134,7 +139,11 @@ impl MemoryJournalClient {
         cancellation: &CancellationToken,
         save: bool,
     ) -> Result<CapturedOutput> {
-        let mut args = self.entrypoint.iter().cloned().collect::<Vec<_>>();
+        let mut args = Vec::new();
+        if self.entrypoint.is_some() && crate::memory_artifacts::guest() {
+            args.push(OsString::from("--no-global-search-paths"));
+        }
+        args.extend(self.entrypoint.iter().cloned());
         args.extend(["agent", "journal"].map(OsString::from));
         for value in arguments {
             args.push(

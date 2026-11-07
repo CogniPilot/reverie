@@ -9,7 +9,7 @@ use std::{
 };
 /// Actual held parent namespace, with named-entry rechecks. This pins inode
 /// identity, not a pathname lease or protection from arbitrary same-UID renames.
-pub(super) struct Directory {
+pub(crate) struct Directory {
     root: PathBuf,
     file: Option<File>,
     identity: (u64, u64, u32, u32),
@@ -28,6 +28,9 @@ pub(super) fn name(path: &Path, root: &Path) -> Result<OsString> {
 }
 impl Directory {
     pub(super) fn open(root: &Path) -> Result<Self> {
+        Self::open_for_uid(root, native::uid())
+    }
+    pub(crate) fn open_for_uid(root: &Path, uid: u32) -> Result<Self> {
         let file = native::open_at(
             libc::AT_FDCWD,
             root.as_os_str(),
@@ -41,7 +44,7 @@ impl Directory {
         };
         let result = (|| {
             let info = directory.file().metadata().map_err(io)?;
-            if info.uid() != native::uid() || info.mode() & 0o022 != 0 {
+            if info.uid() != uid || info.mode() & 0o022 != 0 {
                 return Err(error(ChildCause::Custody));
             }
             directory.identity = identity(&info);
@@ -56,10 +59,10 @@ impl Directory {
         }
         Ok(directory)
     }
-    pub(super) fn file(&self) -> &File {
+    pub(crate) fn file(&self) -> &File {
         self.file.as_ref().expect("held launch parent")
     }
-    pub(super) fn recheck(&self) -> Result<()> {
+    pub(crate) fn recheck(&self) -> Result<()> {
         let named = fs::symlink_metadata(&self.root).map_err(io)?;
         let held = self.file().metadata().map_err(io)?;
         if !named.is_dir()
@@ -71,7 +74,7 @@ impl Directory {
         }
         Ok(())
     }
-    pub(super) fn finish<T>(
+    pub(crate) fn finish<T>(
         mut self,
         result: Result<T>,
         state: RecordDisposition,

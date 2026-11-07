@@ -12,6 +12,10 @@ import tempfile
 import threading
 import unittest
 
+import signal
+
+from reverie.worker import (RESIZE_CONFIRM_SECONDS, RESIZE_GONE, RESIZE_OBSERVE_INTERVAL, RESIZE_QUERY_FLOOR, ViewerResize,
+                            resize_marker_env)
 from reverie.worker import OFFLINE_GRACE_SECONDS, Broker, OfficeAPI, MAX_FRAME, create_args, load_config, receive_frame, send_frame, validate_request
 
 SID = '11111111-2222-3333-4444-555555555555'
@@ -386,6 +390,387 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual([call[0] for call in calls], ['inspect'])
         self.assertFalse(broker.active)
+
+
+RESIZE_TEST_MARKER = 'f' * 32
+
+
+class ResizeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class ResizeChild:
+    def __init__(self):
+        self.pid = 424242
+        self.exit = None
+
+    def poll(self):
+        return self.exit
+
+
+class ResizeStopping:
+    def __init__(self):
+        self.stopped = False
+        self.deadline = None
+
+    def is_set(self):
+        return self.stopped
+
+
+class ResizeBroker:
+    """The broker surface ViewerResize uses, with a scripted engine."""
+
+    def __init__(self, test):
+        self.test = test
+        self.viewers = {}
+        self.owned_clients = {}
+        self.stopping = ResizeStopping()
+        self.calls = []
+        self.answers = []
+
+    def run_engine(self, args, optional=False, *, deadline=None):
+        self.test.assertTrue(optional)
+        self.test.assertIsNotNone(deadline)
+        self.calls.append((args, deadline))
+        answer = self.answers.pop(0)
+        if callable(answer):
+            answer = answer(args)
+        if isinstance(answer, BaseException):
+            raise answer
+        return subprocess.CompletedProcess(args, 0, answer, '')
+
+
+def resize_rows(*rows):
+    return ''.join('%d %d %d\n' % row for row in rows)
+
+
+def resize_unconfirmed(size, reason, observed='none'):
+    return 'Reverie worker: terminal resize to %s unconfirmed (%s); last observed %s' % (size, reason, observed)
+
+
+def resize_environ(marker=RESIZE_TEST_MARKER, extra=('TERM=xterm-256color',)):
+    return '\0'.join([*extra, resize_marker_env(marker)]) + '\0'
+
+
+class ViewerResizeRules(unittest.TestCase):
+    """A viewer's resize is confirmed by its own tmux client within one deadline, or reported as unconfirmed."""
+    def setUp(self):
+        self.clock = ResizeClock()
+        self.broker = ResizeBroker(self)
+        self.child = ResizeChild()
+        self.guard = threading.Lock()
+        self.token = object()
+        self.broker.viewers[self.token] = (self.child, self.guard)
+        self.reports = []
+        self.signals = []
+        kill = lambda pid, sig: self.signals.append((pid, sig))
+        self.enterContext(patch('reverie.worker.os.kill', side_effect=kill))
+        self.resize = ViewerResize(self.broker, 'c' * 64, self.child, self.token, self.guard, RESIZE_TEST_MARKER, clock=self.clock,
+                                   report=self.reports.append)
+
+    def observe(self, answers):
+        self.broker.answers.extend(answers)
+        self.clock.now += RESIZE_OBSERVE_INTERVAL
+        self.assertTrue(self.resize.due())
+        self.resize.observe()
+
+    def test_an_immediate_match_needs_one_signal_and_one_observation(self):
+        self.resize.request(100, 35)
+        self.observe([resize_rows((77, 100, 35)), resize_environ()])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.signals, [(424242, signal.SIGWINCH)])
+        self.assertEqual(self.reports, [])
+        listed, read = [args for args, _ in self.broker.calls]
+        self.assertEqual(listed[-3:], ['list-clients', '-F', '#{client_pid} #{client_width} #{client_height}'])
+        self.assertEqual(read, ['exec', 'c' * 64, '/bin/cat', '/proc/77/environ'])
+
+    def test_an_old_size_is_signalled_again_until_this_client_reports_the_request(self):
+        self.resize.request(100, 35)
+        self.observe([resize_rows((77, 80, 24)), resize_environ()])
+        self.assertEqual(len(self.signals), 2)
+        self.observe([resize_rows((77, 100, 35)), resize_environ()])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(len(self.signals), 2)
+        self.assertEqual(self.reports, [])
+
+    def test_every_call_shares_the_request_deadline_clamped_by_the_stop_budget(self):
+        self.resize.request(100, 35)
+        deadline = self.resize.pending.deadline
+        self.observe([resize_rows((77, 80, 24)), resize_environ()])
+        self.assertEqual({d for _, d in self.broker.calls}, {deadline})
+        self.broker.stopping.deadline = deadline - 1
+        self.observe([resize_rows((77, 80, 24)), resize_environ()])
+        self.assertEqual({d for _, d in self.broker.calls[2:]}, {deadline - 1})
+
+    def test_a_newer_request_replaces_the_older_and_only_it_is_acknowledged(self):
+        self.resize.request(100, 35)
+        self.resize.request(120, 40)
+        self.observe([resize_rows((77, 100, 35)), resize_environ()])
+        self.assertEqual((self.resize.pending.cols, self.resize.pending.rows), (120, 40))
+        self.observe([resize_rows((77, 120, 40)), resize_environ()])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.reports, [])
+
+    def test_an_observation_superseded_while_it_runs_neither_acknowledges_nor_signals(self):
+        self.resize.request(100, 35)
+        def newer(args):
+            self.resize.request(120, 40)
+            return resize_environ()
+        before = len(self.signals)
+        self.observe([resize_rows((77, 100, 35)), newer])
+        # Only the newer request's own signal; the stale 100x35 observation is discarded.
+        self.assertEqual(len(self.signals), before + 1)
+        self.assertEqual((self.resize.pending.cols, self.resize.pending.rows), (120, 40))
+        self.assertEqual(self.reports, [])
+
+    def test_a_query_returning_after_the_deadline_cannot_acknowledge_and_reports_once(self):
+        self.resize.request(100, 35)
+        def late(args):
+            self.clock.now += RESIZE_CONFIRM_SECONDS
+            return resize_environ()
+        signals = len(self.signals)
+        self.observe([resize_rows((77, 100, 35)), late])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(len(self.signals), signals)
+        self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'EXPIRED')])
+        self.assertFalse(self.resize.due())
+
+    def test_nothing_is_dispatched_after_expiry(self):
+        self.resize.request(100, 35)
+        self.clock.now += RESIZE_CONFIRM_SECONDS
+        self.resize.observe()
+        self.assertEqual(self.broker.calls, [])
+        self.assertEqual(len(self.reports), 1)
+        self.assertIn('(EXPIRED)', self.reports[0])
+
+    def test_no_query_is_started_without_its_floor_and_the_request_then_expires_at_its_deadline(self):
+        self.resize.request(100, 35)
+        self.clock.now = self.resize.pending.deadline - RESIZE_QUERY_FLOOR + 0.01
+        self.resize.observe()
+        self.assertEqual(self.broker.calls, [])
+        self.assertEqual(self.reports, [])
+        self.clock.now = self.resize.pending.deadline
+        self.resize.observe()
+        self.assertEqual(self.broker.calls, [])
+        self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'EXPIRED')])
+
+    def test_unsettled_query_ownership_stops_confirmation_and_reports_every_later_request(self):
+        self.resize.request(100, 35)
+        def retained(args):
+            # As run_client does when it cannot reap a killed client: the record stays owned.
+            self.broker.owned_clients[object()] = ResizeChild()
+            return subprocess.TimeoutExpired(args, 1)
+        self.observe([retained])
+        self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'CLEANUP_UNCONFIRMED')])
+        self.assertFalse(self.resize.due())
+        calls = len(self.broker.calls)
+        self.resize.request(120, 40)
+        self.assertEqual(self.reports[-1], resize_unconfirmed('120x40', 'CLEANUP_UNCONFIRMED'))
+        self.assertFalse(self.resize.due())
+        self.resize.observe()
+        self.assertEqual(len(self.broker.calls), calls)
+        self.assertEqual(len(self.broker.owned_clients), 1)
+
+    def test_a_settled_query_failure_or_undecodable_environment_is_only_a_missed_observation(self):
+        self.resize.request(100, 35)
+        self.observe([RuntimeError('Worker engine operation failed')])
+        self.observe([resize_rows((77, 100, 35)), UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid start byte')])
+        self.assertIsNotNone(self.resize.pending)
+        self.assertIsNone(self.resize.blocked)
+        self.observe([resize_rows((77, 100, 35)), resize_environ()])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.reports, [])
+
+    def test_a_malformed_inventory_or_nonzero_exit_is_not_a_size(self):
+        self.resize.request(100, 35)
+        for inventory in ['77 100\n', '77 100 35 x\n', '0 100 35\n', '77 0 35\n', '-77 100 35\n', 'pid 100 35\n']:
+            self.observe([inventory])
+            self.assertIsNotNone(self.resize.pending, inventory)
+        self.broker.answers.append(lambda args: subprocess.CompletedProcess(args, 1, resize_rows((77, 100, 35)), ''))
+        self.clock.now += RESIZE_OBSERVE_INTERVAL
+        self.resize.observe()
+        self.assertIsNotNone(self.resize.pending)
+        self.assertEqual(self.reports, [])
+
+    def test_only_the_one_client_carrying_this_marker_can_acknowledge(self):
+        self.resize.request(100, 35)
+        # Another client already at the requested size, without this viewer's marker.
+        self.observe([resize_rows((77, 80, 24), (78, 100, 35)), resize_environ(), resize_environ('0' * 32)])
+        self.assertIsNotNone(self.resize.pending)
+        # Two clients claiming this marker are ambiguous, not an acknowledgement.
+        self.observe([resize_rows((77, 100, 35), (78, 100, 35)), resize_environ(), resize_environ()])
+        self.assertIsNotNone(self.resize.pending)
+        # An entry that only contains this marker, or extends it, is not this marker.
+        for entry in ('X' + resize_marker_env(RESIZE_TEST_MARKER), resize_marker_env(RESIZE_TEST_MARKER) + '0', resize_marker_env(RESIZE_TEST_MARKER)[:-1]):
+            self.observe([resize_rows((77, 100, 35)), 'TERM=xterm\0' + entry + '\0'])
+            self.assertIsNotNone(self.resize.pending, entry)
+
+    def test_a_replaced_exited_or_stopping_viewer_is_never_signalled_or_reported(self):
+        for end in ('replaced', 'exited', 'stopping'):
+            with self.subTest(end=end):
+                self.setUp()
+                self.resize.request(100, 35)
+                signals = len(self.signals)
+                if end == 'replaced':
+                    self.broker.viewers[self.token] = (ResizeChild(), threading.Lock())
+                elif end == 'exited':
+                    self.child.exit = 0
+                elif end == 'stopping':
+                    self.broker.stopping.stopped = True
+                self.observe([])
+                self.assertIsNone(self.resize.pending)
+                self.assertEqual(len(self.signals), signals)
+                self.assertEqual(self.reports, [])
+                self.assertEqual(self.broker.calls, [])
+
+    def test_a_held_reap_guard_defers_the_signal_and_keeps_the_request_pending(self):
+        self.assertTrue(self.guard.acquire(blocking=False))
+        try:
+            self.resize.request(100, 35)
+            self.assertEqual(self.signals, [])
+            self.assertIsNotNone(self.resize.pending)
+            self.observe([resize_rows((77, 80, 24)), resize_environ()])
+            self.assertEqual(self.signals, [])
+            self.assertIsNotNone(self.resize.pending)
+        finally:
+            self.guard.release()
+        self.observe([resize_rows((77, 80, 24)), resize_environ()])
+        self.assertEqual(self.signals, [(424242, signal.SIGWINCH)])
+        self.observe([resize_rows((77, 100, 35)), resize_environ()])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.reports, [])
+
+    def test_a_viewer_reaped_while_the_guard_is_being_taken_is_not_signalled(self):
+        resize, broker, token = self.resize, self.broker, self.token
+        class ReapedFirst:
+            """A guard whose holder finished reaping the viewer just before this acquire succeeded."""
+            def __init__(self):
+                self.lock = threading.Lock()
+            def acquire(self, blocking=True):
+                broker.viewers.pop(token, None)
+                return self.lock.acquire(blocking)
+            def release(self):
+                self.lock.release()
+        guard = ReapedFirst()
+        broker.viewers[token] = (self.child, guard)
+        resize.guard = guard
+        resize.request(100, 35)
+        self.assertEqual(self.signals, [])
+        self.assertIsNone(resize.pending)
+
+    def test_a_superseded_request_is_never_signalled_for(self):
+        self.resize.request(100, 35)
+        older = self.resize.pending
+        self.resize.request(120, 40)
+        signals = len(self.signals)
+        self.assertEqual(self.resize.signal(older), RESIZE_GONE)
+        self.assertEqual(len(self.signals), signals)
+        self.assertEqual((self.resize.pending.cols, self.resize.pending.rows), (120, 40))
+
+    def test_a_guard_held_until_the_deadline_reports_the_request_expired(self):
+        self.assertTrue(self.guard.acquire(blocking=False))
+        self.addCleanup(self.guard.release)
+        self.resize.request(100, 35)
+        self.clock.now = self.resize.pending.deadline
+        self.resize.observe()
+        self.assertEqual(self.signals, [])
+        self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'EXPIRED')])
+
+    def test_the_first_signal_has_the_stop_check_too(self):
+        self.broker.stopping.stopped = True
+        self.resize.request(100, 35)
+        self.assertEqual(self.signals, [])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.reports, [])
+
+    def test_an_unreadable_client_environment_leaves_no_client_provably_the_only_one(self):
+        self.resize.request(100, 35)
+        for unreadable in (RuntimeError('Worker engine operation failed'),
+                           UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid start byte'),
+                           lambda args: subprocess.CompletedProcess(args, 1, '', '')):
+            self.observe([resize_rows((77, 100, 35), (78, 80, 24)), resize_environ(), unreadable])
+            self.assertIsNotNone(self.resize.pending, unreadable)
+            self.observe([resize_rows((78, 80, 24), (77, 100, 35)), unreadable, resize_environ()])
+            self.assertIsNotNone(self.resize.pending, unreadable)
+        self.observe([resize_rows((77, 100, 35), (78, 80, 24)), resize_environ(), resize_environ('0' * 32)])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.reports, [])
+
+    def test_a_viewer_replaced_before_its_resize_arrives_is_never_signalled(self):
+        self.broker.viewers[self.token] = (ResizeChild(), threading.Lock())
+        self.resize.request(100, 35)
+        self.assertEqual(self.signals, [])
+        self.assertIsNone(self.resize.pending)
+
+    def test_the_request_clock_and_stop_are_checked_under_the_guard_at_the_signal(self):
+        for change in ('expire', 'stop'):
+            with self.subTest(change=change):
+                self.setUp()
+                self.resize.request(100, 35)
+                signals = len(self.signals)
+                clock, broker, guard = self.clock, self.broker, self.guard
+                class Changing:
+                    """A guard whose acquisition takes until the request expires, or until the broker stops."""
+                    def acquire(self, blocking=True):
+                        if change == 'expire':
+                            clock.now += RESIZE_CONFIRM_SECONDS
+                        else:
+                            broker.stopping.stopped = True
+                        return guard.acquire(blocking)
+                    def release(self):
+                        guard.release()
+                changing = Changing()
+                self.broker.viewers[self.token] = (self.child, changing)
+                self.resize.guard = changing
+                self.resize.signal(self.resize.pending)
+                self.assertEqual(len(self.signals), signals)
+                self.assertIsNone(self.resize.pending)
+                self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'EXPIRED')] if change == 'expire' else [])
+
+    def test_an_acknowledgement_is_bound_to_the_request_clock_at_the_moment_it_is_made(self):
+        self.resize.request(100, 35)
+        clock = self.clock
+        class Expiring(str):
+            """An environment whose marker scan takes until the request has expired."""
+            def split(self, *args):
+                clock.now += RESIZE_CONFIRM_SECONDS
+                return str.split(self, *args)
+        self.observe([resize_rows((77, 100, 35)), Expiring(resize_environ())])
+        self.assertIsNone(self.resize.pending)
+        self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'EXPIRED', '100x35')])
+
+    def test_a_blocked_viewer_reports_a_later_request_even_while_its_guard_is_busy(self):
+        self.resize.request(100, 35)
+        def retained(args):
+            self.broker.owned_clients[object()] = ResizeChild()
+            return subprocess.TimeoutExpired(args, 1)
+        self.observe([retained])
+        self.assertTrue(self.guard.acquire(blocking=False))
+        self.addCleanup(self.guard.release)
+        self.resize.request(120, 40)
+        self.assertEqual(self.reports[-1], resize_unconfirmed('120x40', 'CLEANUP_UNCONFIRMED'))
+        self.assertIsNone(self.resize.pending)
+
+    def test_an_environment_read_refused_by_the_query_floor_leaves_the_round_unacknowledged(self):
+        self.resize.request(100, 35)
+        deadline = self.resize.pending.deadline
+        def late(args):
+            # The inventory returns with less than the floor left, so the environment reads are not dispatched.
+            self.clock.now = deadline - RESIZE_QUERY_FLOOR + 0.01
+            return resize_rows((77, 100, 35))
+        self.observe([late])
+        self.assertIsNotNone(self.resize.pending)
+        self.assertEqual(len(self.broker.calls), 1)
+
+    def test_an_unknown_container_reports_the_request_unavailable(self):
+        self.resize.container_id = None
+        self.resize.request(100, 35)
+        self.observe([])
+        self.assertEqual(self.reports, [resize_unconfirmed('100x35', 'UNAVAILABLE')])
 
 
 if __name__ == '__main__':

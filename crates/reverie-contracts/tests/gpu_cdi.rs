@@ -82,3 +82,28 @@ fn assert_projection(name: &str, value: &CdiSelectedEdits, expected: &Projection
     );
     assert_eq!(value.hook_count(), expected.hook_count, "{name}");
 }
+#[test]
+fn actual_pinned_loader_consumes_first_sign_before_decimal_fallback() {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/gpu_access/cdi-double-sign-python.json"
+    ))
+    .unwrap();
+    assert_eq!(corpus["pyyaml"], "6.0.3");
+    assert_eq!(
+        corpus["constructorSha256"],
+        "f178040c9a9723a1e42588f1737bfb8cf9cf364cc6e49fb9a609d62ca3ddf2df"
+    );
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 26);
+    let mut failures = Vec::new();
+    for case in cases {
+        let decoded = CdiDocument::decode(&raw(case["rawHex"].as_str().unwrap())).is_ok();
+        if decoded != case["decoded"].as_bool().unwrap() {
+            failures.push(format!(
+                "{}: loader {} Rust {decoded}",
+                case["value"], case["decoded"]
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

@@ -305,14 +305,203 @@ def create_args(config, session_id, home, *, scratch=None, storage=None):
     return name, digest, args
 
 
-def tmux_exec_args(name, *command, attach=False):
+def tmux_exec_args(name, *command, attach=False, env=()):
     # Docker exec does not inherit the provider shell's locale. Both the tmux
     # server and each attach client need UTF-8; otherwise line drawing becomes
     # VT100 ACS q's and other Unicode is replaced by underscores.
     return ['exec', *(['-it'] if attach else []),
             '--env', 'LANG=C.UTF-8', '--env', 'LC_ALL=C.UTF-8',
             '--env', 'TERM=xterm-256color', '--env', 'COLORTERM=truecolor',
+            *[item for entry in env for item in ('--env', entry)],
             name, '/bin/tmux', '-u', '-L', 'reverie-laptop', *command]
+
+
+# Confirmed terminal resize for one broker viewer.
+#
+# A resize reaches the office pane through the engine's attach client: the broker sets the viewer PTY's size and
+# signals SIGWINCH, and the client must then resize its exec terminal. A SIGWINCH that arrives before the client
+# installs its handler can be dropped, and nothing sends it again, so a single signal is not a delivered resize.
+# ViewerResize keeps the latest requested size per viewer and re-signals until this viewer's own tmux client reports
+# exactly that size, or the request's deadline passes, in which case it reports the resize as unconfirmed and leaves
+# the terminal open.
+#
+# This viewer's client is the one tmux client whose environment carries the viewer's random marker, which its attach
+# exec was given; its client size, not a pane or window size, is the acknowledgement, so split panes, the status line
+# and window-size policy neither fake nor hide one. A round in which any listed client's environment could not be read
+# acknowledges nothing. This correlates an owned viewer; it is not a boundary against a process that copies the
+# marker.
+#
+# Everything runs in the viewer's own serial loop. Every engine call shares the request's deadline, clamped by the
+# broker's stop budget, and is dispatched only while at least RESIZE_QUERY_FLOOR of it remains. The request's stop,
+# viewer, clock and identity checks run before each call and after it returns, under the viewer's reap guard
+# immediately before each signal, the first one included, and again before an acknowledgement. A guard held elsewhere
+# only defers a signal; the request stays pending until it is confirmed, the viewer ends or it expires. A query that
+# leaves an owned engine client unsettled stops this viewer's confirmation for good: the retained client stays with
+# the broker's owned-client cleanup, and later requests are reported as unconfirmed at once.
+RESIZE_MARKER_NAME = 'REVERIE_VIEWER'
+# Each request is confirmed within this long, and observed at most this often.
+RESIZE_CONFIRM_SECONDS = 5.0
+RESIZE_OBSERVE_INTERVAL = 0.25
+# A query is dispatched only with this much of its deadline left, so it can finish and be reaped rather than be cut
+# short by the deadline and left unreaped; the request then expires at its deadline without a further query.
+RESIZE_QUERY_FLOOR = 1.0
+# The image's coreutils, linked into /bin by the same runtime environment as /bin/tmux.
+RESIZE_CAT = '/bin/cat'
+# What a signal attempt did. RESIZE_BUSY means the viewer's reap guard was held, which is not evidence that it exited.
+RESIZE_SENT, RESIZE_BUSY, RESIZE_GONE = 'sent', 'busy', 'gone'
+_RESIZE_CLIENT_ROW = re.compile(r'([1-9][0-9]{0,9}) ([1-9][0-9]{0,3}) ([1-9][0-9]{0,3})')
+
+
+class _ResizeRequest:
+    __slots__ = ('seq', 'cols', 'rows', 'deadline', 'observed')
+
+    def __init__(self, seq, cols, rows, deadline):
+        self.seq, self.cols, self.rows, self.deadline = seq, cols, rows, deadline
+        self.observed = None
+
+
+class ViewerResize:
+    """The resize confirmation of one viewer: `child` is its engine attach client, registered in
+    `broker.viewers[token]` as `(child, guard)`, whose attach exec carries `resize_marker_env(marker)`."""
+
+    def __init__(self, broker, container_id, child, token, guard, marker, *, clock=time.monotonic, report=None):
+        self.broker, self.container_id, self.child = broker, container_id, child
+        self.token, self.guard, self.marker = token, guard, marker
+        self.clock = clock
+        self.report = report or (lambda line: print(line, file=sys.stderr, flush=True))
+        self.pending = None
+        self.blocked = None
+        self.seq = 0
+        self.last_observed = None
+
+    def request(self, cols, rows):
+        """Called after the viewer PTY has been set to cols x rows."""
+        self.seq += 1
+        request = _ResizeRequest(self.seq, cols, rows, self.clock() + RESIZE_CONFIRM_SECONDS)
+        self.pending = request
+        if self.signal(request) == RESIZE_GONE:
+            return
+        if self.blocked is not None:
+            # No query may follow unresolved ownership; this request still gets its disposition.
+            self._finish(request, self.blocked)
+
+    def due(self):
+        return (self.pending is not None and self.blocked is None and
+                (self.last_observed is None or self.clock() - self.last_observed >= RESIZE_OBSERVE_INTERVAL))
+
+    def observe(self):
+        """One bounded observation for the current request; acknowledges it, signals again, or finishes it."""
+        request = self.pending
+        if request is None or self.blocked is not None:
+            return
+        self.last_observed = self.clock()
+        rows = self._query(request, ['list-clients', '-F', '#{client_pid} #{client_width} #{client_height}'], tmux=True)
+        if rows is None:
+            return
+        clients = _resize_clients(rows)
+        ours, unread = [], False
+        for pid, width, height in clients or ():
+            environment = self._query(request, [RESIZE_CAT, '/proc/%d/environ' % pid])
+            if self.pending is not request:
+                return
+            if environment is None:
+                # This client might carry the marker too, so no other client is provably the only one.
+                unread = True
+            elif self.marker_entry in environment.split('\0'):
+                ours.append((width, height))
+        if len(ours) == 1 and not unread:
+            request.observed = ours[0]
+            if ours[0] == (request.cols, request.rows):
+                # The same stop, viewer, clock and identity checks bind the acknowledgement itself.
+                if self._current(request):
+                    self.pending = None
+                return
+        self.signal(request)
+
+    @property
+    def marker_entry(self):
+        return RESIZE_MARKER_NAME + '=' + self.marker
+
+    def signal(self, request):
+        """SIGWINCH for `request` to this viewer's attach client. RESIZE_SENT once signalled; RESIZE_BUSY, with
+        `request` still pending, when the viewer's reap guard is held elsewhere, which is not evidence that it exited;
+        RESIZE_GONE once `request` has finished."""
+        if not self.guard.acquire(blocking=False):
+            return RESIZE_BUSY if self._current(request) else RESIZE_GONE
+        try:
+            # Under the guard no broker reaper can retire this child, so the request's stop, viewer, clock and
+            # identity checks hold for the signal itself.
+            if not self._current(request):
+                return RESIZE_GONE
+            os.kill(self.child.pid, signal.SIGWINCH)
+            return RESIZE_SENT
+        finally:
+            self.guard.release()
+
+    def _query(self, request, command, tmux=False):
+        """One engine call for `request`, or None when nothing usable came back (the request may have finished)."""
+        if not self._current(request):
+            return None
+        deadline = request.deadline
+        stop = getattr(self.broker.stopping, 'deadline', None)
+        if stop is not None:
+            deadline = min(deadline, stop)
+        if deadline - self.clock() < RESIZE_QUERY_FLOOR:
+            return None
+        if self.container_id is None:
+            self._finish(request, 'UNAVAILABLE')
+            return None
+        args = tmux_exec_args(self.container_id, *command) if tmux else ['exec', self.container_id, *command]
+        before = set(self.broker.owned_clients)
+        try:
+            result = self.broker.run_engine(args, optional=True, deadline=deadline)
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+            # A raise does not prove the client was reaped: a retained record does the opposite.
+            if set(self.broker.owned_clients) - before:
+                self.blocked = 'CLEANUP_UNCONFIRMED'
+                self._finish(request, self.blocked)
+                return None
+            self._current(request)
+            return None
+        if not self._current(request) or result.returncode != 0 or not isinstance(result.stdout, str):
+            return None
+        return result.stdout
+
+    def _current(self, request):
+        """Whether `request` is still the one to confirm, finishing it if its time, viewer or broker has ended."""
+        if self.pending is not request:
+            return False
+        if self.broker.stopping.is_set() or self.broker.viewers.get(self.token) != (self.child, self.guard) or \
+                self.child.poll() is not None:
+            self.pending = None
+            return False
+        if self.clock() >= request.deadline:
+            self._finish(request, 'EXPIRED')
+            return False
+        return True
+
+    def _finish(self, request, reason):
+        if self.pending is request:
+            self.pending = None
+        observed = '%dx%d' % request.observed if request.observed else 'none'
+        self.report('Reverie worker: terminal resize to %dx%d unconfirmed (%s); last observed %s' %
+                    (request.cols, request.rows, reason, observed))
+
+
+def resize_marker_env(marker):
+    """The attach exec's environment entry that names this viewer's tmux client."""
+    return RESIZE_MARKER_NAME + '=' + marker
+
+
+def _resize_clients(text):
+    """The `pid width height` rows of a client inventory, or None if any row is malformed."""
+    clients = []
+    for line in text.splitlines():
+        match = _RESIZE_CLIENT_ROW.fullmatch(line)
+        if match is None:
+            return None
+        clients.append(tuple(int(value) for value in match.groups()))
+    return clients
 
 
 def account_mounts(config, environment):
@@ -2163,8 +2352,11 @@ class Broker:
             viewer_token = object()
             viewer_guard = threading.Lock()
             self.viewers[viewer_token] = (None, viewer_guard)
-            child = subprocess.Popen([self.engine, *tmux_exec_args(name, 'attach-session', '-d', '-t', 'office', attach=True)], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
+            # The attach exec's marker names this viewer's own tmux client for resize confirmation.
+            viewer_marker = secrets.token_hex(16)
+            child = subprocess.Popen([self.engine, *tmux_exec_args(name, 'attach-session', '-d', '-t', 'office', attach=True, env=(resize_marker_env(viewer_marker),))], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
             self.viewers[viewer_token] = (child, viewer_guard)
+            resize = ViewerResize(self, viewer_container_id, child, viewer_token, viewer_guard, viewer_marker)
             os.close(slave)
             slave = None
             attached_at = time.monotonic()
@@ -2185,7 +2377,7 @@ class Broker:
                                 if type(cols) is not int or type(rows) is not int or not 1 <= cols <= 1000 or not 1 <= rows <= 1000:
                                     raise ValueError('Invalid resize')
                                 fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
-                                os.kill(child.pid, signal.SIGWINCH)
+                                resize.request(cols, rows)
                             else:
                                 raise ValueError('Invalid terminal frame')
                         else:
@@ -2197,6 +2389,8 @@ class Broker:
                                 send_frame(connection, b'O', output)
                             else:
                                 poller.unregister(master)
+                    if resize.due():
+                        resize.observe()
                     completed = exit_file is not None and exit_file.is_file()
                     result = int(exit_file.read_text()) if completed else child.poll()
                     if result is not None and (not completed or time.monotonic()-attached_at >= .5):

@@ -20,6 +20,18 @@ The Unicode data license is retained beside the tables. The port has no Python
 build or runtime dependency. Fixtures cover actual Python tokens, f64 values,
 stored f32 bytes, scores, HTTP float coercion and metadata string representation.
 
+`python_regex` exposes purpose-specific frozen facts to the native compiler and
+standalone matcher: Python 3.13 simple lower/upper, word/decimal/space classes,
+identifier/alphabetic predicates, regex case additions and Unicode 15.1 named
+characters. Existing lowercase/character tables remain the single owner.
+Additional uppercase and identifier facts were exhaustively qualified against
+the accepted Python runtime, including lone surrogates. The named-character
+dependency is pinned to Unicode 15.1 and its CJK lexical check follows CPython.
+Its adapter also rejects a canonical name followed by extra characters when the
+pinned dependency's hash lookup incorrectly returns the canonical character;
+exact canonical names and exact alias lookup remain unchanged.
+Core depends on no matcher or regex compiler, so this seam introduces no cycle.
+
 The private `python_text` owner shares those unchanged frozen tables across
 scalar memory operations and lossless codepoint consumers such as hostnames and
 nonpersisted model/query text. Lone surrogates retain Python's lower-case
