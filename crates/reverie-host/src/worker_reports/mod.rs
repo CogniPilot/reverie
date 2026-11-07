@@ -9,8 +9,13 @@ mod listener;
 pub use listener::{
     BrokerListenerError, BrokerListenerFailure, PreparedBrokerListener, WorkerBrokerListener,
 };
+mod protected_launch;
 mod record;
 mod registered;
+pub use protected_launch::{
+    HeldProtectedWorkerLaunch, ProtectedLaunchDecodeFailure, ProtectedLaunchHoldFailure,
+    WorkerProtectedLaunchConnection,
+};
 mod resume;
 mod service_connection;
 pub use resume::{WorkerActorChannel, WorkerActorChannelFailure};

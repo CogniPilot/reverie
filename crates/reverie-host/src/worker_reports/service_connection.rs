@@ -67,8 +67,21 @@ pub struct WorkerServiceConnection {
     purpose: WorkerServicePurpose,
     payload: Vec<u8>,
     peer: WorkerPeer,
+    ownership: SocketOwnership,
+}
+enum SocketOwnership {
+    Direct,
+    ProtectedLaunch,
 }
 impl WorkerServiceConnection {
+    pub(super) fn delegate_protected(
+        mut self,
+        request: reverie_contracts::worker_launch::WorkerRequest,
+    ) -> WorkerLaunchConnection {
+        self.ownership = SocketOwnership::ProtectedLaunch;
+        WorkerLaunchConnection::from_protected(self, request)
+    }
+
     pub(super) fn new(
         service: Arc<WorkerReportService>,
         record: Arc<Record>,
@@ -82,6 +95,7 @@ impl WorkerServiceConnection {
             purpose,
             payload,
             peer,
+            ownership: SocketOwnership::Direct,
         }
     }
     pub fn purpose(&self) -> WorkerServicePurpose {
@@ -155,6 +169,8 @@ impl Drop for WorkerServiceConnection {
     fn drop(&mut self) {
         // Default destruction is a checked negative path, not a purpose result
         // or authority to release a delegated resource/channel lifetime.
-        let _ = self.service.finish_accepted_for_worker(&self.record);
+        if matches!(self.ownership, SocketOwnership::Direct) {
+            let _ = self.service.finish_accepted_for_worker(&self.record);
+        }
     }
 }
