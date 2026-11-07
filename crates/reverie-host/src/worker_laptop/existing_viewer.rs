@@ -2,7 +2,9 @@
 //! App supplies its actual classified reuse scope; these resources are not an
 //! authorization, live-pane proof, admission release or source-stop permit.
 use super::*;
+mod created_transfer;
 mod finalization;
+pub use created_transfer::StartedRelayTransferred;
 mod relay;
 mod stop;
 use crate::{

@@ -25,6 +25,13 @@ enum CloseState {
     Unconfirmed,
 }
 impl NixOwnership {
+    pub(super) fn into_closed_storage(self) -> LaunchStorage {
+        let Self::GuardConsumed(data) = self else {
+            unreachable!("actual closed guard checked under the same record mutex")
+        };
+        assert!(data.close == CloseState::Confirmed && data.outcome.is_ok());
+        data.storage
+    }
     pub(super) fn guard_close_confirmed(&self) -> bool {
         matches!(self,Self::GuardConsumed(data) if data.close==CloseState::Confirmed && data.outcome.is_ok())
     }

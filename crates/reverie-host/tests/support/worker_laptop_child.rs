@@ -80,6 +80,11 @@ fn main() {
         fs::write("killed-laptop",b"actual fixed kill effect").unwrap();return;
     }
     if args.first().map(String::as_str)==Some("inspect") {
+        if Path::new("created-final-inspect.json").is_file() && args[1].starts_with("fixture-agent-") {
+            assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
+            if Path::new("created-final-inspect-fail").is_file() {std::process::exit(7);}
+            std::io::stdout().write_all(&fs::read("created-final-inspect.json").unwrap()).unwrap();return;
+        }
         if Path::new("existing-inspect.json").is_file() {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
             std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
@@ -104,6 +109,9 @@ fn main() {
         let running=mode=="created-cleanup-kill"&&!Path::new("killed-laptop").exists();
         let pid=if running {321}else{0};
         print!("[{{\"Id\":\"{id}\",\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]");return;
+    }
+    if args==["ps","--all","--no-trunc","--format","{{.ID}} {{.Names}}"] && Path::new("created-final-census").exists() {
+        std::io::stdout().write_all(&fs::read("created-final-census").unwrap()).unwrap();return;
     }
     assert_eq!(args.first().map(String::as_str),Some("network"));
     match args[1].as_str() {

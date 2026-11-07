@@ -22,6 +22,8 @@ mod storage_cleanup;
 pub use storage::StartedStorageBorrow;
 mod created_receipt;
 pub use created_receipt::CreatedReceiptObservation;
+mod created_finalization;
+pub use created_finalization::{CreatedStorageObservation, StoppedCreatedReturned};
 #[cfg(test)]
 mod tests;
 mod viewer;
@@ -40,7 +42,7 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart,
+    ExistingViewerStart, StartedRelayTransferred,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -94,6 +96,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
+    finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,
     phase: Phase,
@@ -279,6 +282,7 @@ impl Workflows {
             connection,
         };
         let record = Arc::new(Mutex::new(Record {
+            finalization: Default::default(),
             cold: Default::default(),
             resources: Some(resources),
             phase: Phase::Held,

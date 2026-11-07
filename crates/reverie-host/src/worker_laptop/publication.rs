@@ -225,6 +225,18 @@ impl Publication {
     pub(super) fn confirmed(&self) -> bool {
         self.complete && !self.opaque
     }
+    pub(super) fn require_native_closed(&self) -> Result<()> {
+        need(
+            !self.opaque
+                && self.parent.is_none()
+                && self.runtime_parent.is_none()
+                && self.writer.is_none()
+                && self.anchor.is_none()
+                && self.metadata.is_none()
+                && self.metadata_anchor.is_none(),
+            "WORKER_CREATED_PUBLICATION_CLOSE_UNCONFIRMED",
+        )
+    }
     pub(super) fn selected_exit(&self) -> Option<PathBuf> {
         self.nonce
             .as_ref()

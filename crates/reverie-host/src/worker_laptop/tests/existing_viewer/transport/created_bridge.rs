@@ -2,6 +2,8 @@
 //! These component controls mint no App admission or service completion.
 use super::*;
 mod cleanup;
+mod finalization;
+mod transfer;
 fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!(
         "worker_laptop::tests::existing_viewer::transport::created_bridge::{name}"

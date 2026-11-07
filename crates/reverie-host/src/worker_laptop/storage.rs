@@ -154,7 +154,7 @@ fn require_local_closed(record: &Record) -> Result<()> {
     Ok(())
 }
 impl Workflows {
-    fn started_storage_record<'a>(
+    pub(super) fn started_storage_record<'a>(
         &self,
         runtime: &WorkerRuntime,
         created: &'a CreatedLaptop,
@@ -168,6 +168,7 @@ impl Workflows {
         need(
             matches!(record.phase, Phase::Known | Phase::Cleaning)
                 && record.pending.is_none()
+                && record.finalization.untouched()
                 && !record.unknown
                 && record.cleanup.is_none()
                 && record

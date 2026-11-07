@@ -7,6 +7,11 @@ pub(super) struct Cleanup {
     budget: call_budget::CallBudget,
     error: Option<Arc<LaptopError>>,
 }
+impl Cleanup {
+    pub(super) fn confirmed(&self) -> bool {
+        self.error.is_none()
+    }
+}
 #[must_use = "local stopped phase retains real Office/storage/request owners"]
 pub struct StoppedCreatedLaptop {
     pub(super) workflow: LaptopWorkflow,
