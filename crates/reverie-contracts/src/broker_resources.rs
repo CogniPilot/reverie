@@ -170,16 +170,78 @@ impl BrokerResourceConfig {
         let employee = staged.profile().binding().employee();
         let target = staged.target_session();
         let resources = &staged.projection().employees()[employee];
+        let memory = staged_memory(&self.data, staged.profile())?;
         let Node::Object(root) = &mut self.data.0 else {
             unreachable!("checked object")
         };
         replace(root, "employeeResources", employee.as_str(), resources);
         replace(root, "sessionResources", target.as_str(), resources);
+        if let Some(memory) = memory {
+            let Node::Object(entries) = &mut root
+                .get_mut(&key("sessionResources"))
+                .expect("replaced session map")
+                .0
+            else {
+                unreachable!("checked map");
+            };
+            let entry = entries
+                .get_mut(&key(target.as_str()))
+                .expect("replaced target");
+            // Existing explicit SID snapshots outrank the EID policy, including
+            // a frozen null. Never silently drop or overwrite that snapshot.
+            if crate::session_resources_v2::decode(entry)?.is_none() {
+                *entry =
+                    crate::session_resources_v2::wrap(resource_fields(resources), Some(memory));
+            }
+        }
         Ok(StagedBrokerResources {
             data: self.data,
             staged,
         })
     }
+}
+fn staged_memory(
+    data: &Value,
+    profile: &reverie_core::profiles::ResourceProfile,
+) -> Result<Option<Value>> {
+    if profile.resources().budget_mode() != BudgetMode::Pool {
+        return Ok(None);
+    }
+    let mut copied = data.deep_clone();
+    let Node::Object(fields) = std::mem::replace(&mut copied.0, Node::Null) else {
+        unreachable!("checked config");
+    };
+    let config = crate::worker_config::EffectiveWorkerConfig::from_object(fields);
+    let prior = object(config.as_value())
+        .and_then(|root| root.get(&key("sessionResources")))
+        .and_then(object)
+        .and_then(|entries| entries.get(&key(profile.binding().target_session().as_str())));
+    if prior
+        .map(crate::session_resources_v2::decode)
+        .transpose()?
+        .flatten()
+        .is_some()
+    {
+        return Ok(None);
+    }
+    if !crate::device_policy::memory::resource_projection_required(&config) {
+        return Ok(None);
+    }
+    crate::device_policy::memory::validate(&config)
+        .and_then(|policies| {
+            policies
+                .project(
+                    Some(profile.binding().employee()),
+                    Some(profile.resources()),
+                )
+                .map_err(Into::into)
+        })
+        .map(|selected| {
+            selected
+                .as_ref()
+                .map(crate::device_policy::memory::projected_value)
+        })
+        .map_err(|_| ResourceConfigError::ResourceShape)
 }
 /// A broker-config candidate only: no digest, native permit, file or wire codec.
 pub struct StagedBrokerResources {
@@ -232,13 +294,23 @@ fn integer(value: &Object, field: &str) -> Result<u32> {
         _ => Err(ResourceConfigError::ResourceShape),
     }
 }
-fn template(value: &Value) -> Result<ResourceTemplate> {
-    let fields = object(value).ok_or(ResourceConfigError::ResourceShape)?;
+fn template(value: &Value, session: bool) -> Result<ResourceTemplate> {
+    let selected = if session {
+        crate::session_resources_v2::decode(value)?
+    } else {
+        None
+    };
+    let fields = object(selected.as_ref().map_or(value, |entry| entry.resources))
+        .ok_or(ResourceConfigError::ResourceShape)?;
+    require_template_fields(fields)?;
+    template_fields(fields)
+}
+pub(crate) fn require_template_fields(fields: &Object) -> Result<()> {
     if fields.len() != FIELDS.len() || !FIELDS.iter().all(|field| fields.contains_key(&key(field)))
     {
         return Err(ResourceConfigError::ResourceShape);
     }
-    template_fields(fields)
+    Ok(())
 }
 pub(crate) fn template_fields(fields: &Object) -> Result<ResourceTemplate> {
     let mode = match fields.get(&key("budgetMode")) {
@@ -287,7 +359,10 @@ fn map<K: Ord>(
                 .map(|&cp| char::from_u32(cp))
                 .collect::<Option<_>>()
                 .ok_or(ResourceConfigError::ResourceShape)?;
-        result.insert(parse_id(&id)?, template(value)?);
+        result.insert(
+            parse_id(&id)?,
+            template(value, field == "sessionResources")?,
+        );
     }
     Ok(result)
 }
@@ -305,6 +380,16 @@ fn replace(root: &mut Object, field: &str, id: &str, resource: &ResourceTemplate
     let Node::Object(values) = &mut value.0 else {
         unreachable!("checked resource map")
     };
+    if field == "sessionResources"
+        && let Some(Value(Node::Object(entry))) = values.get_mut(&key(id))
+        && entry.contains_key(&key("version"))
+    {
+        entry.insert(
+            key("resources"),
+            Value(Node::Object(resource_fields(resource))),
+        );
+        return;
+    }
     values.insert(key(id), Value(Node::Object(resource_fields(resource))));
 }
 pub(crate) fn resource_fields(resource: &ResourceTemplate) -> Object {

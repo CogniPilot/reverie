@@ -10,7 +10,7 @@ use reverie_core::ids::ProfileEmployeeId;
 use reverie_core::resources::ResourcePolicy;
 use std::collections::BTreeMap;
 
-fn policy(value: &Value) -> Result<SoftMemoryPolicy> {
+pub(crate) fn policy(value: &Value) -> Result<SoftMemoryPolicy> {
     let fields = object(value).ok_or(DeviceConfigError::MemoryShape)?;
     let high = fields.get(&key("memoryHighMiB"));
     if fields.len() != if high.is_some() { 2 } else { 1 } || !fields.contains_key(&key("swapMiB")) {
@@ -45,10 +45,64 @@ pub fn validate(config: &EffectiveWorkerConfig) -> Result<MemoryPolicies> {
 /// even if inactive pool or map fields would fail direct validate().
 pub fn resource_projection_required(config: &EffectiveWorkerConfig) -> bool {
     legacy_json::truthy(root(config).get(&key("employeeMemoryPolicies")))
+        || crate::session_resources_v2::configured(config)
 }
 pub struct MemoryProjection {
     configuration: EffectiveWorkerConfig,
     policy: Option<ProjectedMemoryPolicy>,
+}
+pub enum SessionMemoryProjection {
+    Legacy(EffectiveWorkerConfig),
+    Frozen(MemoryProjection),
+}
+/// Resolve only an explicit versioned SID value, before EID policy fallback.
+/// Legacy entries retain the original feature gating and observation order.
+pub fn project_session(
+    source: &EffectiveWorkerConfig,
+    session: &reverie_core::ids::ProfileSessionId,
+    resources: EffectiveWorkerConfig,
+) -> Result<SessionMemoryProjection> {
+    let entry = root(source)
+        .get(&key("sessionResources"))
+        .and_then(object)
+        .and_then(|fields| fields.get(&key(session.as_str())));
+    let selected = entry
+        .map(crate::session_resources_v2::decode)
+        .transpose()
+        .map_err(|_| DeviceConfigError::MemoryShape)?
+        .flatten();
+    let Some(selected) = selected else {
+        return Ok(SessionMemoryProjection::Legacy(resources));
+    };
+    let projected = selected
+        .memory
+        .map(|memory| {
+            let effective = crate::resource_config::checked_effective_policy(&resources)
+                .map_err(|_| DeviceConfigError::EffectiveCeilingMismatch)?;
+            memory
+                .policy()
+                .project(memory.swap_pool_mib(), Some(&effective))
+                .map_err(DeviceConfigError::from)
+        })
+        .transpose()?;
+    let mut fields = take_root(resources);
+    fields.remove(&key("laptopMemoryPolicy"));
+    if let Some(policy) = &projected {
+        fields.insert(key("laptopMemoryPolicy"), projected_value(policy));
+    }
+    Ok(SessionMemoryProjection::Frozen(MemoryProjection {
+        configuration: EffectiveWorkerConfig::from_object(fields),
+        policy: projected,
+    }))
+}
+pub(crate) fn projected_value(policy: &ProjectedMemoryPolicy) -> Value {
+    let mut fields = BTreeMap::new();
+    if let Some(high) = policy.policy().memory_high_mib() {
+        fields.insert(key("memoryHighMiB"), integer_value(high));
+    }
+    fields.insert(key("swapMiB"), integer_value(policy.policy().swap_mib()));
+    fields.insert(key("swapPoolMiB"), integer_value(policy.swap_pool_mib()));
+    Value(Node::Object(fields))
 }
 impl MemoryProjection {
     pub fn configuration(&self) -> &EffectiveWorkerConfig {
@@ -106,14 +160,8 @@ pub fn project(
             return Err(DeviceConfigError::EffectiveCeilingMismatch);
         }
     }
-    let mut fields = BTreeMap::new();
-    if let Some(high) = policy.policy().memory_high_mib() {
-        fields.insert(key("memoryHighMiB"), integer_value(high));
-    }
-    fields.insert(key("swapMiB"), integer_value(policy.policy().swap_mib()));
-    fields.insert(key("swapPoolMiB"), integer_value(policy.swap_pool_mib()));
     let mut data = take_root(resources);
-    data.insert(key("laptopMemoryPolicy"), Value(Node::Object(fields)));
+    data.insert(key("laptopMemoryPolicy"), projected_value(policy));
     Ok(MemoryProjection {
         configuration: EffectiveWorkerConfig::from_object(data),
         policy: projected,

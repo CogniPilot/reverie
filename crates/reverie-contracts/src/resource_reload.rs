@@ -170,6 +170,37 @@ impl OldPolicyFreeze {
         for name in RESOURCES {
             policy.insert(key(name), field(old_effective, name)?.deep_clone());
         }
+        let changed = match (
+            root(&data.before).get(&key("employeeMemoryPolicies")),
+            root(&data.projected).get(&key("employeeMemoryPolicies")),
+        ) {
+            (None, None) => false,
+            (Some(before), Some(after)) => !before.python_eq(after),
+            _ => true,
+        };
+        let prior =
+            root(&data.before)
+                .get(&key("sessionResources"))
+                .and_then(|value| match &value.0 {
+                    Node::Object(entries) => entries.get(&key(data.old.as_str())),
+                    _ => None,
+                });
+        let versioned = prior
+            .map(crate::session_resources_v2::decode)
+            .transpose()
+            .map_err(ReloadDataError::Resource)?
+            .flatten()
+            .is_some();
+        let policy = if changed || versioned {
+            crate::session_resources_v2::wrap(
+                policy,
+                root(old_effective)
+                    .get(&key("laptopMemoryPolicy"))
+                    .map(Value::deep_clone),
+            )
+        } else {
+            Value(Node::Object(policy))
+        };
         let mut value = data.projected.into_value();
         let Node::Object(root) = &mut value.0 else {
             unreachable!("worker object invariant")
@@ -180,7 +211,7 @@ impl OldPolicyFreeze {
         let Node::Object(policies) = &mut policies.0 else {
             return Err(ReloadDataError::Shape);
         };
-        policies.insert(key(data.old.as_str()), Value(Node::Object(policy)));
+        policies.insert(key(data.old.as_str()), policy);
         let Node::Object(fields) = std::mem::replace(&mut value.0, Node::Null) else {
             unreachable!()
         };

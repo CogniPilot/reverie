@@ -24,6 +24,29 @@ impl SoftMemoryPolicy {
     pub fn swap_mib(&self) -> u32 {
         self.swap
     }
+    /// Checked projection DATA, including a frozen session policy. No native
+    /// cgroup observation, admission or permission to write follows.
+    pub fn project(
+        &self,
+        pool: u32,
+        effective: Option<&ResourcePolicy>,
+    ) -> Result<ProjectedMemoryPolicy, DevicePolicyError> {
+        if pool > MAX_SWAP_POOL_MIB || self.swap > pool {
+            return Err(DevicePolicyError::SwapPool);
+        }
+        if let Some(high) = self.high {
+            let ceiling = effective
+                .ok_or(DevicePolicyError::EffectiveCeiling)?
+                .memory_mib();
+            if high >= ceiling {
+                return Err(DevicePolicyError::MemoryHigh);
+            }
+        }
+        Ok(ProjectedMemoryPolicy {
+            policy: self.clone(),
+            pool,
+        })
+    }
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MemoryPolicies {
@@ -62,18 +85,7 @@ impl MemoryPolicies {
         let Some(policy) = self.selected(employee) else {
             return Ok(None);
         };
-        if let Some(high) = policy.high {
-            let ceiling = effective
-                .ok_or(DevicePolicyError::EffectiveCeiling)?
-                .memory_mib();
-            if high >= ceiling {
-                return Err(DevicePolicyError::MemoryHigh);
-            }
-        }
-        Ok(Some(ProjectedMemoryPolicy {
-            policy: policy.clone(),
-            pool: self.pool,
-        }))
+        policy.project(self.pool, effective).map(Some)
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
