@@ -72,7 +72,6 @@ fn main() {
         fs::write("killed-laptop",b"actual fixed kill effect").unwrap();return;
     }
     if args.first().map(String::as_str)==Some("inspect") {
-<<<<<<< HEAD
         if mode=="created-retained" {
             assert_eq!(args,["inspect",&"c".repeat(64)]);
             let count=fs::read_to_string("retained-inspect-count").ok().map(|v|v.parse::<usize>().unwrap()).unwrap_or(0)+1;
@@ -81,11 +80,10 @@ fn main() {
                 fs::rename("retained-inspect-next.json","retained-inspect.json").unwrap();
             }
             std::io::stdout().write_all(&fs::read("retained-inspect.json").unwrap()).unwrap();return;
-=======
+        }
         if Path::new("existing-inspect.json").is_file() {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
             std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
->>>>>>> 73fa8af1fae8698d8c681cec2aeadf97da97c828
         }
         if mode.starts_with("created-memory") {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
