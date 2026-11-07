@@ -52,7 +52,11 @@ pub struct OfficeStepFailed;
 pub trait WatchdogCore {
     /// The Office address answered GET /api/status with 200, 401 or 403.
     fn office_healthy(&self) -> bool;
-    /// The `office-offline-since` marker: `None` when absent.
+    /// The `office-offline-since` marker exists, whether or not its contents
+    /// decode (the legacy `exists()`); failed when existence is unknown.
+    fn offline_present(&self) -> Result<bool, OfficeStepFailed>;
+    /// The marker's timestamp (the legacy `float(read_text())`): `None` when
+    /// absent, failed when present but unreadable or malformed.
     fn offline_since(&self) -> Result<Option<f64>, OfficeStepFailed>;
     fn mark_offline(&self, now: f64) -> Result<(), OfficeStepFailed>;
     /// Remove the marker; an absent marker is success.
@@ -60,6 +64,8 @@ pub trait WatchdogCore {
     fn stop_laptops(&self) -> Result<(), OfficeStepFailed>;
     /// Registered laptops not attached to a live viewer: (session, container).
     fn detached(&self) -> Vec<(String, String)>;
+    /// Every registered laptop session, attached to a viewer or not.
+    fn registered(&self) -> Vec<String>;
     /// The runtime record names an exit marker that exists.
     fn completed(&self, session: &str) -> Result<bool, SweepStep>;
     fn allowed(&self, session: &str) -> Result<bool, SweepStep>;
@@ -100,9 +106,11 @@ impl Watchdog {
                 Err(step) => self.record(core, &session, step),
             }
         }
-        // A session no longer registered has nothing left to report.
-        let live: Vec<String> = core.detached().into_iter().map(|(s, _)| s).collect();
-        self.failures.retain(|session, _| live.contains(session));
+        // Only unregistering clears a record without a successful sweep; an
+        // attached viewer does not.
+        let registered = core.registered();
+        self.failures
+            .retain(|session, _| registered.contains(session));
     }
     /// Run until `closed`, a tick every 2 s, as `stopping.wait(2)` does.
     pub fn run(&mut self, core: &dyn WatchdogCore, closed: &AtomicBool, now: impl Fn() -> f64) {
@@ -189,25 +197,26 @@ fn clamp(tick: u64) -> i64 {
 }
 /// The legacy Office half, unchanged: any failure waits for the next tick.
 fn office(core: &dyn WatchdogCore, now: f64) {
-    if core.office_healthy() {
-        if let Ok(Some(_)) = core.offline_since() {
+    let healthy = core.office_healthy();
+    let Ok(present) = core.offline_present() else {
+        return;
+    };
+    if healthy {
+        if present {
             core.log("Office API recovered; laptop outage timer cleared.");
         }
         let _ = core.clear_offline();
         return;
     }
-    let since = match core.offline_since() {
-        Ok(Some(since)) => since,
-        Ok(None) => {
-            if core.mark_offline(now).is_err() {
-                return;
-            }
-            core.log(
-                "Office API unavailable; laptops will stop after 10 minutes without recovery.",
-            );
-            now
+    if !present {
+        if core.mark_offline(now).is_err() {
+            return;
         }
-        Err(OfficeStepFailed) => return,
+        core.log("Office API unavailable; laptops will stop after 10 minutes without recovery.");
+    }
+    // The marker is read back, as legacy did; a malformed one waits a tick.
+    let Ok(Some(since)) = core.offline_since() else {
+        return;
     };
     if now - since >= OFFLINE_GRACE_SECONDS {
         let _ = core.stop_laptops();

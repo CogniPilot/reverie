@@ -5,6 +5,10 @@ use std::cell::RefCell;
 struct Fake {
     healthy: bool,
     marker: RefCell<Option<f64>>,
+    /// A present marker whose contents do not decode.
+    malformed: RefCell<bool>,
+    /// Registered sessions attached to a live viewer, so not swept.
+    attached: RefCell<Vec<String>>,
     laptops: RefCell<Vec<(String, String)>>,
     completed: Vec<String>,
     refused: Vec<String>,
@@ -45,7 +49,13 @@ impl WatchdogCore for Fake {
     fn office_healthy(&self) -> bool {
         self.healthy
     }
+    fn offline_present(&self) -> Result<bool, OfficeStepFailed> {
+        Ok(self.marker.borrow().is_some() || *self.malformed.borrow())
+    }
     fn offline_since(&self) -> Result<Option<f64>, OfficeStepFailed> {
+        if *self.malformed.borrow() {
+            return Err(OfficeStepFailed);
+        }
         Ok(*self.marker.borrow())
     }
     fn mark_offline(&self, now: f64) -> Result<(), OfficeStepFailed> {
@@ -54,6 +64,7 @@ impl WatchdogCore for Fake {
     }
     fn clear_offline(&self) -> Result<(), OfficeStepFailed> {
         *self.marker.borrow_mut() = None;
+        *self.malformed.borrow_mut() = false;
         Ok(())
     }
     fn stop_laptops(&self) -> Result<(), OfficeStepFailed> {
@@ -61,7 +72,20 @@ impl WatchdogCore for Fake {
         Ok(())
     }
     fn detached(&self) -> Vec<(String, String)> {
-        self.laptops.borrow().clone()
+        let attached = self.attached.borrow();
+        self.laptops
+            .borrow()
+            .iter()
+            .filter(|(s, _)| !attached.contains(s))
+            .cloned()
+            .collect()
+    }
+    fn registered(&self) -> Vec<String> {
+        self.laptops
+            .borrow()
+            .iter()
+            .map(|(s, _)| s.clone())
+            .collect()
     }
     fn completed(&self, session: &str) -> Result<bool, SweepStep> {
         self.calls.borrow_mut().push(format!("completed {session}"));
@@ -284,4 +308,60 @@ fn run_returns_promptly_once_closed() {
     Watchdog::new(4).run(&core, &closed, || 0.0);
     assert!(start.elapsed() < Duration::from_millis(200));
     assert!(core.logs.borrow().is_empty(), "no tick after close");
+}
+
+// Attaching a viewer keeps a failure; only unregistering clears it.
+#[test]
+fn a_failure_survives_attach_and_clears_on_unregister() {
+    let mut core = Fake {
+        healthy: true,
+        ..Fake::default()
+    }
+    .laptop("a");
+    core.sticky.insert("a".into(), SweepStep::Admission);
+    let mut dog = Watchdog::new(4);
+    dog.tick(&core, 1.0);
+    core.attached.borrow_mut().push("a".into());
+    dog.tick(&core, 3.0);
+    let status = text(dog.status_field()).unwrap();
+    assert!(status.contains("ADMISSION_UNAVAILABLE"), "{status}");
+    assert_eq!(
+        core.calls.borrow().len(),
+        1,
+        "an attached laptop is not swept"
+    );
+    core.laptops.borrow_mut().clear();
+    dog.tick(&core, 5.0);
+    assert!(dog.status_field().is_none(), "unregistering clears it");
+}
+
+// Recovery logs on marker presence, as the legacy exists() did, even
+// when the marker's contents are malformed.
+#[test]
+fn recovery_logs_for_a_malformed_present_marker() {
+    let core = Fake {
+        healthy: true,
+        ..Fake::default()
+    };
+    *core.malformed.borrow_mut() = true;
+    let mut dog = Watchdog::new(4);
+    dog.tick(&core, 1.0);
+    assert_eq!(
+        core.logs.borrow().as_slice(),
+        ["Office API recovered; laptop outage timer cleared."]
+    );
+    assert_eq!(core.offline_present(), Ok(false));
+}
+
+// The unhealthy half: a malformed present marker is not rewritten or logged,
+// and its unreadable timestamp stops nothing (legacy ValueError, next tick).
+#[test]
+fn a_malformed_marker_while_offline_waits_without_stopping() {
+    let core = Fake::default();
+    *core.malformed.borrow_mut() = true;
+    let mut dog = Watchdog::new(4);
+    dog.tick(&core, 10_000.0);
+    assert_eq!(*core.stop_laptops.borrow(), 0);
+    assert!(core.logs.borrow().is_empty());
+    assert!(*core.malformed.borrow(), "the marker is not rewritten");
 }
