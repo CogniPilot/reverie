@@ -44,7 +44,7 @@ fn actual_viewer_is_still_usable_after_provider_stop_and_reaped_only_before_same
     let viewer = start(&fixture, &existing);
     fixture
         .runtime()
-        .stop_existing_viewer_laptop(&existing, end())
+        .stop_existing_viewer_laptop_for_worker(&existing)
         .unwrap();
     assert!(fixture.root.join("stopped-laptop").is_file());
     fixture
@@ -131,7 +131,7 @@ fn completed_before_viewer_constructor_stops_with_original_inputs_without_fabric
     let existing = retain(&fixture, canonical_originals(&fixture));
     fixture
         .runtime()
-        .stop_existing_viewer_laptop(&existing, end())
+        .stop_existing_viewer_laptop_for_worker(&existing)
         .unwrap();
     assert!(!fixture.root.join("viewer-ready").exists());
     assert!(

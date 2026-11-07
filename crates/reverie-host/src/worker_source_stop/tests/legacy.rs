@@ -135,7 +135,7 @@ fn missing_unobserved_target_requires_actual_complete_census_before_known_return
     let address = std::ptr::from_ref(storage.as_ref());
     let mut owner = fixture
         .runtime
-        .retain_unobserved_ordinary_laptop_stop(storage, plan, end())
+        .retain_unobserved_ordinary_laptop_stop_for_worker(storage, plan)
         .unwrap_or_else(|_| panic!("genuine original owner"));
     owner.stop_after_admission(&fixture.runtime).unwrap();
     assert!(!fixture.root.join("stop-requested").exists());
@@ -245,4 +245,49 @@ fn foreign_network_stays_untouched_after_known_stop_and_first_stop_allows_bounde
     assert!(!fixture.root.join("network-disconnected").exists());
     assert!(!fixture.root.join("network-removed").exists());
     restore(&fixture, &mut owner, address);
+}
+#[test]
+fn actual_worker_policy_has_no_component_body_cap_across_multiple_fixed_client_calls() {
+    if isolated(
+        "worker_source_stop::tests::legacy::actual_worker_policy_has_no_component_body_cap_across_multiple_fixed_client_calls",
+    ) {
+        return;
+    }
+    for worker in [false, true] {
+        let fixture = Fixture::new("stop-requested");
+        let (storage, plan, original) = inputs(&fixture);
+        let address = std::ptr::from_ref(storage.as_ref());
+        fs::write(
+            fixture.root.join("legacy-query-delay"),
+            b"80ms each fixed query",
+        )
+        .unwrap();
+        let mut owner = if worker {
+            fixture
+                .runtime
+                .retain_ordinary_laptop_stop_for_worker(storage, plan, original)
+        } else {
+            fixture.runtime.retain_ordinary_laptop_stop(
+                storage,
+                plan,
+                original,
+                Instant::now() + std::time::Duration::from_millis(120),
+            )
+        }
+        .unwrap_or_else(|_| panic!("same actual original inputs"));
+        let result = owner.stop_after_admission(&fixture.runtime);
+        assert_eq!(result.is_ok(), worker);
+        if worker {
+            assert!(fixture.root.join("source-reaped").exists());
+            assert!(
+                fixture.trace().len() >= 6,
+                "multiple independently bounded native calls"
+            );
+            restore(&fixture, &mut owner, address);
+        } else {
+            owner.settle_native(&fixture.runtime, end()).unwrap();
+            assert!(owner.take_stopped(&fixture.runtime, end()).is_err());
+            fixture.assert_held();
+        }
+    }
 }

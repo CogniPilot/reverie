@@ -40,6 +40,18 @@ impl WorkerRuntime {
         existing: &ExistingViewer,
         end: Instant,
     ) -> Result<()> {
+        self.stop_existing_laptop_body(existing, Some(end))
+    }
+    /// Genuine broker finally policy: no aggregate body cap. Every fixed
+    /// client call keeps 20 seconds and the actual original first-stop bound.
+    pub fn stop_existing_viewer_laptop_for_worker(&self, existing: &ExistingViewer) -> Result<()> {
+        self.stop_existing_laptop_body(existing, None)
+    }
+    fn stop_existing_laptop_body(
+        &self,
+        existing: &ExistingViewer,
+        end: Option<Instant>,
+    ) -> Result<()> {
         self.laptop_workflows()
             .bound_existing(self, &existing.reference)?;
         let mut record = existing

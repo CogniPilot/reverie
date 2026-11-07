@@ -54,7 +54,7 @@ impl WorkerRuntime {
         original: ExistingLaptopInspection,
         end: Instant,
     ) -> std::result::Result<OrdinaryLaptopStop, Box<OrdinaryLaptopStopRetainFailure>> {
-        retain(self, storage, plan, Some(original), end)
+        retain(self, storage, plan, Some(original), Some(end))
     }
     /// No absent DTO/flag is supplied. The actual first inspect and complete
     /// census inside stop_after_admission must establish target or absence.
@@ -64,7 +64,26 @@ impl WorkerRuntime {
         plan: ObservedCreatePlan,
         end: Instant,
     ) -> std::result::Result<OrdinaryLaptopStop, Box<OrdinaryLaptopStopRetainFailure>> {
-        retain(self, storage, plan, None, end)
+        retain(self, storage, plan, None, Some(end))
+    }
+    /// Original broker policy: no invented aggregate stop-body budget. Each
+    /// query retains its original 20-second cap and actual first-stop bound.
+    pub fn retain_ordinary_laptop_stop_for_worker(
+        &self,
+        storage: Box<LaunchStorage>,
+        plan: ObservedCreatePlan,
+        original: ExistingLaptopInspection,
+    ) -> std::result::Result<OrdinaryLaptopStop, Box<OrdinaryLaptopStopRetainFailure>> {
+        retain(self, storage, plan, Some(original), None)
+    }
+    /// Absence is still established by actual inspect/census after admission;
+    /// selecting original broker timing supplies no absence or effect grant.
+    pub fn retain_unobserved_ordinary_laptop_stop_for_worker(
+        &self,
+        storage: Box<LaunchStorage>,
+        plan: ObservedCreatePlan,
+    ) -> std::result::Result<OrdinaryLaptopStop, Box<OrdinaryLaptopStopRetainFailure>> {
+        retain(self, storage, plan, None, None)
     }
 }
 fn retain(
@@ -72,7 +91,7 @@ fn retain(
     storage: Box<LaunchStorage>,
     plan: ObservedCreatePlan,
     original: Option<ExistingLaptopInspection>,
-    end: Instant,
+    end: Option<Instant>,
 ) -> std::result::Result<OrdinaryLaptopStop, Box<OrdinaryLaptopStopRetainFailure>> {
     match OrdinaryStopAttempt::new(runtime, &storage, &plan, original.as_ref(), end) {
         Ok(attempt) => Ok(OrdinaryLaptopStop {
