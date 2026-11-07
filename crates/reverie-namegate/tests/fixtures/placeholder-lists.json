@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "home_repo": "reverie",
+  "team": [
+    "alder",
+    "birch",
+    "cedar",
+    "elm",
+    "fir",
+    "gale",
+    "hazel",
+    "kelp",
+    "maple"
+  ],
+  "internal": [
+    "acmeproj",
+    "widgetco"
+  ],
+  "ai_words": [
+    "vendora",
+    "vendorb",
+    "vendorc"
+  ],
+  "ai_phrases": [
+    "coauthor-marker",
+    "made with tool",
+    "written by bot"
+  ],
+  "path_markers": [
+    "/vault/agent-",
+    "drops/20{digit}{digit}-{digit}{digit}-{digit}{digit}",
+    "reverie-placeholder/",
+    "reverie_scratchpad",
+    "/secret/stash-"
+  ],
+  "allow": [
+    "@scope/plugin-elm",
+    "lib-io-elm",
+    "embed-fir-002",
+    "SolverElm"
+  ]
+}
