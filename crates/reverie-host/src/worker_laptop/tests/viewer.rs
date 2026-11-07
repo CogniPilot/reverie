@@ -2,7 +2,7 @@
 //! subprocess. No Docker, company service, fabricated phase or raw PID permit.
 use super::*;
 mod admission;
-mod group;
+pub(super) mod group;
 use crate::worker_storage::StorageLease;
 use reverie_core::worker_launch::TerminalSize;
 use std::sync::atomic::Ordering;

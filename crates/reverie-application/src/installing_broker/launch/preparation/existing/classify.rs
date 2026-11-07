@@ -230,10 +230,12 @@ impl<'a> ReusableWorkerLaunch<'a> {
         &self.resources
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
-        self.inspected.into_failure(
-            PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
-            self.receipt,
-        )
+        self.inspected
+            .into_failure(
+                PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
+                self.receipt,
+            )
+            .classified_abort()
     }
 }
 impl<'a> ColdWorkerLaunch<'a> {
@@ -257,10 +259,12 @@ impl<'a> ColdWorkerLaunch<'a> {
         matches!(self.target, ExistingColdTarget::DeadPane(_))
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
-        self.inspected.into_failure(
-            PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
-            self.receipt,
-        )
+        self.inspected
+            .into_failure(
+                PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
+                self.receipt,
+            )
+            .classified_abort()
     }
 }
 

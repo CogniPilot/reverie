@@ -1,4 +1,18 @@
 use super::native;
+thread_local! { static VIEWER_RELEASE: std::cell::RefCell<Option<std::sync::mpsc::Sender<std::time::Instant>>> = const { std::cell::RefCell::new(None) }; }
+pub(crate) fn observe_viewer_release(sender: std::sync::mpsc::Sender<std::time::Instant>) {
+    VIEWER_RELEASE.with(|next| *next.borrow_mut() = Some(sender));
+}
+pub(super) fn viewer_release(end: std::time::Instant) {
+    if let Some(sender) = VIEWER_RELEASE.with(|next| next.borrow_mut().take()) {
+        let _ = sender.send(end);
+    }
+}
+pub(crate) struct CleanupSlotObservation {
+    pub(crate) end: Option<std::time::Instant>,
+    pub(crate) released_by_caller: bool,
+    pub(crate) same_job: bool,
+}
 use std::{
     sync::{
         Arc,

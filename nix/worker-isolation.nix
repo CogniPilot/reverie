@@ -28,6 +28,16 @@ in {
     apiSocketRoot = lib.mkOption { type = lib.types.str; description = "Private per-laptop office connections."; };
     poolMemoryMiB = lib.mkOption { type = lib.types.ints.positive; description = "Shared hard memory ceiling; leave host and console headroom."; };
     poolTasksMax = lib.mkOption { type = lib.types.ints.positive; default = 8192; };
+    allowedCPUs = lib.mkOption {
+      type = lib.types.nullOr (lib.types.listOf lib.types.ints.unsigned);
+      default = null;
+      description = "Host-owner CPU IDs for the shared worker slice (for example [0 1 2 3 4 5 6 7]); null inherits host placement. Applies to existing seats in this slice without rewriting container recipes.";
+    };
+    taskPerf.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Declare host support for unprivileged per-task user-space perf. Employee task-v1 policy and preserving container recreation remain separate.";
+    };
     softLimitHelper = {
       enable = lib.mkEnableOption "the root helper that applies owner-authorized laptop memory.high";
       deployment = lib.mkOption { type = lib.types.strMatching "[a-z0-9][a-z0-9-]{0,39}"; default = "reverie"; };
@@ -55,6 +65,7 @@ in {
     };
   };
   config = lib.mkIf cfg.enable {
+    boot.kernel.sysctl."kernel.perf_event_paranoid" = lib.mkIf cfg.taskPerf.enable (lib.mkDefault 2);
     systemd.slices.reverie-workers = {
       description = "Reverie agents (console and host remain outside this budget)";
       sliceConfig = {
@@ -65,9 +76,14 @@ in {
         MemorySwapMax = if cfg.laptopSwapPoolMiB == 0 then 0 else "${toString cfg.laptopSwapPoolMiB}M";
         TasksMax = cfg.poolTasksMax;
         CPUWeight = 100; # Work-conserving, no CPU quota.
+      } // lib.optionalAttrs (cfg.allowedCPUs != null) {
+        AllowedCPUs = lib.concatStringsSep " " (map toString cfg.allowedCPUs);
       };
     };
-    assertions = lib.optionals helper.enable [
+    assertions = lib.optional (cfg.allowedCPUs != null) {
+      assertion = cfg.allowedCPUs != [ ] && lib.length (lib.unique cfg.allowedCPUs) == lib.length cfg.allowedCPUs;
+      message = "Reverie allowedCPUs must be a nonempty unique set of host CPU IDs; use null to inherit host placement.";
+    } ++ lib.optionals helper.enable [
       { assertion = softLimitHelperPackage != null; message = "softLimitHelper needs its package."; }
       { assertion = lib.versionAtLeast kernel.version "6.16" || helper.backportAttested != null;
         message = "softLimitHelper needs a kernel >= 6.16 or an attested O_NONBLOCK backport."; }

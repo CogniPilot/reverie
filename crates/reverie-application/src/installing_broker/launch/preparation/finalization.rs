@@ -1,6 +1,9 @@
 //! Shared cleanup timing and actual handler owners, plus negative prefix
 //! finalization. Metadata or transport cleanup never authorizes resource release.
 use super::*;
+#[cfg(test)]
+#[path = "finalization_tests.rs"]
+mod tests;
 /// Fixed finalization purposes share timing and actual handler owners. Neither
 /// an empty local error list nor socket closure grants physical resource release.
 #[derive(Clone, Copy)]
@@ -75,11 +78,21 @@ impl<'a> InspectedWorkerLaunch<'a> {
     }
 }
 impl PreparationFailure<'_> {
+    pub(super) fn classified_abort(mut self: Box<Self>) -> Box<Self> {
+        self.origin = FailureOrigin::ClassifiedAbort;
+        self
+    }
     /// All-attempt, one-shot admission/metadata/socket finalization. An empty
     /// error slice means only these local actions completed; the failure still
     /// retains its actual resource context and SAME logical hold. In particular
     /// storage=None cannot prove acquisition was effect-free or globally closed.
     pub fn close_transport(&mut self, end: Instant) -> &[WorkerDispatchError] {
+        self.close_transport_budget(CleanupBudget::Bounded(end))
+    }
+    pub(super) fn close_transport_budget(
+        &mut self,
+        budget: CleanupBudget,
+    ) -> &[WorkerDispatchError] {
         if self.transport_attempted {
             return &self.cleanup;
         }
@@ -89,7 +102,6 @@ impl PreparationFailure<'_> {
         {
             self.cleanup.push(error.into());
         }
-        let budget = CleanupBudget::Bounded(end);
         if let Err(error) = budget.metadata(&self.preparing, self.active.as_ref()) {
             self.cleanup.push(error.into());
         }

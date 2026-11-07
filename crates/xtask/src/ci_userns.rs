@@ -9,6 +9,10 @@ use std::error::Error;
 #[cfg(any(target_os = "linux", test))]
 use std::path::Path;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+#[cfg(target_os = "linux")]
+pub(super) fn trusted_tool(path: &Path) -> Result<()> {
+    linux::trusted_system_tool(path)
+}
 
 pub(super) fn prepare() -> Result<()> {
     #[cfg(target_os = "linux")]
@@ -24,7 +28,7 @@ pub(super) fn prepare() -> Result<()> {
     }
 }
 #[cfg(any(target_os = "linux", test))]
-fn declared_runner(
+pub(super) fn declared_runner(
     actions: Option<&str>,
     environment: Option<&str>,
     os: Option<&str>,
@@ -35,12 +39,12 @@ fn declared_runner(
         || os != Some("Linux")
         || ci != Some("true")
     {
-        return Err("prepare-ci-userns requires a declared disposable Ubuntu24.04 GitHub-hosted Linux runner; it never configures local/self-hosted machines".into());
+        return Err("CI host preparation requires a declared disposable Ubuntu24.04 GitHub-hosted Linux runner; it never configures local/self-hosted machines".into());
     }
     Ok(())
 }
 #[cfg(any(target_os = "linux", test))]
-fn ubuntu24(release: &str) -> Result<()> {
+pub(super) fn ubuntu24(release: &str) -> Result<()> {
     let field = |name: &str| {
         let prefix = format!("{name}=");
         let mut found = release
