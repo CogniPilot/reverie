@@ -24,6 +24,7 @@ pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementSto
 mod started_source;
 pub use started_source::{
     StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,
+    StartedSourceStorageObservation, StoppedStartedSourceReturned,
 };
 pub use storage::StartedStorageBorrow;
 mod created_receipt;

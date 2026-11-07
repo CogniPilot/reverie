@@ -4,7 +4,7 @@ fn isolated(name: &str) -> bool {
         "worker_laptop::tests::existing_viewer::transport::created_bridge::finalization::{name}"
     ))
 }
-fn observation_row(fixture: &Fixture, running: bool, id: &str) {
+pub(super) fn observation_row(fixture: &Fixture, running: bool, id: &str) {
     fs::write(
         fixture.root.join("created-final-inspect.json"),
         serde_json::to_vec(&json!([{
