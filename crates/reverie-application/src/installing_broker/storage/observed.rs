@@ -28,6 +28,33 @@ impl std::error::Error for OwnedCreatePreparationError {
     }
 }
 impl StorageClaim {
+    /// The original runtime.json and exit.exists observation over the SAME
+    /// resource; retained/consumed registry variants cannot borrow raw paths.
+    pub fn observe_launch_receipt(
+        &self,
+    ) -> Result<reverie_host::worker_storage::LaunchReceiptObservation, StorageWorkflowError> {
+        match &self.state {
+            ClaimState::Legacy { owner, .. } => Ok(owner.observe_launch_receipt()?),
+            ClaimState::Registered {
+                registry, identity, ..
+            } => {
+                let entries = registry.lock(registry.runtime.stop_deadline())?;
+                let entry = entries
+                    .iter()
+                    .find(|entry| Arc::ptr_eq(&entry.identity, identity))
+                    .ok_or_else(|| StorageWorkflowError::refused("WORKER_STORAGE_CLAIM_CHANGED"))?;
+                if !entry.writer_checked {
+                    return Err(StorageWorkflowError::refused(
+                        "WORKER_STORAGE_CLEANUP_UNCONFIRMED",
+                    ));
+                }
+                let EntryOwner::Direct(owner) = &entry.owner else {
+                    return Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"));
+                };
+                Ok(owner.observe_launch_receipt()?)
+            }
+        }
+    }
     /// Keep actual custody while resolving effective config exactly once and
     /// observing arguments. Refuse retained/consumed owners BEFORE any new
     /// native lookup. No employee lease or source/current setter is invented.

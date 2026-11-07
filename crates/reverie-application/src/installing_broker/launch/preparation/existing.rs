@@ -3,6 +3,7 @@
 use super::{observe::ObservedWorkerLaunch, *};
 use reverie_contracts::broker_laptop::LaunchLaptopInspection;
 mod memory;
+mod receipt;
 
 struct ExistingWorkerLaunch<'a> {
     observed: ObservedWorkerLaunch<'a>,
