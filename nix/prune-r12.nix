@@ -1,6 +1,6 @@
 # Source-reviewed candidate, isolated from the installed r8 observation package.
 # Host lease, phase-3 and clean dry-run acceptance remain operator gates.
-{ pkgs, src, leaseCli }:
+{ pkgs, src, leaseCli ? import ./lease-cli.nix { inherit pkgs src; } }:
 let
   hashes = {
     prune = "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed";

@@ -1,4 +1,4 @@
-{ pkgs, src, leaseCli }:
+{ pkgs, src, leaseCli ? import ./lease-cli.nix { inherit pkgs src; } }:
 let
   lib = pkgs.lib;
   sourceHashes = {
