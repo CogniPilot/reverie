@@ -3,6 +3,7 @@
 use super::*;
 mod relay;
 mod transport;
+mod stop;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchStorage, StorageLease},

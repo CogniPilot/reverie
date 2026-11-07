@@ -2,6 +2,7 @@
 //! first native client. InstallingBroker still owns admission and authorization.
 mod cleanup;
 mod cold;
+pub(crate) mod cold_confirm;
 mod cold_prepare;
 mod connection;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};

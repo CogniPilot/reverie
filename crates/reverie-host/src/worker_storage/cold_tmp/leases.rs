@@ -3,6 +3,7 @@
 use super::directories::Directory;
 use super::*;
 mod keys;
+mod retained;
 pub(super) use keys::ClearKeys;
 use reverie_contracts::worker_cold_tmp::{
     ClearReservation, ColdConfiguration, ColdLeaseState, clear_holder_metadata, clear_path_metadata,

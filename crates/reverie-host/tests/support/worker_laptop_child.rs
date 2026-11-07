@@ -8,6 +8,9 @@ fn main() {
     let mode=env::var("LAPTOP_FIXTURE_MODE").unwrap();
     let mut trace=OpenOptions::new().append(true).create(true).open("trace").unwrap();
     writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+    if Path::new("existing-stop-control").is_file() && args.first().map(String::as_str)!=Some("exec") {
+        existing_stop(&args);return;
+    }
     if args.starts_with(&["image".into(),"inspect".into()]) {print!("[{{\"Config\":{{\"Labels\":{{\"reverie.worker.nix-store\":\"0\"}}}}}}]");return;}
     if args==["ps","-aq","--no-trunc"] {
         assert_eq!(mode,"created-viewer-metadata");
@@ -77,6 +80,15 @@ fn main() {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
             std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
         }
+        if mode=="created-retained" {
+            assert_eq!(args,["inspect",&"c".repeat(64)]);
+            let count=fs::read_to_string("retained-inspect-count").ok().map(|v|v.parse::<usize>().unwrap()).unwrap_or(0)+1;
+            fs::write("retained-inspect-count",count.to_string()).unwrap();
+            if count==3 && Path::new("retained-inspect-next.json").exists() {
+                fs::rename("retained-inspect-next.json","retained-inspect.json").unwrap();
+            }
+            std::io::stdout().write_all(&fs::read("retained-inspect.json").unwrap()).unwrap();return;
+        }
         if mode.starts_with("created-memory") {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
             let row=fs::read("memory-inspect.json").unwrap();
@@ -140,6 +152,21 @@ fn relay_query(args:&[String])->bool {
     }
     assert_eq!(&args[14..],["display-message","-p","-t","office","#{pane_dead}"]);
     std::io::stdout().write_all(&fs::read("relay-pane.out").unwrap()).unwrap();true
+}
+fn existing_stop(args: &[String]) {
+    let name=format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap());
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["inspect",target] if *target==name || *target=="c".repeat(64) => {
+            if Path::new("stopped-laptop").exists() && Path::new("existing-stop-failed-inspect").exists(){std::process::exit(7);}
+            let file=if Path::new("stopped-laptop").exists(){"existing-after.json"}else{"existing-inspect.json"};
+            std::io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
+        }
+        ["stop","--time","2",target] if *target=="c".repeat(64) => {fs::write("stopped-laptop",target).unwrap();}
+        ["ps","--all","--no-trunc","--format","{{.ID}} {{.Names}}"] => {std::io::stdout().write_all(&fs::read("existing-stop-census").unwrap()).unwrap();}
+        ["network","inspect",_] => std::process::exit(7),
+        ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
+        _ => std::process::exit(95),
+    }
 }
 fn pane(args:&[String],mode:&str) {
     assert!(mode.starts_with("created-"));

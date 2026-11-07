@@ -31,7 +31,7 @@ fn clear_decode(raw: &[u8]) -> Result<Value> {
     let text = legacy_json::utf8_file_text(raw).map_err(|_| ColdDataError::Lease)?;
     legacy_json::decode_python_str(text.as_bytes()).map_err(|_| ColdDataError::Lease)
 }
-fn strict_record(raw: &[u8]) -> Result<Value> {
+pub(super) fn strict_record(raw: &[u8]) -> Result<Value> {
     let value = legacy_json::decode_metadata_bytes(raw).map_err(|_| ColdDataError::Lease)?;
     let fields = object(&value).ok_or(ColdDataError::Lease)?;
     if !matches!(field(fields,"version"),Some(Value(Node::Number(Number::Integer(value)))) if value=="1")
@@ -48,7 +48,7 @@ pub fn clear_reservation(raw: Option<&[u8]>, now: f64) -> Result<ColdLeaseState>
 pub fn retained_reservation(raw: &[u8], now: f64) -> Result<ColdLeaseState> {
     state(&strict_record(raw)?, now)
 }
-fn state(value: &Value, now: f64) -> Result<ColdLeaseState> {
+pub(super) fn state(value: &Value, now: f64) -> Result<ColdLeaseState> {
     if matches!(value.0, Node::Null) {
         return Ok(ColdLeaseState::Free);
     }

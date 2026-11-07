@@ -3,10 +3,10 @@
 use super::*;
 use crate::legacy_json::Number;
 use reverie_core::ids::{NativeOperationId, ProfileSessionId};
-fn text(value: &str) -> Value {
+pub(super) fn text(value: &str) -> Value {
     Value(Node::String(key(value)))
 }
-fn integer(value: u64) -> Value {
+pub(super) fn integer(value: u64) -> Value {
     Value(Node::Number(Number::Integer(value.to_string())))
 }
 fn record(

@@ -5,6 +5,12 @@
 //! actual broker integration obligations.
 mod cold_tmp;
 #[cfg(test)]
+pub(crate) use cold_tmp::retained::faults::Fault as RetainedColdFault;
+#[cfg(test)]
+pub(crate) fn set_retained_cold_fault(fault: RetainedColdFault) {
+    cold_tmp::retained::faults::set(fault);
+}
+#[cfg(test)]
 pub(crate) fn fail_cold_finalizer_for_owned_test() {
     cold_tmp::FAIL_FINALIZER.with(|flag| flag.set(true));
 }

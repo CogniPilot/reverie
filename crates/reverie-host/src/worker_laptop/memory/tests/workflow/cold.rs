@@ -133,6 +133,22 @@ fn enabled_strategies_cannot_obtain_cold_token_without_their_real_transaction() 
             &ProfileSessionId::parse(SID).unwrap(),
             fixture.source.clone(),
         );
+        if strategy == "retain-and-replace" {
+            let trace = fs::read(fixture.root.join("trace")).unwrap_or_default();
+            let Err(failure) = fixture
+                .runtime()
+                .retain_laptop_network(&nix, plan, request, phone)
+            else {
+                panic!("unprepared retention cannot reach network/create/start/memory");
+            };
+            assert!(matches!(failure.cause(), LaptopError::ColdStorage(_)));
+            assert_eq!(
+                fs::read(fixture.root.join("trace")).unwrap_or_default(),
+                trace
+            );
+            assert!(!fixture.root.join("created-laptop").exists());
+            continue;
+        }
         let workflow = fixture
             .runtime()
             .retain_laptop_network(&nix, plan, request, phone)

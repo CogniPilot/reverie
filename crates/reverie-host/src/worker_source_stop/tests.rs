@@ -2,6 +2,7 @@
 //! replies/effects are an owned Rust fixture, not live-container authority.
 use super::*;
 mod fixture;
+mod legacy;
 mod ordinary;
 use fixture::{Fixture, OTHER, SID, end};
 use reverie_contracts::worker_config;

@@ -68,6 +68,12 @@ pub(super) struct Fixture {
     target: Option<JoinHandle<()>>,
 }
 impl Fixture {
+    pub(super) fn release_target(&mut self) {
+        fs::write(self.root.join("release-source"), b"owned known exit").unwrap();
+        if let Some(target) = self.target.take() {
+            target.join().unwrap();
+        }
+    }
     pub(super) fn new(exit_on: &str) -> Self {
         let program = program();
         let root = fs::canonicalize(std::env::temp_dir())

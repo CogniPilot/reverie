@@ -51,6 +51,7 @@ pub enum LaptopError {
     Refused(&'static str),
     Plan(CreateObservationError),
     ExistingObservation(crate::worker_launch::ExistingObservationError),
+    OrdinaryStop(crate::worker_source_stop::SourceStopError),
     StorageOwner(crate::worker_storage::StorageOwnerError),
     ReceiptData(reverie_contracts::worker_launch::ExitReceiptError),
     Office(OfficeError),
@@ -88,6 +89,7 @@ impl std::fmt::Display for LaptopError {
 impl LaptopError {
     pub(super) fn unconfirmed_native(&self) -> bool {
         match self {
+            Self::OrdinaryStop(_) => true,
             Self::MemoryEffectUnconfirmed(_) => true,
             Self::ColdStorage(error) => error.unconfirmed_native(),
             Self::StorageOwner(error) => error.unconfirmed_native(),
@@ -105,6 +107,7 @@ impl LaptopError {
             Self::Refused(code) => code,
             Self::Plan(_) => "WORKER_LAPTOP_PLAN",
             Self::ExistingObservation(_) => "WORKER_EXISTING_VIEWER_OBSERVATION",
+            Self::OrdinaryStop(error) => error.code(),
             Self::Office(_) => "WORKER_LAPTOP_OFFICE",
             Self::Network(_) => "WORKER_LAPTOP_NETWORK",
             Self::Engine(error) => error.code(),
@@ -139,6 +142,7 @@ impl std::error::Error for LaptopError {
             Self::Refused(_) => None,
             Self::Plan(error) => Some(error),
             Self::ExistingObservation(error) => Some(error),
+            Self::OrdinaryStop(error) => Some(error),
             Self::Office(error) => Some(error),
             Self::Network(error) => Some(error),
             Self::Engine(error) => Some(error),

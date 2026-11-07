@@ -1,6 +1,7 @@
 //! Real moved Nix/storage/network→cold→create→start→memory→commit chain.
 use super::*;
 mod finalizer;
+mod retained;
 use crate::command_telemetry::CommandTelemetry;
 use std::os::unix::fs::DirBuilderExt;
 fn policy(fixture: &mut Fixture, strategy: &str) {
@@ -87,6 +88,23 @@ fn enabled_skipped_preparation_never_reaches_create_or_claims_a_cold_phase() {
     for strategy in ["clear", "retain-and-replace"] {
         let mut fixture = Fixture::new("created-cold");
         policy(&mut fixture, strategy);
+        if strategy == "retain-and-replace" {
+            let (nix, plan, request, phone) = fixture.resources();
+            let trace = fs::read(fixture.root.join("trace")).unwrap_or_default();
+            let Err(failure) = fixture
+                .runtime()
+                .retain_laptop_network(&nix, plan, request, phone)
+            else {
+                panic!("retention must prepare before actual network transfer");
+            };
+            assert!(matches!(failure.cause(), LaptopError::ColdStorage(_)));
+            assert_eq!(
+                fs::read(fixture.root.join("trace")).unwrap_or_default(),
+                trace
+            );
+            assert!(!fixture.root.join("created-laptop").exists());
+            continue;
+        }
         let workflow = network(&fixture);
         let telemetry = CommandTelemetry::capture(fixture.runtime(), &fixture.source).unwrap();
         assert!(matches!(

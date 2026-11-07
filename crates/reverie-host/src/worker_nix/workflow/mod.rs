@@ -172,7 +172,7 @@ impl NixReturned {
     /// The actual moved guard/storage resources, never a replacement from paths.
     pub(crate) fn assert_cold_resources_current(&self) -> Result<()> {
         self.resources.guard.assert_current()?;
-        self.resources.storage.require_no_cold_pending()?;
+        self.resources.storage.require_cold_resources_current()?;
         Ok(())
     }
     pub(crate) fn runtime_directory(&self) -> Result<PathBuf> {
@@ -225,7 +225,21 @@ impl Workflows {
             return Err(LaptopError::Refused("WORKER_LAPTOP_NIX_RETAINED"));
         }
         plan.assert_storage_owner(runtime, &record.resources().storage)
-            .map_err(LaptopError::Plan)
+            .map_err(LaptopError::Plan)?;
+        let policy = reverie_contracts::worker_cold_tmp::ColdConfiguration::capture(plan.source())
+            .map_err(|error| {
+                LaptopError::ColdStorage(crate::worker_storage::StorageOwnerError::ColdData(error))
+            })?;
+        if policy.as_ref().is_some_and(|policy| {
+            policy.strategy() == reverie_contracts::worker_cold_tmp::ColdStrategy::RetainAndReplace
+        }) {
+            record
+                .resources()
+                .storage
+                .require_cold_prepared(plan.source())
+                .map_err(LaptopError::ColdStorage)?;
+        }
+        Ok(())
     }
     pub(crate) fn reclaim_for_laptop(
         &self,
