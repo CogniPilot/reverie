@@ -1,5 +1,6 @@
 //! Build-only artifact producer; no service/runtime/owner operation entrypoint.
 use clap::Parser;
+use reverie_contracts::docker_profile::{MAX_PROFILE_BYTES, produce_docker_profile};
 use reverie_contracts::task_perf_v1::{MAX_ARTIFACT_BYTES, PerfSystem, produce_task_perf};
 use std::path::{Path, PathBuf};
 mod output;
@@ -7,20 +8,23 @@ mod output;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Build the fixed task-v1 seccomp profile and manifest",
-    long_about = "Build-only Nix tool. Read a fixed base profile and write task-perf-seccomp.json and worker-perf-profile.json into an existing empty output directory. This does not configure a server, grant permissions, invoke an engine, or prove installed artifact custody.",
-    after_help = "Example:\n  reverie-policy-artifacts --base-profile /nix/store/BASE.json --output-directory /nix/store/OUTPUT/share/reverie --system x86_64-linux\n\nExisting output files are refused. A failed build may leave partial output; Nix must publish only successful derivations."
+    about = "Build fixed Docker namespace or task-v1 seccomp artifacts",
+    long_about = "Build-only Nix tool. Docker mode appends the fixed namespace rule to the default-deny upstream profile. Task-perf mode writes task-perf-seccomp.json and worker-perf-profile.json into an existing output directory. This does not configure a server, grant permissions, invoke an engine, or prove installed artifact custody.",
+    after_help = "Docker base:\n  reverie-policy-artifacts --base-profile /nix/store/UPSTREAM.json --docker-profile-output /build/worker-docker-seccomp.json\n\nTask perf:\n  reverie-policy-artifacts --base-profile /nix/store/BASE.json --output-directory /nix/store/OUTPUT/share/reverie --system x86_64-linux\n\nModes are mutually exclusive. Existing output files are refused. A failed build may leave partial output; Nix must publish only successful derivations."
 )]
 struct Arguments {
     /// Immutable Docker seccomp base selected by the build expression.
     #[arg(long)]
     base_profile: PathBuf,
     /// Existing build-owned directory; each output must be absent.
-    #[arg(long)]
-    output_directory: PathBuf,
+    #[arg(long, required_unless_present = "docker_profile_output")]
+    output_directory: Option<PathBuf>,
     /// Target system, selected by the Nix build (not the builder's host).
-    #[arg(long, value_parser = ["x86_64-linux", "aarch64-linux"])]
-    system: String,
+    #[arg(long, required_unless_present = "docker_profile_output", value_parser = ["x86_64-linux", "aarch64-linux"])]
+    system: Option<String>,
+    /// Docker mode: absent output file for the fixed namespace profile.
+    #[arg(long, conflicts_with_all = ["output_directory", "system"])]
+    docker_profile_output: Option<PathBuf>,
 }
 fn main() {
     if let Err(error) = run(Arguments::parse()) {
@@ -29,10 +33,22 @@ fn main() {
     }
 }
 fn run(args: Arguments) -> Result<(), Box<dyn std::error::Error>> {
-    let system = PerfSystem::from_name(&args.system)?;
+    if let Some(destination) = args.docker_profile_output {
+        let base = output::read_bounded(&args.base_profile, MAX_PROFILE_BYTES)?;
+        output::write_new(&destination, &produce_docker_profile(&base)?)?;
+        return Ok(());
+    }
+    let system = PerfSystem::from_name(
+        args.system
+            .as_deref()
+            .ok_or(std::io::Error::from(std::io::ErrorKind::InvalidInput))?,
+    )?;
     let base = output::read_bounded(&args.base_profile, MAX_ARTIFACT_BYTES)?;
-    let profile = args.output_directory.join("task-perf-seccomp.json");
-    let manifest = args.output_directory.join("worker-perf-profile.json");
+    let directory = args
+        .output_directory
+        .ok_or(std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let profile = directory.join("task-perf-seccomp.json");
+    let manifest = directory.join("worker-perf-profile.json");
     let generated = produce_task_perf(utf8(&args.base_profile)?, utf8(&profile)?, system, &base)?;
     output::write_new_pair(
         &profile,

@@ -114,10 +114,10 @@ broker must still retain its supported admission and execution guards. This
 cohort does not replace `worker_memory.check_swap_budget`, `configure_started`,
 soft-limit requests or running-kernel verification.
 
-The existing Python broker remains selected. The task-perf artifact is now built
-by the separate Rust build-only policy-artifacts package, with filtered actual
-crate/dependency inputs. The separate Docker base-profile Python producer and
-other build-time tooling remain migration debt. Neither this library nor its
+The existing Python broker remains selected. The Docker namespace base and
+task-perf artifacts are built by the separate Rust build-only policy-artifacts
+package, with filtered actual crate/dependency inputs. Other build-time tooling
+remains migration debt. Neither this library nor its
 tests claim a consumer cutover, activation, a live syscall canary or the complete
 Python-free backend has finished.
 
