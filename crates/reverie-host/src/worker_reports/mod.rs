@@ -2,8 +2,10 @@
 //! actual admission, runtime origin, socket custody and checked finalizers.
 //! No listener, owner grant or successful create/start endpoint is created.
 mod error;
+mod handler;
 mod launch;
 mod record;
+mod registered;
 mod retention;
 pub(crate) mod terminal;
 pub use terminal::{ViewerRelay, ViewerRelayEnd, ViewerRelayError, ViewerRelayEvent};
@@ -17,8 +19,10 @@ use crate::{
 };
 pub use error::WorkerReportError;
 use error::{Result, finalized};
+pub use handler::WorkerHandlerConstruction;
 pub use launch::{AcceptedWorkerConnection, WorkerLaunchConnection};
 use record::Record;
+pub use registered::{RegisteredWorkerConnection, WorkerHandlersProgress};
 pub use retention::{WorkerLaunchClose, WorkerLaunchHold};
 use std::{
     os::unix::net::UnixStream,
@@ -104,7 +108,7 @@ impl WorkerReportService {
     }
     /// Seal THIS admission, interrupt every owned socket, then wait for actual
     /// operation records and checked finalizers. This service owns no caller
-    /// thread JoinHandle/listener; their eventual dispatcher must join them.
+    /// thread JoinHandle/listener except actual published same-record handlers.
     /// No other service/client is sealed here.
     pub fn close(&self, deadline: Instant) -> Result<()> {
         self.closed.store(true, Ordering::Release);
@@ -116,6 +120,9 @@ impl WorkerReportService {
         let mut result = Ok(());
         for record in &records {
             result = finalized(result, record.interrupt());
+        }
+        for record in &records {
+            result = finalized(result, record.settle_handler(end));
         }
         loop {
             if records.iter().all(|record| record.finished()) {

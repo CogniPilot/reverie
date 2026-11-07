@@ -631,6 +631,17 @@ Held/no-job failures. The actual App finalizer must classify it on every outcome
 perform any required real stop before reap, and settle all other owners. No live
 Docker, recovered-viewer, service activation or global release claim follows.
 
+Broker handler construction now splits registration from the same initial
+reader. An opaque registered socket is counted before any real thread exists.
+Its nonclone construction owner publishes the actual JoinHandle; the child
+waits and compares its actual ThreadId before configuration/frame work. Joined
+handler, known socket close and logical Hold release remain distinct facts in
+the same record. An arbitrary supplied spawn error cannot prove no thread:
+known refusal additionally requires actual unread-token Drop on its recorded
+constructing thread. Abandoned/mismatched publication, panic or consumed-close
+uncertainty remain counted. The real listener/all-verbs dispatcher and complete
+startup/shutdown assembly are still required; this is no service-ready result.
+
 `OrdinaryLaptopStop` is the separate legacy/stopped-name cleanup owner. Its
 observed constructor consumes the same Box, plan and original sealed inspection;
 the unobserved constructor consumes the same Box/plan and requires an actual

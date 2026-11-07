@@ -15,6 +15,7 @@ use std::{
 };
 
 pub(super) struct Record {
+    pub(super) handler: Mutex<Option<std::sync::Arc<super::handler::HandlerJob>>>,
     stream: Mutex<Option<UnixStream>>,
     control: Mutex<Option<UnixStream>>,
     finished: AtomicBool,
@@ -128,6 +129,7 @@ impl Record {
     }
     pub(super) fn new(stream: UnixStream) -> Self {
         Self {
+            handler: Mutex::new(None),
             stream: Mutex::new(Some(stream)),
             control: Mutex::new(None),
             finished: AtomicBool::new(false),
@@ -217,7 +219,7 @@ impl Record {
         result
     }
     pub(super) fn settled(&self) -> bool {
-        if !self.socket_closed_known() {
+        if !self.socket_closed_known() || !self.handler_settled() {
             return false;
         }
         match self.lifecycle.try_lock() {
@@ -228,6 +230,37 @@ impl Record {
                 false
             }
         }
+    }
+    pub(super) fn mark_opaque(&self) {
+        self.opaque.store(true, Ordering::Release);
+    }
+    fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
+        match self.handler.try_lock() {
+            Ok(job) => Ok(job.clone()),
+            Err(std::sync::TryLockError::WouldBlock) => Err(WorkerReportError::Unconfirmed),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                Err(WorkerReportError::Unconfirmed)
+            }
+        }
+    }
+    pub(super) fn handler_settled(&self) -> bool {
+        self.handler_job()
+            .is_ok_and(|job| job.is_none_or(|job| job.known_settled()))
+    }
+    pub(super) fn enter_handler(&self, service: &WorkerReportService) -> Result<()> {
+        self.handler_job()?.map_or(Ok(()), |job| job.enter(service))
+    }
+    pub(super) fn note_unread_drop(&self) {
+        if let Ok(Some(job)) = self.handler_job() {
+            job.unread_dropped();
+        }
+    }
+    pub(super) fn settle_handler(&self, end: Instant) -> Result<()> {
+        self.handler_job()?.map_or(Ok(()), |job| job.settle(end))
+    }
+    pub(super) fn collect_handler(&self) -> Result<bool> {
+        self.handler_job()?.map_or(Ok(true), |job| job.join_once())
     }
     pub(super) fn finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)

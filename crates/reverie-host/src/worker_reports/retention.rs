@@ -13,6 +13,7 @@ pub(super) enum LifecycleHoldState {
 pub enum WorkerLaunchClose {
     Complete,
     SocketClosedLifecycleHeld,
+    SocketClosedHandlerRetained,
 }
 /// Only a genuine accepted J connection can issue this one-shot resource.
 /// Default Drop leaves the strong Held identity in the SAME counted record;
@@ -54,7 +55,7 @@ impl WorkerLaunchHold {
             _ => return Err(WorkerReportError::Unconfirmed),
         }
         drop(state);
-        if self.record.socket_closed_known() {
+        if self.record.socket_closed_known() && self.record.handler_settled() {
             records.retain(|entry| !Arc::ptr_eq(entry, &self.record));
         }
         Ok(())

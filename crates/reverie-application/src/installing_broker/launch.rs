@@ -45,17 +45,39 @@ impl InstallingBroker {
         &self,
         stream: UnixStream,
     ) -> Result<WorkerConnectionDispatch<'_>, WorkerDispatchError> {
+        let registered = self.reports.register_worker_connection(stream)?;
+        self.accept_registered_worker_connection(registered)
+    }
+    pub(crate) fn accept_registered_worker_connection(
+        &self,
+        mut registered: reverie_host::worker_reports::RegisteredWorkerConnection,
+    ) -> Result<WorkerConnectionDispatch<'_>, WorkerDispatchError> {
+        if !registered.same_runtime(&self.storage.runtime) {
+            let cleanup = registered.close().err();
+            return Err(WorkerDispatchError::Configuration {
+                primary: GateError::Refused("WORKER_HANDLER_RUNTIME_CHANGED"),
+                cleanup,
+            });
+        }
+        if let Err(primary) = registered.await_handler_publication() {
+            let cleanup = registered.close();
+            let error = match cleanup {
+                Ok(()) => primary,
+                Err(secondary) => WorkerReportError::Finalization {
+                    primary: Box::new(primary),
+                    secondary: Box::new(secondary),
+                },
+            };
+            return Err(error.into());
+        }
         let snapshot = match self.configuration() {
             Ok(snapshot) => snapshot,
             Err(primary) => {
-                let cleanup = self.reports.close_unread_launch(stream).err();
+                let cleanup = registered.close().err();
                 return Err(WorkerDispatchError::Configuration { primary, cleanup });
             }
         };
-        match self
-            .reports
-            .accept(stream, self.command_telemetry(), snapshot.configuration())?
-        {
+        match registered.receive(self.command_telemetry(), snapshot.configuration())? {
             AcceptedWorkerConnection::ReportCompleted => {
                 Ok(WorkerConnectionDispatch::ReportCompleted)
             }

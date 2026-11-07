@@ -31,21 +31,10 @@ impl WorkerReportService {
         collector: &CommandTelemetry,
         configuration: &EffectiveWorkerConfig,
     ) -> Result<AcceptedWorkerConnection> {
-        let record = self.admit(stream)?;
-        match record.read_request(self, collector, configuration) {
-            Ok(Some(request)) => Ok(AcceptedWorkerConnection::Launch(WorkerLaunchConnection {
-                service: self.clone(),
-                record,
-                request,
-            })),
-            Ok(None) => {
-                self.finish_accepted(&record)?;
-                Ok(AcceptedWorkerConnection::ReportCompleted)
-            }
-            Err(error) => finalized(Err(error), self.finish_accepted(&record)),
-        }
+        self.register_worker_connection(stream)?
+            .receive(collector, configuration)
     }
-    fn finish_accepted(&self, record: &Arc<Record>) -> Result<()> {
+    pub(super) fn finish_accepted(&self, record: &Arc<Record>) -> Result<()> {
         let end = self
             .engine
             .stop_deadline()
@@ -53,7 +42,14 @@ impl WorkerReportService {
         let result = record.finish_launch(end);
         finalized(
             result,
-            self.retire_launch(record, end).and_then(require_retired),
+            self.retire_launch(record, end)
+                .and_then(|state| match state {
+                    WorkerLaunchClose::Complete
+                    | WorkerLaunchClose::SocketClosedHandlerRetained => Ok(()),
+                    WorkerLaunchClose::SocketClosedLifecycleHeld => {
+                        Err(WorkerReportError::LifecycleRetained)
+                    }
+                }),
         )
     }
     fn retire_launch(&self, record: &Arc<Record>, end: Instant) -> Result<WorkerLaunchClose> {
@@ -65,11 +61,25 @@ impl WorkerReportService {
         if matches!(*state, super::retention::LifecycleHoldState::Held(_)) {
             return Ok(WorkerLaunchClose::SocketClosedLifecycleHeld);
         }
+        if !record.handler_settled() {
+            return Ok(WorkerLaunchClose::SocketClosedHandlerRetained);
+        }
         records.retain(|other| !Arc::ptr_eq(other, record));
         Ok(WorkerLaunchClose::Complete)
     }
 }
 impl WorkerLaunchConnection {
+    pub(super) fn from_registered(
+        service: Arc<WorkerReportService>,
+        record: Arc<Record>,
+        request: WorkerRequest,
+    ) -> Self {
+        Self {
+            service,
+            record,
+            request,
+        }
+    }
     pub(super) fn require_terminal_hold(&self) -> Result<()> {
         self.record.require_terminal_hold()
     }
@@ -179,5 +189,6 @@ fn require_retired(outcome: WorkerLaunchClose) -> Result<()> {
     match outcome {
         WorkerLaunchClose::Complete => Ok(()),
         WorkerLaunchClose::SocketClosedLifecycleHeld => Err(WorkerReportError::LifecycleRetained),
+        WorkerLaunchClose::SocketClosedHandlerRetained => Err(WorkerReportError::HandlerRetained),
     }
 }
