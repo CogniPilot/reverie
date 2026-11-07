@@ -2,11 +2,14 @@
 //! nor successful metadata requests authenticate a website or authorize work.
 mod code;
 mod engine;
+mod files;
+mod process;
 #[cfg(test)]
 mod tests;
 mod transport;
 use crate::native;
 pub use code::{ImmutableCodeObserver, ObservedCodeFile};
+pub use process::{PeerProcessSnapshot, ProcessSnapshot, WebsiteProcessObserver};
 use reverie_contracts::resource_actor::{EngineMetadata, EngineSelection};
 use reverie_core::operations::JournalDigest;
 use std::{fmt, io, path::PathBuf};
@@ -15,6 +18,7 @@ use std::{fmt, io, path::PathBuf};
 pub enum WebsiteFactsError {
     Refused(&'static str),
     Io(io::Error),
+    Channel(crate::worker_reports::WorkerReportError),
     Cleanup,
     Finalization {
         primary: Box<Self>,
@@ -26,6 +30,7 @@ impl WebsiteFactsError {
         match self {
             Self::Refused(code) => code,
             Self::Io(_) => "ENGINE_METADATA_UNAVAILABLE",
+            Self::Channel(error) => error.code(),
             Self::Cleanup => "ENGINE_METADATA_CLOSE_UNCONFIRMED",
             Self::Finalization { .. } => "ENGINE_METADATA_FINALIZATION",
         }
@@ -40,6 +45,11 @@ impl std::error::Error for WebsiteFactsError {}
 impl From<io::Error> for WebsiteFactsError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
+    }
+}
+impl From<crate::worker_reports::WorkerReportError> for WebsiteFactsError {
+    fn from(value: crate::worker_reports::WorkerReportError) -> Self {
+        Self::Channel(value)
     }
 }
 type Result<T> = std::result::Result<T, WebsiteFactsError>;

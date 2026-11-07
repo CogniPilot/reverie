@@ -3,6 +3,7 @@
 mod facts;
 mod metadata;
 mod native_client;
+mod process;
 mod settings;
 #[cfg(test)]
 mod tests;
@@ -11,6 +12,7 @@ use crate::legacy_json::{self, Node, Number, Text, Value};
 pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
 pub use metadata::{EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata};
 pub use native_client::NativeResourceClientManifest;
+pub use process::{ProcessStatData, require_peer_kernel_status};
 use reverie_core::{PythonText, decimal::UnsignedInteger, operations::JournalDigest};
 pub use settings::ResourceActorSettings;
 use std::{collections::BTreeMap, fmt};
