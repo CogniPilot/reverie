@@ -40,6 +40,8 @@ fn end() -> Instant {
 }
 use crate::test_process::engine_program as program;
 use crate::test_process::isolate_case as isolate;
+#[path = "cold_tests.rs"]
+mod cold_cases;
 #[path = "nix/network/tests.rs"]
 mod network_cases;
 #[path = "nix/tests.rs"]
