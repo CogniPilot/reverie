@@ -4,12 +4,14 @@
  * outside a session) and memory-cli-reference.json (validation, remember, and in-session journal handling with the
  * `reverie agent journal` call stubbed; it records the exact journal argv python ran).
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { Command } from 'commander';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sqlite } from '../src/chat-db.js';
 import { registerAgentCommands, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 import { agentJournalRecall, agentJournalSave, type JournalSaveOptions } from '../src/cli-agent-journal.js';
 import { agentMemory, MEMORY_INPUT_MAX, readInput, sessionJournal, type MemoryCliDeps } from '../src/cli-agent-memory.js';
@@ -139,6 +141,12 @@ describe('recall outside a session, as memory_cli printed it for the legacy reca
 
 /** Python's json module words syntax errors its own way; the code and the error envelope still match. */
 const JSON_SYNTAX = new Set(['malformed-json', 'empty-input']);
+/** Where python turned a null or a number into text ("None", "5"), the verb refuses. */
+const NOT_TEXT: Record<string, string> = {
+  'recall-null-query': '{"error": "query must be text"}\n',
+  'recall-number-query': '{"error": "query must be text"}\n',
+  'remember-null-text': '{"error": "text must be text"}\n',
+};
 
 describe('the memory_cli reference: validation, remember, and the journal inside a session', () => {
   for (const c of reference.cases) {
@@ -153,7 +161,10 @@ describe('the memory_cli reference: validation, remember, and the journal inside
           env: { HOME: home },
           journal: c.journal ? stubJournal(c.journal, requests) : undefined,
         }, root);
-        if (JSON_SYNTAX.has(c.id)) {
+        if (c.id in NOT_TEXT) {
+          expect(got).toEqual({ code: 1, stdout: '', stderr: NOT_TEXT[c.id] });
+          expect(c.expect.stderr).not.toBe(NOT_TEXT[c.id]);
+        } else if (JSON_SYNTAX.has(c.id)) {
           expect(got.code).toBe(c.expect.code);
           expect(got.stdout).toBe('');
           expect(got.stderr).toMatch(/^\{"error": "Expecting [^"]+"\}\n$/);
@@ -166,7 +177,7 @@ describe('the memory_cli reference: validation, remember, and the journal inside
 
   it('covers recall, remember, both scopes and every journal outcome', () => {
     const ids = reference.cases.map((c) => c.id);
-    expect(ids.length).toBe(36);
+    expect(ids.length).toBe(42);
     expect(reference.cases.filter((c) => c.argvCalls.length).length).toBe(12);
   });
 });
@@ -246,11 +257,55 @@ describe('the session journal', () => {
     }));
 });
 
+const WEB = path.join(import.meta.dirname, '..');
+const REPO = path.join(WEB, '..', '..');
+const byId = (id: string) => reference.cases.find((c) => c.id === id)!;
+
+/** The real command as a process: node on the console entry, the request on standard input, a bare environment. */
+function processRun(root: string, args: string[], input: string, extra: Record<string, string> = {}) {
+  const done = spawnSync(process.execPath, ['--import', path.join(WEB, 'node_modules/tsx/dist/loader.mjs'), path.join(WEB, 'src/index.ts'),
+    'agent', 'memory', ...args], { input, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: path.join(root, 'home'), ...extra }, timeout: 60_000 });
+  const mask = (text: string) => text.replaceAll(root, '<root>');
+  return { code: done.status, stdout: mask(done.stdout), stderr: mask(done.stderr) };
+}
+
+describe('the command as a process', () => {
+  it('prints exactly what python printed, on stdout and stderr, with its exit code', () =>
+    inRoot(async (root) => {
+      const { config } = layout(root);
+      for (const id of ['private-missing-store', 'unknown-action', 'remember-outside-session-full']) {
+        const c = byId(id);
+        expect(processRun(root, ['--instance', config], c.stdin), id).toEqual(c.expect);
+      }
+      expect(processRun(root, [], byId('no-instance').stdin)).toEqual(byId('no-instance').expect);
+      expect(processRun(root, [], byId('private-missing-store').stdin, { REVERIE_INSTANCE_CONFIG: config }))
+        .toEqual(byId('private-missing-store').expect);
+    }), 120_000);
+
+  it("keeps node:sqlite's experimental notice off standard error when it opens a store", () =>
+    inRoot(async (root) => {
+      const { config } = layout(root);
+      const db = new (sqlite().DatabaseSync)(path.join(root, 'state', 'memory.sqlite'));
+      db.exec('CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      db.close();
+      // Python answered an empty store as it answered a missing one.
+      expect(processRun(root, ['--instance', config], byId('private-missing-store').stdin)).toEqual(byId('private-missing-store').expect);
+    }), 60_000);
+});
+
 describe('the command', () => {
   it('is `reverie agent memory`, with --instance', () => {
     const program = new Command();
     registerAgentCommands(program);
     const memory = program.commands.find((c) => c.name() === 'agent')!.commands.find((c) => c.name() === 'memory')!;
     expect(memory.options.map((o) => o.long)).toEqual(['--instance']);
+  });
+
+  it('is installed as reverie-memory by the package, and python no longer provides that command', () => {
+    const nix = fs.readFileSync(path.join(REPO, 'nix', 'package.nix'), 'utf8');
+    expect(nix).toContain('makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"');
+    const pyproject = fs.readFileSync(path.join(REPO, 'python', 'pyproject.toml'), 'utf8');
+    expect(pyproject).not.toMatch(/^reverie-memory\s*=/m);
+    expect(fs.existsSync(path.join(REPO, 'python', 'reverie', 'memory_cli.py'))).toBe(false);
   });
 });

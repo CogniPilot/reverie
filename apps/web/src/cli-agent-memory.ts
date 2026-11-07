@@ -107,7 +107,9 @@ async function journalCall(journal: JournalPort, verb: (deps: AgentDeps) => Prom
 function tighten(request: Request): void {
   for (const key of TEXT_FIELDS) {
     const value = request.get(key);
-    if (value !== undefined && value !== null && typeof value !== 'string') throw new Error(`${key} must be text`);
+    // A null elsewhere reads as absent, as in python; a null query or text python would have turned into "None".
+    if (value === undefined || typeof value === 'string' || (value === null && key !== 'query' && key !== 'text')) continue;
+    throw new Error(`${key} must be text`);
   }
   if ([...field(request, 'query')].length > QUERY_MAX) throw new Error(`query must be at most ${QUERY_MAX} characters`);
   if ([...field(request, 'text')].length > TEXT_MAX) throw new Error(`text must be at most ${TEXT_MAX} characters`);
@@ -214,6 +216,19 @@ export function sessionJournal(env: NodeJS.ProcessEnv): JournalPort | undefined 
   };
 }
 
+/**
+ * Python printed nothing on standard error when it succeeded; node:sqlite announces itself there once as experimental.
+ * Drop only that notice, for this command.
+ */
+function quietSqliteNotice(): void {
+  const emit = process.emitWarning.bind(process) as (...args: unknown[]) => void;
+  process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+    const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] as { type?: string } | undefined)?.type;
+    if (type === 'ExperimentalWarning' && String(warning).startsWith('SQLite is an experimental feature')) return;
+    emit(warning, ...rest);
+  }) as typeof process.emitWarning;
+}
+
 /** Standard input as strict UTF-8, refused past MEMORY_INPUT_MAX bytes. */
 export async function readInput(stream: AsyncIterable<Buffer> = process.stdin): Promise<string> {
   const chunks: Buffer[] = [];
@@ -231,6 +246,7 @@ export function registerMemoryCommand(agent: Command): void {
     .description('Recall from your old memory store and journal, or save to your journal: one JSON request on standard input (also installed as reverie-memory)')
     .option('--instance <path>', 'Your instance configuration (default: REVERIE_INSTANCE_CONFIG)')
     .action(async (options: { instance?: string }) => {
+      quietSqliteNotice();
       const env = process.env;
       let input: string;
       try {

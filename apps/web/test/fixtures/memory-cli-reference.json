@@ -608,6 +608,71 @@
      "--json"
     ]
    ]
+  },
+  {
+   "id": "recall-missing-query",
+   "stdin": "{\"action\":\"recall\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "recall-blank-query",
+   "stdin": "{\"action\":\"recall\",\"private\":true,\"query\":\"   \"}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "recall-null-query",
+   "stdin": "{\"action\":\"recall\",\"private\":true,\"query\":null}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "recall-number-query",
+   "stdin": "{\"action\":\"recall\",\"private\":true,\"query\":5}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-null-text",
+   "stdin": "{\"action\":\"remember\",\"private\":true,\"text\":null}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember saves to your office journal as your own Reverie session, and this process is not running inside one. Nothing was saved. Inside your session, run: reverie agent journal save --room '<room-id>' --turn '<message-id>' --text None --tag '<decision|promise|correction|preference|identity|relationship|open-question|lesson|personal-reflection>' --source '<message-id>' --quote '<exact words from that message>'\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "session-recall-missing-query",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"entries\":[{\"id\":1,\"text\":\"ü note\",\"weight\":3.5,\"tags\":[\"decision\"]}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"recall needs a query\"}\n"
+   },
+   "argvCalls": []
   }
  ]
 }
