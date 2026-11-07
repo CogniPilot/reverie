@@ -4,7 +4,7 @@ use super::*;
 use reverie_host::worker_laptop::DirectStorageObservation;
 
 impl Finalizer<'_> {
-    fn observe_direct_storage(&mut self) -> Option<DirectStorageObservation> {
+    pub(super) fn observe_direct_storage(&mut self) -> Option<DirectStorageObservation> {
         let slot = self.owner.resource_slot()?;
         let Some(resources) = slot.take() else {
             return None;
@@ -59,7 +59,7 @@ impl Finalizer<'_> {
         }
     }
 
-    fn finish_direct_storage(
+    pub(super) fn finish_direct_storage(
         &mut self,
         observation: &DirectStorageObservation,
         end: Instant,
@@ -75,14 +75,14 @@ impl Finalizer<'_> {
                 *slot = Some(Resources::Finalized {
                     plan,
                     retained,
-                    remainder,
+                    _remainder: remainder,
                 });
                 Some(retained)
             }
             Err(failure) => {
                 // Keep the actual opaque native/physical failure owner. Never
                 // rebuild a claim or ask a later observation to forgive it.
-                *slot = Some(Resources::FinalStorageFailed { failure, remainder });
+                *slot = Some(Resources::FinalStorageFailed { failure, _remainder: remainder });
                 self.errors
                     .push(ColdError::Refused("WORKER_COLD_FINAL_STORAGE_RETAINED"));
                 None

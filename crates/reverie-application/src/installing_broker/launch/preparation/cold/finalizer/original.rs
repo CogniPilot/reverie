@@ -3,7 +3,10 @@
 use super::*;
 impl Finalizer<'_> {
     pub(super) fn stop_classified_original(&mut self, budget: CleanupBudget) {
-        if self.completed != Some(true) || !matches!(&self.owner, Owner::Classified(_)) {
+        if self.completed != Some(true)
+            || !self.owner.stop_required(true)
+            || !matches!(&self.owner, Owner::Classified(_))
+        {
             return;
         }
         let Some(target) = self.target.clone() else {

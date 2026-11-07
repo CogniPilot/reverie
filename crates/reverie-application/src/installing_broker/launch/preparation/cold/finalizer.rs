@@ -15,6 +15,7 @@ enum Owner<'a> {
     Closed(AllocationClosedCold<'a>),
     Viewing(ViewingCold<'a>),
     Classified(Box<ClassifiedCleanup<'a>>),
+    Preparation(Box<PreparationFailure<'a>>),
 }
 struct ClassifiedCleanup<'a> {
     scope: ColdScope<'a>,
@@ -61,16 +62,32 @@ impl ColdHandlerClosed {
             })
     }
 }
-impl ColdFinalizationFailure<'_> {
+impl<'a> ColdFinalizationFailure<'a> {
+    pub(super) fn retained_preparation(owner: Box<PreparationFailure<'a>>) -> Box<Self> {
+        Box::new(Self {
+            cleanup: Finalizer {
+                owner: Owner::Preparation(owner), primary: None, body_causes: Vec::new(),
+                errors: vec![ColdError::Refused("WORKER_PREPARATION_RESOURCE_RETAINED")],
+                completed: None, stopped: None, target: None,
+            },
+        })
+    }
     pub fn request(&self) -> &WorkerRequest {
-        self.cleanup.owner.scope().preparing.admitted.request()
+        match &self.cleanup.owner {
+            Owner::Preparation(owner) => owner.preparing.admitted.request(),
+            owner => owner.scope().preparing.admitted.request(),
+        }
     }
     pub fn cleanup_error_count(&self) -> usize {
-        self.cleanup.errors.len()
+        self.cleanup.errors.len() + match &self.cleanup.owner {
+            Owner::Preparation(owner) => owner.cleanup.len(),
+            _ => 0,
+        }
     }
 }
 impl std::fmt::Debug for ColdFinalizationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Owner::Preparation(owner) = &self.cleanup.owner { return owner.fmt(out); }
         out.debug_struct("ColdFinalizationFailure")
             .field("session", self.request().session())
             .field("primary", &self.cleanup.primary)
@@ -81,17 +98,26 @@ impl std::fmt::Debug for ColdFinalizationFailure<'_> {
 }
 impl std::fmt::Display for ColdFinalizationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Owner::Preparation(owner) = &self.cleanup.owner { return owner.fmt(out); }
         if let Some(primary) = &self.cleanup.primary {
             write!(out, "{primary}; ")?;
         }
         for error in self.cleanup.body_causes.iter().chain(&self.cleanup.errors) {
             write!(out, "{error}; ")?;
         }
+        match self.cleanup.owner.resource() {
+            Some(Resources::FinalStorageFailed { failure, .. }) => write!(out, "{}; ", failure.cause())?,
+            Some(Resources::Finalized { plan, retained, .. }) => write!(
+                out, "storage disposition for {}: retained={retained}; ", plan.session(),
+            )?,
+            _ => {}
+        }
         Ok(())
     }
 }
 impl std::error::Error for ColdFinalizationFailure<'_> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        if let Owner::Preparation(owner) = &self.cleanup.owner { return Some(owner.cause()); }
         self.cleanup
             .primary
             .as_ref()
@@ -106,6 +132,7 @@ impl<'a> Owner<'a> {
             Self::Closed(owner) => &owner.scope,
             Self::Viewing(owner) => &owner.owner.scope,
             Self::Classified(owner) => &owner.scope,
+            Self::Preparation(_) => unreachable!("retained early failure has no fabricated Cold scope"),
         }
     }
     fn scope_mut(&mut self) -> &mut ColdScope<'a> {
@@ -114,6 +141,7 @@ impl<'a> Owner<'a> {
             Self::Closed(owner) => &mut owner.scope,
             Self::Viewing(owner) => &mut owner.owner.scope,
             Self::Classified(owner) => &mut owner.scope,
+            Self::Preparation(_) => unreachable!("retained early failure has no fabricated Cold scope"),
         }
     }
     fn started(&self) -> Option<&Arc<StartedLaptop>> {
@@ -121,7 +149,7 @@ impl<'a> Owner<'a> {
             Self::Body(owner) => owner.started.as_ref(),
             Self::Closed(owner) => Some(&owner.started),
             Self::Viewing(owner) => Some(&owner.owner.started),
-            Self::Classified(_) => None,
+            Self::Classified(_) | Self::Preparation(_) => None,
         }
     }
     fn created(&self) -> Option<&CreatedLaptop> {
@@ -133,21 +161,21 @@ impl<'a> Owner<'a> {
                 .or_else(|| owner.started.as_ref().map(|owner| &owner.created)),
             Self::Closed(owner) => Some(&owner.started.created),
             Self::Viewing(owner) => Some(&owner.owner.started.created),
-            Self::Classified(_) => None,
+            Self::Classified(_) | Self::Preparation(_) => None,
         }
     }
     fn resource_slot(&mut self) -> Option<&mut Option<Resources>> {
         match self {
             Self::Body(owner) => Some(&mut owner.resources),
             Self::Classified(owner) => Some(&mut owner.resources),
-            Self::Closed(_) | Self::Viewing(_) => None,
+            Self::Closed(_) | Self::Viewing(_) | Self::Preparation(_) => None,
         }
     }
     fn resource(&self) -> Option<&Resources> {
         match self {
             Self::Body(owner) => owner.resources.as_ref(),
             Self::Classified(owner) => owner.resources.as_ref(),
-            Self::Closed(_) | Self::Viewing(_) => None,
+            Self::Closed(_) | Self::Viewing(_) | Self::Preparation(_) => None,
         }
     }
     fn network(&self) -> Option<Arc<storage::NetworkStoragePreparation>> {
@@ -173,7 +201,7 @@ impl<'a> Owner<'a> {
         let scope = self.scope();
         let owned = self.created().is_some() || !matches!(scope.original, OriginalRuntime::Absent);
         owned
-            && !matches!(scope.budget, CreationBudget::ReplacementPending)
+            && !matches!(scope.budget, CreationBudget::Unconfirmed | CreationBudget::ReplacementPending)
             && self.remove_registration(completed)
     }
 }
@@ -249,6 +277,16 @@ impl Finalizer<'_> {
             _ => None,
         };
         if let Some(plan) = plan {
+            // Preserve the original one-time argument/configuration pairing.
+            // This read-side assertion supplies no stop or release authority.
+            if reverie_contracts::worker_config::encode_config(plan.source())
+                != reverie_contracts::worker_config::encode_config(
+                    self.owner.scope().current.configuration(),
+                )
+            {
+                self.errors.push(ColdError::Refused("WORKER_COLD_PLAN_SOURCE_CHANGED"));
+                return;
+            }
             self.target = Some(WorkerContainerName::from_launch_name_data(
                 plan.arguments().worker_name(),
             ));

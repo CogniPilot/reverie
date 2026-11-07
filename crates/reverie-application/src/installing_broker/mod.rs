@@ -27,7 +27,8 @@ pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
 pub use launch::{
     AdmittedWorkerLaunch, AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch,
-    ColdLaunchFailure, ColdViewerFailure, ColdWorkerLaunch, ExistingColdTarget,
+    ColdFinalizationFailure, ColdHandlerClosed, ColdLaunchFailure, ColdViewerFailure,
+    ColdWorkerLaunch, ExistingColdTarget,
     InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure, PreparedReuseViewer,
     ReceivedWorkerLaunch, RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure,
     ReuseHandlerClosed, ReuseRelayError, ReuseRelayReturned, ReuseViewerFailure, ViewingCold,

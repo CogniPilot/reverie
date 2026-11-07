@@ -13,7 +13,8 @@ pub(in crate::installing_broker) use preparation::StartedLaptop;
 mod viewer;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 pub use preparation::{
-    AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdLaunchFailure,
+    AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdFinalizationFailure,
+    ColdHandlerClosed, ColdLaunchFailure,
     ColdViewerFailure, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
     PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer, RestoredReuse,
     ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed, ReuseViewerFailure,

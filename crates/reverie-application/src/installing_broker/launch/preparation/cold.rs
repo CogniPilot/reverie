@@ -44,6 +44,7 @@ enum OriginalRuntime {
     Absent,
 }
 enum CreationBudget {
+    Unconfirmed,
     Initial,
     ReplacementPending,
     ReplacementConfirmed,
@@ -91,12 +92,12 @@ enum Resources {
     FinalStorage(FinalStorage),
     FinalStorageFailed {
         failure: Box<storage::DirectStorageFinishFailure>,
-        remainder: FinalStorageRemainder,
+        _remainder: FinalStorageRemainder,
     },
     Finalized {
         plan: ObservedCreatePlan,
         retained: bool,
-        remainder: FinalStorageRemainder,
+        _remainder: FinalStorageRemainder,
     },
 }
 struct FinalStorage {

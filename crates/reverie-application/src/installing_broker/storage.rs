@@ -4,8 +4,7 @@ mod direct_finalization;
 mod error;
 mod finalization;
 pub(in crate::installing_broker) use direct_finalization::{
-    DirectStorageFinishFailure, DirectStorageFinished, DirectStoragePreparation,
-    DirectStorageRetainFailure,
+    DirectStorageFinishFailure, DirectStoragePreparation,
 };
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{

@@ -27,7 +27,7 @@ impl std::fmt::Display for ColdError {
             Self::Recorded(error) => error.fmt(out),
             Self::Recovery(error) => error.fmt(out),
             Self::Transport(error) => error.fmt(out),
-            Self::Finalized { primary, .. } => primary.fmt(out),
+            Self::Finalized { primary, secondary } => write!(out, "{primary}; cleanup: {secondary}"),
         }
     }
 }
