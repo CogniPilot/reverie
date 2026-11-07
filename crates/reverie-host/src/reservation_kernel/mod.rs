@@ -190,6 +190,11 @@ fn pid_start(source: &impl Source, pid: &UnsignedInteger, end: Instant) -> Resul
         end,
     )?)?)
 }
+/// Same fixed ASCII/65536 _pid read; only the sealed existing-laptop observer
+/// calls this within Host. No public request-selected root or PID endpoint.
+pub(crate) fn existing_process_start(pid: &UnsignedInteger, end: Instant) -> Result<String> {
+    pid_start(&Installed, pid, end)
+}
 fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
     let stat = path("/proc/self/stat");
     let before = kernel_accounting::process_start(&text(source, &stat, 65536, false, end)?)?;

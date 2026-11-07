@@ -36,6 +36,7 @@ impl<'a> ObservedWorkerLaunch<'a> {
                 ExistingObservationError::Origin => {
                     PreparationError::Refused("WORKER_LAUNCH_PLAN_ORIGIN")
                 }
+                error => PreparationError::ExistingHost(error),
             })
     }
 }

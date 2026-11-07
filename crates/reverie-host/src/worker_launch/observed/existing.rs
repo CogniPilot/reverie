@@ -15,6 +15,8 @@ use std::{
 pub enum ExistingObservationError {
     Engine(EngineError),
     Data(LaptopReadError),
+    Kernel(crate::reservation_kernel::ReservationKernelError),
+    Owner(crate::worker_storage::StorageOwnerError),
     Origin,
 }
 impl std::fmt::Display for ExistingObservationError {
@@ -22,6 +24,8 @@ impl std::fmt::Display for ExistingObservationError {
         match self {
             Self::Engine(error) => error.fmt(out),
             Self::Data(error) => error.fmt(out),
+            Self::Kernel(error) => error.fmt(out),
+            Self::Owner(error) => error.fmt(out),
             Self::Origin => out.write_str("WORKER_EXISTING_OBSERVATION_ORIGIN"),
         }
     }
@@ -31,6 +35,8 @@ impl std::error::Error for ExistingObservationError {
         match self {
             Self::Engine(error) => Some(error),
             Self::Data(error) => Some(error),
+            Self::Kernel(error) => Some(error),
+            Self::Owner(error) => Some(error),
             Self::Origin => None,
         }
     }
@@ -41,6 +47,8 @@ pub struct ExistingLaptopInspection {
     observation: Arc<()>,
     data: LaunchLaptopInspection,
 }
+mod process;
+pub use process::{ExistingCaptureFailure, ExistingProcessIncarnation};
 impl ExistingLaptopInspection {
     pub fn data(&self) -> &LaunchLaptopInspection {
         &self.data

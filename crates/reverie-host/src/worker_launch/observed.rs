@@ -16,7 +16,10 @@ use reverie_contracts::{
 use reverie_core::ids::ProfileSessionId;
 use std::sync::Arc;
 mod existing;
-pub use existing::{ExistingLaptopInspection, ExistingObservationError};
+pub use existing::{
+    ExistingCaptureFailure, ExistingLaptopInspection, ExistingObservationError,
+    ExistingProcessIncarnation,
+};
 #[cfg(test)]
 mod tests;
 #[derive(Debug)]
