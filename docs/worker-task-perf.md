@@ -51,11 +51,18 @@ omit no-new-privileges. This test does not impose NNP or confuse that exception
 with forbidden seccomp/AppArmor-unconfined or privileged operation. The actual
 kernel capability/UID/seccomp checks still run before invoking perf.
 
-The image CI job builds the Nix worker image and policy, prepares only its
-declared disposable Ubuntu GitHub-hosted VM via `cargo xtask prepare-ci-perf`,
-then runs the strict real test. That preparation command refuses local and
-self-hosted use and never belongs to ordinary verification or product startup.
-The CI-only `--temporary-image` verification purpose attempts removal of the
+The image CI job runs `cargo xtask verify-worker-perf --ci`. This Rust task
+prepares only its declared disposable Ubuntu GitHub-hosted VM, builds the Nix
+worker image and policy, and runs the strict real test. It invokes programs
+with explicit arguments, without shell orchestration. The pinned Nix Skopeo
+package imports the image under an initially absent temporary tag; the archive's
+ordinary worker tag is never imported. Both verification outcomes attempt
+cleanup of that temporary tag and the owned archive link/directory. There is no
+image pruning or container removal. The task refuses local/self-hosted machines
+and nondefault Docker endpoints, and is not part of ordinary verification or
+product startup. Nix store outputs remain managed by Nix.
+
+The explicit `--temporary-image` verification purpose attempts removal of the
 exact tested immutable worker image ID and unchanged Nix archive out-link after
 either verification outcome; it never prunes images or removes containers.
 NixOS deployments use the declarative module instead. An image test proves

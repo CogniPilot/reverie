@@ -117,6 +117,7 @@
             worker = true;
           };
           workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
+          workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuSupport = import ./nix/worker-gpu-support.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;

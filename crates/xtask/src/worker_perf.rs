@@ -2,11 +2,24 @@
 //! test tooling, never an installed owner-policy or laptop migration shortcut.
 use std::{error::Error, path::Path, process::Command};
 mod ci;
+#[cfg(target_os = "linux")]
+mod ci_image;
 mod temporary;
 pub(super) use temporary::temporary_image;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 pub(super) fn prepare_ci() -> Result<()> {
     ci::prepare()
+}
+pub(super) fn image_ci(root: &Path) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        ci_image::verify(root)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = root;
+        Err("container perf CI requires a disposable Linux runner".into())
+    }
 }
 pub(super) fn image(root: &Path, image: &str, manifest: &Path) -> Result<()> {
     if !cfg!(target_os = "linux") {

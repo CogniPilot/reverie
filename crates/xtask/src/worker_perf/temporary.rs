@@ -9,6 +9,9 @@ pub(crate) fn temporary_image(
     manifest: &Path,
     archive_link: &Path,
 ) -> Result<()> {
+    if !cfg!(target_os = "linux") {
+        return Err("temporary container perf verification requires Linux".into());
+    }
     checked_image(image)?;
     let archive = ArchiveLink::capture(archive_link)?;
     let mut failures = Vec::new();
@@ -32,7 +35,7 @@ pub(crate) fn temporary_image(
     }
 }
 
-fn checked_image(image: &str) -> Result<()> {
+pub(super) fn checked_image(image: &str) -> Result<()> {
     let Some(digest) = image.strip_prefix("sha256:") else {
         return Err("temporary worker cleanup requires the exact immutable image ID".into());
     };
@@ -46,12 +49,12 @@ fn checked_image(image: &str) -> Result<()> {
     Ok(())
 }
 
-struct ArchiveLink {
+pub(super) struct ArchiveLink {
     path: PathBuf,
     target: PathBuf,
 }
 impl ArchiveLink {
-    fn capture(path: &Path) -> Result<Self> {
+    pub(super) fn capture(path: &Path) -> Result<Self> {
         let target = fs::read_link(path)?;
         if !fs::canonicalize(&target)?.starts_with("/nix/store")
             || !fs::metadata(&target)?.is_file()
@@ -63,7 +66,7 @@ impl ArchiveLink {
             target,
         })
     }
-    fn remove(self) -> Result<()> {
+    pub(super) fn remove(self) -> Result<()> {
         if fs::read_link(&self.path)? != self.target {
             return Err("temporary worker archive link changed; preserved replacement".into());
         }

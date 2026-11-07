@@ -33,6 +33,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         [command] if command == "prepare-ci-userns" => ci_userns::prepare()?,
         [command] if command == "prepare-ci-perf" => worker_perf::prepare_ci()?,
+        [command, mode] if command == "verify-worker-perf" && mode == "--ci" => {
+            worker_perf::image_ci(&workspace_root()?)?;
+        }
         [command, mode, value, policy, manifest]
             if command == "verify-worker-perf"
                 && mode == "--image"
@@ -62,6 +65,9 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn help() {
+    println!(
+        "cargo xtask verify-worker-perf --ci\n  Disposable Ubuntu24.04 GitHub-hosted runner only: prepare host support, build the Nix image/policy, import under an owned temporary tag, verify real perf, and clean up on either outcome. Refuses local/self-hosted use."
+    );
     println!(
         "cargo xtask verify-worker-perf --temporary-image sha256:IMAGE --policy-manifest PATH --archive-link LINK\n  CI: verify, then attempt exact temporary image and unchanged Nix archive-link cleanup on success or failure."
     );
