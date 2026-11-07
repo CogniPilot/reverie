@@ -105,7 +105,8 @@ freshness. This source task does not perform those checks or installation.
 
 ## Bounded history reads
 
-The same package supplies `reverie-resource-history`:
+The same package supplies the native `reverie-resource-history` (crate
+`reverie-observations`, which replaced the Python reader byte for byte):
 
 ```sh
 RESULT/bin/reverie-resource-history --config /ABSOLUTE/PRIVATE/CONFIG.json \

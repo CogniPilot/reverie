@@ -15,6 +15,7 @@ members = [
     "crates/reverie-http",
     "crates/reverie-ops-cli",
     "crates/reverie-namegate",
+    "crates/reverie-observations",
     "crates/reverie-voice-ci",
     "crates/xtask",
 ]

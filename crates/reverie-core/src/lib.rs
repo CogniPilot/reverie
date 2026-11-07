@@ -5,6 +5,7 @@ pub mod lease_policy;
 pub mod operations;
 pub mod ops;
 pub mod posix_path;
+pub mod posix_text;
 pub mod profiles;
 pub mod resource_projection;
 pub mod resources;
