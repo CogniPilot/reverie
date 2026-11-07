@@ -3,12 +3,16 @@
 mod code;
 mod engine;
 mod files;
+mod input;
 mod process;
 #[cfg(test)]
 mod tests;
 mod transport;
 use crate::native;
 pub use code::{ImmutableCodeObserver, ObservedCodeFile};
+pub use input::{
+    ImmutableInputKind, ImmutableInputObserver, ObservedImmutableInput, ObservedNativeClient,
+};
 pub use process::{PeerProcessSnapshot, ProcessSnapshot, WebsiteProcessObserver};
 use reverie_contracts::resource_actor::{EngineMetadata, EngineSelection};
 use reverie_core::operations::JournalDigest;
