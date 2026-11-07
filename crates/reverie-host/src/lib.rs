@@ -41,6 +41,7 @@ pub mod worker_nix;
 pub mod worker_recovery;
 pub mod worker_reports;
 pub mod worker_runtime;
+pub mod worker_source_stop;
 pub mod worker_storage;
 pub mod worker_validation;
 

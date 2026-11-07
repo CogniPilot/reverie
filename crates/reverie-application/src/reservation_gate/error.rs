@@ -1,6 +1,11 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    OriginalSource(Box<crate::installing_broker::StorageWorkflowError>),
+    SourceStopData(reverie_contracts::worker_source_stop::SourceStopDataError),
+    NativeSourceStopUncertain {
+        cause: Box<Self>,
+    },
     GpuData(reverie_contracts::gpu_access::GpuDataError),
     GpuHost(reverie_host::gpu_access::GpuHostError),
     GpuApplyUncertain {
@@ -58,6 +63,11 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::OriginalSource(error) => error.code(),
+            Self::SourceStopData(error) => error.code(),
+            Self::NativeSourceStopUncertain { .. } => {
+                "RESOURCE_NATIVE_SOURCE_STOP_UNCERTAIN_KEEP_CLAIM"
+            }
             Self::GpuData(error) => error.code(),
             Self::GpuHost(error) => error.code(),
             Self::GpuApplyUncertain { .. } => "GPU_APPLY_REQUIRES_RECONCILIATION",
@@ -115,6 +125,9 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::OriginalSource(error) => Some(error.as_ref()),
+            Self::SourceStopData(error) => Some(error),
+            Self::NativeSourceStopUncertain { cause } => Some(cause.as_ref()),
             Self::GpuData(error) => Some(error),
             Self::GpuHost(error) => Some(error),
             Self::GpuApplyUncertain { cause } => Some(cause),
@@ -230,7 +243,7 @@ pub(super) fn need(value: bool, code: &'static str) -> Result<()> {
         Err(GateError::Refused(code))
     }
 }
-pub(super) fn finalized<T>(result: Result<T>, closed: Result<()>) -> Result<T> {
+pub(crate) fn finalized<T>(result: Result<T>, closed: Result<()>) -> Result<T> {
     match (result, closed) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),

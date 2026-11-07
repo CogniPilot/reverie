@@ -28,7 +28,8 @@ pub struct RetainedPreparation {
     before: EffectiveWorkerConfig,
     paths: StoragePaths,
     baseline: OriginalSourceBaseline,
-    _source: Option<crate::installing_broker::source::RegisteredSource>,
+    pub(super) original_source: Option<crate::installing_broker::source::RegisteredSource>,
+    pub(super) source_stop_phase: super::preparation_stop::SourceStopPhase,
     pub(super) preparing_attempted: bool,
     pub(super) start_attempted: bool,
     pub(super) start_owner: Option<super::preparation_start::ProtectedStartIntent>,
@@ -42,7 +43,7 @@ impl RetainedPreparation {
         &mut self,
         source: crate::installing_broker::source::RegisteredSource,
     ) {
-        self._source = Some(source);
+        self.original_source = Some(source);
     }
     pub fn operation(&self) -> &OperationView {
         &self.view
@@ -130,7 +131,8 @@ impl ReservationGate {
                     before,
                     paths,
                     baseline,
-                    _source: None,
+                    original_source: None,
+                    source_stop_phase: super::preparation_stop::SourceStopPhase::Idle,
                     preparing_attempted: false,
                     start_attempted: false,
                     start_owner: None,

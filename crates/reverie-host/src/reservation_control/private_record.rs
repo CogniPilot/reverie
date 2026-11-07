@@ -10,6 +10,7 @@ use std::{
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
 };
 pub(super) enum PrivateRecord<'a> {
+    SourceStopIntent(&'a reverie_contracts::reservation_baseline::SourceStopIntentRecord),
     Draft(&'a DraftRecord),
     Publication(&'a PublicationIntent),
     PolicyAttempt(&'a reverie_contracts::reservation_policy::PolicyAttemptRecord),
@@ -20,6 +21,9 @@ pub(super) enum PrivateRecord<'a> {
 impl PrivateRecord<'_> {
     fn name(&self) -> String {
         match self {
+            Self::SourceStopIntent(value) => {
+                format!("source-stop-attempt-{}.json", value.operation_id().as_str())
+            }
             Self::StartIntent(value) => {
                 format!("start-attempt-{}.json", value.operation_id().as_str())
             }
@@ -40,6 +44,7 @@ impl PrivateRecord<'_> {
     }
     fn bytes(&self) -> Result<Vec<u8>> {
         match self {
+            Self::SourceStopIntent(value) => Ok(value.canonical_bytes().to_vec()),
             Self::StartIntent(value) => Ok(value.canonical_bytes().to_vec()),
             Self::Draft(value) => value.canonical_bytes().map_err(ControlHostError::Draft),
             Self::Publication(value) => Ok(value.canonical_bytes()),
