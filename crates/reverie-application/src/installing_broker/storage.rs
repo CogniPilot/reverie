@@ -25,12 +25,12 @@ pub(super) use source::SourceAttachment;
 pub(in crate::installing_broker) mod tests;
 use super::*;
 pub use error::{StorageReleaseFailure, StorageWorkflowError};
+pub(in crate::installing_broker) use nix::{CreatedStorageFinishFailure, CreatedStorageReturned};
 pub use nix::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
 };
-pub(in crate::installing_broker) use nix::{CreatedStorageReturned, CreatedStorageFinishFailure};
 pub use replacement_stop::{
     ReplacementStopPreparation, ReplacementStopReclaimFailure, ReplacementStopRetainFailure,
     ReplacementStopReturned,

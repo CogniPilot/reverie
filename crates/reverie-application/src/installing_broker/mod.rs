@@ -27,12 +27,12 @@ pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
 pub use launch::{
     AdmittedWorkerLaunch, AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch,
-    ColdFinalizationFailure, ColdHandlerClosed, ColdLaunchFailure, ColdRelayReturned, ColdViewerFailure,
-    ColdWorkerLaunch, ExistingColdTarget,
-    InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure, PreparedReuseViewer,
-    ReceivedWorkerLaunch, RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure,
-    ReuseHandlerClosed, ReuseRelayError, ReuseRelayReturned, ReuseViewerFailure, ViewingCold,
-    ViewingReuse, WorkerConnectionDispatch, WorkerDispatchError, WorkerViewerRelayError,
+    ColdFinalizationFailure, ColdHandlerClosed, ColdLaunchFailure, ColdRelayReturned,
+    ColdViewerFailure, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
+    LaunchAdmissionFailure, LaunchPreparationFailure, PreparedReuseViewer, ReceivedWorkerLaunch,
+    RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed,
+    ReuseRelayError, ReuseRelayReturned, ReuseViewerFailure, ViewingCold, ViewingReuse,
+    WorkerConnectionDispatch, WorkerDispatchError, WorkerViewerRelayError,
 };
 pub(crate) use lifecycle::LaptopLifecycle;
 use lifecycle::LaptopState;

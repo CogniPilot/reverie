@@ -111,9 +111,14 @@ impl NetworkStoragePreparation {
         created: &CreatedLaptop,
     ) -> Result<()> {
         if !created.same_workflow(&self.workflow) {
-            return Err(NetworkStorageError::Host(LaptopError::Refused("WORKER_CREATED_ORIGIN")));
+            return Err(NetworkStorageError::Host(LaptopError::Refused(
+                "WORKER_CREATED_ORIGIN",
+            )));
         }
-        self.destination.registry().runtime.close_created_laptop_viewer_for_worker(created)
+        self.destination
+            .registry()
+            .runtime
+            .close_created_laptop_viewer_for_worker(created)
             .map_err(NetworkStorageError::Host)
     }
     pub(in crate::installing_broker) fn cleanup_created_request(
@@ -121,9 +126,14 @@ impl NetworkStoragePreparation {
         created: &CreatedLaptop,
     ) -> Result<()> {
         if !created.same_workflow(&self.workflow) {
-            return Err(NetworkStorageError::Host(LaptopError::Refused("WORKER_CREATED_ORIGIN")));
+            return Err(NetworkStorageError::Host(LaptopError::Refused(
+                "WORKER_CREATED_ORIGIN",
+            )));
         }
-        self.destination.registry().runtime.cleanup_created_laptop_request(created)
+        self.destination
+            .registry()
+            .runtime
+            .cleanup_created_laptop_request(created)
             .map_err(NetworkStorageError::Host)
     }
     pub(in crate::installing_broker) fn start_viewer(
