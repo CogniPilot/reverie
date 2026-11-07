@@ -110,6 +110,15 @@ impl WorkerServiceConnection {
     pub fn retain_lifecycle(&self) -> Result<WorkerLaunchHold> {
         self.record.retain_lifecycle(&self.service)
     }
+    /// Internal purposes retain this exact accepted Record after its genuine
+    /// logical hold is issued. Peer/PID data alone cannot mint this identity.
+    pub(crate) fn held_identity(&self) -> Result<terminal::RelayIdentity> {
+        self.record.require_terminal_hold()?;
+        Ok(terminal::RelayIdentity::new(
+            &self.service,
+            self.record.clone(),
+        ))
+    }
     /// Physical socket finalization remains distinct from held resource work
     /// and this actual handler's JoinHandle. No implicit hold release occurs.
     pub fn close_socket_for_worker(&self) -> Result<WorkerLaunchClose> {

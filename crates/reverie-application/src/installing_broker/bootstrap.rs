@@ -223,6 +223,7 @@ impl InstallingBroker {
                 .expect("successful actual telemetry constructor"),
             reports,
             recovery: Arc::new(RecoveryOwners::new()),
+            goals: Arc::new(reverie_host::goal_custody::GoalCustodyState::new()),
         })
     }
 }

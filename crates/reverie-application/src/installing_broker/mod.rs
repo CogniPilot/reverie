@@ -6,7 +6,9 @@ pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootst
 #[cfg(test)]
 mod bootstrap_tests;
 mod creation;
+mod goal_custody;
 mod gpu_access;
+pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod launch;
 mod lifecycle;
@@ -167,6 +169,7 @@ pub struct InstallingBroker {
     telemetry: Arc<reverie_host::command_telemetry::CommandTelemetry>,
     reports: Arc<reverie_host::worker_reports::WorkerReportService>,
     recovery: Arc<RecoveryOwners>,
+    goals: Arc<reverie_host::goal_custody::GoalCustodyState>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.
