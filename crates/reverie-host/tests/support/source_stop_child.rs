@@ -40,6 +40,10 @@ fn main() {
             if std::env::var("SOURCE_EXIT_ON").unwrap() == "stop-requested" {
                 wait("source-reaped");
             }
+            if Path::new("hold-stop-reply").exists() {
+                fs::write("stop-reply-held", b"owned effect before reply").unwrap();
+                wait("release-stop-reply");
+            }
             if std::env::var("SOURCE_STOP_OPTIONAL_ERROR").is_ok() {
                 std::process::exit(7);
             }
