@@ -158,8 +158,10 @@ use the CI config (and therefore `test/setup.ts`). `test/setup.ts` throws when
 
 ## Agent profile (read-only)
 
-`reverie-runtime --policy POLICY profile SESSION_ID` prints one agent session's profile as JSON for
-the console's profile panel (`GET /api/agents/:id/profile`, `apps/web`):
+`reverie-runtime --policy POLICY profile SESSION_ID` prints one agent session's profile as JSON.
+The console's profile panel (`GET /api/agents/:id/profile`) no longer runs it: the console builds
+the same report itself (`apps/web/src/web/routes/agent-profile-report.ts`) with the same rules.
+The report contains:
 - backend, model, and effort: the console's spawn default, plus the level the newest Claude Code
   transcript turn used
 - the console's usage counters
