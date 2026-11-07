@@ -33,13 +33,17 @@ impl WorkerLaunchHold {
     /// Lock order is records -> hold. No stream/control lock is acquired here;
     /// both acquisitions use the caller's original bound clipped by first stop.
     pub fn release(&mut self, requested: Instant) -> Result<()> {
-        let end = self
-            .service
-            .engine
-            .stop_deadline()
-            .map_or(requested, |stop| stop.min(requested));
-        let mut records = self.service.lock_until(end)?;
-        let mut state = self.record.lifecycle_until(end)?;
+        self.release_budget(&super::budget::CleanupBudget::bounded(
+            &self.service,
+            requested,
+        ))
+    }
+    pub fn release_for_worker(&mut self) -> Result<()> {
+        self.release_budget(&super::budget::CleanupBudget::worker(&self.service))
+    }
+    fn release_budget(&self, budget: &super::budget::CleanupBudget<'_>) -> Result<()> {
+        let mut records = self.service.lock_budget(budget)?;
+        let mut state = self.record.lifecycle_until(budget)?;
         if self.service.opaque.load(Ordering::Acquire) || self.record.opaque() {
             return Err(WorkerReportError::Unconfirmed);
         }

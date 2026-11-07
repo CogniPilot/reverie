@@ -1,6 +1,7 @@
 //! Fixed T/J dispatch on an owned accepted UnixStream. Both purposes share
 //! actual admission, runtime origin, socket custody and checked finalizers.
 //! No listener, owner grant or successful create/start endpoint is created.
+mod budget;
 mod error;
 mod handler;
 mod launch;
@@ -147,6 +148,12 @@ impl WorkerReportService {
         result
     }
     fn lock_until(&self, end: Instant) -> Result<std::sync::MutexGuard<'_, Vec<Arc<Record>>>> {
+        self.lock_budget(&budget::CleanupBudget::bounded(self, end))
+    }
+    fn lock_budget(
+        &self,
+        budget: &budget::CleanupBudget<'_>,
+    ) -> Result<std::sync::MutexGuard<'_, Vec<Arc<Record>>>> {
         loop {
             match self.records.try_lock() {
                 Ok(guard) => return Ok(guard),
@@ -156,13 +163,7 @@ impl WorkerReportService {
                 }
                 Err(TryLockError::WouldBlock) => {}
             }
-            if Instant::now() >= end {
-                return Err(WorkerReportError::Unconfirmed);
-            }
-            std::thread::sleep(
-                end.saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(5)),
-            );
+            budget.pause()?;
         }
     }
 }

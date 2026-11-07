@@ -39,10 +39,20 @@ impl WorkerReportService {
             .engine
             .stop_deadline()
             .unwrap_or_else(|| Instant::now() + Duration::from_secs(10));
-        let result = record.finish_launch(end);
+        self.finish_accepted_budget(record, &super::budget::CleanupBudget::bounded(self, end))
+    }
+    pub(super) fn finish_accepted_for_worker(&self, record: &Arc<Record>) -> Result<()> {
+        self.finish_accepted_budget(record, &super::budget::CleanupBudget::worker(self))
+    }
+    fn finish_accepted_budget(
+        &self,
+        record: &Arc<Record>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<()> {
+        let result = record.finish_launch(budget);
         finalized(
             result,
-            self.retire_launch(record, end)
+            self.retire_launch(record, budget)
                 .and_then(|state| match state {
                     WorkerLaunchClose::Complete
                     | WorkerLaunchClose::SocketClosedHandlerRetained => Ok(()),
@@ -52,9 +62,13 @@ impl WorkerReportService {
                 }),
         )
     }
-    fn retire_launch(&self, record: &Arc<Record>, end: Instant) -> Result<WorkerLaunchClose> {
-        let mut records = self.lock_until(end)?;
-        let state = record.lifecycle_until(end)?;
+    fn retire_launch(
+        &self,
+        record: &Arc<Record>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<WorkerLaunchClose> {
+        let mut records = self.lock_budget(budget)?;
+        let state = record.lifecycle_until(budget)?;
         if !record.socket_closed_known() {
             return Err(WorkerReportError::Unconfirmed);
         }
@@ -163,16 +177,23 @@ impl WorkerLaunchConnection {
     /// Consume the socket descriptors once, preserving a distinct known-closed
     /// lifecycle-held outcome. It does not release that actual lifecycle hold.
     pub fn close_socket(&self, requested: Instant) -> Result<WorkerLaunchClose> {
-        let end = self
-            .service
-            .engine
-            .stop_deadline()
-            .map_or(requested, |stop| stop.min(requested));
-        let result = self.record.finish_launch(end);
+        self.close_socket_budget(&super::budget::CleanupBudget::bounded(
+            &self.service,
+            requested,
+        ))
+    }
+    pub fn close_socket_for_worker(&self) -> Result<WorkerLaunchClose> {
+        self.close_socket_budget(&super::budget::CleanupBudget::worker(&self.service))
+    }
+    fn close_socket_budget(
+        &self,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<WorkerLaunchClose> {
+        let result = self.record.finish_launch(budget);
         match result {
-            Ok(()) => self.service.retire_launch(&self.record, end),
+            Ok(()) => self.service.retire_launch(&self.record, budget),
             Err(primary) => {
-                let cleanup = self.service.retire_launch(&self.record, end).map(|_| ());
+                let cleanup = self.service.retire_launch(&self.record, budget).map(|_| ());
                 finalized(Err(primary), cleanup)
             }
         }

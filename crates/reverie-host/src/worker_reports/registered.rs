@@ -7,6 +7,12 @@ use reverie_contracts::worker_config::EffectiveWorkerConfig;
 pub struct RegisteredWorkerConnection {
     service: Arc<WorkerReportService>,
     record: Option<Arc<Record>>,
+    finish: Finish,
+}
+#[derive(Clone, Copy)]
+enum Finish {
+    Component,
+    Worker,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkerHandlersProgress {
@@ -22,6 +28,7 @@ impl WorkerReportService {
         Ok(RegisteredWorkerConnection {
             service: self.clone(),
             record: Some(record),
+            finish: Finish::Component,
         })
     }
     /// The actual main service joins finished/failed handlers; it creates no
@@ -74,6 +81,9 @@ impl WorkerReportService {
     pub(super) fn finish_registered(&self, record: &Arc<Record>) -> Result<()> {
         self.finish_accepted(record)
     }
+    pub(super) fn finish_registered_for_worker(&self, record: &Arc<Record>) -> Result<()> {
+        self.finish_accepted_for_worker(record)
+    }
 }
 impl RegisteredWorkerConnection {
     /// Fixed App handler entry calls this BEFORE configuration or payload work.
@@ -89,6 +99,7 @@ impl RegisteredWorkerConnection {
         Arc::ptr_eq(&self.service.engine, runtime.installed_engine())
     }
     pub fn reserve_handler(&mut self) -> Result<super::WorkerHandlerConstruction> {
+        self.finish = Finish::Worker;
         super::handler::WorkerHandlerConstruction::new(
             self.service.clone(),
             self.record
@@ -98,6 +109,21 @@ impl RegisteredWorkerConnection {
         )
     }
     pub fn receive(
+        self,
+        collector: &CommandTelemetry,
+        configuration: &EffectiveWorkerConfig,
+    ) -> Result<AcceptedWorkerConnection> {
+        self.receive_inner(collector, configuration)
+    }
+    pub fn receive_for_worker(
+        mut self,
+        collector: &CommandTelemetry,
+        configuration: &EffectiveWorkerConfig,
+    ) -> Result<AcceptedWorkerConnection> {
+        self.finish = Finish::Worker;
+        self.receive_inner(collector, configuration)
+    }
+    fn receive_inner(
         mut self,
         collector: &CommandTelemetry,
         configuration: &EffectiveWorkerConfig,
@@ -115,23 +141,36 @@ impl RegisteredWorkerConnection {
                 ),
             )),
             Ok(None) => {
-                self.service.finish_registered(&record)?;
+                self.finish_record(&record)?;
                 Ok(AcceptedWorkerConnection::ReportCompleted)
             }
-            Err(error) => finalized(Err(error), self.service.finish_registered(&record)),
+            Err(error) => finalized(Err(error), self.finish_record(&record)),
         }
     }
     pub fn close(mut self) -> Result<()> {
+        self.close_inner()
+    }
+    pub fn close_for_worker(mut self) -> Result<()> {
+        self.finish = Finish::Worker;
+        self.close_inner()
+    }
+    fn close_inner(&mut self) -> Result<()> {
         let record = self.record.take().expect("one registered close");
         record.note_unread_drop();
-        self.service.finish_registered(&record)
+        self.finish_record(&record)
+    }
+    fn finish_record(&self, record: &Arc<Record>) -> Result<()> {
+        match self.finish {
+            Finish::Component => self.service.finish_registered(record),
+            Finish::Worker => self.service.finish_registered_for_worker(record),
+        }
     }
 }
 impl Drop for RegisteredWorkerConnection {
     fn drop(&mut self) {
         if let Some(record) = self.record.take() {
             record.note_unread_drop();
-            let _ = self.service.finish_registered(&record);
+            let _ = self.finish_record(&record);
         }
     }
 }

@@ -642,6 +642,12 @@ constructing thread. Abandoned/mismatched publication, panic or consumed-close
 uncertainty remain counted. The real listener/all-verbs dispatcher and complete
 startup/shutdown assembly are still required; this is no service-ready result.
 
+Actual worker socket/Hold finalizers use named `*_for_worker` methods with no
+independent aggregate before stopping. Every contended lock acquisition observes
+the same live first-stop deadline, including a stop published after waiting began.
+Explicit bounded component entrypoints remain available. Native handler collection
+reports only thread settlement; a held resource or opaque descriptor still counts.
+
 `OrdinaryLaptopStop` is the separate legacy/stopped-name cleanup owner. Its
 observed constructor consumes the same Box, plan and original sealed inspection;
 the unobserved constructor consumes the same Box/plan and requires an actual

@@ -76,31 +76,44 @@ impl HandlerJob {
             if service.stopping() || self.abandoned.load(Ordering::Acquire) {
                 return Err(WorkerReportError::Stopping);
             }
-            if self.published.load(Ordering::Acquire)
-                && let Some(thread) = self.thread.get()
-            {
-                let thread = match thread.try_lock() {
-                    Ok(thread) => thread,
-                    Err(TryLockError::WouldBlock) => {
-                        std::thread::yield_now();
-                        continue;
-                    }
-                    Err(TryLockError::Poisoned(_)) => {
-                        self.opaque.store(true, Ordering::Release);
-                        return Err(WorkerReportError::Unconfirmed);
-                    }
-                };
-                if thread
-                    .as_ref()
-                    .is_some_and(|thread| thread.thread().id() == current)
-                {
-                    return Ok(());
-                }
+            let thread = self
+                .published
+                .load(Ordering::Acquire)
+                .then(|| self.thread.get())
+                .flatten();
+            let Some(thread) = thread else {
+                std::thread::sleep(Duration::from_millis(1));
+                continue;
+            };
+            if self.enter_published(thread, current)? {
+                return Ok(());
+            }
+        }
+    }
+    fn enter_published(
+        &self,
+        thread: &Mutex<Option<JoinHandle<()>>>,
+        current: ThreadId,
+    ) -> Result<bool> {
+        let thread = match thread.try_lock() {
+            Ok(thread) => thread,
+            Err(TryLockError::WouldBlock) => {
+                std::thread::yield_now();
+                return Ok(false);
+            }
+            Err(TryLockError::Poisoned(_)) => {
                 self.opaque.store(true, Ordering::Release);
                 return Err(WorkerReportError::Unconfirmed);
             }
-            std::thread::sleep(Duration::from_millis(1));
+        };
+        if thread
+            .as_ref()
+            .is_some_and(|thread| thread.thread().id() == current)
+        {
+            return Ok(true);
         }
+        self.opaque.store(true, Ordering::Release);
+        Err(WorkerReportError::Unconfirmed)
     }
     /// Join only the actual published handle. `is_finished` prevents a planned
     /// blocking wait; fixed Rust-thread/kernel latency is not a hard bound.
@@ -209,7 +222,7 @@ impl WorkerHandlerConstruction {
         }
         finalized(
             Err(cause.into()),
-            self.service.finish_registered(&self.record),
+            self.service.finish_registered_for_worker(&self.record),
         )
     }
 }

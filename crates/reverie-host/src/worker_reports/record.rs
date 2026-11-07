@@ -11,7 +11,7 @@ use std::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 pub(super) struct Record {
@@ -79,9 +79,9 @@ impl Record {
     }
     /// Consume each actual socket descriptor once. Contention/poison/close
     /// refusal cannot turn the registered record into a completed connection.
-    pub(super) fn finish_launch(&self, end: Instant) -> Result<()> {
+    pub(super) fn finish_launch(&self, budget: &super::budget::CleanupBudget<'_>) -> Result<()> {
         let interrupted = self.interrupt();
-        let mut stream = match self.until(&self.stream, end) {
+        let mut stream = match self.until(&self.stream, budget) {
             Ok(stream) => stream,
             Err(error) => return finalized(interrupted, Err(error)),
         };
@@ -90,7 +90,7 @@ impl Record {
         if interrupted.is_err() || closed.is_err() {
             self.opaque.store(true, Ordering::Release);
         }
-        let mut control = match self.until(&self.control, end) {
+        let mut control = match self.until(&self.control, budget) {
             Ok(control) => control,
             Err(error) => return finalized(finalized(interrupted, closed), Err(error)),
         };
@@ -107,7 +107,11 @@ impl Record {
             result
         }
     }
-    fn until<'a, T>(&self, lock: &'a Mutex<T>, end: Instant) -> Result<MutexGuard<'a, T>> {
+    fn until<'a, T>(
+        &self,
+        lock: &'a Mutex<T>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<MutexGuard<'a, T>> {
         loop {
             match lock.try_lock() {
                 Ok(guard) => return Ok(guard),
@@ -117,14 +121,10 @@ impl Record {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => {}
             }
-            if Instant::now() >= end {
+            if budget.pause().is_err() {
                 self.opaque.store(true, Ordering::Release);
                 return Err(WorkerReportError::Unconfirmed);
             }
-            std::thread::sleep(
-                end.saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(1)),
-            );
         }
     }
     pub(super) fn new(stream: UnixStream) -> Self {
@@ -276,9 +276,9 @@ impl Record {
     }
     pub(super) fn lifecycle_until(
         &self,
-        end: Instant,
+        budget: &super::budget::CleanupBudget<'_>,
     ) -> Result<MutexGuard<'_, super::retention::LifecycleHoldState>> {
-        self.until(&self.lifecycle, end)
+        self.until(&self.lifecycle, budget)
     }
     /// Nonblocking mint: stream -> records -> hold. The still-owned stream
     /// fences physical close/retirement; admission retains this exact record.

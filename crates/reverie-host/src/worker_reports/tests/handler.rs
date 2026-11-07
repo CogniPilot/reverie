@@ -249,3 +249,49 @@ fn actual_failed_os_thread_creation_returns_unread_socket_on_constructor_thread_
     assert!(service.records.lock().unwrap().is_empty());
     service.close(end()).unwrap();
 }
+#[test]
+fn joined_handler_does_not_forgive_consumed_socket_close_uncertainty_or_drop_its_engine_origin() {
+    if isolated(
+        "joined_handler_does_not_forgive_consumed_socket_close_uncertainty_or_drop_its_engine_origin",
+    ) {
+        return;
+    }
+    for refusal in [false, true] {
+        let fixture = Arc::new(Fixture::new());
+        let service = Arc::new(fixture.service());
+        let weak = Arc::downgrade(fixture.runtime.installed_engine());
+        let (mut client, server) = fixture.sockets();
+        send(&mut client,b'J',br#"{"sessionId":"00000000-0000-0000-0000-000000000000","cwd":"/work","command":"echo hello","env":{},"cols":80,"rows":24}"#);
+        let mut registered = service.register_worker_connection(server).unwrap();
+        let constructor = registered.reserve_handler().unwrap();
+        let source = fixture.clone();
+        let thread = std::thread::spawn(move || {
+            let AcceptedWorkerConnection::Launch(connection) = registered
+                .receive_for_worker(&source.collector, &super::launch::configuration())
+                .unwrap()
+            else {
+                panic!("actual J")
+            };
+            if refusal {
+                CLOSE_REFUSAL.set(true);
+                assert!(connection.close_socket_for_worker().is_err());
+            } else {
+                assert_eq!(
+                    connection.close_socket_for_worker().unwrap(),
+                    WorkerLaunchClose::SocketClosedHandlerRetained
+                );
+            }
+        });
+        constructor.publish(thread).unwrap();
+        service.settle_worker_handlers(end()).unwrap();
+        assert_eq!(service.close(end()).is_err(), refusal);
+        assert_eq!(service.records.lock().unwrap().len(), usize::from(refusal));
+        drop(service);
+        drop(fixture);
+        assert_eq!(
+            weak.upgrade().is_some(),
+            refusal,
+            "native join alone cannot erase actual consumed-close origin"
+        );
+    }
+}
