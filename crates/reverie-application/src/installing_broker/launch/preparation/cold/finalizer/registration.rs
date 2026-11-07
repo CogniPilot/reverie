@@ -122,9 +122,15 @@ impl Finalizer<'_> {
                     ._phone
                     .require_closed_for_resource(runtime, session)?;
             }
+            if let Some(phone) = &owner.predecessor_phone {
+                phone.require_closed_for_resource(runtime, session)?;
+            }
             if let Some(phone) = &owner.network_phone {
                 phone.require_closed_for_resource(runtime, session)?;
             }
+        }
+        if let Some(phone) = &self.predecessor_phone {
+            phone.require_closed_for_resource(runtime, session)?;
         }
         if let Some(original) = &scope.registration {
             original

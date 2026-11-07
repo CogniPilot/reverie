@@ -198,8 +198,11 @@ fn cold_launch(args: &[String]) -> bool {
         ["inspect", target] if Path::new("cold-created-args").is_file()
             && (*target == NAME || *target == "c".repeat(64)) => {
             let running = !Path::new("cold-stopped").is_file();
-            let pid = if running { 321 } else { 0 };
-            print!("[{{\"Id\":\"{}\",\"Name\":\"/{NAME}\",\"Config\":{{\"Labels\":{{\"reverie.worker\":\"test\",\"reverie.session\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}}},\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]", "c".repeat(64));
+            let pid = if running { fs::read_to_string("cold-running-pid").map_or(321, |value| value.parse::<u32>().unwrap()) } else { 0 };
+            let created = fs::read_to_string("cold-created-args").unwrap();
+            let policy = created.split('\0').find_map(|word| word.strip_prefix("reverie.worker-policy=")).unwrap();
+            assert_eq!(policy.len(), 64);
+            print!("[{{\"Id\":\"{}\",\"Name\":\"/{NAME}\",\"Config\":{{\"Labels\":{{\"reverie.worker\":\"test\",\"reverie.session\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"reverie.worker-policy\":\"{policy}\"}}}},\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]", "c".repeat(64));
         }
         ["network", "create", "--label", "reverie.worker=test", "--label", session, "--opt", "com.docker.network.bridge.enable_icc=false", target] => {
             assert_eq!(*session, "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");

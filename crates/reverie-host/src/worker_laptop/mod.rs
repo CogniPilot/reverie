@@ -24,7 +24,10 @@ mod start;
 mod started_transfer;
 mod storage;
 mod storage_cleanup;
-pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementStopTransferred};
+pub use started_transfer::{
+    StartedOrdinaryStopTransferFailure, StartedOrdinaryStopTransferred,
+    StartedReplacementStopTransferFailure, StartedReplacementStopTransferred,
+};
 mod started_source;
 pub use started_source::{
     StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,
@@ -56,7 +59,7 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart, StartedRelayTransferred,
+    ExistingViewerStart, StartedRelayTransferFailure, StartedRelayTransferred,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -110,7 +113,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
-    source_attachment: Option<Arc<()>>,
+    source_attachment: Option<started_source::Attachment>,
     finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,

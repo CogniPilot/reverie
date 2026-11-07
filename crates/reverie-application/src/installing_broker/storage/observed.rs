@@ -58,6 +58,7 @@ impl StorageClaim {
         &self,
     ) -> Result<reverie_host::worker_storage::LaunchReceiptObservation, StorageWorkflowError> {
         match &self.state {
+            ClaimState::Started(owner) => Ok(owner.borrow()?.observe_launch_receipt()?),
             ClaimState::Legacy { owner, .. } => Ok(owner.observe_launch_receipt()?),
             ClaimState::Registered {
                 registry, identity, ..
@@ -87,6 +88,27 @@ impl StorageClaim {
         captured: &ValidatedWorkerSnapshot,
     ) -> Result<ObservedCreatePlan, OwnedCreatePreparationError> {
         match &self.state {
+            ClaimState::Started(owner) => {
+                let borrowed = owner
+                    .borrow()
+                    .map_err(OwnedCreatePreparationError::Storage)?;
+                let source = captured.configuration().clone();
+                borrowed
+                    .assert_binding(&source, borrowed.paths().session())
+                    .map_err(StorageWorkflowError::from)
+                    .map_err(OwnedCreatePreparationError::Storage)?;
+                let effective =
+                    resource_staging::effective_config(source.clone(), borrowed.paths().session())
+                        .map_err(OwnedCreatePreparationError::Effective)?;
+                borrowed
+                    .prepare_create_plan(source, effective)
+                    .map_err(|cause| match cause {
+                        reverie_host::worker_laptop::LaptopError::Plan(cause) => {
+                            OwnedCreatePreparationError::Observation(cause)
+                        }
+                        cause => OwnedCreatePreparationError::Storage(cause.into()),
+                    })
+            }
             ClaimState::Legacy { registry, owner } => observe(&registry.runtime, owner, captured),
             ClaimState::Registered {
                 registry, identity, ..
