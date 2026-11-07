@@ -4,6 +4,7 @@ mod error;
 mod nix;
 mod observed;
 mod preparation;
+mod recovery_lifetime;
 pub use observed::OwnedCreatePreparationError;
 #[cfg(test)]
 mod tests;

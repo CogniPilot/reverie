@@ -8,6 +8,7 @@ mod bootstrap_tests;
 mod creation;
 mod gpu_access;
 mod image_refresh;
+mod recovered;
 mod storage;
 mod telemetry;
 use crate::{
@@ -17,6 +18,8 @@ use crate::{
 };
 pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
+use recovered::{LaptopOwner, RecoveryOwners};
+pub use recovered::{RecoveryError, RecoverySummary};
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -44,9 +47,11 @@ impl CurrentInstalled {
 struct LaptopRegistration {
     session: ProfileSessionId,
     name: WorkerContainerName,
+    owner: LaptopOwner,
 }
 /// Ordered real installing lifecycle state. No raw registry setter or public
-/// registration constructor exists; native launch/recovery producers own it.
+/// registration constructor exists; the actual recovery producer owns retained
+/// Office/storage entries. Native launch ownership remains a separate producer.
 pub(crate) struct LaptopLifecycle<'a> {
     owner: &'a InstalledWorker,
     guard: MutexGuard<'a, Vec<LaptopRegistration>>,
@@ -97,10 +102,11 @@ impl InstalledWorker {
     pub(crate) fn model_laptop(&self, session: ProfileSessionId) {
         let snapshot = self.snapshot().unwrap();
         let name = WorkerContainerName::for_session(snapshot.envelope().base(), &session);
-        self.laptops
-            .lock()
-            .unwrap()
-            .push(LaptopRegistration { session, name });
+        self.laptops.lock().unwrap().push(LaptopRegistration {
+            session,
+            name,
+            owner: LaptopOwner::Modeled,
+        });
     }
     pub(crate) fn capture(snapshot: ValidatedWorkerSnapshot) -> Arc<Self> {
         Arc::new(Self {
@@ -158,6 +164,7 @@ pub struct InstallingBroker {
     storage: Arc<storage::StorageRegistry>,
     telemetry: Arc<reverie_host::command_telemetry::CommandTelemetry>,
     reports: Arc<reverie_host::worker_reports::WorkerReportService>,
+    recovery: Arc<RecoveryOwners>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.

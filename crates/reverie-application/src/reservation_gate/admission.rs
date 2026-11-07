@@ -183,7 +183,7 @@ impl Admission {
         self.finished = true;
         finalized(terminal, self.cleanup())
     }
-    fn abort(mut self) -> Result<()> {
+    pub(super) fn abort(mut self) -> Result<()> {
         self.finished = true;
         self.cleanup()
     }

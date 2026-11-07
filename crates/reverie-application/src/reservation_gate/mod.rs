@@ -22,6 +22,8 @@ mod preparation_start;
 pub use preparation_start::{ProtectedStartIntent, StartQualificationFacts};
 mod profile_selection;
 mod recovery;
+mod recovery_admission;
+pub(crate) use recovery_admission::RecoveryAdmission;
 mod reload;
 mod terminal_claim;
 #[cfg(test)]
