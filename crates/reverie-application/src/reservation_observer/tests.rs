@@ -21,6 +21,7 @@ struct State {
     laptop_outputs: VecDeque<reverie_host::broker_engine::LaptopInspectOutput>,
     start_checks: bool,
     old_release: Option<&'static str>,
+    process_starts: std::collections::BTreeMap<String, String>,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -50,6 +51,7 @@ impl Fixture {
             laptop_outputs: VecDeque::new(),
             start_checks: false,
             old_release: None,
+            process_starts: std::collections::BTreeMap::new(),
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -124,6 +126,15 @@ impl Fixture {
     }
     pub(crate) fn old_release(&self, result: &'static str) {
         self.0.lock().unwrap().old_release = Some(result);
+    }
+    /// Test DATA only. Allows the existing kernel fixture to retain a start
+    /// observed from an owned actual target without changing production reads.
+    pub(crate) fn process_start(&self, container: &str, start: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .process_starts
+            .insert(container.to_owned(), start.to_owned());
     }
 }
 impl Source for Arc<Fixture> {
@@ -278,17 +289,21 @@ impl Source for Arc<Fixture> {
         policy: Option<&ObservedMemoryPolicy>,
         _: Instant,
     ) -> Result<NativeLimitBinding> {
-        self.0
-            .lock()
-            .unwrap()
-            .events
-            .push(format!("limits:{}", row.id().as_str()));
+        let start = {
+            let mut state = self.0.lock().unwrap();
+            state.events.push(format!("limits:{}", row.id().as_str()));
+            state
+                .process_starts
+                .get(row.id().as_str())
+                .cloned()
+                .unwrap_or_else(|| "77".to_owned())
+        };
         let zero = UnsignedInteger::from_u64(0);
         let declared = row.declarations(policy.map_or(&zero, ObservedMemoryPolicy::swap))?;
         Ok(NativeLimitBinding::from_observed_data(
             row,
             &declared,
-            "77",
+            &start,
             &PosixPath::from_scalar_text("owned"),
             policy,
         )?)

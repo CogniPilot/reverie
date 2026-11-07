@@ -1,10 +1,22 @@
-//! Exact controlled readonly query vocabulary for actual recovery tests.
+//! Exact controlled recovery queries and one owned source-stop target fixture.
 use std::{
     env, fs,
     io::{self, Write},
 };
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args == ["source-stop-target"] {
+        fs::write("source-target.ready", "actual owned target").unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !fs::exists("source-target.release").unwrap()
+            && !fs::exists("source-stop.requested").unwrap()
+        {
+            assert!(std::time::Instant::now() < end, "owned target teardown absent");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        return;
+    }
+    if source_stop(&args) { return; }
     let file = match args
         .iter()
         .map(String::as_str)
@@ -27,6 +39,7 @@ fn main() {
             if format.starts_with("{\"Id\":{{json .Id}}")
                 && !ids.is_empty()
                 && ids.iter().all(|id| id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())) => "inventory.out",
+        ["inspect", id] if fs::read_to_string("source-stop.cid").is_ok_and(|cid| cid == *id) => "source-inspect.out",
         ["inspect", ..] if args.iter().skip(1).all(|id| id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())) => "writers.out",
         _ => std::process::exit(83),
     };
@@ -60,4 +73,21 @@ fn main() {
         return;
     }
     io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
+}
+fn source_stop(args: &[String]) -> bool {
+    let Ok(cid) = fs::read_to_string("source-stop.cid") else { return false; };
+    if args != ["stop", "--time", "2", &cid] { return false; }
+    let mut trace = fs::OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
+    writeln!(trace, "{}", args.join("\0")).unwrap();
+    drop(trace);
+    fs::write("source-stop.requested", "actual fixed stop").unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !fs::exists("source-target.reaped").unwrap() {
+        assert!(std::time::Instant::now() < end, "actual owned source not reaped");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    for leaf in ["inventory.out", "source-inspect.out"] {
+        fs::copy(format!("stopped-{leaf}"), leaf).unwrap();
+    }
+    true
 }

@@ -119,6 +119,11 @@ fn join_claim(
     }
 }
 impl InstallingBroker {
+    /// Enumerate the actual retained Source records and attempt all their native
+    /// settlements. This closes no source resource and is no global shutdown ACK.
+    pub fn settle_original_sources(&self, end: std::time::Instant) -> Result<(), GateError> {
+        self.storage.settle_original_sources(end)
+    }
     /// Trusted installing composition, not owner/API authorization. The
     /// standalone Gate draft reader intentionally retains no source resource.
     pub fn retain_resource_draft(

@@ -3,6 +3,7 @@
 use super::*;
 use reverie_core::operations::JournalId;
 use std::sync::Weak;
+mod stop;
 #[cfg(test)]
 mod tests;
 
@@ -12,12 +13,18 @@ pub(in crate::installing_broker) struct SourceReference {
     paths: StoragePaths,
 }
 pub(super) struct SourceRecord {
-    owner: Mutex<Option<Box<LaunchStorage>>>,
+    owner: Mutex<Option<SourceOwned>>,
     identity: Arc<()>,
     operation: JournalId,
     paths: StoragePaths,
     _office: Arc<super::super::recovered::RecoveredOffice>,
 }
+enum SourceOwned {
+    Direct(Box<LaunchStorage>),
+    Stopping(Box<reverie_host::worker_source_stop::OriginalSourceStop>),
+    Closed,
+}
+#[derive(Clone)]
 pub(crate) struct RegisteredSource {
     registry: Weak<StorageRegistry>,
     record: Arc<SourceRecord>,
@@ -92,7 +99,7 @@ impl SourceReference {
             unreachable!("checked actual Direct owner")
         };
         let record = Arc::new(SourceRecord {
-            owner: Mutex::new(Some(owner)),
+            owner: Mutex::new(Some(SourceOwned::Direct(owner))),
             identity: self.identity.clone(),
             operation,
             paths: self.paths.clone(),
@@ -126,9 +133,11 @@ impl RegisteredSource {
             self.record.owner.lock().map_err(|_| {
                 StorageWorkflowError::refused("RESOURCE_ORIGINAL_SOURCE_UNCONFIRMED")
             })?;
-        let owner = owner
-            .as_ref()
-            .ok_or_else(|| StorageWorkflowError::refused("RESOURCE_ORIGINAL_SOURCE_CONSUMED"))?;
+        let Some(SourceOwned::Direct(owner)) = owner.as_ref() else {
+            return Err(StorageWorkflowError::refused(
+                "RESOURCE_ORIGINAL_SOURCE_CONSUMED",
+            ));
+        };
         owner.assert_binding(
             &registry.runtime,
             claim.source_configuration(),
@@ -147,13 +156,18 @@ impl RegisteredSource {
                 "RESOURCE_ORIGINAL_SOURCE_CHANGED",
             ));
         }
-        let owner = self
-            .record
-            .owner
-            .lock()
-            .map_err(|_| StorageWorkflowError::refused("RESOURCE_ORIGINAL_SOURCE_UNCONFIRMED"))?
-            .take()
-            .ok_or_else(|| StorageWorkflowError::refused("RESOURCE_ORIGINAL_SOURCE_CONSUMED"))?;
+        let mut held =
+            self.record.owner.lock().map_err(|_| {
+                StorageWorkflowError::refused("RESOURCE_ORIGINAL_SOURCE_UNCONFIRMED")
+            })?;
+        if !matches!(held.as_ref(), Some(SourceOwned::Direct(_))) {
+            return Err(StorageWorkflowError::refused(
+                "RESOURCE_ORIGINAL_SOURCE_CONSUMED",
+            ));
+        }
+        let Some(SourceOwned::Direct(owner)) = held.take() else {
+            unreachable!("checked actual Direct source")
+        };
         // No new lease, descriptor close or fallible work after this move.
         entry.owner = EntryOwner::Direct(owner);
         Ok(())

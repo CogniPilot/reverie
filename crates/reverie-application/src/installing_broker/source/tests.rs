@@ -4,6 +4,8 @@
 use super::*;
 #[path = "phase_tests.rs"]
 mod phase;
+#[path = "stop_tests.rs"]
+mod stop;
 use crate::{
     reservation_gate::tests::observation_cases::Setup, reservation_observer::tests::Fixture,
 };

@@ -68,6 +68,16 @@ pub(super) struct RecoveredOffice {
     pub(super) _phone: OfficePhone,
     pub(super) _office: Arc<OfficeService>,
 }
+impl RecoveredOffice {
+    /// Close this exact recovered phone and its tracked native/request work.
+    /// Other phones and the installing Runtime remain live for the target.
+    pub(super) fn close_for_stopped_source(
+        &self,
+        end: std::time::Instant,
+    ) -> std::result::Result<(), reverie_host::office::OfficeError> {
+        self._office.close_phone(&self._phone, end)
+    }
+}
 pub(super) struct RecoveredLaptop {
     pub(super) office: Arc<RecoveredOffice>,
     pub(super) storage: StorageClaim,
