@@ -6,8 +6,9 @@ pub mod collector;
 pub mod collector_state;
 mod custody;
 mod source;
+pub mod user;
 
-pub use custody::Owner;
+pub use custody::{Owner, canonical_config};
 pub use source::{Store, query};
 
 /// Every refusal; the command reports only `Resource history unavailable`.

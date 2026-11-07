@@ -31,9 +31,19 @@ fn kill(child: &mut Child) {
 /// `run_capped(argv, limit, timeout)`: stdout of at most `limit` bytes
 /// within one deadline covering both reading and exit; `None` on timeout,
 /// oversize, a nonzero exit or any error. stderr is discarded.
-fn run_capped(program: &Path, args: &[&str], limit: i64, timeout: Duration) -> Option<String> {
+fn run_capped(
+    program: &Path,
+    args: &[&str],
+    limit: i64,
+    timeout: Duration,
+    environment: Option<&[(std::ffi::OsString, std::ffi::OsString)]>,
+) -> Option<String> {
     let deadline = Instant::now() + timeout;
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    if let Some(environment) = environment {
+        command.env_clear().envs(environment.iter().cloned());
+    }
+    let mut child = command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -90,11 +100,21 @@ fn executable(path: &Path) -> bool {
 }
 
 /// `shutil.which(name)` on POSIX.
-fn which(name: &str) -> Option<PathBuf> {
+fn which(
+    name: &str,
+    environment: Option<&[(std::ffi::OsString, std::ffi::OsString)]>,
+) -> Option<PathBuf> {
     if name.contains('/') {
         return executable(Path::new(name)).then(|| PathBuf::from(name));
     }
-    let search = std::env::var_os("PATH").unwrap_or_else(|| "/bin:/usr/bin".into());
+    let path = match environment {
+        Some(environment) => environment
+            .iter()
+            .find(|(key, _)| key == "PATH")
+            .map(|(_, value)| value.clone()),
+        None => std::env::var_os("PATH"),
+    };
+    let search = path.unwrap_or_else(|| "/bin:/usr/bin".into());
     if search.is_empty() {
         return None;
     }
@@ -113,12 +133,14 @@ pub(crate) fn gpus(cfg: &Config) -> Result<Gpu, &'static str> {
     if !cfg.gpu_auto {
         return Ok(Gpu::Off);
     }
-    if let Some(program) = which(&cfg.nvidia_smi)
+    let environment = cfg.environment.as_deref();
+    if let Some(program) = which(&cfg.nvidia_smi, environment)
         && let Some(output) = run_capped(
             &program,
             &QUERY,
             cfg.max_input_bytes,
             Duration::from_secs(10),
+            environment,
         )
         && let Some(devices) = nvidia_devices(&output)
     {
@@ -221,6 +243,7 @@ mod tests {
             &["-c", script],
             limit,
             Duration::from_secs_f64(timeout),
+            None,
         )
     }
 
@@ -249,5 +272,42 @@ mod tests {
         assert_eq!(shell("head -c 5000 /dev/zero", 1024, 5.0), None, "oversize");
         assert_eq!(shell("exit 3", 1024, 5.0), None, "non-zero exit");
         assert_eq!(shell("echo ok", 1024, 5.0).as_deref(), Some("ok\n"));
+    }
+}
+
+#[cfg(test)]
+mod sysfs_tests {
+    use super::gpus;
+    use reverie_contracts::collector::{Config, Gpu, GpuDevice};
+    use std::fs;
+
+    #[test]
+    fn sysfs_and_missing_driver_do_not_invent_identity_from_card_index() {
+        let root = std::env::temp_dir().join(format!("gpu-identity-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let cfg = Config {
+            sys_root: root.to_str().unwrap().into(),
+            nvidia_smi: "/nonexistent/nvidia-smi".into(),
+            ..Config::default()
+        };
+        assert_eq!(gpus(&cfg), Ok(Gpu::None));
+        let card = root.join("class/drm/card7/device");
+        fs::create_dir_all(&card).unwrap();
+        fs::write(card.join("gpu_busy_percent"), "33\n").unwrap();
+        let expected = GpuDevice {
+            index: 7,
+            util_pct: 33.0,
+            memory: None,
+            uuid: None,
+            identity_status: "unavailable",
+        };
+        assert_eq!(
+            gpus(&cfg),
+            Ok(Gpu::Devices {
+                source: "sysfs",
+                devices: vec![expected]
+            })
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -71,3 +71,23 @@ reverie-collect --config /etc/reverie/collect.toml once
 - Records are strict JSON with sorted keys, byte-identical to the Python
   collector's. Exit status is 0 sampled, 2 configuration error, 5 another run
   holds the lock.
+
+## USER observations
+
+`reverie-observations` replaces `python/reverie/cleanup/collector_user.py`:
+
+```console
+reverie-observations [--config ~/reverie/resource-history/config.json] \
+  init|install|enable|disable|start|stop|status|sample
+```
+
+- `init` creates the private configuration and a marked state directory and
+  never adopts existing data.
+- `install` publishes the fixed user service and timer, records their sha256 and
+  reloads the user manager; every later control rechecks those bytes and the
+  loaded fragments.
+- `sample` runs only as the unit's main process within its fixed memory, task
+  and CPU budget, then samples through `reverie-collect` with no prune input.
+- Any refusal prints `User observation operation refused or unavailable` and
+  exits 2. Units from the earlier Python release can be stopped and disabled;
+  `install` migrates them only when they are exactly that release's bytes.
