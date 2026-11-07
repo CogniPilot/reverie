@@ -39,6 +39,7 @@ pub mod reservation_history;
 pub mod reservation_observation;
 pub mod reservation_policy;
 pub mod reservation_publication;
+pub mod resource_actor;
 pub mod resource_config;
 pub mod resource_history;
 pub mod resource_reload;
