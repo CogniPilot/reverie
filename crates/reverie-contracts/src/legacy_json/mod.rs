@@ -8,6 +8,7 @@ mod tests;
 mod text;
 mod value;
 pub(crate) use decode::GpuControlParseError;
+pub(crate) use decode::HumanParseError;
 pub(crate) use decode::{JournalParseError, JournalParsed};
 pub(crate) use equality::numeric_key;
 pub(crate) use value::{Node, Number, Text, Value, truthy};
@@ -33,6 +34,12 @@ pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
 }
 pub(crate) fn decode_ordered_metadata_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Metadata)
+}
+pub(crate) fn decode_human_protocol_bytes(
+    raw: &[u8],
+) -> Result<ordered::OrderedValue, HumanParseError> {
+    let raw = text::python_bytes(raw).map_err(HumanParseError::Json)?;
+    decode::decode_human(&raw)
 }
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.

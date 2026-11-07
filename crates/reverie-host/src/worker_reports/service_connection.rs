@@ -62,8 +62,8 @@ pub enum AcceptedWorkerServiceConnection {
 
 #[must_use = "the original accepted stream remains in its counted record"]
 pub struct WorkerServiceConnection {
-    service: Arc<WorkerReportService>,
-    record: Arc<Record>,
+    pub(super) service: Arc<WorkerReportService>,
+    pub(super) record: Arc<Record>,
     purpose: WorkerServicePurpose,
     payload: Vec<u8>,
     peer: WorkerPeer,

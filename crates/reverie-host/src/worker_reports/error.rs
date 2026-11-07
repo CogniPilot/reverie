@@ -2,6 +2,8 @@
 pub enum WorkerReportError {
     Stopping,
     Peer,
+    ChannelCapability,
+    ChannelClosePending,
     Frame,
     Refused,
     LaunchKind,
@@ -21,6 +23,8 @@ impl WorkerReportError {
         match self {
             Self::Stopping => "Worker broker is stopping",
             Self::Peer => "Worker peer identity is not authorized",
+            Self::ChannelCapability => "WORKER_NATIVE_CHANNEL_REQUIRES_SO_PEERPIDFD",
+            Self::ChannelClosePending => "WORKER_NATIVE_CHANNEL_CLOSE_PENDING",
             Self::Frame => "Worker frame is too large",
             Self::Refused => "TELEMETRY_REPORT_REFUSED",
             Self::LaunchKind => "Expected worker launch request",

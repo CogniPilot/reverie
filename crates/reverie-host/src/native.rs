@@ -19,6 +19,7 @@ pub(crate) mod interrupted_test;
 mod lease;
 mod memory_namespace;
 mod memory_profile;
+pub(crate) mod metadata_socket;
 mod rename;
 pub(crate) mod socket_entry;
 pub(crate) mod worker_directory;

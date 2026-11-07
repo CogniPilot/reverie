@@ -38,6 +38,21 @@ impl<'a> PythonTextRef<'a> {
     pub fn into_owned(self) -> PythonText {
         PythonText::from_text_ref(self)
     }
+    /// UTF-16 units with Python's surrogatepass behavior. Adjacent literal
+    /// surrogates remain distinct codepoints; this only encodes each point.
+    pub fn utf16_units(&self) -> Vec<u16> {
+        let mut units = Vec::new();
+        for &point in self.codepoints().iter() {
+            if point <= 0xffff {
+                units.push(point as u16);
+            } else {
+                let offset = point - 0x10000;
+                units.push(0xd800 | (offset >> 10) as u16);
+                units.push(0xdc00 | (offset & 0x3ff) as u16);
+            }
+        }
+        units
+    }
     pub fn is_empty(&self) -> bool {
         match self.0 {
             Repr::Scalar(value) => value.is_empty(),
