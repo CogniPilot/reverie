@@ -7,6 +7,7 @@ mod close;
 mod dispatch;
 #[cfg(test)]
 mod tests;
+pub mod watchdog;
 use reverie_contracts::{broker_control::ControlRoute, broker_reply::BrokerReply};
 use reverie_host::broker_listener::{self, BoundSocket};
 use std::{
