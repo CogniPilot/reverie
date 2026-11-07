@@ -279,9 +279,13 @@ impl<'a> Finalizer<'a> {
             }
             Err(error) => self.errors.push(Error::Storage(error)),
         }
-        // Source creates its 5s TERM +100ms KILL observation window only
-        // here, AFTER stop. A slow stop cannot consume the viewer's grace.
-        if let Err(error) = retained.native.close(budget.phase(5_100)) {
+        // After actual stop, native ownership first acquires its original
+        // guard, then starts TERM/KILL. Bookkeeping cannot consume that grace.
+        let closed = match budget {
+            CleanupBudget::Bounded(end) => retained.native.close(end),
+            CleanupBudget::Worker => retained.native.close_for_worker(),
+        };
+        if let Err(error) = closed {
             self.errors.push(Error::Storage(error));
         }
         // No live descriptor is extracted here; its actual owner remains in

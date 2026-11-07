@@ -2,6 +2,17 @@
 use crate::captured_client::test_hooks::Gate;
 use std::cell::Cell;
 use std::{cell::RefCell, sync::Arc};
+thread_local! { static CLEANUP_WAIT: RefCell<Option<std::sync::mpsc::Sender<std::time::Instant>>> = const { RefCell::new(None) }; }
+pub(in crate::worker_laptop) fn observe_cleanup_wait(
+    sender: std::sync::mpsc::Sender<std::time::Instant>,
+) {
+    CLEANUP_WAIT.with(|next| *next.borrow_mut() = Some(sender));
+}
+pub(super) fn cleanup_waiting(end: std::time::Instant) {
+    if let Some(sender) = CLEANUP_WAIT.with(|next| next.borrow_mut().take()) {
+        let _ = sender.send(end);
+    }
+}
 thread_local! { static NEXT: RefCell<Option<Arc<Gate>>> = const { RefCell::new(None) }; }
 thread_local! { static INPUT_CLOSE: Cell<bool> = const { Cell::new(false) }; }
 thread_local! { static WRITE: RefCell<Option<Arc<Gate>>> = const { RefCell::new(None) }; }

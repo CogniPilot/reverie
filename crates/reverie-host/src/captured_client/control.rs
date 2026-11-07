@@ -202,6 +202,23 @@ impl CapturedClient {
         }
         Ok(())
     }
+    pub(crate) fn settle_viewer_for_worker(
+        &self,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+        guard: Instant,
+    ) -> Result<()> {
+        if !job.same_capture(&self.bootstrap) {
+            return Err(EngineError::new(EngineFault::Identity));
+        }
+        job.close_captured_for_worker(guard)
+            .map_err(|_| EngineError::pending(EngineFault::Finalization, CleanupFault::Unreaped))?;
+        let mut active = self.viewer_slot(job, None)?;
+        if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
+        {
+            *active = None;
+        }
+        Ok(())
+    }
     fn viewer_slot(
         &self,
         job: &crate::worker_laptop::ViewerJob,

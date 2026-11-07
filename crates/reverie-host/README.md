@@ -751,3 +751,16 @@ original captured call; waiting neither cancels nor replays it. A stopped or
 uncertain viewer constructor remains in the same laptop/native inventory with
 its real storage and job. This timing join does not establish App allocation
 release, complete handler cleanup, storage release or global shutdown.
+
+Worker viewer cleanup keeps distinct guard, TERM and KILL phases. Without an
+existing stop, guard acquisition gets the original 5.1 seconds; otherwise it
+uses the original first-stop end. The five-second TERM grace begins only after
+the real record, constructor and native state are acquired. KILL then gets its
+original 100 milliseconds, clipped by the caller and live first-stop limits.
+Each phase stays fixed on retry. Existing caller-bounded methods keep their
+original aggregate cap. Native cleanup advances before potentially blocking
+query settlement: a retained resize, stop or final-read constructor must not
+hide the owned viewer. Actual provider stop effects still precede viewer reap.
+Unknown native/query owners and both causes remain retained; only actual join
+and checked process/PTY/query completion stamps the private close receipt.
+That receipt alone grants no storage release or global shutdown acknowledgement.

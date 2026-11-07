@@ -3,6 +3,7 @@
 use super::*;
 mod bulk;
 mod cleanup;
+mod cleanup_worker;
 mod contention;
 mod created;
 mod diagnostic;

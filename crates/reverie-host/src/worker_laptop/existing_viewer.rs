@@ -158,26 +158,42 @@ impl ExistingRecord {
         Ok(())
     }
     fn close(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+        self.close_budget(runtime, viewer::cleanup::Cleanup::bounded(end))
+    }
+    fn close_budget(
+        &mut self,
+        runtime: &WorkerRuntime,
+        cleanup: viewer::cleanup::Cleanup,
+    ) -> Result<()> {
         need(
             self.stage != Stage::Consumed,
             "WORKER_EXISTING_VIEWER_CONSUMED",
         )?;
         if self.stage == Stage::Closed {
-            return self.finalization.settle(runtime, end);
+            return self.finalization.settle(runtime, cleanup.guard());
         }
         self.stage = Stage::Closing;
+        let viewer = self.job.as_ref().map_or(Ok(()), |job| {
+            let client = &runtime.installed_engine().engine.client;
+            match cleanup.ceiling() {
+                Some(end) => client.settle_viewer(job, end),
+                None => client.settle_viewer_for_worker(job, cleanup.guard()),
+            }
+            .map_err(|error| LaptopError::Engine(error.into()))
+        });
+        let deadline = match (cleanup.ceiling(), &self.job) {
+            (Some(end), _) => Ok(end),
+            (None, Some(job)) => job.cleanup_deadline(cleanup.guard()),
+            (None, None) => Ok(cleanup.guard()),
+        };
+        let end = deadline.as_ref().copied().unwrap_or(cleanup.guard());
+        let viewer = finalized(viewer, deadline.map(|_| ()));
+        // Actual stop effects still precede this method in App. Their retained
+        // constructors/final reads cannot postpone the known native viewer.
         let stopped_call = finalized(
             self.stop.settle(runtime, end),
             self.finalization.settle(runtime, end),
         );
-        let viewer = self.job.as_ref().map_or(Ok(()), |job| {
-            runtime
-                .installed_engine()
-                .engine
-                .client
-                .settle_viewer(job, end)
-                .map_err(|error| LaptopError::Engine(error.into()))
-        });
         let result = finalized(stopped_call, viewer);
         match result {
             Ok(()) => {
@@ -378,6 +394,17 @@ impl Workflows {
             .map_err(|_| LaptopError::Refused("WORKER_EXISTING_VIEWER_RETAINED"))?
             .close(runtime, end)
     }
+    fn close_existing_for_worker(
+        &self,
+        runtime: &WorkerRuntime,
+        existing: &ExistingViewer,
+    ) -> Result<()> {
+        self.bound_existing(runtime, &existing.reference)?;
+        let cleanup = viewer::cleanup::Cleanup::worker(runtime);
+        cleanup
+            .acquire(runtime, &existing.reference.record)?
+            .close_budget(runtime, cleanup)
+    }
     fn reclaim_existing<'a>(
         &'a self,
         runtime: &WorkerRuntime,
@@ -483,6 +510,10 @@ impl WorkerRuntime {
     }
     pub fn close_existing_viewer(&self, existing: &ExistingViewer, end: Instant) -> Result<()> {
         self.laptop_workflows().close_existing(self, existing, end)
+    }
+    pub fn close_existing_viewer_for_worker(&self, existing: &ExistingViewer) -> Result<()> {
+        self.laptop_workflows()
+            .close_existing_for_worker(self, existing)
     }
     pub fn reclaim_existing_viewer<'a>(
         &'a self,

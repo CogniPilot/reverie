@@ -8,7 +8,7 @@ impl Drop for Release {
         self.0.released.store(true, Ordering::Release);
     }
 }
-struct UnwindRelease(Arc<Gate>);
+pub(super) struct UnwindRelease(pub(super) Arc<Gate>);
 impl Drop for UnwindRelease {
     fn drop(&mut self) {
         if std::thread::panicking() {
