@@ -1,7 +1,11 @@
 //! The native collector against the Python `collector.sample_once` oracle:
 //! one eight-step scenario on fixture `/proc` and sysfs roots, recorded once
 //! from the Python collector (fixtures/collector-oracle.txt). Every output
-//! file must match byte for byte after every step.
+//! file must match byte for byte after every step, except the order of the
+//! state's `removed_last`: Python and this collector both remove in directory
+//! order (`os.listdir`, `read_dir`), which differs between filesystems, so the
+//! oracle fixes that list as a set and the order is checked against the
+//! directory's own listing.
 use reverie_contracts::collector::{Config, Out};
 use reverie_observations::collector::sample_once;
 use std::collections::BTreeMap;
@@ -76,6 +80,14 @@ impl Env {
             ..Config::default()
         }
     }
+    /// The output directory's names in `read_dir` order, as retention reads
+    /// them.
+    fn listing(&self) -> Vec<String> {
+        fs::read_dir(self.path("out"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect()
+    }
     /// One sample at `now`, then every output file except the lock.
     fn step(&self, now: i64, capture: &mut String) {
         sample_once(&self.cfg(), Some(now)).unwrap();
@@ -142,6 +154,7 @@ fn eight_steps_match_the_python_collector_byte_for_byte() {
     put(&out("rollup-hour-2025-01.jsonl"), "{}\n");
     put(&out("rollup-day-2024.jsonl"), "{}\n");
     put(&out("other.jsonl"), "{}\n");
+    let listing = env.listing();
     env.step(T0 + 86400 + 100, &mut capture);
     fs::rename(out("prune-runs.jsonl"), out("prune-runs.real")).unwrap();
     std::os::unix::fs::symlink("prune-runs.real", out("prune-runs.jsonl")).unwrap();
@@ -154,10 +167,42 @@ fn eight_steps_match_the_python_collector_byte_for_byte() {
     fs::rename(out("prune-runs.real"), out("prune-runs.jsonl")).unwrap();
     env.step(T0 + 86400 + 3700, &mut capture);
     let expected = include_str!("fixtures/collector-oracle.txt");
+    assert_eq!(capture.lines().count(), expected.lines().count());
+    let mut removed = Vec::new();
     for (index, (got, want)) in capture.lines().zip(expected.lines()).enumerate() {
-        assert_eq!(got, want, "line {}", index + 1);
+        match (removed_last(got), removed_last(want)) {
+            (Some((names, got)), Some((_, want))) => {
+                assert_eq!(got, want, "line {}", index + 1);
+                if !names.is_empty() {
+                    removed = names;
+                }
+            }
+            _ => assert_eq!(got, want, "line {}", index + 1),
+        }
     }
-    assert_eq!(capture, expected);
+    assert_eq!(capture.ends_with('\n'), expected.ends_with('\n'));
+    assert_eq!(removed.len(), 3);
+    let in_directory_order = listing
+        .into_iter()
+        .filter(|name| removed.contains(name))
+        .collect::<Vec<_>>();
+    assert_eq!(removed, in_directory_order);
+}
+
+/// A state line's `removed_last` names in their order, and the line with them
+/// sorted.
+fn removed_last(line: &str) -> Option<(Vec<String>, String)> {
+    let key = "\"removed_last\":[";
+    let start = line.find(key)? + key.len();
+    let end = start + line[start..].find(']')?;
+    let names: Vec<String> = serde_json::from_str(&format!("[{}]", &line[start..end])).unwrap();
+    let mut sorted = names.clone();
+    sorted.sort();
+    let text = serde_json::to_string(&sorted).unwrap();
+    Some((
+        names,
+        format!("{}{text}{}", &line[..start - 1], &line[end + 1..]),
+    ))
 }
 
 use reverie_contracts::collector::dump;
