@@ -11,6 +11,9 @@ impl CallBudget {
     pub(super) fn worker() -> Self {
         Self(None)
     }
+    pub(super) fn ceiling(self) -> Option<Instant> {
+        self.0
+    }
     pub(super) fn end(self, runtime: &WorkerRuntime, seconds: u64) -> Instant {
         let end = Instant::now() + std::time::Duration::from_secs(seconds);
         [self.0, runtime.stop_deadline()]

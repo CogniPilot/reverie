@@ -52,6 +52,17 @@ impl ExistingStoragePreparation {
             .runtime
             .start_existing_viewer_for_connection(&self.viewer, connection, end)?)
     }
+    pub(in crate::installing_broker) fn start_for_worker(
+        &self,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ExistingViewerStart, ExistingStorageError> {
+        self.check()?;
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .start_existing_viewer_for_worker(&self.viewer, connection)?)
+    }
     pub(in crate::installing_broker) fn close(
         &self,
         end: Instant,

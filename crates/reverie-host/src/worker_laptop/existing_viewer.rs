@@ -1,6 +1,7 @@
 //! Genuine existing-storage viewer ownership, separate from created/Nix phases.
 //! App supplies its actual classified reuse scope; these resources are not an
 //! authorization, live-pane proof, admission release or source-stop permit.
+use super::call_budget::CallBudget;
 use super::*;
 mod created_transfer;
 mod finalization;
@@ -295,7 +296,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         existing: &ExistingViewer,
-        end: Instant,
+        end: CallBudget,
         connection: Option<&crate::worker_reports::WorkerLaunchConnection>,
     ) -> Result<ExistingViewerStart> {
         self.bound_existing(runtime, &existing.reference)?;
@@ -310,8 +311,7 @@ impl Workflows {
         )?;
         record.stop.require_startable()?;
         need(
-            !runtime.cancellation().is_cancelled()
-                && Instant::now() < viewer::clipped(runtime, end),
+            !runtime.cancellation().is_cancelled() && end.check(runtime).is_ok(),
             "WORKER_VIEWER_STOPPED",
         )?;
         let inputs = record.inputs.as_ref().expect("held real box");
@@ -456,7 +456,7 @@ impl WorkerRuntime {
         end: Instant,
     ) -> Result<ExistingViewerStart> {
         self.laptop_workflows()
-            .start_existing(self, existing, end, None)
+            .start_existing(self, existing, CallBudget::bounded(end), None)
     }
     pub fn start_existing_viewer_for_connection(
         &self,
@@ -464,8 +464,24 @@ impl WorkerRuntime {
         connection: &crate::worker_reports::WorkerLaunchConnection,
         end: Instant,
     ) -> Result<ExistingViewerStart> {
-        self.laptop_workflows()
-            .start_existing(self, existing, end, Some(connection))
+        self.laptop_workflows().start_existing(
+            self,
+            existing,
+            CallBudget::bounded(end),
+            Some(connection),
+        )
+    }
+    pub fn start_existing_viewer_for_worker(
+        &self,
+        existing: &ExistingViewer,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ExistingViewerStart> {
+        self.laptop_workflows().start_existing(
+            self,
+            existing,
+            CallBudget::worker(),
+            Some(connection),
+        )
     }
     pub fn close_existing_viewer(&self, existing: &ExistingViewer, end: Instant) -> Result<()> {
         self.laptop_workflows().close_existing(self, existing, end)
