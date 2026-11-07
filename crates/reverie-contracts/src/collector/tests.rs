@@ -140,3 +140,130 @@ fn dry_live_partial_and_failed_runs_are_separate_in_a_rollup() {
         None
     );
 }
+
+/// The GPU identity scenarios of tests/test_cleanup_package.py.
+mod gpu_identity {
+    use super::*;
+
+    const UUID_A: &str = "GPU-01234567-89ab-cdef-0123-456789abcdef";
+    const UUID_B: &str = "GPU-fedcba98-7654-3210-fedc-ba9876543210";
+
+    fn read(output: &str) -> (Out, Vec<GpuDevice>) {
+        let devices = nvidia_devices(output).unwrap();
+        let (percent, _) = Gpu::Devices {
+            source: "nvidia-smi",
+            devices: devices.clone(),
+        }
+        .out();
+        (percent, devices)
+    }
+
+    #[test]
+    fn uuid_tracks_same_devices_across_index_reordering_without_changing_aggregate() {
+        let first = read(&format!(
+            "0, 40, 100, 8000, {UUID_A}\n1, 60, 200, 16000, {UUID_B}\n"
+        ));
+        let second = read(&format!(
+            "0, 60, 200, 16000, {UUID_B}\n1, 40, 100, 8000, {UUID_A}\n"
+        ));
+        assert_eq!(
+            (first.0.clone(), second.0.clone()),
+            (Out::Float(50.0), Out::Float(50.0))
+        );
+        let readings = |devices: &[GpuDevice]| {
+            devices
+                .iter()
+                .map(|device| {
+                    (
+                        device.uuid.clone(),
+                        device.util_pct,
+                        device.memory.unwrap().1,
+                        device.identity_status,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let expected = [
+            (Some(UUID_A.to_owned()), 40.0, 8000.0, "available"),
+            (Some(UUID_B.to_owned()), 60.0, 16000.0, "available"),
+        ];
+        for (_, devices) in [&first, &second] {
+            let found = readings(devices);
+            assert_eq!(found.len(), 2);
+            for row in &expected {
+                assert!(found.iter().any(|seen| seen.0 == row.0
+                    && seen.1 == row.1
+                    && seen.2 == row.2
+                    && seen.3 == row.3));
+            }
+        }
+        let order = |devices: &[GpuDevice]| {
+            devices
+                .iter()
+                .map(|device| device.uuid.clone())
+                .collect::<Vec<_>>()
+        };
+        let mut reversed = order(&second.1);
+        reversed.reverse();
+        assert_eq!(order(&first.1), reversed);
+    }
+
+    #[test]
+    fn bad_or_duplicate_identity_preserves_metrics_but_never_false_device_attribution() {
+        let upper = format!("GPU-{}", UUID_A[4..].to_uppercase());
+        let (percent, devices) = read(&format!(
+            "0, 10, 1, 2, {UUID_A}\n1, 20, 1, 2, {upper}\n2, 30, 1, 2, GPU-not-a-uuid\n3, 40, 1, 2, N/A\n4, 50, 1, 2\n"
+        ));
+        assert_eq!(percent, Out::Float(30.0));
+        assert!(devices.iter().all(|device| device.uuid.is_none()));
+        let status = devices
+            .iter()
+            .map(|device| device.identity_status)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            status,
+            [
+                "duplicate",
+                "duplicate",
+                "invalid",
+                "unavailable",
+                "unavailable"
+            ]
+        );
+    }
+
+    #[test]
+    fn capped_listing_marks_identities_incomplete_instead_of_missing_late_duplicates() {
+        let mut rows = (0..64)
+            .map(|n| format!("{n}, 25, 1, 2, GPU-{n:08x}-0000-0000-0000-000000000000"))
+            .collect::<Vec<_>>();
+        rows.push(rows[0].clone());
+        let (percent, devices) = read(&rows.join("\n"));
+        assert_eq!((percent, devices.len()), (Out::Float(25.0), 64));
+        assert!(
+            devices
+                .iter()
+                .all(|device| device.uuid.is_none() && device.identity_status == "incomplete")
+        );
+    }
+
+    #[test]
+    fn invalid_metrics_are_still_excluded_and_cannot_hide_duplicate_identity() {
+        let (percent, devices) = read(&format!(
+            "0, 40, 1, 2, {UUID_A}\n1, nan, 1, 2, {UUID_A}\n2, 101, 1, 2, {UUID_B}\n3, 20, -1, 2, {UUID_B}\n4, 60, 1, 2, {UUID_B}\n"
+        ));
+        assert_eq!(percent, Out::Float(50.0));
+        assert_eq!(
+            devices
+                .iter()
+                .map(|device| device.index)
+                .collect::<Vec<_>>(),
+            [0, 4]
+        );
+        assert!(
+            devices
+                .iter()
+                .all(|device| device.uuid.is_none() && device.identity_status == "duplicate")
+        );
+    }
+}

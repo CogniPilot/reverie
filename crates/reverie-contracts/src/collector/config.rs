@@ -22,6 +22,8 @@ pub struct Config {
     pub max_file_bytes: i64,
     pub proc_root: String,
     pub sys_root: String,
+    /// The whole environment of the GPU tool; `None` inherits this process's.
+    pub environment: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
 }
 
 impl Default for Config {
@@ -42,6 +44,7 @@ impl Default for Config {
             max_file_bytes: 64 << 20,
             proc_root: "/proc".into(),
             sys_root: "/sys".into(),
+            environment: None,
         }
     }
 }
@@ -184,5 +187,6 @@ pub fn parse_config(source: &str) -> Result<Config, String> {
         max_file_bytes,
         proc_root: text(&raw, "proc_root", &defaults.proc_root)?,
         sys_root: text(&raw, "sys_root", &defaults.sys_root)?,
+        environment: None,
     })
 }

@@ -527,6 +527,7 @@ dependencies = [
  "reverie-contracts",
  "reverie-core",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
