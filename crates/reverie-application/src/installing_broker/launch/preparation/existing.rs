@@ -2,6 +2,12 @@
 //! before runtime/exit/pane/memory reads. Keep the SAME lifecycle and resources.
 use super::{observe::ObservedWorkerLaunch, *};
 use reverie_host::worker_launch::ExistingObservationError;
+mod classify;
+mod memory;
+mod receipt;
+pub use classify::{
+    ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget, ReusableWorkerLaunch,
+};
 impl<'a> ObservedWorkerLaunch<'a> {
     pub(super) fn inspect(
         self,

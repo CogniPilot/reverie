@@ -564,3 +564,20 @@ settled. Consuming the original resource is a separate one-shot phase, and the
 App must first close the actual Office/request owners and requalify its claim.
 Drop retains unknown actual resources in a process-lifetime quarantine; it is
 neither a durable fence nor global process/writer release acknowledgement.
+
+`retain_existing_viewer` moves the original storage box, observed plan, request
+and sealed first inspection into the same bounded laptop inventory used by
+created viewers. It performs only pure origin/binding checks. The App must
+retain its actual classified reuse, J/hold, lifecycle and admission owners and
+complete admission release before calling `start_existing_viewer`. This branch
+creates no Office phone or Nix/created-container token. Both viewer origins use
+the same fixed native session, PTY, captured-client constructor slot and I/O.
+
+`close_existing_viewer` terminally fences the record and settles its exact job;
+it does not release storage or acknowledge global completion. A reclaim guard
+keeps the same box counted until `into_parts` moves it once under both retained
+mutex guards. The App must validate/hold its registry before this infallible
+restoration step. Dropping that guard leaves the box in the record. Unknown
+construction or descriptor close retains the box and job. Actual reused-viewer
+App transfer, transport/replacement/drain and recovered-viewer producers remain
+required; no backend selection follows from this Host component.
