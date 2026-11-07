@@ -1,7 +1,8 @@
 //! `cleanup/receipts.py` file access: the inputs, the append-only output and
 //! its retention. Records come from `reverie_contracts::prune_receipts`.
 use reverie_contracts::prune_receipts::{
-    self as receipts, Code, Context, Crash, Limits, Receipt, Reference, RetainError,
+    self as receipts, Code, Context, Crash, Limits, Receipt, Reference, RetainError, python_float,
+    python_int,
 };
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
@@ -224,17 +225,7 @@ pub fn run(options: &Options, now: f64) -> Result<(i32, String), Crash> {
     Ok((code, format!("{line}\n")))
 }
 
-/// The value options of `main()`'s parser, and every option string.
-const VALUE_OPTIONS: [&str; 8] = [
-    "--log-dir",
-    "--a1",
-    "--context",
-    "--out",
-    "--max-input-bytes",
-    "--max-entries",
-    "--max-bytes",
-    "--max-age-days",
-];
+/// Every option string of `main()`'s parser.
 const OPTIONS: [&str; 10] = [
     "-h",
     "--help",
@@ -291,38 +282,100 @@ fn is_value(token: &[u8]) -> bool {
     !abbreviation && (negative_number(token) || token.contains(&b' '))
 }
 
-/// The value option, if any, whose split argument argparse refuses with
-/// "expected one argument" (exit 2) before reading or writing any file.
-/// `--option=value` is not split and is never refused here.
-pub fn refused_split_value(args: &[OsString]) -> Option<&'static str> {
+/// What argparse does first when it reads the arguments left to right.
+#[derive(Debug, Eq, PartialEq)]
+pub enum Prescan {
+    /// A help option is consumed before any error: print help and exit 0.
+    Help,
+    /// An error raised before any help option: exit 2 with this message.
+    Usage(String),
+    /// Neither: parse the arguments normally.
+    Parse,
+}
+
+/// The option a token names: exact, or a unique `--` prefix. `Err` is an
+/// ambiguous prefix.
+fn option_named(token: &[u8]) -> Result<Option<&'static str>, String> {
+    let name = token.split(|byte| *byte == b'=').next().unwrap_or(token);
+    if let Some(option) = OPTIONS.iter().find(|option| option.as_bytes() == name) {
+        return Ok(Some(option));
+    }
+    if !token.starts_with(b"--") {
+        return Ok(None);
+    }
+    let matches = OPTIONS
+        .iter()
+        .filter(|option| option.as_bytes().starts_with(name))
+        .copied()
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [only] => Ok(Some(only)),
+        many => Err(format!(
+            "ambiguous option: {} could match {}",
+            String::from_utf8_lossy(name),
+            many.join(", ")
+        )),
+    }
+}
+
+/// argparse's left-to-right consumption: a help option exits 0 as soon as it
+/// is reached, while an ambiguous option, a split value read as an option
+/// (`--max-entries -1_000`) or a value of the wrong type exits 2 when its
+/// option is reached. Unknown options and other arguments are reported only
+/// at the end, so they never pre-empt a later help option.
+pub fn prescan(args: &[OsString]) -> Prescan {
     let mut at = 0;
     while let Some(token) = args.get(at).map(|arg| arg.as_bytes()) {
+        at += 1;
         if token == b"--" {
-            return None;
+            return Prescan::Parse;
         }
-        let candidates = OPTIONS
+        if token.first() != Some(&b'-') || token.len() == 1 {
+            continue;
+        }
+        if token.starts_with(b"-h") {
+            return Prescan::Help;
+        }
+        let option = match option_named(token) {
+            Ok(Some(option)) => option,
+            Ok(None) => continue,
+            Err(message) => return Prescan::Usage(message),
+        };
+        let attached = token
             .iter()
-            .filter(|option| option.as_bytes().starts_with(token))
-            .collect::<Vec<_>>();
-        let option = OPTIONS
-            .iter()
-            .find(|option| option.as_bytes() == token)
-            .or(match candidates.as_slice() {
-                [only] if token.starts_with(b"--") => Some(*only),
-                _ => None,
-            })
-            .filter(|option| VALUE_OPTIONS.contains(option));
-        match option {
-            Some(option)
-                if !args
-                    .get(at + 1)
-                    .is_some_and(|value| is_value(value.as_bytes())) =>
-            {
-                return Some(option);
+            .position(|byte| *byte == b'=')
+            .map(|equals| &token[equals + 1..]);
+        if option == "--help" {
+            return match attached {
+                None => Prescan::Help,
+                Some(value) => Prescan::Usage(format!(
+                    "argument -h/--help: ignored explicit argument '{}'",
+                    String::from_utf8_lossy(value)
+                )),
+            };
+        }
+        let value = match attached {
+            Some(value) => value,
+            None => match args.get(at).map(|arg| arg.as_bytes()) {
+                Some(value) if is_value(value) => {
+                    at += 1;
+                    value
+                }
+                _ => return Prescan::Usage(format!("argument {option}: expected one argument")),
+            },
+        };
+        let text = String::from_utf8_lossy(value);
+        let (valid, kind) = match option {
+            "--max-age-days" => (python_float(&text).is_some(), "float"),
+            "--max-input-bytes" | "--max-entries" | "--max-bytes" => {
+                (python_int(&text).is_some(), "int")
             }
-            Some(_) => at += 2,
-            None => at += 1,
+            _ => (true, ""),
+        };
+        if !valid {
+            return Prescan::Usage(format!("argument {option}: invalid {kind} value: '{text}'"));
         }
     }
-    None
+    Prescan::Parse
 }

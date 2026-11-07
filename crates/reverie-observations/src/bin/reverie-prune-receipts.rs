@@ -1,8 +1,8 @@
 //! `reverie-prune-receipts`: `cleanup/receipts.py main()`. One JSON summary
 //! line on stdout; exit 0 ok, 1 refusals or conflicts, 2 usage, 3 output UNKNOWN.
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use reverie_contracts::prune_receipts::{Limits, python_float, python_int};
-use reverie_observations::receipts::{Options, refused_split_value, run};
+use reverie_observations::receipts::{Options, Prescan, prescan, run};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
@@ -46,12 +46,20 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
-    // Every value option takes hyphen values here; argparse decides which
-    // split ones it reads as options instead, before any file effect.
+    // argparse reads the arguments left to right: an earlier help option
+    // wins, and an earlier usage error exits 2 before any file effect.
+    // Every value option takes hyphen values in clap; prescan decides.
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
-    if let Some(option) = refused_split_value(&args) {
-        eprintln!("reverie-prune-receipts: error: argument {option}: expected one argument");
-        return ExitCode::from(2);
+    match prescan(&args) {
+        Prescan::Help => {
+            let _ = Cli::command().print_help();
+            return ExitCode::SUCCESS;
+        }
+        Prescan::Usage(message) => {
+            eprintln!("reverie-prune-receipts: error: {message}");
+            return ExitCode::from(2);
+        }
+        Prescan::Parse => {}
     }
     let cli = Cli::parse();
     // Paths are plain strings: an empty one is accepted, and false in Python.
