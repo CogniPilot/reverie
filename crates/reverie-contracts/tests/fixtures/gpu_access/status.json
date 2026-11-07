@@ -1,0 +1,239 @@
+{
+  "note": "Actual unchanged owner-local status/request service with original owned real-flock fixture; native observations synthetic. Only binding digest replaced to parameterize captured config paths.",
+  "cases": [
+    {
+      "name": "stopped-none",
+      "value": {
+        "version": 1,
+        "employeeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current": {
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "bindingDigest": "@BINDING@"
+        },
+        "revision": 0,
+        "choices": {
+          "known": true,
+          "devices": [
+            {
+              "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+              "model": "Fixture physical GPU"
+            }
+          ]
+        },
+        "requested": null,
+        "applied": {
+          "known": true,
+          "enabled": false,
+          "deviceUuid": null,
+          "source": "none"
+        },
+        "active": {
+          "known": true,
+          "running": false,
+          "enabled": false,
+          "deviceUuid": null
+        },
+        "state": "unchanged"
+      },
+      "bytes": "{\"version\": 1, \"employeeId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\", \"current\": {\"sessionId\": \"11111111-2222-3333-4444-555555555555\", \"sessionGeneration\": 1, \"bindingDigest\": \"@BINDING@\"}, \"revision\": 0, \"choices\": {\"known\": true, \"devices\": [{\"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"model\": \"Fixture physical GPU\"}]}, \"requested\": null, \"applied\": {\"known\": true, \"enabled\": false, \"deviceUuid\": null, \"source\": \"none\"}, \"active\": {\"known\": true, \"running\": false, \"enabled\": false, \"deviceUuid\": null}, \"state\": \"unchanged\"}"
+    },
+    {
+      "name": "running-none",
+      "value": {
+        "version": 1,
+        "employeeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current": {
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "bindingDigest": "@BINDING@"
+        },
+        "revision": 0,
+        "choices": {
+          "known": true,
+          "devices": [
+            {
+              "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+              "model": "Fixture physical GPU"
+            }
+          ]
+        },
+        "requested": null,
+        "applied": {
+          "known": true,
+          "enabled": false,
+          "deviceUuid": null,
+          "source": "none"
+        },
+        "active": {
+          "known": false,
+          "running": true,
+          "enabled": null,
+          "deviceUuid": null
+        },
+        "state": "unchanged"
+      },
+      "bytes": "{\"version\": 1, \"employeeId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\", \"current\": {\"sessionId\": \"11111111-2222-3333-4444-555555555555\", \"sessionGeneration\": 1, \"bindingDigest\": \"@BINDING@\"}, \"revision\": 0, \"choices\": {\"known\": true, \"devices\": [{\"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"model\": \"Fixture physical GPU\"}]}, \"requested\": null, \"applied\": {\"known\": true, \"enabled\": false, \"deviceUuid\": null, \"source\": \"none\"}, \"active\": {\"known\": false, \"running\": true, \"enabled\": null, \"deviceUuid\": null}, \"state\": \"unchanged\"}"
+    },
+    {
+      "name": "running-pending",
+      "value": {
+        "version": 1,
+        "employeeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current": {
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "bindingDigest": "@BINDING@"
+        },
+        "revision": 1,
+        "choices": {
+          "known": true,
+          "devices": [
+            {
+              "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+              "model": "Fixture physical GPU"
+            }
+          ]
+        },
+        "requested": {
+          "enabled": true,
+          "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+          "revision": 1
+        },
+        "applied": {
+          "known": true,
+          "enabled": false,
+          "deviceUuid": null,
+          "source": "none"
+        },
+        "active": {
+          "known": false,
+          "running": true,
+          "enabled": null,
+          "deviceUuid": null
+        },
+        "state": "pending"
+      },
+      "bytes": "{\"version\": 1, \"employeeId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\", \"current\": {\"sessionId\": \"11111111-2222-3333-4444-555555555555\", \"sessionGeneration\": 1, \"bindingDigest\": \"@BINDING@\"}, \"revision\": 1, \"choices\": {\"known\": true, \"devices\": [{\"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"model\": \"Fixture physical GPU\"}]}, \"requested\": {\"enabled\": true, \"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"revision\": 1}, \"applied\": {\"known\": true, \"enabled\": false, \"deviceUuid\": null, \"source\": \"none\"}, \"active\": {\"known\": false, \"running\": true, \"enabled\": null, \"deviceUuid\": null}, \"state\": \"pending\"}"
+    },
+    {
+      "name": "stopped-on",
+      "value": {
+        "version": 1,
+        "employeeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current": {
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "bindingDigest": "@BINDING@"
+        },
+        "revision": 1,
+        "choices": {
+          "known": true,
+          "devices": [
+            {
+              "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+              "model": "Fixture physical GPU"
+            }
+          ]
+        },
+        "requested": {
+          "enabled": true,
+          "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+          "revision": 1
+        },
+        "applied": {
+          "known": true,
+          "enabled": true,
+          "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+          "source": "employee"
+        },
+        "active": {
+          "known": true,
+          "running": false,
+          "enabled": false,
+          "deviceUuid": null
+        },
+        "state": "applied"
+      },
+      "bytes": "{\"version\": 1, \"employeeId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\", \"current\": {\"sessionId\": \"11111111-2222-3333-4444-555555555555\", \"sessionGeneration\": 1, \"bindingDigest\": \"@BINDING@\"}, \"revision\": 1, \"choices\": {\"known\": true, \"devices\": [{\"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"model\": \"Fixture physical GPU\"}]}, \"requested\": {\"enabled\": true, \"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"revision\": 1}, \"applied\": {\"known\": true, \"enabled\": true, \"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"source\": \"employee\"}, \"active\": {\"known\": true, \"running\": false, \"enabled\": false, \"deviceUuid\": null}, \"state\": \"applied\"}"
+    },
+    {
+      "name": "stopped-off",
+      "value": {
+        "version": 1,
+        "employeeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current": {
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "bindingDigest": "@BINDING@"
+        },
+        "revision": 2,
+        "choices": {
+          "known": true,
+          "devices": [
+            {
+              "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+              "model": "Fixture physical GPU"
+            }
+          ]
+        },
+        "requested": {
+          "enabled": false,
+          "deviceUuid": null,
+          "revision": 2
+        },
+        "applied": {
+          "known": true,
+          "enabled": false,
+          "deviceUuid": null,
+          "source": "none"
+        },
+        "active": {
+          "known": true,
+          "running": false,
+          "enabled": false,
+          "deviceUuid": null
+        },
+        "state": "applied"
+      },
+      "bytes": "{\"version\": 1, \"employeeId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\", \"current\": {\"sessionId\": \"11111111-2222-3333-4444-555555555555\", \"sessionGeneration\": 1, \"bindingDigest\": \"@BINDING@\"}, \"revision\": 2, \"choices\": {\"known\": true, \"devices\": [{\"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"model\": \"Fixture physical GPU\"}]}, \"requested\": {\"enabled\": false, \"deviceUuid\": null, \"revision\": 2}, \"applied\": {\"known\": true, \"enabled\": false, \"deviceUuid\": null, \"source\": \"none\"}, \"active\": {\"known\": true, \"running\": false, \"enabled\": false, \"deviceUuid\": null}, \"state\": \"applied\"}"
+    },
+    {
+      "name": "legacy",
+      "value": {
+        "version": 1,
+        "employeeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current": {
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "bindingDigest": "@BINDING@"
+        },
+        "revision": 0,
+        "choices": {
+          "known": true,
+          "devices": [
+            {
+              "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+              "model": "Fixture physical GPU"
+            }
+          ]
+        },
+        "requested": null,
+        "applied": {
+          "known": true,
+          "enabled": true,
+          "deviceUuid": "GPU-11111111-2222-3333-4444-555555555555",
+          "source": "legacy-session"
+        },
+        "active": {
+          "known": false,
+          "running": true,
+          "enabled": null,
+          "deviceUuid": null
+        },
+        "state": "unchanged"
+      },
+      "bytes": "{\"version\": 1, \"employeeId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\", \"current\": {\"sessionId\": \"11111111-2222-3333-4444-555555555555\", \"sessionGeneration\": 1, \"bindingDigest\": \"@BINDING@\"}, \"revision\": 0, \"choices\": {\"known\": true, \"devices\": [{\"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"model\": \"Fixture physical GPU\"}]}, \"requested\": null, \"applied\": {\"known\": true, \"enabled\": true, \"deviceUuid\": \"GPU-11111111-2222-3333-4444-555555555555\", \"source\": \"legacy-session\"}, \"active\": {\"known\": false, \"running\": true, \"enabled\": null, \"deviceUuid\": null}, \"state\": \"unchanged\"}"
+    }
+  ]
+}

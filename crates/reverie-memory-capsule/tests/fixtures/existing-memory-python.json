@@ -1,0 +1,427 @@
+{
+  "scope": "Actual unchanged legacy APIs, real HashedEmbedder8, fixed test clock; fixture-only sequence/rowid and unknown-extension SQL; no model/provider output or real company data",
+  "producerGit": "292ad02e54c37af6670ba0f38ce9244003d6dc2b",
+  "source": {
+    "chat.py": "29c6d7c8bcdbe20984c90178d02fdce39258f1c9e7af63f816ea033f5961d178",
+    "memory.py": "a857b8f6bff7d30a56408235e37aea04b679b354f3c9fb3daafd3a05be3e7828",
+    "reverie.py": "bc5af0f76a381c722ccae7c153cf030801ba62e5768eb8251147cd83cd8d21b6",
+    "embeddings.py": "a8fdeba181768d4a99444ab47876ea76eee164fd22491be83298ba9d82583392"
+  },
+  "schema": [
+    [
+      "index",
+      "future_extension_note",
+      "future_extension",
+      "CREATE INDEX future_extension_note ON future_extension(note)"
+    ],
+    [
+      "index",
+      "memories_kind_time",
+      "memories",
+      "CREATE INDEX memories_kind_time ON memories(kind, created_at)"
+    ],
+    [
+      "index",
+      "sqlite_autoindex_answered_1",
+      "answered",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_external_episodes_1",
+      "external_episodes",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_reverie_ballots_1",
+      "reverie_ballots",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_reverie_document_history_1",
+      "reverie_document_history",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_reverie_documents_1",
+      "reverie_documents",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_state_1",
+      "state",
+      null
+    ],
+    [
+      "table",
+      "answered",
+      "answered",
+      "CREATE TABLE answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n)"
+    ],
+    [
+      "table",
+      "beliefs",
+      "beliefs",
+      "CREATE TABLE beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n)"
+    ],
+    [
+      "table",
+      "external_episodes",
+      "external_episodes",
+      "CREATE TABLE external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n)"
+    ],
+    [
+      "table",
+      "future_extension",
+      "future_extension",
+      "CREATE TABLE future_extension(id INTEGER PRIMARY KEY,payload BLOB NOT NULL,note TEXT,real_value REAL)"
+    ],
+    [
+      "table",
+      "memories",
+      "memories",
+      "CREATE TABLE memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n, future_payload BLOB)"
+    ],
+    [
+      "table",
+      "reverie_ballots",
+      "reverie_ballots",
+      "CREATE TABLE reverie_ballots (\n                category TEXT NOT NULL, week INTEGER NOT NULL, proposal_hash TEXT NOT NULL,\n                proposal TEXT NOT NULL, reason TEXT NOT NULL, at REAL NOT NULL,\n                PRIMARY KEY(category,week))"
+    ],
+    [
+      "table",
+      "reverie_document_history",
+      "reverie_document_history",
+      "CREATE TABLE reverie_document_history (\n                name TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL,\n                archived_at REAL NOT NULL, PRIMARY KEY(name,revision))"
+    ],
+    [
+      "table",
+      "reverie_documents",
+      "reverie_documents",
+      "CREATE TABLE reverie_documents (\n                name TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL,\n                updated_at REAL NOT NULL)"
+    ],
+    [
+      "table",
+      "sqlite_sequence",
+      "sqlite_sequence",
+      "CREATE TABLE sqlite_sequence(name,seq)"
+    ],
+    [
+      "table",
+      "state",
+      "state",
+      "CREATE TABLE state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "voice_claims",
+      "voice_claims",
+      "CREATE TABLE voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n)"
+    ],
+    [
+      "view",
+      "future_extension_view",
+      "future_extension_view",
+      "CREATE VIEW future_extension_view AS SELECT id,length(payload) AS size FROM future_extension"
+    ]
+  ],
+  "tables": {
+    "answered": [
+      [
+        701,
+        "owned-message-709",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ]
+    ],
+    "beliefs": [
+      [
+        601,
+        601,
+        "Synthetic capsule continuity belief",
+        {
+          "floatBits": "401c000000000000"
+        },
+        null,
+        1,
+        {
+          "floatBits": "41dabb9109900000"
+        }
+      ],
+      [
+        602,
+        602,
+        "Synthetic existing elaboration",
+        {
+          "floatBits": "4014000000000000"
+        },
+        601,
+        0,
+        {
+          "floatBits": "41dabb910c100000"
+        }
+      ]
+    ],
+    "external_episodes": [
+      [
+        702,
+        "owned-external-source-731",
+        44
+      ]
+    ],
+    "future_extension": [
+      [
+        7001,
+        7001,
+        {
+          "blob": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+        },
+        "\u672a\u77e5 \u0000 exact tail",
+        {
+          "floatBits": "3fd5555555555555"
+        }
+      ]
+    ],
+    "memories": [
+      [
+        41,
+        41,
+        "episode",
+        {
+          "floatBits": "41dabb90d5100000"
+        },
+        "synthetic capsule anchor transcript",
+        "An existing owned transcript must survive.",
+        "User: synthetic capsule anchor transcript\nAssistant: An existing owned transcript must survive.",
+        {
+          "floatBits": "4018000000000000"
+        },
+        "default",
+        "hashed-v1-8",
+        {
+          "blob": "57ff97bdeaab773eeaab77be00000000eaab77beeaab77beefc0393feaabf7be"
+        },
+        "[]",
+        "",
+        "{\"fixture\": true, \"unknown\": {\"array\": [null, true, 2]}}",
+        null,
+        {
+          "blob": "00ff110080"
+        }
+      ],
+      [
+        42,
+        42,
+        "reflection",
+        {
+          "floatBits": "41dabb90ee100000"
+        },
+        "",
+        "",
+        "synthetic capsule anchor memory preserves existing vector bytes",
+        {
+          "floatBits": "4020000000000000"
+        },
+        "model",
+        "hashed-v1-8",
+        {
+          "blob": "00000000abaa2a3f000000000000000000000000abaaaa3eabaa2a3f00000000"
+        },
+        "[41]",
+        "continuity",
+        "{\"fixture\": \"exact old producer\", \"unicode\": \"\\u03a3 \\ud83e\\uddea\"}",
+        null,
+        null
+      ],
+      [
+        43,
+        43,
+        "dream",
+        {
+          "floatBits": "41dabb9107100000"
+        },
+        "",
+        "",
+        "synthetic capsule anchor dream hypothesis",
+        {
+          "floatBits": "4000000000000000"
+        },
+        "fixed",
+        "hashed-v1-8",
+        {
+          "blob": "000000002ef9e43e000000002ef9e4be2ef9e4be000000002ef9e43e2ef9e43e"
+        },
+        "[42]",
+        "",
+        "{\"recall\": \"synthetic capsule anchor dream hypothesis\", \"tone\": \"calm\", \"released\": false, \"summary_only\": true}",
+        null,
+        null
+      ],
+      [
+        44,
+        44,
+        "episode",
+        {
+          "floatBits": "41dabb9120100000"
+        },
+        "synthetic capsule external source",
+        "Existing external link survives.",
+        "User: synthetic capsule external source\nAssistant: Existing external link survives.",
+        {
+          "floatBits": "4008000000000000"
+        },
+        "default",
+        "hashed-v1-8",
+        {
+          "blob": "c11883be0000000000000000c118833e0688303fc11883bec118833ec11803bf"
+        },
+        "[]",
+        "",
+        "{\"external_source\": \"owned-external-source-731\", \"visibility\": \"private\"}",
+        null,
+        null
+      ]
+    ],
+    "reverie_ballots": [
+      [
+        871,
+        "publication",
+        2965,
+        "a1ffb1c0349b3817c04555fd76de7e3220f3213a5d54c0215d7f4422fd6e6dbe",
+        "{\"fixture\":\"not real authority\"}",
+        "Synthetic recorded ballot data only",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ]
+    ],
+    "reverie_document_history": [
+      [
+        861,
+        "plan",
+        1,
+        "{\"title\": \"Owned synthetic plan v1\", \"steps\": [\"retain IDs\"]}",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ]
+    ],
+    "reverie_documents": [
+      [
+        1,
+        "self",
+        1,
+        "{\"persona\": \"Chosen synthetic persona\", \"consciousness\": \"\", \"directives\": [], \"reason\": \"Owner-selected initial instance identity\"}",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ],
+      [
+        851,
+        "plan",
+        2,
+        "{\"title\": \"Owned synthetic plan v2\", \"steps\": [\"retain IDs\", \"retain history\"]}",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ],
+      [
+        852,
+        "profile:fixture",
+        1,
+        "{\"role\": \"synthetic role\", \"long_term\": \"preserve selected context\", \"opaque\": [false, 3]}",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ]
+    ],
+    "sqlite_sequence": [
+      [
+        1,
+        "memories",
+        44
+      ],
+      [
+        2,
+        "beliefs",
+        602
+      ]
+    ],
+    "state": [
+      [
+        1,
+        "revisable_self_model",
+        "1"
+      ],
+      [
+        2,
+        "migrated_legacy_history",
+        "missing"
+      ],
+      [
+        901,
+        "vendor.future.state.v99",
+        "opaque \u03a9 \ud83e\uddea \u0000 preserve"
+      ]
+    ],
+    "voice_claims": [
+      [
+        703,
+        "\u03c3 synthetic capsule utterance",
+        {
+          "floatBits": "41dabb9120100000"
+        }
+      ]
+    ]
+  },
+  "rawVectors": [
+    {
+      "id": 41,
+      "embedModel": "hashed-v1-8",
+      "embeddingHex": "57ff97bdeaab773eeaab77be00000000eaab77beeaab77beefc0393feaabf7be"
+    },
+    {
+      "id": 42,
+      "embedModel": "hashed-v1-8",
+      "embeddingHex": "00000000abaa2a3f000000000000000000000000abaaaa3eabaa2a3f00000000"
+    },
+    {
+      "id": 43,
+      "embedModel": "hashed-v1-8",
+      "embeddingHex": "000000002ef9e43e000000002ef9e4be2ef9e4be000000002ef9e43e2ef9e43e"
+    },
+    {
+      "id": 44,
+      "embedModel": "hashed-v1-8",
+      "embeddingHex": "c11883be0000000000000000c118833e0688303fc11883bec118833ec11803bf"
+    }
+  ],
+  "expectedRecall": {
+    "id": 42,
+    "text": "synthetic capsule anchor memory preserves existing vector bytes"
+  },
+  "hashes": {
+    "memory.sqlite": "4f3d8482be76220180650f597b0c9142e3716e8de1ac9c6811bca7e019e1af69",
+    "profile.md": "1a4e4295bfa7987a2e7102881b0d4df9151aedd8ee0d3eb5805d59bb4c149ff0",
+    "instance.json": "70a3acf543faa233fd610be9aab33f17ada11ecc66213d3edde9e46ced1a8ef9"
+  },
+  "ids": {
+    "memories": [
+      41,
+      42,
+      43,
+      44
+    ],
+    "beliefs": [
+      601,
+      602
+    ],
+    "answered": "owned-message-709",
+    "external": "owned-external-source-731"
+  }
+}

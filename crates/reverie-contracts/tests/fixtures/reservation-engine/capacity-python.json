@@ -1,0 +1,806 @@
+[
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 0]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 0]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 0]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 0]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 0]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 34359738368]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 34359738368]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 34359738368]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 34359738368]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 34359738368]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 107374182400]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 107374182400]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 107374182400]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 9007199254740993]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 9007199254740993]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 9007199254740993]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 9007199254740993]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 9007199254740993]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 9223372036854775807]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 9223372036854775807]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 9223372036854775807]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 9223372036854775807]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 9223372036854775807]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 18446744073709551615]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 18446744073709551615]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 18446744073709551615]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 18446744073709551615]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 18446744073709551615]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[0, 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[27917287424, 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829568, 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[88046829569, 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[null, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1, null]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[false, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1, false]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[true, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1, true]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[-1, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1, -1]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1.0, 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1, 1.0]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[\"unknown\", 107374182400]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "legacy_headroom_fits",
+    "raw": "[1, \"unknown\"]",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 0, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 1, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": null, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": false, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": -1, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 1.0, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 9223372036854775808, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607551, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607553, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 0, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 1, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": null, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": false, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": -1, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 1.0, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 9223372036854775808, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934591, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934593, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 0, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 1, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": null, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": false, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": -1, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 1.0, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 9223372036854775808, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934591, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934593, \"total_bytes\": 68719476736, \"available_bytes\": 8589934592}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 0, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 1, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": null, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": false, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": -1, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 1.0, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 9223372036854775808, \"available_bytes\": 8589934592}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476735, \"available_bytes\": 8589934592}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476737, \"available_bytes\": 8589934592}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 0}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 1}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": null}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": false}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": -1}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 1.0}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 9223372036854775808}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934591}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "explicit_host_headroom_fits",
+    "raw": "{\"pool_bytes\": 51539607552, \"site_bytes\": 8589934592, \"reserve_bytes\": 8589934592, \"total_bytes\": 68719476736, \"available_bytes\": 8589934593}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 0, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 1, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": null, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": false, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": -1, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 1.0, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 9223372036854775808, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 99, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 101, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 0, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 1, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": null, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": false, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": -1, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 1.0, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 9223372036854775808, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 59, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 61, \"retained_bytes\": 20, \"candidate_bytes\": 20}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 0, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 1, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": null, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": false, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": -1, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 1.0, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 9223372036854775808, \"candidate_bytes\": 20}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 19, \"candidate_bytes\": 20}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 21, \"candidate_bytes\": 20}",
+    "answer": false,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 0}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 1}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": null}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": false}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": -1}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 1.0}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 9223372036854775808}",
+    "answer": null,
+    "error": true
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 19}",
+    "answer": true,
+    "error": false
+  },
+  {
+    "name": "pool_headroom_fits",
+    "raw": "{\"budget_bytes\": 100, \"committed_bytes\": 60, \"retained_bytes\": 20, \"candidate_bytes\": 21}",
+    "answer": false,
+    "error": false
+  }
+]

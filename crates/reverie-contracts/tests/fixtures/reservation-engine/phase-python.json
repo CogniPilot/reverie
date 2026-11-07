@@ -1,0 +1,44 @@
+[
+  {
+    "name": "ordinary-missing",
+    "kind": "ordinary",
+    "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": []}",
+    "raw": "",
+    "error": "RESERVATION_STOPPED_ROW"
+  },
+  {
+    "name": "ordinary-null",
+    "kind": "ordinary",
+    "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": null}",
+    "raw": "",
+    "error": "RESERVATION_STOPPED_ROW"
+  },
+  {
+    "name": "ordinary-scalar",
+    "kind": "ordinary",
+    "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": true}",
+    "raw": "",
+    "error": "RESERVATION_STOPPED_ROW"
+  },
+  {
+    "name": "ordinary-array",
+    "kind": "ordinary",
+    "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": []}",
+    "raw": "",
+    "error": "RESERVATION_STOPPED_ROW"
+  },
+  {
+    "name": "inventory-all-mount-objects",
+    "kind": "inventory",
+    "ordinary": "",
+    "raw": "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Mounts\":[{\"x\":NaN},[]]}",
+    "error": "RESERVATION_MOUNT_INVENTORY"
+  },
+  {
+    "name": "stopped-all-mount-objects",
+    "kind": "stopped",
+    "ordinary": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}",
+    "raw": "{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Mounts\": [{\"x\":1e309},[]], \"State\": {\"Running\": false, \"Pid\": 0, \"Status\": \"exited\", \"StartedAt\": \"\", \"Paused\": false, \"Restarting\": false, \"Dead\": false}}",
+    "error": "RESERVATION_MOUNT_INVENTORY"
+  }
+]

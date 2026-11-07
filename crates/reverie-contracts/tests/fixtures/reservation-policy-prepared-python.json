@@ -1,0 +1,175 @@
+{
+  "before": {
+    "apiSocketRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/office",
+    "budgetMode": "admission",
+    "cgroupParent": "reverie-workers.slice",
+    "companyFile": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/company.json",
+    "companyRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/company",
+    "cpus": 0,
+    "deployment": "test",
+    "gid": 100,
+    "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "maintenanceSessions": [],
+    "maxWorkers": 4,
+    "memoryMiB": 2048,
+    "mounts": [
+      {
+        "destination": "/workspace",
+        "readOnly": false,
+        "source": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/work"
+      }
+    ],
+    "pidsLimit": 128,
+    "poolMemoryMiB": 8192,
+    "poolTasksMax": 1024,
+    "resourceReservations": {
+      "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "directory": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/ram-private",
+      "hostReserveMiB": 1024,
+      "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+      "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    },
+    "scratchRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/scratch",
+    "serverContainer": "test-console",
+    "socket": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/control/broker.sock",
+    "stateRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/workers",
+    "uid": 1000,
+    "version": 1
+  },
+  "candidate": {
+    "apiSocketRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/office",
+    "budgetMode": "admission",
+    "cgroupParent": "reverie-workers.slice",
+    "companyFile": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/company.json",
+    "companyRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/company",
+    "cpus": 0,
+    "deployment": "test",
+    "employeeResources": {
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+        "budgetMode": "admission",
+        "cpus": 0,
+        "memoryMiB": 4096,
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024
+      }
+    },
+    "gid": 100,
+    "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "maintenanceSessions": [],
+    "maxWorkers": 4,
+    "memoryMiB": 2048,
+    "mounts": [
+      {
+        "destination": "/workspace",
+        "readOnly": false,
+        "source": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/work"
+      }
+    ],
+    "pidsLimit": 128,
+    "poolMemoryMiB": 8192,
+    "poolTasksMax": 1024,
+    "resourceReservations": {
+      "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "directory": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/ram-private",
+      "hostReserveMiB": 1024,
+      "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+      "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    },
+    "scratchRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/scratch",
+    "serverContainer": "test-console",
+    "sessionResources": {
+      "11111111-2222-3333-4444-555555555555": {
+        "budgetMode": "admission",
+        "cpus": 0,
+        "memoryMiB": 2048,
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024
+      },
+      "99999999-9999-4999-8999-999999999999": {
+        "budgetMode": "admission",
+        "cpus": 0,
+        "memoryMiB": 4096,
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024
+      }
+    },
+    "socket": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/control/broker.sock",
+    "stateRoot": "/tmp/nix-shell.cERQpk/tmpfqqx8jq_/workers",
+    "uid": 1000,
+    "version": 1
+  },
+  "document": {
+    "operations": {
+      "ec3c859e-8df2-4c49-baa3-84330ce756fd": {
+        "delta_bytes": "2147483648",
+        "id": "ec3c859e-8df2-4c49-baa3-84330ce756fd",
+        "idempotency_key": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "last_receipt_digest": "b7f80b9b7feba88c05b918d60e9c9053f1e970c607b235e19cd42f5973205fd8",
+        "observation": {
+          "budget_bytes": "8589934592",
+          "committed_bytes": "2147483648",
+          "current_memory_bytes": "2147483648",
+          "current_sid": "11111111-2222-3333-4444-555555555555",
+          "employee_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "generation": "1",
+          "pool_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "pool_revision_digest": "1a2656c4bbf695c71d4ece3d6ced5a53811308aa4a00a88a4f14f936368f7803",
+          "profile_version": "1",
+          "source_binding_digest": "6fa0a2c7e04bfef90f652e00090574b6b6692b9549034f25c556a9c791a0ccb2"
+        },
+        "reason": null,
+        "request": {
+          "employee_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "observation_digest": "4da7a30fa1e8da038d991a123ec351bd8d66342874b4f07aadff188c00f0ab05",
+          "pool_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "preview_digest": "c89d247fbb763b46d33d07a5a2d32d344ac5919ee83d83b8f268bfcfa1162ebf",
+          "profile_version": "1",
+          "requested_memory_bytes": "4294967296",
+          "source_binding_digest": "6fa0a2c7e04bfef90f652e00090574b6b6692b9549034f25c556a9c791a0ccb2"
+        },
+        "request_digest": "a4015f620d42f99be55e3a0b248bdd02b72efa18ef77c1674aeded067f8892b3",
+        "reservation_id": "ed747b34-bcad-42da-bc12-0d9ec42582f0",
+        "reserved_sid": "99999999-9999-4999-8999-999999999999",
+        "scope": {
+          "company_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "owner_scope_digest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6"
+        },
+        "state": "PREPARED",
+        "version": 3
+      }
+    },
+    "revision": 3,
+    "schema": "reverie-laptop-resource-operations-v1"
+  },
+  "profiles": {
+    "profiles": {
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+        "binding": {
+          "current_generation": 1,
+          "current_sid": "11111111-2222-3333-4444-555555555555",
+          "employee_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "target_generation": 2,
+          "target_sid": "99999999-9999-4999-8999-999999999999"
+        },
+        "resources": {
+          "budgetMode": "admission",
+          "cpus": 0,
+          "memoryMiB": 4096,
+          "pidsLimit": 128,
+          "poolMemoryMiB": 8192,
+          "poolTasksMax": 1024
+        },
+        "version": 1
+      }
+    },
+    "revision": 1,
+    "schema": "reverie-employee-resource-profiles-v1"
+  },
+  "receiptBytes": "{\"afterConfigDigest\":\"afb1d281760ae22b90387bd65cac56051b53bcad6bc0488a87500fb5ac243a06\",\"beforeConfigDigest\":\"eda1fb0f518834a39a24185d97abb811a7d7bc6a2e1354fbf8ae4027a32238c2\",\"operationId\":\"ec3c859e-8df2-4c49-baa3-84330ce756fd\",\"profileDigest\":\"2a1792ef8d42a8b22558b2085c4c50220413cbeb095aa4977dbcb71e540dcec8\",\"profileVersion\":1,\"reservationId\":\"ed747b34-bcad-42da-bc12-0d9ec42582f0\",\"schema\":\"reverie-resource-native-preparation-v1\",\"sourceBindingDigest\":\"6fa0a2c7e04bfef90f652e00090574b6b6692b9549034f25c556a9c791a0ccb2\",\"state\":\"PREPARED_CONFIG_ONLY_SOURCE_UNCHANGED\"}",
+  "receiptDigest": "b7f80b9b7feba88c05b918d60e9c9053f1e970c607b235e19cd42f5973205fd8",
+  "source": "actual ResourcePreparationOwner._commit_configuration using owned Preparation fixture, real policy CAS/flock/Broker._reload_resources; fixture engine observations only; no start/launch",
+  "sourceSha256": "57d553446ea06196e31637ebcf035e464f0bc87afdbb1a1fe7edd167e9a06e49"
+}

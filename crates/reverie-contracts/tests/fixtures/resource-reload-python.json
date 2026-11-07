@@ -1,0 +1,2860 @@
+{
+  "cases": [
+    {
+      "accepted": true,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "candidate": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "11111111-2222-3333-4444-555555555555": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 2048,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "baseline",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "oldEffective": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": true,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": -0.0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "candidate": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": -0.0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "11111111-2222-3333-4444-555555555555": {
+            "budgetMode": "admission",
+            "cpus": -0.0,
+            "memoryMiB": 2048,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "cpus",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "oldEffective": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": -0.0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": -0.0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": true,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "unknown": {
+          "image": "nested",
+          "memoryMiB": true,
+          "opsConfig": "nested"
+        },
+        "version": 1
+      },
+      "candidate": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "11111111-2222-3333-4444-555555555555": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 2048,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "unknown": {
+          "image": "nested",
+          "memoryMiB": true,
+          "opsConfig": "nested"
+        },
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "unknown",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "oldEffective": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "unknown": {
+          "image": "nested",
+          "memoryMiB": true,
+          "opsConfig": "nested"
+        },
+        "version": 1
+      },
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "unknown": {
+          "image": "nested",
+          "memoryMiB": true,
+          "opsConfig": "nested"
+        },
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_GLOBAL_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "global-budgetMode",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "pool",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_GLOBAL_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "global-memoryMiB",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2049,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_GLOBAL_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "global-pidsLimit",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 129,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_GLOBAL_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "global-cpus",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 1,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_GLOBAL_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "global-poolMemoryMiB",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8193,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_GLOBAL_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "global-poolTasksMax",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1025,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "Resource reload cannot change laptop grants, images or control paths",
+      "kind": "ValueError",
+      "name": "domain-image",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "Resource reload cannot change laptop grants, images or control paths",
+      "kind": "ValueError",
+      "name": "domain-unknown",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "unknown": "extra",
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "Resource reload cannot change laptop grants, images or control paths",
+      "kind": "ValueError",
+      "name": "domain-mounts",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "Invalid owner session resource map",
+      "kind": "ValueError",
+      "name": "null-sessionResources",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": null,
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": true,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "candidate": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "11111111-2222-3333-4444-555555555555": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 2048,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "empty-sessionResources",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "oldEffective": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {},
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "Invalid owner employee resource projection",
+      "kind": "ValueError",
+      "name": "null-employeeResources",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": null,
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": true,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "candidate": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {},
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "11111111-2222-3333-4444-555555555555": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 2048,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "empty-employeeResources",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "oldEffective": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {},
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_PEER_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "foreign-sessionResources",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_PEER_POLICY_CHANGED",
+      "kind": "Refused",
+      "name": "foreign-employeeResources",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": true,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "candidate": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "11111111-2222-3333-4444-555555555555": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 2048,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "unchanged-peer",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "oldEffective": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          },
+          "ffffffff-ffff-4fff-8fff-ffffffffffff": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "RESERVATION_DISTINCT_TARGET",
+      "kind": "Refused",
+      "name": "same-role",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "11111111-2222-3333-4444-555555555555"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "UUID",
+      "kind": "OperationRefusal",
+      "name": "nil-old",
+      "old": "00000000-0000-0000-0000-000000000000",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    },
+    {
+      "accepted": false,
+      "before": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "employee": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "error": "UUID",
+      "kind": "OperationRefusal",
+      "name": "nil-target",
+      "old": "11111111-2222-3333-4444-555555555555",
+      "projected": {
+        "apiSocketRoot": "/owned/synthetic-old6/office",
+        "budgetMode": "admission",
+        "cgroupParent": "reverie-workers.slice",
+        "companyFile": "/owned/synthetic-old6/company.json",
+        "companyRoot": "/owned/synthetic-old6/company",
+        "cpus": 0,
+        "deployment": "test",
+        "employeeResources": {
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "gid": 100,
+        "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maintenanceSessions": [],
+        "maxWorkers": 4,
+        "memoryMiB": 2048,
+        "mounts": [
+          {
+            "destination": "/workspace",
+            "readOnly": false,
+            "source": "/owned/synthetic-old6/work"
+          }
+        ],
+        "pidsLimit": 128,
+        "poolMemoryMiB": 8192,
+        "poolTasksMax": 1024,
+        "resourceReservations": {
+          "companyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "directory": "/owned/synthetic-old6/ram-private",
+          "hostReserveMiB": 1024,
+          "ownerScopeDigest": "2bfb58d7bc9b7d49f8a87167f81e29a4c1d42fb02d487ad10773d1bd8d6655b6",
+          "poolId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        },
+        "scratchRoot": "/owned/synthetic-old6/scratch",
+        "serverContainer": "test-console",
+        "sessionResources": {
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+            "budgetMode": "admission",
+            "cpus": 0,
+            "memoryMiB": 4096,
+            "pidsLimit": 128,
+            "poolMemoryMiB": 8192,
+            "poolTasksMax": 1024
+          }
+        },
+        "socket": "/owned/synthetic-old6/control/broker.sock",
+        "stateRoot": "/owned/synthetic-old6/workers",
+        "uid": 1000,
+        "version": 1
+      },
+      "target": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "source": "actual worker_resource_reservations.compatibility_candidate + worker_resources.effective_config, owned Reservations fixture; synthetic root replaced after execution",
+  "sourceSha256": "89f4e9a90d85b790ee6f7d08fbe6dbe770aba54c0e264201e94ab571d3d9f2e3"
+}

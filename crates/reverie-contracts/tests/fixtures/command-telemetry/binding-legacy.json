@@ -1,0 +1,17 @@
+[
+  {
+    "phase": "after_first_binding",
+    "outcome": false,
+    "database": false
+  },
+  {
+    "phase": "after_log_open",
+    "outcome": false,
+    "database": true
+  },
+  {
+    "phase": "after_report_read",
+    "outcome": "unavailable",
+    "database": true
+  }
+]

@@ -1,0 +1,227 @@
+{
+  "source": "python/reverie/worker.py",
+  "sourceSha256": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7",
+  "scope": "Actual Broker.check_pool with owned counter files. No configured slice activation/start qualification.",
+  "cases": [
+    {
+      "name": "ordinary",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "exact-headroom",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "960",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "one-task-short",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "961",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Worker pool has insufficient task headroom"
+      }
+    },
+    {
+      "name": "ignore-headroom",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "1024",
+      "headroom": false,
+      "error": null
+    },
+    {
+      "name": "negative-memory",
+      "memory": "-1",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "zero-memory",
+      "memory": "0",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "negative-tasks",
+      "memory": "4294967296",
+      "tasks": "-5",
+      "current": "-100",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "negative-tasks-full",
+      "memory": "4294967296",
+      "tasks": "-5",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Worker pool has insufficient task headroom"
+      }
+    },
+    {
+      "name": "zero-tasks-negative-current",
+      "memory": "4294967296",
+      "tasks": "0",
+      "current": "-64",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "memory-max",
+      "memory": "max",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "tasks-max",
+      "memory": "4294967296",
+      "tasks": "max",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "memory-over",
+      "memory": "4294967297",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "tasks-over",
+      "memory": "4294967296",
+      "tasks": "1025",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "memory-python-int",
+      "memory": " +\uff14_\uff12\uff19\uff14\uff19\uff16\uff17\uff12\uff19\uff16 ",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "tasks-python-int",
+      "memory": "4294967296",
+      "tasks": " +\uff11_\uff10\uff12\uff14 ",
+      "current": "0",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "current-python-int",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": " +\uff19_\uff16\uff10 ",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "memory-strip-controls",
+      "memory": "\u001c4294967296\u001f",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": null
+    },
+    {
+      "name": "current-controls-refused",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "\u001c0\u001f",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "memory-float",
+      "memory": "4294967296.0",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "current-float",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "0.0",
+      "headroom": false,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "memory-empty",
+      "memory": "",
+      "tasks": "1024",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "tasks-empty",
+      "memory": "4294967296",
+      "tasks": "",
+      "current": "0",
+      "headroom": true,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    },
+    {
+      "name": "current-empty",
+      "memory": "4294967296",
+      "tasks": "1024",
+      "current": "",
+      "headroom": false,
+      "error": {
+        "type": "RuntimeError",
+        "message": "Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents"
+      }
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "reference": "python/reverie/memory.py at 45f449da61c51375b49e6d5fdd9f80dea2a2bb51",
+  "cases": [
+    {
+      "operation": "normal",
+      "prefix": null,
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "claim",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": true,
+      "voice": false,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "voice",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": true,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "importance",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "touch-empty",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "reembed-empty",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "prune-empty",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 1,
+      "released": false
+    },
+    {
+      "operation": "release",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 1,
+      "released": true
+    },
+    {
+      "operation": "remove-belief",
+      "prefix": "before explicit commit",
+      "after": null,
+      "count": 1,
+      "answered": false,
+      "voice": false,
+      "beliefs": 0,
+      "released": false
+    }
+  ]
+}

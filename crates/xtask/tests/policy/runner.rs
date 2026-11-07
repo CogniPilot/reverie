@@ -99,6 +99,21 @@ fn unknown_arguments_or_missing_tools_fail() {
 }
 
 #[test]
+fn ci_namespace_setup_refuses_ordinary_local_invocation_before_system_tools() {
+    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .arg("prepare-ci-userns")
+        .env("GITHUB_ACTIONS", "false")
+        .env("REVERIE_CI_RUNNER_ENVIRONMENT", "self-hosted")
+        .output()
+        .expect("actual local refusal; no sudo/AppArmor invocation");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requires a declared disposable Ubuntu24")
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn portable_verification_selects_only_portable_components() {
     let root = TestDir::new();
     let executable = fixture(&root);
@@ -108,4 +123,54 @@ fn portable_verification_selects_only_portable_components() {
         fs::read_to_string(root.path().join("trace")).expect("owned command trace"),
         "fmt --all --check\nclippy --locked -p reverie-core -p reverie-contracts -p reverie-routes -p reverie-http -p reverie-ops-cli -p xtask --all-targets --all-features -- -D warnings\ntest --locked -p reverie-core -p reverie-contracts -p reverie-routes -p reverie-http -p reverie-ops-cli -p xtask --all-targets --all-features\n"
     );
+}
+
+#[test]
+fn cached_runner_uses_each_cargo_invocations_checkout() {
+    let root = TestDir::new();
+    let executable = fixture(&root);
+    for name in ["checkout-a", "checkout-b"] {
+        let checkout = root.path().join(name);
+        let manifest = checkout.join("crates/xtask");
+        fs::create_dir_all(&manifest).unwrap();
+        let cwd_trace = checkout.join("working-directories");
+        let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .arg("verify")
+            .current_dir(root.path())
+            .env("CARGO_MANIFEST_DIR", manifest)
+            .env("CARGO", &executable)
+            .env("XTASK_FIXTURE_TRACE", checkout.join("commands"))
+            .env("XTASK_FIXTURE_CWD_TRACE", &cwd_trace)
+            .env_remove("XTASK_FIXTURE_FAIL")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let expected = fs::canonicalize(checkout).unwrap();
+        let observed = fs::read_to_string(cwd_trace).unwrap();
+        let directories: Vec<_> = observed.lines().collect();
+        assert_eq!(directories.len(), 3);
+        for directory in directories {
+            assert_eq!(fs::canonicalize(directory).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn missing_or_relative_cargo_context_refuses_before_running_tools() {
+    let root = TestDir::new();
+    let executable = fixture(&root);
+    for context in [None, Some("crates/xtask")] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_xtask"));
+        command
+            .arg("verify")
+            .env("CARGO", &executable)
+            .env("XTASK_FIXTURE_TRACE", root.path().join("trace"))
+            .env_remove("CARGO_MANIFEST_DIR");
+        if let Some(context) = context {
+            command.env("CARGO_MANIFEST_DIR", context);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success());
+        assert!(!root.path().join("trace").exists());
+    }
 }

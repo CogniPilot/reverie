@@ -1,5 +1,5 @@
-//! Narrow Linux read-only syscall boundary. Purpose wrappers own path and
-//! metadata policies; these helpers never supply authorization or write files.
+//! Narrow Linux syscall boundary. Purpose wrappers own metadata and write
+//! policies; these helpers never supply authorization or effect permission.
 #![allow(unsafe_code)]
 
 use crate::observation::{ObservationError, ObservationFault, Result, finalized, need};
@@ -10,17 +10,68 @@ use std::os::fd::IntoRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+mod child_record;
+pub(crate) mod child_signals;
+mod cold_temporary;
+mod control;
+#[cfg(test)]
+pub(crate) mod interrupted_test;
 mod lease;
+mod memory_namespace;
+mod memory_profile;
+mod rename;
+pub(crate) mod socket_entry;
+pub(crate) mod worker_directory;
+pub(crate) use cold_temporary::{
+    install as install_cold_temporary, retire as retire_cold_temporary,
+};
+pub(crate) mod ordered_exec;
+pub(crate) mod owned_process;
+pub(crate) mod viewer_session;
+pub(crate) use child_record::unlink as unlink_child_record;
+pub(crate) use child_record::{
+    create_private as create_child_receipt, publish as publish_child_receipt,
+};
+pub(crate) use lease::open_at;
+pub(crate) use lease::open_at_mode;
+pub(crate) use memory_namespace::memory_credentials;
+pub(crate) use memory_namespace::{memory_lock, memory_lock_entry, memory_lock_file};
 mod passwd;
+pub(crate) use memory_profile::publish as publish_memory_profile;
+pub(crate) use memory_profile::{
+    create as create_memory_profile, entry as memory_profile_entry, remove as remove_memory_profile,
+};
+mod reservation;
+pub(crate) use control::{
+    ControlDirectorySnapshot, HeldAdmission, control_directory, held_control_directory,
+    open_admission,
+};
+mod policy;
+pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
+pub(crate) use policy::{
+    EntryStat, PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
+    open_policy_child_directory, open_policy_original, policy_effective_uid, replace_policy,
+};
+pub(crate) use reservation::{
+    read_reservation, reservation_identity, reservation_identity_text, reservation_location,
+};
 mod text;
-pub(crate) use text::{python_path, python_text};
+pub(crate) use text::{python_is_file, python_path, python_text};
+mod office;
+mod office_listener;
+pub(crate) use office_listener::OfficeListenerReady;
 mod resolve;
+mod worker_config;
+pub(crate) use office::office_plan_capability;
+pub(crate) use passwd::home_directory;
 pub(crate) use passwd::username;
-pub(crate) use resolve::resolve_strict_text;
+pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};
+pub(crate) use worker_config::read_owned_text_file as read_nix_rollback;
+pub(crate) use worker_config::read_worker_config;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Stamp {
+pub(crate) struct Stamp {
     device: u64,
     inode: u64,
     uid: u32,
@@ -32,7 +83,17 @@ struct Stamp {
     ctime: (i64, i64),
 }
 impl Stamp {
-    fn of(metadata: &Metadata) -> Self {
+    pub(crate) fn matches_rename_metadata(&self, other: &Self) -> bool {
+        self.device == other.device
+            && self.inode == other.inode
+            && self.uid == other.uid
+            && self.gid == other.gid
+            && self.mode == other.mode
+            && self.links == other.links
+            && self.size == other.size
+            && self.mtime == other.mtime
+    }
+    pub(crate) fn of(metadata: &Metadata) -> Self {
         Self {
             device: metadata.dev(),
             inode: metadata.ino(),
@@ -51,11 +112,7 @@ pub(crate) fn uid() -> u32 {
     unsafe { libc::getuid() }
 }
 pub(crate) fn system() -> Result<(String, String)> {
-    // SAFETY: initialized utsname provides valid writable ABI output storage.
-    let mut value: libc::utsname = unsafe { std::mem::zeroed() };
-    if unsafe { libc::uname(&mut value) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    let value = uname()?;
     // SAFETY: successful uname terminates these fixed-size character arrays.
     let system = unsafe { CStr::from_ptr(value.sysname.as_ptr()) }
         .to_str()
@@ -66,6 +123,23 @@ pub(crate) fn system() -> Result<(String, String)> {
         .map_err(|_| ObservationError::Refused(ObservationFault::System))?
         .to_owned();
     Ok((system, machine))
+}
+pub(crate) fn kernel_release() -> Result<String> {
+    let value = uname()?;
+    // SAFETY: successful uname terminates this fixed-size ABI character array;
+    // the owned utsname stays live for the whole CStr/UTF8 conversion.
+    unsafe { CStr::from_ptr(value.release.as_ptr()) }
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|_| ObservationError::Refused(ObservationFault::System))
+}
+fn uname() -> Result<libc::utsname> {
+    // SAFETY: initialized utsname provides valid writable ABI output storage.
+    let mut value: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut value) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(value)
 }
 pub(crate) fn canonical_in(path: &Path, root: &Path) -> Result<PathBuf> {
     let bytes = path.as_os_str().as_bytes();
@@ -142,7 +216,7 @@ fn read_snapshot(
         metadata: after,
     })
 }
-fn close(file: File) -> Result<()> {
+pub(crate) fn close(file: File) -> Result<()> {
     let fd = file.into_raw_fd();
     // SAFETY: sole descriptor ownership is consumed before this one close.
     let result = if unsafe { libc::close(fd) } == 0 {
@@ -166,7 +240,7 @@ pub(crate) mod test_faults {
         close: bool,
     }
     thread_local! {static STATE:RefCell<Faults>=RefCell::new(Faults::default());}
-    pub(super) fn after_read(path: &Path) -> Result<()> {
+    pub(crate) fn after_read(path: &Path) -> Result<()> {
         let hook = STATE.with(|state| state.borrow_mut().hook.take());
         match hook {
             Some(mut hook) => hook(path),

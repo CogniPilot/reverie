@@ -106,6 +106,15 @@ pub enum WorkerPath {
 }
 impl WorkerEnvelope {
     pub fn capture(config: EffectiveWorkerConfig) -> Result<Self> {
+        Self::capture_observing(config, |_, _| Ok(()))
+    }
+    /// Interleave each declaration with the caller's readonly source observation,
+    /// before checking the next declaration. This still constructs envelope DATA,
+    /// not a native grant. The callback cannot make the envelope authoritative.
+    pub fn capture_observing<E: From<WorkerSchemaError>>(
+        config: EffectiveWorkerConfig,
+        mut observe: impl FnMut(&WorkerMount, WorkerPaths<'_>) -> std::result::Result<(), E>,
+    ) -> std::result::Result<Self, E> {
         let fields = object(config.as_value()).ok_or(WorkerSchemaError::Header)?;
         header(fields)?;
         let base = base(fields)?;
@@ -127,7 +136,9 @@ impl WorkerEnvelope {
             )
         });
         let maintenance = maintenance(fields)?;
-        let mounts = mounts::declarations(fields)?;
+        socket_bound(fields)?;
+        let mounts =
+            mounts::declarations_observed(fields, |mount| observe(mount, WorkerPaths(&paths)))?;
         Ok(Self {
             config,
             base,
@@ -152,14 +163,10 @@ impl WorkerEnvelope {
         &self.maintenance
     }
     pub fn path(&self, path: WorkerPath) -> &MetadataText {
-        &self.paths[match path {
-            WorkerPath::Socket => 0,
-            WorkerPath::StateRoot => 1,
-            WorkerPath::CompanyFile => 2,
-            WorkerPath::CompanyRoot => 3,
-            WorkerPath::ScratchRoot => 4,
-            WorkerPath::ApiSocketRoot => 5,
-        }]
+        &self.paths[path_index(path)]
+    }
+    pub fn paths(&self) -> WorkerPaths<'_> {
+        WorkerPaths(&self.paths)
     }
     /// Reuse existing purpose owners without copying data. This checks only
     /// these feature maps/options, not the unported option/native obligations.
@@ -175,11 +182,32 @@ impl WorkerEnvelope {
             .map_err(WorkerSchemaError::Device)?;
         crate::task_perf_v1::TaskPerfConfiguration::validate(&self.config)
             .map_err(WorkerSchemaError::Perf)?;
-        crate::broker_resources::projection(self.config.as_value())?;
+        crate::broker_resources::validate_maps(self.config.as_value())?;
         crate::lease_policy::LeaseConfig::validate_option(&self.config)
             .map_err(WorkerSchemaError::Lease)?;
         Ok(())
     }
+}
+/// Borrowed original path strings, with no filesystem qualification.
+#[derive(Clone, Copy)]
+pub struct WorkerPaths<'a>(&'a [MetadataText; 6]);
+impl WorkerPaths<'_> {
+    pub fn path(&self, path: WorkerPath) -> &MetadataText {
+        &self.0[path_index(path)]
+    }
+}
+fn path_index(path: WorkerPath) -> usize {
+    match path {
+        WorkerPath::Socket => 0,
+        WorkerPath::StateRoot => 1,
+        WorkerPath::CompanyFile => 2,
+        WorkerPath::CompanyRoot => 3,
+        WorkerPath::ScratchRoot => 4,
+        WorkerPath::ApiSocketRoot => 5,
+    }
+}
+pub(crate) fn validate_header(config: &EffectiveWorkerConfig) -> Result<()> {
+    header(object(config.as_value()).ok_or(WorkerSchemaError::Header)?)
 }
 fn key(value: &str) -> Text {
     Text(value.bytes().map(u32::from).collect())
@@ -266,6 +294,9 @@ fn paths(fields: &Object) -> Result<()> {
             return Err(WorkerSchemaError::Path);
         }
     }
+    Ok(())
+}
+fn socket_bound(fields: &Object) -> Result<()> {
     if scalar(field(fields, "socket"))
         .map_err(|_| WorkerSchemaError::Path)?
         .len()

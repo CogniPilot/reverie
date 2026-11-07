@@ -2,7 +2,7 @@
 # Keep this independent of the website/resume program to avoid a manifest cycle.
 { pkgs, src }:
 let
-  baseProfile = import ./worker-docker-profile.nix { inherit pkgs; };
+  baseProfile = import ./worker-docker-profile.nix { inherit pkgs src; };
   perfPolicy = import ./worker-perf-profile.nix { inherit pkgs src baseProfile; };
 in pkgs.runCommand "reverie-owner-terminal-python-source" {
   nativeBuildInputs = [ pkgs.python3 ];
