@@ -38,6 +38,12 @@ pub(crate) fn decode_strict_bytes(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_metadata(&text::python_bytes(raw)?)
 }
+/// `json.loads(str)` of already decoded text: duplicate keys last-wins and
+/// literal constants accepted. There is no byte-encoding detection, so a BOM is
+/// invalid JSON, as in Python.
+pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
+    decode::decode_last_wins(text.as_bytes())
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {
